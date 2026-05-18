@@ -8570,6 +8570,7 @@ ${hashtag}`;
     if (this.diagnosticsPanel) {
       this.diagnosticsPanel.dispose();
     }
+    this.openCode.dispose();
     this.statusBarItem.dispose();
     this._disposed = true;
     this.outputChannel.dispose();

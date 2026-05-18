@@ -9,8 +9,15 @@ import * as vscode from 'vscode';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 
+type OpenCodeDbCache = { db: any; mtimeMs: number; size: number; path: string };
+type OpenCodeModelUsageWithInteractions = {
+	[modelName: string]: ModelUsage[string] & { interactions?: number };
+};
+
 export class OpenCodeDataAccess {
 	private _sqlJsModule: any = null;
+	private _dbCache: OpenCodeDbCache | null = null;
+	private _dbCacheInflight: Map<string, Promise<any | null>> = new Map();
 	private readonly extensionUri: vscode.Uri;
 
 	constructor(extensionUri: vscode.Uri) {
@@ -65,34 +72,133 @@ export class OpenCodeDataAccess {
 		return this._sqlJsModule;
 	}
 
+	dispose(): void {
+		this.closeDbCache();
+		this._dbCacheInflight.clear();
+	}
+
+	private closeDb(db: any): void {
+		try { db.close(); } catch { /* ignore */ }
+	}
+
+	private closeDbCache(): void {
+		if (this._dbCache) {
+			this.closeDb(this._dbCache.db);
+			this._dbCache = null;
+		}
+	}
+
+	private getCachedDbForPath(dbPath: string): any | null {
+		return this._dbCache?.path === dbPath ? this._dbCache.db : null;
+	}
+
+	private isMissingFileError(error: unknown): boolean {
+		const code = (error as NodeJS.ErrnoException)?.code;
+		return code === 'ENOENT' || code === 'ENOTDIR';
+	}
+
+	private statOpenCodeDb(dbPath: string): fs.Stats | null {
+		try {
+			return fs.statSync(dbPath);
+		} catch (error) {
+			if (this.isMissingFileError(error) && this._dbCache?.path === dbPath) {
+				this.closeDbCache();
+			}
+			return null;
+		}
+	}
+
+	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
+		return this._dbCache?.path === dbPath
+			&& this._dbCache.mtimeMs === stats.mtimeMs
+			&& this._dbCache.size === stats.size;
+	}
+
+	private getDbCacheKey(dbPath: string, stats: fs.Stats): string {
+		return `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+	}
+
+	private sameDbStats(left: fs.Stats, right: fs.Stats): boolean {
+		return left.mtimeMs === right.mtimeMs && left.size === right.size;
+	}
+
+	private async refreshOpenCodeDb(dbPath: string, stats: fs.Stats): Promise<any | null> {
+		let db: any;
+		try {
+			const SQL = await this.initSqlJs();
+			const buffer = fs.readFileSync(dbPath);
+			db = new SQL.Database(buffer);
+		} catch {
+			return this.getCachedDbForPath(dbPath);
+		}
+
+		const currentStats = this.statOpenCodeDb(dbPath);
+		if (!currentStats || !this.sameDbStats(stats, currentStats)) {
+			this.closeDb(db);
+			if (this.isCachedDbCurrent(dbPath, currentStats ?? stats)) {
+				return this._dbCache?.db ?? null;
+			}
+			return this.getCachedDbForPath(dbPath);
+		}
+
+		this.closeDbCache();
+		this._dbCache = { db, path: dbPath, mtimeMs: stats.mtimeMs, size: stats.size };
+		return db;
+	}
+
+	/**
+	 * Returns a cached SQL.Database instance for opencode.db, re-opening only when
+	 * the file's mtime changes. This avoids reading and parsing the entire DB file
+	 * on every query (which was the primary cause of ~700ms-per-call latency).
+	 *
+	 * Uses single-flight deduplication to prevent concurrent calls from each re-reading
+	 * the DB file and leaving instances unclosed.
+	 */
+	private async getOpenCodeDb(): Promise<any | null> {
+		const dbPath = path.join(this.getOpenCodeDataDir(), 'opencode.db');
+		const stats = this.statOpenCodeDb(dbPath);
+		if (!stats) { return this.getCachedDbForPath(dbPath); }
+
+		if (this.isCachedDbCurrent(dbPath, stats)) {
+			return this._dbCache?.db ?? null;
+		}
+
+		const cacheKey = this.getDbCacheKey(dbPath, stats);
+		const inflight = this._dbCacheInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const createDbPromise = this.refreshOpenCodeDb(dbPath, stats);
+		this._dbCacheInflight.set(cacheKey, createDbPromise);
+		try {
+			return await createDbPromise;
+		} finally {
+			if (this._dbCacheInflight.get(cacheKey) === createDbPromise) {
+				this._dbCacheInflight.delete(cacheKey);
+			}
+		}
+	}
+
 	/**
 	 * Read session metadata from the OpenCode SQLite database.
 	 */
 	async readOpenCodeDbSession(sessionId: string): Promise<any | null> {
-		const dbPath = path.join(this.getOpenCodeDataDir(), 'opencode.db');
-		if (!fs.existsSync(dbPath)) { return null; }
+		const db = await this.getOpenCodeDb();
+		if (!db) { return null; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec('SELECT id, slug, title, time_created, time_updated, project_id, directory FROM session WHERE id = ?', [sessionId]);
-				if (result.length === 0 || result[0].values.length === 0) { return null; }
-				const row = result[0].values[0];
-				const cols = result[0].columns;
-				const obj: any = {};
-				for (let i = 0; i < cols.length; i++) { obj[cols[i]] = row[i]; }
-				return {
-					id: obj.id,
-					slug: obj.slug,
-					title: obj.title,
-					projectID: obj.project_id,
-					directory: obj.directory,
-					time: { created: obj.time_created, updated: obj.time_updated }
-				};
-			} finally {
-				db.close();
-			}
+			const result = db.exec('SELECT id, slug, title, time_created, time_updated, project_id, directory FROM session WHERE id = ?', [sessionId]);
+			if (result.length === 0 || result[0].values.length === 0) { return null; }
+			const row = result[0].values[0];
+			const cols = result[0].columns;
+			const obj: any = {};
+			for (let i = 0; i < cols.length; i++) { obj[cols[i]] = row[i]; }
+			return {
+				id: obj.id,
+				slug: obj.slug,
+				title: obj.title,
+				projectID: obj.project_id,
+				directory: obj.directory,
+				time: { created: obj.time_created, updated: obj.time_updated }
+			};
 		} catch {
 			return null;
 		}
@@ -102,25 +208,18 @@ export class OpenCodeDataAccess {
 	 * Read all OpenCode messages from the SQLite database for a given session.
 	 */
 	async readOpenCodeDbMessages(sessionId: string): Promise<any[]> {
-		const dbPath = path.join(this.getOpenCodeDataDir(), 'opencode.db');
-		if (!fs.existsSync(dbPath)) { return []; }
+		const db = await this.getOpenCodeDb();
+		if (!db) { return []; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec('SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created ASC', [sessionId]);
-				if (result.length === 0) { return []; }
-				return result[0].values.map((row: unknown[]) => {
-					const data = JSON.parse(row[1] as string);
-					data.id = row[0];
-					data.time = data.time || {};
-					data.time.created = data.time.created || row[2];
-					return data;
-				});
-			} finally {
-				db.close();
-			}
+			const result = db.exec('SELECT id, data, time_created FROM message WHERE session_id = ? ORDER BY time_created ASC', [sessionId]);
+			if (result.length === 0) { return []; }
+			return result[0].values.map((row: unknown[]) => {
+				const data = JSON.parse(row[1] as string);
+				data.id = row[0];
+				data.time = data.time || {};
+				data.time.created = data.time.created || row[2];
+				return data;
+			});
 		} catch {
 			return [];
 		}
@@ -130,25 +229,18 @@ export class OpenCodeDataAccess {
 	 * Read all OpenCode parts from the SQLite database for a given message.
 	 */
 	async readOpenCodeDbParts(messageId: string): Promise<any[]> {
-		const dbPath = path.join(this.getOpenCodeDataDir(), 'opencode.db');
-		if (!fs.existsSync(dbPath)) { return []; }
+		const db = await this.getOpenCodeDb();
+		if (!db) { return []; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec('SELECT id, data, time_created FROM part WHERE message_id = ? ORDER BY time_created ASC', [messageId]);
-				if (result.length === 0) { return []; }
-				return result[0].values.map((row: unknown[]) => {
-					const data = JSON.parse(row[1] as string);
-					data.id = row[0];
-					data.time = data.time || {};
-					data.time.created = data.time.created || row[2];
-					return data;
-				});
-			} finally {
-				db.close();
-			}
+			const result = db.exec('SELECT id, data, time_created FROM part WHERE message_id = ? ORDER BY time_created ASC', [messageId]);
+			if (result.length === 0) { return []; }
+			return result[0].values.map((row: unknown[]) => {
+				const data = JSON.parse(row[1] as string);
+				data.id = row[0];
+				data.time = data.time || {};
+				data.time.created = data.time.created || row[2];
+				return data;
+			});
 		} catch {
 			return [];
 		}
@@ -158,19 +250,12 @@ export class OpenCodeDataAccess {
 	 * Discover all session IDs from the OpenCode SQLite database.
 	 */
 	async discoverOpenCodeDbSessions(): Promise<string[]> {
-		const dbPath = path.join(this.getOpenCodeDataDir(), 'opencode.db');
-		if (!fs.existsSync(dbPath)) { return []; }
+		const db = await this.getOpenCodeDb();
+		if (!db) { return []; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec('SELECT id FROM session');
-				if (result.length === 0) { return []; }
-				return result[0].values.map((row: unknown[]) => row[0] as string);
-			} finally {
-				db.close();
-			}
+			const result = db.exec('SELECT id FROM session');
+			if (result.length === 0) { return []; }
+			return result[0].values.map((row: unknown[]) => row[0] as string);
 		} catch {
 			return [];
 		}
@@ -294,6 +379,10 @@ export class OpenCodeDataAccess {
 	 */
 	async getTokensFromOpenCodeSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
 		const messages = await this.getOpenCodeMessagesForSession(sessionFilePath);
+		return this.getTokensFromOpenCodeMessages(messages);
+	}
+
+	private getTokensFromOpenCodeMessages(messages: any[]): { tokens: number; thinkingTokens: number } {
 		let thinkingTokens = 0;
 
 		// OpenCode messages have a cumulative `total` field that grows with each API call.
@@ -318,7 +407,22 @@ export class OpenCodeDataAccess {
 	 */
 	async countOpenCodeInteractions(sessionFilePath: string): Promise<number> {
 		const messages = await this.getOpenCodeMessagesForSession(sessionFilePath);
+		return this.countOpenCodeInteractionsFromMessages(messages);
+	}
+
+	private countOpenCodeInteractionsFromMessages(messages: any[]): number {
 		return messages.filter(m => m.role === 'user').length;
+	}
+
+	private getAssistantMessagesByParent(messages: any[]): Map<string, any[]> {
+		const assistantMessagesByParent = new Map<string, any[]>();
+		for (const msg of messages) {
+			if (msg.role !== 'assistant' || !msg.parentID) { continue; }
+			const existing = assistantMessagesByParent.get(msg.parentID) ?? [];
+			existing.push(msg);
+			assistantMessagesByParent.set(msg.parentID, existing);
+		}
+		return assistantMessagesByParent;
 	}
 
 	/**
@@ -326,8 +430,13 @@ export class OpenCodeDataAccess {
 	 * Extracts model info from assistant message files.
 	 */
 	async getOpenCodeModelUsage(sessionFilePath: string): Promise<ModelUsage> {
-		const modelUsage: ModelUsage = {};
 		const messages = await this.getOpenCodeMessagesForSession(sessionFilePath);
+		return this.getOpenCodeModelUsageFromMessages(messages);
+	}
+
+	private getOpenCodeModelUsageFromMessages(messages: any[]): ModelUsage {
+		const modelUsage: ModelUsage = {};
+		const assistantMessagesByParent = this.getAssistantMessagesByParent(messages);
 
 		// OpenCode messages have a cumulative `total` field. To get per-turn tokens,
 		// compute deltas between consecutive user turns using the last assistant message's total.
@@ -336,7 +445,7 @@ export class OpenCodeDataAccess {
 			const msg = messages[i];
 			if (msg.role !== 'user') { continue; }
 			// Find all assistant messages for this turn
-			const turnAssistantMsgs = messages.filter((m, idx) => idx > i && m.role === 'assistant' && m.parentID === msg.id);
+			const turnAssistantMsgs = assistantMessagesByParent.get(msg.id) ?? [];
 			if (turnAssistantMsgs.length === 0) { continue; }
 
 			// Get cumulative total from the last assistant message in this turn
@@ -381,39 +490,34 @@ export class OpenCodeDataAccess {
 	 * Returns tokens, interactions, model usage, and timestamp.
 	 * Includes per-model interaction counts in modelUsage.
 	 */
-	async getOpenCodeSessionData(sessionFilePath: string): Promise<{ tokens: number; interactions: number; modelUsage: ModelUsage & { [key: string]: { inputTokens: number; outputTokens: number; interactions?: number } }; timestamp: number }> {
+	async getOpenCodeSessionData(sessionFilePath: string): Promise<{ tokens: number; interactions: number; modelUsage: OpenCodeModelUsageWithInteractions; timestamp: number }> {
 		const messages = await this.getOpenCodeMessagesForSession(sessionFilePath);
-		
+
 		// Get timestamp from the first message
 		let timestamp = Date.now();
 		if (messages.length > 0 && messages[0].time_created) {
 			timestamp = messages[0].time_created;
 		}
 
-		// Get tokens
-		const { tokens } = await this.getTokensFromOpenCodeSession(sessionFilePath);
+		const { tokens } = this.getTokensFromOpenCodeMessages(messages);
+		const interactions = this.countOpenCodeInteractionsFromMessages(messages);
+		const baseModelUsage = this.getOpenCodeModelUsageFromMessages(messages);
+		const assistantMessagesByParent = this.getAssistantMessagesByParent(messages);
 
-		// Get interactions (total count)
-		const interactions = await this.countOpenCodeInteractions(sessionFilePath);
-
-		// Get model usage with per-model interaction counts
-		const baseModelUsage = await this.getOpenCodeModelUsage(sessionFilePath);
-		
 		// Count interactions per model (each user turn -> 1 interaction for the model that responded)
 		const modelInteractions: { [model: string]: number } = {};
-		let prevTotal = 0;
 		for (let i = 0; i < messages.length; i++) {
 			const msg = messages[i];
 			if (msg.role !== 'user') { continue; }
-			const turnAssistantMsgs = messages.filter((m, idx) => idx > i && m.role === 'assistant' && m.parentID === msg.id);
+			const turnAssistantMsgs = assistantMessagesByParent.get(msg.id) ?? [];
 			if (turnAssistantMsgs.length === 0) { continue; }
-			
+
 			const model = turnAssistantMsgs[0].modelID || turnAssistantMsgs[0].model?.modelID || 'unknown';
 			modelInteractions[model] = (modelInteractions[model] || 0) + 1;
 		}
-		
+
 		// Merge interaction counts into model usage
-		const modelUsage: any = {};
+		const modelUsage: OpenCodeModelUsageWithInteractions = {};
 		for (const [model, usage] of Object.entries(baseModelUsage)) {
 			modelUsage[model] = {
 				...usage,
@@ -424,4 +528,3 @@ export class OpenCodeDataAccess {
 		return { tokens, interactions, modelUsage, timestamp };
 	}
 }
-
