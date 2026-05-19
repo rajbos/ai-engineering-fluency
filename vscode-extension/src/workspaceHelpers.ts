@@ -130,184 +130,184 @@ export function globToRegExp(glob: string, caseInsensitive: boolean = false): Re
  * Resolve an exact relative path in a workspace.
  * When `caseInsensitive` is true, path segments are matched case-insensitively.
  */
+
+/**
+ * Try to resolve one path segment `segment` inside directory `current`.
+ * When `isLast` is false, the resolved entry must be a directory.
+ * Returns the resolved absolute path, or undefined if not found / wrong type.
+ * @internal
+ */
+function resolvePathSegment(current: string, segment: string, isLast: boolean): string | undefined {
+	if (!fs.existsSync(current)) { return undefined; }
+	let entries: fs.Dirent[];
+	try {
+		entries = fs.readdirSync(current, { withFileTypes: true });
+	} catch {
+		return undefined;
+	}
+	const matchedEntry = entries.find(e => e.name.toLowerCase() === segment.toLowerCase());
+	if (!matchedEntry) { return undefined; }
+	const matchedPath = path.join(current, matchedEntry.name);
+	if (isLast) { return matchedPath; }
+	try {
+		if (!fs.statSync(matchedPath).isDirectory()) { return undefined; }
+	} catch {
+		return undefined;
+	}
+	return matchedPath;
+}
+
 export function resolveExactWorkspacePath(workspaceFolderPath: string, relativePattern: string, caseInsensitive: boolean): string | undefined {
 	const directPath = path.join(workspaceFolderPath, relativePattern);
 	if (!caseInsensitive) {
 		return fs.existsSync(directPath) ? directPath : undefined;
 	}
+	if (fs.existsSync(directPath)) { return directPath; }
 
-	if (fs.existsSync(directPath)) {
-		return directPath;
-	}
-
-	const normalized = relativePattern.replace(/\\/g, '/');
-	const segments = normalized.split('/').filter(seg => seg.length > 0 && seg !== '.');
-
+	const segments = relativePattern.replace(/\\/g, '/').split('/').filter(seg => seg.length > 0 && seg !== '.');
 	let current = workspaceFolderPath;
 	for (let index = 0; index < segments.length; index++) {
-		const segment = segments[index];
-		const isLast = index === segments.length - 1;
-
-		if (!fs.existsSync(current)) {
-			return undefined;
-		}
-
-		let entries: fs.Dirent[] = [];
-		try {
-			entries = fs.readdirSync(current, { withFileTypes: true });
-		} catch {
-			return undefined;
-		}
-
-		const matchedEntry = entries.find(entry => entry.name.toLowerCase() === segment.toLowerCase());
-		if (!matchedEntry) {
-			return undefined;
-		}
-
-		const matchedPath = path.join(current, matchedEntry.name);
-		if (!isLast) {
-			let stat: fs.Stats;
-			try {
-				stat = fs.statSync(matchedPath);
-			} catch {
-				return undefined;
-			}
-			if (!stat.isDirectory()) {
-				return undefined;
-			}
-		}
-
-		current = matchedPath;
+		const resolved = resolvePathSegment(current, segments[index], index === segments.length - 1);
+		if (!resolved) { return undefined; }
+		current = resolved;
 	}
-
 	return fs.existsSync(current) ? current : undefined;
+}
+
+// ── scanWorkspaceCustomizationFiles helpers ──────────────────────────────────────────
+
+/** Shared context for building a CustomizationFileEntry from a matched path. */
+interface PatternScanContext {
+	workspaceFolderPath: string;
+	pattern: CustomizationPattern;
+	stalenessDays: number;
+}
+
+/** Build a CustomizationFileEntry for a matched absolute path. */
+function buildCustomizationEntry(
+	ctx: PatternScanContext,
+	absPath: string,
+	displayName?: string
+): CustomizationFileEntry {
+	const { workspaceFolderPath, pattern, stalenessDays } = ctx;
+	const stat = fs.statSync(absPath);
+	const name = displayName ?? path.basename(absPath);
+	return {
+		path: absPath,
+		relativePath: path.relative(workspaceFolderPath, absPath).replace(/\\/g, '/'),
+		type: pattern.type ?? 'unknown',
+		icon: pattern.icon ?? '',
+		label: pattern.label ?? name,
+		name,
+		lastModified: stat.mtime.toISOString(),
+		isStale: (Date.now() - stat.mtime.getTime()) > stalenessDays * 24 * 60 * 60 * 1000,
+		category: pattern.category
+	};
+}
+
+/** Handle `scanMode: "exact"` — look for a single file at the given path. */
+function scanExactPattern(ctx: PatternScanContext): CustomizationFileEntry | undefined {
+	const { workspaceFolderPath, pattern, stalenessDays } = ctx;
+	const absPath = resolveExactWorkspacePath(workspaceFolderPath, pattern.path, !!pattern.caseInsensitive);
+	if (!absPath) { return undefined; }
+	return buildCustomizationEntry({ workspaceFolderPath, pattern, stalenessDays }, absPath);
+}
+
+/** Handle `scanMode: "oneLevel"` — enumerate one directory level for wildcard matches. */
+function scanOneLevelPattern(ctx: PatternScanContext, excludeDirs: string[]): CustomizationFileEntry[] {
+	const { workspaceFolderPath, pattern, stalenessDays } = ctx;
+	const normalizedPattern = pattern.path.replace(/\\/g, '/');
+	const starIndex = normalizedPattern.indexOf('*');
+	if (starIndex === -1) { return []; }
+
+	const beforeStar = normalizedPattern.substring(0, starIndex);
+	const afterStar = normalizedPattern.substring(starIndex + 1);
+	const baseDirPath = beforeStar.replace(/\/$/, '');
+	const baseDir = baseDirPath ? path.join(workspaceFolderPath, baseDirPath) : workspaceFolderPath;
+	if (!fs.existsSync(baseDir) || !fs.statSync(baseDir).isDirectory()) { return []; }
+
+	const entries = fs.readdirSync(baseDir, { withFileTypes: true });
+	const suffix = afterStar.startsWith('/') ? afterStar.substring(1) : afterStar;
+	const results: CustomizationFileEntry[] = [];
+	for (const entry of entries) {
+		if (excludeDirs.includes(entry.name)) { continue; }
+		const candidatePath = path.join(baseDir, entry.name, suffix);
+		if (!fs.existsSync(candidatePath)) { continue; }
+		const stat = fs.statSync(candidatePath);
+		if (!stat.isFile()) { continue; }
+		const displayName = pattern.type === 'skill' ? entry.name : path.basename(candidatePath);
+		results.push(buildCustomizationEntry(ctx, candidatePath, displayName));
+	}
+	return results;
+}
+
+/**
+ * Recursively walk `dir` up to `depth` levels, collecting files that match `regex`.
+ * @internal
+ */
+function walkDirectoryForPattern(
+	dir: string,
+	depth: number,
+	ctx: PatternScanContext,
+	regex: RegExp,
+	excludeDirs: string[]
+): CustomizationFileEntry[] {
+	if (depth < 0) { return []; }
+	let children: fs.Dirent[];
+	try { children = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+	const results: CustomizationFileEntry[] = [];
+	for (const child of children) {
+		const childPath = path.join(dir, child.name);
+		if (child.isDirectory() && !excludeDirs.includes(child.name)) {
+			results.push(...walkDirectoryForPattern(childPath, depth - 1, ctx, regex, excludeDirs));
+		} else if (child.isFile()) {
+			const rel = path.relative(ctx.workspaceFolderPath, childPath).replace(/\\/g, '/');
+			if (regex.test(rel)) {
+				results.push(buildCustomizationEntry(ctx, childPath));
+			}
+		}
+	}
+	return results;
+}
+
+/** Handle `scanMode: "recursive"` — glob-match files at any depth. */
+function scanRecursivePattern(ctx: PatternScanContext, excludeDirs: string[]): CustomizationFileEntry[] {
+	const { workspaceFolderPath, pattern } = ctx;
+	const maxDepth = typeof pattern.maxDepth === 'number' ? pattern.maxDepth : 6;
+	const regex = globToRegExp(pattern.path, !!pattern.caseInsensitive);
+	return walkDirectoryForPattern(workspaceFolderPath, maxDepth, ctx, regex, excludeDirs);
 }
 
 /**
  * Scan a workspace folder for customization files according to `customizationPatterns.json`.
  */
 export function scanWorkspaceCustomizationFiles(workspaceFolderPath: string): CustomizationFileEntry[] {
-	const results: CustomizationFileEntry[] = [];
-	if (!workspaceFolderPath || !fs.existsSync(workspaceFolderPath)) { return results; }
+	if (!workspaceFolderPath || !fs.existsSync(workspaceFolderPath)) { return []; }
 
 	const cfg = customizationPatternsData as CustomizationPatternsConfig;
 	const stalenessDays = typeof cfg.stalenessThresholdDays === 'number' ? cfg.stalenessThresholdDays : 90;
 	const excludeDirs: string[] = Array.isArray(cfg.excludeDirs) ? cfg.excludeDirs : [];
 
-	for (const pattern of (cfg.patterns || [])) {
+	const results: CustomizationFileEntry[] = [];
+	for (const pattern of (cfg.patterns ?? [])) {
 		try {
-			const scanMode = pattern.scanMode || 'exact';
-			const relativePattern = pattern.path as string;
+			const ctx: PatternScanContext = { workspaceFolderPath, pattern, stalenessDays };
+			const scanMode = pattern.scanMode ?? 'exact';
 			if (scanMode === 'exact') {
-				const caseInsensitive = !!pattern.caseInsensitive;
-				const absPath = resolveExactWorkspacePath(workspaceFolderPath, relativePattern, caseInsensitive);
-				if (absPath) {
-					const stat = fs.statSync(absPath);
-					results.push({
-						path: absPath,
-						relativePath: path.relative(workspaceFolderPath, absPath).replace(/\\/g, '/'),
-						type: pattern.type || 'unknown',
-						icon: pattern.icon || '',
-						label: pattern.label || path.basename(absPath),
-						name: path.basename(absPath),
-						lastModified: stat.mtime.toISOString(),
-						isStale: (Date.now() - stat.mtime.getTime()) > stalenessDays * 24 * 60 * 60 * 1000,
-						category: pattern.category
-					});
-				}
+				const entry = scanExactPattern(ctx);
+				if (entry) { results.push(entry); }
 			} else if (scanMode === 'oneLevel') {
-				// Split at the first '*' wildcard to find base directory and remaining path
-				// e.g., ".github/skills/*/SKILL.md" -> base: ".github/skills/", remaining: "/SKILL.md"
-				const normalizedPattern = relativePattern.replace(/\\/g, '/');
-				const starIndex = normalizedPattern.indexOf('*');
-				if (starIndex === -1) { continue; } // No wildcard, skip
-
-				// Split the pattern at the '*'
-				const beforeStar = normalizedPattern.substring(0, starIndex);
-				const afterStar = normalizedPattern.substring(starIndex + 1);
-
-				// The base directory is everything before the '*' (trim trailing slash)
-				const baseDirPath = beforeStar.replace(/\/$/, '');
-				const baseDir = baseDirPath ? path.join(workspaceFolderPath, baseDirPath) : workspaceFolderPath;
-
-				if (!fs.existsSync(baseDir)) { continue; }
-				const baseStat = fs.statSync(baseDir);
-				if (!baseStat.isDirectory()) { continue; }
-
-				// Enumerate directories in the base directory
-				const entries = fs.readdirSync(baseDir, { withFileTypes: true });
-				const fullPattern = afterStar.startsWith('/') ? afterStar.substring(1) : afterStar;
-				for (const entry of entries) {
-					// Only consider directories at this level (unless afterStar is just a filename)
-					if (excludeDirs.includes(entry.name)) { continue; }
-
-					// Construct the full path with this entry replacing the '*'
-					const candidatePath = path.join(baseDir, entry.name, fullPattern);
-
-					// Check if this path exists
-					if (fs.existsSync(candidatePath)) {
-						const stat = fs.statSync(candidatePath);
-						if (stat.isFile()) {
-							// For skills, use the directory name (parent of SKILL.md) as the display name
-							const displayName = pattern.type === 'skill' ? entry.name : path.basename(candidatePath);
-
-							results.push({
-								path: candidatePath,
-								relativePath: path.relative(workspaceFolderPath, candidatePath).replace(/\\/g, '/'),
-								type: pattern.type || 'unknown',
-								icon: pattern.icon || '',
-								label: pattern.label || displayName,
-								name: displayName,
-								lastModified: stat.mtime.toISOString(),
-								category: pattern.category,
-								isStale: (Date.now() - stat.mtime.getTime()) > stalenessDays * 24 * 60 * 60 * 1000
-							});
-						}
-					}
-				}
+				results.push(...scanOneLevelPattern(ctx, excludeDirs));
 			} else if (scanMode === 'recursive') {
-				const maxDepth = typeof pattern.maxDepth === 'number' ? pattern.maxDepth : 6;
-				const caseInsensitive = !!pattern.caseInsensitive;
-				const regex = globToRegExp(relativePattern, caseInsensitive);
-				// Walk recursively
-				const walk = (dir: string, depth: number) => {
-					if (depth < 0) { return; }
-					let children: fs.Dirent[] = [];
-					try { children = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
-					for (const child of children) {
-						const name = child.name;
-						if (child.isDirectory()) {
-							if (excludeDirs.includes(name)) { continue; }
-							walk(path.join(dir, name), depth - 1);
-						} else if (child.isFile()) {
-							const rel = path.relative(workspaceFolderPath, path.join(dir, name)).replace(/\\/g, '/');
-							if (regex.test(rel)) {
-								const abs = path.join(dir, name);
-								const stat = fs.statSync(abs);
-								results.push({
-									path: abs,
-									relativePath: rel,
-									type: pattern.type || 'unknown',
-									icon: pattern.icon || '',
-									label: pattern.label || path.basename(abs),
-									name: path.basename(abs),
-									lastModified: stat.mtime.toISOString(),
-									isStale: (Date.now() - stat.mtime.getTime()) > stalenessDays * 24 * 60 * 60 * 1000,
-									category: pattern.category
-								});
-							}
-						}
-					}
-				};
-				walk(workspaceFolderPath, maxDepth);
+				results.push(...scanRecursivePattern(ctx, excludeDirs));
 			}
-		} catch (e) {
+		} catch {
 			// ignore per-pattern errors
 		}
 	}
 
 	// Deduplicate by absolute path
-	const uniq: { [p: string]: CustomizationFileEntry } = {};
+	const uniq: Record<string, CustomizationFileEntry> = {};
 	for (const r of results) { uniq[path.normalize(r.path)] = r; }
 	return Object.values(uniq);
 }
@@ -318,10 +318,6 @@ export function getRepositoryUrl(): string {
 	return repoUrl || 'https://github.com/rajbos/ai-engineering-fluency';
 }
 
-/**
- * Determine the editor type from a session file path
- * Returns: 'VS Code', 'VS Code Insiders', 'VSCodium', 'Cursor', 'Copilot CLI', or 'Unknown'
- */
 /**
  * Detect the actual mode type from inputState.mode object.
  * Returns 'ask', 'edit', 'agent', 'plan', or 'customAgent'.
