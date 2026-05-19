@@ -6,6 +6,21 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-05-19
+
+### Features
+- Surface Copilot CLI chat-only sessions from session-store.db (#915)
+- Add friendly display names for additional tools (#920)
+- Persist chart view/period/displayMode selection across navigation (#911)
+
+### Bug Fixes
+- Propagate cachedReadTokens/cacheCreationTokens in calculateDailyStats (#907)
+- Fix N+1 inefficiency in processing OpenCode sessions (#922)
+
+### Performance
+- Apply mtime-based DB caching to crush adapter to fix N+1 inefficiency (#924)
+- Eliminate redundant JSON.parse calls in session analysis (#910)
+
 ## [0.9.0] - 2026-05-14
 
 ### Features
