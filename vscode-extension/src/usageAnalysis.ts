@@ -230,6 +230,73 @@ function recordToolOrMcpInvocation(
 }
 
 /**
+ * Process a list of session requests, accumulating enhanced metrics in-place.
+ * Mutates editedFiles, timestamps, timingsData, waitTimes and agentCounts.
+ * Returns the total applies and total code blocks counted.
+ */
+function processRequestsForEnhancedMetrics(
+	requests: SessionRequestRaw[],
+	agentCounts: AgentTypeUsage,
+	editedFiles: Set<string>,
+	timestamps: number[],
+	timingsData: { firstProgress?: number; totalElapsed?: number }[],
+	waitTimes: number[]
+): { totalApplies: number; totalCodeBlocks: number } {
+	let totalApplies = 0;
+	let totalCodeBlocks = 0;
+	for (const requestRaw of requests) {
+		if (!requestRaw) { continue; }
+		const request = requestRaw;
+
+		// Track timestamps
+		if (request.timestamp !== undefined) { timestamps.push(request.timestamp); }
+
+		// Track timings
+		if (request.result?.timings) {
+			timingsData.push(request.result.timings);
+		}
+
+		// Track wait times
+		if (request.timeSpentWaiting !== undefined) {
+			waitTimes.push(request.timeSpentWaiting);
+		}
+
+		// Track agent types
+		if (request.agent?.id) {
+			const agentId = request.agent.id;
+			if (agentId.includes('edit')) {
+				agentCounts.editsAgent++;
+			} else if (agentId.includes('default')) {
+				agentCounts.defaultAgent++;
+			} else if (agentId.includes('workspace')) {
+				agentCounts.workspaceAgent++;
+			} else {
+				agentCounts.other++;
+			}
+		}
+
+		// Track edit scope and apply usage
+		if (request.response && Array.isArray(request.response)) {
+			for (const respRaw of request.response as ResponseItemRaw[]) {
+				if (!respRaw) { continue; }
+				const resp = respRaw;
+				if (resp.kind === 'textEditGroup' && resp.uri) {
+					const filePath = resp.uri.path || JSON.stringify(resp.uri);
+					editedFiles.add(filePath);
+				}
+				if (resp.kind === 'codeblockUri') {
+					totalCodeBlocks++;
+					if (resp.isEdit === true) {
+						totalApplies++;
+					}
+				}
+			}
+		}
+	}
+	return { totalApplies, totalCodeBlocks };
+}
+
+/**
  * Merge usage analysis data into period stats
  */
 export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
@@ -1008,57 +1075,8 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 				if (sessionState.lastMessageDate !== undefined) { timestamps.push(sessionState.lastMessageDate); }
 				
 				// Process requests
-				const requests = sessionState.requests || [];
-				
-				for (const requestRaw of requests) {
-					if (!requestRaw) { continue; }
-					const request = requestRaw as SessionRequestRaw;
-					
-					// Track timestamps
-					if (request.timestamp !== undefined) { timestamps.push(request.timestamp); }
-					
-					// Track timings
-					if (request.result?.timings) {
-						timingsData.push(request.result.timings);
-					}
-					
-					// Track wait times
-					if (request.timeSpentWaiting !== undefined) {
-						waitTimes.push(request.timeSpentWaiting);
-					}
-					
-					// Track agent types
-					if (request.agent?.id) {
-						const agentId = request.agent.id;
-						if (agentId.includes('edit')) {
-							agentCounts.editsAgent++;
-						} else if (agentId.includes('default')) {
-							agentCounts.defaultAgent++;
-						} else if (agentId.includes('workspace')) {
-							agentCounts.workspaceAgent++;
-						} else {
-							agentCounts.other++;
-						}
-					}
-					
-					// Track edit scope and apply usage
-					if (request.response && Array.isArray(request.response)) {
-						for (const respRaw of request.response as ResponseItemRaw[]) {
-							if (!respRaw) { continue; }
-							const resp = respRaw;
-							if (resp.kind === 'textEditGroup' && resp.uri) {
-								const filePath = resp.uri.path || JSON.stringify(resp.uri);
-								editedFiles.add(filePath);
-							}
-							if (resp.kind === 'codeblockUri') {
-								totalCodeBlocks++;
-								if (resp.isEdit === true) {
-									totalApplies++;
-								}
-							}
-						}
-					}
-				}
+				const requests = (sessionState.requests || []) as SessionRequestRaw[];
+				({ totalApplies, totalCodeBlocks } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
 			}
 		} else {
 			// Handle regular JSON files
@@ -1069,55 +1087,8 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 			if (sessionContent.lastMessageDate) { timestamps.push(sessionContent.lastMessageDate); }
 			
 			// Process requests
-			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-				for (const requestRaw of sessionContent.requests) {
-					const request = requestRaw as SessionRequestRaw;
-					// Track timestamps
-					if (request.timestamp !== undefined) { timestamps.push(request.timestamp); }
-					
-					// Track timings
-					if (request.result?.timings) {
-						timingsData.push(request.result.timings);
-					}
-					
-					// Track wait times
-					if (request.timeSpentWaiting !== undefined) {
-						waitTimes.push(request.timeSpentWaiting);
-					}
-					
-					// Track agent types
-					if (request.agent?.id) {
-						const agentId = request.agent.id;
-						if (agentId.includes('edit')) {
-							agentCounts.editsAgent++;
-						} else if (agentId.includes('default')) {
-							agentCounts.defaultAgent++;
-						} else if (agentId.includes('workspace')) {
-							agentCounts.workspaceAgent++;
-						} else {
-							agentCounts.other++;
-						}
-					}
-					
-					// Track edit scope and apply usage
-					if (request.response && Array.isArray(request.response)) {
-						for (const respRaw of request.response as ResponseItemRaw[]) {
-							if (!respRaw) { continue; }
-							const resp = respRaw;
-							if (resp.kind === 'textEditGroup' && resp.uri) {
-								const filePath = resp.uri.path || JSON.stringify(resp.uri);
-								editedFiles.add(filePath);
-							}
-							if (resp.kind === 'codeblockUri') {
-								totalCodeBlocks++;
-								if (resp.isEdit === true) {
-									totalApplies++;
-								}
-							}
-						}
-					}
-				}
-			}
+			const requests = (sessionContent.requests ?? []) as SessionRequestRaw[];
+			({ totalApplies, totalCodeBlocks } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
 		}
 		
 		// Store edit scope data
