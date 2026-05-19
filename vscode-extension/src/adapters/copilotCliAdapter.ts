@@ -19,11 +19,14 @@ import type { ModelUsage, ChatTurn } from '../types';
 import type {
 	IEcosystemAdapter,
 	IDiscoverableEcosystem,
+	IAnalyzableEcosystem,
 	DiscoveryResult,
 	CandidatePath,
+	UsageAnalysisAdapterContext,
 } from '../ecosystemAdapter';
 import { CopilotCliStoreAccess } from '../copilotCliStore';
 import { createEmptyContextRefs } from '../tokenEstimation';
+import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
 
 /** Returns the canonical Copilot CLI session-state directory (~/.copilot/session-state). */
 export function getCopilotCliSessionStateDir(): string {
@@ -40,7 +43,7 @@ async function pathExists(p: string): Promise<boolean> {
 	try { await fs.promises.access(p); return true; } catch { return false; }
 }
 
-export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosystem {
+export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'copilotcli';
 	readonly displayName = 'GitHub Copilot CLI';
 
@@ -127,6 +130,15 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			thinkingTokensEstimate: 0,
 		}));
 		return { turns };
+	}
+
+	async analyzeUsage(sessionFile: string, _ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
+		const analysis = createEmptySessionUsageAnalysis();
+		if (!this.store.isCliStoreSession(sessionFile)) { return analysis; }
+		const turns = await this.store.getTurns(sessionFile);
+		// Each user turn counts as one CLI interaction; no model/tool data available in the schema.
+		analysis.modeUsage.cli = turns.filter(t => t.user_message !== null).length;
+		return analysis;
 	}
 
 	async getDailyFractions(sessionFile: string): Promise<Record<string, number>> {
