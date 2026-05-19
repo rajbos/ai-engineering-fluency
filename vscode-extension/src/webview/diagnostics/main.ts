@@ -87,6 +87,12 @@ type GitHubAuthStatus = {
   username?: string;
 };
 
+type SessionFolder = {
+  dir: string;
+  count: number;
+  editorName?: string;
+};
+
 type DiagnosticsData = {
   report: string;
   sessionFiles: { file: string; size: number; modified: string }[];
@@ -97,6 +103,7 @@ type DiagnosticsData = {
   isDebugMode?: boolean;
   globalStateCounters?: GlobalStateCounters;
   githubAuth?: GitHubAuthStatus;
+  sessionFolders?: SessionFolder[];
 };
 
 type DiagnosticsViewState = {
@@ -139,6 +146,12 @@ let currentSortDirection: "asc" | "desc" = "desc";
 let currentEditorFilter: string | null = null; // null = show all
 let currentContextRefFilter: keyof ContextReferenceUsage | null = null; // null = show all
 let hideEmptySessions = true; // hide sessions with 0 interactions by default
+
+// Render state (promoted to module level so all setup functions can be top-level)
+let storedDetailedFiles: SessionFileDetails[] = [];
+let isLoading = true;
+let currentBackendInfo: BackendStorageInfo | undefined;
+let currentGithubAuth: GitHubAuthStatus | undefined;
 
 function escapeHtml(text: string): string {
   return text
@@ -407,9 +420,6 @@ function getEditorBadgeClass(editor: string): string {
   if (lower.includes("visual studio")) {
     return "editor-badge editor-badge-vs";
   }
-  if (lower.includes("visual studio")) {
-    return "editor-badge editor-badge-vs";
-  }
   if (lower.includes("jetbrains")) {
     return "editor-badge editor-badge-jetbrains";
   }
@@ -429,9 +439,6 @@ function getEditorIcon(editor: string): string {
   const lower = editor.toLowerCase();
   if (lower.includes("jetbrains") || lower.includes("rider") || lower.includes("intellij")) {
     return "🟣";
-  }
-  if (lower.includes("visual studio")) {
-    return "🪟";
   }
   if (lower.includes("visual studio")) {
     return "🪟";
@@ -1265,260 +1272,546 @@ function groupSessionFolders(
   return result;
 }
 
-function renderLayout(data: DiagnosticsData): void {
-  const root = document.getElementById("root");
-  if (!root) {
-    return;
+function getHomeDirectory(): string {
+  type WindowWithProcess = Window & { process?: { env?: { HOME?: string; USERPROFILE?: string } } };
+  const win = window as WindowWithProcess;
+  return win.process?.env?.HOME || win.process?.env?.USERPROFILE || "";
+}
+
+function buildSessionFoldersElement(folders: SessionFolder[]): HTMLElement {
+  const sorted = [...folders].sort((a, b) => b.count - a.count);
+  const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
+  const home = getHomeDirectory();
+
+  const container = document.createElement("div");
+  container.className = "session-folders-table";
+
+  const heading = document.createElement("h4");
+  heading.textContent = "Main Session Folders (by editor root):";
+  container.appendChild(heading);
+
+  const table = document.createElement("table");
+  table.className = "session-table";
+  container.appendChild(table);
+
+  const thead = document.createElement("thead");
+  table.appendChild(thead);
+  const headerRow = document.createElement("tr");
+  thead.appendChild(headerRow);
+  for (const text of ["Folder", "Editor", "# of Sessions", "Open"]) {
+    const th = document.createElement("th");
+    th.textContent = text;
+    headerRow.appendChild(th);
   }
 
-  // Build session folder summary (main entry folders) for reference
-  let sessionFilesHtml = "";
-  const sessionFolders = groupSessionFolders((data as any).sessionFolders || []);
-  if (sessionFolders.length > 0) {
-    // Sort folders by descending count so top folders show first
-    const sorted = [...sessionFolders].sort((a, b) => b.count - a.count);
-    sessionFilesHtml = `
-			<div class="session-folders-table">
-				<h4>Main Session Folders (by editor root):</h4>
-				<table class="session-table">
-					<thead>
-						<tr>
-							<th>Folder</th>
-							<th>Editor</th>
-							<th># of Sessions</th>
-							<th>Open</th>
-						</tr>
-					</thead>
-					<tbody>`;
-    const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
-    console.log(
-      "[Diagnostics] Total sessions calculated:",
-      totalSessions,
-      "from",
-      sorted.length,
-      "folders",
-    );
+  const tbody = document.createElement("tbody");
+  table.appendChild(tbody);
 
-    sorted.forEach(
-      (sf: { dir: string; count: number; editorName?: string }) => {
-        // Shorten common user paths for readability
-        let display = sf.dir;
-        const home =
-          (window as any).process?.env?.HOME ||
-          (window as any).process?.env?.USERPROFILE ||
-          "";
-        if (home && display.startsWith(home)) {
-          display = display.replace(home, "~");
+  for (const sf of sorted) {
+    let display = sf.dir;
+    if (home && display.startsWith(home)) {
+      display = display.replace(home, "~");
+    }
+    const editorName = sf.editorName || "Unknown";
+
+    const row = document.createElement("tr");
+
+    const folderCell = document.createElement("td");
+    folderCell.setAttribute("title", sf.dir);
+    folderCell.textContent = display;
+    row.appendChild(folderCell);
+
+    const editorCell = document.createElement("td");
+    const editorBadge = document.createElement("span");
+    editorBadge.className = getEditorBadgeClass(editorName);
+    editorBadge.textContent = `${getEditorIcon(editorName)} ${editorName}`;
+    editorCell.appendChild(editorBadge);
+    row.appendChild(editorCell);
+
+    const countCell = document.createElement("td");
+    countCell.textContent = String(sf.count);
+    row.appendChild(countCell);
+
+    const openCell = document.createElement("td");
+    const openLink = document.createElement("a");
+    openLink.href = "#";
+    openLink.className = "reveal-link";
+    openLink.setAttribute("data-path", encodeURIComponent(sf.dir));
+    openLink.textContent = "Open directory";
+    openCell.appendChild(openLink);
+    if (editorName === "Unknown") {
+      const reportLink = document.createElement("a");
+      reportLink.href = "#";
+      reportLink.className = "report-editor-link";
+      reportLink.setAttribute("data-path", encodeURIComponent(sf.dir));
+      reportLink.setAttribute("title", "Report this unknown path so we can add editor support");
+      reportLink.textContent = "📢 Report";
+      openCell.appendChild(document.createTextNode(" "));
+      openCell.appendChild(reportLink);
+    }
+    row.appendChild(openCell);
+    tbody.appendChild(row);
+  }
+
+  const totalRow = document.createElement("tr");
+  totalRow.style.borderTop = "2px solid #5a5a5a";
+  totalRow.style.fontWeight = "600";
+  totalRow.style.background = "rgba(255, 255, 255, 0.05)";
+
+  const totalLabelCell = document.createElement("td");
+  totalLabelCell.setAttribute("colspan", "2");
+  totalLabelCell.style.textAlign = "right";
+  totalLabelCell.style.paddingRight = "16px";
+  totalLabelCell.textContent = "Total:";
+  totalRow.appendChild(totalLabelCell);
+
+  const totalCountCell = document.createElement("td");
+  totalCountCell.textContent = String(totalSessions);
+  totalRow.appendChild(totalCountCell);
+
+  totalRow.appendChild(document.createElement("td"));
+  tbody.appendChild(totalRow);
+
+  return container;
+}
+
+function setupStorageLinkHandlers(): void {
+  document.querySelectorAll(".open-storage-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const path = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-path") || "",
+      );
+      if (path) {
+        vscode.postMessage({ command: "revealPath", path });
+      }
+    });
+  });
+}
+
+function setupGitHubAuthHandlers(): void {
+  document.getElementById('btn-authenticate-github')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'authenticateGitHub' });
+  });
+
+  document.getElementById('btn-sign-out-github')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'signOutGitHub' });
+  });
+}
+
+function activateSubtab(subtabId: string): boolean {
+  const subtabEl = document.querySelector(`.subtab[data-subtab="${subtabId}"]`);
+  const contentEl = document.getElementById(`subtab-${subtabId}`);
+  if (subtabEl && contentEl) {
+    const subtabBar = subtabEl.closest(".subtab-bar");
+    if (subtabBar) {
+      subtabBar.querySelectorAll(".subtab").forEach((s) => s.classList.remove("active"));
+    }
+    document.querySelectorAll(".subtab-content").forEach((c) => c.classList.remove("active"));
+    subtabEl.classList.add("active");
+    contentEl.classList.add("active");
+    return true;
+  }
+  return false;
+}
+
+function activateTab(tabId: string): boolean {
+  const tabButton = document.querySelector(`.tab[data-tab="${tabId}"]`);
+  const tabContent = document.getElementById(`tab-${tabId}`);
+
+  if (tabButton && tabContent) {
+    document
+      .querySelectorAll(".tab")
+      .forEach((t) => t.classList.remove("active"));
+    document
+      .querySelectorAll(".tab-content")
+      .forEach((c) => c.classList.remove("active"));
+
+    tabButton.classList.add("active");
+    tabContent.classList.add("active");
+    return true;
+  }
+  return false;
+}
+
+function setupSortHandlers(): void {
+  document.querySelectorAll(".sortable").forEach((header) => {
+    header.addEventListener("click", () => {
+      const sortColumn = (header as HTMLElement).getAttribute(
+        "data-sort",
+      ) as typeof currentSortColumn;
+      if (sortColumn) {
+        if (currentSortColumn === sortColumn) {
+          currentSortDirection =
+            currentSortDirection === "desc" ? "asc" : "desc";
+        } else {
+          currentSortColumn = sortColumn;
+          currentSortDirection = "desc";
         }
-        const editorName = sf.editorName || "Unknown";
-        sessionFilesHtml += `
-				<tr>
-					<td title="${escapeHtml(sf.dir)}">${escapeHtml(display)}</td>
-				<td><span class="${getEditorBadgeClass(editorName)}">${getEditorIcon(editorName)} ${escapeHtml(editorName)}</span></td>
-					<td>${sf.count}</td>
-					<td><a href="#" class="reveal-link" data-path="${encodeURIComponent(sf.dir)}">Open directory</a>${editorName === "Unknown" ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.dir)}" title="Report this unknown path so we can add editor support">📢 Report</a>` : ""}</td>
-				</tr>`;
-      },
+        reRenderTable();
+      }
+    });
+  });
+}
+
+function setupEditorFilterHandlers(): void {
+  document.querySelectorAll(".editor-panel").forEach((panel) => {
+    panel.addEventListener("click", () => {
+      const editor = (panel as HTMLElement).getAttribute("data-editor");
+      currentEditorFilter = editor === "" ? null : editor;
+      reRenderTable();
+    });
+  });
+}
+
+function setupContextRefFilterHandlers(): void {
+  document.querySelectorAll(".context-ref-filter").forEach((filter) => {
+    filter.addEventListener("click", () => {
+      const refType = (filter as HTMLElement).getAttribute(
+        "data-ref-type",
+      ) as keyof ContextReferenceUsage | null;
+
+      if (currentContextRefFilter === refType) {
+        currentContextRefFilter = null;
+      } else {
+        currentContextRefFilter = refType;
+      }
+      reRenderTable();
+    });
+  });
+}
+
+function setupZeroInteractionFilterHandler(): void {
+  const checkbox = document.getElementById("hide-empty-sessions") as HTMLInputElement | null;
+  if (checkbox) {
+    checkbox.addEventListener("change", () => {
+      hideEmptySessions = checkbox.checked;
+      reRenderTable();
+    });
+  }
+}
+
+function setupBackendButtonHandlers(): void {
+  document
+    .getElementById("btn-configure-backend")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "configureBackend" });
+    });
+
+  document
+    .getElementById("btn-configure-backend-team")
+    ?.addEventListener("click", () => {
+      diagState.patch({ activeTab: "backend", activeSubtab: "backend-teamserver" });
+      vscode.postMessage({ command: "configureTeamServer" });
+    });
+
+  document
+    .getElementById("btn-team-server-auth-warning")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "authenticateGitHub" });
+    });
+
+  document
+    .getElementById("btn-open-settings")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "openSettings" });
+    });
+
+  document
+    .getElementById("btn-open-display-settings")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "openDisplaySettings" });
+    });
+}
+
+function setupSubtabHandlers(): void {
+  document.querySelectorAll(".subtab").forEach((subtab) => {
+    subtab.addEventListener("click", () => {
+      const subtabId = (subtab as HTMLElement).getAttribute("data-subtab");
+      if (!subtabId) {
+        return;
+      }
+      const subtabBar = subtab.closest(".subtab-bar");
+      if (subtabBar) {
+        subtabBar.querySelectorAll(".subtab").forEach((s) => s.classList.remove("active"));
+      }
+      document.querySelectorAll(".subtab-content").forEach((c) => c.classList.remove("active"));
+      subtab.classList.add("active");
+      document.getElementById(`subtab-${subtabId}`)?.classList.add("active");
+      diagState.patch({ activeSubtab: subtabId });
+    });
+  });
+}
+
+function reRenderTable(): void {
+  const container = document.getElementById("session-table-container");
+  if (container) {
+    container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
+    if (!isLoading) {
+      setupSortHandlers();
+      setupEditorFilterHandlers();
+      setupContextRefFilterHandlers();
+      setupZeroInteractionFilterHandler();
+      setupFileLinks();
+    }
+  }
+}
+
+function setupFileLinks(): void {
+  document.querySelectorAll(".session-file-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const file = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-file") || "",
+      );
+      vscode.postMessage({ command: "openSessionFile", file });
+    });
+  });
+
+  document.querySelectorAll(".view-formatted-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const file = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-file") || "",
+      );
+      vscode.postMessage({ command: "openFormattedJsonlFile", file });
+    });
+  });
+
+  document.querySelectorAll(".reveal-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const path = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-path") || "",
+      );
+      vscode.postMessage({ command: "revealPath", path });
+    });
+  });
+
+  document.querySelectorAll(".report-editor-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const path = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-path") || "",
+      );
+      vscode.postMessage({ command: "reportNewEditorPath", path });
+    });
+  });
+}
+
+function updateCacheNumbers(): void {
+  const cacheTabContent = document.getElementById("tab-cache");
+  if (cacheTabContent) {
+    const summaryCards = cacheTabContent.querySelectorAll(".summary-card");
+    if (summaryCards.length >= 4) {
+      const entriesValue = summaryCards[0]?.querySelector(".summary-value");
+      if (entriesValue) {
+        entriesValue.textContent = "0";
+      }
+
+      const sizeValue = summaryCards[1]?.querySelector(".summary-value");
+      if (sizeValue) {
+        sizeValue.textContent = "0 MB";
+      }
+
+      const lastUpdatedValue =
+        summaryCards[2]?.querySelector(".summary-value");
+      if (lastUpdatedValue) {
+        lastUpdatedValue.textContent = "Never";
+      }
+
+      const ageValue = summaryCards[3]?.querySelector(".summary-value");
+      if (ageValue) {
+        ageValue.textContent = "N/A";
+      }
+    }
+  }
+}
+
+function setupFolderAnalyzerHandlers(): void {
+  document.getElementById("btn-browse-folder")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "pickFolder" });
+  });
+
+  document.getElementById("btn-analyze-folder")?.addEventListener("click", () => {
+    const input = document.getElementById("folder-path-input") as HTMLInputElement | null;
+    const select = document.getElementById("tool-type-select") as HTMLSelectElement | null;
+    const folderPath = input?.value.trim() ?? "";
+
+    if (!folderPath) {
+      if (input) {
+        input.style.borderColor = "#d97706";
+        input.focus();
+      }
+      return;
+    }
+    if (input) {
+      input.style.borderColor = "";
+    }
+
+    const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = "<span>⏳</span><span>Analyzing…</span>";
+    }
+
+    const resultsDiv = document.getElementById("folder-analysis-results");
+    if (resultsDiv) {
+      resultsDiv.innerHTML = `
+          <div class="analyzer-loading">
+            <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+            <span>Scanning files…</span>
+          </div>`;
+    }
+
+    vscode.postMessage({
+      command: "analyzeFolder",
+      folderPath,
+      toolType: select?.value ?? "auto",
+    });
+  });
+}
+
+function setupTabHandlers(): void {
+  document.querySelectorAll(".tab").forEach((tab) => {
+    tab.addEventListener("click", () => {
+      const tabId = (tab as HTMLElement).getAttribute("data-tab");
+
+      if (tabId && activateTab(tabId)) {
+        diagState.patch({ activeTab: tabId });
+      }
+    });
+  });
+}
+
+function setupButtonHandlers(): void {
+  document.getElementById("btn-copy")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "copyReport" });
+  });
+
+  document.getElementById("btn-issue")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "openIssue" });
+  });
+
+  document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
+    const btn = document.getElementById(
+      "btn-clear-cache",
+    ) as HTMLButtonElement | null;
+    if (btn) {
+      btn.style.background = "#d97706";
+      btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+      btn.disabled = true;
+    }
+    updateCacheNumbers();
+    vscode.postMessage({ command: "clearCache" });
+  });
+
+  document
+    .getElementById("btn-clear-cache-tab")
+    ?.addEventListener("click", () => {
+      const btn = document.getElementById(
+        "btn-clear-cache-tab",
+      ) as HTMLButtonElement | null;
+      if (btn) {
+        btn.style.background = "#d97706";
+        btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+        btn.disabled = true;
+      }
+      updateCacheNumbers();
+      vscode.postMessage({ command: "clearCache" });
+    });
+
+  document.addEventListener("click", (event) => {
+    const target = event.target as HTMLElement;
+    if (!target) {
+      return;
+    }
+    if (
+      target.id === "btn-clear-cache" ||
+      target.id === "btn-clear-cache-tab"
+    ) {
+      target.style.background = "#d97706";
+      target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+      if (target instanceof HTMLButtonElement) {
+        target.disabled = true;
+      }
+      updateCacheNumbers();
+      vscode.postMessage({ command: "clearCache" });
+    }
+    if (target.id === "btn-reset-debug-counters") {
+      vscode.postMessage({ command: "resetDebugCounters" });
+    }
+    if (target.classList.contains("debug-counter-set")) {
+      const key = target.getAttribute("data-key");
+      const row = target.closest("tr");
+      const input = row?.querySelector(".debug-counter-input") as HTMLInputElement | null;
+      if (key && input) {
+        const value = parseInt(input.value, 10);
+        if (!isNaN(value)) {
+          vscode.postMessage({ command: "setDebugCounter", key, value });
+        }
+      }
+    }
+    if (target.classList.contains("debug-flag-set")) {
+      const key = target.getAttribute("data-key");
+      const row = target.closest("tr");
+      const input = row?.querySelector(".debug-flag-input") as HTMLInputElement | null;
+      if (key && input) {
+        vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
+      }
+    }
+  });
+
+  document
+    .getElementById("btn-refresh")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "refresh" }),
     );
+  document
+    .getElementById("btn-chart")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showChart" }),
+    );
+  document
+    .getElementById("btn-usage")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showUsageAnalysis" }),
+    );
+  document
+    .getElementById("btn-details")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showDetails" }),
+    );
+  document
+    .getElementById("btn-diagnostics")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showDiagnostics" }),
+    );
+  document
+    .getElementById("btn-maturity")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showMaturity" }),
+    );
+  document
+    .getElementById("btn-dashboard")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showDashboard" }),
+    );
+  document
+    .getElementById("btn-environmental")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showEnvironmental" }),
+    );
+  wireExtensionPointButtons(vscode);
+}
 
-    // Add total row
-    sessionFilesHtml += `
-				<tr style="border-top: 2px solid #5a5a5a; font-weight: 600; background: rgba(255, 255, 255, 0.05);">
-					<td colspan="2" style="text-align: right; padding-right: 16px;">Total:</td>
-					<td>${totalSessions}</td>
-					<td></td>
-				</tr>`;
-    console.log("[Diagnostics] Total row HTML added to sessionFilesHtml");
-
-    sessionFilesHtml += `
-					</tbody>
-				</table>
-			</div>`;
-  }
-
-  // Remove session files section from report text (it's shown separately as clickable links)
-  let escapedReport = escapeHtml(data.report);
-
-  // Check if we're in loading state for the report
-  const reportIsLoading = data.report === LOADING_PLACEHOLDER;
-
-  if (!reportIsLoading) {
-    // Remove the old session files list from the report text if present
-    escapedReport = removeSessionFilesSection(escapedReport);
-  } else {
-    // Show a better loading message
-    escapedReport = LOADING_MESSAGE.trim();
-  }
-
-  // Build detailed session files table
-  const detailedFiles = data.detailedSessionFiles || [];
-
-  root.innerHTML = `
-		<style>${themeStyles}</style>
-		<style>${styles}</style>
-		<div class="container">
-			<div class="header">
-				<div class="header-left">
-					<span class="header-icon">🔍</span>
-					<span class="header-title">Diagnostic Report</span>
-				</div>
-				<div class="button-row">
-					${buttonHtml("btn-refresh")}
-					${buttonHtml("btn-details")}
-					${buttonHtml("btn-chart")}
-					${buttonHtml("btn-usage")}
-					${buttonHtml("btn-environmental")}
-					${buttonHtml("btn-maturity")}
-					${data?.backendConfigured ? buttonHtml("btn-dashboard") : ""}
-				</div>
-			</div>
-
-			<div class="tabs">
-				<button class="tab active" data-tab="report">📋 Report</button>
-				<button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
-				<button class="tab" data-tab="cache">💾 Cache</button>
-				<button class="tab" data-tab="backend">☁️ Backend Storage</button>
-				<button class="tab" data-tab="github">🔑 GitHub Auth</button>
-				<button class="tab" data-tab="display">⚙️ Settings</button>
-				<button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
-				${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
-			</div>
-
-			<div id="tab-report" class="tab-content active">
-				<div class="info-box">
-					<div class="info-box-title">📋 About This Report</div>
-					<div>
-						This diagnostic report contains information about your AI Engineering Fluency extension
-						extension setup and usage statistics. </br> It does <strong>not</strong> include any of your
-						code or conversation content. You can safely share this report when reporting issues.
-					</div>
-				</div>
-				<div class="button-group" style="margin-bottom: 12px;">
-					<button class="button" id="btn-copy"><span>📋</span><span>Copy to Clipboard</span></button>
-					<button class="button secondary" id="btn-issue"><span>🐛</span><span>Open GitHub Issue</span></button>
-					<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>Clear Cache</span></button>
-				</div>
-				<div class="report-content">${escapedReport}</div>
-				${sessionFilesHtml}
-			</div>
-
-			<div id="tab-sessions" class="tab-content">
-				<div class="info-box">
-					<div class="info-box-title">📁 Session File Analysis</div>
-					<div>
-						This tab shows session files with activity in the last 14 days from all detected editors. </br>
-						Click on an editor panel to filter, click column headers to sort, and click a file name to open it.
-					</div>
-				</div>
-				<div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
-			</div>
-
-			<div id="tab-cache" class="tab-content">
-				<div class="info-box">
-					<div class="info-box-title">💾 Cache Information</div>
-					<div>
-						The extension caches session file data to improve performance and reduce file system operations.
-						Cache is stored in VS Code's global state and persists across sessions.
-					</div>
-				</div>
-				<div class="cache-details">
-					<div class="summary-cards">
-						<div class="summary-card">
-						<div class="summary-label">📦 Cache Entries</div>
-						<div class="summary-value">${data.cacheInfo?.size || 0}</div>
-					</div>
-					<div class="summary-card">
-						<div class="summary-label">💾 Cache Size</div>
-						<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>
-						</div>
-						<div class="summary-card">
-							<div class="summary-label">🕒 Last Updated</div>
-							<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>
-						</div>
-						<div class="summary-card">
-							<div class="summary-label">⏱️ Cache Age</div>
-							<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? getTimeSince(data.cacheInfo.lastUpdated) : "N/A"}</div>
-						</div>
-					</div>
-					<div class="cache-location">
-						<h4>Storage Location</h4>
-						<div class="location-box">
-							<code>${escapeHtml(data.cacheInfo?.location || "VS Code Global State")}</code>
-							${data.cacheInfo?.storagePath ? ` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(data.cacheInfo.storagePath)}">Open storage location</a>` : ""}
-						</div>
-						<p style="color: #999; font-size: 12px; margin-top: 8px;">
-							Cache is stored in VS Code's global state (extension storage) and includes:
-							<ul style="margin: 8px 0 0 20px;">
-								<li>Token counts per session file</li>
-								<li>Interaction counts</li>
-								<li>Model usage statistics</li>
-								<li>File modification timestamps for validation</li>
-								<li>Usage analysis data (tool calls, modes, context references)</li>
-							</ul>
-						</p>
-					</div>
-					<div class="cache-actions">
-						<h4>Cache Management</h4>
-						<p style="color: #999; font-size: 12px; margin-bottom: 12px;">
-							Clearing the cache will force the extension to re-read and re-analyze all session files on the next update.
-							This can help resolve issues with stale or incorrect data.
-						</p>
-						<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-backend" class="tab-content">
-				${renderBackendStoragePanel(data.backendStorageInfo, data.githubAuth)}
-			</div>
-
-			<div id="tab-github" class="tab-content">
-				${renderGitHubAuthPanel(data.githubAuth)}
-			</div>
-			<div id="tab-display" class="tab-content">
-				<div class="info-box">
-					<div class="info-box-title">⚙️ Display Settings</div>
-					<div>Configure how numbers are displayed across the extension. Changes take effect immediately in the Settings editor and are applied the next time a view is opened or refreshed.</div>
-				</div>
-				<div class="backend-card">
-					<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🔢 Number Formatting</h4>
-					<p style="color: #ccc; margin-bottom: 12px;">
-						Token counts can be shown in compact format using K/M suffixes (e.g. <strong>1.5K</strong>, <strong>1.2M</strong>)
-						for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,200,000</strong>) for precision.
-					</p>
-					<div class="button-group">
-						<button class="button" id="btn-open-display-settings">
-							<span>⚙️</span>
-							<span>Open Display Settings</span>
-						</button>
-					</div>
-				</div>
-			</div>
-			${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
-			<div id="tab-path-analyzer" class="tab-content">
-				${renderFolderAnalyzerTab()}
-			</div>
-		</div>
-	`;
-
-  // Store data for re-rendering on sort - will be updated when data loads
-  let storedDetailedFiles = detailedFiles;
-  let isLoading = detailedFiles.length === 0;
-  // Cache backend and auth state so re-renders triggered by either update have both
-  let currentBackendInfo: BackendStorageInfo | undefined = data.backendStorageInfo;
-  let currentGithubAuth: GitHubAuthStatus | undefined = data.githubAuth;
-
-  // Listen for messages from the extension (background loading)
+function setupMessageHandlers(): void {
   window.addEventListener("message", (event) => {
     const message = event.data;
     if (message.command === "diagnosticDataLoaded") {
-      // Initial diagnostic data has loaded (report, session folders, backend info)
-      // Update the report text and folders
       if (message.report) {
-        // Update the report tab content
         const reportTabContent = document.getElementById("tab-report");
         if (reportTabContent) {
-          // Process the report text to remove session files section
           const processedReport = removeSessionFilesSection(message.report);
           const reportPre = reportTabContent.querySelector(".report-content");
           if (reportPre) {
@@ -1527,7 +1820,6 @@ function renderLayout(data: DiagnosticsData): void {
         }
       }
 
-      // Update backend storage info if provided
       if (message.backendStorageInfo) {
         currentBackendInfo = message.backendStorageInfo;
         if (message.githubAuth !== undefined) {
@@ -1535,7 +1827,6 @@ function renderLayout(data: DiagnosticsData): void {
         }
         const backendTabContent = document.getElementById("tab-backend");
         if (backendTabContent) {
-          // Capture active subtab before re-rendering so we can restore it
           const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
           const previousSubtab = activeSubtabEl?.getAttribute("data-subtab")
             ?? diagState.restore().activeSubtab;
@@ -1544,11 +1835,9 @@ function renderLayout(data: DiagnosticsData): void {
             currentBackendInfo,
             currentGithubAuth,
           );
-          // Re-attach event listeners for backend buttons
           setupBackendButtonHandlers();
           setupSubtabHandlers();
 
-          // Restore previously-active subtab (or default to first)
           if (previousSubtab) {
             activateSubtab(previousSubtab);
             diagState.patch({ activeSubtab: previousSubtab });
@@ -1558,146 +1847,30 @@ function renderLayout(data: DiagnosticsData): void {
         console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");
       }
 
-      // Update session folders if provided
       if (message.sessionFolders && message.sessionFolders.length > 0) {
         const reportTabContent = document.getElementById("tab-report");
         if (reportTabContent) {
-          const grouped = groupSessionFolders(message.sessionFolders);
-          const sorted = [...grouped].sort(
-            (a: any, b: any) => b.count - a.count,
-          );
+          const grouped = groupSessionFolders(message.sessionFolders as SessionFolder[]);
+          const foldersEl = buildSessionFoldersElement(grouped);
 
-          // Build the session folders table using DOM APIs to avoid HTML injection
-          let container = reportTabContent.querySelector(
-            ".session-folders-table",
-          ) as HTMLElement | null;
-          if (!container) {
-            container = document.createElement("div");
-            container.className = "session-folders-table";
+          const existing = reportTabContent.querySelector(".session-folders-table");
+          if (existing) {
+            existing.replaceWith(foldersEl);
           } else {
-            // Clear existing content so we can rebuild safely
-            while (container.firstChild) {
-              container.removeChild(container.firstChild);
-            }
-          }
-
-          const heading = document.createElement("h4");
-          heading.textContent = "Main Session Folders (by editor root):";
-          container.appendChild(heading);
-
-          const table = document.createElement("table");
-          table.className = "session-table";
-          container.appendChild(table);
-
-          const thead = document.createElement("thead");
-          table.appendChild(thead);
-          const headerRow = document.createElement("tr");
-          thead.appendChild(headerRow);
-
-          const headers = ["Folder", "Editor", "# of Sessions", "Open"];
-          headers.forEach((text) => {
-            const th = document.createElement("th");
-            th.textContent = text;
-            headerRow.appendChild(th);
-          });
-
-          const tbody = document.createElement("tbody");
-          table.appendChild(tbody);
-
-          sorted.forEach((sf: any) => {
-            let display = sf.dir;
-            const home =
-              (window as any).process?.env?.HOME ||
-              (window as any).process?.env?.USERPROFILE ||
-              "";
-            if (home && display.startsWith(home)) {
-              display = display.replace(home, "~");
-            }
-            const editorName = sf.editorName || "Unknown";
-
-            const row = document.createElement("tr");
-
-            // Folder cell
-            const folderCell = document.createElement("td");
-            folderCell.setAttribute("title", escapeHtml(sf.dir));
-            folderCell.textContent = escapeHtml(display);
-            row.appendChild(folderCell);
-
-            // Editor cell
-            const editorCell = document.createElement("td");
-            const editorBadge = document.createElement("span");
-            editorBadge.className = getEditorBadgeClass(editorName);
-            editorBadge.textContent = `${getEditorIcon(editorName)} ${escapeHtml(editorName)}`;
-            editorCell.appendChild(editorBadge);
-            row.appendChild(editorCell);
-
-            // Count cell
-            const countCell = document.createElement("td");
-            countCell.textContent = String(sf.count);
-            row.appendChild(countCell);
-
-            // Open link cell
-            const openCell = document.createElement("td");
-            const openLink = document.createElement("a");
-            openLink.href = "#";
-            openLink.className = "reveal-link";
-            openLink.setAttribute("data-path", encodeURIComponent(sf.dir));
-            openLink.textContent = "Open directory";
-            openCell.appendChild(openLink);
-            row.appendChild(openCell);
-
-            tbody.appendChild(row);
-          });
-
-          // Add total row
-          const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
-          const totalRow = document.createElement("tr");
-          totalRow.style.borderTop = "2px solid var(--vscode-panel-border)";
-          totalRow.style.fontWeight = "bold";
-          totalRow.style.background = "rgba(255, 255, 255, 0.05)";
-
-          const totalLabelCell = document.createElement("td");
-          totalLabelCell.setAttribute("colspan", "2");
-          totalLabelCell.style.textAlign = "right";
-          totalLabelCell.style.paddingRight = "16px";
-          totalLabelCell.textContent = "Total:";
-          totalRow.appendChild(totalLabelCell);
-
-          const totalCountCell = document.createElement("td");
-          totalCountCell.textContent = totalSessions.toString();
-          totalRow.appendChild(totalCountCell);
-
-          const totalEmptyCell = document.createElement("td");
-          totalRow.appendChild(totalEmptyCell);
-
-          tbody.appendChild(totalRow);
-
-          // Find where to insert or replace the session folders table
-          // It should be inserted after the report-content div but before the button-group
-          const existingTable = reportTabContent.querySelector(
-            ".session-folders-table",
-          );
-          if (!existingTable) {
-            // Insert after the report-content div
-            const reportContent =
-              reportTabContent.querySelector(".report-content");
+            const reportContent = reportTabContent.querySelector(".report-content");
             if (reportContent) {
-              reportContent.insertAdjacentElement("afterend", container);
+              reportContent.insertAdjacentElement("afterend", foldersEl);
             } else {
-              // Fallback: append to the tab content if report-content is missing
-              reportTabContent.appendChild(container);
+              reportTabContent.appendChild(foldersEl);
             }
           }
-
           setupStorageLinkHandlers();
         }
       }
 
-      // Update candidate paths if provided
       if (message.candidatePaths && message.candidatePaths.length > 0) {
         const reportTabContent = document.getElementById("tab-report");
         if (reportTabContent) {
-          // Remove existing candidate paths table if present
           const existing = reportTabContent.querySelector(".candidate-paths-table");
           if (existing) {
             existing.remove();
@@ -1705,7 +1878,6 @@ function renderLayout(data: DiagnosticsData): void {
 
           const candidateEl = buildCandidatePathsElement(message.candidatePaths);
 
-          // Insert after session-folders-table if it exists, otherwise after report-content
           const foldersTable = reportTabContent.querySelector(".session-folders-table");
           if (foldersTable) {
             foldersTable.insertAdjacentElement("afterend", candidateEl);
@@ -1720,9 +1892,6 @@ function renderLayout(data: DiagnosticsData): void {
         }
       }
 
-      // Diagnostic data loaded successfully - no console needed as this is normal operation
-
-      // Update GitHub Auth tab with the auth status from the loaded data
       if (message.githubAuth !== undefined) {
         const githubTabContent = document.getElementById("tab-github");
         if (githubTabContent) {
@@ -1731,14 +1900,12 @@ function renderLayout(data: DiagnosticsData): void {
         }
       }
     } else if (message.command === "githubAuthUpdated") {
-      // Update GitHub Auth tab with new authentication status
       currentGithubAuth = message.githubAuth;
       const githubTabContent = document.getElementById("tab-github");
       if (githubTabContent) {
         githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
         setupGitHubAuthHandlers();
       }
-      // Re-render the backend panel so the team server warning reflects the new auth state
       const backendTabContent = document.getElementById("tab-backend");
       if (backendTabContent && currentBackendInfo) {
         const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
@@ -1751,18 +1918,17 @@ function renderLayout(data: DiagnosticsData): void {
         }
       }
     } else if (message.command === "diagnosticDataError") {
-      // Show error message
       console.error("Error loading diagnostic data:", message.error);
-      const root = document.getElementById("root");
-      if (root) {
+      const rootEl = document.getElementById("root");
+      if (rootEl) {
         const errorDiv = document.createElement("div");
         errorDiv.style.cssText =
           "color: #ff6b6b; padding: 20px; text-align: center;";
         errorDiv.innerHTML = `
-					<h3>⚠️ Error Loading Diagnostic Data</h3>
-					<p>${escapeHtml(message.error || "Unknown error")}</p>
-				`;
-        root.insertBefore(errorDiv, root.firstChild);
+<h3>⚠️ Error Loading Diagnostic Data</h3>
+<p>${escapeHtml(message.error || "Unknown error")}</p>
+`;
+        rootEl.insertBefore(errorDiv, rootEl.firstChild);
       }
     } else if (
       message.command === "sessionFilesLoaded" &&
@@ -1771,16 +1937,13 @@ function renderLayout(data: DiagnosticsData): void {
       storedDetailedFiles = message.detailedSessionFiles;
       isLoading = false;
 
-      // Update tab count
       const sessionsTab = document.querySelector('.tab[data-tab="sessions"]');
       if (sessionsTab) {
         sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
       }
 
-      // Re-render the table
       reRenderTable();
     } else if (message.command === "cacheCleared") {
-      // Reset button states to indicate success
       const btnReport = document.getElementById(
         "btn-clear-cache",
       ) as HTMLButtonElement | null;
@@ -1798,7 +1961,6 @@ function renderLayout(data: DiagnosticsData): void {
         btnTab.disabled = false;
       }
 
-      // Re-enable buttons after a short delay and reset to original state
       setTimeout(() => {
         if (btnReport) {
           btnReport.style.background = "";
@@ -1810,7 +1972,6 @@ function renderLayout(data: DiagnosticsData): void {
         }
       }, 2000);
     } else if (message.command === "cacheRefreshed") {
-      // Update cache numbers with refreshed data
       if (message.cacheInfo) {
         const cacheInfo = message.cacheInfo;
         const cacheTabContent = document.getElementById("tab-cache");
@@ -1875,469 +2036,185 @@ function renderLayout(data: DiagnosticsData): void {
       }
     }
   });
+}
 
-  // Handle open storage link clicks
-  function setupStorageLinkHandlers(): void {
-    document.querySelectorAll(".open-storage-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const path = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-path") || "",
-        );
-        if (path) {
-          vscode.postMessage({ command: "revealPath", path });
-        }
-      });
-    });
+function renderLayout(data: DiagnosticsData): void {
+  const root = document.getElementById("root");
+  if (!root) {
+    return;
   }
 
-  function setupGitHubAuthHandlers(): void {
-    document.getElementById('btn-authenticate-github')?.addEventListener('click', () => {
-      vscode.postMessage({ command: 'authenticateGitHub' });
-    });
+  // Initialise module-level render state
+  const detailedFiles = data.detailedSessionFiles || [];
+  storedDetailedFiles = detailedFiles;
+  isLoading = detailedFiles.length === 0;
+  currentBackendInfo = data.backendStorageInfo;
+  currentGithubAuth = data.githubAuth;
 
-    document.getElementById('btn-sign-out-github')?.addEventListener('click', () => {
-      vscode.postMessage({ command: 'signOutGitHub' });
-    });
-  }
+  const reportIsLoading = data.report === LOADING_PLACEHOLDER;
+  const escapedReport = reportIsLoading
+    ? LOADING_MESSAGE.trim()
+    : removeSessionFilesSection(escapeHtml(data.report));
 
-  // Helper function to activate a subtab by its ID (without the "subtab-" prefix)
-  function activateSubtab(subtabId: string): boolean {
-    const subtabEl = document.querySelector(`.subtab[data-subtab="${subtabId}"]`);
-    const contentEl = document.getElementById(`subtab-${subtabId}`);
-    if (subtabEl && contentEl) {
-      const subtabBar = subtabEl.closest(".subtab-bar");
-      if (subtabBar) {
-        subtabBar.querySelectorAll(".subtab").forEach((s) => s.classList.remove("active"));
-      }
-      document.querySelectorAll(".subtab-content").forEach((c) => c.classList.remove("active"));
-      subtabEl.classList.add("active");
-      contentEl.classList.add("active");
-      return true;
-    }
-    return false;
-  }
+  root.innerHTML = `
+<style>${themeStyles}</style>
+<style>${styles}</style>
+<div class="container">
+<div class="header">
+<div class="header-left">
+<span class="header-icon">🔍</span>
+<span class="header-title">Diagnostic Report</span>
+</div>
+<div class="button-row">
+${buttonHtml("btn-refresh")}
+${buttonHtml("btn-details")}
+${buttonHtml("btn-chart")}
+${buttonHtml("btn-usage")}
+${buttonHtml("btn-environmental")}
+${buttonHtml("btn-maturity")}
+${data?.backendConfigured ? buttonHtml("btn-dashboard") : ""}
+</div>
+</div>
 
-  // Helper function to activate a tab by its ID
-  function activateTab(tabId: string): boolean {
-    const tabButton = document.querySelector(`.tab[data-tab="${tabId}"]`);
-    const tabContent = document.getElementById(`tab-${tabId}`);
+<div class="tabs">
+<button class="tab active" data-tab="report">📋 Report</button>
+<button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
+<button class="tab" data-tab="cache">💾 Cache</button>
+<button class="tab" data-tab="backend">☁️ Backend Storage</button>
+<button class="tab" data-tab="github">🔑 GitHub Auth</button>
+<button class="tab" data-tab="display">⚙️ Settings</button>
+<button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
+${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
+</div>
 
-    if (tabButton && tabContent) {
-      // Remove active class from all tabs and contents
-      document
-        .querySelectorAll(".tab")
-        .forEach((t) => t.classList.remove("active"));
-      document
-        .querySelectorAll(".tab-content")
-        .forEach((c) => c.classList.remove("active"));
+<div id="tab-report" class="tab-content active">
+<div class="info-box">
+<div class="info-box-title">📋 About This Report</div>
+<div>
+This diagnostic report contains information about your AI Engineering Fluency extension
+extension setup and usage statistics. </br> It does <strong>not</strong> include any of your
+code or conversation content. You can safely share this report when reporting issues.
+</div>
+</div>
+<div class="button-group" style="margin-bottom: 12px;">
+<button class="button" id="btn-copy"><span>📋</span><span>Copy to Clipboard</span></button>
+<button class="button secondary" id="btn-issue"><span>🐛</span><span>Open GitHub Issue</span></button>
+<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>Clear Cache</span></button>
+</div>
+<div class="report-content">${escapedReport}</div>
+</div>
 
-      // Activate the specified tab
-      tabButton.classList.add("active");
-      tabContent.classList.add("active");
-      return true;
-    }
-    return false;
-  }
+<div id="tab-sessions" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">📁 Session File Analysis</div>
+<div>
+This tab shows session files with activity in the last 14 days from all detected editors. </br>
+Click on an editor panel to filter, click column headers to sort, and click a file name to open it.
+</div>
+</div>
+<div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
+</div>
 
-  // Wire up tab switching
-  document.querySelectorAll(".tab").forEach((tab) => {
-    tab.addEventListener("click", () => {
-      const tabId = (tab as HTMLElement).getAttribute("data-tab");
+<div id="tab-cache" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">💾 Cache Information</div>
+<div>
+The extension caches session file data to improve performance and reduce file system operations.
+Cache is stored in VS Code's global state and persists across sessions.
+</div>
+</div>
+<div class="cache-details">
+<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">📦 Cache Entries</div>
+<div class="summary-value">${data.cacheInfo?.size || 0}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">💾 Cache Size</div>
+<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">🕒 Last Updated</div>
+<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">⏱️ Cache Age</div>
+<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? getTimeSince(data.cacheInfo.lastUpdated) : "N/A"}</div>
+</div>
+</div>
+<div class="cache-location">
+<h4>Storage Location</h4>
+<div class="location-box">
+<code>${escapeHtml(data.cacheInfo?.location || "VS Code Global State")}</code>
+${data.cacheInfo?.storagePath ? ` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(data.cacheInfo.storagePath)}">Open storage location</a>` : ""}
+</div>
+<p style="color: #999; font-size: 12px; margin-top: 8px;">
+Cache is stored in VS Code's global state (extension storage) and includes:
+<ul style="margin: 8px 0 0 20px;">
+<li>Token counts per session file</li>
+<li>Interaction counts</li>
+<li>Model usage statistics</li>
+<li>File modification timestamps for validation</li>
+<li>Usage analysis data (tool calls, modes, context references)</li>
+</ul>
+</p>
+</div>
+<div class="cache-actions">
+<h4>Cache Management</h4>
+<p style="color: #999; font-size: 12px; margin-bottom: 12px;">
+Clearing the cache will force the extension to re-read and re-analyze all session files on the next update.
+This can help resolve issues with stale or incorrect data.
+</p>
+<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
+</div>
+</div>
+</div>
 
-      if (tabId && activateTab(tabId)) {
-        // Save the active tab state
-        diagState.patch({ activeTab: tabId });
-      }
-    });
-  });
+<div id="tab-backend" class="tab-content">
+${renderBackendStoragePanel(data.backendStorageInfo, data.githubAuth)}
+</div>
 
-  // Wire up sortable column headers
-  function setupSortHandlers(): void {
-    document.querySelectorAll(".sortable").forEach((header) => {
-      header.addEventListener("click", () => {
-        const sortColumn = (header as HTMLElement).getAttribute(
-          "data-sort",
-        ) as typeof currentSortColumn;
-        if (sortColumn) {
-          // Toggle direction if same column, otherwise default to desc
-          if (currentSortColumn === sortColumn) {
-            currentSortDirection =
-              currentSortDirection === "desc" ? "asc" : "desc";
-          } else {
-            currentSortColumn = sortColumn;
-            currentSortDirection = "desc";
-          }
+<div id="tab-github" class="tab-content">
+${renderGitHubAuthPanel(data.githubAuth)}
+</div>
+<div id="tab-display" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">⚙️ Display Settings</div>
+<div>Configure how numbers are displayed across the extension. Changes take effect immediately in the Settings editor and are applied the next time a view is opened or refreshed.</div>
+</div>
+<div class="backend-card">
+<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🔢 Number Formatting</h4>
+<p style="color: #ccc; margin-bottom: 12px;">
+Token counts can be shown in compact format using K/M suffixes (e.g. <strong>1.5K</strong>, <strong>1.2M</strong>)
+for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,200,000</strong>) for precision.
+</p>
+<div class="button-group">
+<button class="button" id="btn-open-display-settings">
+<span>⚙️</span>
+<span>Open Display Settings</span>
+</button>
+</div>
+</div>
+</div>
+${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
+<div id="tab-path-analyzer" class="tab-content">
+${renderFolderAnalyzerTab()}
+</div>
+</div>
+`;
 
-          // Re-render table
-          reRenderTable();
-        }
-      });
-    });
-  }
-
-  // Wire up editor filter panel handlers
-  function setupEditorFilterHandlers(): void {
-    document.querySelectorAll(".editor-panel").forEach((panel) => {
-      panel.addEventListener("click", () => {
-        const editor = (panel as HTMLElement).getAttribute("data-editor");
-        currentEditorFilter = editor === "" ? null : editor;
-
-        // Re-render table
-        reRenderTable();
-      });
-    });
-  }
-
-  // Wire up context ref filter handlers
-  function setupContextRefFilterHandlers(): void {
-    document.querySelectorAll(".context-ref-filter").forEach((filter) => {
-      filter.addEventListener("click", () => {
-        const refType = (filter as HTMLElement).getAttribute(
-          "data-ref-type",
-        ) as keyof ContextReferenceUsage | null;
-
-        // Toggle: if clicking the same filter, clear it
-        if (currentContextRefFilter === refType) {
-          currentContextRefFilter = null;
-        } else {
-          currentContextRefFilter = refType;
-        }
-
-        // Re-render table
-        reRenderTable();
-      });
-    });
-  }
-
-  // Wire up hide-empty-sessions checkbox handler
-  function setupZeroInteractionFilterHandler(): void {
-    const checkbox = document.getElementById("hide-empty-sessions") as HTMLInputElement | null;
-    if (checkbox) {
-      checkbox.addEventListener("change", () => {
-        hideEmptySessions = checkbox.checked;
-        reRenderTable();
-      });
-    }
-  }
-
-  // Wire up backend button handlers
-  function setupBackendButtonHandlers(): void {
-    document
-      .getElementById("btn-configure-backend")
-      ?.addEventListener("click", () => {
-        vscode.postMessage({ command: "configureBackend" });
-      });
-
-    document
-      .getElementById("btn-configure-backend-team")
-      ?.addEventListener("click", () => {
-        // Pre-save the teamserver subtab so the diagnostics panel restores to it
-        // after the settings change triggers a panel refresh
-        diagState.patch({ activeTab: "backend", activeSubtab: "backend-teamserver" });
-        vscode.postMessage({ command: "configureTeamServer" });
-      });
-
-    document
-      .getElementById("btn-team-server-auth-warning")
-      ?.addEventListener("click", () => {
-        vscode.postMessage({ command: "authenticateGitHub" });
-      });
-
-    document
-      .getElementById("btn-open-settings")
-      ?.addEventListener("click", () => {
-        vscode.postMessage({ command: "openSettings" });
-      });
-
-    document
-      .getElementById("btn-open-display-settings")
-      ?.addEventListener("click", () => {
-        vscode.postMessage({ command: "openDisplaySettings" });
-      });
-  }
-
-  function setupSubtabHandlers(): void {
-    document.querySelectorAll(".subtab").forEach((subtab) => {
-      subtab.addEventListener("click", () => {
-        const subtabId = (subtab as HTMLElement).getAttribute("data-subtab");
-        if (!subtabId) {
-          return;
-        }
-        // Deactivate all subtabs and content in the same subtab-bar
-        const subtabBar = subtab.closest(".subtab-bar");
-        if (subtabBar) {
-          subtabBar.querySelectorAll(".subtab").forEach((s) => s.classList.remove("active"));
-        }
-        document.querySelectorAll(".subtab-content").forEach((c) => c.classList.remove("active"));
-        subtab.classList.add("active");
-        document.getElementById(`subtab-${subtabId}`)?.classList.add("active");
-        // Persist active subtab so it can be restored after a data refresh
-        diagState.patch({ activeSubtab: subtabId });
-      });
-    });
-  }
-
-  // Re-render the session table with current filter/sort state
-  function reRenderTable(): void {
-    const container = document.getElementById("session-table-container");
-    if (container) {
-      container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
-      if (!isLoading) {
-        setupSortHandlers();
-        setupEditorFilterHandlers();
-        setupContextRefFilterHandlers();
-        setupZeroInteractionFilterHandler();
-        setupFileLinks();
-      }
+  // Render session folders via DOM API (XSS-safe, no innerHTML)
+  const sessionFolders = groupSessionFolders(data.sessionFolders || []);
+  if (sessionFolders.length > 0) {
+    const reportTab = document.getElementById("tab-report");
+    const reportContent = reportTab?.querySelector(".report-content");
+    if (reportContent) {
+      reportContent.insertAdjacentElement("afterend", buildSessionFoldersElement(sessionFolders));
     }
   }
 
-  // Wire up file link handlers
-  function setupFileLinks(): void {
-    document.querySelectorAll(".session-file-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const file = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-file") || "",
-        );
-        vscode.postMessage({ command: "openSessionFile", file });
-      });
-    });
-
-    // View formatted JSONL link handlers
-    document.querySelectorAll(".view-formatted-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const file = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-file") || "",
-        );
-        vscode.postMessage({ command: "openFormattedJsonlFile", file });
-      });
-    });
-
-    // Reveal link handlers
-    document.querySelectorAll(".reveal-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const path = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-path") || "",
-        );
-        vscode.postMessage({ command: "revealPath", path });
-      });
-    });
-
-    // Report unknown editor path handlers
-    document.querySelectorAll(".report-editor-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const path = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-path") || "",
-        );
-        vscode.postMessage({ command: "reportNewEditorPath", path });
-      });
-    });
-  }
-
-  // Wire up event listeners
-  document.getElementById("btn-copy")?.addEventListener("click", () => {
-    vscode.postMessage({ command: "copyReport" });
-  });
-
-  document.getElementById("btn-issue")?.addEventListener("click", () => {
-    vscode.postMessage({ command: "openIssue" });
-  });
-
-  // Helper function to update cache numbers to zero
-  function updateCacheNumbers(): void {
-    const cacheTabContent = document.getElementById("tab-cache");
-    if (cacheTabContent) {
-      const summaryCards = cacheTabContent.querySelectorAll(".summary-card");
-      if (summaryCards.length >= 4) {
-        const entriesValue = summaryCards[0]?.querySelector(".summary-value");
-        if (entriesValue) {
-          entriesValue.textContent = "0";
-        }
-
-        const sizeValue = summaryCards[1]?.querySelector(".summary-value");
-        if (sizeValue) {
-          sizeValue.textContent = "0 MB";
-        }
-
-        const lastUpdatedValue =
-          summaryCards[2]?.querySelector(".summary-value");
-        if (lastUpdatedValue) {
-          lastUpdatedValue.textContent = "Never";
-        }
-
-        const ageValue = summaryCards[3]?.querySelector(".summary-value");
-        if (ageValue) {
-          ageValue.textContent = "N/A";
-        }
-      }
-    }
-  }
-
-  function setupFolderAnalyzerHandlers(): void {
-    document.getElementById("btn-browse-folder")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "pickFolder" });
-    });
-
-    document.getElementById("btn-analyze-folder")?.addEventListener("click", () => {
-      const input = document.getElementById("folder-path-input") as HTMLInputElement | null;
-      const select = document.getElementById("tool-type-select") as HTMLSelectElement | null;
-      const folderPath = input?.value.trim() ?? "";
-
-      if (!folderPath) {
-        if (input) {
-          input.style.borderColor = "#d97706";
-          input.focus();
-        }
-        return;
-      }
-      if (input) {
-        input.style.borderColor = "";
-      }
-
-      const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
-      if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = "<span>⏳</span><span>Analyzing…</span>";
-      }
-
-      const resultsDiv = document.getElementById("folder-analysis-results");
-      if (resultsDiv) {
-        resultsDiv.innerHTML = `
-          <div class="analyzer-loading">
-            <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
-            <span>Scanning files…</span>
-          </div>`;
-      }
-
-      vscode.postMessage({
-        command: "analyzeFolder",
-        folderPath,
-        toolType: select?.value ?? "auto",
-      });
-    });
-  }
-
-  document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
-    const btn = document.getElementById(
-      "btn-clear-cache",
-    ) as HTMLButtonElement | null;
-    if (btn) {
-      btn.style.background = "#d97706";
-      btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-      btn.disabled = true;
-    }
-    // Immediately update cache numbers (optimistic update)
-    updateCacheNumbers();
-    vscode.postMessage({ command: "clearCache" });
-  });
-
-  document
-    .getElementById("btn-clear-cache-tab")
-    ?.addEventListener("click", () => {
-      const btn = document.getElementById(
-        "btn-clear-cache-tab",
-      ) as HTMLButtonElement | null;
-      if (btn) {
-        btn.style.background = "#d97706";
-        btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-        btn.disabled = true;
-      }
-      // Immediately update cache numbers (optimistic update)
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    });
-
-  // Fallback click delegation in case direct listeners are not attached
-  document.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
-    if (!target) {
-      return;
-    }
-    if (
-      target.id === "btn-clear-cache" ||
-      target.id === "btn-clear-cache-tab"
-    ) {
-      target.style.background = "#d97706";
-      target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-      if (target instanceof HTMLButtonElement) {
-        target.disabled = true;
-      }
-      // Immediately update cache numbers (optimistic update)
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    }
-    if (target.id === "btn-reset-debug-counters") {
-      vscode.postMessage({ command: "resetDebugCounters" });
-    }
-    if (target.classList.contains("debug-counter-set")) {
-      const key = target.getAttribute("data-key");
-      const row = target.closest("tr");
-      const input = row?.querySelector(".debug-counter-input") as HTMLInputElement | null;
-      if (key && input) {
-        const value = parseInt(input.value, 10);
-        if (!isNaN(value)) {
-          vscode.postMessage({ command: "setDebugCounter", key, value });
-        }
-      }
-    }
-    if (target.classList.contains("debug-flag-set")) {
-      const key = target.getAttribute("data-key");
-      const row = target.closest("tr");
-      const input = row?.querySelector(".debug-flag-input") as HTMLInputElement | null;
-      if (key && input) {
-        vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
-      }
-    }
-  });
-
-  // Navigation buttons (match details view)
-  document
-    .getElementById("btn-refresh")
-    ?.addEventListener("click", () =>
-      vscode.postMessage({ command: "refresh" }),
-    );
-  document
-    .getElementById("btn-chart")
-    ?.addEventListener("click", () =>
-      vscode.postMessage({ command: "showChart" }),
-    );
-  document
-    .getElementById("btn-usage")
-    ?.addEventListener("click", () =>
-      vscode.postMessage({ command: "showUsageAnalysis" }),
-    );
-  document
-    .getElementById("btn-details")
-    ?.addEventListener("click", () =>
-      vscode.postMessage({ command: "showDetails" }),
-    );
-  document
-    .getElementById("btn-diagnostics")
-    ?.addEventListener("click", () =>
-      vscode.postMessage({ command: "showDiagnostics" }),
-    );
-  document
-    .getElementById("btn-maturity")
-    ?.addEventListener("click", () =>
-      vscode.postMessage({ command: "showMaturity" }),
-    );
-  document
-    .getElementById("btn-dashboard")
-    ?.addEventListener("click", () =>
-      vscode.postMessage({ command: "showDashboard" }),
-    );
-  document
-    .getElementById("btn-environmental")
-    ?.addEventListener("click", () =>
-      vscode.postMessage({ command: "showEnvironmental" }),
-    );
-  wireExtensionPointButtons(vscode);
-
+  setupMessageHandlers();
+  setupTabHandlers();
   setupSortHandlers();
   setupEditorFilterHandlers();
   setupContextRefFilterHandlers();
@@ -2348,20 +2225,17 @@ function renderLayout(data: DiagnosticsData): void {
   setupStorageLinkHandlers();
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
+  setupButtonHandlers();
 
-  // Restore active tab from saved state, with fallback to default
   const savedState = diagState.restore();
   if (savedState?.activeTab && !activateTab(savedState.activeTab)) {
-    // If saved tab doesn't exist (e.g., structure changed), activate default "report" tab
     activateTab("report");
   }
 
-  // Restore active subtab from saved state
   if (savedState?.activeSubtab) {
     activateSubtab(savedState.activeSubtab);
   }
 }
-
 async function bootstrap(): Promise<void> {
   const { provideVSCodeDesignSystem, vsCodeButton } =
     await import("@vscode/webview-ui-toolkit");
