@@ -9,6 +9,6 @@
     "scrape": "node scrape-models.js"
   },
   "dependencies": {
-    "puppeteer": "^25.0.2"
+    "puppeteer": "^25.0.4"
   }
 }
