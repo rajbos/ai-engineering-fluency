@@ -26,235 +26,88 @@ export interface BackendConfigPanelCallbacks {
 	onClearAzureSettings: () => Promise<BackendConfigPanelState>;
 }
 
-export class BackendConfigPanel implements vscode.Disposable {
-	private panel: vscode.WebviewPanel | undefined;
-	private readonly disposables: vscode.Disposable[] = [];
-	private disposed = false;
-	private dirty = false;
-	private operationInProgress = false;
+/** Discriminated union of all messages the webview sends to the extension host. */
+type WebviewCommand =
+	| { command: 'markDirty' }
+	| { command: 'save'; draft: BackendConfigDraft }
+	| { command: 'discard' }
+	| { command: 'stayLocal' }
+	| { command: 'testConnection'; draft: BackendConfigDraft }
+	| { command: 'updateSharedKey'; storageAccount: string; draft?: BackendConfigDraft }
+	| { command: 'launchWizard' }
+	| { command: 'clearAzureSettings' };
 
-	constructor(private readonly extensionUri: vscode.Uri, private readonly callbacks: BackendConfigPanelCallbacks) {}
+/** Discriminated union of all messages the extension host sends to the webview. */
+type WebviewOutboundMessage =
+	| { type: 'state'; state: BackendConfigPanelState; errors?: Record<string, string>; message?: string }
+	| { type: 'testResult'; result: { ok: boolean; message: string } }
+	| { type: 'sharedKeyResult'; result: { ok: boolean; message: string } };
 
-	public isDisposed(): boolean {
-		return this.disposed;
-	}
+// ─── HTML generation helpers ──────────────────────────────────────────────────
 
-	public async show(): Promise<void> {
-		const state = await this.callbacks.getState();
-		if (!this.panel) {
-			this.panel = vscode.window.createWebviewPanel(
-				'copilotBackendConfig',
-				'AI Engineering Fluency: Configure Backend',
-				{ viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
-				{ enableScripts: true, retainContextWhenHidden: false }
-			);
-			// Track all event listeners in disposables array for proper cleanup
-			this.disposables.push(
-				this.panel.onDidDispose(() => this.handleDispose()),
-				this.panel.webview.onDidReceiveMessage(async (message) => this.handleMessage(message))
-			);
-		}
-		this.panel.webview.html = this.renderHtml(this.panel.webview, state);
-		this.panel.reveal();
-	}
+/** Returns the CSS styles for the config panel webview. */
+function buildStyles(): string {
+	return `
+		body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #e5e5e5; margin: 0; padding: 0; }
+		.banner { background: #423620; color: #f2c97d; padding: 10px 16px; display: none; }
+		.banner.offline { display: block; }
+		.layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
+		.nav { border-right: 1px solid #2f2f2f; padding: 16px; background: #252526; }
+		.nav vscode-button { width: 100%; margin-bottom: 8px; }
+		.nav .selected { background: #0e639c; color: #fff; }
+		.main { padding: 16px 20px 32px; }
+		.section { display: none; gap: 12px; }
+		.section.active { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
+		.card { background: #252526; border: 1px solid #2f2f2f; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
+		.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
+		.field label { font-size: 12px; color: #c8c8c8; }
+		.field small { color: #999; }
+		.field .error { color: #f48771; font-size: 11px; }
+		.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
+		.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
+		.inline { display: flex; align-items: center; gap: 10px; }
+		.helper { color: #b3b3b3; font-size: 12px; line-height: 1.4; }
+		.status-line { font-size: 12px; padding: 8px 10px; border-radius: 6px; background: #1b252e; }
+		.status-line.ok { color: #b8f5c4; border: 1px solid #2d4f3a; }
+		.status-line.error { color: #f8c7c0; border: 1px solid #7c2f2f; }
+		.pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+		.muted { color: #9a9a9a; }
+		.disabled-section { opacity: 0.5; pointer-events: none; }
+		.change-item { padding: 8px 12px; margin: 6px 0; background: #2d2d30; border-left: 3px solid #0e639c; border-radius: 4px; }
+		.change-item.warning { border-left-color: #d7ba7d; }
+		.change-item.danger { border-left-color: #f48771; }
+		.change-label { font-weight: bold; color: #e5e5e5; margin-bottom: 4px; }
+		.change-value { color: #b3b3b3; font-size: 13px; }
+		#reviewSummary { margin-bottom: 16px; }`;
+}
 
-	private handleDispose(): void {
-		if (this.disposed) {
-			return;
-		}
-		this.disposed = true;
-		if (this.dirty) {
-			vscode.window.showWarningMessage('Backend configuration panel closed with unsaved changes. No changes were applied.');
-		}
-	}
-
-	public dispose(): void {
-		// Dispose all tracked event listeners
-		for (const disposable of this.disposables) {
-			disposable.dispose();
-		}
-		this.disposables.length = 0;
-		
-		// Dispose the panel itself
-		if (this.panel) {
-			this.panel.dispose();
-			this.panel = undefined;
-		}
-	}
-
-	/**
-	 * Execute an async operation with locking to prevent concurrent state updates.
-	 */
-	private async withLock<T>(operation: () => Promise<T>): Promise<T> {
-		if (this.operationInProgress) {
-			throw new Error('Another operation is in progress. Please wait.');
-		}
-		this.operationInProgress = true;
-		try {
-			return await operation();
-		} finally {
-			this.operationInProgress = false;
-		}
-	}
-
-	private async handleMessage(message: any): Promise<void> {
-		switch (message?.command) {
-			case 'markDirty':
-				this.dirty = true;
-				return;
-			case 'save':
-				await this.handleSave(message.draft as BackendConfigDraft);
-				return;
-			case 'discard':
-				await this.handleDiscard();
-				return;
-			case 'stayLocal':
-				await this.handleStayLocal();
-				return;
-			case 'testConnection':
-				await this.handleTestConnection(message.draft as BackendConfigDraft);
-				return;
-			case 'updateSharedKey':
-				await this.handleUpdateSharedKey(message.storageAccount as string, message.draft as BackendConfigDraft | undefined);
-				return;
-			case 'launchWizard':
-				await this.handleLaunchWizard();
-				return;
-			case 'clearAzureSettings':
-				await this.handleClearAzureSettings();
-				return;
-		}
-	}
-
-	private async handleSave(draft: BackendConfigDraft): Promise<void> {
-		try {
-			await this.withLock(async () => {
-				const result = await this.callbacks.onSave(draft);
-				this.dirty = false;
-				this.postState(result.state, result.errors, result.message);
-			});
-		} catch (error: any) {
-			vscode.window.showErrorMessage(`Failed to save backend settings: ${error?.message || String(error)}`);
-		}
-	}
-
-	private async handleDiscard(): Promise<void> {
-		const state = await this.callbacks.onDiscard();
-		this.dirty = false;
-		this.postState(state, undefined, 'Changes discarded.');
-	}
-
-	private async handleStayLocal(): Promise<void> {
-		const state = await this.callbacks.onStayLocal();
-		this.dirty = false;
-		this.postState(state, undefined, 'Backend disabled. Staying local-only.');
-	}
-
-	private async handleTestConnection(draft: BackendConfigDraft): Promise<void> {
-		const result = await this.callbacks.onTestConnection(draft);
-		this.postMessage({ type: 'testResult', result });
-	}
-
-	private async handleUpdateSharedKey(storageAccount: string, draft?: BackendConfigDraft): Promise<void> {
-		const result = await this.callbacks.onUpdateSharedKey(storageAccount, draft);
-		if (result.state) {
-			this.postState(result.state);
-		}
-		this.postMessage({ type: 'sharedKeyResult', result });
-	}
-
-	private async handleLaunchWizard(): Promise<void> {
-		const state = await this.callbacks.onLaunchWizard();
-		this.postState(state, undefined, 'Wizard completed. Refreshing settings.');
-	}
-
-	private async handleClearAzureSettings(): Promise<void> {
-		const state = await this.callbacks.onClearAzureSettings();
-		this.dirty = false;
-		this.postState(state, undefined, 'Azure settings cleared.');
-	}
-
-	private postState(state: BackendConfigPanelState, errors?: Record<string, string>, message?: string): void {
-		this.postMessage({ type: 'state', state, errors, message });
-	}
-
-	private postMessage(payload: any): void {
-		if (this.panel) {
-			this.panel.webview.postMessage(payload);
-		}
-	}
-
-	private renderHtml(webview: vscode.Webview, state: BackendConfigPanelState): string {
-		// Use cryptographically secure random for CSP nonce
-		const nonce = crypto.randomBytes(16).toString('base64');
-		const toolkitUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'toolkit', 'toolkit.js'));
-		const initialState = safeJsonForInlineScript(state);
- 		return `<!DOCTYPE html>
-<html lang="en">
-<head>
-	<meta charset="UTF-8">
-	<meta name="viewport" content="width=device-width, initial-scale=1.0">
-	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
-	<title>Configure Backend</title>
-		<style>
-			body { font-family: 'Segoe UI', sans-serif; background: #1e1e1e; color: #e5e5e5; margin: 0; padding: 0; }
-			.banner { background: #423620; color: #f2c97d; padding: 10px 16px; display: none; }
-			.banner.offline { display: block; }
-			.layout { display: grid; grid-template-columns: 220px 1fr; min-height: 100vh; }
-			.nav { border-right: 1px solid #2f2f2f; padding: 16px; background: #252526; }
-			.nav vscode-button { width: 100%; margin-bottom: 8px; }
-			.nav .selected { background: #0e639c; color: #fff; }
-			.main { padding: 16px 20px 32px; }
-			.section { display: none; gap: 12px; }
-			.section.active { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); }
-			.card { background: #252526; border: 1px solid #2f2f2f; border-radius: 8px; padding: 16px; display: flex; flex-direction: column; gap: 10px; }
-			.field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 6px; }
-			.field label { font-size: 12px; color: #c8c8c8; }
-			.field small { color: #999; }
-			.field .error { color: #f48771; font-size: 11px; }
-			.actions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 4px; }
-			.grid-2 { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; }
-			.inline { display: flex; align-items: center; gap: 10px; }
-			.helper { color: #b3b3b3; font-size: 12px; line-height: 1.4; }
-			.status-line { font-size: 12px; padding: 8px 10px; border-radius: 6px; background: #1b252e; }
-			.status-line.ok { color: #b8f5c4; border: 1px solid #2d4f3a; }
-			.status-line.error { color: #f8c7c0; border: 1px solid #7c2f2f; }
-			.pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
-			.muted { color: #9a9a9a; }
-			.disabled-section { opacity: 0.5; pointer-events: none; }
-			.change-item { padding: 8px 12px; margin: 6px 0; background: #2d2d30; border-left: 3px solid #0e639c; border-radius: 4px; }
-			.change-item.warning { border-left-color: #d7ba7d; }
-			.change-item.danger { border-left-color: #f48771; }
-			.change-label { font-weight: bold; color: #e5e5e5; margin-bottom: 4px; }
-			.change-value { color: #b3b3b3; font-size: 13px; }
-			#reviewSummary { margin-bottom: 16px; }
-		</style>
-</head>
-<body>
-	<div id="offlineBanner" class="banner">Offline detected. You can edit and save locally. "Test connection" is disabled.</div>
-	<div class="layout">
-		<aside class="nav">
+/** Returns the navigation sidebar HTML. */
+function buildNavHtml(): string {
+	return `<aside class="nav">
 			<vscode-button appearance="secondary" class="nav-btn selected" data-target="overview" aria-label="Navigate to Overview section">Overview</vscode-button>
 			<vscode-button appearance="secondary" class="nav-btn" data-target="azure" aria-label="Navigate to Azure Storage section">Azure Storage</vscode-button>
 			<vscode-button appearance="secondary" class="nav-btn" data-target="teamserver" aria-label="Navigate to Team Server section">Team Server</vscode-button>
 			<vscode-button appearance="secondary" class="nav-btn" data-target="sharing" aria-label="Navigate to Sharing section">Sharing</vscode-button>
 			<vscode-button appearance="secondary" class="nav-btn" data-target="advanced" aria-label="Navigate to Advanced section">Advanced</vscode-button>
-			<vscode-button appearance="secondary" class="nav-btn" data-target="review" aria-label="Navigate to Review and Apply section">Review & Apply</vscode-button>
-		</aside>
-		<main class="main">
-			<section id="overview" class="section active">
-				<div class="card">
-					<h3>Why use backend sync?</h3>
-					<p class="helper"><strong>Team visibility & insights:</strong> Share Copilot usage across your team to identify patterns, optimize costs, and track adoption. Perfect for managers, platform teams, and anyone managing Copilot licenses.</p>
-					<p class="helper"><strong>Multi-device sync:</strong> Work on multiple machines? Backend keeps your token usage history synced across all devices automatically.</p>
-					<p class="helper"><strong>Long-term tracking:</strong> Local data lives in VS Code session files that can be cleaned up. Backend provides durable, queryable storage for trend analysis and compliance reporting.</p>
-					<p class="helper"><strong>Privacy-first:</strong> Choose your sharing level from Solo (just you) to Team Identified (full analytics). You control what's shared and how you're identified.</p>
-					<p class="helper">Not ready to sync? Use <strong>Stay Local</strong> mode to keep all data on this machine only.</p>
-				</div>
-				<div class="card">
-					<h3>Current status</h3>
-					<div class="pill-row">
-						<vscode-badge id="backendStateBadge"></vscode-badge>
+			<vscode-button appearance="secondary" class="nav-btn" data-target="review" aria-label="Navigate to Review and Apply section">Review &amp; Apply</vscode-button>
+		</aside>`;
+}
+
+/** Returns the Overview section HTML. */
+function buildOverviewSection(): string {
+	return `<section id="overview" class="section active">
+			<div class="card">
+				<h3>Why use backend sync?</h3>
+				<p class="helper"><strong>Team visibility &amp; insights:</strong> Share Copilot usage across your team to identify patterns, optimize costs, and track adoption. Perfect for managers, platform teams, and anyone managing Copilot licenses.</p>
+				<p class="helper"><strong>Multi-device sync:</strong> Work on multiple machines? Backend keeps your token usage history synced across all devices automatically.</p>
+				<p class="helper"><strong>Long-term tracking:</strong> Local data lives in VS Code session files that can be cleaned up. Backend provides durable, queryable storage for trend analysis and compliance reporting.</p>
+				<p class="helper"><strong>Privacy-first:</strong> Choose your sharing level from Solo (just you) to Team Identified (full analytics). You control what's shared and how you're identified.</p>
+				<p class="helper">Not ready to sync? Use <strong>Stay Local</strong> mode to keep all data on this machine only.</p>
+			</div>
+			<div class="card">
+				<h3>Current status</h3>
+				<div class="pill-row">
+					<vscode-badge id="backendStateBadge"></vscode-badge>
 					<vscode-badge id="privacyBadge"></vscode-badge>
 					<vscode-badge id="authBadge"></vscode-badge>
 				</div>
@@ -279,11 +132,15 @@ export class BackendConfigPanel implements vscode.Disposable {
 				<p class="helper"><strong>1. Storage backend:</strong> Choose between <strong>Azure Storage</strong> (Table Storage — you own the Azure resources) or a <strong>Team Server</strong> (self-hosted Node.js server your team runs, with GitHub OAuth login and a shared dashboard).</p>
 				<p class="helper"><strong>2. Authentication:</strong> Azure Storage uses Entra ID (role-based, recommended) or Storage Shared Key. Team Server uses a bearer token set in the extension settings.</p>
 				<p class="helper"><strong>3. Automatic sync:</strong> Every 5 minutes, the extension calculates token usage from session files and pushes aggregates to the configured backend. Configurable lookback window (7-90 days).</p>
-				<p class="helper"><strong>4. Query & analyze:</strong> Azure Storage: use Storage Explorer, Power BI, or custom tools. Team Server: view the shared dashboard in your browser.</p>
+				<p class="helper"><strong>4. Query &amp; analyze:</strong> Azure Storage: use Storage Explorer, Power BI, or custom tools. Team Server: view the shared dashboard in your browser.</p>
 				<p class="helper">Need help with Azure? <vscode-link id="launchWizardLink" href="#">Launch the guided Azure setup walkthrough</vscode-link> to configure subscription, resource group, storage account, and auth mode step-by-step.</p>
 			</div>
-		</section>
-		<section id="teamserver" class="section">
+		</section>`;
+}
+
+/** Returns the Team Server section HTML. */
+function buildTeamServerSection(): string {
+	return `<section id="teamserver" class="section">
 			<div class="card">
 				<h3>Team Server</h3>
 				<p class="helper">A self-hosted sharing server lets your team run their own backend. Usage data is uploaded securely using a bearer token and stored in the server's SQLite database. Team members can view a shared dashboard after logging in with GitHub OAuth.</p>
@@ -292,9 +149,9 @@ export class BackendConfigPanel implements vscode.Disposable {
 				</div>
 				<div id="enabledToggleTeam-help" class="helper">Independent of Azure Storage — both backends can sync simultaneously.</div>
 				<div class="status-line" id="lastSyncLine" style="margin-top: 12px;" role="status"></div>
-			<div id="githubAuthWarning" style="display:none; margin-top: 12px; padding: 10px 12px; background: #4d2c00; border-left: 3px solid #f0883e; border-radius: 4px; font-size: 12px; color: #e5c07b;">
-				⚠️ <strong>GitHub sign-in required.</strong> The extension uses your VS Code GitHub session as the upload token. Open the <strong>Accounts</strong> menu (bottom-left) and grant access to <em>AI Engineering Fluency</em>, then wait for the next sync.
-			</div>
+				<div id="githubAuthWarning" style="display:none; margin-top: 12px; padding: 10px 12px; background: #4d2c00; border-left: 3px solid #f0883e; border-radius: 4px; font-size: 12px; color: #e5c07b;">
+					⚠️ <strong>GitHub sign-in required.</strong> The extension uses your VS Code GitHub session as the upload token. Open the <strong>Accounts</strong> menu (bottom-left) and grant access to <em>AI Engineering Fluency</em>, then wait for the next sync.
+				</div>
 			</div>
 			<div class="card">
 				<h3>Connection</h3>
@@ -314,194 +171,214 @@ export class BackendConfigPanel implements vscode.Disposable {
 				<p class="helper"><strong>4. Enter the Server URL above</strong> and select <em>Team Server</em> as the storage backend on the Overview tab.</p>
 				<p class="helper"><strong>5. Open the dashboard:</strong> Navigate to <code>&lt;Server URL&gt;/dashboard</code> in your browser, log in with GitHub, and you'll see shared usage statistics for everyone who has uploaded data.</p>
 			</div>
-		</section>
-		<section id="sharing" class="section">
-				<div class="card">
-					<h3>Sharing profile</h3>
-					<div class="field">
-						<label for="sharingProfile">Profile</label>
-						<vscode-dropdown id="sharingProfile" aria-describedby="sharingProfile-help">
-							<vscode-option value="off">Off (local-only)</vscode-option>
-							<vscode-option value="soloFull">Solo</vscode-option>
-							<vscode-option value="teamAnonymized">Team Anonymized</vscode-option>
-							<vscode-option value="teamPseudonymous">Team Pseudonymous</vscode-option>
-							<vscode-option value="teamIdentified">Team Identified</vscode-option>
-						</vscode-dropdown>
-						<div id="sharingProfile-help" class="helper" style="margin-bottom: 8px;">Choose your privacy level. Each profile controls what data is synced to Azure and who can see it.</div>
-						<details style="margin-bottom: 12px;">
-							<summary style="cursor: pointer; color: #3794ff; font-size: 12px; margin-bottom: 8px;">What do these profiles mean?</summary>
-							<div style="margin-top: 12px; font-size: 11px; line-height: 1.5;">
-								<div style="background: #2d2d30; border-left: 3px solid #555; padding: 10px 12px; margin-bottom: 10px;">
-									<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">🔒 Off (Local-only)</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> No one — data never leaves your device</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Nothing synced to Azure</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ Not synced</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ Not synced</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
-									<div style="color: #888; font-style: italic; margin-top: 6px;">Use this to keep all data private on this device only.</div>
-								</div>
-								<div style="background: #2d2d30; border-left: 3px solid #0e639c; padding: 10px 12px; margin-bottom: 10px;">
-									<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👤 Solo</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Only you (single-user Azure storage)</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ✅ <em>Actual names</em> (e.g., "frontend-monorepo")</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ✅ <em>Actual names</em> (e.g., "DESKTOP-ABC123")</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID (you're the only user)</div>
-									<div style="color: #888; font-style: italic; margin-top: 6px;">Perfect for personal tracking across multiple devices. No privacy concerns since only you have access.</div>
-								</div>
-								<div style="background: #2d2d30; border-left: 3px solid #4ec9b0; padding: 10px 12px; margin-bottom: 10px;">
-									<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Anonymized</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
-									<div style="color: #888; font-style: italic; margin-top: 6px;">Strongest team privacy: team sees aggregated usage but can't identify specific workspaces, machines, or users.</div>
-								</div>
-								<div style="background: #2d2d30; border-left: 3px solid #c586c0; padding: 10px 12px; margin-bottom: 10px;">
-									<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Pseudonymous</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Stable alias auto-derived from Entra ID</em> (e.g., "dev-001")</div>
-									<div style="color: #888; font-style: italic; margin-top: 6px;">Track usage per-person without revealing real names. Same developer always gets same alias across sessions.</div>
-								</div>
-								<div style="background: #2d2d30; border-left: 3px solid #d7ba7d; padding: 10px 12px; margin-bottom: 10px;">
-									<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Identified</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "frontend-monorepo")</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "DESKTOP-ABC123")</div>
-									<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Team alias OR Entra object ID</em> (e.g., "alex-dev" or GUID)</div>
-									<div style="color: #888; font-style: italic; margin-top: 6px;">Full transparency: team sees who uses what. Best for small teams or compliance scenarios.</div>
-								</div>
-								<div style="background: #3a3d41; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; margin-top: 12px;">
-									<div style="color: #f48771; font-size: 10px; font-weight: bold; margin-bottom: 4px;">⚠️ IMPORTANT</div>
-									<div style="color: #b3b3b3; font-size: 10px;">• Token counts, model names, and dates are <strong>always included</strong> when backend is enabled</div>
-									<div style="color: #b3b3b3; font-size: 10px;">• "Who can see" means anyone with read access to your Azure Storage account</div>
-									<div style="color: #b3b3b3; font-size: 10px;">• Upgrading to more permissive profiles requires explicit consent</div>
-									<div style="color: #b3b3b3; font-size: 10px;">• Use the "Store readable workspace & machine names" checkbox below to control name storage</div>
-								</div>
-							</div>
-						</details>
-					</div>
-					<div id="nameStorageControl" style="margin-top: 16px;">
-						<div class="field inline">
-							<vscode-checkbox id="shareNames" aria-describedby="shareNames-help">Store readable workspace & machine names</vscode-checkbox>
-							<div id="shareNames-help" class="helper" style="margin-left: 24px;">Applies when using Team Pseudonymous or Team Identified. Solo always includes names; Team Anonymized always uses hashed IDs.</div>
-						</div>
-					</div>
-					<div class="field inline" style="margin-top: 12px;">
-						<vscode-checkbox id="includeMachineBreakdown" aria-describedby="includeMachineBreakdown-help">Include per-machine breakdown</vscode-checkbox>
-						<div id="includeMachineBreakdown-help" class="helper" style="margin-left: 24px;">Separate rows per machine. Disable to merge into workspace totals only.</div>
-					</div>
-				</div>
-				<div class="card" id="identityCard" style="display:none;">
-					<h3>Identity (Team Identified)</h3>
-					<div class="field">
-						<label for="userIdentityMode">Identity mode</label>
-						<vscode-dropdown id="userIdentityMode" aria-describedby="userIdentityMode-help">
-							<vscode-option value="teamAlias">Team alias</vscode-option>
-							<vscode-option value="entraObjectId">Entra object ID</vscode-option>
-						</vscode-dropdown>
-					</div>
-					<div class="field">
-						<label for="userId">Alias or object ID</label>
-						<vscode-text-field id="userId" placeholder="alex-dev" aria-describedby="userId-help userId-error"></vscode-text-field>
-						<div id="userId-error" class="error" role="alert" data-error-for="userId"></div>
-					</div>
-					<div id="userId-help userIdentityMode-help" class="helper">Team alias: Use a non-identifying handle like "alex-dev". Entra object ID: Use your directory GUID for compliance auditing.</div>
-				</div>
-			</section>
-			<section id="azure" class="section">
-				<div class="card">
-					<h3>Enable backend</h3>
-					<div class="field inline">
-						<vscode-checkbox id="enabledToggle" aria-describedby="enabledToggle-help">Enable backend sync to Azure</vscode-checkbox>
-					</div>
-					<div id="enabledToggle-help" class="helper">Syncs token usage to Azure Storage when enabled. Stays local-only when disabled.</div>
-					<div class="actions">
-						<vscode-button id="setupBtn" appearance="secondary" aria-label="Open guided Azure setup wizard">Setup</vscode-button>
-						<vscode-button id="testConnectionBtn" appearance="secondary" aria-label="Test connection to Azure Storage">Test connection</vscode-button>
-						<vscode-button id="clearSettingsBtn" appearance="secondary" aria-label="Clear all Azure settings">Clear settings</vscode-button>
-					</div>
-					<div class="status-line" id="testResult" role="status" aria-live="polite"></div>
-				</div>
-				<div class="card">
-				<h3>Azure Settings</h3>
-					<p class="helper">Azure Storage connection details. Use the guided wizard to auto-fill these fields.</p>
-					<div class="grid-2">
-						<div class="field"><label for="subscriptionId">Subscription ID</label><vscode-text-field id="subscriptionId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" aria-describedby="subscriptionId-error"></vscode-text-field><div id="subscriptionId-error" class="error" role="alert" data-error-for="subscriptionId"></div></div>
-						<div class="field"><label for="resourceGroup">Resource Group</label><vscode-text-field id="resourceGroup" placeholder="copilot-tokens-rg" aria-describedby="resourceGroup-error"></vscode-text-field><div id="resourceGroup-error" class="error" role="alert" data-error-for="resourceGroup"></div></div>
-						<div class="field"><label for="storageAccount">Storage Account</label><vscode-text-field id="storageAccount" placeholder="copilottokenstorage" aria-describedby="storageAccount-error"></vscode-text-field><div id="storageAccount-error" class="error" role="alert" data-error-for="storageAccount"></div></div>
-						<div class="field"><label for="aggTable">Aggregate Table</label><vscode-text-field id="aggTable" placeholder="usageAggDaily" aria-describedby="aggTable-error"></vscode-text-field><div id="aggTable-error" class="error" role="alert" data-error-for="aggTable"></div></div>
-						<div class="field"><label for="eventsTable">Events Table (optional)</label><vscode-text-field id="eventsTable" placeholder="usageEvents" aria-describedby="eventsTable-error"></vscode-text-field><div id="eventsTable-error" class="error" role="alert" data-error-for="eventsTable"></div></div>
+		</section>`;
+}
 
-					</div>
-				</div>
-				<div class="card">
-					<h3>Authentication</h3>
-					<div class="field">
-						<label for="authMode">Auth mode</label>
-						<vscode-dropdown id="authMode" aria-describedby="authHelper">
-							<vscode-option value="entraId">Entra ID (role-based access)</vscode-option>
-							<vscode-option value="sharedKey">Storage Shared Key</vscode-option>
-						</vscode-dropdown>
-						<div class="helper" id="authHelper"></div>
-					</div>
-					<div class="actions">
-						<vscode-button id="updateKeyBtn" appearance="secondary" aria-label="Update Storage Account Shared Key">Update shared key</vscode-button>
-					</div>
-					<div class="helper" id="sharedKeyStatus"></div>
-				</div>
-			</section>
-			<section id="advanced" class="section">
-				<div class="card">
-					<h3>Advanced</h3>
-					<div class="field"><label for="datasetId">Dataset ID</label><vscode-text-field id="datasetId" placeholder="my-team-copilot" aria-describedby="datasetId-help datasetId-error"></vscode-text-field><div id="datasetId-error" class="error" role="alert" data-error-for="datasetId"></div></div>
-					<div id="datasetId-help" class="helper">Dataset ID groups your usage data. Examples: "my-team", "project-alpha", "personal-usage"</div>
-					<div class="field"><label for="lookbackDays">Lookback days <span class="range">(1-90)</span></label><vscode-text-field id="lookbackDays" type="number" placeholder="30" aria-describedby="lookbackDays-help lookbackDays-error"></vscode-text-field><div id="lookbackDays-error" class="error" role="alert" data-error-for="lookbackDays"></div></div>
-					<div id="lookbackDays-help" class="helper">How far back to sync: 7 days = current week, 30 days = current month, 90 days = full quarter. Smaller values sync faster.</div>
-				</div>
-				<div class="card">
-					<h3>Blob Upload</h3>
-					<p class="helper"><strong>What gets uploaded:</strong> The raw Copilot Chat session log files from your local VS Code storage. These JSON/JSONL files contain <em>full conversation content</em> — your prompts, AI responses (including generated code), model names, timestamps, tool calls, and context references.</p>
-					<p class="helper"><strong>Why:</strong> Enables downstream analysis by tools like GitHub Copilot Coding Agent, Power BI, or custom pipelines that need access to the complete session data — not just the aggregated token counts stored in Table Storage.</p>
-					<p class="helper"><strong>Privacy note:</strong> Unlike the table sync (which only stores aggregated token counts), blob upload stores the <em>complete</em> session files. This means anyone with read access to the blob container can see your full Copilot conversations. Only enable this if you are comfortable sharing this data.</p>
-					<p class="helper"><strong>Storage path:</strong> Files are organized as <code>{dataset}/{machineId}/{date}/{sessionFile}</code> in the container, using the same storage account as table sync.</p>
-					<div class="field inline" style="margin-top: 8px;">
-						<vscode-checkbox id="blobUploadEnabled" aria-describedby="blobUploadEnabled-help">Enable blob upload of session log files</vscode-checkbox>
-					</div>
-					<div id="blobUploadEnabled-help" class="helper">Periodically uploads your local Copilot session files to Azure Blob Storage. Uses the same storage account and credentials as the table sync above.</div>
-					<div id="blobSettingsGroup">
-						<div class="field"><label for="blobContainerName">Container name</label><vscode-text-field id="blobContainerName" placeholder="copilot-session-logs" aria-describedby="blobContainerName-help blobContainerName-error"></vscode-text-field><div id="blobContainerName-error" class="error" role="alert" data-error-for="blobContainerName"></div></div>
-						<div id="blobContainerName-help" class="helper">The blob container to store session files in. Created automatically if it doesn't exist. Uses private access (no public access).</div>
-						<div class="field"><label for="blobUploadFrequencyHours">Upload frequency (hours) <span class="range">(1-168)</span></label><vscode-text-field id="blobUploadFrequencyHours" type="number" placeholder="24" aria-describedby="blobUploadFrequencyHours-help blobUploadFrequencyHours-error"></vscode-text-field><div id="blobUploadFrequencyHours-error" class="error" role="alert" data-error-for="blobUploadFrequencyHours"></div></div>
-						<div id="blobUploadFrequencyHours-help" class="helper">All session files within the lookback window are re-uploaded on each cycle (1 = hourly, 24 = daily, 168 = weekly). Existing blobs are overwritten.</div>
-						<div class="field inline">
-							<vscode-checkbox id="blobCompressFiles" aria-describedby="blobCompressFiles-help">Compress files before upload (gzip)</vscode-checkbox>
+/** Returns the Sharing section HTML. */
+function buildSharingSection(): string {
+	return `<section id="sharing" class="section">
+			<div class="card">
+				<h3>Sharing profile</h3>
+				<div class="field">
+					<label for="sharingProfile">Profile</label>
+					<vscode-dropdown id="sharingProfile" aria-describedby="sharingProfile-help">
+						<vscode-option value="off">Off (local-only)</vscode-option>
+						<vscode-option value="soloFull">Solo</vscode-option>
+						<vscode-option value="teamAnonymized">Team Anonymized</vscode-option>
+						<vscode-option value="teamPseudonymous">Team Pseudonymous</vscode-option>
+						<vscode-option value="teamIdentified">Team Identified</vscode-option>
+					</vscode-dropdown>
+					<div id="sharingProfile-help" class="helper" style="margin-bottom: 8px;">Choose your privacy level. Each profile controls what data is synced to Azure and who can see it.</div>
+					<details style="margin-bottom: 12px;">
+						<summary style="cursor: pointer; color: #3794ff; font-size: 12px; margin-bottom: 8px;">What do these profiles mean?</summary>
+						<div style="margin-top: 12px; font-size: 11px; line-height: 1.5;">
+							<div style="background: #2d2d30; border-left: 3px solid #555; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">🔒 Off (Local-only)</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> No one — data never leaves your device</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Nothing synced to Azure</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ Not synced</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ Not synced</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Use this to keep all data private on this device only.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #0e639c; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👤 Solo</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Only you (single-user Azure storage)</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ✅ <em>Actual names</em> (e.g., "frontend-monorepo")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ✅ <em>Actual names</em> (e.g., "DESKTOP-ABC123")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID (you're the only user)</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Perfect for personal tracking across multiple devices. No privacy concerns since only you have access.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #4ec9b0; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Anonymized</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Strongest team privacy: team sees aggregated usage but can't identify specific workspaces, machines, or users.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #c586c0; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Pseudonymous</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Stable alias auto-derived from Entra ID</em> (e.g., "dev-001")</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Track usage per-person without revealing real names. Same developer always gets same alias across sessions.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #d7ba7d; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Identified</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "frontend-monorepo")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "DESKTOP-ABC123")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Team alias OR Entra object ID</em> (e.g., "alex-dev" or GUID)</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Full transparency: team sees who uses what. Best for small teams or compliance scenarios.</div>
+							</div>
+							<div style="background: #3a3d41; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; margin-top: 12px;">
+								<div style="color: #f48771; font-size: 10px; font-weight: bold; margin-bottom: 4px;">⚠️ IMPORTANT</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Token counts, model names, and dates are <strong>always included</strong> when backend is enabled</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• "Who can see" means anyone with read access to your Azure Storage account</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Upgrading to more permissive profiles requires explicit consent</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Use the "Store readable workspace &amp; machine names" checkbox below to control name storage</div>
+							</div>
 						</div>
-						<div id="blobCompressFiles-help" class="helper">Reduces storage costs and bandwidth by compressing files with gzip.</div>
+					</details>
+				</div>
+				<div id="nameStorageControl" style="margin-top: 16px;">
+					<div class="field inline">
+						<vscode-checkbox id="shareNames" aria-describedby="shareNames-help">Store readable workspace &amp; machine names</vscode-checkbox>
+						<div id="shareNames-help" class="helper" style="margin-left: 24px;">Applies when using Team Pseudonymous or Team Identified. Solo always includes names; Team Anonymized always uses hashed IDs.</div>
 					</div>
 				</div>
-			</section>
-			<section id="review" class="section">
-				<div class="card">
-					<h3>Review & Apply</h3>
-					<div class="helper">Review your configuration changes below, then confirm and save.</div>
-					<div id="reviewSummary"></div>
-					<div class="field inline"><vscode-checkbox id="confirmApply" aria-describedby="confirmApply-help">I understand this will overwrite backend settings.</vscode-checkbox></div>
-					<div id="confirmApply-help" class="helper" style="display:none;">Confirm you understand before saving</div>
-					<div class="actions">
-						<vscode-button appearance="primary" id="saveBtnReview" disabled aria-label="Save backend settings and apply changes">Save & Apply</vscode-button>
-						<vscode-button id="discardBtnReview" appearance="secondary" aria-label="Discard unsaved changes">Discard</vscode-button>
-					</div>
+				<div class="field inline" style="margin-top: 12px;">
+					<vscode-checkbox id="includeMachineBreakdown" aria-describedby="includeMachineBreakdown-help">Include per-machine breakdown</vscode-checkbox>
+					<div id="includeMachineBreakdown-help" class="helper" style="margin-left: 24px;">Separate rows per machine. Disable to merge into workspace totals only.</div>
 				</div>
-			</section>
-		</main>
-	</div>
-	<script type="module" nonce="${nonce}">
+			</div>
+			<div class="card" id="identityCard" style="display:none;">
+				<h3>Identity (Team Identified)</h3>
+				<div class="field">
+					<label for="userIdentityMode">Identity mode</label>
+					<vscode-dropdown id="userIdentityMode" aria-describedby="userIdentityMode-help">
+						<vscode-option value="teamAlias">Team alias</vscode-option>
+						<vscode-option value="entraObjectId">Entra object ID</vscode-option>
+					</vscode-dropdown>
+				</div>
+				<div class="field">
+					<label for="userId">Alias or object ID</label>
+					<vscode-text-field id="userId" placeholder="alex-dev" aria-describedby="userId-help userId-error"></vscode-text-field>
+					<div id="userId-error" class="error" role="alert" data-error-for="userId"></div>
+				</div>
+				<div id="userId-help userIdentityMode-help" class="helper">Team alias: Use a non-identifying handle like "alex-dev". Entra object ID: Use your directory GUID for compliance auditing.</div>
+			</div>
+		</section>`;
+}
+
+/** Returns the Azure Storage section HTML. */
+function buildAzureSection(): string {
+	return `<section id="azure" class="section">
+			<div class="card">
+				<h3>Enable backend</h3>
+				<div class="field inline">
+					<vscode-checkbox id="enabledToggle" aria-describedby="enabledToggle-help">Enable backend sync to Azure</vscode-checkbox>
+				</div>
+				<div id="enabledToggle-help" class="helper">Syncs token usage to Azure Storage when enabled. Stays local-only when disabled.</div>
+				<div class="actions">
+					<vscode-button id="setupBtn" appearance="secondary" aria-label="Open guided Azure setup wizard">Setup</vscode-button>
+					<vscode-button id="testConnectionBtn" appearance="secondary" aria-label="Test connection to Azure Storage">Test connection</vscode-button>
+					<vscode-button id="clearSettingsBtn" appearance="secondary" aria-label="Clear all Azure settings">Clear settings</vscode-button>
+				</div>
+				<div class="status-line" id="testResult" role="status" aria-live="polite"></div>
+			</div>
+			<div class="card">
+				<h3>Azure Settings</h3>
+				<p class="helper">Azure Storage connection details. Use the guided wizard to auto-fill these fields.</p>
+				<div class="grid-2">
+					<div class="field"><label for="subscriptionId">Subscription ID</label><vscode-text-field id="subscriptionId" placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx" aria-describedby="subscriptionId-error"></vscode-text-field><div id="subscriptionId-error" class="error" role="alert" data-error-for="subscriptionId"></div></div>
+					<div class="field"><label for="resourceGroup">Resource Group</label><vscode-text-field id="resourceGroup" placeholder="copilot-tokens-rg" aria-describedby="resourceGroup-error"></vscode-text-field><div id="resourceGroup-error" class="error" role="alert" data-error-for="resourceGroup"></div></div>
+					<div class="field"><label for="storageAccount">Storage Account</label><vscode-text-field id="storageAccount" placeholder="copilottokenstorage" aria-describedby="storageAccount-error"></vscode-text-field><div id="storageAccount-error" class="error" role="alert" data-error-for="storageAccount"></div></div>
+					<div class="field"><label for="aggTable">Aggregate Table</label><vscode-text-field id="aggTable" placeholder="usageAggDaily" aria-describedby="aggTable-error"></vscode-text-field><div id="aggTable-error" class="error" role="alert" data-error-for="aggTable"></div></div>
+					<div class="field"><label for="eventsTable">Events Table (optional)</label><vscode-text-field id="eventsTable" placeholder="usageEvents" aria-describedby="eventsTable-error"></vscode-text-field><div id="eventsTable-error" class="error" role="alert" data-error-for="eventsTable"></div></div>
+				</div>
+			</div>
+			<div class="card">
+				<h3>Authentication</h3>
+				<div class="field">
+					<label for="authMode">Auth mode</label>
+					<vscode-dropdown id="authMode" aria-describedby="authHelper">
+						<vscode-option value="entraId">Entra ID (role-based access)</vscode-option>
+						<vscode-option value="sharedKey">Storage Shared Key</vscode-option>
+					</vscode-dropdown>
+					<div class="helper" id="authHelper"></div>
+				</div>
+				<div class="actions">
+					<vscode-button id="updateKeyBtn" appearance="secondary" aria-label="Update Storage Account Shared Key">Update shared key</vscode-button>
+				</div>
+				<div class="helper" id="sharedKeyStatus"></div>
+			</div>
+		</section>`;
+}
+
+/** Returns the Advanced section HTML. */
+function buildAdvancedSection(): string {
+	return `<section id="advanced" class="section">
+			<div class="card">
+				<h3>Advanced</h3>
+				<div class="field"><label for="datasetId">Dataset ID</label><vscode-text-field id="datasetId" placeholder="my-team-copilot" aria-describedby="datasetId-help datasetId-error"></vscode-text-field><div id="datasetId-error" class="error" role="alert" data-error-for="datasetId"></div></div>
+				<div id="datasetId-help" class="helper">Dataset ID groups your usage data. Examples: "my-team", "project-alpha", "personal-usage"</div>
+				<div class="field"><label for="lookbackDays">Lookback days <span class="range">(1-90)</span></label><vscode-text-field id="lookbackDays" type="number" placeholder="30" aria-describedby="lookbackDays-help lookbackDays-error"></vscode-text-field><div id="lookbackDays-error" class="error" role="alert" data-error-for="lookbackDays"></div></div>
+				<div id="lookbackDays-help" class="helper">How far back to sync: 7 days = current week, 30 days = current month, 90 days = full quarter. Smaller values sync faster.</div>
+			</div>
+			<div class="card">
+				<h3>Blob Upload</h3>
+				<p class="helper"><strong>What gets uploaded:</strong> The raw Copilot Chat session log files from your local VS Code storage. These JSON/JSONL files contain <em>full conversation content</em> — your prompts, AI responses (including generated code), model names, timestamps, tool calls, and context references.</p>
+				<p class="helper"><strong>Why:</strong> Enables downstream analysis by tools like GitHub Copilot Coding Agent, Power BI, or custom pipelines that need access to the complete session data — not just the aggregated token counts stored in Table Storage.</p>
+				<p class="helper"><strong>Privacy note:</strong> Unlike the table sync (which only stores aggregated token counts), blob upload stores the <em>complete</em> session files. This means anyone with read access to the blob container can see your full Copilot conversations. Only enable this if you are comfortable sharing this data.</p>
+				<p class="helper"><strong>Storage path:</strong> Files are organized as <code>{dataset}/{machineId}/{date}/{sessionFile}</code> in the container, using the same storage account as table sync.</p>
+				<div class="field inline" style="margin-top: 8px;">
+					<vscode-checkbox id="blobUploadEnabled" aria-describedby="blobUploadEnabled-help">Enable blob upload of session log files</vscode-checkbox>
+				</div>
+				<div id="blobUploadEnabled-help" class="helper">Periodically uploads your local Copilot session files to Azure Blob Storage. Uses the same storage account and credentials as the table sync above.</div>
+				<div id="blobSettingsGroup">
+					<div class="field"><label for="blobContainerName">Container name</label><vscode-text-field id="blobContainerName" placeholder="copilot-session-logs" aria-describedby="blobContainerName-help blobContainerName-error"></vscode-text-field><div id="blobContainerName-error" class="error" role="alert" data-error-for="blobContainerName"></div></div>
+					<div id="blobContainerName-help" class="helper">The blob container to store session files in. Created automatically if it doesn't exist. Uses private access (no public access).</div>
+					<div class="field"><label for="blobUploadFrequencyHours">Upload frequency (hours) <span class="range">(1-168)</span></label><vscode-text-field id="blobUploadFrequencyHours" type="number" placeholder="24" aria-describedby="blobUploadFrequencyHours-help blobUploadFrequencyHours-error"></vscode-text-field><div id="blobUploadFrequencyHours-error" class="error" role="alert" data-error-for="blobUploadFrequencyHours"></div></div>
+					<div id="blobUploadFrequencyHours-help" class="helper">All session files within the lookback window are re-uploaded on each cycle (1 = hourly, 24 = daily, 168 = weekly). Existing blobs are overwritten.</div>
+					<div class="field inline">
+						<vscode-checkbox id="blobCompressFiles" aria-describedby="blobCompressFiles-help">Compress files before upload (gzip)</vscode-checkbox>
+					</div>
+					<div id="blobCompressFiles-help" class="helper">Reduces storage costs and bandwidth by compressing files with gzip.</div>
+				</div>
+			</div>
+		</section>`;
+}
+
+/** Returns the Review &amp; Apply section HTML. */
+function buildReviewSection(): string {
+	return `<section id="review" class="section">
+			<div class="card">
+				<h3>Review &amp; Apply</h3>
+				<div class="helper">Review your configuration changes below, then confirm and save.</div>
+				<div id="reviewSummary"></div>
+				<div class="field inline"><vscode-checkbox id="confirmApply" aria-describedby="confirmApply-help">I understand this will overwrite backend settings.</vscode-checkbox></div>
+				<div id="confirmApply-help" class="helper" style="display:none;">Confirm you understand before saving</div>
+				<div class="actions">
+					<vscode-button appearance="primary" id="saveBtnReview" disabled aria-label="Save backend settings and apply changes">Save &amp; Apply</vscode-button>
+					<vscode-button id="discardBtnReview" appearance="secondary" aria-label="Discard unsaved changes">Discard</vscode-button>
+				</div>
+			</div>
+		</section>`;
+}
+
+/**
+ * Returns the two <script> blocks for the config panel webview.
+ * Includes XSS protection via escHtml() for all user-controlled values rendered via innerHTML.
+ */
+function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string, aliasRegex: string): string {
+	return `	<script type="module" nonce="${nonce}">
 		// Register toolkit components before main script runs
 		try {
 			const { provideVSCodeDesignSystem, vsCodeButton, vsCodeBadge } = await import('${toolkitUri}');
@@ -516,7 +393,12 @@ export class BackendConfigPanel implements vscode.Disposable {
 		const vscodeApi = acquireVsCodeApi();
 		const initial = ${initialState};
 		let currentState = initial;
-		const aliasRegex = new RegExp(${safeJsonForInlineScript('^[A-Za-z0-9][A-Za-z0-9_-]*$')});
+		const aliasRegex = new RegExp(${aliasRegex});
+
+		/** Escapes HTML entities to prevent XSS when injecting user-controlled values via innerHTML. */
+		function escHtml(s) {
+			return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+		}
 
 		function byId(id) { return document.getElementById(id); }
 
@@ -547,7 +429,7 @@ export class BackendConfigPanel implements vscode.Disposable {
 			const showGithubWarning = state.draft.sharingServerEnabled && !state.githubTokenAvailable;
 			byId('githubAuthWarning').style.display = showGithubWarning ? 'block' : 'none';
 			updateLastSyncLine(state.lastSyncAt);
-			
+
 			// Update overview details
 			const detailsDiv = byId('overviewDetails');
 			if (state.draft.enabled || state.draft.sharingServerEnabled) {
@@ -578,7 +460,7 @@ export class BackendConfigPanel implements vscode.Disposable {
 			});
 			Object.entries(errors).forEach(([key, message]) => {
 				const target = document.querySelector(\`[data-error-for="\${key}"]\`);
-				if (target) { 
+				if (target) {
 					target.textContent = message;
 					// Set aria-invalid on the field
 					const field = byId(key);
@@ -722,9 +604,9 @@ export class BackendConfigPanel implements vscode.Disposable {
 			const sharingSection = document.getElementById('sharing');
 			const advancedSection = document.getElementById('advanced');
 			const teamSection = document.getElementById('teamserver');
-			
+
 			// Each toggle is independent — do not sync them
-			
+
 			// Disable Azure settings cards if Azure backend is disabled
 			const azureCards = azureSection.querySelectorAll('.card');
 			azureCards.forEach((card, index) => {
@@ -736,7 +618,7 @@ export class BackendConfigPanel implements vscode.Disposable {
 					}
 				}
 			});
-			
+
 			// Disable Team Server connection card if Team Server is disabled
 			const teamCards = teamSection.querySelectorAll('.card');
 			teamCards.forEach((card, index) => {
@@ -748,7 +630,7 @@ export class BackendConfigPanel implements vscode.Disposable {
 					}
 				}
 			});
-			
+
 			// Disable Sharing and Advanced sections if both backends are disabled
 			const anyEnabled = enabled || sharingServerEnabled;
 			if (anyEnabled) {
@@ -776,31 +658,31 @@ export class BackendConfigPanel implements vscode.Disposable {
 			const draft = readDraft();
 			const summary = byId('reviewSummary');
 			if (!summary) return;
-			
+
 			let html = '';
-			
+
 			const eitherEnabled = draft.enabled || draft.sharingServerEnabled;
 			if (!eitherEnabled) {
 				html = '<div class="change-item danger"><div class="change-label">⚠️ All Backends Disabled</div><div class="change-value">All token usage data will stay local-only. No sync to any backend.</div></div>';
 			} else {
 				if (draft.enabled) {
 					if (draft.subscriptionId && draft.resourceGroup && draft.storageAccount) {
-						html += '<div class="change-item"><div class="change-label">✓ Azure Storage Enabled</div><div class="change-value">Subscription: ' + draft.subscriptionId + '<br>Resource Group: ' + draft.resourceGroup + '<br>Storage Account: ' + draft.storageAccount + '</div></div>';
+						html += '<div class="change-item"><div class="change-label">✓ Azure Storage Enabled</div><div class="change-value">Subscription: ' + escHtml(draft.subscriptionId) + '<br>Resource Group: ' + escHtml(draft.resourceGroup) + '<br>Storage Account: ' + escHtml(draft.storageAccount) + '</div></div>';
 					} else {
 						html += '<div class="change-item warning"><div class="change-label">⚠️ Azure Storage Enabled (incomplete)</div><div class="change-value">Not fully configured — some Azure fields are missing</div></div>';
 					}
 					const authLabel = draft.authMode === 'sharedKey' ? 'Storage Shared Key' : 'Entra ID (RBAC)';
 					html += '<div class="change-item"><div class="change-label">Azure Auth</div><div class="change-value">' + authLabel + '</div></div>';
 				}
-				
+
 				if (draft.sharingServerEnabled) {
 					if (draft.sharingServerEndpointUrl) {
-						html += '<div class="change-item"><div class="change-label">✓ Team Server Enabled</div><div class="change-value">URL: ' + draft.sharingServerEndpointUrl + '</div></div>';
+						html += '<div class="change-item"><div class="change-label">✓ Team Server Enabled</div><div class="change-value">URL: ' + escHtml(draft.sharingServerEndpointUrl) + '</div></div>';
 					} else {
 						html += '<div class="change-item warning"><div class="change-label">⚠️ Team Server Enabled (incomplete)</div><div class="change-value">Server URL not configured</div></div>';
 					}
 				}
-				
+
 				const profileLabels = {
 					'off': 'Off (Local-only)',
 					'soloFull': 'Solo (Personal)',
@@ -808,24 +690,24 @@ export class BackendConfigPanel implements vscode.Disposable {
 					'teamPseudonymous': 'Team Pseudonymous',
 					'teamIdentified': 'Team Identified'
 				};
-				const profileLabel = profileLabels[draft.sharingProfile] || draft.sharingProfile;
+				const profileLabel = escHtml(profileLabels[draft.sharingProfile] || draft.sharingProfile);
 				let nameSync = 'Hashed IDs';
 				if (draft.sharingProfile === 'soloFull' || draft.sharingProfile === 'teamPseudonymous' || draft.sharingProfile === 'teamIdentified') {
 					nameSync = 'Readable names';
 				}
-				html += '<div class="change-item"><div class="change-label">Privacy & Sharing</div><div class="change-value">Profile: ' + profileLabel + '<br>Workspace/Machine Names: ' + nameSync + '<br>Per-machine breakdown: Always enabled</div></div>';
-				
+				html += '<div class="change-item"><div class="change-label">Privacy &amp; Sharing</div><div class="change-value">Profile: ' + profileLabel + '<br>Workspace/Machine Names: ' + nameSync + '<br>Per-machine breakdown: Always enabled</div></div>';
+
 				if (draft.sharingProfile === 'teamIdentified' && draft.userId) {
-					html += '<div class="change-item"><div class="change-label">User Identity</div><div class="change-value">' + draft.userId + ' (' + (draft.userIdentityMode === 'entraObjectId' ? 'Entra Object ID' : 'Team Alias') + ')</div></div>';
+					html += '<div class="change-item"><div class="change-label">User Identity</div><div class="change-value">' + escHtml(draft.userId) + ' (' + (draft.userIdentityMode === 'entraObjectId' ? 'Entra Object ID' : 'Team Alias') + ')</div></div>';
 				}
-				
-				html += '<div class="change-item"><div class="change-label">Dataset & Lookback</div><div class="change-value">Dataset ID: ' + (draft.datasetId || 'default') + '<br>Lookback: ' + (draft.lookbackDays || 30) + ' days</div></div>';
-				
+
+				html += '<div class="change-item"><div class="change-label">Dataset &amp; Lookback</div><div class="change-value">Dataset ID: ' + escHtml(draft.datasetId || 'default') + '<br>Lookback: ' + escHtml(draft.lookbackDays || 30) + ' days</div></div>';
+
 				if (draft.blobUploadEnabled) {
-					html += '<div class="change-item warning"><div class="change-label">⚠️ Blob Upload</div><div class="change-value">Enabled — full session log files (prompts, responses, code) will be uploaded<br>Container: ' + (draft.blobContainerName || 'copilot-session-logs') + '<br>Frequency: every ' + (draft.blobUploadFrequencyHours || 24) + ' hours<br>Compression: ' + (draft.blobCompressFiles !== false ? 'On' : 'Off') + '</div></div>';
+					html += '<div class="change-item warning"><div class="change-label">⚠️ Blob Upload</div><div class="change-value">Enabled — full session log files (prompts, responses, code) will be uploaded<br>Container: ' + escHtml(draft.blobContainerName || 'copilot-session-logs') + '<br>Frequency: every ' + escHtml(draft.blobUploadFrequencyHours || 24) + ' hours<br>Compression: ' + (draft.blobCompressFiles !== false ? 'On' : 'Off') + '</div></div>';
 				}
 			}
-			
+
 			summary.innerHTML = html;
 		}
 
@@ -938,29 +820,217 @@ export class BackendConfigPanel implements vscode.Disposable {
 				setTimeout(waitForToolkit, 10);
 			}
 		}
-		
+
 		waitForToolkit();
-	</script>
+	</script>`;
+}
+
+/**
+ * Renders the full HTML for the backend configuration webview panel.
+ * Accepts extensionUri to resolve the VS Code Webview UI Toolkit script path.
+ */
+export function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri, state: BackendConfigPanelState): string {
+	const nonce = crypto.randomBytes(16).toString('base64');
+	const toolkitUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'toolkit', 'toolkit.js')).toString();
+	const initialState = safeJsonForInlineScript(state);
+	const aliasRegex = safeJsonForInlineScript('^[A-Za-z0-9][A-Za-z0-9_-]*$');
+	return `<!DOCTYPE html>
+<html lang="en">
+<head>
+	<meta charset="UTF-8">
+	<meta name="viewport" content="width=device-width, initial-scale=1.0">
+	<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} https: data:; style-src ${webview.cspSource} 'unsafe-inline'; font-src ${webview.cspSource}; script-src 'nonce-${nonce}' ${webview.cspSource};">
+	<title>Configure Backend</title>
+	<style>${buildStyles()}
+	</style>
+</head>
+<body>
+	<div id="offlineBanner" class="banner">Offline detected. You can edit and save locally. "Test connection" is disabled.</div>
+	<div class="layout">
+		${buildNavHtml()}
+		<main class="main">
+			${buildOverviewSection()}
+			${buildTeamServerSection()}
+			${buildSharingSection()}
+			${buildAzureSection()}
+			${buildAdvancedSection()}
+			${buildReviewSection()}
+		</main>
+	</div>
+	${buildScriptHtml(nonce, toolkitUri, initialState, aliasRegex)}
 </body>
 </html>`;
+}
+
+export class BackendConfigPanel implements vscode.Disposable {
+	private panel: vscode.WebviewPanel | undefined;
+	private readonly disposables: vscode.Disposable[] = [];
+	private disposed = false;
+	private dirty = false;
+	private operationInProgress = false;
+
+	constructor(private readonly extensionUri: vscode.Uri, private readonly callbacks: BackendConfigPanelCallbacks) {}
+
+	public isDisposed(): boolean {
+		return this.disposed;
+	}
+
+	/** Renders the HTML for the webview. Public for unit-testing. */
+	public renderHtml(webview: vscode.Webview, state: BackendConfigPanelState): string {
+		return buildHtml(webview, this.extensionUri, state);
+	}
+
+	public async show(): Promise<void> {
+		const state = await this.callbacks.getState();
+		if (!this.panel) {
+			this.panel = vscode.window.createWebviewPanel(
+				'copilotBackendConfig',
+				'AI Engineering Fluency: Configure Backend',
+				{ viewColumn: vscode.ViewColumn.Active, preserveFocus: false },
+				{ enableScripts: true, retainContextWhenHidden: false }
+			);
+			// Track all event listeners in disposables array for proper cleanup
+			this.disposables.push(
+				this.panel.onDidDispose(() => this.handleDispose()),
+				this.panel.webview.onDidReceiveMessage(async (message: unknown) => this.handleMessage(message as WebviewCommand))
+			);
+		}
+		this.panel.webview.html = buildHtml(this.panel.webview, this.extensionUri, state);
+		this.panel.reveal();
+	}
+
+	private handleDispose(): void {
+		if (this.disposed) {
+			return;
+		}
+		this.disposed = true;
+		if (this.dirty) {
+			vscode.window.showWarningMessage('Backend configuration panel closed with unsaved changes. No changes were applied.');
+		}
+	}
+
+	public dispose(): void {
+		// Dispose all tracked event listeners
+		for (const disposable of this.disposables) {
+			disposable.dispose();
+		}
+		this.disposables.length = 0;
+
+		// Dispose the panel itself
+		if (this.panel) {
+			this.panel.dispose();
+			this.panel = undefined;
+		}
+	}
+
+	/**
+	 * Execute an async operation with locking to prevent concurrent state updates.
+	 */
+	private async withLock<T>(operation: () => Promise<T>): Promise<T> {
+		if (this.operationInProgress) {
+			throw new Error('Another operation is in progress. Please wait.');
+		}
+		this.operationInProgress = true;
+		try {
+			return await operation();
+		} finally {
+			this.operationInProgress = false;
+		}
+	}
+
+	private async handleMessage(message: WebviewCommand): Promise<void> {
+		switch (message.command) {
+			case 'markDirty':
+				this.dirty = true;
+				return;
+			case 'save':
+				await this.handleSave(message.draft);
+				return;
+			case 'discard':
+				await this.handleDiscard();
+				return;
+			case 'stayLocal':
+				await this.handleStayLocal();
+				return;
+			case 'testConnection':
+				await this.handleTestConnection(message.draft);
+				return;
+			case 'updateSharedKey':
+				await this.handleUpdateSharedKey(message.storageAccount, message.draft);
+				return;
+			case 'launchWizard':
+				await this.handleLaunchWizard();
+				return;
+			case 'clearAzureSettings':
+				await this.handleClearAzureSettings();
+				return;
+		}
+	}
+
+	private async handleSave(draft: BackendConfigDraft): Promise<void> {
+		try {
+			await this.withLock(async () => {
+				const result = await this.callbacks.onSave(draft);
+				this.dirty = false;
+				this.postState(result.state, result.errors, result.message);
+			});
+		} catch (error: unknown) {
+			const msg = error instanceof Error ? error.message : String(error);
+			vscode.window.showErrorMessage(`Failed to save backend settings: ${msg}`);
+		}
+	}
+
+	private async handleDiscard(): Promise<void> {
+		const state = await this.callbacks.onDiscard();
+		this.dirty = false;
+		this.postState(state, undefined, 'Changes discarded.');
+	}
+
+	private async handleStayLocal(): Promise<void> {
+		const state = await this.callbacks.onStayLocal();
+		this.dirty = false;
+		this.postState(state, undefined, 'Backend disabled. Staying local-only.');
+	}
+
+	private async handleTestConnection(draft: BackendConfigDraft): Promise<void> {
+		const result = await this.callbacks.onTestConnection(draft);
+		this.postMessage({ type: 'testResult', result });
+	}
+
+	private async handleUpdateSharedKey(storageAccount: string, draft?: BackendConfigDraft): Promise<void> {
+		const result = await this.callbacks.onUpdateSharedKey(storageAccount, draft);
+		if (result.state) {
+			this.postState(result.state);
+		}
+		this.postMessage({ type: 'sharedKeyResult', result });
+	}
+
+	private async handleLaunchWizard(): Promise<void> {
+		const state = await this.callbacks.onLaunchWizard();
+		this.postState(state, undefined, 'Wizard completed. Refreshing settings.');
+	}
+
+	private async handleClearAzureSettings(): Promise<void> {
+		const state = await this.callbacks.onClearAzureSettings();
+		this.dirty = false;
+		this.postState(state, undefined, 'Azure settings cleared.');
+	}
+
+	private postState(state: BackendConfigPanelState, errors?: Record<string, string>, message?: string): void {
+		this.postMessage({ type: 'state', state, errors, message });
+	}
+
+	private postMessage(msg: WebviewOutboundMessage): void {
+		if (this.panel) {
+			this.panel.webview.postMessage(msg);
+		}
 	}
 }
 
 /**
- * Export renderHtml for testing purposes.
- * This allows integration tests to verify the HTML structure and JavaScript functionality.
+ * Renders the backend config panel HTML for the given webview and state.
+ * Exported for testing without needing to instantiate BackendConfigPanel.
  */
 export function renderBackendConfigHtml(webview: vscode.Webview, state: BackendConfigPanelState): string {
-
-	const panel = new BackendConfigPanel(vscode.Uri.file('/test'), {
-		getState: async () => state,
-		onSave: async () => ({ state, errors: {} }),
-		onDiscard: async () => state,
-		onStayLocal: async () => state,
-		onTestConnection: async () => ({ ok: true, message: 'Test' }),
-		onUpdateSharedKey: async () => ({ ok: true, message: 'Test' }),
-		onLaunchWizard: async () => state,
-		onClearAzureSettings: async () => state
-	});
-	return (panel as any).renderHtml(webview, state);
+	return buildHtml(webview, vscode.Uri.file('/test'), state);
 }
