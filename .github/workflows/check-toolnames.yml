@@ -273,7 +273,8 @@ jobs:
             sleep 2
           done
           curl -fsS http://localhost:11434/api/tags >/dev/null
-          if curl -fsS http://localhost:11434/api/tags | \
+          OLLAMA_TAGS=$(curl -fsS http://localhost:11434/api/tags)
+          if echo "$OLLAMA_TAGS" | \
               python3 -c "import json,sys; d=json.load(sys.stdin); exit(0 if any('qwen2.5:1.5b' in m['name'] for m in d.get('models',[])) else 1)" \
               2>/dev/null; then
             echo "Model qwen2.5:1.5b already available in cache"
