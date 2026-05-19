@@ -391,27 +391,59 @@ export function extractCustomAgentName(modeId: string): string | null {
 	return null;
 }
 
+// ── getEditorNameFromRoot predicates ──────────────────────────────────────────────
+
+/** Returns true when the root folder belongs to a JetBrains IDE Copilot store. */
+function isJetBrainsRoot(lower: string): boolean {
+	return lower.includes('.copilot/jb') || lower.includes('.copilot\\jb');
+}
+
+/** Returns true when the root folder belongs to Copilot CLI. */
+function isCopilotCliRoot(lower: string): boolean {
+	return lower.includes('.copilot') || lower.includes('copilot');
+}
+
+/** Returns true when the root folder belongs to VS Code Insiders. */
+function isCodeInsidersRoot(lower: string): boolean {
+	return lower.includes('code - insiders') || lower.includes('code-insiders') || lower.includes('insiders');
+}
+
+/** Returns true when the root folder belongs to VS Code Exploration. */
+function isCodeExplorationRoot(lower: string): boolean {
+	return lower.includes('code - exploration') || lower.includes('code%20-%20exploration');
+}
+
+/** Returns true when the root folder belongs to Visual Studio. */
+function isVisualStudioRoot(lower: string): boolean {
+	return lower.includes('.vs') && lower.includes('copilot-chat');
+}
+
+/** Returns true when the root folder belongs to VS Code. */
+function isVSCodeRoot(lower: string): boolean {
+	return lower.endsWith('code') || lower.includes(path.sep + 'code' + path.sep) || lower.includes('/code/');
+}
+
 /**
  * Determine a friendly editor name from an editor root path (folder name)
- * e.g. 'C:\...\AppData\Roaming\Code' -> 'VS Code'
+ * e.g. 'C:\\...\\AppData\\Roaming\\Code' -> 'VS Code'
  */
 export function getEditorNameFromRoot(rootPath: string): string {
 	if (!rootPath) { return 'Unknown'; }
 	const lower = rootPath.toLowerCase();
-	// Check obvious markers first
-	if (lower.includes('.copilot/jb') || lower.includes('.copilot\\jb')) { return 'JetBrains'; }
-	if (lower.includes('.copilot') || lower.includes('copilot')) { return 'Copilot CLI'; }
+	// Check obvious markers first (JetBrains must precede Copilot CLI)
+	if (isJetBrainsRoot(lower)) { return 'JetBrains'; }
+	if (isCopilotCliRoot(lower)) { return 'Copilot CLI'; }
 	if (lower.includes('opencode')) { return 'OpenCode'; }
 	if (lower.includes('.continue')) { return 'Continue'; }
 	if (lower.includes('.vibe')) { return 'Mistral Vibe'; }
 	if (lower.includes('.gemini')) { return 'Gemini CLI'; }
-	if (lower.includes('code - insiders') || lower.includes('code-insiders') || lower.includes('insiders')) { return 'VS Code Insiders'; }
-	if (lower.includes('code - exploration') || lower.includes('code%20-%20exploration')) { return 'VS Code Exploration'; }
+	if (isCodeInsidersRoot(lower)) { return 'VS Code Insiders'; }
+	if (isCodeExplorationRoot(lower)) { return 'VS Code Exploration'; }
 	if (lower.includes('vscodium')) { return 'VSCodium'; }
 	if (lower.includes('cursor')) { return 'Cursor'; }
-        if (lower.includes('.vs') && lower.includes('copilot-chat')) { return 'Visual Studio'; }
-	// Generic 'code' match (catch AppData\Roaming\Code)
-	if (lower.endsWith('code') || lower.includes(path.sep + 'code' + path.sep) || lower.includes('/code/')) { return 'VS Code'; }
+	if (isVisualStudioRoot(lower)) { return 'Visual Studio'; }
+	// Generic 'code' match (catch AppData\\Roaming\\Code)
+	if (isVSCodeRoot(lower)) { return 'VS Code'; }
 	return 'Unknown';
 }
 
