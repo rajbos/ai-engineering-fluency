@@ -19,12 +19,38 @@ function fmt(n: number): string {
 	return n.toLocaleString('en-US');
 }
 
-type CategoryScore = { stage: number; evidence: string[]; tips: string[] };
+/** Fluency stage levels (1 = AI Skeptic through 4 = AI Strategist). */
+type Stage = 1 | 2 | 3 | 4;
+
+type CategoryScore = { stage: Stage; evidence: string[]; tips: string[] };
+
+/** Promotes a stage to at least `next`, returning the higher of the two. */
+function promoteStage(current: Stage, next: Stage): Stage {
+	return Math.max(current, next) as Stage;
+}
+
+/** Human-readable labels for each stage. */
+const STAGE_LABELS: Record<Stage, string> = {
+	1: 'Stage 1: AI Skeptic',
+	2: 'Stage 2: AI Explorer',
+	3: 'Stage 3: AI Collaborator',
+	4: 'Stage 4: AI Strategist',
+};
+
+/** Computes the median stage from an array of category stage scores. */
+function computeMedianStage(stages: Stage[]): Stage {
+	const sorted = [...stages].sort((a, b) => a - b);
+	const mid = Math.floor(sorted.length / 2);
+	const median = sorted.length % 2 === 0
+		? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+		: sorted[mid];
+	return median as Stage;
+}
 
 function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
 	const evidence: string[] = [];
 	const tips: string[] = [];
-	let stage = 1;
+	let stage: Stage = 1;
 
 	const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + p.modeUsage.cli;
 	if (totalInteractions > 0) { evidence.push(`${fmt(totalInteractions)} total interactions`); }
@@ -41,10 +67,10 @@ function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
 		}
 		if (p.conversationPatterns.avgTurnsPerSession >= 3) {
 			evidence.push(`Avg ${p.conversationPatterns.avgTurnsPerSession.toFixed(1)} exchanges per session`);
-			stage = Math.max(stage, 2) as 1 | 2 | 3 | 4;
+			stage = promoteStage(stage, 2);
 		}
 		if (p.conversationPatterns.avgTurnsPerSession >= 5) {
-			stage = Math.max(stage, 3) as 1 | 2 | 3 | 4;
+			stage = promoteStage(stage, 3);
 		}
 	}
 
@@ -67,7 +93,7 @@ function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
 	if (hasModelSwitching) {
 		evidence.push(`Switched models in ${Math.round(p.modelSwitching.switchingFrequency)}% of sessions`);
 		if (stage < 4 && p.modelSwitching.mixedTierSessions > 0) {
-			stage = Math.max(stage, 3) as 1 | 2 | 3 | 4;
+			stage = promoteStage(stage, 3);
 		}
 	}
 
@@ -88,7 +114,7 @@ function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
 function _scoreContextEngineering(p: UsageAnalysisPeriod): CategoryScore {
 	const evidence: string[] = [];
 	const tips: string[] = [];
-	let stage = 1;
+	let stage: Stage = 1;
 
 	const refs = p.contextReferences;
 	const totalContextRefs = refs.file + refs.selection + refs.symbol + refs.codebase + refs.workspace;
@@ -118,7 +144,7 @@ function _scoreContextEngineering(p: UsageAnalysisPeriod): CategoryScore {
 	const imageRefs = refs.byKind['copilot.image'] || 0;
 	if (imageRefs > 0) {
 		evidence.push(`${fmt(imageRefs)} image references (vision)`);
-		stage = Math.max(stage, 3) as 1 | 2 | 3 | 4;
+		stage = promoteStage(stage, 3);
 	}
 
 	if (stage < 2) { tips.push('Try adding [#file or #selection](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) references to give Copilot more context'); }
@@ -169,10 +195,10 @@ function _scoreContextEngineering(p: UsageAnalysisPeriod): CategoryScore {
 function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
 	const evidence: string[] = [];
 	const tips: string[] = [];
-	let stage = 1;
+	let stage: Stage = 1;
 
 	if (p.modeUsage.agent > 0) { evidence.push(`${fmt(p.modeUsage.agent)} agent-mode interactions`); stage = 2; }
-	if (p.modeUsage.cli > 0) { evidence.push(`${fmt(p.modeUsage.cli)} CLI interactions`); stage = Math.max(stage, 2) as 1 | 2 | 3 | 4; }
+	if (p.modeUsage.cli > 0) { evidence.push(`${fmt(p.modeUsage.cli)} CLI interactions`); stage = promoteStage(stage, 2); }
 	if (p.toolCalls.total > 0) { evidence.push(`${fmt(p.toolCalls.total)} tool calls executed`); }
 	if (p.modeUsage.edit > 0) { evidence.push(`${fmt(p.modeUsage.edit)} edit-mode interactions`); }
 
@@ -182,24 +208,24 @@ function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
 			: 0;
 		if (p.editScope.multiFileEdits > 0) {
 			evidence.push(`${fmt(p.editScope.multiFileEdits)} multi-file edit sessions (${multiFileRate}%)`);
-			stage = Math.max(stage, 2) as 1 | 2 | 3 | 4;
+			stage = promoteStage(stage, 2);
 		}
 		if (p.editScope.avgFilesPerSession >= 3) {
 			evidence.push(`Avg ${p.editScope.avgFilesPerSession.toFixed(1)} files per edit session`);
-			stage = Math.max(stage, 3) as 1 | 2 | 3 | 4;
+			stage = promoteStage(stage, 3);
 		}
 	}
 
 	if (p.agentTypes && p.agentTypes.editsAgent > 0) {
 		evidence.push(`${fmt(p.agentTypes.editsAgent)} edits agent sessions`);
-		stage = Math.max(stage, 2) as 1 | 2 | 3 | 4;
+		stage = promoteStage(stage, 2);
 	}
 
 	const nonAutoToolCount = Object.keys(p.toolCalls.byTool).filter(t => !AUTOMATIC_TOOL_SET.has(t.toLowerCase()) && !t.startsWith('__slash__')).length;
 	if ((p.modeUsage.agent + p.modeUsage.cli) >= 10 && nonAutoToolCount >= 3) { stage = 3; }
 	if ((p.modeUsage.agent + p.modeUsage.cli) >= 50 && nonAutoToolCount >= 5) { stage = 4; }
 	if (p.editScope && p.editScope.multiFileEdits >= 20 && p.editScope.avgFilesPerSession >= 3) {
-		stage = Math.max(stage, 4) as 1 | 2 | 3 | 4;
+		stage = promoteStage(stage, 4);
 	}
 
 	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) — it can run terminal commands, edit files, and explore your codebase autonomously'); }
@@ -212,7 +238,7 @@ function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
 function _scoreToolUsage(p: UsageAnalysisPeriod): CategoryScore {
 	const evidence: string[] = [];
 	const tips: string[] = [];
-	let stage = 1;
+	let stage: Stage = 1;
 
 	const toolCount = Object.keys(p.toolCalls.byTool).length;
 	const nonAutoToolCount = Object.keys(p.toolCalls.byTool).filter(t => !AUTOMATIC_TOOL_SET.has(t.toLowerCase()) && !t.startsWith('__slash__')).length;
@@ -229,7 +255,7 @@ function _scoreToolUsage(p: UsageAnalysisPeriod): CategoryScore {
 	if (p.agentTypes) {
 		if (p.agentTypes.workspaceAgent > 0) {
 			evidence.push(`${fmt(p.agentTypes.workspaceAgent)} @workspace agent sessions`);
-			stage = Math.max(stage, 3) as 1 | 2 | 3 | 4;
+			stage = promoteStage(stage, 3);
 		}
 	}
 
@@ -243,13 +269,13 @@ function _scoreToolUsage(p: UsageAnalysisPeriod): CategoryScore {
 	const usedAdvanced = Object.keys(advancedToolFriendlyNames).filter(t => (p.toolCalls.byTool[t] || 0) > 0);
 	if (usedAdvanced.length > 0) {
 		evidence.push(`Advanced tools: ${usedAdvanced.map(t => advancedToolFriendlyNames[t]).join(', ')}`);
-		if (usedAdvanced.length >= 2) { stage = Math.max(stage, 3) as 1 | 2 | 3 | 4; }
+		if (usedAdvanced.length >= 2) { stage = promoteStage(stage, 3); }
 	}
 
 	const mcpServers = Object.keys(p.mcpTools.byServer);
 	if (p.mcpTools.total > 0) {
 		evidence.push(`${fmt(p.mcpTools.total)} MCP tool calls across ${mcpServers.length} server(s)`);
-		stage = Math.max(stage, 3) as 1 | 2 | 3 | 4;
+		stage = promoteStage(stage, 3);
 		if (mcpServers.length >= 2) { stage = 4; }
 	}
 
@@ -277,7 +303,7 @@ function _scoreToolUsage(p: UsageAnalysisPeriod): CategoryScore {
 function _scoreCustomization(p: UsageAnalysisPeriod, lastCustomizationMatrix: WorkspaceCustomizationMatrix | undefined): CategoryScore {
 	const evidence: string[] = [];
 	const tips: string[] = [];
-	let stage = 1;
+	let stage: Stage = 1;
 
 	const matrix = lastCustomizationMatrix;
 	const totalRepos = matrix?.totalWorkspaces ?? 0;
@@ -296,7 +322,7 @@ function _scoreCustomization(p: UsageAnalysisPeriod, lastCustomizationMatrix: Wo
 		if (hasStage4Models) {
 			stage = 4;
 		} else {
-			stage = Math.max(stage, 3) as 1 | 2 | 3 | 4;
+			stage = promoteStage(stage, 3);
 		}
 	}
 
@@ -350,14 +376,14 @@ function _scoreCustomization(p: UsageAnalysisPeriod, lastCustomizationMatrix: Wo
 function _scoreWorkflowIntegration(p: UsageAnalysisPeriod): CategoryScore {
 	const evidence: string[] = [];
 	const tips: string[] = [];
-	let stage = 1;
+	let stage: Stage = 1;
 
 	if (p.sessions >= 3) { evidence.push(`${fmt(p.sessions)} sessions in the last 30 days`); stage = 2; }
 
 	if (p.applyUsage && p.applyUsage.totalCodeBlocks > 0) {
 		const applyRatePercent = Math.round(p.applyUsage.applyRate);
 		evidence.push(`${applyRatePercent}% code block apply rate (${fmt(p.applyUsage.totalApplies)}/${fmt(p.applyUsage.totalCodeBlocks)})`);
-		if (applyRatePercent >= 50) { stage = Math.max(stage, 2) as 1 | 2 | 3 | 4; }
+		if (applyRatePercent >= 50) { stage = promoteStage(stage, 2); }
 	}
 
 	if (p.sessionDuration && p.sessionDuration.avgDurationMs > 0) {
@@ -370,13 +396,13 @@ function _scoreWorkflowIntegration(p: UsageAnalysisPeriod): CategoryScore {
 	const modesUsed = [p.modeUsage.ask > 0, p.modeUsage.agent > 0, p.modeUsage.cli > 0].filter(Boolean).length;
 	if (modesUsed >= 2) {
 		evidence.push(`Uses ${modesUsed} modes (ask/agent/cli)`);
-		stage = Math.max(stage, 3) as 1 | 2 | 3 | 4;
+		stage = promoteStage(stage, 3);
 	}
 
 	const hasExplicitContext = totalContextRefs >= 10;
 	if (hasExplicitContext) {
 		evidence.push(`${fmt(totalContextRefs)} explicit context references`);
-		if (totalContextRefs >= 20) { stage = Math.max(stage, 3) as 1 | 2 | 3 | 4; }
+		if (totalContextRefs >= 20) { stage = promoteStage(stage, 3); }
 	}
 
 	if (p.sessions >= 15 && modesUsed >= 2 && totalContextRefs >= 20) {
