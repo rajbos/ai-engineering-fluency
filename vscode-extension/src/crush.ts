@@ -16,6 +16,8 @@ import * as vscode from 'vscode';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 
+type CrushDbCacheEntry = { db: any; mtimeMs: number; size: number };
+
 export interface CrushProject {
 	path: string;
 	data_dir: string;
@@ -24,10 +26,107 @@ export interface CrushProject {
 
 export class CrushDataAccess {
 	private _sqlJsModule: any = null;
+	private _dbCache: Map<string, CrushDbCacheEntry> = new Map();
+	private _dbCacheInflight: Map<string, Promise<any | null>> = new Map();
 	private readonly extensionUri: vscode.Uri;
 
 	constructor(extensionUri: vscode.Uri) {
 		this.extensionUri = extensionUri;
+	}
+
+	dispose(): void {
+		for (const entry of this._dbCache.values()) {
+			try { entry.db.close(); } catch { /* ignore */ }
+		}
+		this._dbCache.clear();
+		this._dbCacheInflight.clear();
+	}
+
+	private closeDb(db: any): void {
+		try { db.close(); } catch { /* ignore */ }
+	}
+
+	private isMissingFileError(error: unknown): boolean {
+		const code = (error as NodeJS.ErrnoException)?.code;
+		return code === 'ENOENT' || code === 'ENOTDIR';
+	}
+
+	private statCrushDb(dbPath: string): fs.Stats | null {
+		try {
+			return fs.statSync(dbPath);
+		} catch (error) {
+			if (this.isMissingFileError(error) && this._dbCache.has(dbPath)) {
+				this.closeDb(this._dbCache.get(dbPath)!.db);
+				this._dbCache.delete(dbPath);
+			}
+			return null;
+		}
+	}
+
+	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
+		const entry = this._dbCache.get(dbPath);
+		return !!entry && entry.mtimeMs === stats.mtimeMs && entry.size === stats.size;
+	}
+
+	private getDbCacheKey(dbPath: string, stats: fs.Stats): string {
+		return `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+	}
+
+	private sameDbStats(left: fs.Stats, right: fs.Stats): boolean {
+		return left.mtimeMs === right.mtimeMs && left.size === right.size;
+	}
+
+	private async refreshCrushDb(dbPath: string, stats: fs.Stats): Promise<any | null> {
+		let db: any;
+		try {
+			const SQL = await this.initSqlJs();
+			const buffer = fs.readFileSync(dbPath);
+			db = new SQL.Database(buffer);
+		} catch {
+			return this._dbCache.get(dbPath)?.db ?? null;
+		}
+
+		const currentStats = this.statCrushDb(dbPath);
+		if (!currentStats || !this.sameDbStats(stats, currentStats)) {
+			this.closeDb(db);
+			return this._dbCache.get(dbPath)?.db ?? null;
+		}
+
+		const existing = this._dbCache.get(dbPath);
+		if (existing) { this.closeDb(existing.db); }
+		this._dbCache.set(dbPath, { db, mtimeMs: stats.mtimeMs, size: stats.size });
+		return db;
+	}
+
+	/**
+	 * Returns a cached SQL.Database instance for the given crush.db path, re-opening
+	 * only when the file's mtime or size changes. This avoids reading and parsing the
+	 * entire DB file on every query (the primary cause of ~700ms-per-call latency).
+	 *
+	 * Uses single-flight deduplication to prevent concurrent callers from each
+	 * re-reading the DB file and leaving instances unclosed.
+	 */
+	private async getCrushDb(dbPath: string): Promise<any | null> {
+		const stats = this.statCrushDb(dbPath);
+		if (!stats) { return this._dbCache.get(dbPath)?.db ?? null; }
+
+		if (this.isCachedDbCurrent(dbPath, stats)) {
+			return this._dbCache.get(dbPath)!.db;
+		}
+
+		const cacheKey = this.getDbCacheKey(dbPath, stats);
+		const inflight = this._dbCacheInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const createDbPromise = this.refreshCrushDb(dbPath, stats);
+		this._dbCacheInflight.set(cacheKey, createDbPromise);
+		try {
+			return await createDbPromise;
+		} finally {
+			if (this._dbCacheInflight.get(cacheKey) === createDbPromise) {
+				this._dbCacheInflight.delete(cacheKey);
+			}
+		}
 	}
 
 	/**
@@ -115,18 +214,12 @@ export class CrushDataAccess {
 	 * Discover all session IDs in a specific `crush.db` file.
 	 */
 	async discoverSessionsInDb(dbPath: string): Promise<string[]> {
-		if (!fs.existsSync(dbPath)) { return []; }
+		const db = await this.getCrushDb(dbPath);
+		if (!db) { return []; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec('SELECT id FROM sessions');
-				if (result.length === 0) { return []; }
-				return result[0].values.map((row: unknown[]) => row[0] as string);
-			} finally {
-				db.close();
-			}
+			const result = db.exec('SELECT id FROM sessions');
+			if (result.length === 0) { return []; }
+			return result[0].values.map((row: unknown[]) => row[0] as string);
 		} catch {
 			return [];
 		}
@@ -138,25 +231,20 @@ export class CrushDataAccess {
 	async readCrushSession(virtualPath: string): Promise<any | null> {
 		const dbPath = this.getCrushDbPath(virtualPath);
 		const sessionId = this.getCrushSessionId(virtualPath);
-		if (!sessionId || !fs.existsSync(dbPath)) { return null; }
+		if (!sessionId) { return null; }
+		const db = await this.getCrushDb(dbPath);
+		if (!db) { return null; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec(
-					'SELECT id, title, message_count, prompt_tokens, completion_tokens, created_at, updated_at FROM sessions WHERE id = ?',
-					[sessionId]
-				);
-				if (result.length === 0 || result[0].values.length === 0) { return null; }
-				const cols = result[0].columns;
-				const row = result[0].values[0];
-				const obj: any = {};
-				cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
-				return obj;
-			} finally {
-				db.close();
-			}
+			const result = db.exec(
+				'SELECT id, title, message_count, prompt_tokens, completion_tokens, created_at, updated_at FROM sessions WHERE id = ?',
+				[sessionId]
+			);
+			if (result.length === 0 || result[0].values.length === 0) { return null; }
+			const cols = result[0].columns;
+			const row = result[0].values[0];
+			const obj: any = {};
+			cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+			return obj;
 		} catch {
 			return null;
 		}
@@ -169,29 +257,24 @@ export class CrushDataAccess {
 	async getCrushMessages(virtualPath: string): Promise<any[]> {
 		const dbPath = this.getCrushDbPath(virtualPath);
 		const sessionId = this.getCrushSessionId(virtualPath);
-		if (!sessionId || !fs.existsSync(dbPath)) { return []; }
+		if (!sessionId) { return []; }
+		const db = await this.getCrushDb(dbPath);
+		if (!db) { return []; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec(
-					'SELECT id, session_id, role, parts, model, provider, created_at, updated_at, finished_at FROM messages WHERE session_id = ? AND is_summary_message = 0 ORDER BY created_at ASC',
-					[sessionId]
-				);
-				if (result.length === 0) { return []; }
-				const cols = result[0].columns;
-				return result[0].values.map((row: unknown[]) => {
-					const obj: any = {};
-					cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
-					if (typeof obj.parts === 'string') {
-						try { obj.parts = JSON.parse(obj.parts); } catch { obj.parts = []; }
-					}
-					return obj;
-				});
-			} finally {
-				db.close();
-			}
+			const result = db.exec(
+				'SELECT id, session_id, role, parts, model, provider, created_at, updated_at, finished_at FROM messages WHERE session_id = ? AND is_summary_message = 0 ORDER BY created_at ASC',
+				[sessionId]
+			);
+			if (result.length === 0) { return []; }
+			const cols = result[0].columns;
+			return result[0].values.map((row: unknown[]) => {
+				const obj: any = {};
+				cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+				if (typeof obj.parts === 'string') {
+					try { obj.parts = JSON.parse(obj.parts); } catch { obj.parts = []; }
+				}
+				return obj;
+			});
 		} catch {
 			return [];
 		}
