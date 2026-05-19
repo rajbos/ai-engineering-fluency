@@ -297,6 +297,208 @@ function processRequestsForEnhancedMetrics(
 }
 
 /**
+ * Process a fully-reconstructed delta session state to populate usage analysis.
+ * Handles mode detection, context references, tool invocations, model switching,
+ * thinking effort extraction, and conversation pattern derivation.
+ */
+function processDeltaSessionAnalysis(
+	deps: Pick<UsageAnalysisDeps, 'toolNameMap' | 'modelPricing'>,
+	sessionState: DeltaSessionState,
+	lines: string[],
+	analysis: SessionUsageAnalysis
+): void {
+
+	// Extract session mode from reconstructed state
+	const sessionModeType = sessionState.inputState?.mode 
+		? getModeType(sessionState.inputState.mode)
+		: 'ask';
+
+	// Detect implicit selections
+	if (sessionState.inputState?.selections && Array.isArray(sessionState.inputState.selections)) {
+		for (const sel of sessionState.inputState.selections) {
+			if (sel && (sel.startLineNumber !== sel.endLineNumber || sel.startColumn !== sel.endColumn)) {
+				analysis.contextReferences.implicitSelection++;
+				break;
+			}
+		}
+	}
+
+	// Process reconstructed requests array
+	const requests = (sessionState.requests ?? []) as SessionRequestRaw[];
+	for (const request of requests) {
+		if (!request || !request.requestId) { continue; }
+
+		// Count by mode type
+		incrementModeUsage(sessionModeType, analysis.modeUsage);
+
+		// Check for agent in request
+		if (request.agent?.id) {
+			const toolName = request.agent.id;
+			analysis.toolCalls.total++;
+			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+		}
+
+		// Analyze all context references from this request
+		analyzeRequestContext(request, analysis.contextReferences);
+
+		// Extract tool calls and MCP tools from request.response array
+		if (request.response && Array.isArray(request.response)) {
+			for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+				if (!responseItemRaw) { continue; }
+				const responseItem = responseItemRaw;
+				if (responseItem.kind === 'toolInvocationSerialized' || responseItem.kind === 'prepareToolInvocation') {
+					const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || responseItem.toolSpecificData?.kind || 'unknown';
+
+					// Route to MCP or regular tool counters
+					recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
+				}
+			}
+		}
+	}
+
+	// Compute model switching inline from the already-reconstructed state
+	// to avoid re-reading and re-parsing the file in calculateModelSwitching.
+	{
+		// Derive the session-level default model from reconstructed state,
+		// mirroring the selectedModel extraction used in the line-by-line path.
+		const sessionDefaultModel = (
+			sessionState.selectedModel?.identifier ||
+			sessionState.selectedModel?.metadata?.id ||
+			sessionState.inputState?.selectedModel?.metadata?.id ||
+			'gpt-4o'
+		).replace(/^copilot\//, '');
+
+		const models: string[] = [];
+		for (const req of requests) {
+			if (!req || !req.requestId) { continue; }
+			let reqModel = sessionDefaultModel;
+			if (req.modelId) {
+				reqModel = req.modelId.replace(/^copilot\//, '');
+			} else if (req.result?.metadata?.modelId) {
+				reqModel = req.result.metadata.modelId.replace(/^copilot\//, '');
+			} else if (req.result?.details) {
+				reqModel = getModelFromRequest(req, deps.modelPricing);
+			}
+			models.push(reqModel);
+		}
+		const uniqueModels = [...new Set(models)];
+		analysis.modelSwitching.uniqueModels = uniqueModels;
+		analysis.modelSwitching.modelCount = uniqueModels.length;
+		analysis.modelSwitching.totalRequests = models.length;
+		let switchCount = 0;
+		for (let mi = 1; mi < models.length; mi++) {
+			if (models[mi] !== models[mi - 1]) { switchCount++; }
+		}
+		analysis.modelSwitching.switchCount = switchCount;
+		applyModelTierClassification(deps.modelPricing, uniqueModels, models, analysis);
+	}
+
+	// Extract thinking effort (reasoning effort) from delta lines
+	{
+		const { effortByRequestId, defaultEffort, switchCount: effortSwitchCount } = buildReasoningEffortTimeline(lines);
+		if (defaultEffort !== null || effortByRequestId.size > 0) {
+			const byEffort: { [effort: string]: number } = {};
+			for (const [, effort] of effortByRequestId) {
+				byEffort[effort] = (byEffort[effort] || 0) + 1;
+			}
+			// If we have a defaultEffort but no per-request data, record it as the session default
+			if (effortByRequestId.size === 0 && defaultEffort !== null) {
+				byEffort[defaultEffort] = requests.length;
+			}
+			analysis.thinkingEffort = { byEffort, switchCount: effortSwitchCount, defaultEffort };
+		}
+	}
+
+
+	// Derive conversation patterns from mode usage
+	deriveConversationPatterns(analysis);
+}
+
+/**
+ * Process requests in a regular JSON session file.
+ * Populates mode usage, context references, and tool/MCP invocations.
+ */
+function processJsonSessionRequests(
+	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
+	sessionContent: ParsedSessionJson,
+	analysis: SessionUsageAnalysis
+): void {
+	// Detect session mode and count interactions per request
+	if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
+		for (const requestRaw of sessionContent.requests) {
+			const request = requestRaw as SessionRequestRaw;
+			// Determine mode for each individual request
+			let requestMode = 'ask'; // default
+
+			// Check request-level agent ID first (more specific)
+			if (request.agent?.id) {
+				const agentId = request.agent.id.toLowerCase();
+				if (agentId.includes('edit')) {
+					requestMode = 'edit';
+				} else if (agentId.includes('agent')) {
+					requestMode = 'agent';
+				}
+			}
+			// Fall back to session-level mode if no request-specific agent
+			else if (sessionContent.mode?.id) {
+				const modeId = sessionContent.mode.id.toLowerCase();
+				if (modeId.includes('agent')) {
+					requestMode = 'agent';
+				} else if (modeId.includes('edit')) {
+					requestMode = 'edit';
+				}
+			}
+
+			// Count this request in the appropriate mode
+			if (requestMode === 'agent') {
+				analysis.modeUsage.agent++;
+			} else if (requestMode === 'edit') {
+				analysis.modeUsage.edit++;
+			} else {
+				analysis.modeUsage.ask++;
+			}
+
+			// Analyze all context references from this request
+			analyzeRequestContext(request, analysis.contextReferences);
+
+			// Analyze response for tool calls and MCP tools
+			if (request.response && Array.isArray(request.response)) {
+				for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+					if (!responseItemRaw) { continue; }
+					const responseItem = responseItemRaw;
+					// Detect tool invocations
+					if (responseItem.kind === 'toolInvocationSerialized' ||
+						responseItem.kind === 'prepareToolInvocation') {
+						const toolName = responseItem.toolId ||
+							responseItem.toolName ||
+							responseItem.invocationMessage?.toolName ||
+							'unknown';
+
+						// Route to MCP or regular tool counters
+						recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
+					}
+
+					// Detect MCP servers starting
+					if (responseItem.kind === 'mcpServersStarting' && responseItem.didStartServerIds) {
+						for (const serverId of responseItem.didStartServerIds) {
+							analysis.mcpTools.total++;
+							analysis.mcpTools.byServer[serverId] = (analysis.mcpTools.byServer[serverId] || 0) + 1;
+						}
+					}
+
+					// Detect inline references in response items
+					if (responseItem.kind === 'inlineReference' && responseItem.inlineReference) {
+						// Treat response inlineReferences as contentReferences
+						analyzeContentReferences([responseItem], analysis.contextReferences);
+					}
+				}
+			}
+		}
+	}
+
+}
+
+/**
  * Merge usage analysis data into period stats
  */
 export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
@@ -1207,111 +1409,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 						// Skip invalid lines
 					}
 				}
-
-				// Extract session mode from reconstructed state
-				const sessionModeType = sessionState.inputState?.mode 
-					? getModeType(sessionState.inputState.mode)
-					: 'ask';
-
-				// Detect implicit selections
-				if (sessionState.inputState?.selections && Array.isArray(sessionState.inputState.selections)) {
-					for (const sel of sessionState.inputState.selections) {
-						if (sel && (sel.startLineNumber !== sel.endLineNumber || sel.startColumn !== sel.endColumn)) {
-							analysis.contextReferences.implicitSelection++;
-							break;
-						}
-					}
-				}
-
-				// Process reconstructed requests array
-				const requests = (sessionState.requests ?? []) as SessionRequestRaw[];
-				for (const request of requests) {
-					if (!request || !request.requestId) { continue; }
-
-					// Count by mode type
-					incrementModeUsage(sessionModeType, analysis.modeUsage);
-
-					// Check for agent in request
-					if (request.agent?.id) {
-						const toolName = request.agent.id;
-						analysis.toolCalls.total++;
-						analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-					}
-
-					// Analyze all context references from this request
-					analyzeRequestContext(request, analysis.contextReferences);
-
-					// Extract tool calls and MCP tools from request.response array
-					if (request.response && Array.isArray(request.response)) {
-						for (const responseItemRaw of request.response as ResponseItemRaw[]) {
-							if (!responseItemRaw) { continue; }
-							const responseItem = responseItemRaw;
-							if (responseItem.kind === 'toolInvocationSerialized' || responseItem.kind === 'prepareToolInvocation') {
-								const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || responseItem.toolSpecificData?.kind || 'unknown';
-
-								// Route to MCP or regular tool counters
-								recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
-							}
-						}
-					}
-				}
-
-				// Compute model switching inline from the already-reconstructed state
-				// to avoid re-reading and re-parsing the file in calculateModelSwitching.
-				{
-					// Derive the session-level default model from reconstructed state,
-					// mirroring the selectedModel extraction used in the line-by-line path.
-					const sessionDefaultModel = (
-						sessionState.selectedModel?.identifier ||
-						sessionState.selectedModel?.metadata?.id ||
-						sessionState.inputState?.selectedModel?.metadata?.id ||
-						'gpt-4o'
-					).replace(/^copilot\//, '');
-
-					const models: string[] = [];
-					for (const req of requests) {
-						if (!req || !req.requestId) { continue; }
-						let reqModel = sessionDefaultModel;
-						if (req.modelId) {
-							reqModel = req.modelId.replace(/^copilot\//, '');
-						} else if (req.result?.metadata?.modelId) {
-							reqModel = req.result.metadata.modelId.replace(/^copilot\//, '');
-						} else if (req.result?.details) {
-							reqModel = getModelFromRequest(req, deps.modelPricing);
-						}
-						models.push(reqModel);
-					}
-					const uniqueModels = [...new Set(models)];
-					analysis.modelSwitching.uniqueModels = uniqueModels;
-					analysis.modelSwitching.modelCount = uniqueModels.length;
-					analysis.modelSwitching.totalRequests = models.length;
-					let switchCount = 0;
-					for (let mi = 1; mi < models.length; mi++) {
-						if (models[mi] !== models[mi - 1]) { switchCount++; }
-					}
-					analysis.modelSwitching.switchCount = switchCount;
-					applyModelTierClassification(deps.modelPricing, uniqueModels, models, analysis);
-				}
-
-				// Extract thinking effort (reasoning effort) from delta lines
-				{
-					const { effortByRequestId, defaultEffort, switchCount: effortSwitchCount } = buildReasoningEffortTimeline(lines);
-					if (defaultEffort !== null || effortByRequestId.size > 0) {
-						const byEffort: { [effort: string]: number } = {};
-						for (const [, effort] of effortByRequestId) {
-							byEffort[effort] = (byEffort[effort] || 0) + 1;
-						}
-						// If we have a defaultEffort but no per-request data, record it as the session default
-						if (effortByRequestId.size === 0 && defaultEffort !== null) {
-							byEffort[defaultEffort] = requests.length;
-						}
-						analysis.thinkingEffort = { byEffort, switchCount: effortSwitchCount, defaultEffort };
-					}
-				}
-
-				// Derive conversation patterns from mode usage before returning
-				deriveConversationPatterns(analysis);
-
+				processDeltaSessionAnalysis(deps, sessionState, lines, analysis);
 				return analysis;
 			}
 
@@ -1504,78 +1602,8 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		// Handle regular .json files
 		const sessionContent = (preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent) as unknown) as ParsedSessionJson;
 
-		// Detect session mode and count interactions per request
-		if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-			for (const requestRaw of sessionContent.requests) {
-				const request = requestRaw as SessionRequestRaw;
-				// Determine mode for each individual request
-				let requestMode = 'ask'; // default
-
-				// Check request-level agent ID first (more specific)
-				if (request.agent?.id) {
-					const agentId = request.agent.id.toLowerCase();
-					if (agentId.includes('edit')) {
-						requestMode = 'edit';
-					} else if (agentId.includes('agent')) {
-						requestMode = 'agent';
-					}
-				}
-				// Fall back to session-level mode if no request-specific agent
-				else if (sessionContent.mode?.id) {
-					const modeId = sessionContent.mode.id.toLowerCase();
-					if (modeId.includes('agent')) {
-						requestMode = 'agent';
-					} else if (modeId.includes('edit')) {
-						requestMode = 'edit';
-					}
-				}
-
-				// Count this request in the appropriate mode
-				if (requestMode === 'agent') {
-					analysis.modeUsage.agent++;
-				} else if (requestMode === 'edit') {
-					analysis.modeUsage.edit++;
-				} else {
-					analysis.modeUsage.ask++;
-				}
-
-				// Analyze all context references from this request
-				analyzeRequestContext(request, analysis.contextReferences);
-
-				// Analyze response for tool calls and MCP tools
-				if (request.response && Array.isArray(request.response)) {
-					for (const responseItemRaw of request.response as ResponseItemRaw[]) {
-						if (!responseItemRaw) { continue; }
-						const responseItem = responseItemRaw;
-						// Detect tool invocations
-						if (responseItem.kind === 'toolInvocationSerialized' ||
-							responseItem.kind === 'prepareToolInvocation') {
-							const toolName = responseItem.toolId ||
-								responseItem.toolName ||
-								responseItem.invocationMessage?.toolName ||
-								'unknown';
-
-							// Route to MCP or regular tool counters
-							recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
-						}
-
-						// Detect MCP servers starting
-						if (responseItem.kind === 'mcpServersStarting' && responseItem.didStartServerIds) {
-							for (const serverId of responseItem.didStartServerIds) {
-								analysis.mcpTools.total++;
-								analysis.mcpTools.byServer[serverId] = (analysis.mcpTools.byServer[serverId] || 0) + 1;
-							}
-						}
-
-						// Detect inline references in response items
-						if (responseItem.kind === 'inlineReference' && responseItem.inlineReference) {
-							// Treat response inlineReferences as contentReferences
-							analyzeContentReferences([responseItem], analysis.contextReferences);
-						}
-					}
-				}
-			}
-		}
+		// Process requests for mode usage, context references, and tool/MCP invocations
+		processJsonSessionRequests(deps, sessionContent, analysis);
 
 		// Calculate model switching statistics from session (pass preloaded content to avoid re-reading)
 		await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
