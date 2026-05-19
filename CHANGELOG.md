@@ -7,7 +7,6 @@
 >
 > The entries below are historical (pre-split) VS Code extension releases.
 
-## [Unreleased]
 ## [0.0.18]
 
 ## [0.0.17]
