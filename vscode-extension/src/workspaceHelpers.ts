@@ -559,119 +559,123 @@ export function extractMcpServerName(toolName: string, toolNameMap: { [key: stri
 	return parts[0] || 'unknown';
 }
 
+// ── extractRepositoryFromContentReferences helpers ───────────────────────────────────────
+
+/**
+ * Normalize a raw content-reference path to a native OS path.
+ * VS Code URI paths on Windows start with "/c:/..." and need the leading slash removed.
+ */
+function normalizeWindowsUriPath(rawPath: string): string {
+	if (process.platform === 'win32' && /^\/[a-zA-Z]:/.test(rawPath)) {
+		return rawPath.substring(1);
+	}
+	return rawPath;
+}
+
+/**
+ * Collect all file-system paths from an array of content-reference items.
+ * Handles both `reference` and `inlineReference` kinds.
+ */
+function collectFilePathsFromRefs(contentReferences: ContentReferenceItem[]): string[] {
+	const filePaths: string[] = [];
+	for (const contentRef of contentReferences) {
+		if (!contentRef || typeof contentRef !== 'object') { continue; }
+		const { kind } = contentRef;
+		let ref: ContentReferenceData | undefined;
+		if (kind === 'reference') { ref = contentRef.reference; }
+		else if (kind === 'inlineReference') { ref = contentRef.inlineReference; }
+		if (!ref) { continue; }
+		// Prefer fsPath (native format) over path (URI format)
+		const rawPath = ref.fsPath ?? ref.path;
+		if (typeof rawPath === 'string' && rawPath.length > 0) {
+			filePaths.push(normalizeWindowsUriPath(rawPath));
+		}
+	}
+	return filePaths;
+}
+
+/**
+ * Build a list of potential git root directories by walking up the directory tree.
+ * Returns paths ordered from deepest to shallowest.
+ */
+function buildPotentialGitRoots(filePath: string): string[] {
+	const normalizedPath = filePath.replace(/\\/g, '/');
+	const pathParts = normalizedPath.split('/').filter(p => p.length > 0);
+	const isWindowsDrive = process.platform === 'win32' && /^[a-zA-Z]:$/.test(pathParts[0] ?? '');
+	const roots: string[] = [];
+	for (let i = pathParts.length - 1; i >= 1; i--) {
+		let potentialRoot = pathParts.slice(0, i).join('/');
+		// On Unix, the leading '/' is lost when filtering empty path parts — restore it.
+		if (!isWindowsDrive && !potentialRoot.startsWith('/')) {
+			potentialRoot = '/' + potentialRoot;
+		}
+		roots.push(potentialRoot);
+	}
+	return roots;
+}
+
+/**
+ * Try to read the remote origin URL from a standard `.git/config` file.
+ * Returns undefined if the file does not exist or contains no origin remote.
+ */
+async function tryReadGitConfigRemote(potentialRoot: string): Promise<string | undefined> {
+	try {
+		const gitConfig = await fs.promises.readFile(path.join(potentialRoot, '.git', 'config'), 'utf8');
+		return parseGitRemoteUrl(gitConfig);
+	} catch {
+		return undefined;
+	}
+}
+
+/**
+ * Try to read the remote origin URL from a git worktree `.git` file.
+ * A worktree `.git` is a plain file containing `gitdir: <path>`.
+ * Follows the pointer up two levels to the main git directory where `config` lives.
+ * Returns undefined if not a worktree or the URL cannot be determined.
+ */
+async function tryReadWorktreeGitRemote(potentialRoot: string): Promise<string | undefined> {
+	try {
+		const gitFileContent = await fs.promises.readFile(path.join(potentialRoot, '.git'), 'utf8');
+		const match = gitFileContent.match(/^gitdir:\s*(.+)$/m);
+		if (!match) { return undefined; }
+		const gitdirPath = match[1].trim();
+		const basePath = potentialRoot.replace(/\//g, path.sep);
+		const resolvedGitdir = path.isAbsolute(gitdirPath)
+			? gitdirPath
+			: path.resolve(basePath, gitdirPath);
+		// Standard worktree: gitdir = <main>/.git/worktrees/<name>
+		// Main .git dir is 2 levels up; its config holds the remote URL.
+		const mainConfigPath = path.join(path.resolve(resolvedGitdir, '..', '..'), 'config');
+		const gitConfig = await fs.promises.readFile(mainConfigPath, 'utf8');
+		return parseGitRemoteUrl(gitConfig);
+	} catch {
+		return undefined;
+	}
+}
+
 /**
  * Extract repository remote URL from file paths found in contentReferences.
- * Looks for .git/config file in the workspace root to get the origin remote URL.
+ * Walks up the directory tree for each referenced file looking for `.git/config`.
+ * Supports both standard repos and git worktrees.
  * @param contentReferences Array of content reference objects from session data
  * @returns The repository remote URL if found, undefined otherwise
  */
 export async function extractRepositoryFromContentReferences(contentReferences: ContentReferenceItem[]): Promise<string | undefined> {
-	if (!Array.isArray(contentReferences)) {
-		return undefined;
-	}
+	if (!Array.isArray(contentReferences)) { return undefined; }
 
-	const filePaths: string[] = [];
+	const filePaths = collectFilePathsFromRefs(contentReferences);
+	if (filePaths.length === 0) { return undefined; }
 
-	// Collect all file paths from contentReferences
-	for (const contentRef of contentReferences) {
-		if (!contentRef || typeof contentRef !== 'object') {
-			continue;
-		}
-
-		let reference = null;
-		const kind = contentRef.kind;
-
-		if (kind === 'reference' && contentRef.reference) {
-			reference = contentRef.reference;
-		} else if (kind === 'inlineReference' && contentRef.inlineReference) {
-			reference = contentRef.inlineReference;
-		}
-
-		if (reference) {
-			// Prefer fsPath (native format) over path (URI format)
-			const rawPath = reference.fsPath || reference.path;
-			if (typeof rawPath === 'string' && rawPath.length > 0) {
-				// Convert VS Code URI path format to native path on Windows
-				// URI paths look like "/c:/Users/..." but should be "c:/Users/..." on Windows
-				let normalizedPath = rawPath;
-				if (process.platform === 'win32' && normalizedPath.match(/^\/[a-zA-Z]:/)) {
-					normalizedPath = normalizedPath.substring(1); // Remove leading slash
-				}
-				filePaths.push(normalizedPath);
-			}
-		}
-	}
-
-	if (filePaths.length === 0) {
-		return undefined;
-	}
-
-	// Find the most likely workspace root by looking for common parent directories
-	// Try each file path and look for a .git/config file in parent directories
 	const checkedRoots = new Set<string>();
-
 	for (const filePath of filePaths) {
-		// Normalize path separators to forward slashes for consistent splitting
-		const normalizedPath = filePath.replace(/\\/g, '/');
-		const pathParts = normalizedPath.split('/').filter(p => p.length > 0);
-
-		// Walk up the directory tree looking for .git/config
-		for (let i = pathParts.length - 1; i >= 1; i--) {
-			// Reconstruct path - on Windows, first part is drive letter (e.g., "c:")
-			let potentialRoot = pathParts.slice(0, i).join('/');
-
-			// On Windows, ensure we have a valid absolute path
-			if (process.platform === 'win32' && pathParts[0].match(/^[a-zA-Z]:$/)) {
-				// Path starts with drive letter, already valid
-			} else if (process.platform !== 'win32' && !potentialRoot.startsWith('/')) {
-				// On Unix, prepend / for absolute path
-				potentialRoot = '/' + potentialRoot;
-			}
-
-			// Skip if we've already checked this root
-			if (checkedRoots.has(potentialRoot)) {
-				continue;
-			}
+		for (const potentialRoot of buildPotentialGitRoots(filePath)) {
+			if (checkedRoots.has(potentialRoot)) { continue; }
 			checkedRoots.add(potentialRoot);
-
-			const gitConfigPath = path.join(potentialRoot, '.git', 'config');
-			try {
-				const gitConfig = await fs.promises.readFile(gitConfigPath, 'utf8');
-				const remoteUrl = parseGitRemoteUrl(gitConfig);
-				if (remoteUrl) {
-					return remoteUrl;
-				}
-			} catch {
-				// No .git/config at this level, continue up the tree
-			}
-
-			// Also check if .git is a file (git worktree) — contains "gitdir: <path>"
-			const gitFilePath = path.join(potentialRoot, '.git');
-			try {
-				const gitFileContent = await fs.promises.readFile(gitFilePath, 'utf8');
-				const match = gitFileContent.match(/^gitdir:\s*(.+)$/m);
-				if (match) {
-					const gitdirPath = match[1].trim();
-					const basePath = potentialRoot.replace(/\//g, path.sep);
-					const resolvedGitdir = path.isAbsolute(gitdirPath)
-						? gitdirPath
-						: path.resolve(basePath, gitdirPath);
-					// Standard worktree: gitdir = <main>/.git/worktrees/<name>
-					// Main .git dir is 2 levels up; its config holds the remote URL
-					const mainGitDir = path.resolve(resolvedGitdir, '..', '..');
-					const mainConfigPath = path.join(mainGitDir, 'config');
-					const gitConfig = await fs.promises.readFile(mainConfigPath, 'utf8');
-					const remoteUrl = parseGitRemoteUrl(gitConfig);
-					if (remoteUrl) {
-						return remoteUrl;
-					}
-				}
-			} catch {
-				// Not a worktree or can't read gitdir, continue
-			}
+			const remoteUrl = await tryReadGitConfigRemote(potentialRoot) ??
+				await tryReadWorktreeGitRemote(potentialRoot);
+			if (remoteUrl) { return remoteUrl; }
 		}
 	}
-
 	return undefined;
 }
 
