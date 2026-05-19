@@ -191,6 +191,45 @@ export interface UsageAnalysisDeps {
 
 
 /**
+ * Increment the appropriate mode counter based on modeType string.
+ */
+function incrementModeUsage(modeType: string, modeUsage: ModeUsage): void {
+	if (modeType === 'agent') {
+		modeUsage.agent++;
+	} else if (modeType === 'edit') {
+		modeUsage.edit++;
+	} else if (modeType === 'plan') {
+		modeUsage.plan++;
+	} else if (modeType === 'customAgent') {
+		modeUsage.customAgent++;
+	} else {
+		modeUsage.ask++;
+	}
+}
+
+/**
+ * Record a tool invocation, routing to MCP counters or regular tool-call counters.
+ */
+function recordToolOrMcpInvocation(
+	toolName: string,
+	analysis: SessionUsageAnalysis,
+	toolNameMap: { [key: string]: string }
+): void {
+	if (isMcpTool(toolName)) {
+		// Count as MCP tool
+		analysis.mcpTools.total++;
+		const serverName = extractMcpServerName(toolName, toolNameMap);
+		analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
+		const normalizedTool = normalizeMcpToolName(toolName);
+		analysis.mcpTools.byTool[normalizedTool] = (analysis.mcpTools.byTool[normalizedTool] || 0) + 1;
+	} else {
+		// Count as regular tool call
+		analysis.toolCalls.total++;
+		analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+	}
+}
+
+/**
  * Merge usage analysis data into period stats
  */
 export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
@@ -1219,17 +1258,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 					if (!request || !request.requestId) { continue; }
 
 					// Count by mode type
-					if (sessionModeType === 'agent') {
-						analysis.modeUsage.agent++;
-					} else if (sessionModeType === 'edit') {
-						analysis.modeUsage.edit++;
-					} else if (sessionModeType === 'plan') {
-						analysis.modeUsage.plan++;
-					} else if (sessionModeType === 'customAgent') {
-						analysis.modeUsage.customAgent++;
-					} else {
-						analysis.modeUsage.ask++;
-					}
+					incrementModeUsage(sessionModeType, analysis.modeUsage);
 
 					// Check for agent in request
 					if (request.agent?.id) {
@@ -1249,17 +1278,8 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 							if (responseItem.kind === 'toolInvocationSerialized' || responseItem.kind === 'prepareToolInvocation') {
 								const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || responseItem.toolSpecificData?.kind || 'unknown';
 
-								// Check if this is an MCP tool by name pattern
-								if (isMcpTool(toolName)) {
-									analysis.mcpTools.total++;
-									const serverName = extractMcpServerName(toolName, deps.toolNameMap);
-									analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
-									const normalizedTool = normalizeMcpToolName(toolName);
-									analysis.mcpTools.byTool[normalizedTool] = (analysis.mcpTools.byTool[normalizedTool] || 0) + 1;
-								} else {
-									analysis.toolCalls.total++;
-									analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-								}
+								// Route to MCP or regular tool counters
+								recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
 							}
 						}
 					}
@@ -1417,17 +1437,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 						for (const request of event.v) {
 							if (request.requestId) {
 								// Count by mode type
-								if (sessionMode === 'agent') {
-									analysis.modeUsage.agent++;
-								} else if (sessionMode === 'edit') {
-									analysis.modeUsage.edit++;
-								} else if (sessionMode === 'plan') {
-									analysis.modeUsage.plan++;
-								} else if (sessionMode === 'customAgent') {
-									analysis.modeUsage.customAgent++;
-								} else {
-									analysis.modeUsage.ask++;
-								}
+								incrementModeUsage(sessionMode, analysis.modeUsage);
 							}
 							// Check for agent in request
 							if (request.agent?.id) {
@@ -1485,19 +1495,8 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 					if (event.type === 'tool.call' || event.type === 'tool.result' || event.type === 'tool.execution_start') {
 						const toolName = event.data?.toolName || event.toolName || 'unknown';
 
-						// Check if this is an MCP tool by name pattern
-						if (isMcpTool(toolName)) {
-							// Count as MCP tool
-							analysis.mcpTools.total++;
-							const serverName = extractMcpServerName(toolName, deps.toolNameMap);
-							analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
-							const normalizedTool = normalizeMcpToolName(toolName);
-							analysis.mcpTools.byTool[normalizedTool] = (analysis.mcpTools.byTool[normalizedTool] || 0) + 1;
-						} else {
-							// Count as regular tool call
-							analysis.toolCalls.total++;
-							analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-						}
+						// Route to MCP or regular tool counters
+						recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
 					}
 
 					// Detect MCP tools from explicit MCP events
@@ -1585,19 +1584,8 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 								responseItem.invocationMessage?.toolName ||
 								'unknown';
 
-							// Check if this is an MCP tool by name pattern
-							if (isMcpTool(toolName)) {
-								// Count as MCP tool
-								analysis.mcpTools.total++;
-								const serverName = extractMcpServerName(toolName, deps.toolNameMap);
-								analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
-								const normalizedTool = normalizeMcpToolName(toolName);
-								analysis.mcpTools.byTool[normalizedTool] = (analysis.mcpTools.byTool[normalizedTool] || 0) + 1;
-							} else {
-								// Count as regular tool call
-								analysis.toolCalls.total++;
-								analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-							}
+							// Route to MCP or regular tool counters
+							recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
 						}
 
 						// Detect MCP servers starting
