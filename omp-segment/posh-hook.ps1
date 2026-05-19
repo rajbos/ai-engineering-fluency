@@ -18,14 +18,14 @@
 # 4. Reload your profile: . $PROFILE
 
 function Set-PoshContext {
-    # Only refresh every 15 minutes to keep prompt fast.
+    # Only refresh every 5 minutes to keep prompt fast.
     $lastRun = if ($env:COPILOT_TOKEN_LAST_RUN) {
         try { [DateTime]::Parse($env:COPILOT_TOKEN_LAST_RUN) } catch { [DateTime]::MinValue }
     } else {
         [DateTime]::MinValue
     }
 
-    if (([DateTime]::UtcNow - $lastRun).TotalMinutes -lt 15) { return }
+    if (([DateTime]::UtcNow - $lastRun).TotalMinutes -lt 5) { return }
 
     try {
         $data   = ai-engineering-fluency usage --json | ConvertFrom-Json

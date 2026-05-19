@@ -14,7 +14,7 @@ import { discoverSessionFiles, calculateDetailedStats, formatTokens } from '../h
 
 const SEGMENT_CACHE_DIR = path.join(os.homedir(), '.copilot-token-tracker');
 const SEGMENT_CACHE_PATH = path.join(SEGMENT_CACHE_DIR, 'omp-segment-cache.json');
-const DEFAULT_TTL_MINUTES = 15;
+const DEFAULT_TTL_MINUTES = 5;
 
 interface SegmentCacheFile {
 	updatedAt: string;

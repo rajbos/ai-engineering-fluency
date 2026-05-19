@@ -20,7 +20,9 @@ Two caches work together:
 | Cache | Location | TTL | Purpose |
 |---|---|---|---|
 | **Oh-my-posh segment cache** | in-memory, per shell session | 5 min (configurable) | Prevents calling the CLI on every keystroke |
-| **CLI segment cache** | `~/.copilot-token-tracker/omp-segment-cache.json` | 15 min (configurable) | Prevents re-parsing session files when OMP cache expires |
+| **CLI segment cache** | `~/.copilot-token-tracker/omp-segment-cache.json` | 5 min (configurable) | Prevents re-parsing session files when OMP cache expires |
+
+> **Method 2 (env vars) warning:** Do **not** add a `"cache"` block to the env var segment in your OMP theme. OMP's segment cache stores the rendered string for the full duration — so if `Set-PoshContext` updates `$env:COPILOT_TOKENS_TODAY`, the prompt still shows the stale cached value until the OMP cache expires. Since `Set-PoshContext` already controls the refresh rate, the OMP cache only adds extra staleness here without any benefit.
 
 A session parsing run (cache miss) typically takes < 1 second.
 
@@ -136,7 +138,7 @@ Save the file.
 }
 ```
 
-The hook updates `$env:COPILOT_TOKENS_TODAY` and `$env:COPILOT_TOKENS_30D` at most once every 15 minutes.
+The hook updates `$env:COPILOT_TOKENS_TODAY` and `$env:COPILOT_TOKENS_30D` at most once every 5 minutes.
 
 ---
 
@@ -191,7 +193,7 @@ The hook updates `$env:COPILOT_TOKENS_TODAY` and `$env:COPILOT_TOKENS_30D` at mo
 ai-engineering-fluency segment [options]
 
 Options:
-  --ttl <minutes>   Segment cache TTL in minutes (default: 15)
+  --ttl <minutes>   Segment cache TTL in minutes (default: 5)
   --refresh         Force refresh — bypass the segment output cache
   --hide-zero       Output nothing when both token counts are zero
   --no-cache        Also bypass the underlying session file cache
@@ -271,8 +273,9 @@ oh-my-posh init pwsh --config "$env:TEMP\test.omp.json" | Invoke-Expression
 | Segment shows `today · 30d` without values | `Set-PoshContext` not called before first render | Add `Set-PoshContext` call at end of `$PROFILE` after the function definition |
 | Segment never updates | OMP cache too long | Set `cache.duration` to `"1m"` or use `--hide-zero` |
 | Stale numbers | CLI cache still valid | Run `ai-engineering-fluency segment --refresh` |
+| Prompt shows stale data even after refresh | OMP `cache` block on a Method 2 env var segment | **Remove** the `"cache"` block from the env var segment — OMP caches the rendered string, bypassing env var updates from `Set-PoshContext` |
 | Icon shows as a box / `?` | Not using a Nerd Font | Replace `\uec1e` with `🤖` or remove the icon |
-| Prompt slows down | OMP cache not set | Add `"cache": {"duration": "5m", "strategy": "session"}` to the segment |
+| Prompt slows down | OMP cache not set (Method 1 only) | Add `"cache": {"duration": "5m", "strategy": "session"}` to the `{{ cmd }}` segment |
 
 ---
 
@@ -398,13 +401,13 @@ To use Nerd Font glyphs instead of plain ASCII separators, replace the diamond a
 
 In the standard shell prompt setup, oh-my-posh's segment-level `cache` block prevents calling the CLI on every keystroke. That OMP cache **does not apply** in the Copilot CLI statusline context — each Copilot status refresh calls the script fresh.
 
-What does help is the CLI's own segment cache (`~/.copilot-token-tracker/omp-segment-cache.json`, default 15-minute TTL). After the first call, subsequent statusline renders return the cached value in ~150 ms instead of the full ~7 s cold parse.
+What does help is the CLI's own segment cache (`~/.copilot-token-tracker/omp-segment-cache.json`, default 5-minute TTL). After the first call, subsequent statusline renders return the cached value in ~150 ms instead of the full ~7 s cold parse.
 
 Tune the TTL with the `--ttl` flag inside `statusline.ps1` if you want more or less freshness:
 
 ```powershell
 # Inside statusline.ps1 — change the ai-engineering-fluency segment call:
-$tokenOutput = & ai-engineering-fluency segment --ttl 5 2>$null   # refresh every 5 min
+$tokenOutput = & ai-engineering-fluency segment --ttl 2 2>$null   # refresh every 2 min
 ```
 
 ---
