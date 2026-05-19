@@ -4,8 +4,6 @@ All notable changes to the VS Code extension will be documented in this file.
 
 Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
 
-## [Unreleased]
-
 ## [0.10.1] - 2026-05-19
 
 ### Bug Fixes
