@@ -42,6 +42,145 @@ import { detectJetBrainsModeFromContent, type JetBrainsMode } from './jetbrains'
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isAnalyzable } from './ecosystemAdapter';
 
+
+// ---------------------------------------------------------------------------
+// Internal types for parsed session log JSON structures
+// ---------------------------------------------------------------------------
+
+/** Reference object inside a contentReferences item */
+interface ContentRefObject {
+fsPath?: string;
+path?: string;
+name?: string;
+}
+
+/** A single item from a session contentReferences array */
+interface ContentRefItemRaw {
+kind?: string;
+reference?: ContentRefObject;
+inlineReference?: ContentRefObject;
+}
+
+/** Variable container from a session request variableData field */
+interface VariableDataRaw {
+variables?: Array<{
+kind?: string;
+name?: string;
+value?: { fsPath?: string; path?: string; external?: string };
+}>;
+}
+
+/** A request entry in a session file */
+interface SessionRequestRaw {
+requestId?: string;
+timestamp?: number;
+timeSpentWaiting?: number;
+agent?: { id?: string };
+message?: {
+text?: string;
+parts?: Array<{ text?: string }>;
+};
+contentReferences?: unknown[];
+variableData?: unknown;
+response?: unknown[];
+result?: {
+timings?: { firstProgress?: number; totalElapsed?: number };
+usage?: { promptTokens?: number; completionTokens?: number };
+promptTokens?: number;
+outputTokens?: number;
+details?: string;
+metadata?: {
+promptTokens?: number;
+outputTokens?: number;
+modelId?: string;
+};
+};
+modelId?: string;
+}
+
+/** A parsed regular JSON session content */
+interface ParsedSessionJson {
+requests?: unknown[];
+mode?: { id?: string };
+creationDate?: number;
+lastMessageDate?: number;
+inputState?: {
+mode?: string;
+selectedModel?: { metadata?: { id?: string }; identifier?: string };
+selections?: Array<{
+startLineNumber?: number;
+endLineNumber?: number;
+startColumn?: number;
+endColumn?: number;
+}>;
+};
+selectedModel?: { metadata?: { id?: string }; identifier?: string };
+}
+
+/** A JSONL event (delta-based or CLI format) */
+interface JsonlEventRaw {
+kind?: number;
+k?: string[];
+v?: unknown;
+type?: string;
+data?: {
+selectedModel?: string;
+newModel?: string;
+reasoningEffort?: string;
+content?: string;
+outputTokens?: number;
+result?: {
+content?: unknown;
+detailedContent?: unknown;
+};
+modelMetrics?: Record<string, {
+usage?: {
+inputTokens?: number;
+outputTokens?: number;
+cacheReadTokens?: number;
+cacheWriteTokens?: number;
+};
+}>;
+mcpServer?: string;
+toolName?: string;
+};
+model?: string;
+toolName?: string;
+}
+
+/** Reconstructed delta session state (from applyDelta over JSONL lines) */
+interface DeltaSessionState {
+	requests?: unknown[];
+	creationDate?: number;
+	lastMessageDate?: number;
+	inputState?: {
+		mode?: string;
+		selectedModel?: { identifier?: string; metadata?: { id?: string } };
+		selections?: Array<{
+			startLineNumber?: number;
+			endLineNumber?: number;
+			startColumn?: number;
+			endColumn?: number;
+		}>;
+	};
+	selectedModel?: { identifier?: string; metadata?: { id?: string } };
+	[key: string]: unknown;
+}
+
+/** A response item in a session request */
+interface ResponseItemRaw {
+	kind?: string;
+	uri?: { path?: string };
+	isEdit?: boolean;
+	toolId?: string;
+	toolName?: string;
+	invocationMessage?: { toolName?: string };
+	toolSpecificData?: { kind?: string };
+	value?: string;
+	didStartServerIds?: string[];
+	inlineReference?: ContentRefObject;
+}
+
 export interface UsageAnalysisDeps {
 	warn: (msg: string) => void;
 	ecosystems: IEcosystemAdapter[];
@@ -351,15 +490,16 @@ export function analyzeContextReferences(text: string, refs: ContextReferenceUsa
  * Looks for kind: "reference" entries and tracks by kind, path patterns.
  * Also increments specific category counters like refs.file when appropriate.
  */
-export function analyzeContentReferences(contentReferences: any[], refs: ContextReferenceUsage): void {
+export function analyzeContentReferences(contentReferences: unknown[], refs: ContextReferenceUsage): void {
 	if (!Array.isArray(contentReferences)) {
 		return;
 	}
 
-	for (const contentRef of contentReferences) {
-		if (!contentRef || typeof contentRef !== 'object') {
+	for (const item of contentReferences) {
+		if (!item || typeof item !== 'object') {
 			continue;
 		}
+		const contentRef = item as ContentRefItemRaw;
 
 		// Track by kind
 		const kind = contentRef.kind;
@@ -433,12 +573,16 @@ export function analyzeContentReferences(contentReferences: any[], refs: Context
  * Analyze variableData to track prompt file attachments and other variable-based context.
  * This captures automatic attachments like copilot-instructions.md via variable system.
  */
-export function analyzeVariableData(variableData: any, refs: ContextReferenceUsage): void {
-	if (!variableData || !Array.isArray(variableData.variables)) {
+export function analyzeVariableData(variableData: unknown, refs: ContextReferenceUsage): void {
+	if (!variableData || typeof variableData !== 'object') {
+		return;
+	}
+	const data = variableData as VariableDataRaw;
+	if (!Array.isArray(data.variables)) {
 		return;
 	}
 
-	for (const variable of variableData.variables) {
+	for (const variable of data.variables) {
 		if (!variable || typeof variable !== 'object') {
 			continue;
 		}
@@ -499,29 +643,40 @@ export function deriveConversationPatterns(analysis: SessionUsageAnalysis): void
  * Analyze a request object for all context references.
  * This is the unified method that processes text, contentReferences, and variableData.
  */
-export function analyzeRequestContext(request: any, refs: ContextReferenceUsage): void {
+export function analyzeRequestContext(request: unknown, refs: ContextReferenceUsage): void {
+	if (!request || typeof request !== 'object') { return; }
+	const req = request as Record<string, unknown>;
+
 	// Analyze user message text for context references
-	if (request.message) {
-		if (request.message.text) {
-			analyzeContextReferences(request.message.text, refs);
+	const message = req['message'];
+	if (message && typeof message === 'object') {
+		const msg = message as Record<string, unknown>;
+		if (typeof msg['text'] === 'string') {
+			analyzeContextReferences(msg['text'], refs);
 		}
-		if (request.message.parts) {
-			for (const part of request.message.parts) {
-				if (part.text) {
-					analyzeContextReferences(part.text, refs);
+		const parts = msg['parts'];
+		if (Array.isArray(parts)) {
+			for (const part of parts) {
+				if (part && typeof part === 'object') {
+					const p = part as Record<string, unknown>;
+					if (typeof p['text'] === 'string') {
+						analyzeContextReferences(p['text'], refs);
+					}
 				}
 			}
 		}
 	}
 
 	// Analyze contentReferences if present
-	if (request.contentReferences && Array.isArray(request.contentReferences)) {
-		analyzeContentReferences(request.contentReferences, refs);
+	const contentRefs = req['contentReferences'];
+	if (Array.isArray(contentRefs)) {
+		analyzeContentReferences(contentRefs, refs);
 	}
 
 	// Analyze variableData if present
-	if (request.variableData) {
-		analyzeVariableData(request.variableData, refs);
+	const variableData = req['variableData'];
+	if (variableData !== undefined) {
+		analyzeVariableData(variableData, refs);
 	}
 }
 
@@ -583,7 +738,7 @@ export function applyModelTierClassification(
  * Calculate model switching statistics for a session file.
  * This method updates the analysis.modelSwitching field in place.
  */
-export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'warn' | 'modelPricing' | 'tokenEstimators' | 'ecosystems'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: any): Promise<void> {
+export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'warn' | 'modelPricing' | 'tokenEstimators' | 'ecosystems'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<void> {
 	try {
 		// Use non-cached method to avoid circular dependency
 		// (getSessionFileDataCached -> analyzeSessionUsage -> getModelUsageFromSessionCached -> getSessionFileDataCached)
@@ -627,13 +782,14 @@ export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'war
 		}
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
 		if (!isJsonl) {
-			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+			const sessionContent = (preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent) as unknown) as ParsedSessionJson;
 			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
 				let previousModel: string | null = null;
 				let switchCount = 0;
 				const tierCounts = { standard: 0, premium: 0, unknown: 0 };
 
-				for (const request of sessionContent.requests) {
+				for (const requestRaw of sessionContent.requests) {
+					const request = requestRaw as SessionRequestRaw;
 					const currentModel = getModelFromRequest(request, deps.modelPricing);
 					
 					// Count model switches
@@ -756,7 +912,7 @@ export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'war
  * - Conversation patterns (multi-turn sessions)
  * - Agent type usage
  */
-export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: any): Promise<void> {
+export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<void> {
 	try {
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 
@@ -772,7 +928,7 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 		let totalApplies = 0;
 		let totalCodeBlocks = 0;
 		const timestamps: number[] = [];
-		const timingsData: { firstProgress: number; totalElapsed: number; }[] = [];
+		const timingsData: { firstProgress?: number; totalElapsed?: number; }[] = [];
 		const waitTimes: number[] = [];
 		const agentCounts = {
 			editsAgent: 0,
@@ -798,7 +954,7 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 			
 			if (isDeltaBased) {
 				// Reconstruct full state
-				let sessionState: any = {};
+				let sessionState: DeltaSessionState = {};
 				for (const line of lines) {
 					try {
 						const delta = JSON.parse(line);
@@ -809,17 +965,18 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 				}
 				
 				// Extract timestamps
-				if (sessionState.creationDate) { timestamps.push(sessionState.creationDate); }
-				if (sessionState.lastMessageDate) { timestamps.push(sessionState.lastMessageDate); }
+				if (sessionState.creationDate !== undefined) { timestamps.push(sessionState.creationDate); }
+				if (sessionState.lastMessageDate !== undefined) { timestamps.push(sessionState.lastMessageDate); }
 				
 				// Process requests
 				const requests = sessionState.requests || [];
 				
-				for (const request of requests) {
-					if (!request) { continue; }
+				for (const requestRaw of requests) {
+					if (!requestRaw) { continue; }
+					const request = requestRaw as SessionRequestRaw;
 					
 					// Track timestamps
-					if (request.timestamp) { timestamps.push(request.timestamp); }
+					if (request.timestamp !== undefined) { timestamps.push(request.timestamp); }
 					
 					// Track timings
 					if (request.result?.timings) {
@@ -847,8 +1004,9 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 					
 					// Track edit scope and apply usage
 					if (request.response && Array.isArray(request.response)) {
-						for (const resp of request.response) {
-							if (!resp) { continue; }
+						for (const respRaw of request.response as ResponseItemRaw[]) {
+							if (!respRaw) { continue; }
+							const resp = respRaw;
 							if (resp.kind === 'textEditGroup' && resp.uri) {
 								const filePath = resp.uri.path || JSON.stringify(resp.uri);
 								editedFiles.add(filePath);
@@ -865,7 +1023,7 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 			}
 		} else {
 			// Handle regular JSON files
-			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+			const sessionContent = (preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent) as unknown) as ParsedSessionJson;
 			
 			// Extract timestamps
 			if (sessionContent.creationDate) { timestamps.push(sessionContent.creationDate); }
@@ -873,9 +1031,10 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 			
 			// Process requests
 			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-				for (const request of sessionContent.requests) {
+				for (const requestRaw of sessionContent.requests) {
+					const request = requestRaw as SessionRequestRaw;
 					// Track timestamps
-					if (request.timestamp) { timestamps.push(request.timestamp); }
+					if (request.timestamp !== undefined) { timestamps.push(request.timestamp); }
 					
 					// Track timings
 					if (request.result?.timings) {
@@ -903,8 +1062,9 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 					
 					// Track edit scope and apply usage
 					if (request.response && Array.isArray(request.response)) {
-						for (const resp of request.response) {
-							if (!resp) { continue; }
+						for (const respRaw of request.response as ResponseItemRaw[]) {
+							if (!respRaw) { continue; }
+							const resp = respRaw;
 							if (resp.kind === 'textEditGroup' && resp.uri) {
 								const filePath = resp.uri.path || JSON.stringify(resp.uri);
 								editedFiles.add(filePath);
@@ -996,7 +1156,7 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 /**
  * Analyze a session file for usage patterns (tool calls, modes, context references, MCP tools)
  */
-export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<SessionUsageAnalysis> {
+export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<SessionUsageAnalysis> {
 	const analysis: SessionUsageAnalysis = createEmptySessionUsageAnalysis();
 
 	try {
@@ -1028,7 +1188,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 
 			if (isDeltaBased) {
 				// Delta-based format: reconstruct full state first, then process
-				let sessionState: any = {};
+				let sessionState: DeltaSessionState = {};
 				for (const line of lines) {
 					try {
 						const delta = JSON.parse(line);
@@ -1054,7 +1214,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 				}
 
 				// Process reconstructed requests array
-				const requests = sessionState.requests || [];
+				const requests = (sessionState.requests ?? []) as SessionRequestRaw[];
 				for (const request of requests) {
 					if (!request || !request.requestId) { continue; }
 
@@ -1083,8 +1243,9 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 
 					// Extract tool calls and MCP tools from request.response array
 					if (request.response && Array.isArray(request.response)) {
-						for (const responseItem of request.response) {
-							if (!responseItem) { continue; }
+						for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+							if (!responseItemRaw) { continue; }
+							const responseItem = responseItemRaw;
 							if (responseItem.kind === 'toolInvocationSerialized' || responseItem.kind === 'prepareToolInvocation') {
 								const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || responseItem.toolSpecificData?.kind || 'unknown';
 
@@ -1280,8 +1441,9 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 
 							// Extract tool calls from request.response array (when full request is added)
 							if (request.response && Array.isArray(request.response)) {
-								for (const responseItem of request.response) {
-									if (!responseItem) { continue; }
+								for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+									if (!responseItemRaw) { continue; }
+									const responseItem = responseItemRaw;
 									if (responseItem.kind === 'toolInvocationSerialized' || responseItem.kind === 'prepareToolInvocation') {
 										analysis.toolCalls.total++;
 										const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || responseItem.toolSpecificData?.kind || 'unknown';
@@ -1370,11 +1532,12 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		}
 
 		// Handle regular .json files
-		const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+		const sessionContent = (preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent) as unknown) as ParsedSessionJson;
 
 		// Detect session mode and count interactions per request
 		if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-			for (const request of sessionContent.requests) {
+			for (const requestRaw of sessionContent.requests) {
+				const request = requestRaw as SessionRequestRaw;
 				// Determine mode for each individual request
 				let requestMode = 'ask'; // default
 
@@ -1411,8 +1574,9 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 
 				// Analyze response for tool calls and MCP tools
 				if (request.response && Array.isArray(request.response)) {
-					for (const responseItem of request.response) {
-						if (!responseItem) { continue; }
+					for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+						if (!responseItemRaw) { continue; }
+						const responseItem = responseItemRaw;
 						// Detect tool invocations
 						if (responseItem.kind === 'toolInvocationSerialized' ||
 							responseItem.kind === 'prepareToolInvocation') {
@@ -1466,7 +1630,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 	return analysis;
 }
 
-export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'warn' | 'tokenEstimators' | 'modelPricing' | 'ecosystems'>, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<ModelUsage> {
+export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'warn' | 'tokenEstimators' | 'modelPricing' | 'ecosystems'>, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<ModelUsage> {
 	const modelUsage: ModelUsage = {};
 
 	// Dispatch to ecosystem adapter when available
@@ -1495,7 +1659,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 			let defaultModel = 'unknown';
 
 			// For delta-based formats, reconstruct state to extract actual usage
-			let sessionState: any = {};
+			let sessionState: DeltaSessionState = {};
 			let isDeltaBased = false;
 			// For CLI (non-delta) sessions: capture exact per-model usage from session.shutdown
 			let cliShutdownModelUsage: ModelUsage | null = null;
@@ -1560,7 +1724,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 						// shutdown events so no segment's tokens are lost.
 						if (event.type === 'session.shutdown' && event.data?.modelMetrics) {
 							if (!cliShutdownModelUsage) { cliShutdownModelUsage = {}; }
-							for (const [modelName, metrics] of Object.entries(event.data.modelMetrics) as [string, any][]) {
+							for (const [modelName, metrics] of Object.entries(event.data.modelMetrics as Record<string, { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } }>)) {
 								const usage = metrics?.usage;
 								if (usage) {
 									if (!cliShutdownModelUsage[modelName]) {
@@ -1628,8 +1792,10 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 
 			// For delta-based formats, extract actual usage from reconstructed state
 			if (isDeltaBased && sessionState.requests && Array.isArray(sessionState.requests)) {
-				for (const request of sessionState.requests) {
-					if (!request || !request.requestId) { continue; }
+				for (const requestRaw of sessionState.requests) {
+					if (!requestRaw) { continue; }
+					const request = requestRaw as SessionRequestRaw;
+					if (!request.requestId) { continue; }
 
 					// Extract request-level modelId
 					let requestModel = defaultModel;
@@ -1665,7 +1831,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 							modelUsage[requestModel].inputTokens += estimateTokensFromText(request.message.text, requestModel, deps.tokenEstimators);
 						}
 						if (request.response && Array.isArray(request.response)) {
-							for (const responseItem of request.response) {
+							for (const responseItem of request.response as ResponseItemRaw[]) {
 								if (responseItem?.value) {
 									modelUsage[requestModel].outputTokens += estimateTokensFromText(responseItem.value, requestModel, deps.tokenEstimators);
 								}
@@ -1675,7 +1841,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 
 					// Sub-agent invocations are additive: not included in parent actual token counts
 					if (request.response && Array.isArray(request.response)) {
-						for (const responseItem of request.response) {
+						for (const responseItem of request.response as ResponseItemRaw[]) {
 							const subAgent = extractSubAgentData(responseItem);
 							if (subAgent) {
 								const saModel = subAgent.modelName || requestModel;
@@ -1691,7 +1857,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 			// FALLBACK: If reconstruction missed result data, use regex extraction from raw lines
 			const rawModelUsage = extractPerRequestUsageFromRawLines(lines);
 			for (const [reqIdx, extracted] of rawModelUsage) {
-				const request = sessionState.requests?.[reqIdx];
+				const request = sessionState.requests?.[reqIdx] as SessionRequestRaw | undefined;
 				if (!request) { continue; }
 				// Only use regex fallback if reconstruction didn't already provide usage
 				if (request.result?.usage || (typeof request.result?.promptTokens === 'number') || (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number')) { continue; }
@@ -1706,10 +1872,11 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 		}
 
 		// Handle regular .json files
-		const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+		const sessionContent = (preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent) as unknown) as ParsedSessionJson;
 
 		if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-			for (const request of sessionContent.requests) {
+			for (const requestRaw of sessionContent.requests) {
+				const request = requestRaw as SessionRequestRaw;
 				// Get model for this request
 				const model = getModelFromRequest(request, deps.modelPricing);
 
@@ -1746,7 +1913,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 
 					// Estimate tokens from assistant response (output)
 					if (request.response && Array.isArray(request.response)) {
-						for (const responseItem of request.response) {
+						for (const responseItem of request.response as ResponseItemRaw[]) {
 							if (responseItem?.value) {
 								const tokens = estimateTokensFromText(responseItem.value, model, deps.tokenEstimators);
 								modelUsage[model].outputTokens += tokens;
@@ -1757,7 +1924,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 
 				// Sub-agent invocations are additive: not included in parent actual token counts
 				if (request.response && Array.isArray(request.response)) {
-					for (const responseItem of request.response) {
+					for (const responseItem of request.response as ResponseItemRaw[]) {
 						const subAgent = extractSubAgentData(responseItem);
 						if (subAgent) {
 							const saModel = subAgent.modelName || model;
@@ -1775,3 +1942,6 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 
 	return modelUsage;
 }
+
+
+
