@@ -1,4 +1,5 @@
 import * as vscode from "vscode";
+import type { Stats } from "fs";
 
 import { safeStringifyError } from "../utils/errors";
 import {
@@ -65,7 +66,7 @@ export interface BackendFacadeDeps {
     fileSize: number,
   ) => Promise<SessionFileCache>;
   // Stat helper for OpenCode DB virtual paths
-  statSessionFile: (sessionFile: string) => Promise<any>;
+  statSessionFile: (sessionFile: string) => Promise<Stats>;
   // OpenCode session handling
   isOpenCodeSession?: (sessionFile: string) => boolean;
   getOpenCodeSessionData?: (sessionFile: string) => Promise<{
@@ -176,6 +177,12 @@ export class BackendFacade {
 
   public clearQueryCache(): void {
     this.queryService.clearQueryCache();
+  }
+
+  private afterConfigChange(): void {
+    this.startTimerIfEnabled();
+    this.deps.updateTokenStats?.();
+    this.clearQueryCache();
   }
 
   public dispose(): void {
@@ -343,9 +350,22 @@ export class BackendFacade {
       machines: Map<string, string>;
     };
   }> {
-    // Delegate to syncService which already has the implementation
+    // Delegate to syncService which already has the implementation.
+    // computeDailyRollupsFromLocalSessions is private on SyncService; we define a
+    // standalone interface and double-cast (via unknown) to preserve type-safety at
+    // the call site rather than using an untyped "as any".
+    interface SyncServiceInternals {
+      computeDailyRollupsFromLocalSessions(args: {
+        lookbackDays: number;
+        userId?: string;
+      }): Promise<{
+        rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>;
+        workspaceNamesById: Record<string, string>;
+        machineNamesById: Record<string, string>;
+      }>;
+    }
     const result = await (
-      this.syncService as any
+      this.syncService as unknown as SyncServiceInternals
     ).computeDailyRollupsFromLocalSessions(args);
     // The syncService returns:
     // { rollups: Map<string, { key, value }>, workspaceNamesById, machineNamesById }
@@ -472,7 +492,10 @@ export class BackendFacade {
    * rollups for every day within the given lookback window (default 365 days).
    * Use this when the normal sync has missed data due to the mtime filter.
    */
-  public async backfillHistoricalData(maxLookbackDays = 365, onProgress?: (processed: number, total: number, daysFound: number) => void): Promise<void> {
+  public async backfillHistoricalData(
+    maxLookbackDays = 365,
+    onProgress?: (processed: number, total: number, daysFound: number) => void,
+  ): Promise<void> {
     const settings = this.getSettings();
     await this.syncService.backfillSync(settings, this.isConfigured(settings), maxLookbackDays, onProgress);
     this.clearQueryCache();
@@ -480,7 +503,7 @@ export class BackendFacade {
 
   public async tryGetBackendDetailedStatsForStatusBar(
     settings: BackendSettings,
-  ): Promise<any | undefined> {
+  ): Promise<unknown> {
     const sharingPolicy = computeBackendSharingPolicy({
       enabled: settings.enabled,
       profile: settings.sharingProfile,
@@ -493,7 +516,7 @@ export class BackendFacade {
     );
   }
 
-  public async getStatsForDetailsPanel(): Promise<any | undefined> {
+  public async getStatsForDetailsPanel(): Promise<unknown> {
     const settings = this.getSettings();
     const sharingPolicy = computeBackendSharingPolicy({
       enabled: settings.enabled,
@@ -522,41 +545,31 @@ export class BackendFacade {
   }
 
   public async setBackendSharedKey(): Promise<void> {
-    const settings = this.getSettings();
-    const storageAccount = settings.storageAccount;
-    try {
-      const ok = await this.promptForAndStoreSharedKey(
-        storageAccount,
-        "Set Storage Shared Key for Backend Sync",
-      );
-      if (ok) {
-        vscode.window.showInformationMessage(
-          SuccessMessages.keyUpdated(storageAccount),
-        );
-      }
-    } catch (e) {
-      vscode.window.showErrorMessage(
-        `Failed to set Shared Key: ${safeStringifyError(e)}`,
-      );
-    }
+    return this.manageSharedKeyCommand("set");
   }
 
   public async rotateBackendSharedKey(): Promise<void> {
+    return this.manageSharedKeyCommand("rotate");
+  }
+
+  private async manageSharedKeyCommand(action: "set" | "rotate"): Promise<void> {
     const settings = this.getSettings();
     const storageAccount = settings.storageAccount;
+    const promptTitle =
+      action === "set"
+        ? "Set Storage Shared Key for Backend Sync"
+        : "Rotate Storage Shared Key for Backend Sync";
+    const errorPrefix = action === "set" ? "Failed to set" : "Failed to rotate";
     try {
-      const ok = await this.promptForAndStoreSharedKey(
-        storageAccount,
-        "Rotate Storage Shared Key for Backend Sync",
-      );
+      const ok = await this.promptForAndStoreSharedKey(storageAccount, promptTitle);
       if (ok) {
         vscode.window.showInformationMessage(
           SuccessMessages.keyUpdated(storageAccount),
         );
       }
-    } catch (e) {
+    } catch (e: unknown) {
       vscode.window.showErrorMessage(
-        `Failed to rotate Shared Key: ${safeStringifyError(e)}`,
+        `${errorPrefix} Shared Key: ${safeStringifyError(e)}`,
       );
     }
   }
@@ -603,13 +616,18 @@ export class BackendFacade {
       next,
       vscode.ConfigurationTarget.Global,
     );
-    const enabled = config.get<boolean>("backend.shareWithTeam", false);
-    const suffix = enabled
-      ? ""
-      : " (Note: this only affects team sharing mode; personal mode always includes names)";
+    const suffix = this.getShareWithTeamSuffix();
     vscode.window.showInformationMessage(
       `Backend: workspace/machine name sync ${next ? "enabled" : "disabled"}${suffix}`,
     );
+  }
+
+  private getShareWithTeamSuffix(): string {
+    const config = vscode.workspace.getConfiguration("aiEngineeringFluency");
+    const enabled = config.get<boolean>("backend.shareWithTeam", false);
+    return enabled
+      ? ""
+      : " (Note: this only affects team sharing mode; personal mode always includes names)";
   }
 
   private async getConfigPanelState(
@@ -633,7 +651,7 @@ export class BackendFacade {
           ? "Auth: Shared Key stored on this machine"
           : "Auth: Shared Key missing on this machine"
         : "Auth: Entra ID (RBAC)";
-    const lastSyncAt = this.deps.context?.globalState?.get<number>('backend.lastSyncAt');
+    const lastSyncAt = this.deps.context?.globalState?.get<number>("backend.lastSyncAt");
     const githubTokenAvailable = !!(this.deps.getGithubToken?.());
     return {
       draft,
@@ -817,9 +835,7 @@ export class BackendFacade {
         await this.azureResourceService.configureBackendWizard();
       },
     );
-    this.startTimerIfEnabled();
-    this.deps.updateTokenStats?.();
-    this.clearQueryCache();
+    this.afterConfigChange();
     return this.getConfigPanelState();
   }
 
@@ -834,9 +850,7 @@ export class BackendFacade {
     };
     const next = applyDraftToSettings(settings, draft, undefined);
     await this.updateConfiguration(next);
-    this.startTimerIfEnabled();
-    this.deps.updateTokenStats?.();
-    this.clearQueryCache();
+    this.afterConfigChange();
     return this.getConfigPanelState(draft);
   }
 
@@ -861,7 +875,7 @@ export class BackendFacade {
         await this.credentialService.clearStoredStorageSharedKey(
           settings.storageAccount,
         );
-      } catch (e) {
+      } catch (_e: unknown) {
         // Continue even if key clear fails
       }
     }
@@ -893,9 +907,7 @@ export class BackendFacade {
 
     const next = applyDraftToSettings(settings, draft, undefined);
     await this.updateConfiguration(next);
-    this.startTimerIfEnabled();
-    this.deps.updateTokenStats?.();
-    this.clearQueryCache();
+    this.afterConfigChange();
     return this.getConfigPanelState(draft);
   }
 
@@ -984,8 +996,8 @@ export class BackendFacade {
             creds.tableCredential,
           );
           return { ok: true, message: SuccessMessages.connected() };
-        } catch (error: any) {
-          const details = error?.message || String(error);
+        } catch (error: unknown) {
+          const details = safeStringifyError(error);
           if (details.includes("403") || details.includes("Forbidden")) {
             return {
               ok: false,
@@ -1042,8 +1054,8 @@ export class BackendFacade {
           draft ?? toDraft(this.getSettings()),
         ),
       };
-    } catch (error: any) {
-      return { ok: false, message: error?.message || String(error) };
+    } catch (error: unknown) {
+      return { ok: false, message: safeStringifyError(error) };
     }
   }
 
@@ -1059,74 +1071,38 @@ export class BackendFacade {
         await this.credentialService.clearStoredStorageSharedKey(
           settings.storageAccount,
         );
-      } catch (e) {
+      } catch (_e: unknown) {
         // Continue even if key clear fails
       }
     }
 
-    const config = vscode.workspace.getConfiguration("aiEngineeringFluency");
-    await Promise.all([
-      config.update(
-        "backend.enabled",
-        false,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.authMode",
-        "entraId",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.sharingProfile",
-        "off",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareWithTeam",
-        false,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareWorkspaceMachineNames",
-        false,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareConsentAt",
-        "",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.subscriptionId",
-        "",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.resourceGroup",
-        "",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.storageAccount",
-        "",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.aggTable",
-        "usageAggDaily",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.eventsTable",
-        "usageEvents",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update("backend.userId", "", vscode.ConfigurationTarget.Global),
-    ]);
-
-    this.startTimerIfEnabled();
-    this.deps.updateTokenStats?.();
-    this.clearQueryCache();
+    // Build a clean reset draft (same defaults used by clearAzureSettings)
+    const draft: BackendConfigDraft = {
+      enabled: false,
+      backend: "storageTables",
+      authMode: "entraId",
+      sharingProfile: "off",
+      shareWorkspaceMachineNames: false,
+      includeMachineBreakdown: false,
+      datasetId: "default",
+      lookbackDays: 30,
+      subscriptionId: "",
+      resourceGroup: "",
+      storageAccount: "",
+      aggTable: "usageAggDaily",
+      eventsTable: "usageEvents",
+      userIdentityMode: "pseudonymous",
+      userId: "",
+      sharingServerEnabled: false,
+      sharingServerEndpointUrl: "",
+      blobUploadEnabled: false,
+      blobContainerName: "copilot-session-logs",
+      blobUploadFrequencyHours: 24,
+      blobCompressFiles: true,
+    };
+    const next = applyDraftToSettings(settings, draft, undefined);
+    await this.updateConfiguration(next);
+    this.afterConfigChange();
 
     vscode.window.showInformationMessage(
       "Azure settings cleared successfully.",
@@ -1168,3 +1144,15 @@ export class BackendFacade {
     return true;
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+
