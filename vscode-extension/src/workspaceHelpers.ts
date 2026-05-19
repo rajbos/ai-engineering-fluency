@@ -751,67 +751,115 @@ export function resolveWorkspaceFolderFromSessionPath(sessionFilePath: string, w
 	}
 }
 
-export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
-	const normalizedPath = filePath.toLowerCase().replace(/\\/g, '/');
+// ── Editor-detection private predicates ──────────────────────────────────────
 
+/** Returns true for Gemini CLI session paths (`.gemini/tmp/.../chats/session-*.jsonl`). */
+function isGeminiCliPath(lowerPath: string): boolean {
+	return lowerPath.includes('/.gemini/tmp/') &&
+		lowerPath.includes('/chats/session-') &&
+		lowerPath.endsWith('.jsonl');
+}
+
+/** Returns true for VS Code Insiders path segments (`/code - insiders/` or percent-encoded). */
+function isCodeInsidersPath(lowerPath: string): boolean {
+	return lowerPath.includes('/code - insiders/') || lowerPath.includes('/code%20-%20insiders/');
+}
+
+/** Returns true for VS Code Exploration path segments. */
+function isCodeExplorationPath(lowerPath: string): boolean {
+	return lowerPath.includes('/code - exploration/') || lowerPath.includes('/code%20-%20exploration/');
+}
+
+/** Returns true for VS Code Server path segments. */
+function isVSCodeServerPath(lowerPath: string): boolean {
+	return lowerPath.includes('.vscode-server/') || lowerPath.includes('.vscode-remote/');
+}
+
+/** Returns true for Visual Studio path segments (`/.vs/.../copilot-chat/.../sessions/`). */
+function isVisualStudioPath(lowerPath: string): boolean {
+	return lowerPath.includes('/.vs/') &&
+		lowerPath.includes('/copilot-chat/') &&
+		lowerPath.includes('/sessions/');
+}
+
+/** Returns true for VS Code Insiders via loose substring match (used by detectEditorSource). */
+function isCodeInsidersSource(lowerPath: string): boolean {
+	return lowerPath.includes('code - insiders') || lowerPath.includes('code-insiders');
+}
+
+// ── getEditorTypeFromPath helpers ───────────────────────────────────────────
+
+/**
+ * Detect tool-specific (non-VS Code family) editors from a lower-cased normalised path.
+ * Returns the editor name or undefined if none matched.
+ * @internal
+ */
+function detectToolEditorFromPath(
+	filePath: string,
+	lowerPath: string,
+	isOpenCodeSessionFile?: (p: string) => boolean
+): string | undefined {
 	// Check JetBrains before Copilot CLI: both live under ~/.copilot/ but jb/
 	// is a sibling of session-state/ and must be attributed to the JetBrains IDE.
-	if (normalizedPath.includes('/.copilot/jb/')) {
-		return 'JetBrains';
-	}
-	if (normalizedPath.includes('/.copilot/session-store.db#')) {
-		return 'Copilot CLI';
-	}
-	if (normalizedPath.includes('/.copilot/session-state/')) {
-		return 'Copilot CLI';
-	}
-	if (isOpenCodeSessionFile?.(filePath)) {
-		return 'OpenCode';
-	}
-	if (normalizedPath.includes('/.crush/crush.db#')) {
-		return 'Crush';
-	}
-	if (normalizedPath.includes('/.continue/sessions/')) {
-		return 'Continue';
-	}
-	if (normalizedPath.includes('/local-agent-mode-sessions/')) {
-		return 'Claude Desktop Cowork';
-	}
-	if (normalizedPath.includes('/.claude/projects/')) {
-		return 'Claude Code';
-	}
-	if (normalizedPath.includes('/.vibe/logs/session/')) {
-		return 'Mistral Vibe';
-	}
-	if (normalizedPath.includes('/.gemini/tmp/') && normalizedPath.includes('/chats/session-') && normalizedPath.endsWith('.jsonl')) {
-		return 'Gemini CLI';
-	}
-	if (normalizedPath.includes('/code - insiders/') || normalizedPath.includes('/code%20-%20insiders/')) {
-		return 'VS Code Insiders';
-	}
-	if (normalizedPath.includes('/code - exploration/') || normalizedPath.includes('/code%20-%20exploration/')) {
-		return 'VS Code Exploration';
-	}
-	if (normalizedPath.includes('/vscodium/')) {
-		return 'VSCodium';
-	}
-	if (normalizedPath.includes('/cursor/')) {
-		return 'Cursor';
-	}
-	if (normalizedPath.includes('.vscode-server-insiders/')) {
-		return 'VS Code Server (Insiders)';
-	}
-	if (normalizedPath.includes('.vscode-server/') || normalizedPath.includes('.vscode-remote/')) {
-		return 'VS Code Server';
-	}
-        if (normalizedPath.includes('/.vs/') && normalizedPath.includes('/copilot-chat/') && normalizedPath.includes('/sessions/')) {
-                return 'Visual Studio';
-        }
-	if (normalizedPath.includes('/code/')) {
-		return 'VS Code';
-	}
+	if (lowerPath.includes('/.copilot/jb/')) { return 'JetBrains'; }
+	if (lowerPath.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
+	if (lowerPath.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
+	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
+	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
+	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }
+	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
+	if (lowerPath.includes('/.claude/projects/')) { return 'Claude Code'; }
+	if (lowerPath.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
+	if (isGeminiCliPath(lowerPath)) { return 'Gemini CLI'; }
+	return undefined;
+}
 
-	return 'Unknown';
+/**
+ * Detect VS Code family editors (including Cursor, VSCodium, VS Code Server, Visual Studio)
+ * from a lower-cased normalised path.
+ * Returns the editor name or undefined if none matched.
+ * @internal
+ */
+function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
+	if (isCodeInsidersPath(lowerPath)) { return 'VS Code Insiders'; }
+	if (isCodeExplorationPath(lowerPath)) { return 'VS Code Exploration'; }
+	if (lowerPath.includes('/vscodium/')) { return 'VSCodium'; }
+	if (lowerPath.includes('/cursor/')) { return 'Cursor'; }
+	if (lowerPath.includes('.vscode-server-insiders/')) { return 'VS Code Server (Insiders)'; }
+	if (isVSCodeServerPath(lowerPath)) { return 'VS Code Server'; }
+	if (isVisualStudioPath(lowerPath)) { return 'Visual Studio'; }
+	if (lowerPath.includes('/code/')) { return 'VS Code'; }
+	return undefined;
+}
+
+/**
+ * Determine the editor type from a session file path.
+ * Returns: 'VS Code', 'VS Code Insiders', 'VSCodium', 'Cursor', 'Copilot CLI',
+ *          'JetBrains', 'OpenCode', 'Claude Code', 'Continue', 'Mistral Vibe',
+ *          'Gemini CLI', 'Claude Desktop Cowork', 'Crush', or 'Unknown'.
+ */
+export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
+	const lowerPath = filePath.toLowerCase().replace(/\\/g, '/');
+	return detectToolEditorFromPath(filePath, lowerPath, isOpenCodeSessionFile) ??
+		detectVSCodeVariantFromPath(lowerPath) ??
+		'Unknown';
+}
+
+// ── detectEditorSource helper ──────────────────────────────────────────
+
+/**
+ * Detect VS Code family and related IDE editors via loose substring matching.
+ * Used by detectEditorSource which uses broader (no-slash) patterns.
+ * @internal
+ */
+function detectIDEEditorSource(lowerPath: string): string | undefined {
+	if (lowerPath.includes('cursor')) { return 'Cursor'; }
+	if (isCodeInsidersSource(lowerPath)) { return 'VS Code Insiders'; }
+	if (lowerPath.includes('vscodium')) { return 'VSCodium'; }
+	if (lowerPath.includes('windsurf')) { return 'Windsurf'; }
+	if (isVisualStudioPath(lowerPath)) { return 'Visual Studio'; }
+	if (lowerPath.includes('code')) { return 'VS Code'; }
+	return undefined;
 }
 
 /**
@@ -827,12 +875,6 @@ export function detectEditorSource(filePath: string, isOpenCodeSessionFile?: (p:
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/.claude/projects/')) { return 'Claude Code'; }
 	if (lowerPath.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
-	if (lowerPath.includes('/.gemini/tmp/') && lowerPath.includes('/chats/session-') && lowerPath.endsWith('.jsonl')) { return 'Gemini CLI'; }
-	if (lowerPath.includes('cursor')) { return 'Cursor'; }
-	if (lowerPath.includes('code - insiders') || lowerPath.includes('code-insiders')) { return 'VS Code Insiders'; }
-	if (lowerPath.includes('vscodium')) { return 'VSCodium'; }
-	if (lowerPath.includes('windsurf')) { return 'Windsurf'; }
-        if (lowerPath.includes('/.vs/') && lowerPath.includes('/copilot-chat/') && lowerPath.includes('/sessions/')) { return 'Visual Studio'; }
-	if (lowerPath.includes('code')) { return 'VS Code'; }
-	return 'Unknown';
+	if (isGeminiCliPath(lowerPath)) { return 'Gemini CLI'; }
+	return detectIDEEditorSource(lowerPath) ?? 'Unknown';
 }
