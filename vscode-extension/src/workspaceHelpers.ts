@@ -10,6 +10,50 @@ import * as packageJson from '../package.json';
 import customizationPatternsData from './customizationPatterns.json';
 
 
+// ── Local type definitions ────────────────────────────────────────────────
+
+/** Represents a VS Code Copilot interaction mode object read from session data. */
+interface ModeObject {
+	kind?: string;
+	id?: string;
+}
+
+/** A single file/path reference inside a chat content-reference item. */
+interface ContentReferenceData {
+	fsPath?: string;
+	path?: string;
+}
+
+/**
+ * A content-reference item as stored in Copilot session data.
+ * The `kind` field determines which nested reference key is present.
+ */
+interface ContentReferenceItem {
+	kind?: string;
+	reference?: ContentReferenceData;
+	inlineReference?: ContentReferenceData;
+}
+
+/** A single pattern entry in customizationPatterns.json. */
+interface CustomizationPattern {
+	id?: string;
+	type?: string;
+	category?: 'copilot' | 'non-copilot';
+	icon?: string;
+	label?: string;
+	path: string;
+	scanMode?: string;
+	caseInsensitive?: boolean;
+	maxDepth?: number;
+}
+
+/** Top-level structure of customizationPatterns.json. */
+interface CustomizationPatternsConfig {
+	stalenessThresholdDays?: number;
+	excludeDirs?: string[];
+	patterns?: CustomizationPattern[];
+}
+
 /**
  * Resolve the workspace folder full path from a session file path.
  * Looks for a `workspaceStorage/<id>/` segment and reads `workspace.json` or `meta.json`.
@@ -146,7 +190,7 @@ export function scanWorkspaceCustomizationFiles(workspaceFolderPath: string): Cu
 	const results: CustomizationFileEntry[] = [];
 	if (!workspaceFolderPath || !fs.existsSync(workspaceFolderPath)) { return results; }
 
-	const cfg = customizationPatternsData as any;
+	const cfg = customizationPatternsData as CustomizationPatternsConfig;
 	const stalenessDays = typeof cfg.stalenessThresholdDays === 'number' ? cfg.stalenessThresholdDays : 90;
 	const excludeDirs: string[] = Array.isArray(cfg.excludeDirs) ? cfg.excludeDirs : [];
 
@@ -168,7 +212,7 @@ export function scanWorkspaceCustomizationFiles(workspaceFolderPath: string): Cu
 						name: path.basename(absPath),
 						lastModified: stat.mtime.toISOString(),
 						isStale: (Date.now() - stat.mtime.getTime()) > stalenessDays * 24 * 60 * 60 * 1000,
-						category: pattern.category as 'copilot' | 'non-copilot' | undefined
+						category: pattern.category
 					});
 				}
 			} else if (scanMode === 'oneLevel') {
@@ -215,7 +259,7 @@ export function scanWorkspaceCustomizationFiles(workspaceFolderPath: string): Cu
 								label: pattern.label || displayName,
 								name: displayName,
 								lastModified: stat.mtime.toISOString(),
-								category: pattern.category as 'copilot' | 'non-copilot' | undefined,
+								category: pattern.category,
 								isStale: (Date.now() - stat.mtime.getTime()) > stalenessDays * 24 * 60 * 60 * 1000
 							});
 						}
@@ -249,7 +293,7 @@ export function scanWorkspaceCustomizationFiles(workspaceFolderPath: string): Cu
 									name: path.basename(abs),
 									lastModified: stat.mtime.toISOString(),
 									isStale: (Date.now() - stat.mtime.getTime()) > stalenessDays * 24 * 60 * 60 * 1000,
-									category: pattern.category as 'copilot' | 'non-copilot' | undefined
+									category: pattern.category
 								});
 							}
 						}
@@ -282,7 +326,7 @@ export function getRepositoryUrl(): string {
  * Detect the actual mode type from inputState.mode object.
  * Returns 'ask', 'edit', 'agent', 'plan', or 'customAgent'.
  */
-export function getModeType(mode: any): 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' {
+export function getModeType(mode: ModeObject | null | undefined): 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' {
 	if (!mode || !mode.kind) {
 		return 'ask';
 	}
@@ -521,7 +565,7 @@ export function extractMcpServerName(toolName: string, toolNameMap: { [key: stri
  * @param contentReferences Array of content reference objects from session data
  * @returns The repository remote URL if found, undefined otherwise
  */
-export async function extractRepositoryFromContentReferences(contentReferences: any[]): Promise<string | undefined> {
+export async function extractRepositoryFromContentReferences(contentReferences: ContentReferenceItem[]): Promise<string | undefined> {
 	if (!Array.isArray(contentReferences)) {
 		return undefined;
 	}
