@@ -1617,6 +1617,59 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 	return analysis;
 }
 
+/**
+ * Try to extract exact token usage from a session request result,
+ * checking all known storage formats (OLD, NEW, INSIDERS).
+ * Returns true if tokens were extracted; false if text-based estimation is needed.
+ */
+function tryExtractExactTokenUsage(
+	request: SessionRequestRaw,
+	model: string,
+	modelUsage: ModelUsage
+): boolean {
+	if (request.result?.usage) {
+		// OLD FORMAT (pre-Feb 2026)
+		const u = request.result.usage;
+		modelUsage[model].inputTokens += typeof u.promptTokens === 'number' ? u.promptTokens : 0;
+		modelUsage[model].outputTokens += typeof u.completionTokens === 'number' ? u.completionTokens : 0;
+		return true;
+	}
+	if (typeof request.result?.promptTokens === 'number' && typeof request.result?.outputTokens === 'number') {
+		// NEW FORMAT (Feb 2026+)
+		modelUsage[model].inputTokens += request.result.promptTokens;
+		modelUsage[model].outputTokens += request.result.outputTokens;
+		return true;
+	}
+	if (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number' && typeof request.result.metadata.outputTokens === 'number') {
+		// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
+		modelUsage[model].inputTokens += request.result.metadata.promptTokens;
+		modelUsage[model].outputTokens += request.result.metadata.outputTokens;
+		return true;
+	}
+	return false;
+}
+
+/**
+ * Accumulate sub-agent token usage from a response item array into modelUsage.
+ * Sub-agent invocations are additive (not included in parent token counts).
+ */
+function accumulateSubAgentTokenUsage(
+	responseItems: ResponseItemRaw[],
+	baseModel: string,
+	modelUsage: ModelUsage,
+	tokenEstimators: { [key: string]: number }
+): void {
+	for (const responseItem of responseItems) {
+		const subAgent = extractSubAgentData(responseItem);
+		if (subAgent) {
+			const saModel = subAgent.modelName || baseModel;
+			if (!modelUsage[saModel]) { modelUsage[saModel] = { inputTokens: 0, outputTokens: 0 }; }
+			if (subAgent.prompt) { modelUsage[saModel].inputTokens += estimateTokensFromText(subAgent.prompt, saModel, tokenEstimators); }
+			if (subAgent.result) { modelUsage[saModel].outputTokens += estimateTokensFromText(subAgent.result, saModel, tokenEstimators); }
+		}
+	}
+}
+
 export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'warn' | 'tokenEstimators' | 'modelPricing' | 'ecosystems'>, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<ModelUsage> {
 	const modelUsage: ModelUsage = {};
 
@@ -1799,21 +1852,8 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 					}
 
 					// Use actual usage if available, otherwise estimate from text
-					if (request.result?.usage) {
-						// OLD FORMAT (pre-Feb 2026)
-						const u = request.result.usage;
-						modelUsage[requestModel].inputTokens += typeof u.promptTokens === 'number' ? u.promptTokens : 0;
-						modelUsage[requestModel].outputTokens += typeof u.completionTokens === 'number' ? u.completionTokens : 0;
-					} else if (typeof request.result?.promptTokens === 'number' && typeof request.result?.outputTokens === 'number') {
-						// NEW FORMAT (Feb 2026+)
-						modelUsage[requestModel].inputTokens += request.result.promptTokens;
-						modelUsage[requestModel].outputTokens += request.result.outputTokens;
-					} else if (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number' && typeof request.result.metadata.outputTokens === 'number') {
-						// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
-						modelUsage[requestModel].inputTokens += request.result.metadata.promptTokens;
-						modelUsage[requestModel].outputTokens += request.result.metadata.outputTokens;
-					} else {
-						// Fallback to text-based estimation
+					if (!tryExtractExactTokenUsage(request, requestModel, modelUsage)) {
+						// Fallback: estimate from message text and response content
 						if (request.message?.text) {
 							modelUsage[requestModel].inputTokens += estimateTokensFromText(request.message.text, requestModel, deps.tokenEstimators);
 						}
@@ -1828,15 +1868,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 
 					// Sub-agent invocations are additive: not included in parent actual token counts
 					if (request.response && Array.isArray(request.response)) {
-						for (const responseItem of request.response as ResponseItemRaw[]) {
-							const subAgent = extractSubAgentData(responseItem);
-							if (subAgent) {
-								const saModel = subAgent.modelName || requestModel;
-								if (!modelUsage[saModel]) { modelUsage[saModel] = { inputTokens: 0, outputTokens: 0 }; }
-								if (subAgent.prompt) { modelUsage[saModel].inputTokens += estimateTokensFromText(subAgent.prompt, saModel, deps.tokenEstimators); }
-								if (subAgent.result) { modelUsage[saModel].outputTokens += estimateTokensFromText(subAgent.result, saModel, deps.tokenEstimators); }
-							}
-						}
+						accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], requestModel, modelUsage, deps.tokenEstimators);
 					}
 				}
 			}
@@ -1873,37 +1905,19 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 				}
 
 				// Use actual usage if available, otherwise estimate from text
-				if (request.result?.usage) {
-					// OLD FORMAT (pre-Feb 2026)
-					const u = request.result.usage;
-					modelUsage[model].inputTokens += typeof u.promptTokens === 'number' ? u.promptTokens : 0;
-					modelUsage[model].outputTokens += typeof u.completionTokens === 'number' ? u.completionTokens : 0;
-				} else if (typeof request.result?.promptTokens === 'number' && typeof request.result?.outputTokens === 'number') {
-					// NEW FORMAT (Feb 2026+)
-					modelUsage[model].inputTokens += request.result.promptTokens;
-					modelUsage[model].outputTokens += request.result.outputTokens;
-				} else if (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number' && typeof request.result.metadata.outputTokens === 'number') {
-					// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
-					modelUsage[model].inputTokens += request.result.metadata.promptTokens;
-					modelUsage[model].outputTokens += request.result.metadata.outputTokens;
-				} else {
-					// Fallback to text-based estimation
-					// Estimate tokens from user message (input)
+				if (!tryExtractExactTokenUsage(request, model, modelUsage)) {
+					// Fallback: estimate from message parts and response content
 					if (request.message && request.message.parts) {
 						for (const part of request.message.parts) {
 							if (part.text) {
-								const tokens = estimateTokensFromText(part.text, model, deps.tokenEstimators);
-								modelUsage[model].inputTokens += tokens;
+								modelUsage[model].inputTokens += estimateTokensFromText(part.text, model, deps.tokenEstimators);
 							}
 						}
 					}
-
-					// Estimate tokens from assistant response (output)
 					if (request.response && Array.isArray(request.response)) {
 						for (const responseItem of request.response as ResponseItemRaw[]) {
 							if (responseItem?.value) {
-								const tokens = estimateTokensFromText(responseItem.value, model, deps.tokenEstimators);
-								modelUsage[model].outputTokens += tokens;
+								modelUsage[model].outputTokens += estimateTokensFromText(responseItem.value, model, deps.tokenEstimators);
 							}
 						}
 					}
@@ -1911,15 +1925,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 
 				// Sub-agent invocations are additive: not included in parent actual token counts
 				if (request.response && Array.isArray(request.response)) {
-					for (const responseItem of request.response as ResponseItemRaw[]) {
-						const subAgent = extractSubAgentData(responseItem);
-						if (subAgent) {
-							const saModel = subAgent.modelName || model;
-							if (!modelUsage[saModel]) { modelUsage[saModel] = { inputTokens: 0, outputTokens: 0 }; }
-							if (subAgent.prompt) { modelUsage[saModel].inputTokens += estimateTokensFromText(subAgent.prompt, saModel, deps.tokenEstimators); }
-							if (subAgent.result) { modelUsage[saModel].outputTokens += estimateTokensFromText(subAgent.result, saModel, deps.tokenEstimators); }
-						}
-					}
+					accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], model, modelUsage, deps.tokenEstimators);
 				}
 			}
 		}
