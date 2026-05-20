@@ -373,8 +373,11 @@ if (!sessionJson) {
 try { sessionJson = JSON.parse(fileContent); } catch { return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
 }
 
-const sj = isObject(sessionJson) ? sessionJson : null;
-const requests: unknown[] = sj && Array.isArray(sj['requests']) ? (sj['requests'] as unknown[]) : (sj && Array.isArray(sj['history']) ? (sj['history'] as unknown[]) : []);
+if (!isObject(sessionJson) || Array.isArray(sessionJson)) {
+return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 };
+}
+
+const requests: unknown[] = Array.isArray(sessionJson['requests']) ? (sessionJson['requests'] as unknown[]) : (Array.isArray(sessionJson['history']) ? (sessionJson['history'] as unknown[]) : []);
 interactions = requests.length;
 for (const request of requests) { processRequest(request); }
 

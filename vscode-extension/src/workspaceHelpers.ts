@@ -8,6 +8,7 @@ import * as path from 'path';
 import type { CustomizationFileEntry } from './types';
 import * as packageJson from '../package.json';
 import customizationPatternsData from './customizationPatterns.json';
+import { withErrorRecoverySync } from './utils/errors';
 
 
 // ── Local type definitions ────────────────────────────────────────────────
@@ -61,9 +62,11 @@ interface CustomizationPatternsConfig {
  */
 // Helper: read a workspaceStorage JSON file and extract a candidate folder path from configured keys
 export function parseWorkspaceStorageJsonFile(jsonPath: string, candidateKeys: string[]): string | undefined {
+	if (typeof jsonPath !== 'string' || !jsonPath || !Array.isArray(candidateKeys)) { return undefined; }
 	try {
 		const raw = fs.readFileSync(jsonPath, 'utf8');
 		const obj = JSON.parse(raw);
+		if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) { return undefined; }
 		for (const key of candidateKeys) {
 			const candidate = obj[key];
 			if (typeof candidate !== 'string') { continue; }
@@ -253,8 +256,11 @@ function walkDirectoryForPattern(
 	excludeDirs: string[]
 ): CustomizationFileEntry[] {
 	if (depth < 0) { return []; }
-	let children: fs.Dirent[];
-	try { children = fs.readdirSync(dir, { withFileTypes: true }); } catch { return []; }
+	const children = withErrorRecoverySync(
+		() => fs.readdirSync(dir, { withFileTypes: true }),
+		[] as fs.Dirent[],
+		`walkDirectoryForPattern readdir(${dir})`
+	);
 	const results: CustomizationFileEntry[] = [];
 	for (const child of children) {
 		const childPath = path.join(dir, child.name);

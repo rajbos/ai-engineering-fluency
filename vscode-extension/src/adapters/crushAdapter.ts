@@ -5,6 +5,7 @@ import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, D
 import { CrushDataAccess } from '../crush';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { withErrorRecoverySync } from '../utils/errors';
 
 export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'crush';
@@ -102,12 +103,15 @@ export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, 
 		const candidates: CandidatePath[] = [
 			{ path: path.join(configDir, 'projects.json'), source: 'Crush (projects.json)' },
 		];
-		try {
-			const projects = this.crush.readCrushProjects();
-			for (const project of projects) {
-				candidates.push({ path: path.join(project.data_dir, 'crush.db'), source: `Crush (${path.basename(project.path)})` });
-			}
-		} catch { /* ignore */ }
+		const extraPaths = withErrorRecoverySync(
+			() => this.crush.readCrushProjects().map(project => ({
+				path: path.join(project.data_dir, 'crush.db'),
+				source: `Crush (${path.basename(project.path)})`
+			})),
+			[] as CandidatePath[],
+			'crushAdapter getCandidatePaths'
+		);
+		candidates.push(...extraPaths);
 		return candidates;
 	}
 

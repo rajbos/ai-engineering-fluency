@@ -10,7 +10,9 @@ import {
 	isStorageLocalAuthDisallowedByPolicyError,
 	redactSecretsInText,
 	safeStringifyError,
-	withErrorHandling
+	withErrorHandling,
+	withErrorRecovery,
+	withErrorRecoverySync
 } from '../../src/utils/errors';
 
 test('BackendConfigError/BackendAuthError/BackendSyncError set name and cause', () => {
@@ -191,4 +193,63 @@ test('withErrorHandling preserves the original error as cause', async () => {
                 assert.ok(e instanceof BackendError);
                 assert.equal(e.cause, original);
         }
+});
+
+// ── withErrorRecoverySync tests ───────────────────────────────────────────
+
+test('withErrorRecoverySync returns fn result on success', () => {
+	const result = withErrorRecoverySync(() => 42, 0, 'test context');
+	assert.equal(result, 42);
+});
+
+test('withErrorRecoverySync returns fallback when fn throws', () => {
+	const result = withErrorRecoverySync(() => { throw new Error('boom'); }, 99, 'test context');
+	assert.equal(result, 99);
+});
+
+test('withErrorRecoverySync returns fallback with no context when context is omitted', () => {
+	const result = withErrorRecoverySync(() => { throw new Error('boom'); }, 'default');
+	assert.equal(result, 'default');
+});
+
+test('withErrorRecoverySync returns array fallback when fn throws', () => {
+	const result = withErrorRecoverySync(() => { throw new Error('oops'); }, [] as string[]);
+	assert.deepEqual(result, []);
+});
+
+test('withErrorRecoverySync returns null fallback when fn throws', () => {
+	const result = withErrorRecoverySync(() => { throw new Error('fail'); }, null);
+	assert.equal(result, null);
+});
+
+// ── withErrorRecovery tests (async) ──────────────────────────────────────
+
+test('withErrorRecovery returns fn result on success (sync fn)', async () => {
+	const result = await withErrorRecovery(() => 'hello', 'fallback', 'ctx');
+	assert.equal(result, 'hello');
+});
+
+test('withErrorRecovery returns fn result on success (async fn)', async () => {
+	const result = await withErrorRecovery(async () => 'world', 'fallback', 'ctx');
+	assert.equal(result, 'world');
+});
+
+test('withErrorRecovery returns fallback when sync fn throws', async () => {
+	const result = await withErrorRecovery(() => { throw new Error('boom'); }, 'default', 'ctx');
+	assert.equal(result, 'default');
+});
+
+test('withErrorRecovery returns fallback when async fn rejects', async () => {
+	const result = await withErrorRecovery(async () => { throw new Error('async boom'); }, 0, 'ctx');
+	assert.equal(result, 0);
+});
+
+test('withErrorRecovery returns array fallback when fn throws', async () => {
+	const result = await withErrorRecovery(() => { throw new Error('fail'); }, [] as number[]);
+	assert.deepEqual(result, []);
+});
+
+test('withErrorRecovery returns null fallback when fn throws', async () => {
+	const result = await withErrorRecovery(async () => { throw new Error('fail'); }, null);
+	assert.equal(result, null);
 });

@@ -1,3 +1,5 @@
+export { buildAdapterRegistry } from './adapterRegistry';
+export type { AdapterRegistryDeps } from './adapterRegistry';
 export { OpenCodeAdapter } from './openCodeAdapter';
 export { CrushAdapter } from './crushAdapter';
 export { ContinueAdapter } from './continueAdapter';

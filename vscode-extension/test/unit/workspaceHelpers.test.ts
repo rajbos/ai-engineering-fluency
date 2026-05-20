@@ -611,3 +611,49 @@ assert.equal(opencodeFile?.category, 'non-copilot');
 fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 });
+
+// ---------------------------------------------------------------------------
+// parseWorkspaceStorageJsonFile — input validation
+// ---------------------------------------------------------------------------
+
+import { parseWorkspaceStorageJsonFile } from '../../src/workspaceHelpers';
+
+test('parseWorkspaceStorageJsonFile: returns undefined for null JSON content', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    try {
+        const tmpFile = nodePath.join(tmpDir, 'workspace.json');
+        fs.writeFileSync(tmpFile, 'null', 'utf8');
+        // JSON.parse("null") returns null — must not throw accessing obj[key]
+        assert.equal(parseWorkspaceStorageJsonFile(tmpFile, ['folder', 'workspace']), undefined);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('parseWorkspaceStorageJsonFile: returns undefined for array JSON content', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    try {
+        const tmpFile = nodePath.join(tmpDir, 'workspace.json');
+        fs.writeFileSync(tmpFile, '["item1", "item2"]', 'utf8');
+        assert.equal(parseWorkspaceStorageJsonFile(tmpFile, ['folder']), undefined);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('parseWorkspaceStorageJsonFile: returns undefined for empty jsonPath', () => {
+    assert.equal(parseWorkspaceStorageJsonFile('', ['folder']), undefined);
+});
+
+test('parseWorkspaceStorageJsonFile: returns path from valid object', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    try {
+        const tmpFile = nodePath.join(tmpDir, 'workspace.json');
+        // Use a file:// URI as the value so vscode.Uri.parse can resolve it
+        fs.writeFileSync(tmpFile, JSON.stringify({ folder: 'file:///home/user/myproject' }), 'utf8');
+        const result = parseWorkspaceStorageJsonFile(tmpFile, ['folder']);
+        assert.ok(typeof result === 'string' && result.length > 0, 'should return a non-empty path string');
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});

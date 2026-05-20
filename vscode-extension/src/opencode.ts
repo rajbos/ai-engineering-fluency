@@ -16,6 +16,7 @@ type OpenCodeModelUsageWithInteractions = {
 
 export class OpenCodeDataAccess {
 	private _sqlJsModule: any = null;
+	private _sqlJsInitPromise: Promise<any> | null = null;
 	private _dbCache: OpenCodeDbCache | null = null;
 	private _dbCacheInflight: Map<string, Promise<any | null>> = new Map();
 	private readonly extensionUri: vscode.Uri;
@@ -60,21 +61,35 @@ export class OpenCodeDataAccess {
 
 	/**
 	 * Lazily initialize and return the sql.js SQL module.
+	 *
+	 * Promise-caches the in-flight load so concurrent callers share a single
+	 * WASM initialization rather than each starting an independent load.
+	 * The cache is reset on failure so a transient error is retryable.
 	 */
 	async initSqlJs(): Promise<any> {
 		if (this._sqlJsModule) { return this._sqlJsModule; }
-		const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
-		let wasmBinary: Uint8Array | undefined;
-		if (fs.existsSync(wasmPath)) {
-			wasmBinary = fs.readFileSync(wasmPath);
+		if (!this._sqlJsInitPromise) {
+			this._sqlJsInitPromise = (async () => {
+				const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
+				let wasmBinary: Uint8Array | undefined;
+				if (fs.existsSync(wasmPath)) {
+					wasmBinary = fs.readFileSync(wasmPath);
+				}
+				const module = await initSqlJs(wasmBinary ? { wasmBinary } : undefined);
+				this._sqlJsModule = module;
+				return module;
+			})().catch(err => {
+				this._sqlJsInitPromise = null;
+				throw err;
+			});
 		}
-		this._sqlJsModule = await initSqlJs(wasmBinary ? { wasmBinary } : undefined);
-		return this._sqlJsModule;
+		return this._sqlJsInitPromise;
 	}
 
 	dispose(): void {
 		this.closeDbCache();
 		this._dbCacheInflight.clear();
+		this._sqlJsInitPromise = null;
 	}
 
 	private closeDb(db: any): void {
