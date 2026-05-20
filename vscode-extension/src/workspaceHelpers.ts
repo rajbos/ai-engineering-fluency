@@ -8,6 +8,7 @@ import * as path from 'path';
 import type { CustomizationFileEntry } from './types';
 import * as packageJson from '../package.json';
 import customizationPatternsData from './customizationPatterns.json';
+import { resolveFileUri } from './workspacePathResolver';
 
 
 // ── Local type definitions ────────────────────────────────────────────────
@@ -67,19 +68,14 @@ export function parseWorkspaceStorageJsonFile(jsonPath: string, candidateKeys: s
 		for (const key of candidateKeys) {
 			const candidate = obj[key];
 			if (typeof candidate !== 'string') { continue; }
-			const pathCandidate = candidate.replace(/^file:\/\//, '');
-			// Prefer vscode.Uri.parse -> fsPath when possible
-			try {
-				const uri = vscode.Uri.parse(candidate);
-				if (uri.fsPath && uri.fsPath.length > 0) {
-					return uri.fsPath;
-				}
-			} catch { }
-			try {
-				return decodeURIComponent(pathCandidate);
-			} catch {
-				return pathCandidate;
+			// Resolve file:// URIs using the safe resolver (handles Windows, POSIX, UNC, encoded chars).
+			if (candidate.startsWith('file://')) {
+				const resolved = resolveFileUri(candidate);
+				if (resolved) { return resolved; }
+				continue;
 			}
+			// Non-URI value — treat as a plain filesystem path.
+			return candidate;
 		}
 	} catch {
 		// ignore parse/read errors
@@ -377,11 +373,13 @@ export function extractCustomAgentName(modeId: string): string | null {
 	}
 
 	try {
-		// Handle both file:/// URIs and regular paths
-		const cleanPath = modeId.replace('file:///', '').replace('file://', '');
-		const decodedPath = decodeURIComponent(cleanPath);
-		const parts = decodedPath.split(/[\\/]/);
-		const filename = parts[parts.length - 1];
+		// Resolve file:// URIs via the safe resolver; treat other values as plain paths.
+		const fsPath = modeId.startsWith('file://')
+			? resolveFileUri(modeId)
+			: modeId;
+		if (!fsPath) { return null; }
+
+		const filename = path.basename(fsPath);
 
 		// Remove .agent.md extension
 		if (filename.endsWith('.agent.md')) {
@@ -391,7 +389,7 @@ export function extractCustomAgentName(modeId: string): string | null {
 			// Handle case like TestEngineerAgent.md.agent.md
 			return filename.slice(0, -10).replace('.md', '');
 		}
-	} catch (e) {
+	} catch {
 		return null;
 	}
 
