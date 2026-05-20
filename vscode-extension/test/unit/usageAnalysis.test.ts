@@ -679,6 +679,71 @@ test('getModelUsageFromSession: CLI session without cache fields leaves cachedRe
 });
 
 // ---------------------------------------------------------------------------
+// CLI live session (no session.shutdown) — content-based estimation
+// ---------------------------------------------------------------------------
+
+test('getModelUsageFromSession: CLI live session uses accumulated content not output ratio', async () => {
+    // 0 tool calls → numTurns=1, contextFactor=1 → inputTokens = raw content estimate
+    const events = [
+        JSON.stringify({ type: 'session.start', data: { selectedModel: 'claude-sonnet-4.5' } }),
+        JSON.stringify({ type: 'user.message', data: { content: 'hello', model: 'claude-sonnet-4.5' } }),
+        JSON.stringify({ type: 'assistant.message', data: { outputTokens: 500, model: 'claude-sonnet-4.5' } }),
+    ].join('\n');
+    const deps = makeMockDeps();
+    const result = await getModelUsageFromSession(deps, 'fake/.copilot/session-state/uuid/events.jsonl', events);
+    const usage = result['claude-sonnet-4.5'];
+    assert.ok(usage, 'claude-sonnet-4.5 key should exist');
+    // outputTokens = real value from API
+    assert.equal(usage.outputTokens, 500);
+    // inputTokens = ceil("hello".length * 0.25) * contextFactor(1) = ceil(1.25) * 1 = 2
+    assert.equal(usage.inputTokens, 2);
+    // cachedReadTokens must NOT be set for live sessions (no shutdown data)
+    assert.equal(usage.cachedReadTokens, undefined);
+});
+
+test('getModelUsageFromSession: CLI live session scales input by context-growth factor from tool calls', async () => {
+    // 10 tool calls → numTurns=5, contextFactor=(5+1)/2=3
+    const toolStart = JSON.stringify({ type: 'tool.execution_start', data: { model: 'claude-sonnet-4.5' } });
+    const toolDone = JSON.stringify({ type: 'tool.execution_complete', data: { result: { content: 'tool' }, model: 'claude-sonnet-4.5' } });
+    const events = [
+        JSON.stringify({ type: 'session.start', data: { selectedModel: 'claude-sonnet-4.5' } }),
+        JSON.stringify({ type: 'user.message', data: { content: 'hello', model: 'claude-sonnet-4.5' } }),
+        ...Array.from({ length: 10 }, () => [toolStart, toolDone]).flat(),
+        JSON.stringify({ type: 'assistant.message', data: { outputTokens: 500, model: 'claude-sonnet-4.5' } }),
+    ].join('\n');
+    const deps = makeMockDeps();
+    const result = await getModelUsageFromSession(deps, 'fake/.copilot/session-state/uuid/events.jsonl', events);
+    const usage = result['claude-sonnet-4.5'];
+    assert.ok(usage, 'claude-sonnet-4.5 key should exist');
+    assert.equal(usage.outputTokens, 500);
+    // accumulatedInput = ceil(5*0.25) + 10*ceil(4*0.25) = 2 + 10*1 = 12
+    // numTurns = max(1, round(10/2)) = 5, contextFactor = (5+1)/2 = 3
+    // inputTokens = round(12 * 3) = 36
+    assert.equal(usage.inputTokens, 36);
+    assert.equal(usage.cachedReadTokens, undefined);
+});
+
+test('getModelUsageFromSession: CLI live session gives far lower estimate than old 130x output ratio', async () => {
+    // Old approach with 30 tool calls + 10K output tokens: 10000 * 130 = 1,300,000
+    // New approach: accumulated content * contextFactor stays well under 100K
+    const toolStart = JSON.stringify({ type: 'tool.execution_start', data: { model: 'claude-sonnet-4.5' } });
+    const toolDone = JSON.stringify({ type: 'tool.execution_complete', data: { result: { content: 'tool' }, model: 'claude-sonnet-4.5' } });
+    const events = [
+        JSON.stringify({ type: 'session.start', data: { selectedModel: 'claude-sonnet-4.5' } }),
+        JSON.stringify({ type: 'user.message', data: { content: 'hello', model: 'claude-sonnet-4.5' } }),
+        ...Array.from({ length: 30 }, () => [toolStart, toolDone]).flat(),
+        JSON.stringify({ type: 'assistant.message', data: { outputTokens: 10000, model: 'claude-sonnet-4.5' } }),
+    ].join('\n');
+    const deps = makeMockDeps();
+    const result = await getModelUsageFromSession(deps, 'fake/.copilot/session-state/uuid/events.jsonl', events);
+    const usage = result['claude-sonnet-4.5'];
+    // accumulated=2+30=32, numTurns=15, contextFactor=8, inputTokens=round(32*8)=256
+    assert.equal(usage.outputTokens, 10000);
+    assert.ok(usage.inputTokens < 100_000, `inputTokens (${usage.inputTokens}) should be far below the old 1.3M estimate`);
+    assert.equal(usage.cachedReadTokens, undefined);
+});
+
+// ---------------------------------------------------------------------------
 // calculateModelSwitching
 // ---------------------------------------------------------------------------
 

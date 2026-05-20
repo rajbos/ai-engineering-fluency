@@ -1812,19 +1812,24 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 				return cliShutdownModelUsage;
 			}
 
-			// No session.shutdown: assistant.message events carry real per-response outputTokens from the API.
-			// Estimate input using observed ratio from completed agent sessions (~130x output for heavy
-			// agent sessions with >20 tool calls, ~50x for moderate, ~10x for light/chat-only).
-			// Cache reads empirically equal ~input tokens (prompt caching caches the full context).
+			// No session.shutdown: estimate input from the content already accumulated (user
+			// messages + tool outputs), scaled by a context-growth factor that accounts for
+			// the full conversation history being re-sent on every API call.
+			// Each call sends ≈ all previous content, so average input per call grows as
+			// (numTurns+1)/2 × per-turn content. Tool-call count ÷ 2 approximates turn count
+			// for typical agentic sessions (~2 tool calls per turn on average).
+			// This avoids the massive overcount of the old output-ratio approach (up to 130×)
+			// while still reflecting that context accumulates across turns.
 			if (!isDeltaBased && cliRealOutputByModel) {
-				const inputOutputRatio = totalCliToolCalls > 20 ? 130 : totalCliToolCalls > 5 ? 50 : 10;
+				const numTurns = Math.max(1, Math.round(totalCliToolCalls / 2));
+				const contextFactor = Math.max(1, (numTurns + 1) / 2);
 				const estimatedUsage: ModelUsage = {};
 				for (const [m, realOutput] of Object.entries(cliRealOutputByModel)) {
-					const estimatedInput = Math.round(realOutput * inputOutputRatio);
+					const accumulatedInput = modelUsage[m]?.inputTokens ?? 0;
 					estimatedUsage[m] = {
-						inputTokens: estimatedInput,
+						inputTokens: Math.round(accumulatedInput * contextFactor),
 						outputTokens: realOutput,
-						cachedReadTokens: estimatedInput,
+						// cachedReadTokens intentionally omitted: cannot estimate reliably without shutdown data
 					};
 				}
 				return estimatedUsage;
