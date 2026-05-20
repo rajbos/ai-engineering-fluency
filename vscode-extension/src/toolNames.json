@@ -614,6 +614,8 @@
   ,"mcp_angular-cli_list_projects": "Angular MCP: Get Project List"
   ,"mcp_azure_mcp_extension_cli_generate": "Azure MCP (Local): Generate"
   ,"mcp_playwright_browser_console_messages": "Playwright MCP: Browser Console Messages"
+  ,"mcp_com_figma_mcp_get_design_context": "Figma MCP (Local): Get Design Context"
+  ,"mcp_com_figma_mcp_get_screenshot": "Figma MCP (Local): Get Screenshot"
   ,"google_research": "Google Research"
   ,"task_execution": "Task Execution"
   ,"tool_search_tool_regex": "Tool Search"
