@@ -1,4 +1,4 @@
-﻿import * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -986,14 +986,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 					// instead of waiting for the next timer tick.
 					const backend = this.backend;
 					if (backend && typeof backend.syncToBackendStore === 'function') {
-						backend.syncToBackendStore(true).then(() => {
-							// Refresh diagnostics again after sync completes so "Last Sync" shows the new time
-							if (this.diagnosticsPanel) {
-								this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
+						void (async () => {
+							try {
+								await backend.syncToBackendStore(true);
+								// Refresh diagnostics again after sync completes so "Last Sync" shows the new time
+								if (this.diagnosticsPanel) {
+									this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
+								}
+							} catch (err: unknown) {
+								this.warn('Backend sync after settings change failed: ' + err);
 							}
-						}).catch((err: unknown) => {
-							this.warn('Backend sync after settings change failed: ' + err);
-						});
+						})();
 					}
 					// If the diagnostic report is open, refresh it so the Backend Storage
 					// section reflects the new settings immediately (e.g. after saving the
@@ -1729,22 +1732,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const settings = this.backend.getSettings();
 				if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
 					// Use the already-computed fresh score when available; otherwise compute now.
-					Promise.resolve(freshMaturityData ?? this.calculateMaturityScores(false)).then((maturityData) => {
-						const scorePayload: Record<string, unknown> = {
-							overallStage: maturityData.overallStage,
-							overallLabel: maturityData.overallLabel,
-							categories: maturityData.categories.map((c: any) => ({
-								category: c.category,
-								icon: c.icon,
-								stage: c.stage,
-								tips: c.tips,
-							})),
-							computedAt: new Date().toISOString(),
-						};
-						return this.backend!.uploadFluencyScoreToSharingServer(settings, scorePayload);
-					}).catch((err: unknown) => {
-						this.warn(`Failed to upload fluency score to sharing server: ${err}`);
-					});
+					void (async () => {
+						try {
+							const maturityData = await (freshMaturityData ?? this.calculateMaturityScores(false));
+							const scorePayload: Record<string, unknown> = {
+								overallStage: maturityData.overallStage,
+								overallLabel: maturityData.overallLabel,
+								categories: maturityData.categories.map((c: any) => ({
+									category: c.category,
+									icon: c.icon,
+									stage: c.stage,
+									tips: c.tips,
+								})),
+								computedAt: new Date().toISOString(),
+							};
+							await this.backend!.uploadFluencyScoreToSharingServer(settings, scorePayload);
+						} catch (err: unknown) {
+							this.warn(`Failed to upload fluency score to sharing server: ${err}`);
+						}
+					})();
 				}
 			}
 
@@ -1773,9 +1779,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastDetailedStats = detailedStats;
 
 			// Save cache to ensure it's persisted for next run (don't await to avoid blocking UI)
-			this.saveCacheToStorage().catch(err => {
-				this.warn(`Failed to save cache: ${err}`);
-			});
+			void (async () => {
+				try {
+					await this.saveCacheToStorage();
+				} catch (err) {
+					this.warn(`Failed to save cache: ${err}`);
+				}
+			})();
 
 			// Pre-warm full-year chart data in background so the chart opens without delay.
 			// Only kick off when not already computed and the chart panel isn't open (showChart handles that case).
@@ -4746,31 +4756,34 @@ usageAnalysis: undefined
 			// Capture panel reference to guard against stale async results
 			// (user could close and reopen the panel while calculation is in flight)
 			const panel = this.analysisPanel;
-			this.calculateUsageAnalysisStats(true).then(analysisStats => {
-				if (!this.analysisPanel || this.analysisPanel !== panel) { return; }
-				void this.analysisPanel.webview.postMessage({
-					command: 'updateStats',
-					data: {
-						today: analysisStats.today,
-						last30Days: analysisStats.last30Days,
-						month: analysisStats.month,
-						locale: analysisStats.locale,
-						customizationMatrix: analysisStats.customizationMatrix || null,
-						missedPotential: analysisStats.missedPotential || [],
-						lastUpdated: analysisStats.lastUpdated.toISOString(),
-						backendConfigured: this.isBackendConfigured(),
-						currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
-					},
-				});
-			}).catch(err => {
-				this.error(`Failed to load usage analysis stats: ${err}`);
-				if (this.analysisPanel && this.analysisPanel === panel) {
+			void (async () => {
+				try {
+					const analysisStats = await this.calculateUsageAnalysisStats(true);
+					if (!this.analysisPanel || this.analysisPanel !== panel) { return; }
 					void this.analysisPanel.webview.postMessage({
-						command: 'updateStatsError',
-						error: String(err),
+						command: 'updateStats',
+						data: {
+							today: analysisStats.today,
+							last30Days: analysisStats.last30Days,
+							month: analysisStats.month,
+							locale: analysisStats.locale,
+							customizationMatrix: analysisStats.customizationMatrix || null,
+							missedPotential: analysisStats.missedPotential || [],
+							lastUpdated: analysisStats.lastUpdated.toISOString(),
+							backendConfigured: this.isBackendConfigured(),
+							currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
+						},
 					});
+				} catch (err) {
+					this.error(`Failed to load usage analysis stats: ${err}`);
+					if (this.analysisPanel && this.analysisPanel === panel) {
+						void this.analysisPanel.webview.postMessage({
+							command: 'updateStatsError',
+							error: String(err),
+						});
+					}
 				}
-			});
+			})();
 		}
 
 		// Handle panel disposal
@@ -5561,34 +5574,28 @@ ${hashtag}`;
 
         // Copy share text to clipboard for easy pasting
         await vscode.env.clipboard.writeText(shareText);
-        await vscode.window
-          .showInformationMessage(
-            "Share text copied to clipboard! Paste it into your LinkedIn post.",
-            "Open LinkedIn",
-          )
-          .then(async (selection) => {
-            if (selection === "Open LinkedIn") {
-              await vscode.env.openExternal(vscode.Uri.parse(shareUrl));
-            }
-          });
+        const selection = await vscode.window.showInformationMessage(
+          "Share text copied to clipboard! Paste it into your LinkedIn post.",
+          "Open LinkedIn",
+        );
+        if (selection === "Open LinkedIn") {
+          await vscode.env.openExternal(vscode.Uri.parse(shareUrl));
+        }
         break;
       }
 
       case "bluesky": {
         // Copy share text to clipboard, then open Bluesky compose
         await vscode.env.clipboard.writeText(shareText);
-        await vscode.window
-          .showInformationMessage(
-            "Share text copied to clipboard! Paste it into your Bluesky post.",
-            "Open Bluesky",
-          )
-          .then(async (selection) => {
-            if (selection === "Open Bluesky") {
-              await vscode.env.openExternal(
-                vscode.Uri.parse("https://bsky.app/intent/compose"),
-              );
-            }
-          });
+        const selection = await vscode.window.showInformationMessage(
+          "Share text copied to clipboard! Paste it into your Bluesky post.",
+          "Open Bluesky",
+        );
+        if (selection === "Open Bluesky") {
+          await vscode.env.openExternal(
+            vscode.Uri.parse("https://bsky.app/intent/compose"),
+          );
+        }
         break;
       }
 
@@ -5603,18 +5610,15 @@ ${hashtag}`;
         if (instance) {
           // Copy share text to clipboard, then open Mastodon compose
           await vscode.env.clipboard.writeText(shareText);
-          await vscode.window
-            .showInformationMessage(
-              "Share text copied to clipboard! Paste it into your Mastodon post.",
-              "Open Mastodon",
-            )
-            .then(async (selection) => {
-              if (selection === "Open Mastodon") {
-                await vscode.env.openExternal(
-                  vscode.Uri.parse(`https://${instance}/share`),
-                );
-              }
-            });
+          const selection = await vscode.window.showInformationMessage(
+            "Share text copied to clipboard! Paste it into your Mastodon post.",
+            "Open Mastodon",
+          );
+          if (selection === "Open Mastodon") {
+            await vscode.env.openExternal(
+              vscode.Uri.parse(`https://${instance}/share`),
+            );
+          }
         }
         break;
       }
@@ -5655,16 +5659,15 @@ ${hashtag}`;
 
     const buffer = Buffer.from(base64Match[1], "base64");
     await vscode.workspace.fs.writeFile(uri, buffer);
-    void vscode.window
-      .showInformationMessage(
+    void (async () => {
+      const selection = await vscode.window.showInformationMessage(
         `Chart image saved to ${uri.fsPath}`,
         "Open Image",
-      )
-      .then((selection) => {
-        if (selection === "Open Image") {
-          void vscode.env.openExternal(uri);
-        }
-      });
+      );
+      if (selection === "Open Image") {
+        void vscode.env.openExternal(uri);
+      }
+    })();
     this.log(`Chart image saved to ${uri.fsPath}`);
   }
 
@@ -5745,16 +5748,15 @@ ${hashtag}`;
       const pdfBuffer = Buffer.from(pdf.output("arraybuffer"));
       await vscode.workspace.fs.writeFile(uri, pdfBuffer);
 
-      void vscode.window
-        .showInformationMessage(
+      void (async () => {
+        const selection = await vscode.window.showInformationMessage(
           `Fluency Score PDF saved to ${uri.fsPath}`,
           "Open PDF",
-        )
-        .then((selection) => {
-          if (selection === "Open PDF") {
-            void vscode.env.openExternal(uri);
-          }
-        });
+        );
+        if (selection === "Open PDF") {
+          void vscode.env.openExternal(uri);
+        }
+      })();
 
       this.log(`Fluency Score PDF exported to ${uri.fsPath}`);
     } catch (error) {
@@ -5862,16 +5864,15 @@ ${hashtag}`;
       })) as Buffer;
       await vscode.workspace.fs.writeFile(uri, pptxBuffer);
 
-      void vscode.window
-        .showInformationMessage(
+      void (async () => {
+        const selection = await vscode.window.showInformationMessage(
           `Fluency Score PPTX saved to ${uri.fsPath}`,
           "Open File",
-        )
-        .then((selection) => {
-          if (selection === "Open File") {
-            void vscode.env.openExternal(uri);
-          }
-        });
+        );
+        if (selection === "Open File") {
+          void vscode.env.openExternal(uri);
+        }
+      })();
 
       this.log(`Fluency Score PPTX exported to ${uri.fsPath}`);
     } catch (error) {
@@ -7412,19 +7413,18 @@ ${hashtag}`;
               );
             } catch (err) {
               // If command is not registered, show settings
-              vscode.window
-                .showInformationMessage(
+              void (async () => {
+                const choice = await vscode.window.showInformationMessage(
                   'Backend configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.',
                   "Open Settings",
-                )
-                .then((choice) => {
-                  if (choice === "Open Settings") {
-                    vscode.commands.executeCommand(
-                      "workbench.action.openSettings",
-                      "aiEngineeringFluency.backend",
-                    );
-                  }
-                });
+                );
+                if (choice === "Open Settings") {
+                  void vscode.commands.executeCommand(
+                    "workbench.action.openSettings",
+                    "aiEngineeringFluency.backend",
+                  );
+                }
+              })();
             }
           });
           break;
@@ -7435,19 +7435,18 @@ ${hashtag}`;
                 "aiEngineeringFluency.configureTeamServer",
               );
             } catch (err) {
-              vscode.window
-                .showInformationMessage(
+              void (async () => {
+                const choice = await vscode.window.showInformationMessage(
                   'Team Server configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.',
                   "Open Settings",
-                )
-                .then((choice) => {
-                  if (choice === "Open Settings") {
-                    vscode.commands.executeCommand(
-                      "workbench.action.openSettings",
-                      "aiEngineeringFluency.backend.sharingServer",
-                    );
-                  }
-                });
+                );
+                if (choice === "Open Settings") {
+                  void vscode.commands.executeCommand(
+                    "workbench.action.openSettings",
+                    "aiEngineeringFluency.backend.sharingServer",
+                  );
+                }
+              })();
             }
           });
           break;
@@ -8538,10 +8537,14 @@ ${hashtag}`;
     // Save cache to storage before disposing (fire-and-forget async operation)
     // Note: Cache loss during abnormal shutdown is acceptable as it will rebuild on next startup
     // We can't await here since dispose() is synchronous
-    this.saveCacheToStorage().catch((err) => {
-      // Output channel will be disposed, so log to console as fallback
-      console.error("Error saving cache during disposal:", err);
-    });
+    void (async () => {
+      try {
+        await this.saveCacheToStorage();
+      } catch (err) {
+        // Output channel will be disposed, so log to console as fallback
+        console.error("Error saving cache during disposal:", err);
+      }
+    })();
     if (this.logViewerPanel) {
       this.logViewerPanel.dispose();
     }
@@ -8665,7 +8668,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
 
   // If the legacy extension is also installed, nudge the user to uninstall it.
   // Fire-and-forget: don't block activation on the user's response.
-  checkForLegacyExtensionConflict(context).catch(() => { /* ignore */ });
+  void (async () => {
+    try {
+      await checkForLegacyExtensionConflict(context);
+    } catch {
+      /* ignore */
+    }
+  })();
 
   // Wire up backend facade and commands so the diagnostics webview can launch the
   // configuration wizard. Uses tokenTracker logging and helpers via casting to any.
