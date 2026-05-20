@@ -15,8 +15,7 @@ import { ClaudeCodeDataAccess } from '../../vscode-extension/src/claudecode';
 import { ClaudeDesktopCoworkDataAccess } from '../../vscode-extension/src/claudedesktop';
 import { MistralVibeDataAccess } from '../../vscode-extension/src/mistralvibe';
 import { GeminiCliDataAccess } from '../../vscode-extension/src/geminicli';
-import type { IEcosystemAdapter } from '../../vscode-extension/src/ecosystemAdapter';
-import { OpenCodeAdapter, CrushAdapter, ContinueAdapter, ClaudeDesktopAdapter, ClaudeCodeAdapter, VisualStudioAdapter, MistralVibeAdapter, GeminiCliAdapter, CopilotChatAdapter, CopilotCliAdapter, JetBrainsAdapter } from '../../vscode-extension/src/adapters';
+import { buildAdapterRegistry } from '../../vscode-extension/src/adapters';
 import { isMcpTool, extractMcpServerName } from '../../vscode-extension/src/workspaceHelpers';
 import { parseSessionFileContent } from '../../vscode-extension/src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, getModelTier } from '../../vscode-extension/src/tokenEstimation';
@@ -99,27 +98,19 @@ const _mistralVibeInstance = createMistralVibe();
 const _geminiCliInstance = createGeminiCli();
 
 /** Ordered registry of ecosystem adapters — first match wins. */
-const _ecosystems: IEcosystemAdapter[] = [
-	new OpenCodeAdapter(_openCodeInstance),
-	new CrushAdapter(_crushInstance),
-	new VisualStudioAdapter(_visualStudioInstance, (t, m) => estimateTokensFromText(t, m ?? 'gpt-4', tokenEstimators)),
-	new ContinueAdapter(_continueInstance),
-	new ClaudeDesktopAdapter(
-		_claudeDesktopCoworkInstance,
-		isMcpTool,
-		extractMcpServerName,
-		(t, m) => estimateTokensFromText(t, m ?? 'gpt-4', tokenEstimators)
-	),
-	new ClaudeCodeAdapter(_claudeCodeInstance),
-	new MistralVibeAdapter(_mistralVibeInstance),
-	new GeminiCliAdapter(_geminiCliInstance),
-	// Copilot Chat / CLI adapters: discovery-only. Their handles() returns
-	// false so processSessionFile() falls through to the shared parser path
-	// for VS Code Copilot Chat and CLI files. See issue #654.
-	new CopilotChatAdapter(),
-	new CopilotCliAdapter(),
-	new JetBrainsAdapter(),
-];
+const _ecosystems = buildAdapterRegistry({
+	openCode: _openCodeInstance,
+	crush: _crushInstance,
+	continue_: _continueInstance,
+	visualStudio: _visualStudioInstance,
+	claudeCode: _claudeCodeInstance,
+	claudeDesktopCowork: _claudeDesktopCoworkInstance,
+	mistralVibe: _mistralVibeInstance,
+	geminiCli: _geminiCliInstance,
+	estimateTokens: (t, m) => estimateTokensFromText(t, m ?? 'gpt-4', tokenEstimators),
+	isMcpTool: isMcpTool,
+	extractMcpServerName: extractMcpServerName,
+});
 
 /** Create session discovery instance for CLI */
 function createSessionDiscovery(): SessionDiscovery {
