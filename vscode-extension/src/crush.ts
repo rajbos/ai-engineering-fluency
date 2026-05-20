@@ -26,6 +26,7 @@ export interface CrushProject {
 
 export class CrushDataAccess {
 	private _sqlJsModule: any = null;
+	private _sqlJsInitPromise: Promise<any> | null = null;
 	private _dbCache: Map<string, CrushDbCacheEntry> = new Map();
 	private _dbCacheInflight: Map<string, Promise<any | null>> = new Map();
 	private readonly extensionUri: vscode.Uri;
@@ -40,6 +41,7 @@ export class CrushDataAccess {
 		}
 		this._dbCache.clear();
 		this._dbCacheInflight.clear();
+		this._sqlJsInitPromise = null;
 	}
 
 	private closeDb(db: any): void {
@@ -189,16 +191,29 @@ export class CrushDataAccess {
 
 	/**
 	 * Lazily initialise and cache the sql.js module.
+	 *
+	 * Promise-caches the in-flight load so concurrent callers share a single
+	 * WASM initialization rather than each starting an independent load.
+	 * The cache is reset on failure so a transient error is retryable.
 	 */
 	async initSqlJs(): Promise<any> {
 		if (this._sqlJsModule) { return this._sqlJsModule; }
-		const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
-		let wasmBinary: Uint8Array | undefined;
-		if (fs.existsSync(wasmPath)) {
-			wasmBinary = fs.readFileSync(wasmPath);
+		if (!this._sqlJsInitPromise) {
+			this._sqlJsInitPromise = (async () => {
+				const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
+				let wasmBinary: Uint8Array | undefined;
+				if (fs.existsSync(wasmPath)) {
+					wasmBinary = fs.readFileSync(wasmPath);
+				}
+				const module = await initSqlJs(wasmBinary ? { wasmBinary } : undefined);
+				this._sqlJsModule = module;
+				return module;
+			})().catch(err => {
+				this._sqlJsInitPromise = null;
+				throw err;
+			});
 		}
-		this._sqlJsModule = await initSqlJs(wasmBinary ? { wasmBinary } : undefined);
-		return this._sqlJsModule;
+		return this._sqlJsInitPromise;
 	}
 
 	/**

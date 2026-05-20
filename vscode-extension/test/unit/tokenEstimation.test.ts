@@ -622,3 +622,170 @@ test('extractCachedTokensFromDebugLog: ignores non-numeric cachedTokens values',
         ].join('\n');
         assert.equal(extractCachedTokensFromDebugLog(lines), 100);
 });
+
+// ── Strategy pattern: selectTokenEstimationStrategy ────────────────────────
+
+import { DeltaTokenStrategy, EventJsonlTokenStrategy, selectTokenEstimationStrategy } from '../../src/tokenEstimation';
+
+test('selectTokenEstimationStrategy: returns DeltaTokenStrategy for delta-based JSONL', () => {
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [] } }),
+                JSON.stringify({ kind: 2, k: ['requests', 0], v: { message: { text: 'hello' } } }),
+        ];
+        const strategy = selectTokenEstimationStrategy(lines);
+        assert.ok(strategy instanceof DeltaTokenStrategy);
+});
+
+test('selectTokenEstimationStrategy: returns EventJsonlTokenStrategy for CLI JSONL', () => {
+        const lines = [
+                JSON.stringify({ type: 'session.start', data: {} }),
+                JSON.stringify({ type: 'user.message', data: { content: 'hi' } }),
+        ];
+        const strategy = selectTokenEstimationStrategy(lines);
+        assert.ok(strategy instanceof EventJsonlTokenStrategy);
+});
+
+test('selectTokenEstimationStrategy: returns EventJsonlTokenStrategy for empty input', () => {
+        const strategy = selectTokenEstimationStrategy([]);
+        assert.ok(strategy instanceof EventJsonlTokenStrategy);
+});
+
+test('selectTokenEstimationStrategy: skips blank lines when detecting format', () => {
+        const lines = ['', '   ', JSON.stringify({ kind: 0, v: {} })];
+        const strategy = selectTokenEstimationStrategy(lines);
+        assert.ok(strategy instanceof DeltaTokenStrategy);
+});
+
+// ── DeltaTokenStrategy: independently testable ─────────────────────────────
+
+test('DeltaTokenStrategy: estimates tokens from kind:2 request message text', () => {
+        // Real VS Code format: k=['requests'] with array v
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [] } }),
+                JSON.stringify({ kind: 2, k: ['requests'], v: [{ message: { text: 'hello world from delta' } }] }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.ok(result.tokens > 0);
+});
+
+test('DeltaTokenStrategy: extracts actual tokens from reconstructed state (promptTokens/outputTokens)', () => {
+        // Put the result in kind:0 initial state so it's properly reconstructed
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [{ message: { text: 'q' }, result: { promptTokens: 100, outputTokens: 50 } }] } }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 150);
+});
+
+test('DeltaTokenStrategy: extracts actual tokens from result.metadata (Insiders format)', () => {
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [{ message: { text: 'q' }, result: { metadata: { promptTokens: 200, outputTokens: 80 } } }] } }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 280);
+});
+
+test('DeltaTokenStrategy: extracts actual tokens from result.usage (completionTokens)', () => {
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [{ message: { text: 'q' }, result: { usage: { promptTokens: 50, completionTokens: 30 } } }] } }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 80);
+});
+
+test('DeltaTokenStrategy: separates thinking tokens from kind:2 response', () => {
+        // Use k=['requests', 0, 'response'] so k.includes('response') is true
+        const lines = [
+                JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [{ kind: 'thinking', value: 'thinking text' }] }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.ok(result.thinkingTokens > 0);
+        assert.equal(result.tokens, result.thinkingTokens, 'total tokens equals thinking-only tokens when there is no other content');
+});
+
+test('DeltaTokenStrategy: returns zero cacheReadTokens and empty modelUsage', () => {
+        const lines = [JSON.stringify({ kind: 0, v: {} })];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.equal(result.cacheReadTokens, 0);
+        assert.deepEqual(result.modelUsage, {});
+        assert.deepEqual(result.dailyActualTokens, {});
+});
+
+test('DeltaTokenStrategy: handles empty lines gracefully', () => {
+        const result = new DeltaTokenStrategy().estimate([]);
+        assert.equal(result.tokens, 0);
+        assert.equal(result.actualTokens, 0);
+});
+
+// ── EventJsonlTokenStrategy: independently testable ────────────────────────
+
+test('EventJsonlTokenStrategy: counts user.message tokens', () => {
+        const lines = [JSON.stringify({ type: 'user.message', data: { content: 'hello from cli' } })];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.ok(result.tokens > 0);
+});
+
+test('EventJsonlTokenStrategy: counts user.message_rendered tokens (JetBrains)', () => {
+        const lines = [JSON.stringify({ type: 'user.message_rendered', data: { renderedMessage: 'rendered with context' } })];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.ok(result.tokens > 0);
+});
+
+test('EventJsonlTokenStrategy: counts assistant.message content tokens', () => {
+        const lines = [JSON.stringify({ type: 'assistant.message', data: { content: 'the answer' } })];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.ok(result.tokens > 0);
+});
+
+test('EventJsonlTokenStrategy: uses session.shutdown for actual tokens and model usage', () => {
+        const lines = [
+                JSON.stringify({ type: 'user.message', data: { content: 'hi' } }),
+                JSON.stringify({
+                        type: 'session.shutdown',
+                        data: { modelMetrics: { 'gpt-4o': { usage: { inputTokens: 100, outputTokens: 200 } } } }
+                }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 300);
+        assert.ok(result.modelUsage['gpt-4o']);
+        assert.equal(result.modelUsage['gpt-4o'].inputTokens, 100);
+        assert.equal(result.modelUsage['gpt-4o'].outputTokens, 200);
+});
+
+test('EventJsonlTokenStrategy: extracts thinking tokens from assistant.message.reasoningText', () => {
+        const lines = [JSON.stringify({ type: 'assistant.message', data: { reasoningText: 'thinking hard' } })];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.ok(result.thinkingTokens > 0);
+});
+
+test('EventJsonlTokenStrategy: extracts JetBrains thinking tokens from data.thinking.text', () => {
+        const lines = [JSON.stringify({ type: 'assistant.message', data: { thinking: { text: 'deep thought' } } })];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.ok(result.thinkingTokens > 0);
+});
+
+test('EventJsonlTokenStrategy: counts tool.execution_complete content tokens', () => {
+        const lines = [JSON.stringify({ type: 'tool.execution_complete', data: { result: { content: 'file contents here' } } })];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.ok(result.tokens > 0);
+});
+
+test('EventJsonlTokenStrategy: attributes shutdown tokens to UTC day', () => {
+        const ts = '2025-03-15T10:00:00.000Z';
+        const lines = [
+                JSON.stringify({
+                        type: 'session.shutdown',
+                        timestamp: ts,
+                        data: { modelMetrics: { 'gpt-4o': { usage: { inputTokens: 50, outputTokens: 50 } } } }
+                }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.dailyActualTokens['2025-03-15'], 100);
+});
+
+test('EventJsonlTokenStrategy: returns empty result for empty input', () => {
+        const result = new EventJsonlTokenStrategy().estimate([]);
+        assert.equal(result.tokens, 0);
+        assert.equal(result.actualTokens, 0);
+        assert.deepEqual(result.modelUsage, {});
+});

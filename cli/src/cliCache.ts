@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { SessionData } from './helpers';
+import { CliCachePolicy } from '../../vscode-extension/src/cachePolicy';
 
 /** Bump this when the SessionData shape changes to force a full re-parse. */
 const CACHE_VERSION = 3;
@@ -35,6 +36,8 @@ const CACHE_PATH = path.join(CACHE_DIR, 'cli-cache.json');
 let cache: Map<string, CacheEntry> = new Map();
 let cacheEnabled = true;
 let dirty = false;
+
+const cachePolicy = new CliCachePolicy<CacheEntry>(MAX_CACHE_ENTRIES);
 
 /** Disable caching (e.g. when --no-cache is passed). */
 export function disableCache(): void {
@@ -65,11 +68,7 @@ export function loadCache(): void {
 export function saveCache(): void {
 	if (!cacheEnabled || !dirty) { return; }
 	try {
-		// Prune to MAX_CACHE_ENTRIES, keeping the most recently modified files
-		if (cache.size > MAX_CACHE_ENTRIES) {
-			const sorted = [...cache.entries()].sort((a, b) => b[1].mtime - a[1].mtime);
-			cache = new Map(sorted.slice(0, MAX_CACHE_ENTRIES));
-		}
+		cachePolicy.evict(cache);
 
 		fs.mkdirSync(CACHE_DIR, { recursive: true });
 		const payload: CacheFile = {
@@ -91,7 +90,7 @@ export function getCached(filePath: string, mtime: number, size: number): Sessio
 	if (!cacheEnabled) { return null; }
 	const entry = cache.get(filePath);
 	if (!entry) { return null; }
-	if (entry.mtime !== mtime || entry.size !== size) { return null; }
+	if (!cachePolicy.isValid(entry, mtime, size)) { return null; }
 	// Rehydrate the Date
 	return {
 		...entry.data,

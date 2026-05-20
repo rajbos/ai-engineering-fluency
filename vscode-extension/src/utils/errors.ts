@@ -155,3 +155,29 @@ export async function withErrorHandling<T>(
 		throw new BackendError(message, error);
 	}
 }
+
+/**
+ * Calls fn and returns its result. On error, logs with context and returns fallback.
+ * Use this instead of silent `catch { }` blocks so errors remain visible for debugging.
+ */
+export function withErrorRecoverySync<T>(fn: () => T, fallback: T, context?: string): T {
+	try {
+		return fn();
+	} catch (err) {
+		console.error(`[recovery] ${context ?? 'unknown'}:`, err);
+		return fallback;
+	}
+}
+
+/**
+ * Calls fn (sync or async) and returns its result. On error, logs with context and returns fallback.
+ * Use this instead of silent `catch { }` blocks so errors remain visible for debugging.
+ */
+export async function withErrorRecovery<T>(fn: () => T | Promise<T>, fallback: T, context?: string): Promise<T> {
+	try {
+		return await fn();
+	} catch (err) {
+		console.error(`[recovery] ${context ?? 'unknown'}:`, err);
+		return fallback;
+	}
+}

@@ -8,6 +8,11 @@
  * Adding a new ecosystem only requires:
  *   1. Implementing this interface in a new file under src/adapters/
  *   2. Adding an instance to the registry in extension.ts (and cli/src/helpers.ts)
+ *
+ * Concurrency contract: all async methods must be safe for concurrent invocation.
+ * Implementations that load heavyweight resources (e.g. WASM, SQLite databases) must
+ * cache the in-flight Promise — not just the resolved value — to prevent duplicate
+ * initialization when multiple callers await the same method simultaneously.
  */
 import type * as fsModule from 'fs';
 import type { ModelUsage, ChatTurn, SessionUsageAnalysis, ModelPricing } from './types';

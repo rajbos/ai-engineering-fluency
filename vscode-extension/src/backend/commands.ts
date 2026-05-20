@@ -50,43 +50,9 @@ export class BackendCommandHandler {
 		}
 	}
 
-	// Convenience methods matching the old interface
-	async configureBackend(): Promise<void> {
-		return this.handleConfigureBackend();
-	}
-
-	async copyBackendConfig(): Promise<void> {
-		return this.handleCopyBackendConfig();
-	}
-
-	async exportCurrentView(): Promise<void> {
-		return this.handleExportCurrentView();
-	}
-
-	async setBackendSharedKey(): Promise<void> {
-		return this.handleSetBackendSharedKey();
-	}
-
-	async rotateBackendSharedKey(): Promise<void> {
-		return this.handleRotateBackendSharedKey();
-	}
-
-	async clearBackendSharedKey(): Promise<void> {
-		return this.handleClearBackendSharedKey();
-	}
-
-	async toggleBackendWorkspaceMachineNameSync(): Promise<void> {
-		return this.handleToggleBackendWorkspaceMachineNameSync();
-	}
-
-	async enableTeamSharing(): Promise<void> {
-		return this.handleEnableTeamSharing();
-	}
-
-	async disableTeamSharing(): Promise<void> {
-		return this.handleDisableTeamSharing();
-	}
-
+	/**
+	 * Handles the "Toggle Workspace/Machine Name Sync" command.
+	 */
 	async handleToggleBackendWorkspaceMachineNameSync(): Promise<void> {
 		try {
 			await this.facade.toggleBackendWorkspaceMachineNameSync();
@@ -96,14 +62,9 @@ export class BackendCommandHandler {
 		}
 	}
 
-	async setSharingProfile(): Promise<void> {
-		return this.handleSetSharingProfile();
-	}
-
-	async clearAzureSettings(): Promise<void> {
-		return this.handleClearAzureSettings();
-	}
-
+	/**
+	 * Handles the "Set Sharing Profile" command.
+	 */
 	async handleSetSharingProfile(): Promise<void> {
 		try {
 			await this.facade.setSharingProfileCommand();

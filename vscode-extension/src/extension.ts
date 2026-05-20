@@ -78,19 +78,7 @@ import { MistralVibeDataAccess } from './mistralvibe';
 import { GeminiCliDataAccess } from './geminicli';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { getEcosystemDisplayName } from './ecosystemAdapter';
-import {
-	OpenCodeAdapter,
-	CrushAdapter,
-	ContinueAdapter,
-	ClaudeDesktopAdapter,
-	ClaudeCodeAdapter,
-	VisualStudioAdapter,
-	MistralVibeAdapter,
-	GeminiCliAdapter,
-	CopilotChatAdapter,
-	CopilotCliAdapter,
-	JetBrainsAdapter,
-} from './adapters';
+import { buildAdapterRegistry } from './adapters';
 import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from './adapters/jetbrainsAdapter';
 import { detectJetBrainsModelHintFromContent } from './jetbrains';
@@ -907,23 +895,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.claudeDesktopCowork = new ClaudeDesktopCoworkDataAccess();
 		this.mistralVibe = new MistralVibeDataAccess();
 		this.geminiCli = new GeminiCliDataAccess();
-		this.ecosystems = [
-			new OpenCodeAdapter(this.openCode),
-			new CrushAdapter(this.crush),
-			new VisualStudioAdapter(this.visualStudio, (t, m) => this.estimateTokensFromText(t, m)),
-			new ContinueAdapter(this.continue_),
-			new ClaudeDesktopAdapter(this.claudeDesktopCowork, (t) => this.isMcpTool(t), (t) => this.extractMcpServerName(t), (t, m) => this.estimateTokensFromText(t, m)),
-			new ClaudeCodeAdapter(this.claudeCode),
-			new MistralVibeAdapter(this.mistralVibe),
-			new GeminiCliAdapter(this.geminiCli),
-			// Copilot Chat / CLI adapters: discovery-only. Their handles() returns
-			// false so the existing fallback parsing in this file continues to
-			// own per-session parsing for VS Code Copilot Chat and CLI files.
-			// See issue #654.
-			new CopilotChatAdapter(),
-			new CopilotCliAdapter(),
-			new JetBrainsAdapter(),
-		];
+		this.ecosystems = buildAdapterRegistry({
+			openCode: this.openCode,
+			crush: this.crush,
+			continue_: this.continue_,
+			visualStudio: this.visualStudio,
+			claudeCode: this.claudeCode,
+			claudeDesktopCowork: this.claudeDesktopCowork,
+			mistralVibe: this.mistralVibe,
+			geminiCli: this.geminiCli,
+			estimateTokens: (t, m) => this.estimateTokensFromText(t, m),
+			isMcpTool: (t) => this.isMcpTool(t),
+			extractMcpServerName: (t) => this.extractMcpServerName(t),
+		});
 		this.cacheManager = new CacheManager(context, { log: (m: string) => this.log(m), warn: (m: string) => this.warn(m), error: (m: string) => this.error(m) }, CopilotTokenTracker.CACHE_VERSION);
 		this.sessionDiscovery = new SessionDiscovery({
 			log: (m) => this.log(m),

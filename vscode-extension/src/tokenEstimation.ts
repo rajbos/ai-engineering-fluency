@@ -66,188 +66,92 @@ export function extractSubAgentData(item: unknown): { prompt: string; result: st
 	return (prompt || result) ? { prompt, result, modelName } : null;
 }
 
+/** Return type for all token estimation strategies. */
+export type TokenEstimationResult = {
+	tokens: number;
+	thinkingTokens: number;
+	actualTokens: number;
+	cacheReadTokens: number;
+	modelUsage: ModelUsage;
+	dailyActualTokens: Record<string, number>;
+};
+
 /**
- * Estimate tokens from a JSONL session file (used by Copilot CLI/Agent mode and VS Code incremental format)
- * Each line is a separate JSON object representing an event in the session
+ * Strategy interface for estimating tokens from a JSONL session file.
+ * Each implementation handles a distinct session file format.
  */
-export function estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; modelUsage: ModelUsage; dailyActualTokens: Record<string, number> } {
-	let totalTokens = 0;
-	let totalThinkingTokens = 0;
-	const lines = fileContent.trim().split('\n');
+export interface TokenEstimationStrategy {
+	estimate(lines: string[]): TokenEstimationResult;
+}
 
-	// For delta-based formats, reconstruct full state to reliably extract actual usage.
-	// Usage data can arrive at many different delta path levels, so line-by-line matching
-	// is fragile. Reconstructing the state (like the logviewer does) is the reliable approach.
-	let sessionState: any = {};
-	let isDeltaBased = false;
-	let parseFailedLines = 0;
-	// For CLI (non-delta) format: accumulate actual token totals from session.shutdown
-	let cliActualTokens = 0;
-	// Total cache-read tokens from CLI session.shutdown events (across all models)
-	let cliCacheReadTokens = 0;
-	// Per-model breakdown from CLI session.shutdown events
-	let cliShutdownModelUsage: ModelUsage | null = null;
-	// Real outputTokens from assistant.message events (used when session.shutdown is absent)
-	let cliRealOutputByModel: { [model: string]: number } | null = null;
-	let totalEstToolCalls = 0;
-	// Per-UTC-day actual token breakdown from shutdown event timestamps
-	const dailyActualTokens: Record<string, number> = {};
+/**
+ * Handles VS Code delta-based JSONL format (kind:0/1/2 events).
+ *
+ * Reconstructs the full session state by applying deltas, then extracts:
+ * - Estimated tokens from request message text and response items (kind:2 appends)
+ * - Actual token counts from the reconstructed result objects
+ * - Sub-agent tokens from the fully assembled response items
+ * - Regex fallback for requests whose JSON.parse failed
+ */
+export class DeltaTokenStrategy implements TokenEstimationStrategy {
+	estimate(lines: string[]): TokenEstimationResult {
+		let totalTokens = 0;
+		let totalThinkingTokens = 0;
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		let sessionState: any = {};
+		let parseFailedLines = 0;
 
-	for (const line of lines) {
-		if (!line.trim()) { continue; }
-
-		try {
-			const event = JSON.parse(line);
-
-			// Detect and reconstruct delta-based format in parallel with estimation
-			if (typeof event.kind === 'number') {
-				isDeltaBased = true;
+		for (const line of lines) {
+			if (!line.trim()) { continue; }
+			try {
+				const event = JSON.parse(line);
 				sessionState = applyDelta(sessionState, event);
-			}
 
-			// Copilot CLI: session.shutdown contains exact token totals per model
-			if (event.type === 'session.shutdown' && event.data?.modelMetrics) {
-				if (!cliShutdownModelUsage) { cliShutdownModelUsage = {}; }
-				let shutdownTotal = 0;
-				for (const [modelName, metrics] of Object.entries(event.data.modelMetrics) as [string, any][]) {
-					const usage = metrics?.usage;
-					if (usage) {
-						const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
-						const output = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
-						const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
-						const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
-						cliActualTokens += input + output;
-						cliCacheReadTokens += cacheRead;
-						shutdownTotal += input + output;
-						if (!cliShutdownModelUsage[modelName]) {
-							cliShutdownModelUsage[modelName] = { inputTokens: 0, outputTokens: 0 };
-						}
-						cliShutdownModelUsage[modelName].inputTokens += input;
-						cliShutdownModelUsage[modelName].outputTokens += output;
-						// Cache breakdown — inputTokens is the total (uncached + reads + writes).
-						// Populate these so calculateEstimatedCost can apply the correct discount rates.
-						if (cacheRead > 0) {
-							cliShutdownModelUsage[modelName].cachedReadTokens = (cliShutdownModelUsage[modelName].cachedReadTokens ?? 0) + cacheRead;
-						}
-						if (cacheWrite > 0) {
-							cliShutdownModelUsage[modelName].cacheCreationTokens = (cliShutdownModelUsage[modelName].cacheCreationTokens ?? 0) + cacheWrite;
+				// Incremental request messages (kind:2 append to requests array)
+				if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
+					for (const request of event.v) {
+						if (request.message?.text) {
+							totalTokens += estimateTokensFromText(request.message.text);
 						}
 					}
 				}
-				// Attribute this shutdown's tokens to its UTC day
-				if (shutdownTotal > 0 && event.timestamp) {
-					const dayKey = new Date(event.timestamp).toISOString().slice(0, 10);
-					if (dayKey && dayKey !== 'Inval') {
-						dailyActualTokens[dayKey] = (dailyActualTokens[dayKey] || 0) + shutdownTotal;
+
+				// Incremental response items (kind:2 append to response array)
+				if (event.kind === 2 && event.k?.includes('response') && Array.isArray(event.v)) {
+					for (const responseItem of event.v) {
+						if (responseItem.kind === 'thinking' && responseItem.value) {
+							totalThinkingTokens += estimateTokensFromText(responseItem.value);
+							continue;
+						}
+						// Sub-agent results are incomplete mid-stream; count from reconstructed state below.
+						if (extractSubAgentData(responseItem)) { continue; }
+						if (responseItem.value) {
+							totalTokens += estimateTokensFromText(responseItem.value);
+						} else if (responseItem.kind === 'markdownContent' && responseItem.content?.value) {
+							totalTokens += estimateTokensFromText(responseItem.content.value);
+						}
 					}
 				}
+			} catch {
+				parseFailedLines++;
 			}
-
-			// Handle Copilot CLI / JetBrains event types
-			if (event.type === 'user.message' && event.data?.content) {
-				totalTokens += estimateTokensFromText(event.data.content);
-			} else if (event.type === 'user.message_rendered' && event.data?.renderedMessage) {
-				// JetBrains IDE: rendered message includes injected file context alongside the
-				// user question. Count it in place of user.message so the context tokens are
-				// captured. (user.message and user.message_rendered share the same turnId;
-				// the rendered version subsumes the bare message, so any double-count is minor
-				// as user.message is typically short compared to the full rendered content.)
-				totalTokens += estimateTokensFromText(event.data.renderedMessage);
-			} else if (event.type === 'assistant.message') {
-				const realOut = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
-				if (realOut > 0) {
-					// Real API-reported output tokens — accumulate for ratio-based total estimation
-					if (!cliRealOutputByModel) { cliRealOutputByModel = {}; }
-					const m = event.data?.model || 'unknown';
-					cliRealOutputByModel[m] = (cliRealOutputByModel[m] ?? 0) + realOut;
-				} else if (event.data?.content) {
-					totalTokens += estimateTokensFromText(event.data.content);
-				}
-			} else if (event.type === 'tool.execution_start') {
-				totalEstToolCalls++;
-			} else if (event.type === 'tool.execution_complete' && event.data?.result) {
-				const result = event.data.result;
-				// Prefer detailedContent (captures full subagent prompt for task launches)
-				const text = typeof result.detailedContent === 'string' ? result.detailedContent
-					: typeof result.content === 'string' ? result.content : '';
-				if (text) { totalTokens += estimateTokensFromText(text); }
-			} else if (event.content) {
-				// Fallback for other formats that might have content
-				totalTokens += estimateTokensFromText(event.content);
-			}
-
-			// Copilot CLI / JetBrains: extract thinking tokens from assistant.message events
-			if (event.type === 'assistant.message') {
-				const reasoningText = event.data?.reasoningText;
-				if (typeof reasoningText === 'string' && reasoningText) {
-					totalThinkingTokens += estimateTokensFromText(reasoningText);
-				}
-				// JetBrains format uses event.data.thinking.text
-				const thinkingText = event.data?.thinking?.text;
-				if (typeof thinkingText === 'string' && thinkingText) {
-					totalThinkingTokens += estimateTokensFromText(thinkingText);
-				}
-			}
-
-			// Handle VS Code incremental format (kind: 2 with requests or response)
-			if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-				for (const request of event.v) {
-					if (request.message?.text) {
-						totalTokens += estimateTokensFromText(request.message.text);
-					}
-				}
-			}
-
-			if (event.kind === 2 && event.k?.includes('response') && Array.isArray(event.v)) {
-				for (const responseItem of event.v) {
-					// Separate thinking tokens
-					if (responseItem.kind === 'thinking' && responseItem.value) {
-						totalThinkingTokens += estimateTokensFromText(responseItem.value);
-						continue;
-					}
-					// Sub-agent items are built up incrementally via delta events; their
-					// result text may be incomplete here. Skip and count from reconstructed state below.
-					if (extractSubAgentData(responseItem)) { continue; }
-					if (responseItem.value) {
-						totalTokens += estimateTokensFromText(responseItem.value);
-					} else if (responseItem.kind === 'markdownContent' && responseItem.content?.value) {
-						totalTokens += estimateTokensFromText(responseItem.content.value);
-					}
-				}
-			}
-		} catch (e) {
-			// Track parse failures for regex fallback
-			parseFailedLines++;
 		}
-	}
 
-	// No session.shutdown: use real outputTokens from assistant.message + observed input:output ratios.
-	// Heavy agent sessions show ~130x ratio; cache reads ≈ input (50% of total from completed sessions).
-	if (!isDeltaBased && !cliActualTokens && cliRealOutputByModel) {
-		const inputOutputRatio = totalEstToolCalls > 20 ? 130 : totalEstToolCalls > 5 ? 50 : 10;
-		for (const realOutput of Object.values(cliRealOutputByModel)) {
-			const estimatedInput = Math.round(realOutput * inputOutputRatio);
-			cliActualTokens += estimatedInput + realOutput;  // input + output (cache is a subset of input)
-			cliCacheReadTokens += estimatedInput;            // cache ≈ input from empirical data
-		}
-	}
-
-	// Extract actual tokens from the reconstructed state (handles all delta path patterns)
-	// Use per-request regex fallback (like the logviewer) so that requests whose result
-	// lines failed JSON.parse still contribute actual tokens instead of being silently lost.
-	let totalActualTokens = 0;
-	if (isDeltaBased) {
-		const rawUsageFallback = parseFailedLines > 0 ? extractPerRequestUsageFromRawLines(lines) : new Map<number, { promptTokens: number; outputTokens: number }>();
-		const requests = (sessionState.requests && Array.isArray(sessionState.requests)) ? sessionState.requests : [];
-		// Determine highest request index: max of reconstructed array length and regex-extracted keys
+		// Extract actual tokens from the reconstructed state (handles all delta path patterns).
+		// Use per-request regex fallback so that requests whose result lines failed JSON.parse
+		// still contribute actual tokens instead of being silently lost.
+		const rawUsageFallback = parseFailedLines > 0
+			? extractPerRequestUsageFromRawLines(lines)
+			: new Map<number, { promptTokens: number; outputTokens: number }>();
+		const requests: any[] = Array.isArray(sessionState.requests) ? sessionState.requests : [];
 		let maxIndex = requests.length;
 		for (const idx of rawUsageFallback.keys()) {
 			if (idx + 1 > maxIndex) { maxIndex = idx + 1; }
 		}
+		let totalActualTokens = 0;
 		for (let i = 0; i < maxIndex; i++) {
 			const request = requests[i];
 			let found = false;
-			// Try reconstructed state first
 			if (request?.result) {
 				const result = request.result;
 				if (typeof result.promptTokens === 'number' && typeof result.outputTokens === 'number') {
@@ -265,7 +169,6 @@ export function estimateTokensFromJsonlSession(fileContent: string): { tokens: n
 					found = true;
 				}
 			}
-			// Per-request fallback: if reconstruction missed this request's result, use regex
 			if (!found) {
 				const extracted = rawUsageFallback.get(i);
 				if (extracted) {
@@ -273,15 +176,9 @@ export function estimateTokensFromJsonlSession(fileContent: string): { tokens: n
 				}
 			}
 		}
-	}
 
-	// If CLI session.shutdown provided actual totals, use them; otherwise fall back to per-request delta totals
-	const finalActualTokens = !isDeltaBased && cliActualTokens > 0 ? cliActualTokens : totalActualTokens;
-
-	// For delta-based sessions, extract sub-agent token estimates from the fully reconstructed state.
-	// Sub-agent results are built up char-by-char via delta events and are only complete in sessionState.
-	if (isDeltaBased) {
-		const requests = Array.isArray(sessionState.requests) ? sessionState.requests : [];
+		// Sub-agent results are built up char-by-char via delta events and are only
+		// complete in the fully reconstructed state — count them here.
 		for (const request of requests) {
 			if (!request?.response || !Array.isArray(request.response)) { continue; }
 			for (const responseItem of request.response) {
@@ -292,9 +189,180 @@ export function estimateTokensFromJsonlSession(fileContent: string): { tokens: n
 				}
 			}
 		}
-	}
 
-	return { tokens: totalTokens + totalThinkingTokens, thinkingTokens: totalThinkingTokens, actualTokens: finalActualTokens, cacheReadTokens: cliCacheReadTokens, modelUsage: cliShutdownModelUsage ?? {}, dailyActualTokens };
+		return {
+			tokens: totalTokens + totalThinkingTokens,
+			thinkingTokens: totalThinkingTokens,
+			actualTokens: totalActualTokens,
+			cacheReadTokens: 0,
+			modelUsage: {},
+			dailyActualTokens: {},
+		};
+	}
+}
+
+/**
+ * Handles event-based JSONL format (Copilot CLI, JetBrains, and similar tools).
+ *
+ * Events are identified by a `type` string field. Supports:
+ * - `session.shutdown`: exact token totals per model, daily attribution
+ * - `user.message` / `user.message_rendered`: user input estimation
+ * - `assistant.message`: output estimation or real token counts
+ * - `tool.execution_start` / `tool.execution_complete`: tool call counting and result estimation
+ * - Ratio-based total estimation when no session.shutdown is present
+ */
+export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
+	estimate(lines: string[]): TokenEstimationResult {
+		let totalTokens = 0;
+		let totalThinkingTokens = 0;
+		let cliActualTokens = 0;
+		let cliCacheReadTokens = 0;
+		let cliShutdownModelUsage: ModelUsage | null = null;
+		let cliRealOutputByModel: { [model: string]: number } | null = null;
+		let totalEstToolCalls = 0;
+		const dailyActualTokens: Record<string, number> = {};
+
+		for (const line of lines) {
+			if (!line.trim()) { continue; }
+			try {
+				const event = JSON.parse(line);
+
+				// session.shutdown contains exact token totals per model
+				if (event.type === 'session.shutdown' && event.data?.modelMetrics) {
+					if (!cliShutdownModelUsage) { cliShutdownModelUsage = {}; }
+					let shutdownTotal = 0;
+					for (const [modelName, metrics] of Object.entries(event.data.modelMetrics) as [string, any][]) {
+						const usage = metrics?.usage;
+						if (usage) {
+							const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
+							const output = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
+							const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
+							const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
+							cliActualTokens += input + output;
+							cliCacheReadTokens += cacheRead;
+							shutdownTotal += input + output;
+							if (!cliShutdownModelUsage[modelName]) {
+								cliShutdownModelUsage[modelName] = { inputTokens: 0, outputTokens: 0 };
+							}
+							cliShutdownModelUsage[modelName].inputTokens += input;
+							cliShutdownModelUsage[modelName].outputTokens += output;
+							// Cache breakdown — inputTokens is the total (uncached + reads + writes).
+							// Populate these so calculateEstimatedCost can apply the correct discount rates.
+							if (cacheRead > 0) {
+								cliShutdownModelUsage[modelName].cachedReadTokens = (cliShutdownModelUsage[modelName].cachedReadTokens ?? 0) + cacheRead;
+							}
+							if (cacheWrite > 0) {
+								cliShutdownModelUsage[modelName].cacheCreationTokens = (cliShutdownModelUsage[modelName].cacheCreationTokens ?? 0) + cacheWrite;
+							}
+						}
+					}
+					// Attribute this shutdown's tokens to its UTC day
+					if (shutdownTotal > 0 && event.timestamp) {
+						const dayKey = new Date(event.timestamp).toISOString().slice(0, 10);
+						if (dayKey && dayKey !== 'Inval') {
+							dailyActualTokens[dayKey] = (dailyActualTokens[dayKey] || 0) + shutdownTotal;
+						}
+					}
+				}
+
+				// User / assistant / tool event types
+				if (event.type === 'user.message' && event.data?.content) {
+					totalTokens += estimateTokensFromText(event.data.content);
+				} else if (event.type === 'user.message_rendered' && event.data?.renderedMessage) {
+					// JetBrains IDE: rendered message includes injected file context alongside the
+					// user question. Count it in place of user.message so the context tokens are
+					// captured. (user.message and user.message_rendered share the same turnId;
+					// the rendered version subsumes the bare message, so any double-count is minor
+					// as user.message is typically short compared to the full rendered content.)
+					totalTokens += estimateTokensFromText(event.data.renderedMessage);
+				} else if (event.type === 'assistant.message') {
+					const realOut = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
+					if (realOut > 0) {
+						// Real API-reported output tokens — accumulate for ratio-based total estimation
+						if (!cliRealOutputByModel) { cliRealOutputByModel = {}; }
+						const m = event.data?.model || 'unknown';
+						cliRealOutputByModel[m] = (cliRealOutputByModel[m] ?? 0) + realOut;
+					} else if (event.data?.content) {
+						totalTokens += estimateTokensFromText(event.data.content);
+					}
+				} else if (event.type === 'tool.execution_start') {
+					totalEstToolCalls++;
+				} else if (event.type === 'tool.execution_complete' && event.data?.result) {
+					const result = event.data.result;
+					// Prefer detailedContent (captures full subagent prompt for task launches)
+					const text = typeof result.detailedContent === 'string' ? result.detailedContent
+						: typeof result.content === 'string' ? result.content : '';
+					if (text) { totalTokens += estimateTokensFromText(text); }
+				} else if (event.content) {
+					// Fallback for other formats that might have content
+					totalTokens += estimateTokensFromText(event.content);
+				}
+
+				// Extract thinking tokens from assistant.message events
+				if (event.type === 'assistant.message') {
+					const reasoningText = event.data?.reasoningText;
+					if (typeof reasoningText === 'string' && reasoningText) {
+						totalThinkingTokens += estimateTokensFromText(reasoningText);
+					}
+					// JetBrains format uses event.data.thinking.text
+					const thinkingText = event.data?.thinking?.text;
+					if (typeof thinkingText === 'string' && thinkingText) {
+						totalThinkingTokens += estimateTokensFromText(thinkingText);
+					}
+				}
+			} catch { /* skip invalid lines */ }
+		}
+
+		// No session.shutdown: use real outputTokens from assistant.message + observed input:output ratios.
+		// Heavy agent sessions show ~130x ratio; cache reads ≈ input (50% of total from completed sessions).
+		if (!cliActualTokens && cliRealOutputByModel) {
+			const inputOutputRatio = totalEstToolCalls > 20 ? 130 : totalEstToolCalls > 5 ? 50 : 10;
+			for (const realOutput of Object.values(cliRealOutputByModel)) {
+				const estimatedInput = Math.round(realOutput * inputOutputRatio);
+				cliActualTokens += estimatedInput + realOutput;  // input + output (cache is a subset of input)
+				cliCacheReadTokens += estimatedInput;            // cache ≈ input from empirical data
+			}
+		}
+
+		return {
+			tokens: totalTokens + totalThinkingTokens,
+			thinkingTokens: totalThinkingTokens,
+			actualTokens: cliActualTokens,
+			cacheReadTokens: cliCacheReadTokens,
+			modelUsage: cliShutdownModelUsage ?? {},
+			dailyActualTokens,
+		};
+	}
+}
+
+/**
+ * Select the appropriate token estimation strategy for the given JSONL lines.
+ *
+ * VS Code delta-based files always begin with a `kind:0` event. Checking the first
+ * few non-empty lines is sufficient and avoids double-parsing the whole file.
+ * All other formats (Copilot CLI, JetBrains, …) use the event-based strategy.
+ */
+export function selectTokenEstimationStrategy(lines: string[]): TokenEstimationStrategy {
+	let checked = 0;
+	for (const line of lines) {
+		if (!line.trim()) { continue; }
+		if (++checked > 10) { break; }
+		try {
+			const event = JSON.parse(line);
+			if (typeof event.kind === 'number') { return new DeltaTokenStrategy(); }
+		} catch { /* continue scanning */ }
+	}
+	return new EventJsonlTokenStrategy();
+}
+
+/**
+ * Estimate tokens from a JSONL session file (used by Copilot CLI/Agent mode and VS Code incremental format)
+ * Each line is a separate JSON object representing an event in the session
+ */
+export function estimateTokensFromJsonlSession(fileContent: string): TokenEstimationResult {
+	const lines = fileContent.trim().split('\n');
+	const strategy = selectTokenEstimationStrategy(lines);
+	return strategy.estimate(lines);
 }
 
 /**

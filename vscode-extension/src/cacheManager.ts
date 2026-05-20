@@ -7,6 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { SessionFileCache } from './types';
+import { type CachePolicy, VsCodeCachePolicy } from './cachePolicy';
 
 export interface CacheManagerDeps {
 	log: (msg: string) => void;
@@ -19,11 +20,18 @@ export class CacheManager {
 	private readonly context: vscode.ExtensionContext;
 	private readonly deps: CacheManagerDeps;
 	private readonly cacheVersion: number;
+	private readonly policy: CachePolicy<SessionFileCache>;
 
-	constructor(context: vscode.ExtensionContext, deps: CacheManagerDeps, cacheVersion: number) {
+	constructor(
+		context: vscode.ExtensionContext,
+		deps: CacheManagerDeps,
+		cacheVersion: number,
+		policy?: CachePolicy<SessionFileCache>,
+	) {
 		this.context = context;
 		this.deps = deps;
 		this.cacheVersion = cacheVersion;
+		this.policy = policy ?? new VsCodeCachePolicy(deps.log);
 	}
 
 	get cache(): Map<string, SessionFileCache> {
@@ -40,11 +48,7 @@ export class CacheManager {
 		if (!cached) {
 			return false;
 		}
-		// If size is missing (old cache), treat as invalid so it will be upgraded
-		if (typeof cached.size !== 'number') {
-			return false;
-		}
-		return cached.mtime === currentMtime && cached.size === currentSize;
+		return this.policy.isValid(cached, currentMtime, currentSize);
 	}
 
 	getCachedSessionData(filePath: string): SessionFileCache | undefined {
@@ -59,26 +63,7 @@ export class CacheManager {
 			data.size = fileSize;
 		}
 		this.sessionFileCache.set(filePath, data);
-
-		// Limit cache size to prevent memory issues (keep last 3000 files)
-		// Only trigger cleanup when size exceeds limit by 100 to avoid frequent operations
-		if (this.sessionFileCache.size > 3100) {
-			// Remove 100 oldest entries to bring size back to 3000
-			// Maps maintain insertion order, so the first entries are the oldest
-			const keysToDelete: string[] = [];
-			let count = 0;
-			for (const key of this.sessionFileCache.keys()) {
-				keysToDelete.push(key);
-				count++;
-				if (count >= 100) {
-					break;
-				}
-			}
-			for (const key of keysToDelete) {
-				this.sessionFileCache.delete(key);
-			}
-			this.deps.log(`Cache size limit reached, removed ${keysToDelete.length} oldest entries. Current size: ${this.sessionFileCache.size}`);
-		}
+		this.policy.evict(this.sessionFileCache);
 	}
 
 	clearExpiredCache(): void {
