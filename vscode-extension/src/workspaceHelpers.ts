@@ -61,9 +61,11 @@ interface CustomizationPatternsConfig {
  */
 // Helper: read a workspaceStorage JSON file and extract a candidate folder path from configured keys
 export function parseWorkspaceStorageJsonFile(jsonPath: string, candidateKeys: string[]): string | undefined {
+	if (typeof jsonPath !== 'string' || !jsonPath || !Array.isArray(candidateKeys)) { return undefined; }
 	try {
 		const raw = fs.readFileSync(jsonPath, 'utf8');
 		const obj = JSON.parse(raw);
+		if (typeof obj !== 'object' || obj === null || Array.isArray(obj)) { return undefined; }
 		for (const key of candidateKeys) {
 			const candidate = obj[key];
 			if (typeof candidate !== 'string') { continue; }

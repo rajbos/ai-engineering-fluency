@@ -328,6 +328,10 @@ if (!sessionJson) {
 try { sessionJson = JSON.parse(fileContent); } catch { return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
 }
 
+if (!isObject(sessionJson) || Array.isArray(sessionJson)) {
+return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 };
+}
+
 const requests = Array.isArray(sessionJson.requests) ? sessionJson.requests : (Array.isArray(sessionJson.history) ? sessionJson.history : []);
 interactions = requests.length;
 for (const request of requests) { processRequest(request); }
