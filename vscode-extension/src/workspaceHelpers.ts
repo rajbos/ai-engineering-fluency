@@ -322,8 +322,19 @@ export function getRepositoryUrl(): string {
  * Detect the actual mode type from inputState.mode object.
  * Returns 'ask', 'edit', 'agent', 'plan', or 'customAgent'.
  */
-export function getModeType(mode: ModeObject | null | undefined): 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' {
-	if (!mode || !mode.kind) {
+export function getModeType(mode: ModeObject | string | null | undefined): 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' {
+	if (!mode) {
+		return 'ask';
+	}
+
+	// When mode arrives as a raw string kind (e.g. incremental state-update events)
+	if (typeof mode === 'string') {
+		if (mode === 'edit') { return 'edit'; }
+		if (mode === 'agent') { return 'agent'; }
+		return 'ask';
+	}
+
+	if (!mode.kind) {
 		return 'ask';
 	}
 
