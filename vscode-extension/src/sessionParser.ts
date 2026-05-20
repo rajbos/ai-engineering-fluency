@@ -34,6 +34,40 @@ return defaultModel;
 return trimmed.startsWith('copilot/') ? trimmed.substring('copilot/'.length) : trimmed;
 }
 
+interface MessagePart {
+  text?: string;
+}
+
+interface RequestMessage {
+  parts?: MessagePart[];
+  text?: string;
+}
+
+interface ResponseItem {
+  kind?: string;
+  value?: string;
+  content?: { value?: string };
+  message?: { parts?: MessagePart[] };
+}
+
+interface RequestResult {
+  usage?: { promptTokens?: number; completionTokens?: number };
+  promptTokens?: number;
+  outputTokens?: number;
+  metadata?: { promptTokens?: number; outputTokens?: number; modelId?: string };
+  details?: string;
+}
+
+interface ProcessableRequest {
+  modelId?: string;
+  selectedModel?: { identifier?: string };
+  model?: string;
+  message?: RequestMessage;
+  response?: ResponseItem[];
+  responses?: ResponseItem[];
+  result?: RequestResult;
+}
+
 /**
  * Apply a delta to reconstruct session state from delta-based JSONL
  * VS Code Insiders uses this format where:
@@ -48,9 +82,9 @@ if (!isObject(delta)) {
 return state;
 }
 
-const kind = (delta as any).kind;
-const k = (delta as any).k;
-const v = (delta as any).v;
+const kind = delta['kind'];
+const k = delta['k'];
+const v = delta['v'];
 
 if (kind === 0) {
 // Initial state - full replacement
@@ -68,15 +102,16 @@ return state;
 }
 }
 
-let root: any = isObject(state) ? state : Object.create(null);
-let current: any = root;
+let root: JsonObject | unknown[] = isObject(state) ? state : Object.create(null);
+let current: JsonObject | unknown[] = root;
 
-const ensureChildContainer = (parent: any, key: string, nextSeg: string): any => {
+const ensureChildContainer = (parent: JsonObject, key: string, nextSeg: string): JsonObject | unknown[] => {
 const wantsArray = isArrayIndexSegment(nextSeg);
-let existing = parent[key];
+const existing = parent[key];
 if (!isObject(existing)) {
-existing = wantsArray ? [] : Object.create(null);
-parent[key] = existing;
+const newNode: JsonObject | unknown[] = wantsArray ? [] : Object.create(null);
+parent[key] = newNode;
+return newNode;
 }
 return existing;
 };
@@ -88,12 +123,15 @@ const nextSeg = path[i + 1];
 
 if (Array.isArray(current) && isArrayIndexSegment(seg)) {
 const idx = Number(seg);
-let existing = current[idx];
-if (!isObject(existing)) {
-existing = isArrayIndexSegment(nextSeg) ? [] : Object.create(null);
-current[idx] = existing;
+const rawExisting = current[idx];
+let nextNode: JsonObject | unknown[];
+if (!isObject(rawExisting)) {
+nextNode = isArrayIndexSegment(nextSeg) ? [] : Object.create(null);
+current[idx] = nextNode;
+} else {
+nextNode = rawExisting;
 }
-current = existing;
+current = nextNode;
 continue;
 }
 
@@ -124,15 +162,15 @@ return root;
 
 if (kind === 2) {
 // Append value(s) to array at key path
-let target: any;
+let target: unknown[] | undefined;
 if (Array.isArray(current) && isArrayIndexSegment(lastSeg)) {
 const idx = Number(lastSeg);
 if (!Array.isArray(current[idx])) {
 current[idx] = [];
 }
-target = current[idx];
+target = current[idx] as unknown[];
 } else if (isObject(current)) {
-if (!Array.isArray((current as any)[lastSeg])) {
+if (!Array.isArray(current[lastSeg])) {
 // Use Object.defineProperty for safe assignment
 Object.defineProperty(current, lastSeg, {
 value: [],
@@ -141,7 +179,7 @@ enumerable: true,
 configurable: true
 });
 }
-target = (current as any)[lastSeg];
+target = current[lastSeg] as unknown[];
 }
 
 if (Array.isArray(target)) {
@@ -171,15 +209,16 @@ if (!isObject(item)) {
 continue;
 }
 // Separate thinking items from regular response text
-if ((item as any).kind === 'thinking') {
-const value = (item as any).value;
+if (item['kind'] === 'thinking') {
+const value = item['value'];
 if (typeof value === 'string' && value) {
 thinkingText += value;
 }
 continue;
 }
-const contentValue = isObject((item as any).content) ? (item as any).content.value : undefined;
-const value = (item as any).value;
+const content = item['content'];
+const contentValue = isObject(content) ? content['value'] : undefined;
+const value = item['value'];
 // Prefer content.value when present to avoid double-counting wrapper text.
 if (typeof contentValue === 'string' && contentValue) {
 responseText += contentValue;
@@ -196,7 +235,7 @@ export function parseSessionFileContent(
 sessionFilePath: string,
 fileContent: string,
 estimateTokensFromText: (text: string, model?: string) => number,
-getModelFromRequest?: (req: any) => string
+getModelFromRequest?: (req: ProcessableRequest) => string
 ) {
 // Aggregates and helpers are declared up front; the heavy lifting is delegated
 const modelUsage: ModelUsage = {};
@@ -206,7 +245,7 @@ let totalOutputTokens = 0;
 let totalThinkingTokens = 0;
 let totalActualTokens = 0;
 
-let sessionJson: any | undefined;
+let sessionJson: unknown;
 let defaultModel = 'unknown';
 
 const ensureModel = (m?: string) => (typeof m === 'string' && m ? m : defaultModel);
@@ -226,39 +265,40 @@ totalOutputTokens += t;
 };
 
 // Process a single request (used by both JSON and reconstructed delta flows)
-const processRequest = (request: any) => {
+const processRequest = (request: unknown) => {
 if (request == null || typeof request !== 'object') { return; }
+const req = request as ProcessableRequest;
 
-const rawRequestModel = request.modelId ?? request.selectedModel?.identifier ?? request.model;
+const rawRequestModel = req.modelId ?? req.selectedModel?.identifier ?? req.model;
 const requestModel = normalizeModelId(rawRequestModel, defaultModel);
 
 let model: string;
 if (typeof rawRequestModel === 'string' && rawRequestModel.trim()) {
 model = requestModel;
 } else {
-const callbackModelRaw = getModelFromRequest ? getModelFromRequest(request) : undefined;
+const callbackModelRaw = getModelFromRequest ? getModelFromRequest(req) : undefined;
 const callbackModel = normalizeModelId(callbackModelRaw, '');
 model = callbackModel || requestModel;
 }
 
 // Input parts
-if (request?.message?.parts) {
-for (const part of request.message.parts) {
+if (req.message?.parts) {
+for (const part of req.message.parts) {
 if (typeof part?.text === 'string' && part.text) { addInput(model, part.text); }
 }
-} else if (typeof request?.message?.text === 'string') {
-addInput(model, request.message.text);
+} else if (typeof req.message?.text === 'string') {
+addInput(model, req.message.text);
 }
 
 // Extract output and thinking text via extractResponseAndThinkingText, which handles
 // both plain .value and delta-format content.value shapes.
-const { responseText, thinkingText } = extractResponseAndThinkingText(request.response);
+const { responseText, thinkingText } = extractResponseAndThinkingText(req.response);
 if (responseText) { addOutput(model, responseText); }
 if (thinkingText) { totalThinkingTokens += estimateTokensFromText(thinkingText, model); }
 
 // Loop only for sub-agents and message.parts — skip .value and thinking items
 // because extractResponseAndThinkingText already counted them above.
-const responseItems = Array.isArray(request.response) ? request.response : (Array.isArray(request.responses) ? request.responses : []);
+const responseItems: ResponseItem[] = Array.isArray(req.response) ? req.response : (Array.isArray(req.responses) ? req.responses : []);
 for (const responseItem of responseItems) {
 const subAgent = extractSubAgentData(responseItem);
 if (subAgent) {
@@ -280,15 +320,15 @@ if (typeof p?.text === 'string' && p.text) { addOutput(model, p.text); }
 }
 
 // Actual token counts if present
-if (request?.result?.usage) {
-const u = request.result.usage;
+if (req.result?.usage) {
+const u = req.result.usage;
 const prompt = typeof u.promptTokens === 'number' ? u.promptTokens : 0;
 const completion = typeof u.completionTokens === 'number' ? u.completionTokens : 0;
 totalActualTokens += prompt + completion;
-} else if (typeof request?.result?.promptTokens === 'number' && typeof request?.result?.outputTokens === 'number') {
-totalActualTokens += request.result.promptTokens + request.result.outputTokens;
-} else if (request?.result?.metadata && typeof request?.result?.metadata?.promptTokens === 'number' && typeof request?.result?.metadata?.outputTokens === 'number') {
-totalActualTokens += request.result.metadata.promptTokens + request.result.metadata.outputTokens;
+} else if (typeof req.result?.promptTokens === 'number' && typeof req.result?.outputTokens === 'number') {
+totalActualTokens += req.result.promptTokens + req.result.outputTokens;
+} else if (req.result?.metadata && typeof req.result.metadata.promptTokens === 'number' && typeof req.result.metadata.outputTokens === 'number') {
+totalActualTokens += req.result.metadata.promptTokens + req.result.metadata.outputTokens;
 }
 };
 
@@ -306,9 +346,14 @@ for (const line of lines) {
 try { const delta = JSON.parse(line); sessionState = applyDelta(sessionState, delta); } catch { }
 }
 
-const requests = isObject(sessionState) && Array.isArray((sessionState as any).requests) ? ((sessionState as any).requests as unknown[]) : [];
+const sessionStateObj = isObject(sessionState) ? sessionState : null;
+const requests: unknown[] = sessionStateObj && Array.isArray(sessionStateObj['requests']) ? (sessionStateObj['requests'] as unknown[]) : [];
 // Count only requests that look like user interactions
-interactions = requests.filter((r) => isObject(r) && isObject((r as any).message) && typeof (r as any).message.text === 'string' && (r as any).message.text.trim()).length;
+interactions = requests.filter((r) => {
+if (!isObject(r)) { return false; }
+const msg = r['message'];
+return isObject(msg) && typeof msg['text'] === 'string' && (msg['text'] as string).trim();
+}).length;
 for (const r of requests) { processRequest(r); }
 return {
 tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens,
@@ -328,7 +373,8 @@ if (!sessionJson) {
 try { sessionJson = JSON.parse(fileContent); } catch { return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
 }
 
-const requests = Array.isArray(sessionJson.requests) ? sessionJson.requests : (Array.isArray(sessionJson.history) ? sessionJson.history : []);
+const sj = isObject(sessionJson) ? sessionJson : null;
+const requests: unknown[] = sj && Array.isArray(sj['requests']) ? (sj['requests'] as unknown[]) : (sj && Array.isArray(sj['history']) ? (sj['history'] as unknown[]) : []);
 interactions = requests.length;
 for (const request of requests) { processRequest(request); }
 

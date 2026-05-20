@@ -1002,7 +1002,7 @@ export function readClaudeCodeEventsForAnalysis(sessionFilePath: string): any[] 
 	try {
 		const content = fs.readFileSync(sessionFilePath, 'utf8');
 		const lines = content.trim().split('\n');
-		const events: any[] = [];
+		const events: unknown[] = [];
 		for (const line of lines) {
 			if (!line.trim()) { continue; }
 			try { events.push(JSON.parse(line)); } catch { /* skip */ }
@@ -1266,13 +1266,11 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 				for (const line of lines) {
 					try {
 						const delta = JSON.parse(line);
-						sessionState = applyDelta(sessionState, delta);
+						sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
 					} catch {
 						// Skip invalid lines
 					}
 				}
-				
-				// Extract timestamps
 				if (sessionState.creationDate !== undefined) { timestamps.push(sessionState.creationDate); }
 				if (sessionState.lastMessageDate !== undefined) { timestamps.push(sessionState.lastMessageDate); }
 				
@@ -1404,7 +1402,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 				for (const line of lines) {
 					try {
 						const delta = JSON.parse(line);
-						sessionState = applyDelta(sessionState, delta);
+						sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
 					} catch {
 						// Skip invalid lines
 					}
@@ -1715,7 +1713,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 					// Detect and reconstruct delta-based format
 					if (typeof event.kind === 'number') {
 						isDeltaBased = true;
-						sessionState = applyDelta(sessionState, event);
+						sessionState = applyDelta(sessionState, event) as DeltaSessionState;
 					}
 
 					// Copilot CLI session.start carries the selected model
