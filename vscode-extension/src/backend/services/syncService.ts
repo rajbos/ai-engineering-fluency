@@ -21,6 +21,7 @@ import { CredentialService } from './credentialService';
 import { DataPlaneService } from './dataPlaneService';
 import { BackendUtility } from './utilityService';
 import { SharingServerUploadService, type SharingServerEntry } from './sharingServerUploadService';
+import { SyncLock } from './syncLock';
 import { isJsonlContent } from '../../tokenEstimation';
 import { getEditorTypeFromPath } from '../../workspaceHelpers';
 
@@ -124,8 +125,7 @@ export class SyncService {
 	private backendSyncInterval: NodeJS.Timeout | undefined;
 	private consecutiveFailures = 0;
 	private readonly MAX_CONSECUTIVE_FAILURES = 5;
-	/** Stale threshold for the sync lock file (matches the sync timer interval). */
-	private static readonly SYNC_LOCK_STALE_MS = BACKEND_SYNC_MIN_INTERVAL_MS;
+	private readonly syncLock: SyncLock;
 
 	constructor(
 		private readonly deps: SyncServiceDeps,
@@ -134,7 +134,13 @@ export class SyncService {
 		private readonly blobUploadService: BlobUploadServiceLike | undefined,
 		private readonly utility: typeof BackendUtility,
 		private readonly sharingServerUploadService: SharingServerUploadService | undefined,
-	) {}
+	) {
+		this.syncLock = new SyncLock(
+			deps.context,
+			deps.logger.log.bind(deps.logger),
+			deps.logger.warn.bind(deps.logger),
+		);
+	}
 
 	// ── Cross-instance file lock ────────────────────────────────────────
 
@@ -147,72 +153,14 @@ export class SyncService {
 	 * syncing to independent endpoints and should not block each other.
 	 */
 	private async acquireSyncLock(backend?: string, serverUrl?: string): Promise<boolean> {
-		const ctx = this.deps.context;
-		if (!ctx) { return true; } // No context → allow (tests)
-		// Use a backend-specific lock so Azure and sharingServer syncs don't block each other.
-		const suffix = backend === 'sharingServer' ? '_sharingserver' : '';
-		const lockPath = path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
-		const lockContent = JSON.stringify({
-			sessionId: vscode.env.sessionId,
-			timestamp: Date.now(),
-			serverUrl,
-		});
-		try {
-			await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
-			const fd = await fs.promises.open(lockPath, 'wx');
-			await fd.writeFile(lockContent);
-			await fd.close();
-			return true;
-		} catch (err: any) {
-			if (err.code !== 'EEXIST') {
-				this.deps.logger.warn(`Sync lock: unexpected error acquiring lock: ${err.message}`);
-				return false;
-			}
-			// Lock file exists — check if it belongs to a different server or is stale
-			try {
-				const content = await fs.promises.readFile(lockPath, 'utf-8');
-				const lock = JSON.parse(content);
-				// Different server URL → the lock does not apply to this instance.
-				if (serverUrl && lock.serverUrl && lock.serverUrl !== serverUrl) {
-					this.deps.logger.log(`Sync lock: lock is held for a different server (${lock.serverUrl}), proceeding for ${serverUrl}`);
-					return true;
-				}
-				if (Date.now() - lock.timestamp > SyncService.SYNC_LOCK_STALE_MS) {
-					this.deps.logger.log('Sync lock: breaking stale lock from another window');
-					await fs.promises.unlink(lockPath);
-					try {
-						const fd = await fs.promises.open(lockPath, 'wx');
-						await fd.writeFile(lockContent);
-						await fd.close();
-						return true;
-					} catch {
-						return false;
-					}
-				}
-			} catch {
-				// Lock file may have been deleted by its owner
-			}
-			return false;
-		}
+		return this.syncLock.acquire(backend, serverUrl);
 	}
 
 	/**
 	 * Release the sync lock, but only if we own it.
 	 */
 	private async releaseSyncLock(backend?: string): Promise<void> {
-		const ctx = this.deps.context;
-		if (!ctx) { return; }
-		const suffix = backend === 'sharingServer' ? '_sharingserver' : '';
-		const lockPath = path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
-		try {
-			const content = await fs.promises.readFile(lockPath, 'utf-8');
-			const lock = JSON.parse(content);
-			if (lock.sessionId === vscode.env.sessionId) {
-				await fs.promises.unlink(lockPath);
-			}
-		} catch {
-			// Lock file already gone or unreadable
-		}
+		return this.syncLock.release(backend);
 	}
 
 	/**
