@@ -26,8 +26,8 @@ import {
 } from '../../src/backend/rollups';
 
 test('validateTeamAlias accepts lowercase/digits/dash only', () => {
-	assert.deepStrictEqual(validateTeamAlias('alice-01'), { valid: true, alias: 'alice-01' });
-	assert.deepStrictEqual(validateTeamAlias('Alice-01'), { valid: true, alias: 'alice-01' });
+	assert.deepStrictEqual(validateTeamAlias('alice-01'), { valid: true, data: { alias: 'alice-01' } });
+	assert.deepStrictEqual(validateTeamAlias('Alice-01'), { valid: true, data: { alias: 'alice-01' } });
 	assert.equal(validateTeamAlias('alice@example.com').valid, false);
 	assert.equal(validateTeamAlias('alice bob').valid, false);
 	assert.equal(validateTeamAlias('').valid, false);
@@ -56,9 +56,9 @@ test('validateTeamAlias rejects common name patterns (CR-015)', () => {
 	assert.equal(validateTeamAlias('john').valid, false);
 	
 	// Test that valid non-common names still pass
-	assert.deepStrictEqual(validateTeamAlias('alice-01'), { valid: true, alias: 'alice-01' });
-	assert.deepStrictEqual(validateTeamAlias('bob-team-x'), { valid: true, alias: 'bob-team-x' });
-	assert.deepStrictEqual(validateTeamAlias('charlie-99'), { valid: true, alias: 'charlie-99' });
+	assert.deepStrictEqual(validateTeamAlias('alice-01'), { valid: true, data: { alias: 'alice-01' } });
+	assert.deepStrictEqual(validateTeamAlias('bob-team-x'), { valid: true, data: { alias: 'bob-team-x' } });
+	assert.deepStrictEqual(validateTeamAlias('charlie-99'), { valid: true, data: { alias: 'charlie-99' } });
 });
 
 test('derivePseudonymousUserKey is stable and dataset-scoped', () => {
