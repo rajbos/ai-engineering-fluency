@@ -68,8 +68,9 @@ export const fluencyCommand = new Command('fluency')
 		};
 
 		const stageBar = (stage: number): string => {
-			const filled = '█'.repeat(stage);
-			const empty = '░'.repeat(4 - stage);
+			const clampedStage = (Number.isFinite(stage) && stage >= 1 && stage <= 4) ? Math.floor(stage) : 0;
+			const filled = '█'.repeat(clampedStage);
+			const empty = '░'.repeat(4 - clampedStage);
 			return filled + empty;
 		};
 

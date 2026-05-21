@@ -92,7 +92,7 @@ function printPeriodStats(
 	console.log(chalk.bold(`${emoji} ${label}`));
 	console.log(chalk.dim('─'.repeat(55)));
 
-	if (stats.sessions === 0) {
+	if (!stats || stats.sessions === 0) {
 		console.log(chalk.dim('  No activity in this period'));
 		console.log();
 		return;

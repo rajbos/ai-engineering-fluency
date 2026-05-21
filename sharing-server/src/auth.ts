@@ -1,8 +1,37 @@
 import { createHash } from 'crypto';
 import type { Context, Next } from 'hono';
 import { upsertUser, type UserRow } from './db.js';
+import {
+	TOKEN_CACHE_TTL_MS,
+	NEGATIVE_CACHE_TTL_MS,
+	UPLOAD_RATE_MAX,
+	UPLOAD_RATE_WINDOW_MS,
+	IP_RATE_MAX,
+	IP_RATE_WINDOW_MS,
+} from './config.js';
 
-const CACHE_TTL_MS = 10 * 60 * 1000; // 10 minutes
+interface GitHubUserResponse {
+	id: number;
+	login: string;
+	name: string | null;
+	avatar_url: string;
+}
+
+/** Type guard that validates the shape of the GitHub /user API response at runtime. */
+function isValidGitHubUserResponse(data: unknown): data is GitHubUserResponse {
+	if (!data || typeof data !== 'object') return false;
+	const d = data as Record<string, unknown>;
+	return (
+		typeof d['id'] === 'number' &&
+		Number.isInteger(d['id']) &&
+		d['id'] > 0 &&
+		typeof d['login'] === 'string' &&
+		d['login'].length > 0 &&
+		(d['name'] === null || typeof d['name'] === 'string') &&
+		typeof d['avatar_url'] === 'string' &&
+		d['avatar_url'].length > 0
+	);
+}
 
 interface CachedAuth {
 	user: UserRow;
@@ -18,17 +47,12 @@ const tokenCache = new Map<string, CachedAuth>();
 
 // Negative cache: SHA-256(token) → bannedUntil timestamp (short TTL for bad tokens)
 const negativeCache = new Map<string, NegativeCacheEntry>();
-const NEGATIVE_TTL_MS = 60 * 1000; // 1 minute
 
 // Upload rate limiter: github_id → { count, resetAt }
 const uploadRateMap = new Map<number, { count: number; resetAt: number }>();
-const UPLOAD_RATE_MAX = 100;
-const UPLOAD_RATE_WINDOW_MS = 60 * 60 * 1000; // 1 hour per user
 
 // Pre-auth IP rate limiter: IP → { count, resetAt }
 const ipRateMap = new Map<string, { count: number; resetAt: number }>();
-const IP_RATE_MAX = 200;
-const IP_RATE_WINDOW_MS = 60 * 1000; // 1 minute per IP
 
 /**
  * Validates a GitHub Bearer token supplied by the client (e.g. the VS Code extension).
@@ -69,25 +93,39 @@ export async function validateGitHubToken(token: string): Promise<UserRow | null
 	}
 
 	if (!response.ok) {
-		negativeCache.set(cacheKey, { bannedUntil: Date.now() + NEGATIVE_TTL_MS });
+		negativeCache.set(cacheKey, { bannedUntil: Date.now() + NEGATIVE_CACHE_TTL_MS });
 		return null;
 	}
 
-	const data = await response.json() as { id: number; login: string; name: string | null; avatar_url: string };
+	let rawData: unknown;
+	try {
+		rawData = await response.json();
+	} catch {
+		// Malformed JSON from GitHub API — don't cache, treat as transient failure
+		return null;
+	}
+
+	if (!isValidGitHubUserResponse(rawData)) {
+		// GitHub API returned an unexpected data shape — could indicate API version change
+		console.warn('[auth] GitHub /user response failed schema validation');
+		return null;
+	}
+
+	const data = rawData;
 
 	// Optional org membership check
 	const allowedOrg = process.env.ALLOWED_GITHUB_ORG;
 	if (allowedOrg) {
 		const isMember = await checkOrgMembership(token, data.login, allowedOrg);
 		if (!isMember) {
-			negativeCache.set(cacheKey, { bannedUntil: Date.now() + NEGATIVE_TTL_MS });
+			negativeCache.set(cacheKey, { bannedUntil: Date.now() + NEGATIVE_CACHE_TTL_MS });
 			return null;
 		}
 	}
 
 	const user = upsertUser(data.id, data.login, data.name, data.avatar_url);
 
-	tokenCache.set(cacheKey, { user, expiresAt: Date.now() + CACHE_TTL_MS });
+	tokenCache.set(cacheKey, { user, expiresAt: Date.now() + TOKEN_CACHE_TTL_MS });
 	return user;
 }
 

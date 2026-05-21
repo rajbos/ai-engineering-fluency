@@ -70,6 +70,7 @@
     "ministral-8b-2410": 0.25,
     "magistral-small-latest": 0.25,
     "devstral-medium-2507": 0.25,
-    "pixtral-large-2411": 0.25
+    "pixtral-large-2411": 0.25,
+    "gemini-3.5-flash": 0.25
   }
 }

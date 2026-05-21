@@ -72,21 +72,29 @@ export function deriveShareWithTeam(profile: BackendSharingProfile): boolean {
 	return profile === 'teamPseudonymous' || profile === 'teamIdentified';
 }
 
-export function sharingLevel(profile: BackendSharingProfile): number {
-	// Higher number => more permissive.
+/** Ordering of sharing profiles from least to most permissive. Higher value = more data leaves the machine. */
+export enum SharingLevel {
+	Off = 0,
+	TeamAnonymized = 10,
+	TeamPseudonymous = 20,
+	SoloFull = 25, // personal but includes readable names; sits between TeamPseudonymous and TeamIdentified
+	TeamIdentified = 30
+}
+
+export function sharingLevel(profile: BackendSharingProfile): SharingLevel {
 	switch (profile) {
 		case 'off':
-			return 0;
+			return SharingLevel.Off;
 		case 'teamAnonymized':
-			return 1;
+			return SharingLevel.TeamAnonymized;
 		case 'teamPseudonymous':
-			return 2;
+			return SharingLevel.TeamPseudonymous;
 		case 'teamIdentified':
-			return 3;
+			return SharingLevel.TeamIdentified;
 		case 'soloFull':
-			return 2.5; // personal but includes readable names
+			return SharingLevel.SoloFull;
 		default:
-			return 0;
+			return SharingLevel.Off;
 	}
 }
 

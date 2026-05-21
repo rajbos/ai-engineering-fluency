@@ -3,6 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ChatTurn, ModelUsage, PromptTokenDetail } from './types';
 import { createEmptyContextRefs } from './tokenEstimation';
+import { normalizePathForComparison } from './workspaceHelpers';
 
 interface GeminiCliSessionHeader {
 	sessionId: string;
@@ -132,8 +133,8 @@ export class GeminiCliDataAccess {
 	}
 
 	isGeminiCliSessionFile(filePath: string): boolean {
-		const normalized = filePath.toLowerCase().replace(/\\/g, '/');
-		const tmpDir = this.getGeminiTmpDir().toLowerCase().replace(/\\/g, '/');
+		const normalized = normalizePathForComparison(filePath);
+		const tmpDir = normalizePathForComparison(this.getGeminiTmpDir());
 		return normalized.startsWith(tmpDir)
 			&& normalized.includes('/chats/session-')
 			&& normalized.endsWith('.jsonl');

@@ -3,6 +3,7 @@ import { Hono } from 'hono';
 import { api } from './routes/api.js';
 import { dashboard } from './routes/dashboard.js';
 import { getDb, closeDb, restoreFromBackup, backupToAzureFiles, syncAdminLogins } from './db.js';
+import { BACKUP_INTERVAL_MS } from './config.js';
 
 const app = new Hono();
 
@@ -72,7 +73,7 @@ async function main(): Promise<void> {
 	await initDbWithRetry();
 	syncAdminLogins();
 	// Periodic backup every 5 minutes in case of unexpected SIGKILL.
-	setInterval(() => backupToAzureFiles(), 5 * 60 * 1000).unref();
+	setInterval(() => backupToAzureFiles(), BACKUP_INTERVAL_MS).unref();
 
 	const org = process.env.ALLOWED_GITHUB_ORG;
 	const adminLogins = process.env.ADMIN_GITHUB_LOGINS;

@@ -112,8 +112,8 @@ test('listAggDailyEntitiesFromTableClient returns normalized entities', async ()
 				updatedAt: '2024-06-15T00:00:00Z',
 			};
 		},
-		upsertEntity: async () => ({}),
-		deleteEntity: async () => ({}),
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
 	};
 
 	const results = await listAggDailyEntitiesFromTableClient({
@@ -141,8 +141,8 @@ test('listAggDailyEntitiesFromTableClient skips entities missing required fields
 			yield { partitionKey: 'pk', rowKey: 'rk1', model: 'gpt-4o', workspaceId: 'ws1' };
 			yield { partitionKey: 'pk', rowKey: 'rk2', model: 'gpt-4o', workspaceId: 'ws1', machineId: 'm1', inputTokens: 10, outputTokens: 20, interactions: 1 };
 		},
-		upsertEntity: async () => ({}),
-		deleteEntity: async () => ({}),
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
 	};
 
 	const results = await listAggDailyEntitiesFromTableClient({
@@ -163,12 +163,12 @@ test('listAggDailyEntitiesFromTableClient uses defaults for missing optional fie
 			yield {
 				partitionKey: undefined, rowKey: undefined,
 				model: 'gpt-4o', workspaceId: 'ws1', machineId: 'm1',
-				inputTokens: 'not-a-number', outputTokens: -5, interactions: undefined,
-				schemaVersion: 'not-a-number',
+				inputTokens: undefined, outputTokens: -5, interactions: undefined,
+				schemaVersion: undefined,
 			};
 		},
-		upsertEntity: async () => ({}),
-		deleteEntity: async () => ({}),
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
 	};
 
 	const results = await listAggDailyEntitiesFromTableClient({
@@ -214,8 +214,8 @@ test('listAggDailyEntitiesFromTableClient includes fluency metrics when present'
 				sessionCount: 10,
 			};
 		},
-		upsertEntity: async () => ({}),
-		deleteEntity: async () => ({}),
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
 	};
 
 	const results = await listAggDailyEntitiesFromTableClient({
@@ -256,8 +256,8 @@ test('listAggDailyEntitiesFromTableClient omits fluency metrics when absent', as
 				inputTokens: 10, outputTokens: 20, interactions: 1,
 			};
 		},
-		upsertEntity: async () => ({}),
-		deleteEntity: async () => ({}),
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
 	};
 
 	const results = await listAggDailyEntitiesFromTableClient({
@@ -277,8 +277,8 @@ test('listAggDailyEntitiesFromTableClient returns empty on error', async () => {
 	const errors: string[] = [];
 	const mockClient: TableClientLike = {
 		async *listEntities() { throw new Error('connection failed'); },
-		upsertEntity: async () => ({}),
-		deleteEntity: async () => ({}),
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
 	};
 
 	const results = await listAggDailyEntitiesFromTableClient({

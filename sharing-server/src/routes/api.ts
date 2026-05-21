@@ -1,18 +1,17 @@
 import { Hono } from 'hono';
 import { requireBearerAuth, checkUploadRateLimit, type AuthVariables } from '../auth.js';
 import { upsertUpload, deleteUploadsForDays, getUploadsForUser, getDb, upsertUserFluencyScore, type UploadEntry } from '../db.js';
+import { MAX_STRING_LENGTHS, MAX_TOKEN_VALUE, MAX_ENTRIES_PER_UPLOAD } from '../config.js';
 
-const MAX_STRING_LENGTHS = {
-	model: 128,
-	workspaceId: 256,
-	workspaceName: 256,
-	machineId: 256,
-	machineName: 256,
-	datasetId: 128,
-	editor: 100,
-};
-const MAX_TOKEN_VALUE = 2_000_000_000; // 2B tokens — large agent sessions can exceed 100M in one day
-const MAX_ENTRIES_PER_UPLOAD = 500;
+// Fluency score payload limits
+const MAX_FLUENCY_LABEL_LENGTH = 128;
+const MAX_FLUENCY_CATEGORIES = 100;
+const MAX_FLUENCY_CATEGORY_NAME_LENGTH = 128;
+const MAX_FLUENCY_ICON_LENGTH = 64;
+const MAX_FLUENCY_TIPS_PER_CATEGORY = 20;
+const MAX_FLUENCY_TIP_LENGTH = 512;
+const MAX_FLUENCY_SCORE_JSON_BYTES = 100_000; // 100 KB
+const MAX_FLUENCY_METRICS_JSON_BYTES = 10_000; // 10 KB per entry
 
 export const api = new Hono<{ Variables: AuthVariables }>();
 
@@ -127,16 +126,13 @@ api.post('/fluency-score', requireBearerAuth, async (c) => {
 		return c.json({ error: 'Invalid JSON body.' }, 400);
 	}
 
-	if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-		return c.json({ error: 'Body must be a JSON object.' }, 400);
+	const validationError = validateFluencyScore(body);
+	if (validationError) {
+		return c.json({ error: validationError }, 400);
 	}
 
-	const b = body as Record<string, unknown>;
-	if (typeof b.overallStage !== 'number' || !Array.isArray(b.categories)) {
-		return c.json({ error: '"overallStage" (number) and "categories" (array) are required.' }, 400);
-	}
-
-	upsertUserFluencyScore(user.id, JSON.stringify(body));
+	const scoreJson = JSON.stringify(body);
+	upsertUserFluencyScore(user.id, scoreJson);
 	return c.json({ ok: true });
 });
 
@@ -176,10 +172,10 @@ function validateEntry(entry: unknown): string | null {
 		return `"machineId" too long (max ${MAX_STRING_LENGTHS.machineId})`;
 	}
 	if (!isNonNegativeInt(e.inputTokens) || (e.inputTokens as number) > MAX_TOKEN_VALUE) {
-		return '"inputTokens" must be a non-negative integer ≤ 100,000,000';
+		return `"inputTokens" must be a non-negative integer ≤ ${MAX_TOKEN_VALUE.toLocaleString()}`;
 	}
 	if (!isNonNegativeInt(e.outputTokens) || (e.outputTokens as number) > MAX_TOKEN_VALUE) {
-		return '"outputTokens" must be a non-negative integer ≤ 100,000,000';
+		return `"outputTokens" must be a non-negative integer ≤ ${MAX_TOKEN_VALUE.toLocaleString()}`;
 	}
 	if (!isNonNegativeInt(e.interactions) || (e.interactions as number) > 100_000) {
 		return '"interactions" must be a non-negative integer ≤ 100,000';
@@ -188,9 +184,11 @@ function validateEntry(entry: unknown): string | null {
 	// Optional string fields — truncate if too long (defensive, after length check)
 	if (e.workspaceName !== undefined && e.workspaceName !== null) {
 		if (typeof e.workspaceName !== 'string') return '"workspaceName" must be a string';
+		if (e.workspaceName.length > MAX_STRING_LENGTHS.workspaceName) return `"workspaceName" too long (max ${MAX_STRING_LENGTHS.workspaceName})`;
 	}
 	if (e.machineName !== undefined && e.machineName !== null) {
 		if (typeof e.machineName !== 'string') return '"machineName" must be a string';
+		if (e.machineName.length > MAX_STRING_LENGTHS.machineName) return `"machineName" too long (max ${MAX_STRING_LENGTHS.machineName})`;
 	}
 	if (e.datasetId !== undefined && e.datasetId !== null) {
 		if (typeof e.datasetId !== 'string') return '"datasetId" must be a string';
@@ -208,6 +206,9 @@ function validateEntry(entry: unknown): string | null {
 		if (typeof e.fluencyMetrics !== 'object' || Array.isArray(e.fluencyMetrics)) {
 			return '"fluencyMetrics" must be an object';
 		}
+		if (Buffer.byteLength(JSON.stringify(e.fluencyMetrics), 'utf8') > MAX_FLUENCY_METRICS_JSON_BYTES) {
+			return `"fluencyMetrics" too large (max ${MAX_FLUENCY_METRICS_JSON_BYTES} bytes)`;
+		}
 	}
 
 	return null;
@@ -215,4 +216,92 @@ function validateEntry(entry: unknown): string | null {
 
 function isNonNegativeInt(value: unknown): boolean {
 	return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * Validates the fluency score payload.
+ * Returns null if the body is valid, or an error message string describing
+ * the first validation failure found.
+ */
+function validateFluencyScore(body: unknown): string | null {
+	if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+		return 'Body must be a JSON object.';
+	}
+
+	const b = body as Record<string, unknown>;
+
+	if (!Number.isInteger(b.overallStage) || (b.overallStage as number) < 1 || (b.overallStage as number) > 4) {
+		return '"overallStage" must be an integer between 1 and 4.';
+	}
+	if (!Array.isArray(b.categories)) {
+		return '"categories" must be an array.';
+	}
+	if (b.categories.length > MAX_FLUENCY_CATEGORIES) {
+		return `"categories" too long (max ${MAX_FLUENCY_CATEGORIES} items).`;
+	}
+	if (b.overallLabel !== undefined && b.overallLabel !== null) {
+		if (typeof b.overallLabel !== 'string') {
+			return '"overallLabel" must be a string.';
+		}
+		if (b.overallLabel.length > MAX_FLUENCY_LABEL_LENGTH) {
+			return `"overallLabel" too long (max ${MAX_FLUENCY_LABEL_LENGTH}).`;
+		}
+	}
+	if (b.computedAt !== undefined && b.computedAt !== null) {
+		if (typeof b.computedAt !== 'string') {
+			return '"computedAt" must be a string.';
+		}
+		if (b.computedAt.length > 64) {
+			return '"computedAt" too long (max 64 chars).';
+		}
+	}
+	for (let i = 0; i < b.categories.length; i++) {
+		const catErr = validateFluencyCategory(b.categories[i], i);
+		if (catErr) {
+			return catErr;
+		}
+	}
+
+	if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_FLUENCY_SCORE_JSON_BYTES) {
+		return `Fluency score payload too large (max ${MAX_FLUENCY_SCORE_JSON_BYTES} bytes).`;
+	}
+
+	return null;
+}
+
+function validateFluencyCategory(cat: unknown, index: number): string | null {
+	if (typeof cat !== 'object' || cat === null || Array.isArray(cat)) {
+		return `categories[${index}] must be an object`;
+	}
+	const c = cat as Record<string, unknown>;
+	if (typeof c.category !== 'string' || c.category.length === 0) {
+		return `categories[${index}].category must be a non-empty string`;
+	}
+	if (c.category.length > MAX_FLUENCY_CATEGORY_NAME_LENGTH) {
+		return `categories[${index}].category too long (max ${MAX_FLUENCY_CATEGORY_NAME_LENGTH})`;
+	}
+	if (typeof c.icon !== 'string') {
+		return `categories[${index}].icon must be a string`;
+	}
+	if (c.icon.length > MAX_FLUENCY_ICON_LENGTH) {
+		return `categories[${index}].icon too long (max ${MAX_FLUENCY_ICON_LENGTH})`;
+	}
+	if (!Number.isInteger(c.stage) || (c.stage as number) < 1 || (c.stage as number) > 4) {
+		return `categories[${index}].stage must be an integer between 1 and 4`;
+	}
+	if (!Array.isArray(c.tips)) {
+		return `categories[${index}].tips must be an array`;
+	}
+	if (c.tips.length > MAX_FLUENCY_TIPS_PER_CATEGORY) {
+		return `categories[${index}].tips too long (max ${MAX_FLUENCY_TIPS_PER_CATEGORY} items)`;
+	}
+	for (let j = 0; j < c.tips.length; j++) {
+		if (typeof c.tips[j] !== 'string') {
+			return `categories[${index}].tips[${j}] must be a string`;
+		}
+		if ((c.tips[j] as string).length > MAX_FLUENCY_TIP_LENGTH) {
+			return `categories[${index}].tips[${j}] too long (max ${MAX_FLUENCY_TIP_LENGTH})`;
+		}
+	}
+	return null;
 }

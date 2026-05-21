@@ -2,28 +2,16 @@
 import { el } from '../shared/domUtils';
 import { buttonHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { registerMessageHandler } from '../shared/messageHandler';
 
-type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number; cli: number };
-type ToolCallUsage = { total: number; byTool: { [key: string]: number } };
-type McpToolUsage = { total: number; byServer: { [key: string]: number }; byTool: { [key: string]: number } };
-
-type ModelSwitchingAnalysis = {
-	modelsPerSession: number[];
-	totalSessions: number;
-	averageModelsPerSession: number;
-	maxModelsPerSession: number;
+type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
-	switchingFrequency: number;
-	standardModels: string[];
-	premiumModels: string[];
-	unknownModels: string[];
-	mixedTierSessions: number;
 	standardRequests: number;
 	premiumRequests: number;
 	unknownRequests: number;
@@ -44,6 +32,22 @@ type UsageAnalysisPeriod = {
 	};
 };
 
+type TodaySessionSummary = {
+	title: string | null;
+	filePath: string;
+	interactions: number;
+	toolCalls: number;
+	inputTokens: number;
+	outputTokens: number;
+	thinkingTokens: number;
+	cachedTokens: number;
+	totalTokens: number;
+	estimatedCost: number;
+	editor: string;
+	models: string[];
+	lastActivity: string;
+};
+
 type UsageAnalysisStats = {
 	today: UsageAnalysisPeriod;
 	last30Days: UsageAnalysisPeriod;
@@ -55,6 +59,8 @@ type UsageAnalysisStats = {
 	backendConfigured?: boolean;
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
+	todaySessions?: TodaySessionSummary[];
+	use24HourTime?: boolean;
 };
 
 declare function acquireVsCodeApi<TState = unknown>(): {
@@ -109,8 +115,42 @@ declare global {
 	}
 }
 
+/** Shape of hygiene check items returned by the extension host. */
+interface RepoHygieneCheck {
+	readonly id?: string;
+	readonly label?: string;
+	readonly detail?: string;
+	readonly hint?: string;
+	readonly weight?: number;
+	readonly status?: string;
+	readonly category?: string;
+}
+
+/** Shape of recommendation items returned by the extension host. */
+interface RepoHygieneRecommendation {
+	readonly action?: string;
+	readonly impact?: string;
+	readonly weight?: number;
+	readonly priority?: string;
+}
+
+/** Shape of a full repo-hygiene analysis result. */
+interface RepoAnalysisData {
+	summary?: {
+		percentage?: number;
+		passedChecks?: number;
+		warningChecks?: number;
+		failedChecks?: number;
+		totalScore?: number;
+		maxScore?: number;
+		categories?: Record<string, { percentage?: number }>;
+	};
+	checks?: RepoHygieneCheck[];
+	recommendations?: RepoHygieneRecommendation[];
+}
+
 interface RepoAnalysisRecord {
-	data?: any;
+	data?: RepoAnalysisData;
 	error?: string;
 }
 
@@ -132,6 +172,15 @@ function clearLoadingTimeout(): void {
 	}
 }
 
+/** Creates a styled Refresh button that posts `refresh` to the extension host. */
+function createRefreshButton(): HTMLButtonElement {
+	const btn = document.createElement('button');
+	btn.textContent = '🔄 Refresh';
+	btn.style.cssText = 'padding: 6px 16px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); border-radius: 2px; font-size: 13px;';
+	btn.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
+	return btn;
+}
+
 function showLoadError(message: string): void {
 	const root = document.getElementById('root');
 	if (!root) { return; }
@@ -143,11 +192,7 @@ function showLoadError(message: string): void {
 	const msg = document.createElement('div');
 	msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
 	msg.textContent = message;
-	const btn = document.createElement('button');
-	btn.textContent = '🔄 Refresh';
-	btn.style.cssText = 'padding: 6px 16px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); border-radius: 2px; font-size: 13px;';
-	btn.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
-	container.append(icon, msg, btn);
+	container.append(icon, msg, createRefreshButton());
 	root.textContent = '';
 	root.append(container);
 }
@@ -208,15 +253,6 @@ type AgentSessionsResult = {
   since: string;
   fetchedAt: string;
 };
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
-}
 
 const EFFORT_DISPLAY_NAMES: Record<string, string> = {
 	xhigh: 'Extra High',
@@ -280,6 +316,165 @@ function createMcpToolIssueUrl(unknownTools: string[]): string {
 	const labels = encodeURIComponent('MCP Toolnames');
 	
 	return `${repoUrl}/issues/new?title=${title}&body=${body}&labels=${labels}`;
+}
+
+// ─── Mode bar chart helpers ────────────────────────────────────────────────────
+
+type ModeBarConfig = {
+readonly label: string;
+readonly key: keyof ModeUsage;
+readonly gradient: string;
+};
+
+const MODE_BAR_CONFIGS: readonly ModeBarConfig[] = [
+{ label: '\u{1F4AC} Ask Mode',    key: 'ask',         gradient: 'linear-gradient(90deg, #3b82f6, #60a5fa)' },
+{ label: '\u270F\uFE0F Edit Mode',   key: 'edit',        gradient: 'linear-gradient(90deg, #10b981, #34d399)' },
+{ label: '\u{1F916} Agent Mode',  key: 'agent',       gradient: 'linear-gradient(90deg, #7c3aed, #a855f7)' },
+{ label: '\u{1F4CB} Plan Mode',   key: 'plan',        gradient: 'linear-gradient(90deg, #f59e0b, #fbbf24)' },
+{ label: '\u26A1 Custom Agent',   key: 'customAgent', gradient: 'linear-gradient(90deg, #ec4899, #f472b6)' },
+{ label: '\u{1F5A5}\uFE0F CLI',   key: 'cli',         gradient: 'linear-gradient(90deg, #06b6d4, #22d3ee)' },
+];
+
+/** Renders a single horizontal bar item for the mode usage chart. */
+function renderModeBarItem(label: string, count: number, total: number, gradient: string): string {
+const pct = total > 0 ? (count / total) * 100 : 0;
+return `
+<div class="bar-item">
+<div class="bar-label"><span>${label}</span><span><strong>${formatNumber(count)}</strong> (${formatPercent(pct, 0)})</span></div>
+<div class="bar-track"><div class="bar-fill" style="width: ${pct.toFixed(1)}%; background: ${gradient};"></div></div>
+</div>`;
+}
+
+/** Renders the full bar-chart column for a single time period's mode usage. */
+function renderModeBarChart(modeUsage: ModeUsage, title: string): string {
+const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli;
+const bars = MODE_BAR_CONFIGS
+.map(({ label, key, gradient }) => renderModeBarItem(label, modeUsage[key], total, gradient))
+.join('');
+return `
+<div>
+<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
+<div class="bar-chart">${bars}
+</div>
+</div>`;
+}
+
+// ─── Multi-model period helper ──────────────────────────────────────────────────
+
+/** Renders one column of the Multi-Model Usage section for a single time period. */
+function renderMultiModelPeriod(
+title: string,
+switching: ModelSwitchingAnalysis,
+allStandardModels: readonly string[],
+allPremiumModels: readonly string[],
+allUnknownModels: readonly string[],
+): string {
+return `
+<div>
+<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
+<div class="stats-grid" style="grid-template-columns: 1fr;">
+<div class="stat-card">
+<div class="stat-label">\u{1F4CA} Avg Models per Conversation</div>
+<div class="stat-value">${formatFixed(switching.averageModelsPerSession, 1)}</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">\u{1F504} Switching Frequency</div>
+<div class="stat-value">${formatPercent(switching.switchingFrequency, 0)}</div>
+<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with &gt;1 model</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">\u{1F4C8} Max Models in Session</div>
+<div class="stat-value">${formatNumber(switching.maxModelsPerSession || 0)}</div>
+</div>
+</div>
+<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Tier:</div>
+<div style="min-height: 90px;">
+${allStandardModels.length > 0 ? `
+<div style="margin-bottom: 6px;">
+<span style="color: var(--link-color);">\u{1F535} Standard:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allStandardModels.map(escapeHtml).join(', ')}</span>
+</div>
+` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
+${allPremiumModels.length > 0 ? `
+<div style="margin-bottom: 6px;">
+<span style="color: var(--warning-fg);">\u2B50 Premium:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allPremiumModels.map(escapeHtml).join(', ')}</span>
+</div>
+` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
+${allUnknownModels.length > 0 ? `
+<div style="margin-bottom: 6px;">
+<span style="color: var(--text-muted);">\u2753 Unknown:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
+</div>
+` : ''}
+</div>
+${switching.totalRequests > 0 ? `
+<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 65px;">
+<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
+${switching.standardRequests > 0 ? `
+<div style="margin-bottom: 4px; font-size: 11px;">
+<span style="color: var(--link-color);">\u{1F535} Standard: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.standardRequests)} (${formatPercent((switching.standardRequests / switching.totalRequests) * 100)})</span>
+</div>
+` : ''}
+${switching.premiumRequests > 0 ? `
+<div style="margin-bottom: 4px; font-size: 11px;">
+<span style="color: var(--warning-fg);">\u2B50 Premium: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.premiumRequests)} (${formatPercent((switching.premiumRequests / switching.totalRequests) * 100)})</span>
+</div>
+` : ''}
+${switching.unknownRequests > 0 ? `
+<div style="margin-bottom: 4px; font-size: 11px;">
+<span style="color: var(--text-muted);">\u2753 Unknown: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.unknownRequests)} (${formatPercent((switching.unknownRequests / switching.totalRequests) * 100)})</span>
+</div>
+` : ''}
+</div>
+` : ''}
+${switching.mixedTierSessions > 0 ? `
+<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
+<span style="font-size: 11px; color: var(--link-color);">\u{1F500} Mixed tier sessions: ${formatNumber(switching.mixedTierSessions)}</span>
+</div>
+` : ''}
+</div>
+</div>`;
+}
+
+// ─── Progress panel helper ──────────────────────────────────────────────────────
+
+/**
+ * Updates (or creates) a progress indicator inside a container element.
+ * Strips existing non-title/subtitle children on first call; updates text on subsequent calls.
+ */
+function updateProgressPanel(
+selector: string,
+progressClass: string,
+messagePrefix: string,
+done: number,
+total: number,
+): void {
+const container = document.querySelector(selector);
+if (!container) { return; }
+const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+const message = `${messagePrefix} ${done}/${total} repos (${pct}%)`;
+const existing = container.querySelector(`.${progressClass}`);
+if (existing) {
+existing.textContent = message;
+} else {
+// First progress update — remove static placeholder content (keep title/subtitle divs)
+Array.from(container.children).forEach(child => {
+const htmlEl = child as HTMLElement;
+if (!htmlEl.classList.contains('section-title') && !htmlEl.classList.contains('section-subtitle')) {
+htmlEl.remove();
+}
+});
+const div = document.createElement('div');
+div.className = progressClass;
+div.style.cssText = 'margin-top:8px; font-size:12px; color:var(--text-secondary);';
+div.textContent = message;
+container.appendChild(div);
+}
 }
 
 function renderMissedPotential(stats: UsageAnalysisStats): string {
@@ -388,10 +583,129 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 		</table>`;
 }
 
-/**
- * Return a copy of `map` with every key from `keys` present (defaulting to 0).
- * Used to build cross-period tables where every item found in any period is shown in all.
- */
+// --- Today's Sessions table with sortable columns ---
+type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'lastActivity';
+let sessionSortColumn: SessionSortColumn = 'interactions';
+let sessionSortDirection: 'asc' | 'desc' = 'desc';
+let cachedTodaySessions: TodaySessionSummary[] = [];
+let use24HourTime = true;
+
+function getSessionSortIndicator(column: SessionSortColumn): string {
+	if (sessionSortColumn !== column) { return ''; }
+	return sessionSortDirection === 'desc' ? ' ▼' : ' ▲';
+}
+
+function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary[] {
+	return [...sessions].sort((a, b) => {
+		let cmp = 0;
+		switch (sessionSortColumn) {
+			case 'title':
+				cmp = (a.title || '').localeCompare(b.title || '');
+				break;
+			case 'editor':
+				cmp = (a.editor || '').localeCompare(b.editor || '');
+				break;
+			case 'lastActivity':
+				cmp = (a.lastActivity || '').localeCompare(b.lastActivity || '');
+				break;
+			default:
+				cmp = (a[sessionSortColumn] as number) - (b[sessionSortColumn] as number);
+				break;
+		}
+		return sessionSortDirection === 'desc' ? -cmp : cmp;
+	});
+}
+
+function renderTodaySessionsTable(sessions: TodaySessionSummary[]): string {
+	cachedTodaySessions = sessions;
+	if (!sessions || sessions.length === 0) {
+		return '<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No sessions recorded today yet.</div>';
+	}
+	return `<div id="sessions-table-container">${buildSessionsTableHtml(sessions)}</div>`;
+}
+
+function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
+	const sorted = sortTodaySessions(sessions);
+	const rows = sorted.map((s, idx) => {
+		const title = escapeHtml(s.title || 'Untitled session');
+		const filePath = escapeHtml(s.filePath || '');
+		const models = s.models.map(m => escapeHtml(m)).join(', ') || '—';
+		const editor = escapeHtml(s.editor || 'unknown');
+		const cost = s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—';
+		const time = s.lastActivity ? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }) : '—';
+		return `<tr>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; color:var(--text-secondary);">${idx + 1}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Open viewer for session &quot;${title}&quot;"><a href="#" class="session-title-link" data-file="${filePath}" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${title}</a></td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.interactions)}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.toolCalls)}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.inputTokens)}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.outputTokens)}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.thinkingTokens)}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.cachedTokens)}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.totalTokens)}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${cost}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px;">${editor}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${models}">${models}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; white-space:nowrap; text-align:right;">${time}</td>
+		</tr>`;
+	}).join('');
+
+	return `
+		<div style="overflow-x:auto;">
+		<table class="sessions-table" style="width:100%; border-collapse:collapse; min-width:900px;">
+			<thead>
+				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">
+					<th style="padding:6px 8px;">#</th>
+					<th class="sortable" data-sort="title" style="padding:6px 8px;">Title${getSessionSortIndicator('title')}</th>
+					<th class="sortable" data-sort="interactions" style="padding:6px 8px; text-align:right;">Turns${getSessionSortIndicator('interactions')}</th>
+					<th class="sortable" data-sort="toolCalls" style="padding:6px 8px; text-align:right;">Tools${getSessionSortIndicator('toolCalls')}</th>
+					<th class="sortable" data-sort="inputTokens" style="padding:6px 8px; text-align:right;">Input${getSessionSortIndicator('inputTokens')}</th>
+					<th class="sortable" data-sort="outputTokens" style="padding:6px 8px; text-align:right;">Output${getSessionSortIndicator('outputTokens')}</th>
+					<th class="sortable" data-sort="thinkingTokens" style="padding:6px 8px; text-align:right;">Thinking${getSessionSortIndicator('thinkingTokens')}</th>
+					<th class="sortable" data-sort="cachedTokens" style="padding:6px 8px; text-align:right;">Cached${getSessionSortIndicator('cachedTokens')}</th>
+					<th class="sortable" data-sort="totalTokens" style="padding:6px 8px; text-align:right;">Total${getSessionSortIndicator('totalTokens')}</th>
+					<th class="sortable" data-sort="estimatedCost" style="padding:6px 8px; text-align:right;">Cost${getSessionSortIndicator('estimatedCost')}</th>
+					<th class="sortable" data-sort="editor" style="padding:6px 8px;">Editor${getSessionSortIndicator('editor')}</th>
+					<th style="padding:6px 8px;">Models</th>
+					<th class="sortable" data-sort="lastActivity" style="padding:6px 8px; text-align:right;">Last Active${getSessionSortIndicator('lastActivity')}</th>
+				</tr>
+			</thead>
+			<tbody>
+				${rows}
+			</tbody>
+		</table>
+		</div>`;
+}
+
+function setupSessionsTableSort(): void {
+	const container = document.getElementById('sessions-table-container');
+	if (!container) { return; }
+	container.addEventListener('click', (e) => {
+		// Handle session title link clicks → open in log viewer
+		const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.session-title-link');
+		if (link) {
+			e.preventDefault();
+			const file = link.getAttribute('data-file');
+			if (file) {
+				vscode.postMessage({ command: 'openSessionFile', file });
+			}
+			return;
+		}
+		// Handle sortable column header clicks
+		const th = (e.target as HTMLElement).closest<HTMLElement>('th.sortable');
+		if (!th) { return; }
+		const col = th.getAttribute('data-sort') as SessionSortColumn;
+		if (!col) { return; }
+		if (sessionSortColumn === col) {
+			sessionSortDirection = sessionSortDirection === 'desc' ? 'asc' : 'desc';
+		} else {
+			sessionSortColumn = col;
+			sessionSortDirection = 'desc';
+		}
+		container.innerHTML = buildSessionsTableHtml(cachedTodaySessions);
+	});
+}
+
 function unionFill(map: { [key: string]: number }, keys: string[]): { [key: string]: number } {
 	const result: { [key: string]: number } = { ...map };
 	for (const k of keys) {
@@ -524,6 +838,13 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			sanitized.missedPotential = raw.missedPotential.filter(
 				(w: any) => w && typeof w === 'object' && typeof w.workspacePath === 'string'
 			) as MissedPotentialWorkspace[];
+		}
+
+		// Pass-through todaySessions (array of session summary objects)
+		if (Array.isArray(raw.todaySessions)) {
+			sanitized.todaySessions = raw.todaySessions.filter(
+				(s: any) => s && typeof s === 'object' && typeof s.interactions === 'number'
+			) as TodaySessionSummary[];
 		}
 
 		return sanitized;
@@ -856,9 +1177,11 @@ function renderLayout(stats: UsageAnalysisStats): void {
 		return;
 	}
 
+	// customizationMatrix is passed as an extra field on the stats object alongside the typed fields
+	type StatsWithMatrix = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null };
 	const matrix =
-		((stats as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined | null) ??
-		((window.__INITIAL_USAGE__ as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined | null);
+		(stats as StatsWithMatrix).customizationMatrix ??
+		(window.__INITIAL_USAGE__ as StatsWithMatrix | undefined)?.customizationMatrix ?? null;
 	hygieneMatrixState = matrix ?? null;
 	if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
 		selectedRepoPath = null;
@@ -979,8 +1302,6 @@ function renderLayout(stats: UsageAnalysisStats): void {
 
 	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
 	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
-	const todayTotalModes = stats.today.modeUsage.ask + stats.today.modeUsage.edit + stats.today.modeUsage.agent + stats.today.modeUsage.plan + stats.today.modeUsage.customAgent + stats.today.modeUsage.cli;
-	const last30DaysTotalModes = stats.last30Days.modeUsage.ask + stats.last30Days.modeUsage.edit + stats.last30Days.modeUsage.agent + stats.last30Days.modeUsage.plan + stats.last30Days.modeUsage.customAgent + stats.last30Days.modeUsage.cli;
 
 	const multiModelHtml = `
 			<!-- Multi-Model Usage Section -->
@@ -988,213 +1309,9 @@ function renderLayout(stats: UsageAnalysisStats): void {
 				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
 				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
 				<div class="three-column">
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-						<div class="stats-grid" style="grid-template-columns: 1fr;">
-							<div class="stat-card">
-								<div class="stat-label">📊 Avg Models per Conversation</div>
-								<div class="stat-value">${formatFixed(stats.today.modelSwitching.averageModelsPerSession, 1)}</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">🔄 Switching Frequency</div>
-								<div class="stat-value">${formatPercent(stats.today.modelSwitching.switchingFrequency, 0)}</div>
-								<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with >1 model</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">📈 Max Models in Session</div>
-								<div class="stat-value">${formatNumber(stats.today.modelSwitching.maxModelsPerSession || 0)}</div>
-							</div>
-						</div>
-						<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Tier:</div>
-							<div style="min-height: 90px;">
-								${allStandardModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--link-color);">🔵 Standard:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allStandardModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allPremiumModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--warning-fg);">⭐ Premium:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allPremiumModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allUnknownModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--text-muted);">❓ Unknown:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : ''}
-							</div>
-							${stats.today.modelSwitching.totalRequests > 0 ? `
-								<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 65px;">
-									<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
-									${stats.today.modelSwitching.standardRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--link-color);">🔵 Standard: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.today.modelSwitching.standardRequests)} (${formatPercent((stats.today.modelSwitching.standardRequests / stats.today.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.today.modelSwitching.premiumRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--warning-fg);">⭐ Premium: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.today.modelSwitching.premiumRequests)} (${formatPercent((stats.today.modelSwitching.premiumRequests / stats.today.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.today.modelSwitching.unknownRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--text-muted);">❓ Unknown: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.today.modelSwitching.unknownRequests)} (${formatPercent((stats.today.modelSwitching.unknownRequests / stats.today.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-								</div>
-							` : ''}
-							${stats.today.modelSwitching.mixedTierSessions > 0 ? `
-								<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-									<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed tier sessions: ${formatNumber(stats.today.modelSwitching.mixedTierSessions)}</span>
-								</div>
-							` : ''}
-						</div>
-					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-						<div class="stats-grid" style="grid-template-columns: 1fr;">
-							<div class="stat-card">
-								<div class="stat-label">📊 Avg Models per Conversation</div>
-								<div class="stat-value">${formatFixed(stats.last30Days.modelSwitching.averageModelsPerSession, 1)}</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">🔄 Switching Frequency</div>
-								<div class="stat-value">${formatPercent(stats.last30Days.modelSwitching.switchingFrequency, 0)}</div>
-								<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with >1 model</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">📈 Max Models in Session</div>
-								<div class="stat-value">${formatNumber(stats.last30Days.modelSwitching.maxModelsPerSession || 0)}</div>
-							</div>
-						</div>
-						<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Tier:</div>
-							<div style="min-height: 90px;">
-								${allStandardModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--link-color);">🔵 Standard:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allStandardModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allPremiumModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--warning-fg);">⭐ Premium:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allPremiumModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allUnknownModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--text-muted);">❓ Unknown:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : ''}
-							</div>
-							${stats.last30Days.modelSwitching.totalRequests > 0 ? `
-								<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 65px;">
-									<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
-									${stats.last30Days.modelSwitching.standardRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--link-color);">🔵 Standard: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.last30Days.modelSwitching.standardRequests)} (${formatPercent((stats.last30Days.modelSwitching.standardRequests / stats.last30Days.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.last30Days.modelSwitching.premiumRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--warning-fg);">⭐ Premium: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.last30Days.modelSwitching.premiumRequests)} (${formatPercent((stats.last30Days.modelSwitching.premiumRequests / stats.last30Days.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.last30Days.modelSwitching.unknownRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--text-muted);">❓ Unknown: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.last30Days.modelSwitching.unknownRequests)} (${formatPercent((stats.last30Days.modelSwitching.unknownRequests / stats.last30Days.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-								</div>
-							` : ''}
-							${stats.last30Days.modelSwitching.mixedTierSessions > 0 ? `
-								<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-									<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed tier sessions: ${formatNumber(stats.last30Days.modelSwitching.mixedTierSessions)}</span>
-								</div>
-							` : ''}
-						</div>
-					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-						<div class="stats-grid" style="grid-template-columns: 1fr;">
-							<div class="stat-card">
-								<div class="stat-label">📊 Avg Models per Conversation</div>
-								<div class="stat-value">${formatFixed(stats.month.modelSwitching.averageModelsPerSession, 1)}</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">🔄 Switching Frequency</div>
-								<div class="stat-value">${formatPercent(stats.month.modelSwitching.switchingFrequency, 0)}</div>
-								<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with >1 model</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">📈 Max Models in Session</div>
-								<div class="stat-value">${formatNumber(stats.month.modelSwitching.maxModelsPerSession || 0)}</div>
-							</div>
-						</div>
-						<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Tier:</div>
-							<div style="min-height: 90px;">
-								${allStandardModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--link-color);">🔵 Standard:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allStandardModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allPremiumModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--warning-fg);">⭐ Premium:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allPremiumModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allUnknownModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--text-muted);">❓ Unknown:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : ''}
-							</div>
-							${stats.month.modelSwitching.totalRequests > 0 ? `
-								<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 65px;">
-									<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
-									${stats.month.modelSwitching.standardRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--link-color);">🔵 Standard: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.month.modelSwitching.standardRequests)} (${formatPercent((stats.month.modelSwitching.standardRequests / stats.month.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.month.modelSwitching.premiumRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--warning-fg);">⭐ Premium: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.month.modelSwitching.premiumRequests)} (${formatPercent((stats.month.modelSwitching.premiumRequests / stats.month.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.month.modelSwitching.unknownRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--text-muted);">❓ Unknown: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.month.modelSwitching.unknownRequests)} (${formatPercent((stats.month.modelSwitching.unknownRequests / stats.month.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-								</div>
-							` : ''}
-							${stats.month.modelSwitching.mixedTierSessions > 0 ? `
-								<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-									<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed tier sessions: ${formatNumber(stats.month.modelSwitching.mixedTierSessions)}</span>
-								</div>
-							` : ''}
-						</div>
-					</div>
+					${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+					${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
 				</div>
 			</div>`;
 
@@ -1287,10 +1404,21 @@ function renderLayout(stats: UsageAnalysisStats): void {
 
 			<div class="tab-bar">
 				<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity">📊 My Activity</button>
+				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions">📋 Today's Sessions</button>
 				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools">🔧 Tools &amp; Integrations</button>
 				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health">🏗️ Workspace Health</button>
 				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos">🤖 Repository PRs</button>
 				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent">🤖 Cloud Agent</button>
+			</div>
+
+			<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
+				<div class="section">
+					<div class="section-title"><span>📋</span><span>Today's Sessions</span></div>
+					<div class="section-subtitle">Individual session breakdown for today — sorted by number of interactions (most active first).</div>
+					<div style="margin-top: 12px;">
+						${renderTodaySessionsTable(stats.todaySessions || [])}
+					</div>
+				</div>
 			</div>
 
 			<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
@@ -1300,60 +1428,8 @@ function renderLayout(stats: UsageAnalysisStats): void {
 					<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
 					<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
 					<div class="two-column">
-						<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-							<div class="bar-chart">
-								<div class="bar-item">
-									<div class="bar-label"><span>💬 Ask Mode</span><span><strong>${formatNumber(stats.today.modeUsage.ask)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.ask / todayTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.ask / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #3b82f6, #60a5fa);"></div></div>
-								</div>
-								<div class="bar-item">
-									<div class="bar-label"><span>✏️ Edit Mode</span><span><strong>${formatNumber(stats.today.modeUsage.edit)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.edit / todayTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.edit / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #10b981, #34d399);"></div></div>
-								</div>
-								<div class="bar-item">
-									<div class="bar-label"><span>🤖 Agent Mode</span><span><strong>${formatNumber(stats.today.modeUsage.agent)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.agent / todayTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.agent / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #7c3aed, #a855f7);"></div></div>
-								</div>						<div class="bar-item">
-								<div class="bar-label"><span>📋 Plan Mode</span><span><strong>${formatNumber(stats.today.modeUsage.plan)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.plan / todayTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.plan / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #f59e0b, #fbbf24);"></div></div>
-							</div>
-							<div class="bar-item">
-								<div class="bar-label"><span>⚡ Custom Agent</span><span><strong>${formatNumber(stats.today.modeUsage.customAgent)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.customAgent / todayTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.customAgent / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #ec4899, #f472b6);"></div></div>
-							</div>
-							<div class="bar-item">
-								<div class="bar-label"><span>🖥️ CLI</span><span><strong>${formatNumber(stats.today.modeUsage.cli)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.cli / todayTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.cli / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #06b6d4, #22d3ee);"></div></div>
-							</div>						</div>
-						</div>
-						<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📊 Last 30 Days</h4>
-							<div class="bar-chart">
-								<div class="bar-item">
-									<div class="bar-label"><span>💬 Ask Mode</span><span><strong>${formatNumber(stats.last30Days.modeUsage.ask)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.ask / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.ask / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #3b82f6, #60a5fa);"></div></div>
-								</div>
-								<div class="bar-item">
-									<div class="bar-label"><span>✏️ Edit Mode</span><span><strong>${formatNumber(stats.last30Days.modeUsage.edit)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.edit / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.edit / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #10b981, #34d399);"></div></div>
-								</div>
-								<div class="bar-item">
-									<div class="bar-label"><span>🤖 Agent Mode</span><span><strong>${formatNumber(stats.last30Days.modeUsage.agent)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.agent / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.agent / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #7c3aed, #a855f7);"></div></div>
-								</div>						<div class="bar-item">
-								<div class="bar-label"><span>📋 Plan Mode</span><span><strong>${formatNumber(stats.last30Days.modeUsage.plan)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.plan / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.plan / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #f59e0b, #fbbf24);"></div></div>
-							</div>
-							<div class="bar-item">
-								<div class="bar-label"><span>⚡ Custom Agent</span><span><strong>${formatNumber(stats.last30Days.modeUsage.customAgent)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.customAgent / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.customAgent / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #ec4899, #f472b6);"></div></div>
-							</div>
-							<div class="bar-item">
-								<div class="bar-label"><span>🖥️ CLI</span><span><strong>${formatNumber(stats.last30Days.modeUsage.cli)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.cli / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.cli / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #06b6d4, #22d3ee);"></div></div>
-							</div>						</div>
-						</div>
+						${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
+						${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
 					</div>
 				</div>
 
@@ -1589,7 +1665,15 @@ function renderLayout(stats: UsageAnalysisStats): void {
 
 
 
-	// Wire up navigation buttons
+	wireNavigationButtons();
+	wireRepositoryButtons();
+	renderRepositoryHygienePanels();
+	setupTabs();
+	wireCopyButtons();
+}
+
+/** Wires up top-level navigation toolbar buttons (refresh, details, chart, etc.). */
+function wireNavigationButtons(): void {
 	document.getElementById('btn-refresh')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'refresh' });
 	});
@@ -1612,19 +1696,21 @@ function renderLayout(stats: UsageAnalysisStats): void {
 		vscode.postMessage({ command: 'showEnvironmental' });
 	});
 	wireExtensionPointButtons(vscode);
-	
-	// Repository analysis buttons
+}
+
+/** Wires up repository hygiene analysis buttons and pane click handlers. */
+function wireRepositoryButtons(): void {
 	document.getElementById('btn-analyse-repo')?.addEventListener('click', () => {
-		const btn = document.getElementById('btn-analyse-repo') as any;
+		const btn = document.getElementById('btn-analyse-repo') as HTMLElement & { disabled: boolean };
 		if (btn) {
 			btn.disabled = true;
 			btn.textContent = 'Analyzing...';
 		}
 		vscode.postMessage({ command: 'analyseRepository' });
 	});
-	
+
 	document.getElementById('btn-analyse-all')?.addEventListener('click', () => {
-		const btn = document.getElementById('btn-analyse-all') as any;
+		const btn = document.getElementById('btn-analyse-all') as HTMLElement & { disabled: boolean };
 		if (btn) {
 			btn.disabled = true;
 			btn.textContent = 'Analyzing All...';
@@ -1636,44 +1722,38 @@ function renderLayout(stats: UsageAnalysisStats): void {
 		vscode.postMessage({ command: 'analyseAllRepositories' });
 	});
 
-	document.getElementById('repo-list-pane')?.addEventListener('click', (e) => {
+	document.getElementById('repo-list-pane')?.addEventListener('click', (e: MouseEvent) => {
 		const target = e.target as HTMLElement;
 		const actionButton = target.closest<HTMLElement>('.btn-repo-action');
-		if (!actionButton) {
-			return;
-		}
-
+		if (!actionButton) { return; }
 		const workspacePath = actionButton.getAttribute('data-workspace-path');
 		const action = actionButton.getAttribute('data-action');
-		if (!workspacePath || !action) {
-			return;
-		}
-
+		if (!workspacePath || !action) { return; }
 		if (action === 'details') {
 			selectedRepoPath = workspacePath;
 			isSwitchingRepository = false;
 			renderRepositoryHygienePanels();
 			return;
 		}
-
 		if (action === 'analyze') {
-			(actionButton as any).disabled = true;
-			(actionButton as any).textContent = 'Analyzing...';
+			(actionButton as HTMLElement & { disabled: boolean }).disabled = true;
+			actionButton.textContent = 'Analyzing...';
 			isBatchAnalysisInProgress = false;
 			vscode.postMessage({ command: 'analyseRepository', workspacePath });
 		}
 	});
 
-	document.getElementById('repo-details-pane')?.addEventListener('click', (e) => {
+	document.getElementById('repo-details-pane')?.addEventListener('click', (e: MouseEvent) => {
 		const target = e.target as HTMLElement;
 		if (target.closest('#btn-switch-repository')) {
 			isSwitchingRepository = true;
 			renderRepositoryHygienePanels();
 		}
 	});
+}
 
-	renderRepositoryHygienePanels();
-	setupTabs();
+/** Wires up copy-to-clipboard buttons (class `cf-copy`). */
+function wireCopyButtons(): void {
 	Array.from(document.getElementsByClassName('cf-copy')).forEach((el) => {
 		(el as HTMLElement).addEventListener('click', (ev) => {
 			const target = ev.currentTarget as HTMLElement;
@@ -1708,10 +1788,14 @@ registerMessageHandler<any>((message) => {
 			if (message.data?.locale) {
 				setFormatLocale(message.data.locale);
 			}
+			if (typeof message.data?.use24HourTime === 'boolean') {
+				use24HourTime = message.data.use24HourTime;
+			}
 			{
 				const sanitized = sanitizeStats(message.data);
 				if (sanitized) {
 					renderLayout(sanitized);
+					setupSessionsTableSort();
 					renderRepositoryHygienePanels();
 					// Restore repos PR tab if we already fetched data (renderLayout resets the DOM)
 					if (repoPrStatsData) {
@@ -1764,29 +1848,13 @@ registerMessageHandler<any>((message) => {
 			break;
 		}
 		case 'repoPrStatsProgress': {
-			const container = document.querySelector('#repos-pr-content');
-			if (container) {
-				const done = message.done as number;
-				const total = message.total as number;
-				const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-				const progEl = container.querySelector('.repos-pr-progress');
-				if (progEl) {
-					progEl.textContent = `Fetching PRs… ${done}/${total} repos (${pct}%)`;
-				} else {
-					// First progress update — strip the static placeholder (keep only title/subtitle)
-					Array.from(container.children).forEach(child => {
-						const el = child as HTMLElement;
-						if (!el.classList.contains('section-title') && !el.classList.contains('section-subtitle')) {
-							el.remove();
-						}
-					});
-					const div = document.createElement('div');
-					div.className = 'repos-pr-progress';
-					div.style.cssText = 'margin-top:8px; font-size:12px; color:var(--text-secondary);';
-					div.textContent = `Fetching PRs… ${done}/${total} repos (${pct}%)`;
-					container.appendChild(div);
-				}
-			}
+			updateProgressPanel(
+				'#repos-pr-content',
+				'repos-pr-progress',
+				'Fetching PRs…',
+				message.done as number,
+				message.total as number,
+			);
 			break;
 		}
 		case 'agentSessionsLoaded': {
@@ -1802,28 +1870,13 @@ registerMessageHandler<any>((message) => {
 			break;
 		}
 		case 'agentSessionsProgress': {
-			const agentContainer = document.querySelector('#agent-sessions-content');
-			if (agentContainer) {
-				const done = message.done as number;
-				const total = message.total as number;
-				const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-				const progEl = agentContainer.querySelector('.agent-sessions-progress');
-				if (progEl) {
-					progEl.textContent = `Fetching agent sessions… ${done}/${total} repos (${pct}%)`;
-				} else {
-					Array.from(agentContainer.children).forEach(child => {
-						const el = child as HTMLElement;
-						if (!el.classList.contains('section-title') && !el.classList.contains('section-subtitle')) {
-							el.remove();
-						}
-					});
-					const div = document.createElement('div');
-					div.className = 'agent-sessions-progress';
-					div.style.cssText = 'margin-top:8px; font-size:12px; color:var(--text-secondary);';
-					div.textContent = `Fetching agent sessions… ${done}/${total} repos (${pct}%)`;
-					agentContainer.appendChild(div);
-				}
-			}
+			updateProgressPanel(
+				'#agent-sessions-content',
+				'agent-sessions-progress',
+				'Fetching agent sessions…',
+				message.done as number,
+				message.total as number,
+			);
 			break;
 		}
 	}
@@ -1851,7 +1904,7 @@ function toFiniteNumber(value: unknown): number {
 	return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function buildRepoAnalysisBodyElement(data: any, workspacePath?: string): HTMLElement {
+function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: string): HTMLElement {
 	const summary = data?.summary || {};
 	const checks = Array.isArray(data?.checks) ? data.checks : [];
 	const recommendations = Array.isArray(data?.recommendations) ? [...data.recommendations] : [];
@@ -1934,9 +1987,9 @@ function buildRepoAnalysisBodyElement(data: any, workspacePath?: string): HTMLEl
 	container.appendChild(scoreSummary);
 
 	const priorityOrder: { [key: string]: number } = { high: 1, medium: 2, low: 3 };
-	recommendations.sort((a: any, b: any) => (priorityOrder[a?.priority as string] || 99) - (priorityOrder[b?.priority as string] || 99));
+	recommendations.sort((a: RepoHygieneRecommendation, b: RepoHygieneRecommendation) => (priorityOrder[a?.priority as string] || 99) - (priorityOrder[b?.priority as string] || 99));
 
-	const categories: { [key: string]: any[] } = {};
+	const categories: Record<string, RepoHygieneCheck[]> = {};
 	for (const check of checks) {
 		const categoryId = typeof check?.category === 'string' && check.category.length > 0 ? check.category : 'other';
 		if (!categories[categoryId]) {
@@ -2074,7 +2127,7 @@ function buildRepoAnalysisBodyElement(data: any, workspacePath?: string): HTMLEl
 	}
 
 	// Build a prompt summarizing the failed/warning checks for Copilot
-	const failedChecks = checks.filter((c: any) => c?.status === 'fail' || c?.status === 'warning');
+	const failedChecks = checks.filter((c: RepoHygieneCheck) => c?.status === 'fail' || c?.status === 'warning');
 	if (failedChecks.length > 0) {
 		const copilotSection = el('div');
 		copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;');
@@ -2087,7 +2140,7 @@ function buildRepoAnalysisBodyElement(data: any, workspacePath?: string): HTMLEl
 		copilotBtn.setAttribute('style', 'min-width: 180px;');
 		copilotBtn.textContent = '🤖 Ask Copilot to Improve';
 		copilotBtn.addEventListener('click', () => {
-			const failedLines = failedChecks.map((c: any) => `- ${c.label}: ${c.detail || ''}${c.hint ? ` (${c.hint})` : ''}`).join('\n');
+			const failedLines = failedChecks.map((c: RepoHygieneCheck) => `- ${c.label}: ${c.detail || ''}${c.hint ? ` (${c.hint})` : ''}`).join('\n');
 			const prompt = `Please help me improve this repository by addressing the following best practice issues:\n\n${failedLines}\n\nFor each issue, please provide specific steps or code changes to fix it.`;
 
 			const isRepoOpen = !workspacePath || currentWorkspacePaths.some(
@@ -2232,7 +2285,7 @@ function renderRepositoryHygienePanels(): void {
 	`;
 }
 
-function displayRepoAnalysisResults(data: any, workspacePath?: string): void {
+function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: string): void {
 	if (workspacePath) {
 		repoAnalysisState.set(workspacePath, { data, error: undefined });
 		if (!isBatchAnalysisInProgress) {
@@ -2243,7 +2296,7 @@ function displayRepoAnalysisResults(data: any, workspacePath?: string): void {
 		return;
 	}
 
-	const btn = document.getElementById('btn-analyse-repo') as any;
+	const btn = document.getElementById('btn-analyse-repo') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
@@ -2270,7 +2323,7 @@ function displayRepoAnalysisError(error: string, workspacePath?: string): void {
 		return;
 	}
 
-	const btn = document.getElementById('btn-analyse-repo') as any;
+	const btn = document.getElementById('btn-analyse-repo') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
@@ -2294,10 +2347,10 @@ function handleBatchAnalysisComplete(): void {
 	renderRepositoryHygienePanels();
 
 	// Re-enable the "Analyze All" button
-	const btn = document.getElementById('btn-analyse-all') as any;
+	const btn = document.getElementById('btn-analyse-all') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
 		btn.disabled = false;
-		const matrix = (initialData as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined;
+		const matrix = initialData?.customizationMatrix as WorkspaceCustomizationMatrix | undefined;
 		const count = matrix?.workspaces?.length || 0;
 		btn.textContent = `Analyze All Repositories (${count})`;
 	}
@@ -2323,11 +2376,7 @@ async function bootstrap(): Promise<void> {
 				const msg = document.createElement('div');
 				msg.style.cssText = 'color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;';
 				msg.textContent = '⏳ Taking longer than expected… Session files may be large or the scan is still in progress.';
-				const btn = document.createElement('button');
-				btn.textContent = '🔄 Refresh';
-				btn.style.cssText = 'padding: 6px 16px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); border-radius: 2px; font-size: 13px;';
-				btn.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
-				hint.append(msg, btn);
+				hint.append(msg, createRefreshButton());
 				r.textContent = '';
 				r.append(hint);
 			}
@@ -2339,7 +2388,9 @@ async function bootstrap(): Promise<void> {
 	console.log('[Usage Analysis] Received locale from extension:', initialData.locale);
 	console.log('[Usage Analysis] Test format 1234567.89 with received locale:', new Intl.NumberFormat(initialData.locale).format(1234567.89));
 	setFormatLocale(initialData.locale);
+	use24HourTime = initialData.use24HourTime !== false;
 	renderLayout(initialData);
+	setupSessionsTableSort();
 
 	// Event delegation for suppress-tool buttons (rendered dynamically in the tools section)
 	document.addEventListener('click', (event) => {
@@ -2360,11 +2411,7 @@ void bootstrap().catch(err => {
 		const msg = document.createElement('div');
 		msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
 		msg.textContent = 'Failed to initialize usage analysis. Please try refreshing.';
-		const btn = document.createElement('button');
-		btn.textContent = '🔄 Refresh';
-		btn.style.cssText = 'padding: 6px 16px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); border-radius: 2px; font-size: 13px;';
-		btn.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
-		container.append(msg, btn);
+		container.append(msg, createRefreshButton());
 		root.textContent = '';
 		root.append(container);
 	}

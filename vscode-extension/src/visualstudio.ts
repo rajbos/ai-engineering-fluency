@@ -24,6 +24,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { decode, decodeMulti } from '@msgpack/msgpack';
 import type { ModelUsage } from './types';
+import { normalizePathForComparison } from './workspaceHelpers';
 
 /** Directory names to skip during filesystem scan (heavy / non-project dirs). */
 const SCAN_SKIP_DIRS = new Set([
@@ -40,8 +41,10 @@ export class VisualStudioDataAccess {
  * Detection: normalised path contains `/.vs/`, `/copilot-chat/`, and `/sessions/`.
  */
 isVSSessionFile(filePath: string): boolean {
-const n = filePath.replace(/\\/g, '/');
-return n.includes('/.vs/') && n.includes('/copilot-chat/') && n.includes('/sessions/');
+	const n = normalizePathForComparison(filePath);
+	const isVS = n.includes('/.vs/') && n.includes('/copilot-chat/') && n.includes('/sessions/');
+	const isSsms = n.includes('/ssmsgithubcopilot/') && n.includes('/copilot-chat/') && n.includes('/sessions/');
+	return isVS || isSsms;
 }
 
 /**
@@ -61,11 +64,22 @@ return path.join(localAppData, 'Temp', 'VSGitHubCopilotLogs');
 }
 
 /**
+ * Returns the SSMS AppData base directory where Copilot session files are stored.
+ * Pattern: %LOCALAPPDATA%\Microsoft\SSMS\
+ */
+getSsmsSessionsDir(): string {
+const localAppData = process.env.LOCALAPPDATA
+|| path.join(os.homedir(), 'AppData', 'Local');
+return path.join(localAppData, 'Microsoft', 'SSMS');
+}
+
+/**
  * Discover VS Copilot session files.
  * Primary: parse VS temp chat log files (fast).
  * Supplemental: filesystem scan of common development roots, to catch sessions
  * not yet referenced in logs (e.g. VS running but session not yet persisted to log,
  * or log files cleaned up by system temp cleaner).
+ * SSMS: dedicated scan of %LOCALAPPDATA%\Microsoft\SSMS\ for SSMSGitHubCopilot sessions.
  */
 discoverSessions(): string[] {
 const seen = new Set<string>();
@@ -73,6 +87,7 @@ const sessionFiles: string[] = [];
 
 this._discoverFromLogs(seen, sessionFiles);
 this._discoverFromFilesystem(seen, sessionFiles);
+this._discoverFromSsmsAppData(seen, sessionFiles);
 
 return sessionFiles;
 }
@@ -197,6 +212,48 @@ solutionDirs = fs.readdirSync(vsDir, { withFileTypes: true });
 for (const sol of solutionDirs) {
 if (!sol.isDirectory()) { continue; }
 const copilotChatDir = path.join(vsDir, sol.name, 'copilot-chat');
+let hashDirs: fs.Dirent[];
+try {
+hashDirs = fs.readdirSync(copilotChatDir, { withFileTypes: true });
+} catch { continue; }
+
+for (const hashDir of hashDirs) {
+if (!hashDir.isDirectory()) { continue; }
+const sessionsDir = path.join(copilotChatDir, hashDir.name, 'sessions');
+let sessionFiles: fs.Dirent[];
+try {
+sessionFiles = fs.readdirSync(sessionsDir, { withFileTypes: true });
+} catch { continue; }
+
+for (const sf of sessionFiles) {
+if (!sf.isFile()) { continue; }
+const fullPath = path.join(sessionsDir, sf.name);
+if (seen.has(fullPath)) { continue; }
+seen.add(fullPath);
+results.push(fullPath);
+}
+}
+}
+}
+
+/**
+ * Scan %LOCALAPPDATA%\Microsoft\SSMS\ for SSMSGitHubCopilot Copilot Chat sessions.
+ * Pattern: SSMS\<version>\SSMSGitHubCopilot\copilot-chat\<hash>\sessions\<uuid>
+ * SSMS only runs on Windows — skip on other platforms.
+ */
+private _discoverFromSsmsAppData(seen: Set<string>, results: string[]): void {
+if (os.platform() !== 'win32') { return; }
+const ssmsDir = this.getSsmsSessionsDir();
+if (!fs.existsSync(ssmsDir)) { return; }
+
+let versionDirs: fs.Dirent[];
+try {
+versionDirs = fs.readdirSync(ssmsDir, { withFileTypes: true });
+} catch { return; }
+
+for (const versionDir of versionDirs) {
+if (!versionDir.isDirectory()) { continue; }
+const copilotChatDir = path.join(ssmsDir, versionDir.name, 'SSMSGitHubCopilot', 'copilot-chat');
 let hashDirs: fs.Dirent[];
 try {
 hashDirs = fs.readdirSync(copilotChatDir, { withFileTypes: true });

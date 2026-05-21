@@ -1,7 +1,7 @@
 // Import shared utilities
 import { BUTTONS } from "../shared/buttonConfig";
 import { createButton, el } from "../shared/domUtils";
-import { formatCost, formatNumber, formatCompact, setCompactNumbers } from "../shared/formatUtils";
+import { escapeHtml, formatCost, formatNumber, formatCompact, setCompactNumbers } from "../shared/formatUtils";
 import { getModelDisplayName } from "../shared/modelUtils";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import themeStyles from "../shared/theme.css";
@@ -573,14 +573,6 @@ function getFluencyStageIcon(stage: number): string {
 		4: '🎯'  // Strategist
 	};
 	return icons[stage] || '❓';
-}
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;');
 }
 
 function markdownToHtml(text: string): string {

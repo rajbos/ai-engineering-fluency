@@ -55,6 +55,7 @@ import type {
   ModelSwitchingAnalysis,
   MissedPotentialWorkspace,
   UsageAnalysisStats,
+  TodaySessionSummary,
   CustomizationTypeStatus,
   WorkspaceCustomizationRow,
   WorkspaceCustomizationMatrix,
@@ -66,29 +67,19 @@ import type {
   SessionLogData,
   WorkspaceCustomizationSummary,
   AgentSessionsResult,
+  TokenEstimator,
 } from './types';
-import { OpenCodeDataAccess } from './opencode';
-import { CrushDataAccess } from './crush';
-import { VisualStudioDataAccess } from './visualstudio';
-import { ContinueDataAccess } from './continue';
-import { ClaudeCodeDataAccess } from './claudecode';
-import { ClaudeDesktopCoworkDataAccess } from './claudedesktop';
-import { MistralVibeDataAccess } from './mistralvibe';
-import { GeminiCliDataAccess } from './geminicli';
+import type { OpenCodeDataAccess } from './opencode';
+import type { CrushDataAccess } from './crush';
+import type { VisualStudioDataAccess } from './visualstudio';
+import type { ContinueDataAccess } from './continue';
+import type { ClaudeCodeDataAccess } from './claudecode';
+import type { ClaudeDesktopCoworkDataAccess } from './claudedesktop';
+import type { MistralVibeDataAccess } from './mistralvibe';
+import type { GeminiCliDataAccess } from './geminicli';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
-import {
-	OpenCodeAdapter,
-	CrushAdapter,
-	ContinueAdapter,
-	ClaudeDesktopAdapter,
-	ClaudeCodeAdapter,
-	VisualStudioAdapter,
-	MistralVibeAdapter,
-	GeminiCliAdapter,
-	CopilotChatAdapter,
-	CopilotCliAdapter,
-	JetBrainsAdapter,
-} from './adapters';
+import { getEcosystemDisplayName } from './ecosystemAdapter';
+import { buildAdapterRegistry, createDataAccessInstances } from './adapters';
 import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from './adapters/jetbrainsAdapter';
 import { detectJetBrainsModelHintFromContent } from './jetbrains';
@@ -108,6 +99,7 @@ import {
   extractSubAgentData as _extractSubAgentData,
   buildReasoningEffortTimeline as _buildReasoningEffortTimeline,
   extractCachedTokensFromDebugLog as _extractCachedTokensFromDebugLog,
+  extractResponseItemText as _extractResponseItemText,
 } from './tokenEstimation';
 import { SessionDiscovery } from './sessionDiscovery';
 import { CacheManager } from './cacheManager';
@@ -161,6 +153,8 @@ import {
 } from './viewRegression';
 import { determineOnboardingAction } from './onboarding';
 import { addModelUsage, addEditorUsage, computeUtcDateRanges, aggregatePeriodStats, type SessionAggregateInput } from './statsHelpers';
+import { getNonce, buildCspMeta } from './utils/webviewUtils';
+import { buildChartData as _buildChartData } from './chartDataBuilder';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -179,9 +173,20 @@ type LocalViewRegressionCase = {
   open: () => Promise<void>;
 };
 
+/** Pre-loaded session file data shared across both analysis passes (detailed + usage analysis). */
+type SessionFilePreload = {
+	sessionFile: string;
+	mtime: number;
+	fileSize: number;
+	sessionData: SessionFileCache;
+	wasCached: boolean;
+	/** Only populated for files with interactions > 0 (avoids fetching details for empty sessions). */
+	details?: SessionFileDetails;
+};
+
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 45; // Fix Cowork token double-counting: deduplicate by requestId in buildTurns
+	private static readonly CACHE_VERSION = 46; // Restore CLI cache token propagation in tokenEstimation + usageAnalysis (was reverted in 7d9def8)
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 
@@ -262,9 +267,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastFullDailyStats: DailyTokenStats[] | undefined;
 	/** Last period selected by the user in the chart view; restored on next open. */
 	private lastChartPeriod: 'day' | 'week' | 'month' = 'day';
+	/** Last view selected by the user in the chart view; restored on next open. */
+	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' = 'total';
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
 	private lastDashboardData: any | undefined;
-	private tokenEstimators: { [key: string]: number } = tokenEstimatorsData.estimators;
+	private tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsData.estimators;
 	private co2Per1kTokens = 0.2; // gCO2e per 1000 tokens, a rough estimate
 	private co2AbsorptionPerTreePerYear = 21000; // grams of CO2 per tree per year
 	private waterUsagePer1kTokens = 0.3; // liters of water per 1000 tokens, based on data center usage estimates
@@ -359,13 +366,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Run async tasks over session files with bounded concurrency (default: 20).
+	 * Run async tasks over session files with bounded concurrency (default: 10).
 	 * Prevents I/O saturation when processing hundreds of session files in parallel.
 	 */
 	private async runWithConcurrency<R>(
 		files: string[],
 		fn: (file: string, index: number) => Promise<R>,
-		limit = 20
+		limit = 10
 	): Promise<(R | undefined)[]> {
 		if (files.length === 0) { return []; }
 		const results: (R | undefined)[] = new Array(files.length);
@@ -884,31 +891,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	constructor(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this.extensionUri = extensionUri;
-		this.openCode = new OpenCodeDataAccess(extensionUri);
-		this.crush = new CrushDataAccess(extensionUri);
-		this.continue_ = new ContinueDataAccess();
-		this.visualStudio = new VisualStudioDataAccess();
-		this.claudeCode = new ClaudeCodeDataAccess();
-		this.claudeDesktopCowork = new ClaudeDesktopCoworkDataAccess();
-		this.mistralVibe = new MistralVibeDataAccess();
-		this.geminiCli = new GeminiCliDataAccess();
-		this.ecosystems = [
-			new OpenCodeAdapter(this.openCode),
-			new CrushAdapter(this.crush),
-			new VisualStudioAdapter(this.visualStudio, (t, m) => this.estimateTokensFromText(t, m)),
-			new ContinueAdapter(this.continue_),
-			new ClaudeDesktopAdapter(this.claudeDesktopCowork, (t) => this.isMcpTool(t), (t) => this.extractMcpServerName(t), (t, m) => this.estimateTokensFromText(t, m)),
-			new ClaudeCodeAdapter(this.claudeCode),
-			new MistralVibeAdapter(this.mistralVibe),
-			new GeminiCliAdapter(this.geminiCli),
-			// Copilot Chat / CLI adapters: discovery-only. Their handles() returns
-			// false so the existing fallback parsing in this file continues to
-			// own per-session parsing for VS Code Copilot Chat and CLI files.
-			// See issue #654.
-			new CopilotChatAdapter(),
-			new CopilotCliAdapter(),
-			new JetBrainsAdapter(),
-		];
+		const dataAccess = createDataAccessInstances(extensionUri);
+		this.openCode = dataAccess.openCode;
+		this.crush = dataAccess.crush;
+		this.continue_ = dataAccess.continue_;
+		this.visualStudio = dataAccess.visualStudio;
+		this.claudeCode = dataAccess.claudeCode;
+		this.claudeDesktopCowork = dataAccess.claudeDesktopCowork;
+		this.mistralVibe = dataAccess.mistralVibe;
+		this.geminiCli = dataAccess.geminiCli;
+		this.ecosystems = buildAdapterRegistry({
+			...dataAccess,
+			estimateTokens: (t, m) => this.estimateTokensFromText(t, m),
+			isMcpTool: (t) => this.isMcpTool(t),
+			extractMcpServerName: (t) => this.extractMcpServerName(t),
+		});
 		this.cacheManager = new CacheManager(context, { log: (m: string) => this.log(m), warn: (m: string) => this.warn(m), error: (m: string) => this.error(m) }, CopilotTokenTracker.CACHE_VERSION);
 		this.sessionDiscovery = new SessionDiscovery({
 			log: (m) => this.log(m),
@@ -993,14 +990,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 					// instead of waiting for the next timer tick.
 					const backend = this.backend;
 					if (backend && typeof backend.syncToBackendStore === 'function') {
-						backend.syncToBackendStore(true).then(() => {
-							// Refresh diagnostics again after sync completes so "Last Sync" shows the new time
-							if (this.diagnosticsPanel) {
-								this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
+						void (async () => {
+							try {
+								await backend.syncToBackendStore(true);
+								// Refresh diagnostics again after sync completes so "Last Sync" shows the new time
+								if (this.diagnosticsPanel) {
+									this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
+								}
+							} catch (err: unknown) {
+								this.warn('Backend sync after settings change failed: ' + err);
 							}
-						}).catch((err: unknown) => {
-							this.warn('Backend sync after settings change failed: ' + err);
-						});
+						})();
 					}
 					// If the diagnostic report is open, refresh it so the Backend Storage
 					// section reflects the new settings immediately (e.g. after saving the
@@ -1017,7 +1017,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		// Update every 5 minutes (cache is saved automatically after each update)
 		this.updateInterval = setInterval(() => {
-			this.updateTokenStats(true); // Silent update from timer
+			this.updateTokenStats(true, true); // Silent background update — skip if a run is already in progress
 		}, 5 * 60 * 1000);
 	}
 
@@ -1525,10 +1525,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	public async updateTokenStats(silent: boolean = false): Promise<DetailedStats | undefined> {
+	public async updateTokenStats(silent: boolean = false, skipIfBusy = false): Promise<DetailedStats | undefined> {
 		// Coalesce concurrent callers onto the same in-flight run to prevent
 		// multiple executions from racing to update the status bar simultaneously.
+		// Background/timer callers pass skipIfBusy=true to drop the call rather than queue.
 		if (this._updateTokenStatsInFlight) {
+			if (skipIfBusy) {
+				this.log('updateTokenStats already in progress, skipping background refresh');
+				return undefined;
+			}
 			this.log('updateTokenStats already in progress, coalescing onto existing run');
 			return this._updateTokenStatsInFlight;
 		}
@@ -1541,13 +1546,64 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/**
+	 * Discover all session files, stat them, and load (or cache-hit) their parsed data.
+	 * Returns a `SessionFilePreload[]` that both calculateDetailedStats and
+	 * calculateUsageAnalysisStats can consume, eliminating a second filesystem scan.
+	 */
+	private async _preloadSessionFiles(
+		cutoffMs: number,
+		progressCallback?: (completed: number, total: number) => void
+	): Promise<{ sessionFiles: string[]; preloaded: SessionFilePreload[] }> {
+		this.cacheManager.clearExpiredCache();
+		const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+		this.log(`📊 Analyzing ${sessionFiles.length} session file(s)...`);
+
+		if (sessionFiles.length === 0) {
+			this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
+			return { sessionFiles, preloaded: [] };
+		}
+
+		const analyzeStartMs = Date.now();
+		const results = await this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
+			if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
+			const fileStats = await this.statSessionFile(sessionFile);
+			const mtime = fileStats.mtime.getTime();
+			const fileSize = fileStats.size;
+			if (mtime < cutoffMs) { return null; }
+			const cachedData = this.getCachedSessionData(sessionFile);
+			const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+			const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
+			// Fetch details (lastInteraction etc.) only for non-empty sessions — avoids extra I/O for empty files.
+			const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile) : undefined;
+			return { sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload;
+		});
+
+		const preloaded = results.filter((r): r is SessionFilePreload => r !== null && r !== undefined);
+		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		return { sessionFiles, preloaded };
+	}
+
 	private async _runUpdateTokenStats(silent: boolean): Promise<DetailedStats | undefined> {
 		try {
 			this.log('Updating token stats...');
-			const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(silent ? undefined : (completed, total) => {
+
+			// Compute the date-range cutoff used by both analysis methods so we can do a
+			// single filesystem scan + file-load pass and share the results.
+			const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());
+			const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
+
+			const progressCallback = silent ? undefined : (completed: number, total: number) => {
 				const percentage = Math.round((completed / total) * 100);
 				this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
-			});
+			};
+
+			// Single preload pass: discover all session files, stat, and parse/cache each one.
+			// Both calculateDetailedStats and calculateUsageAnalysisStats reuse this result,
+			// eliminating duplicate filesystem scans and stat() calls.
+			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback);
+
+			const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 			this.lastDailyStats = dailyStats;
 			// Keep lastFullDailyStats fresh: replace the recent 30-day entries so the chart
 			// shows the same data as the toolbar/details panel on every background refresh.
@@ -1635,7 +1691,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			// If the analysis panel is open, update its content via postMessage to preserve repo hygiene results
 			if (this.analysisPanel) {
-				const analysisStats = await this.calculateUsageAnalysisStats(false); // Force recalculation on refresh
+				const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded); // Force recalculation on refresh — use preloaded data
 				if (silent) {
 					// Background update: send data via postMessage so repo analysis results are preserved.
 					// The webview re-renders stats but repoAnalysisState (module-level) restores analysis results.
@@ -1667,7 +1723,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// During background (silent) updates, skip to preserve demo panel state and user overrides.
 			// Always compute a fresh score so it can be reused for the sharing server upload below.
 			const freshMaturityData = (!silent || this.maturityPanel)
-				? await this.calculateMaturityScores(false)
+				? await this.calculateMaturityScores(false, preloaded)
 				: undefined;
 			if (this.maturityPanel && !silent && freshMaturityData) {
 				this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, freshMaturityData);
@@ -1680,22 +1736,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const settings = this.backend.getSettings();
 				if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
 					// Use the already-computed fresh score when available; otherwise compute now.
-					Promise.resolve(freshMaturityData ?? this.calculateMaturityScores(false)).then((maturityData) => {
-						const scorePayload: Record<string, unknown> = {
-							overallStage: maturityData.overallStage,
-							overallLabel: maturityData.overallLabel,
-							categories: maturityData.categories.map((c: any) => ({
-								category: c.category,
-								icon: c.icon,
-								stage: c.stage,
-								tips: c.tips,
-							})),
-							computedAt: new Date().toISOString(),
-						};
-						return this.backend!.uploadFluencyScoreToSharingServer(settings, scorePayload);
-					}).catch((err: unknown) => {
-						this.warn(`Failed to upload fluency score to sharing server: ${err}`);
-					});
+					void (async () => {
+						try {
+							const maturityData = await (freshMaturityData ?? this.calculateMaturityScores(false));
+							const scorePayload: Record<string, unknown> = {
+								overallStage: maturityData.overallStage,
+								overallLabel: maturityData.overallLabel,
+								categories: maturityData.categories.map((c: any) => ({
+									category: c.category,
+									icon: c.icon,
+									stage: c.stage,
+									tips: c.tips,
+								})),
+								computedAt: new Date().toISOString(),
+							};
+							await this.backend!.uploadFluencyScoreToSharingServer(settings, scorePayload);
+						} catch (err: unknown) {
+							this.warn(`Failed to upload fluency score to sharing server: ${err}`);
+						}
+					})();
 				}
 			}
 
@@ -1724,14 +1783,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastDetailedStats = detailedStats;
 
 			// Save cache to ensure it's persisted for next run (don't await to avoid blocking UI)
-			this.saveCacheToStorage().catch(err => {
-				this.warn(`Failed to save cache: ${err}`);
-			});
+			void (async () => {
+				try {
+					await this.saveCacheToStorage();
+				} catch (err) {
+					this.warn(`Failed to save cache: ${err}`);
+				}
+			})();
 
 			// Pre-warm full-year chart data in background so the chart opens without delay.
 			// Only kick off when not already computed and the chart panel isn't open (showChart handles that case).
 			if (!this.lastFullDailyStats && !this.chartPanel) {
-				void this.calculateDailyStats();
+				void this.calculateDailyStats(365, sessionFiles);
 			}
 
 			return detailedStats;
@@ -1779,10 +1842,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		};
 	}
 
-	private async calculateDetailedStats(progressCallback?: (completed: number, total: number) => void): Promise<{ stats: DetailedStats; dailyStats: DailyTokenStats[] }> {
+	private async calculateDetailedStats(progressCallback?: (completed: number, total: number) => void, preloaded?: SessionFilePreload[]): Promise<{ stats: DetailedStats; dailyStats: DailyTokenStats[] }> {
 		const now = new Date();
 		// UTC-based date keys for consistent daily attribution (matching server-side)
-		const { todayUtcKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysUtcStartKey, last30DaysStartMs } = computeUtcDateRanges(now);
+		const { todayUtcKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysUtcStartKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
+		// The file-load cutoff covers both the rolling 30-day window AND the full previous
+		// calendar month, so April 1–12 sessions are not skipped on May 13.
+		const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 
 		let todayStats = { tokens: 0, thinkingTokens: 0, cachedTokens: 0, estimatedTokens: 0, actualTokens: 0, sessions: 0, interactions: 0, modelUsage: {} as ModelUsage, editorUsage: {} as EditorUsage };
 		let monthStats = { tokens: 0, thinkingTokens: 0, cachedTokens: 0, estimatedTokens: 0, actualTokens: 0, sessions: 0, interactions: 0, modelUsage: {} as ModelUsage, editorUsage: {} as EditorUsage };
@@ -1793,35 +1859,48 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let dailyStatsMap = new Map<string, DailyTokenStats>();
 
 		try {
-			// Clean expired cache entries
-			this.cacheManager.clearExpiredCache();
-
-			const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-			this.log(`📊 Analyzing ${sessionFiles.length} session file(s)...`);
-
-			if (sessionFiles.length === 0) {
-				this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
-			}
-
 			let cacheHits = 0;
 			let cacheMisses = 0;
 			let skippedFiles = 0;
+			const analysisStartMs = Date.now();
 
-			// Gather per-file data (stat + cache lookup + details) in parallel with bounded concurrency,
-			// then aggregate results sequentially. This avoids serialising hundreds of cheap cache hits.
-			const sessionDataResults = await this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
-				if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
-				const fileStats = await this.statSessionFile(sessionFile);
-				const mtime = fileStats.mtime.getTime();
-				const fileSize = fileStats.size;
-				if (mtime < last30DaysStartMs) { return null; }
-				const cachedData = this.getCachedSessionData(sessionFile);
-				const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
-				const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-				if (sessionData.interactions === 0) { return null; }
-				const details = await this.getSessionFileDetails(sessionFile);
-				return { sessionFile, sessionData, details, mtime, wasCached };
-			});
+			let sessionDataResults: ({ sessionFile: string; sessionData: SessionFileCache; details: SessionFileDetails; mtime: number; wasCached: boolean } | null | undefined)[];
+
+			if (preloaded) {
+				// Single-pass path: reuse pre-loaded data including details — no extra I/O needed.
+				// clearExpiredCache and discovery were already handled by _preloadSessionFiles.
+				sessionDataResults = preloaded.map(p => {
+					if (p.sessionData.interactions === 0 || !p.details) { return null; }
+					return { sessionFile: p.sessionFile, sessionData: p.sessionData, details: p.details, mtime: p.mtime, wasCached: p.wasCached };
+				});
+			} else {
+				// Standalone path: discover, stat, load, and get details independently.
+				// Clean expired cache entries
+				this.cacheManager.clearExpiredCache();
+
+				const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+				this.log(`📊 Analyzing ${sessionFiles.length} session file(s)...`);
+
+				if (sessionFiles.length === 0) {
+					this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
+				}
+
+				// Gather per-file data (stat + cache lookup + details) in parallel with bounded concurrency,
+				// then aggregate results sequentially. This avoids serialising hundreds of cheap cache hits.
+				sessionDataResults = await this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
+					if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
+					const fileStats = await this.statSessionFile(sessionFile);
+					const mtime = fileStats.mtime.getTime();
+					const fileSize = fileStats.size;
+					if (mtime < fileLoadCutoffMs) { return null; }
+					const cachedData = this.getCachedSessionData(sessionFile);
+					const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+					const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
+					if (sessionData.interactions === 0) { return null; }
+					const details = await this.getSessionFileDetails(sessionFile);
+					return { sessionFile, sessionData, details, mtime, wasCached };
+				});
+			}
 
 			// Build pure-function inputs: map non-null results and track cache stats
 			const aggregateInputs: SessionAggregateInput[] = [];
@@ -1848,6 +1927,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				lastMonthUtcEndKey,
 				last30DaysUtcStartKey,
 				last30DaysStartMs,
+				lastMonthStartMs,
 			});
 			todayStats = aggregated.todayStats;
 			monthStats = aggregated.monthStats;
@@ -1856,7 +1936,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			dailyStatsMap = aggregated.dailyStatsMap;
 			skippedFiles += aggregated.skippedCount;
 
-			this.log(`✅ Analysis complete: Today ${todayStats.sessions} sessions, Month ${monthStats.sessions} sessions, Last 30 Days ${last30DaysStats.sessions} sessions, Previous Month ${lastMonthStats.sessions} sessions`);
+			const analysisElapsedMs = Date.now() - analysisStartMs;
+			const analysisElapsedSec = (analysisElapsedMs / 1000).toFixed(1);
+			this.log(`✅ Analysis complete in ${analysisElapsedSec}s: Today ${todayStats.sessions} sessions, Month ${monthStats.sessions} sessions, Last 30 Days ${last30DaysStats.sessions} sessions, Previous Month ${lastMonthStats.sessions} sessions`);
 			if (skippedFiles > 0) {
 				this.log(`⏭️ Skipped ${skippedFiles} session file(s) (empty or no activity in recent months)`);
 			}
@@ -2005,6 +2087,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.compactNumbers', true);
 	}
 
+	private getUse24HourTimeSetting(): boolean {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.use24HourTime', true);
+	}
+
 	private refreshOpenPanelsForSettingChange(): void {
 		const stats = this.lastDetailedStats;
 		if (!stats) { return; }
@@ -2025,7 +2111,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  (actualTokens > estimatedTokens) and UTC date assignment as calculateDetailedStats
 	 *  so all chart period views are consistent. Stores the result in
 	 *  `lastFullDailyStats` and returns it. Zero-fill is handled per-period in buildChartData. */
-	private async calculateDailyStats(daysBack = 365): Promise<DailyTokenStats[]> {
+	private async calculateDailyStats(daysBack = 365, knownSessionFiles?: string[]): Promise<DailyTokenStats[]> {
 		const now = new Date();
 		const cutoffUtcStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysBack));
 		const cutoffUtcStartKey = cutoffUtcStart.toISOString().slice(0, 10);
@@ -2034,7 +2120,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const dailyStatsMap = new Map<string, DailyTokenStats>();
 
 		try {
-			const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+			const sessionFiles = knownSessionFiles ?? await this.sessionDiscovery.getCopilotSessionFiles();
 			this.log(`📈 Preparing chart data (${daysBack}d) from ${sessionFiles.length} session file(s)...`);
 
 			const dailyResults = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
@@ -2072,11 +2158,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 							if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
 							dailyEntry.repositoryUsage[repository].tokens += dayTokens;
 							dailyEntry.repositoryUsage[repository].sessions += 1;
-							for (const [model, usage] of Object.entries(dayRollup.modelUsage)) {
-								if (!dailyEntry.modelUsage[model]) { dailyEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
-								dailyEntry.modelUsage[model].inputTokens += usage.inputTokens;
-								dailyEntry.modelUsage[model].outputTokens += usage.outputTokens;
-							}
+							addModelUsage(dailyEntry.modelUsage, dayRollup.modelUsage);
 						}
 					} else {
 						// Fallback: session-level attribution
@@ -2105,11 +2187,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 						if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
 						dailyEntry.repositoryUsage[repository].tokens += tokens;
 						dailyEntry.repositoryUsage[repository].sessions += 1;
-						for (const [model, usage] of Object.entries(modelUsage)) {
-							if (!dailyEntry.modelUsage[model]) { dailyEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
-							dailyEntry.modelUsage[model].inputTokens += usage.inputTokens;
-							dailyEntry.modelUsage[model].outputTokens += usage.outputTokens;
-						}
+						addModelUsage(dailyEntry.modelUsage, modelUsage);
 					}
 				} catch (fileError) {
 					this.warn(`Error processing session file ${sessionFile} for daily stats: ${fileError}`);
@@ -2161,7 +2239,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Calculate usage analysis statistics for today and last 30 days
 	 * @param useCache If true, return cached stats if available. If false, force recalculation.
 	 */
-	private async calculateUsageAnalysisStats(useCache = true): Promise<UsageAnalysisStats> {
+	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[]): Promise<UsageAnalysisStats> {
 		// Return cached stats if available and cache is allowed
 		if (useCache && this.lastUsageAnalysisStats) {
 			this.log('🔍 [Usage Analysis] Using cached stats');
@@ -2170,10 +2248,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		const now = new Date();
 		// UTC-based day keys for consistent period boundaries (matching server-side)
-		const todayUtcKey = now.toISOString().slice(0, 10);
-		const last30DaysUtcStartKey = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30)).toISOString().slice(0, 10);
-		const monthUtcStartKey = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
-		const last30DaysStartMs = new Date(last30DaysUtcStartKey).getTime();
+		const { todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
+		const usageAnalysisFileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 
 		this.log('🔍 [Usage Analysis] Starting calculation...');
 		this._cacheHits = 0; // Reset cache hit counter
@@ -2258,6 +2334,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const todayStats = emptyPeriod();
 		const last30DaysStats = emptyPeriod();
 		const monthStats = emptyPeriod();
+		const todaySessionsList: TodaySessionSummary[] = [];
 
 		// Track session counts per resolved workspace (workspaces with activity in last 30 days)
 		const workspaceSessionCounts = new Map<string, number>();
@@ -2273,30 +2350,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._customizationFilesCache.clear();
 
 		try {
-			const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-			this.log(`🔍 [Usage Analysis] Processing ${sessionFiles.length} session files`);
+			let totalFiles: number;
+			let usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[];
+
+			if (preloaded) {
+				// Single-pass path: reuse pre-loaded data — no filesystem re-scan needed.
+				this.log(`🔍 [Usage Analysis] Processing ${preloaded.length} preloaded session files`);
+				totalFiles = preloaded.length;
+				usageResults = preloaded.map(p => ({ sessionFile: p.sessionFile, sessionData: p.sessionData, mtime: p.mtime }));
+			} else {
+				const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+				this.log(`🔍 [Usage Analysis] Processing ${sessionFiles.length} session files`);
+				totalFiles = sessionFiles.length;
+
+				// Gather stat + session data in parallel, then aggregate sequentially.
+				// The workspace/customization-cache mutations below are not async, so they are safe
+				// to run in the sequential aggregation pass even after parallel data fetch.
+				usageResults = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
+					const fileStats = await this.statSessionFile(sessionFile);
+					const mtime = fileStats.mtime.getTime();
+					const fileSize = fileStats.size;
+					if (mtime < usageAnalysisFileLoadCutoffMs) { return null; }
+					const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
+					return { sessionFile, sessionData, mtime };
+				});
+			}
 
 			let processed = 0;
-			const progressInterval = Math.max(1, Math.floor(sessionFiles.length / 20)); // Log every 5%
-
-			// Gather stat + session data in parallel, then aggregate sequentially.
-			// The workspace/customization-cache mutations below are not async, so they are safe
-			// to run in the sequential aggregation pass even after parallel data fetch.
-			const usageResults = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
-				const fileStats = await this.statSessionFile(sessionFile);
-				const mtime = fileStats.mtime.getTime();
-				const fileSize = fileStats.size;
-				if (mtime < last30DaysStartMs) { return null; }
-				const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-				return { sessionFile, sessionData, mtime };
-			});
+			const progressInterval = Math.max(1, Math.floor(totalFiles / 20)); // Log every 5%
 
 			for (const r of usageResults) {
 				try {
 					if (!r) {
 						processed++;
 						if (processed % progressInterval === 0) {
-							this.log(`🔍 [Usage Analysis] Progress: ${processed}/${sessionFiles.length} files (${Math.round(processed / sessionFiles.length * 100)}%)`);
+							this.log(`🔍 [Usage Analysis] Progress: ${processed}/${totalFiles} files (${Math.round(processed / totalFiles * 100)}%)`);
 						}
 						continue;
 					}
@@ -2346,7 +2434,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 							// Skip counting this session as it contains no user interactions
 							processed++;
 							if (processed % progressInterval === 0) {
-								this.log(`🔍 [Usage Analysis] Progress: ${processed}/${sessionFiles.length} files (${Math.round(processed / sessionFiles.length * 100)}%)`);
+								this.log(`🔍 [Usage Analysis] Progress: ${processed}/${totalFiles} files (${Math.round(processed / totalFiles * 100)}%)`);
 							}
 							continue;
 						}
@@ -2412,11 +2500,35 @@ class CopilotTokenTracker implements vscode.Disposable {
 						if (lastActivityUtcKey === todayUtcKey) {
 							todayStats.sessions++;
 							this.mergeUsageAnalysis(todayStats, analysis);
+
+							// Collect per-session summary for "Today's Sessions" tab
+							const modelUsage = sessionData.modelUsage || {};
+							let inputTok = 0, outputTok = 0, cachedTok = 0;
+							for (const usage of Object.values(modelUsage)) {
+								inputTok += usage.inputTokens || 0;
+								outputTok += usage.outputTokens || 0;
+								cachedTok += usage.cachedReadTokens || 0;
+							}
+							todaySessionsList.push({
+								title: sessionData.title || null,
+								filePath: sessionFile,
+								interactions,
+								toolCalls: analysis.toolCalls.total,
+								inputTokens: inputTok,
+								outputTokens: outputTok,
+								thinkingTokens: sessionData.thinkingTokens || 0,
+								cachedTokens: cachedTok,
+								totalTokens: sessionData.actualTokens || sessionData.tokens || 0,
+								estimatedCost: this.calculateEstimatedCost(modelUsage),
+								editor: this.detectEditorSource(sessionFile),
+								models: Object.keys(modelUsage),
+								lastActivity: sessionData.lastInteraction || new Date(mtime).toISOString(),
+							});
 						}
 
 					processed++;
 					if (processed % progressInterval === 0) {
-						this.log(`🔍 [Usage Analysis] Progress: ${processed}/${sessionFiles.length} files (${Math.round(processed / sessionFiles.length * 100)}%)`);
+						this.log(`🔍 [Usage Analysis] Progress: ${processed}/${totalFiles} files (${Math.round(processed / totalFiles * 100)}%)`);
 					}
 				} catch (fileError) {
 					this.warn(`Error processing session file for usage analysis: ${fileError}`);
@@ -2619,7 +2731,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			locale: Intl.DateTimeFormat().resolvedOptions().locale,
 			lastUpdated: now,
 			customizationMatrix: this._lastCustomizationMatrix,
-			missedPotential: this._lastMissedPotential || []
+			missedPotential: this._lastMissedPotential || [],
+			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions)
 		};
 
 		// Cache the result for future use
@@ -2635,7 +2748,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return _mergeUsageAnalysis(period, analysis);
 	}
 
-	private async countInteractionsInSession(sessionFile: string, preloadedContent?: string): Promise<number> {
+	private async countInteractionsInSession(sessionFile: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<number> {
 		try {
 			const eco = this.findEcosystem(sessionFile);
 			if (eco) { return eco.countInteractions(sessionFile); }
@@ -2676,7 +2789,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			}
 
 			// Handle regular .json files
-			const sessionContent = JSON.parse(fileContent);
+			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
 
 			// Count the number of requests as interactions
 			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
@@ -2777,7 +2890,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 
-	private async extractSessionMetadata(sessionFile: string, preloadedContent?: string): Promise<{
+	private async extractSessionMetadata(sessionFile: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<{
 		title: string | undefined;
 		firstInteraction: string | null;
 		lastInteraction: string | null;
@@ -2865,7 +2978,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			} else {
 				// JSON format - try to parse
 				try {
-					const parsed = JSON.parse(fileContent);
+					const parsed = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
 					if (parsed.customTitle) { title = parsed.customTitle; }
 					// creationDate is session creation, not a request — only add to timestamps
 					if (parsed.creationDate) { timestamps.push(parsed.creationDate); }
@@ -2917,21 +3030,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this._cacheMisses++;
 
-		// Pre-read file content once for regular Copilot Chat files to avoid 5 redundant reads
+		// Pre-read file content once for regular Copilot Chat files to avoid redundant reads
 		let preloadedContent: string | undefined;
 		const isSpecialSession = this.findEcosystem(sessionFilePath) !== null;
 		if (!isSpecialSession) {
 			preloadedContent = await fs.promises.readFile(sessionFilePath, 'utf8');
 		}
 
-		// Cache miss - process the file (using pre-read content when available)
-		const tokenResult = await this.estimateTokensFromSession(sessionFilePath, preloadedContent);
-		const interactions = await this.countInteractionsInSession(sessionFilePath, preloadedContent);
-		const modelUsage = await _getModelUsageFromSession(this.usageAnalysisDeps, sessionFilePath, preloadedContent);
-		const usageAnalysis = await _analyzeSessionUsage(this.usageAnalysisDeps, sessionFilePath, preloadedContent);
+		// Pre-parse JSON content once for non-JSONL files to avoid multiple redundant JSON.parse calls.
+		// Each analysis function independently parses the same content; sharing the parsed object
+		// eliminates up to 7 redundant JSON.parse operations per cache miss for large session files.
+		let preloadedParsedJson: any | undefined;
+		if (preloadedContent
+			&& !sessionFilePath.endsWith('.jsonl')
+			&& !_isJsonlContent(preloadedContent)
+			&& !_isUuidPointerFile(preloadedContent)
+		) {
+			try { preloadedParsedJson = JSON.parse(preloadedContent); } catch { /* each function handles parse errors individually */ }
+		}
 
-		// Extract title and timestamps from the session file
-		const sessionMeta = await this.extractSessionMetadata(sessionFilePath, preloadedContent);
+		// Cache miss - process the file using pre-read content and pre-parsed JSON when available.
+		// Use Promise.all so ecosystem-session I/O (eco.getTokens etc.) can overlap across calls.
+		const [tokenResult, interactions, modelUsage, usageAnalysis, sessionMeta] = await Promise.all([
+			this.estimateTokensFromSession(sessionFilePath, preloadedContent, preloadedParsedJson),
+			this.countInteractionsInSession(sessionFilePath, preloadedContent, preloadedParsedJson),
+			_getModelUsageFromSession(this.usageAnalysisDeps, sessionFilePath, preloadedContent, preloadedParsedJson),
+			_analyzeSessionUsage(this.usageAnalysisDeps, sessionFilePath, preloadedContent, preloadedParsedJson),
+			this.extractSessionMetadata(sessionFilePath, preloadedContent, preloadedParsedJson),
+		]);
 
 		// Compute per-UTC-day rollups by distributing cached totals proportionally across days
 		// (same approach as syncService.processCachedSessionFile)
@@ -3120,7 +3246,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const eco = this.findEcosystem(sessionFile);
 		if (eco) {
 			details.editorRoot = eco.getEditorRoot(sessionFile);
-			details.editorName = eco.displayName;
+			details.editorName = getEcosystemDisplayName(eco, sessionFile);
 			return;
 		}
 		try {
@@ -3316,7 +3442,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				details.lastInteraction = meta.lastInteraction;
 				details.interactions = interactionCount;
 				details.editorRoot = eco.getEditorRoot(sessionFile);
-				details.editorName = eco.displayName;
+				details.editorName = getEcosystemDisplayName(eco, sessionFile);
 				if (meta.workspacePath) {
 					details.repository = path.basename(meta.workspacePath);
 				}
@@ -3582,7 +3708,7 @@ return {
 file: details.file,
 title: details.title || null,
 editorSource: details.editorSource,
-editorName: details.editorName || eco.displayName,
+editorName: details.editorName || getEcosystemDisplayName(eco, sessionFile),
 size: details.size,
 modified: details.modified,
 interactions: details.interactions,
@@ -3750,7 +3876,7 @@ usageAnalysis: undefined
 			const jetBrainsModelHint: string | null = isJetBrainsFile
 				? detectJetBrainsModelHintFromContent(fileContent)
 				: null;
-			let cliSessionModel = isJetBrainsFile ? (jetBrainsModelHint || 'unknown') : 'gpt-4o';
+			let cliSessionModel = isJetBrainsFile ? (jetBrainsModelHint || 'unknown') : 'unknown';
 			let cliSessionEffort: string | undefined;
 
 			// JetBrains partition files (~/.copilot/jb/{uuid}/partition-{n}.jsonl) share
@@ -3759,7 +3885,9 @@ usageAnalysis: undefined
 
 			// Pre-scan for model and effort:
 			// 1. session.start.data.selectedModel (older CLI format)
-			// 2. First tool.execution_complete.data.model (newer CLI format — session.start has no selectedModel)
+			// 2. session.model_change.data.newModel (current CLI format)
+			// 3. First assistant.message.data.model (per-turn model)
+			// 4. First tool.execution_complete.data.model (newer CLI format — session.start has no selectedModel)
 			let cliModelFound = false;
 			for (const line of lines) {
 				try {
@@ -3771,7 +3899,19 @@ usageAnalysis: undefined
 						}
 						if (typeof ev.data.reasoningEffort === 'string') { cliSessionEffort = ev.data.reasoningEffort; }
 						if (cliModelFound) { break; }
-						// No model in session.start — continue scanning for tool.execution_complete
+						// No model in session.start — continue scanning
+					}
+					// Current CLI format: model change event
+					if (ev.type === 'session.model_change' && typeof ev.data?.newModel === 'string') {
+						cliSessionModel = ev.data.newModel;
+						cliModelFound = true;
+						break;
+					}
+					// Per-turn model from assistant.message
+					if (ev.type === 'assistant.message' && typeof ev.data?.model === 'string') {
+						cliSessionModel = ev.data.model;
+						cliModelFound = true;
+						break;
 					}
 					// Newer format: model stored per tool call result
 					if (ev.type === 'tool.execution_complete' && typeof ev.data?.model === 'string') {
@@ -3797,6 +3937,11 @@ usageAnalysis: undefined
 			for (const line of lines) {
 				try {
 					const event = JSON.parse(line);
+
+					// Track model changes so subsequent turns use the correct model
+					if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
+						cliSessionModel = event.data.newModel;
+					}
 
 					// Handle Copilot CLI format (type: 'user.message')
 					if (event.type === 'user.message' && event.data?.content) {
@@ -3850,8 +3995,12 @@ usageAnalysis: undefined
 							subAgentOutputTokenMap.set(event.data.parentToolCallId, prev + this.estimateTokensFromText(event.data.content, cliSessionModel));
 						} else if (turns.length > 0) {
 							const lastTurn = turns[turns.length - 1];
+							// Update turn model from per-event model if available
+							if (typeof event.data.model === 'string') {
+								lastTurn.model = event.data.model;
+							}
 							lastTurn.assistantResponse += event.data.content;
-							lastTurn.outputTokensEstimate = this.estimateTokensFromText(lastTurn.assistantResponse, lastTurn.model || 'gpt-4o');
+							lastTurn.outputTokensEstimate = this.estimateTokensFromText(lastTurn.assistantResponse, lastTurn.model || cliSessionModel);
 						}
 					}
 
@@ -4070,19 +4219,12 @@ usageAnalysis: undefined
 		const mcpTools: { server: string; tool: string }[] = [];
 
 		for (const item of response) {
-			// Separate thinking items
-			if (item.kind === 'thinking') {
-				if (item.value && typeof item.value === 'string') {
-					thinkingText += item.value;
-				}
-				continue;
-			}
-
-			// Extract text content
-			if (item.value && typeof item.value === 'string') {
-				responseText += item.value;
-			} else if (item.kind === 'markdownContent' && item.content?.value) {
-				responseText += item.content.value;
+			if (!item || typeof item !== 'object') { continue; }
+			// Extract text content and thinking via shared utility
+			const { text: itemText, isThinking: itemIsThinking } = _extractResponseItemText(item);
+			if (itemText) {
+				if (itemIsThinking) { thinkingText += itemText; }
+				else { responseText += itemText; }
 			}
 
 			// Extract tool invocations
@@ -4136,7 +4278,7 @@ usageAnalysis: undefined
 
 
 
-	private async estimateTokensFromSession(sessionFilePath: string, preloadedContent?: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens?: number }> {
+	private async estimateTokensFromSession(sessionFilePath: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens?: number }> {
 		try {
 			const eco = this.findEcosystem(sessionFilePath);
 			if (eco) { return eco.getTokens(sessionFilePath); }
@@ -4155,7 +4297,7 @@ usageAnalysis: undefined
 			}
 
 			// Handle regular .json files
-			const sessionContent = JSON.parse(fileContent);
+			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
 			let totalInputTokens = 0;
 			let totalOutputTokens = 0;
 			let totalThinkingTokens = 0;
@@ -4175,11 +4317,6 @@ usageAnalysis: undefined
 					// Estimate tokens from assistant response (output)
 					if (request.response && Array.isArray(request.response)) {
 						for (const responseItem of request.response) {
-							// Separate thinking tokens
-							if (responseItem.kind === 'thinking' && responseItem.value) {
-								totalThinkingTokens += this.estimateTokensFromText(responseItem.value, this.getModelFromRequest(request));
-								continue;
-							}
 							// Sub-agent invocations: count prompt (input) + result (output)
 							const subAgent = _extractSubAgentData(responseItem);
 							if (subAgent) {
@@ -4188,8 +4325,13 @@ usageAnalysis: undefined
 								if (subAgent.result) { totalOutputTokens += this.estimateTokensFromText(subAgent.result, saModel); }
 								continue;
 							}
-							if (responseItem.value) {
-								totalOutputTokens += this.estimateTokensFromText(responseItem.value, this.getModelFromRequest(request));
+							const { text, isThinking } = _extractResponseItemText(responseItem);
+							if (text) {
+								if (isThinking) {
+									totalThinkingTokens += this.estimateTokensFromText(text, this.getModelFromRequest(request));
+								} else {
+									totalOutputTokens += this.estimateTokensFromText(text, this.getModelFromRequest(request));
+								}
 							}
 						}
 					}
@@ -4412,18 +4554,10 @@ usageAnalysis: undefined
 	}
 
 	private getEnvironmentalHtml(webview: vscode.Webview, stats: DetailedStats): string {
-		const nonce = this.getNonce();
+		const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'environmental.js')
 		);
-
-		const csp = [
-			`default-src 'none'`,
-			`img-src ${webview.cspSource} https: data:`,
-			`style-src 'unsafe-inline' ${webview.cspSource}`,
-			`font-src ${webview.cspSource} https: data:`,
-			`script-src 'nonce-${nonce}'`,
-		].join('; ');
 
 		const dataWithBackend = {
 			...stats,
@@ -4437,7 +4571,7 @@ usageAnalysis: undefined
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-			<meta http-equiv="Content-Security-Policy" content="${csp}" />
+			${buildCspMeta(webview, nonce)}
 			<title>Environmental Impact</title>
 		</head>
 		<body>
@@ -4493,6 +4627,12 @@ usageAnalysis: undefined
 				const p = message.period;
 				if (p === 'day' || p === 'week' || p === 'month') {
 					this.lastChartPeriod = p;
+				}
+			}
+			if (message.command === 'setViewPreference') {
+				const v = message.view;
+				if (v === 'total' || v === 'model' || v === 'editor' || v === 'repository' || v === 'cost') {
+					this.lastChartView = v;
 				}
 			}
 		});
@@ -4583,6 +4723,17 @@ usageAnalysis: undefined
 				case 'loadAgentSessions':
 					await this.dispatch('loadAgentSessions', () => this.loadAgentSessions());
 					break;
+				case 'openSessionFile':
+					if (message.file) {
+						await this.dispatch('openSessionFile:analysis', async () => {
+							try {
+								await this.showLogViewer(message.file);
+							} catch (err) {
+								vscode.window.showErrorMessage('Could not open log viewer: ' + message.file);
+							}
+						});
+					}
+					break;
 			}
 		});
 
@@ -4594,31 +4745,34 @@ usageAnalysis: undefined
 			// Capture panel reference to guard against stale async results
 			// (user could close and reopen the panel while calculation is in flight)
 			const panel = this.analysisPanel;
-			this.calculateUsageAnalysisStats(true).then(analysisStats => {
-				if (!this.analysisPanel || this.analysisPanel !== panel) { return; }
-				void this.analysisPanel.webview.postMessage({
-					command: 'updateStats',
-					data: {
-						today: analysisStats.today,
-						last30Days: analysisStats.last30Days,
-						month: analysisStats.month,
-						locale: analysisStats.locale,
-						customizationMatrix: analysisStats.customizationMatrix || null,
-						missedPotential: analysisStats.missedPotential || [],
-						lastUpdated: analysisStats.lastUpdated.toISOString(),
-						backendConfigured: this.isBackendConfigured(),
-						currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
-					},
-				});
-			}).catch(err => {
-				this.error(`Failed to load usage analysis stats: ${err}`);
-				if (this.analysisPanel && this.analysisPanel === panel) {
+			void (async () => {
+				try {
+					const analysisStats = await this.calculateUsageAnalysisStats(true);
+					if (!this.analysisPanel || this.analysisPanel !== panel) { return; }
 					void this.analysisPanel.webview.postMessage({
-						command: 'updateStatsError',
-						error: String(err),
+						command: 'updateStats',
+						data: {
+							today: analysisStats.today,
+							last30Days: analysisStats.last30Days,
+							month: analysisStats.month,
+							locale: analysisStats.locale,
+							customizationMatrix: analysisStats.customizationMatrix || null,
+							missedPotential: analysisStats.missedPotential || [],
+							lastUpdated: analysisStats.lastUpdated.toISOString(),
+							backendConfigured: this.isBackendConfigured(),
+							currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
+						},
 					});
+				} catch (err) {
+					this.error(`Failed to load usage analysis stats: ${err}`);
+					if (this.analysisPanel && this.analysisPanel === panel) {
+						void this.analysisPanel.webview.postMessage({
+							command: 'updateStatsError',
+							error: String(err),
+						});
+					}
 				}
-			});
+			})();
 		}
 
 		// Handle panel disposal
@@ -5153,16 +5307,8 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	}
 
 	private getLogViewerHtml(webview: vscode.Webview, logData: SessionLogData): string {
-		const nonce = this.getNonce();
+		const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'logviewer.js'));
-
-		const csp = [
-			`default-src 'none'`,
-			`img-src ${webview.cspSource} https: data:`,
-			`style-src 'unsafe-inline' ${webview.cspSource}`,
-			`font-src ${webview.cspSource} https: data:`,
-			`script-src 'nonce-${nonce}'`
-		].join('; ');
 
 		const initialData = JSON.stringify({ ...logData, compactNumbers: this.getCompactNumbersSetting() }).replace(/</g, '\\u003c');
 
@@ -5171,7 +5317,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-			<meta http-equiv="Content-Security-Policy" content="${csp}" />
+			${buildCspMeta(webview, nonce)}
 			<title>Session Log Viewer</title>
 		</head>
 		<body>
@@ -5232,14 +5378,14 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Overall stage = median of the 6 category scores.
 	 * @param useCache If true, use cached usage stats. If false, force recalculation.
 	 */
-	private async calculateMaturityScores(useCache = true): Promise<{
+	private async calculateMaturityScores(useCache = true, preloaded?: SessionFilePreload[]): Promise<{
 		overallStage: number;
 		overallLabel: string;
 		categories: { category: string; icon: string; stage: number; evidence: string[]; tips: string[] }[];
 		period: UsageAnalysisPeriod;
 		lastUpdated: string;
 	}> {
-		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache), useCache);
+		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded), useCache);
 	}
 
 	public async showMaturity(): Promise<void> {
@@ -5409,34 +5555,28 @@ ${hashtag}`;
 
         // Copy share text to clipboard for easy pasting
         await vscode.env.clipboard.writeText(shareText);
-        await vscode.window
-          .showInformationMessage(
-            "Share text copied to clipboard! Paste it into your LinkedIn post.",
-            "Open LinkedIn",
-          )
-          .then(async (selection) => {
-            if (selection === "Open LinkedIn") {
-              await vscode.env.openExternal(vscode.Uri.parse(shareUrl));
-            }
-          });
+        const selection = await vscode.window.showInformationMessage(
+          "Share text copied to clipboard! Paste it into your LinkedIn post.",
+          "Open LinkedIn",
+        );
+        if (selection === "Open LinkedIn") {
+          await vscode.env.openExternal(vscode.Uri.parse(shareUrl));
+        }
         break;
       }
 
       case "bluesky": {
         // Copy share text to clipboard, then open Bluesky compose
         await vscode.env.clipboard.writeText(shareText);
-        await vscode.window
-          .showInformationMessage(
-            "Share text copied to clipboard! Paste it into your Bluesky post.",
-            "Open Bluesky",
-          )
-          .then(async (selection) => {
-            if (selection === "Open Bluesky") {
-              await vscode.env.openExternal(
-                vscode.Uri.parse("https://bsky.app/intent/compose"),
-              );
-            }
-          });
+        const selection = await vscode.window.showInformationMessage(
+          "Share text copied to clipboard! Paste it into your Bluesky post.",
+          "Open Bluesky",
+        );
+        if (selection === "Open Bluesky") {
+          await vscode.env.openExternal(
+            vscode.Uri.parse("https://bsky.app/intent/compose"),
+          );
+        }
         break;
       }
 
@@ -5451,18 +5591,15 @@ ${hashtag}`;
         if (instance) {
           // Copy share text to clipboard, then open Mastodon compose
           await vscode.env.clipboard.writeText(shareText);
-          await vscode.window
-            .showInformationMessage(
-              "Share text copied to clipboard! Paste it into your Mastodon post.",
-              "Open Mastodon",
-            )
-            .then(async (selection) => {
-              if (selection === "Open Mastodon") {
-                await vscode.env.openExternal(
-                  vscode.Uri.parse(`https://${instance}/share`),
-                );
-              }
-            });
+          const selection = await vscode.window.showInformationMessage(
+            "Share text copied to clipboard! Paste it into your Mastodon post.",
+            "Open Mastodon",
+          );
+          if (selection === "Open Mastodon") {
+            await vscode.env.openExternal(
+              vscode.Uri.parse(`https://${instance}/share`),
+            );
+          }
         }
         break;
       }
@@ -5503,16 +5640,15 @@ ${hashtag}`;
 
     const buffer = Buffer.from(base64Match[1], "base64");
     await vscode.workspace.fs.writeFile(uri, buffer);
-    void vscode.window
-      .showInformationMessage(
+    void (async () => {
+      const selection = await vscode.window.showInformationMessage(
         `Chart image saved to ${uri.fsPath}`,
         "Open Image",
-      )
-      .then((selection) => {
-        if (selection === "Open Image") {
-          void vscode.env.openExternal(uri);
-        }
-      });
+      );
+      if (selection === "Open Image") {
+        void vscode.env.openExternal(uri);
+      }
+    })();
     this.log(`Chart image saved to ${uri.fsPath}`);
   }
 
@@ -5593,16 +5729,15 @@ ${hashtag}`;
       const pdfBuffer = Buffer.from(pdf.output("arraybuffer"));
       await vscode.workspace.fs.writeFile(uri, pdfBuffer);
 
-      void vscode.window
-        .showInformationMessage(
+      void (async () => {
+        const selection = await vscode.window.showInformationMessage(
           `Fluency Score PDF saved to ${uri.fsPath}`,
           "Open PDF",
-        )
-        .then((selection) => {
-          if (selection === "Open PDF") {
-            void vscode.env.openExternal(uri);
-          }
-        });
+        );
+        if (selection === "Open PDF") {
+          void vscode.env.openExternal(uri);
+        }
+      })();
 
       this.log(`Fluency Score PDF exported to ${uri.fsPath}`);
     } catch (error) {
@@ -5710,16 +5845,15 @@ ${hashtag}`;
       })) as Buffer;
       await vscode.workspace.fs.writeFile(uri, pptxBuffer);
 
-      void vscode.window
-        .showInformationMessage(
+      void (async () => {
+        const selection = await vscode.window.showInformationMessage(
           `Fluency Score PPTX saved to ${uri.fsPath}`,
           "Open File",
-        )
-        .then((selection) => {
-          if (selection === "Open File") {
-            void vscode.env.openExternal(uri);
-          }
-        });
+        );
+        if (selection === "Open File") {
+          void vscode.env.openExternal(uri);
+        }
+      })();
 
       this.log(`Fluency Score PPTX exported to ${uri.fsPath}`);
     } catch (error) {
@@ -5818,7 +5952,7 @@ ${hashtag}`;
       isDebugMode: boolean;
     },
   ): string {
-    const nonce = this.getNonce();
+    const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(
         this.extensionUri,
@@ -5827,14 +5961,6 @@ ${hashtag}`;
         "fluency-level-viewer.js",
       ),
     );
-
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} https: data:`,
-      `style-src 'unsafe-inline' ${webview.cspSource}`,
-      `font-src ${webview.cspSource} https: data:`,
-      `script-src 'nonce-${nonce}'`,
-    ].join("; ");
 
     const dataWithBackend = {
       ...data,
@@ -5850,7 +5976,7 @@ ${hashtag}`;
 	<head>
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-		<meta http-equiv="Content-Security-Policy" content="${csp}" />
+		${buildCspMeta(webview, nonce)}
 		<title>Scoring Guide</title>
 	</head>
 	<body>
@@ -5892,18 +6018,10 @@ ${hashtag}`;
       }>;
     },
   ): string {
-    const nonce = this.getNonce();
+    const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "maturity.js"),
     );
-
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} https: data:`,
-      `style-src 'unsafe-inline' ${webview.cspSource}`,
-      `font-src ${webview.cspSource} https: data:`,
-      `script-src 'nonce-${nonce}'`,
-    ].join("; ");
 
     const dataWithBackend = {
       ...data,
@@ -5919,7 +6037,7 @@ ${hashtag}`;
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-			<meta http-equiv="Content-Security-Policy" content="${csp}" />
+			${buildCspMeta(webview, nonce)}
 			<title>AI Engineering Fluency Score</title>
 		</head>
 		<body>
@@ -6347,11 +6465,7 @@ ${hashtag}`;
         personalDevices.add(machineId);
         personalWorkspaces.add(workspaceId);
 
-        if (!personalModelUsage[model]) {
-          personalModelUsage[model] = { inputTokens: 0, outputTokens: 0 };
-        }
-        personalModelUsage[model].inputTokens += inputTokens;
-        personalModelUsage[model].outputTokens += outputTokens;
+        addModelUsage(personalModelUsage, { [model]: { inputTokens, outputTokens } });
       }
 
       // Team data aggregation - use userId|datasetId as key to track users across datasets.
@@ -6676,20 +6790,12 @@ ${hashtag}`;
     webview: vscode.Webview,
     data: any | undefined,
   ): string {
-    const nonce = this.getNonce();
+    const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "dashboard.js"),
     );
 
     const backendConfig = this.getDashboardBackendConfig();
-
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} https: data:`,
-      `style-src 'unsafe-inline' ${webview.cspSource}`,
-      `font-src ${webview.cspSource} https: data:`,
-      `script-src 'nonce-${nonce}'`,
-    ].join("; ");
 
     const dataWithBackend = data
       ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting() }
@@ -6704,7 +6810,7 @@ ${hashtag}`;
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-			<meta http-equiv="Content-Security-Policy" content="${csp}" />
+			${buildCspMeta(webview, nonce)}
 			<title>Team Dashboard</title>
 		</head>
 		<body>
@@ -6715,16 +6821,6 @@ ${hashtag}`;
 			<script nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
 		</html>`;
-  }
-
-  private getNonce(): string {
-    const possible =
-      "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
-    let text = "";
-    for (let i = 0; i < 32; i++) {
-      text += possible.charAt(Math.floor(Math.random() * possible.length));
-    }
-    return text;
   }
 
   /**
@@ -6765,18 +6861,10 @@ ${hashtag}`;
     webview: vscode.Webview,
     stats: DetailedStats,
   ): string {
-    const nonce = this.getNonce();
+    const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "details.js"),
     );
-
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} https: data:`,
-      `style-src 'unsafe-inline' ${webview.cspSource}`,
-      `font-src ${webview.cspSource} https: data:`,
-      `script-src 'nonce-${nonce}'`,
-    ].join("; ");
 
     const sortSettings = this.context.globalState.get('details.sortSettings', {
       editor: { key: 'name', dir: 'asc' },
@@ -6799,7 +6887,7 @@ ${hashtag}`;
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-			<meta http-equiv="Content-Security-Policy" content="${csp}" />
+			${buildCspMeta(webview, nonce)}
 			<title>AI Engineering Fluency</title>
 		</head>
 		<body>
@@ -7264,19 +7352,18 @@ ${hashtag}`;
               );
             } catch (err) {
               // If command is not registered, show settings
-              vscode.window
-                .showInformationMessage(
+              void (async () => {
+                const choice = await vscode.window.showInformationMessage(
                   'Backend configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.',
                   "Open Settings",
-                )
-                .then((choice) => {
-                  if (choice === "Open Settings") {
-                    vscode.commands.executeCommand(
-                      "workbench.action.openSettings",
-                      "aiEngineeringFluency.backend",
-                    );
-                  }
-                });
+                );
+                if (choice === "Open Settings") {
+                  void vscode.commands.executeCommand(
+                    "workbench.action.openSettings",
+                    "aiEngineeringFluency.backend",
+                  );
+                }
+              })();
             }
           });
           break;
@@ -7287,19 +7374,18 @@ ${hashtag}`;
                 "aiEngineeringFluency.configureTeamServer",
               );
             } catch (err) {
-              vscode.window
-                .showInformationMessage(
+              void (async () => {
+                const choice = await vscode.window.showInformationMessage(
                   'Team Server configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.',
                   "Open Settings",
-                )
-                .then((choice) => {
-                  if (choice === "Open Settings") {
-                    vscode.commands.executeCommand(
-                      "workbench.action.openSettings",
-                      "aiEngineeringFluency.backend.sharingServer",
-                    );
-                  }
-                });
+                );
+                if (choice === "Open Settings") {
+                  void vscode.commands.executeCommand(
+                    "workbench.action.openSettings",
+                    "aiEngineeringFluency.backend.sharingServer",
+                  );
+                }
+              })();
             }
           });
           break;
@@ -7519,7 +7605,7 @@ ${hashtag}`;
         if (eco) {
           const editorRoot = eco.getEditorRoot(file);
           dirCounts.set(editorRoot, (dirCounts.get(editorRoot) || 0) + 1);
-          dirEditorNames.set(editorRoot, eco.displayName);
+          dirEditorNames.set(editorRoot, getEcosystemDisplayName(eco, file));
           continue;
         }
         const parts = file.split(/[\\\/]/);
@@ -7903,7 +7989,7 @@ ${hashtag}`;
     sessionFolders: { dir: string; count: number }[] = [],
     backendStorageInfo: any = null,
   ): string {
-    const nonce = this.getNonce();
+    const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(
         this.extensionUri,
@@ -7912,14 +7998,6 @@ ${hashtag}`;
         "diagnostics.js",
       ),
     );
-
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} https: data:`,
-      `style-src 'unsafe-inline' ${webview.cspSource}`,
-      `font-src ${webview.cspSource} https: data:`,
-      `script-src 'nonce-${nonce}'`,
-    ].join("; ");
 
     // Get cache information
     let cacheSizeInMB = 0;
@@ -8015,7 +8093,7 @@ ${hashtag}`;
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-			<meta http-equiv="Content-Security-Policy" content="${csp}" />
+			${buildCspMeta(webview, nonce)}
 			<title>Diagnostic Report</title>
 		</head>
 		<body>
@@ -8029,244 +8107,12 @@ ${hashtag}`;
   }
 
   private buildChartData(fullDailyStats: DailyTokenStats[]): ChartDataPayload {
-    const now = new Date();
-
-    const modelColors = [
-      { bg: "rgba(54, 162, 235, 0.6)", border: "rgba(54, 162, 235, 1)" },
-      { bg: "rgba(255, 99, 132, 0.6)", border: "rgba(255, 99, 132, 1)" },
-      { bg: "rgba(75, 192, 192, 0.6)", border: "rgba(75, 192, 192, 1)" },
-      { bg: "rgba(153, 102, 255, 0.6)", border: "rgba(153, 102, 255, 1)" },
-      { bg: "rgba(255, 159, 64, 0.6)", border: "rgba(255, 159, 64, 1)" },
-      { bg: "rgba(255, 205, 86, 0.6)", border: "rgba(255, 205, 86, 1)" },
-      { bg: "rgba(201, 203, 207, 0.6)", border: "rgba(201, 203, 207, 1)" },
-      { bg: "rgba(100, 181, 246, 0.6)", border: "rgba(100, 181, 246, 1)" },
-    ];
-
-    const fmtKey = (d: Date) =>
-      `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
-
-    const emptyEntry = (date: string): DailyTokenStats => ({
-      date, tokens: 0, sessions: 0, interactions: 0,
-      modelUsage: {}, editorUsage: {}, repositoryUsage: {},
-    });
-
-    const mergeInto = (target: DailyTokenStats, src: DailyTokenStats) => {
-      target.tokens += src.tokens;
-      target.sessions += src.sessions;
-      target.interactions += src.interactions;
-      for (const [m, u] of Object.entries(src.modelUsage)) {
-        if (!target.modelUsage[m]) { target.modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
-        target.modelUsage[m].inputTokens += u.inputTokens;
-        target.modelUsage[m].outputTokens += u.outputTokens;
-        if (u.cachedReadTokens !== undefined) {
-          target.modelUsage[m].cachedReadTokens = (target.modelUsage[m].cachedReadTokens ?? 0) + u.cachedReadTokens;
-        }
-        if (u.cacheCreationTokens !== undefined) {
-          target.modelUsage[m].cacheCreationTokens = (target.modelUsage[m].cacheCreationTokens ?? 0) + u.cacheCreationTokens;
-        }
-      }
-      for (const [e, u] of Object.entries(src.editorUsage)) {
-        if (!target.editorUsage[e]) { target.editorUsage[e] = { tokens: 0, sessions: 0 }; }
-        target.editorUsage[e].tokens += u.tokens;
-        target.editorUsage[e].sessions += u.sessions;
-      }
-      for (const [r, u] of Object.entries(src.repositoryUsage)) {
-        if (!target.repositoryUsage[r]) { target.repositoryUsage[r] = { tokens: 0, sessions: 0 }; }
-        target.repositoryUsage[r].tokens += u.tokens;
-        target.repositoryUsage[r].sessions += u.sessions;
-      }
-    };
-
-    type BucketEntry = { label: string; key: string; stats: DailyTokenStats };
-
-    const buildPeriodData = (buckets: BucketEntry[]) => {
-      const entries = buckets.map(b => b.stats);
-      const labels = buckets.map(b => b.label);
-      const tokensData = entries.map(e => e.tokens);
-      const sessionsData = entries.map(e => e.sessions);
-
-      const allModels = new Set<string>();
-      entries.forEach(e => Object.keys(e.modelUsage).forEach(m => allModels.add(m)));
-
-      // Rank models by total tokens across the period; keep top 5, group the rest
-      const modelTotals = new Map<string, number>();
-      for (const model of allModels) {
-        const total = entries.reduce((sum, e) => {
-          const u = e.modelUsage[model];
-          return sum + (u ? u.inputTokens + u.outputTokens : 0);
-        }, 0);
-        modelTotals.set(model, total);
-      }
-      const sortedModels = Array.from(allModels).sort((a, b) => (modelTotals.get(b) || 0) - (modelTotals.get(a) || 0));
-      const topModels = sortedModels.slice(0, 5);
-      const otherModels = sortedModels.slice(5);
-
-      const modelDatasets = topModels.map((model, idx) => {
-        const color = modelColors[idx % modelColors.length];
-        return {
-          label: getModelDisplayName(model),
-          data: entries.map(e => { const u = e.modelUsage[model]; return u ? u.inputTokens + u.outputTokens : 0; }),
-          backgroundColor: color.bg, borderColor: color.border, borderWidth: 1,
-        };
-      });
-      if (otherModels.length > 0) {
-        modelDatasets.push({
-          label: 'Other models',
-          data: entries.map(e => otherModels.reduce((sum, m) => {
-            const u = e.modelUsage[m];
-            return sum + (u ? u.inputTokens + u.outputTokens : 0);
-          }, 0)),
-          backgroundColor: 'rgba(150, 150, 150, 0.5)',
-          borderColor: 'rgba(150, 150, 150, 0.8)',
-          borderWidth: 1,
-        });
-      }
-
-      const allEditors = new Set<string>();
-      entries.forEach(e => Object.keys(e.editorUsage).forEach(ed => allEditors.add(ed)));
-      const editorDatasets = Array.from(allEditors).map((editor, idx) => {
-        const color = modelColors[idx % modelColors.length];
-        return {
-          label: editor,
-          data: entries.map(e => e.editorUsage[editor]?.tokens || 0),
-          backgroundColor: color.bg, borderColor: color.border, borderWidth: 1,
-        };
-      });
-
-      const allRepos = new Set<string>();
-      entries.forEach(e => Object.keys(e.repositoryUsage)
-        .filter(r => r !== 'Unknown')
-        .forEach(r => allRepos.add(r)));
-      const repositoryDatasets = Array.from(allRepos).map((repo, idx) => {
-        const color = modelColors[idx % modelColors.length];
-        return {
-          label: this.getRepoDisplayName(repo),
-          fullRepo: repo,
-          data: entries.map(e => e.repositoryUsage[repo]?.tokens || 0),
-          backgroundColor: color.bg, borderColor: color.border, borderWidth: 1,
-        };
-      });
-
-      const totalTokens = tokensData.reduce((a, b) => a + b, 0);
-      const totalSessions = sessionsData.reduce((a, b) => a + b, 0);
-      const periodCount = buckets.length;
-
-      const costData = entries.map(e => this.calculateEstimatedCost(e.modelUsage, 'copilot'));
-      const totalCost = costData.reduce((a, b) => a + b, 0);
-
-      return {
-        labels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets,
-        periodCount, totalTokens, totalSessions,
-        avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0,
-        costData,
-        totalCost,
-        avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0,
-      };
-    };
-
-    // ── Daily period: last 30 days with zero-fill ─────────────────────
-    const thirtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-    const thirtyDaysAgoStr = fmtKey(thirtyDaysAgo);
-    const todayStr = fmtKey(now);
-    const dailyBucketMap = new Map<string, BucketEntry>();
-    for (let cursor = new Date(thirtyDaysAgo); cursor <= now; cursor.setDate(cursor.getDate() + 1)) {
-      const key = fmtKey(new Date(cursor));
-      dailyBucketMap.set(key, { key, label: key, stats: emptyEntry(key) });
-    }
-    for (const day of fullDailyStats) {
-      if (day.date >= thirtyDaysAgoStr && day.date <= todayStr) {
-        const bucket = dailyBucketMap.get(day.date);
-        if (bucket) { mergeInto(bucket.stats, day); }
-      }
-    }
-    const dailyBuckets = Array.from(dailyBucketMap.values()).sort((a, b) => a.key.localeCompare(b.key));
-    const dailyPeriod = buildPeriodData(dailyBuckets);
-
-    // ── Weekly period: last 6 calendar weeks with zero-fill ──────────
-    const getMondayOfWeek = (d: Date): Date => {
-      const copy = new Date(d); copy.setHours(0, 0, 0, 0);
-      const day = copy.getDay();
-      copy.setDate(copy.getDate() - (day === 0 ? 6 : day - 1));
-      return copy;
-    };
-    const fmtWeekLabel = (monday: Date): string => {
-      const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
-      if (monday.getMonth() === sunday.getMonth()) {
-        return `${monday.toLocaleDateString("en-US", { month: "short" })} ${monday.getDate()}–${sunday.getDate()}`;
-      }
-      return `${monday.toLocaleDateString("en-US", { month: "short", day: "numeric" })}–${sunday.toLocaleDateString("en-US", { month: "short", day: "numeric" })}`;
-    };
-    const thisMonday = getMondayOfWeek(now);
-    const weekBucketMap = new Map<string, BucketEntry>();
-    for (let w = 5; w >= 0; w--) {
-      const monday = new Date(thisMonday); monday.setDate(thisMonday.getDate() - w * 7);
-      const key = fmtKey(monday);
-      weekBucketMap.set(key, { key, label: fmtWeekLabel(monday), stats: emptyEntry(key) });
-    }
-    for (const day of fullDailyStats) {
-      const monday = getMondayOfWeek(new Date(day.date + "T00:00:00"));
-      const bucket = weekBucketMap.get(fmtKey(monday));
-      if (bucket) { mergeInto(bucket.stats, day); }
-    }
-    const weeklyBuckets = Array.from(weekBucketMap.values()).sort((a, b) => a.key.localeCompare(b.key));
-    const weeklyPeriod = buildPeriodData(weeklyBuckets);
-
-    // ── Monthly period: last 12 calendar months with zero-fill ───────
-    const monthBucketMap = new Map<string, BucketEntry>();
-    for (let m = 11; m >= 0; m--) {
-      const monthDate = new Date(now.getFullYear(), now.getMonth() - m, 1);
-      const key = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
-      const label = monthDate.toLocaleDateString("en-US", { month: "short", year: "numeric" });
-      monthBucketMap.set(key, { key, label, stats: emptyEntry(key) });
-    }
-    for (const day of fullDailyStats) {
-      const monthKey = day.date.slice(0, 7);
-      const bucket = monthBucketMap.get(monthKey);
-      if (bucket) { mergeInto(bucket.stats, day); }
-    }
-    const monthlyBuckets = Array.from(monthBucketMap.values()).sort((a, b) => a.key.localeCompare(b.key));
-    const monthlyPeriod = buildPeriodData(monthlyBuckets);
-
-    // ── Summary totals from the daily period (last 30 days) ──────────
-    const editorTotalsMap: Record<string, number> = {};
-    dailyBuckets.forEach(b => {
-      Object.entries(b.stats.editorUsage).forEach(([editor, usage]) => {
-        editorTotalsMap[editor] = (editorTotalsMap[editor] || 0) + usage.tokens;
-      });
-    });
-    const repositoryTotalsMap: Record<string, number> = {};
-    dailyBuckets.forEach(b => {
-      Object.entries(b.stats.repositoryUsage)
-        .filter(([repo]) => repo !== 'Unknown')
-        .forEach(([repo, usage]) => {
-        const displayName = this.getRepoDisplayName(repo);
-        repositoryTotalsMap[displayName] = (repositoryTotalsMap[displayName] || 0) + usage.tokens;
-      });
-    });
-
-    return {
-      // Backward-compat flat fields (daily period)
-      labels: dailyPeriod.labels,
-      tokensData: dailyPeriod.tokensData,
-      sessionsData: dailyPeriod.sessionsData,
-      modelDatasets: dailyPeriod.modelDatasets,
-      editorDatasets: dailyPeriod.editorDatasets,
-      repositoryDatasets: dailyPeriod.repositoryDatasets,
-      editorTotalsMap,
-      repositoryTotalsMap,
-      dailyCount: dailyPeriod.periodCount,
-      totalTokens: dailyPeriod.totalTokens,
-      avgTokensPerDay: dailyPeriod.avgPerPeriod,
-      totalSessions: dailyPeriod.totalSessions,
-      lastUpdated: new Date().toISOString(),
+    return _buildChartData(fullDailyStats, {
+      getRepoDisplayName: _getRepoDisplayName,
+      calculateEstimatedCost: (modelUsage, pricingSource) => _calculateEstimatedCost(modelUsage, this.modelPricing, pricingSource),
       backendConfigured: this.isBackendConfigured(),
       compactNumbers: this.getCompactNumbersSetting(),
-      periods: {
-        day: dailyPeriod,
-        week: weeklyPeriod,
-        month: monthlyPeriod,
-      },
-    };
+    });
   }
 
   private getChartHtml(
@@ -8274,20 +8120,12 @@ ${hashtag}`;
     dailyStats: DailyTokenStats[],
     periodsReady = true,
   ): string {
-    const nonce = this.getNonce();
+    const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "chart.js"),
     );
 
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} https: data:`,
-      `style-src 'unsafe-inline' ${webview.cspSource}`,
-      `font-src ${webview.cspSource} https: data:`,
-      `script-src 'nonce-${nonce}'`,
-    ].join("; ");
-
-    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod };
+    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
 
@@ -8296,7 +8134,7 @@ ${hashtag}`;
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-			<meta http-equiv="Content-Security-Policy" content="${csp}" />
+			${buildCspMeta(webview, nonce)}
 			<title>AI Engineering Fluency — Chart</title>
 		</head>
 		<body>
@@ -8313,18 +8151,10 @@ ${hashtag}`;
     webview: vscode.Webview,
     stats: UsageAnalysisStats | null,
   ): string {
-    const nonce = this.getNonce();
+    const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "usage.js"),
     );
-
-    const csp = [
-      `default-src 'none'`,
-      `img-src ${webview.cspSource} https: data:`,
-      `style-src 'unsafe-inline' ${webview.cspSource}`,
-      `font-src ${webview.cspSource} https: data:`,
-      `script-src 'nonce-${nonce}'`,
-    ].join("; ");
 
     // Detect user's locale for number formatting
     const localeFromEnv =
@@ -8359,6 +8189,8 @@ ${hashtag}`;
       backendConfigured: this.isBackendConfigured(),
       currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
       suppressedUnknownTools,
+      todaySessions: stats.todaySessions || [],
+      use24HourTime: this.getUse24HourTimeSetting(),
     }).replace(/</g, "\\u003c") : 'null';
 
     return `<!DOCTYPE html>
@@ -8366,7 +8198,7 @@ ${hashtag}`;
 		<head>
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
-			<meta http-equiv="Content-Security-Policy" content="${csp}" />
+			${buildCspMeta(webview, nonce)}
 			<title>Usage Analysis</title>
 		</head>
 		<body>
@@ -8398,16 +8230,21 @@ ${hashtag}`;
     // Save cache to storage before disposing (fire-and-forget async operation)
     // Note: Cache loss during abnormal shutdown is acceptable as it will rebuild on next startup
     // We can't await here since dispose() is synchronous
-    this.saveCacheToStorage().catch((err) => {
-      // Output channel will be disposed, so log to console as fallback
-      console.error("Error saving cache during disposal:", err);
-    });
+    void (async () => {
+      try {
+        await this.saveCacheToStorage();
+      } catch (err) {
+        // Output channel will be disposed, so log to console as fallback
+        console.error("Error saving cache during disposal:", err);
+      }
+    })();
     if (this.logViewerPanel) {
       this.logViewerPanel.dispose();
     }
     if (this.diagnosticsPanel) {
       this.diagnosticsPanel.dispose();
     }
+    this.openCode.dispose();
     this.statusBarItem.dispose();
     this._disposed = true;
     this.outputChannel.dispose();
@@ -8524,7 +8361,13 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
 
   // If the legacy extension is also installed, nudge the user to uninstall it.
   // Fire-and-forget: don't block activation on the user's response.
-  checkForLegacyExtensionConflict(context).catch(() => { /* ignore */ });
+  void (async () => {
+    try {
+      await checkForLegacyExtensionConflict(context);
+    } catch {
+      /* ignore */
+    }
+  })();
 
   // Wire up backend facade and commands so the diagnostics webview can launch the
   // configuration wizard. Uses tokenTracker logging and helpers via casting to any.

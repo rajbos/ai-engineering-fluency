@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
+import { normalizePathForComparison } from './workspaceHelpers';
 
 export class ContinueDataAccess {
 
@@ -29,7 +30,7 @@ export class ContinueDataAccess {
 	 * Check if a file path is a Continue session file.
 	 */
 	isContinueSessionFile(filePath: string): boolean {
-		const normalized = filePath.toLowerCase().replace(/\\/g, '/');
+		const normalized = normalizePathForComparison(filePath);
 		return normalized.includes('/.continue/sessions/') && normalized.endsWith('.json');
 	}
 

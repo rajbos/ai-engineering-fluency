@@ -7,35 +7,41 @@ import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
 import { SessionDiscovery } from '../../vscode-extension/src/sessionDiscovery';
-import { OpenCodeDataAccess } from '../../vscode-extension/src/opencode';
-import { CrushDataAccess } from '../../vscode-extension/src/crush';
-import { ContinueDataAccess } from '../../vscode-extension/src/continue';
-import { VisualStudioDataAccess } from '../../vscode-extension/src/visualstudio';
-import { ClaudeCodeDataAccess } from '../../vscode-extension/src/claudecode';
-import { ClaudeDesktopCoworkDataAccess } from '../../vscode-extension/src/claudedesktop';
-import { MistralVibeDataAccess } from '../../vscode-extension/src/mistralvibe';
-import { GeminiCliDataAccess } from '../../vscode-extension/src/geminicli';
+import { buildAdapterRegistry, createDataAccessInstances } from '../../vscode-extension/src/adapters';
 import type { IEcosystemAdapter } from '../../vscode-extension/src/ecosystemAdapter';
-import { OpenCodeAdapter, CrushAdapter, ContinueAdapter, ClaudeDesktopAdapter, ClaudeCodeAdapter, VisualStudioAdapter, MistralVibeAdapter, GeminiCliAdapter, CopilotChatAdapter, CopilotCliAdapter, JetBrainsAdapter } from '../../vscode-extension/src/adapters';
 import { isMcpTool, extractMcpServerName } from '../../vscode-extension/src/workspaceHelpers';
+import { resolveFileUri } from '../../vscode-extension/src/workspacePathResolver';
 import { parseSessionFileContent } from '../../vscode-extension/src/sessionParser';
-import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, getModelTier } from '../../vscode-extension/src/tokenEstimation';
+import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost } from '../../vscode-extension/src/tokenEstimation';
 import { extractDailyFractions } from '../../vscode-extension/src/dailyAttribution';
-import type { DetailedStats, PeriodStats, ModelUsage, EditorUsage, SessionFileCache, UsageAnalysisStats, UsageAnalysisPeriod, WorkspaceCustomizationMatrix } from '../../vscode-extension/src/types';
-import { analyzeSessionUsage, mergeUsageAnalysis, calculateModelSwitching, trackEnhancedMetrics } from '../../vscode-extension/src/usageAnalysis';
-import { createEmptyContextRefs } from '../../vscode-extension/src/tokenEstimation';
+import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix } from '../../vscode-extension/src/types';
+import { analyzeSessionUsage, mergeUsageAnalysis } from '../../vscode-extension/src/usageAnalysis';
+import { withErrorRecovery } from '../../vscode-extension/src/utils/errors';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
+import { ENVIRONMENTAL } from './constants';
 
 // Import JSON data files
 import tokenEstimatorsData from '../../vscode-extension/src/tokenEstimators.json';
 import modelPricingData from '../../vscode-extension/src/modelPricing.json';
 import toolNamesData from '../../vscode-extension/src/toolNames.json';
 
-// Environmental impact constants (from extension.ts)
-const CO2_PER_1K_TOKENS = 0.2;           // gCO2e per 1000 tokens
-const CO2_ABSORPTION_PER_TREE_PER_YEAR = 21000; // grams CO2 per tree/year
-const WATER_USAGE_PER_1K_TOKENS = 0.3;   // liters per 1000 tokens
+// Pure analysis helpers from analysis.ts
+import {
+	type SessionData,
+	type DailyEntry,
+	effectiveTokens,
+	getEditorSourceFromPath,
+	runWithConcurrency,
+	createEmptyPeriodStats,
+	aggregateIntoPeriod,
+	createEmptyUsageAnalysisPeriod,
+	buildChartPayload,
+	fmt,
+	formatTokens,
+} from './analysis';
+export type { SessionData, DailyEntry } from './analysis';
+export { effectiveTokens, buildChartPayload, fmt, formatTokens } from './analysis';
 
 const tokenEstimators: { [key: string]: number } = tokenEstimatorsData.estimators;
 const modelPricing = modelPricingData.pricing as { [key: string]: any };
@@ -46,84 +52,24 @@ const log = (msg: string) => { /* quiet by default */ };
 const warn = (msg: string) => { /* quiet by default */ };
 const error = (msg: string, err?: any) => console.error(chalk.red(msg), err || '');
 
-/** Create OpenCode data access instance for CLI */
-function createOpenCode(): OpenCodeDataAccess {
+/** Synchronous lazy-initialized ecosystem registry — created once on first use. */
+let _ecosystems: IEcosystemAdapter[] | null = null;
+
+/** Returns the shared ecosystem adapter registry, creating it on first call. */
+function getEcosystems(): IEcosystemAdapter[] {
+	if (_ecosystems) { return _ecosystems; }
 	const fakeUri = vscodeStub.Uri.file(__dirname);
-	return new OpenCodeDataAccess(fakeUri as any);
-}
-
-/** Create Crush data access instance for CLI */
-function createCrush(): CrushDataAccess {
-	const fakeUri = vscodeStub.Uri.file(__dirname);
-	return new CrushDataAccess(fakeUri as any);
-}
-
-/** Create Continue data access instance for CLI */
-function createContinue(): ContinueDataAccess {
-	return new ContinueDataAccess();
-}
-
-/** Create Visual Studio data access instance for CLI */
-function createVisualStudio(): VisualStudioDataAccess {
-	return new VisualStudioDataAccess();
-}
-
-/** Create Claude Code data access instance for CLI */
-function createClaudeCode(): ClaudeCodeDataAccess {
-	return new ClaudeCodeDataAccess();
-}
-
-/** Create Claude Desktop Cowork data access instance for CLI */
-function createClaudeDesktopCowork(): ClaudeDesktopCoworkDataAccess {
-	return new ClaudeDesktopCoworkDataAccess();
-}
-
-/** Create Mistral Vibe data access instance for CLI */
-function createMistralVibe(): MistralVibeDataAccess {
-	return new MistralVibeDataAccess();
-}
-
-/** Create Gemini CLI data access instance for CLI */
-function createGeminiCli(): GeminiCliDataAccess {
-	return new GeminiCliDataAccess();
-}
-
-// Module-level singletons so sql.js WASM is only initialised once across all session files
-const _openCodeInstance = createOpenCode();
-const _crushInstance = createCrush();
-const _continueInstance = createContinue();
-const _visualStudioInstance = createVisualStudio();
-const _claudeCodeInstance = createClaudeCode();
-const _claudeDesktopCoworkInstance = createClaudeDesktopCowork();
-const _mistralVibeInstance = createMistralVibe();
-const _geminiCliInstance = createGeminiCli();
-
-/** Ordered registry of ecosystem adapters — first match wins. */
-const _ecosystems: IEcosystemAdapter[] = [
-	new OpenCodeAdapter(_openCodeInstance),
-	new CrushAdapter(_crushInstance),
-	new VisualStudioAdapter(_visualStudioInstance, (t, m) => estimateTokensFromText(t, m ?? 'gpt-4', tokenEstimators)),
-	new ContinueAdapter(_continueInstance),
-	new ClaudeDesktopAdapter(
-		_claudeDesktopCoworkInstance,
+	_ecosystems = buildAdapterRegistry({
+		...createDataAccessInstances(fakeUri as any),
+		estimateTokens: (t, m) => estimateTokensFromText(t, m ?? 'gpt-4', tokenEstimators),
 		isMcpTool,
 		extractMcpServerName,
-		(t, m) => estimateTokensFromText(t, m ?? 'gpt-4', tokenEstimators)
-	),
-	new ClaudeCodeAdapter(_claudeCodeInstance),
-	new MistralVibeAdapter(_mistralVibeInstance),
-	new GeminiCliAdapter(_geminiCliInstance),
-	// Copilot Chat / CLI adapters: discovery-only. Their handles() returns
-	// false so processSessionFile() falls through to the shared parser path
-	// for VS Code Copilot Chat and CLI files. See issue #654.
-	new CopilotChatAdapter(),
-	new CopilotCliAdapter(),
-	new JetBrainsAdapter(),
-];
-
+	});
+	return _ecosystems;
+}
 /** Create session discovery instance for CLI */
 function createSessionDiscovery(): SessionDiscovery {
-	return new SessionDiscovery({ log, warn, error, ecosystems: _ecosystems });
+	return new SessionDiscovery({ log, warn, error, ecosystems: getEcosystems() });
 }
 
 /** Discover all session files on this machine */
@@ -147,8 +93,12 @@ export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<
 	for (const sessionFile of sessionFiles) {
 		// Claude Code session: ~/.claude/projects/<hash>/<uuid>.jsonl
 		if (sessionFile.startsWith(claudeBasePath + path.sep) || sessionFile.startsWith(claudeBasePath + '/')) {
-			try {
-				const content = await fs.promises.readFile(sessionFile, 'utf-8');
+			const content = await withErrorRecovery(
+				() => fs.promises.readFile(sessionFile, 'utf-8'),
+				null,
+				`buildCustomizationMatrix readFile(${sessionFile})`
+			);
+			if (content !== null) {
 				const lines = content.split('\n').slice(0, 30);
 				for (const line of lines) {
 					if (!line.trim()) { continue; }
@@ -160,7 +110,7 @@ export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<
 						}
 					} catch { /* skip malformed lines */ }
 				}
-			} catch { /* skip unreadable files */ }
+			}
 			continue;
 		}
 
@@ -171,30 +121,36 @@ export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<
 		const workspaceJsonPath = path.join(hashDir, 'workspace.json');
 
 		try {
-			if (!fs.existsSync(workspaceJsonPath)) { continue; }
+			const workspaceJsonExists = await fs.promises.access(workspaceJsonPath).then(() => true).catch(() => false);
+			if (!workspaceJsonExists) { continue; }
 			const content = JSON.parse(await fs.promises.readFile(workspaceJsonPath, 'utf-8'));
 			const folderUri: string | undefined = content.folder;
 			if (!folderUri || !folderUri.startsWith('file://')) { continue; }
 
-			let folderPath = decodeURIComponent(folderUri.replace(/^file:\/\//, ''));
-			// On Windows, file:///C:/... becomes /C:/... — strip the leading slash
-			if (/^\/[A-Za-z]:/.test(folderPath)) { folderPath = folderPath.slice(1); }
-			workspacePaths.add(folderPath);
-		} catch { /* skip unreadable workspace.json files */ }
+			const folderPath = resolveFileUri(folderUri);
+			if (folderPath) { workspacePaths.add(folderPath); }
+		} catch (err) {
+			console.error(`[buildCustomizationMatrix] Failed to read workspace.json at ${workspaceJsonPath}:`, err);
+		}
 	}
 
 	if (workspacePaths.size === 0) { return undefined; }
 
 	let workspacesWithIssues = 0;
 	for (const wsPath of workspacePaths) {
-		try {
-			const hasInstructions = fs.existsSync(path.join(wsPath, '.github', 'copilot-instructions.md'));
-			const hasAgentsMd    = fs.existsSync(path.join(wsPath, 'agents.md'));
-			const hasClaudeMd    = fs.existsSync(path.join(wsPath, 'CLAUDE.md'));
-			if (!hasInstructions && !hasAgentsMd && !hasClaudeMd) { workspacesWithIssues++; }
-		} catch {
-			workspacesWithIssues++;
-		}
+		const hasIssues = await withErrorRecovery(
+			async () => {
+				const [hasInstructions, hasAgentsMd, hasClaudeMd] = await Promise.all([
+					fs.promises.access(path.join(wsPath, '.github', 'copilot-instructions.md')).then(() => true).catch(() => false),
+					fs.promises.access(path.join(wsPath, 'agents.md')).then(() => true).catch(() => false),
+					fs.promises.access(path.join(wsPath, 'CLAUDE.md')).then(() => true).catch(() => false),
+				]);
+				return !hasInstructions && !hasAgentsMd && !hasClaudeMd;
+			},
+			true,
+			`buildCustomizationMatrix workspace check(${wsPath})`
+		);
+		if (hasIssues) { workspacesWithIssues++; }
 	}
 
 	return {
@@ -230,74 +186,9 @@ function resolveModel(request: any): string {
  * Virtual DB paths are resolved to the actual DB file.
  */
 async function statSessionFile(filePath: string): Promise<fs.Stats> {
-	const eco = _ecosystems.find(e => e.handles(filePath));
+	const eco = getEcosystems().find(e => e.handles(filePath));
 	if (eco) { return eco.stat(filePath); }
 	return fs.promises.stat(filePath);
-}
-
-/** Determine editor source from file path */
-function getEditorSourceFromPath(filePath: string): string {
-	const normalized = filePath.toLowerCase().replace(/\\/g, '/');
-	if (normalized.includes('/cursor/')) { return 'cursor'; }
-	if (normalized.includes('/code - insiders/')) { return 'vscode-insiders'; }
-	if (normalized.includes('/code - exploration/')) { return 'vscode-exploration'; }
-	if (normalized.includes('/vscodium/')) { return 'vscodium'; }
-	if (normalized.includes('/.copilot/')) { return 'copilot-cli'; }
-	if (normalized.includes('/.crush/crush.db#')) { return 'crush'; }
-	if (normalized.includes('/opencode/')) { return 'opencode'; }
-	if (normalized.includes('/local-agent-mode-sessions/')) { return 'claude-desktop-cowork'; }
-	if (normalized.includes('/.claude/projects/')) { return 'claude-code'; }
-	if (normalized.includes('/.vibe/logs/session/')) { return 'mistral-vibe'; }
-	if (normalized.includes('/.gemini/tmp/') && normalized.includes('/chats/session-') && normalized.endsWith('.jsonl')) { return 'gemini-cli'; }
-	if (normalized.includes('.vscode-server')) { return 'vscode-remote'; }
-	if (normalized.includes('/.vs/') && normalized.includes('/copilot-chat/')) { return 'Visual Studio'; }
-	return 'vscode';
-}
-
-/**
- * Run async tasks with bounded concurrency.
- * Items are processed up to `limit` at a time, avoiding I/O and memory saturation.
- */
-async function runWithConcurrency<T, R>(
-	items: T[],
-	fn: (item: T, index: number) => Promise<R>,
-	limit = 20
-): Promise<(R | undefined)[]> {
-	if (items.length === 0) { return []; }
-	const results: (R | undefined)[] = new Array(items.length);
-	let idx = 0;
-	const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
-		while (idx < items.length) {
-			const i = idx++;
-			try { results[i] = await fn(items[i], i); } catch { results[i] = undefined; }
-		}
-	});
-	await Promise.all(workers);
-	return results;
-}
-
-export interface SessionData {
-	file: string;
-	tokens: number;
-	thinkingTokens: number;
-	/** Actual LLM tokens from session.shutdown or request-level usage data. 0 means unavailable. */
-	actualTokens: number;
-	interactions: number;
-	modelUsage: ModelUsage;
-	lastModified: Date;
-	editorSource: string;
-	/**
-	 * Per-UTC-day token fractions, keyed by "YYYY-MM-DD".
-	 * Values sum to 1.0. Built from interaction timestamps extracted from the session file.
-	 * Falls back to { [mtimeDateKey]: 1.0 } when no timestamps are available.
-	 *
-	 * This is the canonical attribution mechanism for all session formats:
-	 *  - Copilot CLI JSONL: from user.message event timestamps
-	 *  - VS Code delta JSONL: from kind:0/1/2 request timestamps
-	 *  - VS Code JSON: from requests[].timestamp fields
-	 *  - Ecosystem adapters: mtime fallback (until adapter implements getDailyFractions)
-	 */
-	dailyFractions: Record<string, number>;
 }
 
 /**
@@ -312,10 +203,6 @@ export interface SessionData {
  * When adding support for a new session format, extend this function rather than creating
  * a separate attribution implementation — this keeps all formats consistent.
  */
-/** Returns actual tokens when available (more accurate), else falls back to estimated. */
-export function effectiveTokens(data: SessionData): number {
-	return data.actualTokens > 0 ? data.actualTokens : data.tokens;
-}
 
 /**
  * Process a single session file and extract its data.
@@ -331,7 +218,7 @@ export async function processSessionFile(filePath: string): Promise<SessionData 
 		}
 
 		// Dispatch to ecosystem adapters (OpenCode, Crush, VS, Continue, ClaudeDesktop, ClaudeCode, MistralVibe)
-		const eco = _ecosystems.find(e => e.handles(filePath));
+		const eco = getEcosystems().find(e => e.handles(filePath));
 		if (eco) {
 			const [tokenResult, interactions, modelUsage] = await Promise.all([
 				eco.getTokens(filePath),
@@ -502,9 +389,9 @@ export async function calculateDetailedStats(
 		if (period.sessions > 0) {
 			period.avgTokensPerSession = Math.round(period.tokens / period.sessions);
 		}
-		period.co2 = (period.tokens / 1000) * CO2_PER_1K_TOKENS;
-		period.treesEquivalent = period.co2 / CO2_ABSORPTION_PER_TREE_PER_YEAR;
-		period.waterUsage = (period.tokens / 1000) * WATER_USAGE_PER_1K_TOKENS;
+		period.co2 = (period.tokens / 1000) * ENVIRONMENTAL.CO2_PER_1K_TOKENS;
+		period.treesEquivalent = period.co2 / ENVIRONMENTAL.CO2_ABSORPTION_PER_TREE_PER_YEAR;
+		period.waterUsage = (period.tokens / 1000) * ENVIRONMENTAL.WATER_USAGE_PER_1K_TOKENS;
 		period.estimatedCost = calculateEstimatedCost(period.modelUsage, modelPricing);
 		period.estimatedCostCopilot = calculateEstimatedCost(period.modelUsage, modelPricing, 'copilot');
 	}
@@ -513,57 +400,6 @@ export async function calculateDetailedStats(
 		...periods,
 		lastUpdated: now,
 	};
-}
-
-function createEmptyPeriodStats(): PeriodStats {
-	return {
-		tokens: 0,
-		thinkingTokens: 0,
-		estimatedTokens: 0,
-		actualTokens: 0,
-		sessions: 0,
-		avgInteractionsPerSession: 0,
-		avgTokensPerSession: 0,
-		modelUsage: {},
-		editorUsage: {},
-		co2: 0,
-		treesEquivalent: 0,
-		waterUsage: 0,
-		estimatedCost: 0,
-	};
-}
-
-function aggregateIntoPeriod(period: PeriodStats, data: SessionData, fraction: number): void {
-	const displayTok = Math.round(effectiveTokens(data) * fraction);
-	const thinkingTok = Math.round(data.thinkingTokens * fraction);
-	const actualTok = Math.round(data.actualTokens * fraction);
-
-	period.tokens += displayTok;
-	period.thinkingTokens += thinkingTok;
-	period.estimatedTokens += Math.round(data.tokens * fraction);
-	period.actualTokens += actualTok;
-	period.sessions++;
-
-	// Merge model usage proportionally
-	for (const [model, usage] of Object.entries(data.modelUsage)) {
-		if (!period.modelUsage[model]) {
-			period.modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
-		}
-		period.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
-		period.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
-	}
-
-	// Track interactions proportionally for the running average
-	const interactions = Math.round(data.interactions * fraction);
-	const totalInteractions = period.avgInteractionsPerSession * (period.sessions - 1) + interactions;
-	period.avgInteractionsPerSession = period.sessions > 0 ? totalInteractions / period.sessions : 0;
-
-	// Editor usage
-	if (!period.editorUsage[data.editorSource]) {
-		period.editorUsage[data.editorSource] = { tokens: 0, sessions: 0 };
-	}
-	period.editorUsage[data.editorSource].tokens += displayTok;
-	period.editorUsage[data.editorSource].sessions++;
 }
 
 /**
@@ -576,7 +412,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 		tokenEstimators,
 		modelPricing,
 		toolNameMap,
-		ecosystems: _ecosystems,
+		ecosystems: getEcosystems(),
 	};
 
 	const now = new Date();
@@ -622,72 +458,6 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 		month: monthPeriod,
 		lastUpdated: now,
 	};
-}
-
-function createEmptyUsageAnalysisPeriod(): UsageAnalysisPeriod {
-	return {
-		sessions: 0,
-		toolCalls: { total: 0, byTool: {} },
-		modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
-		contextReferences: createEmptyContextRefs(),
-		mcpTools: { total: 0, byServer: {}, byTool: {} },
-		modelSwitching: {
-			modelsPerSession: [],
-			totalSessions: 0,
-			averageModelsPerSession: 0,
-			maxModelsPerSession: 0,
-			minModelsPerSession: 0,
-			switchingFrequency: 0,
-			standardModels: [],
-			premiumModels: [],
-			unknownModels: [],
-			mixedTierSessions: 0,
-			standardRequests: 0,
-			premiumRequests: 0,
-			unknownRequests: 0,
-			totalRequests: 0,
-		},
-		repositories: [],
-		repositoriesWithCustomization: [],
-		editScope: {
-			singleFileEdits: 0,
-			multiFileEdits: 0,
-			totalEditedFiles: 0,
-			avgFilesPerSession: 0,
-		},
-		applyUsage: {
-			totalApplies: 0,
-			totalCodeBlocks: 0,
-			applyRate: 0,
-		},
-		sessionDuration: {
-			totalDurationMs: 0,
-			avgDurationMs: 0,
-			avgFirstProgressMs: 0,
-			avgTotalElapsedMs: 0,
-			avgWaitTimeMs: 0,
-		},
-		conversationPatterns: {
-			multiTurnSessions: 0,
-			singleTurnSessions: 0,
-			avgTurnsPerSession: 0,
-			maxTurnsInSession: 0,
-		},
-		agentTypes: {
-			editsAgent: 0,
-			defaultAgent: 0,
-			workspaceAgent: 0,
-			other: 0,
-		},
-	};
-}
-
-/** A single day's aggregated token data for the chart view. */
-interface DailyEntry {
-	tokens: number;
-	sessions: number;
-	modelUsage: ModelUsage;
-	editorUsage: { [editor: string]: { tokens: number; sessions: number } };
 }
 
 /**
@@ -775,182 +545,8 @@ export async function calculateDailyStats(sessionFiles: string[]): Promise<{
 	return { labels, days, allDaysMap };
 }
 
-const CHART_COLORS = [
-	{ bg: 'rgba(54, 162, 235, 0.6)',  border: 'rgba(54, 162, 235, 1)' },
-	{ bg: 'rgba(255, 99, 132, 0.6)',  border: 'rgba(255, 99, 132, 1)' },
-	{ bg: 'rgba(75, 192, 192, 0.6)',  border: 'rgba(75, 192, 192, 1)' },
-	{ bg: 'rgba(153, 102, 255, 0.6)', border: 'rgba(153, 102, 255, 1)' },
-	{ bg: 'rgba(255, 159, 64, 0.6)',  border: 'rgba(255, 159, 64, 1)' },
-	{ bg: 'rgba(255, 205, 86, 0.6)',  border: 'rgba(255, 205, 86, 1)' },
-	{ bg: 'rgba(201, 203, 207, 0.6)', border: 'rgba(201, 203, 207, 1)' },
-	{ bg: 'rgba(100, 181, 246, 0.6)', border: 'rgba(100, 181, 246, 1)' },
-];
-
-/**
- * Build the JSON payload consumed by the chart webview from the daily stats arrays
- * returned by `calculateDailyStats`. Includes weekly and monthly period aggregations.
- */
-export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysMap?: Map<string, DailyEntry>): object {
-	const fmtKey = (d: Date) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
-
-	const buildPeriodFromEntries = (buckets: Array<{ label: string; entry: DailyEntry }>) => {
-		const entries = buckets.map(b => b.entry);
-		const bLabels = buckets.map(b => b.label);
-		const tokensData = entries.map(e => e.tokens);
-		const sessionsData = entries.map(e => e.sessions);
-
-		const allModels = new Set<string>();
-		entries.forEach(e => Object.keys(e.modelUsage).forEach(m => allModels.add(m)));
-		const modelDatasets = Array.from(allModels).map((model, idx) => {
-			const color = CHART_COLORS[idx % CHART_COLORS.length];
-			return { label: model, data: entries.map(e => { const u = e.modelUsage[model]; return u ? u.inputTokens + u.outputTokens : 0; }), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
-		});
-
-		const allEditors = new Set<string>();
-		entries.forEach(e => Object.keys(e.editorUsage).forEach(ed => allEditors.add(ed)));
-		const editorDatasets = Array.from(allEditors).map((editor, idx) => {
-			const color = CHART_COLORS[idx % CHART_COLORS.length];
-			return { label: editor, data: entries.map(e => e.editorUsage[editor]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
-		});
-
-		const totalTokens = tokensData.reduce((a, b) => a + b, 0);
-		const totalSessions = sessionsData.reduce((a, b) => a + b, 0);
-		const periodCount = buckets.length;
-		const costData = entries.map(e => calculateEstimatedCost(e.modelUsage, modelPricing));
-		const totalCost = costData.reduce((a, b) => a + b, 0);
-		const avgCostPerPeriod = periodCount > 0 ? totalCost / periodCount : 0;
-		return { labels: bLabels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets: [], periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod };
-	};
-
-	const mergeEntry = (target: DailyEntry, src: DailyEntry) => {
-		target.tokens += src.tokens;
-		target.sessions += src.sessions;
-		for (const [m, u] of Object.entries(src.modelUsage)) {
-			if (!target.modelUsage[m]) { target.modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
-			target.modelUsage[m].inputTokens += u.inputTokens;
-			target.modelUsage[m].outputTokens += u.outputTokens;
-		}
-		for (const [e, u] of Object.entries(src.editorUsage)) {
-			if (!target.editorUsage[e]) { target.editorUsage[e] = { tokens: 0, sessions: 0 }; }
-			target.editorUsage[e].tokens += u.tokens;
-			target.editorUsage[e].sessions += u.sessions;
-		}
-	};
-
-	const emptyEntry = (): DailyEntry => ({ tokens: 0, sessions: 0, modelUsage: {}, editorUsage: {} });
-
-	const now = new Date();
-
-	// ── Daily period: the existing 30-day data ──────────────────────────
-	const dailyBuckets = labels.map((l, i) => ({ label: l, entry: days[i] }));
-	const dailyPeriod = buildPeriodFromEntries(dailyBuckets);
-
-	// ── Weekly period: last 6 calendar weeks ───────────────────────────
-	const getMondayOfWeek = (d: Date): Date => {
-		const copy = new Date(d); copy.setHours(0, 0, 0, 0);
-		const day = copy.getDay();
-		copy.setDate(copy.getDate() - (day === 0 ? 6 : day - 1));
-		return copy;
-	};
-	const fmtWeekLabel = (monday: Date): string => {
-		const sunday = new Date(monday); sunday.setDate(monday.getDate() + 6);
-		if (monday.getMonth() === sunday.getMonth()) {
-			return `${monday.toLocaleDateString('en-US', { month: 'short' })} ${monday.getDate()}–${sunday.getDate()}`;
-		}
-		return `${monday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}–${sunday.toLocaleDateString('en-US', { month: 'short', day: 'numeric' })}`;
-	};
-	const thisMonday = getMondayOfWeek(now);
-	const weekBucketMap = new Map<string, { label: string; entry: DailyEntry }>();
-	for (let w = 5; w >= 0; w--) {
-		const monday = new Date(thisMonday); monday.setDate(thisMonday.getDate() - w * 7);
-		const key = fmtKey(monday);
-		weekBucketMap.set(key, { label: fmtWeekLabel(monday), entry: emptyEntry() });
-	}
-	const sourceMap = allDaysMap || new Map(labels.map((l, i) => [l, days[i]]));
-	for (const [dateKey, entry] of sourceMap.entries()) {
-		const monday = getMondayOfWeek(new Date(dateKey + 'T00:00:00'));
-		const bucket = weekBucketMap.get(fmtKey(monday));
-		if (bucket) { mergeEntry(bucket.entry, entry); }
-	}
-	const weeklyBuckets = Array.from(weekBucketMap.values());
-	const weeklyPeriod = buildPeriodFromEntries(weeklyBuckets);
-
-	// ── Monthly period: last 12 calendar months ────────────────────────
-	const monthBucketMap = new Map<string, { label: string; entry: DailyEntry }>();
-	for (let m = 11; m >= 0; m--) {
-		const monthDate = new Date(now.getFullYear(), now.getMonth() - m, 1);
-		const key = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, '0')}`;
-		const label = monthDate.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
-		monthBucketMap.set(key, { label, entry: emptyEntry() });
-	}
-	for (const [dateKey, entry] of sourceMap.entries()) {
-		const monthKey = dateKey.slice(0, 7);
-		const bucket = monthBucketMap.get(monthKey);
-		if (bucket) { mergeEntry(bucket.entry, entry); }
-	}
-	const monthlyBuckets = Array.from(monthBucketMap.values());
-	const monthlyPeriod = buildPeriodFromEntries(monthlyBuckets);
-
-	// ── Editor totals map (last 30 days) ───────────────────────────────
-	const editorTotalsMap: Record<string, number> = {};
-	days.forEach(d => {
-		Object.entries(d.editorUsage).forEach(([editor, usage]) => {
-			editorTotalsMap[editor] = (editorTotalsMap[editor] || 0) + usage.tokens;
-		});
-	});
-
-	return {
-		// Backward-compat flat fields (daily period)
-		labels: dailyPeriod.labels,
-		tokensData: dailyPeriod.tokensData,
-		sessionsData: dailyPeriod.sessionsData,
-		modelDatasets: dailyPeriod.modelDatasets,
-		editorDatasets: dailyPeriod.editorDatasets,
-		editorTotalsMap,
-		repositoryDatasets: [],
-		repositoryTotalsMap: {},
-		dailyCount: dailyPeriod.periodCount,
-		totalTokens: dailyPeriod.totalTokens,
-		avgTokensPerDay: dailyPeriod.periodCount > 0 ? Math.round(dailyPeriod.totalTokens / dailyPeriod.periodCount) : 0,
-		totalSessions: dailyPeriod.totalSessions,
-		lastUpdated: new Date().toISOString(),
-		backendConfigured: false,
-		periodsReady: true,
-		periods: {
-			day: dailyPeriod,
-			week: weeklyPeriod,
-			month: monthlyPeriod,
-		},
-	};
-}
-
-/** Format a number with thousand separators */
-export function fmt(n: number): string {
-	return n.toLocaleString('en-US');
-}
-
-/** Format token counts for display */
-export function formatTokens(tokens: number): string {
-	if (tokens >= 1_000_000) {
-		return `${(tokens / 1_000_000).toFixed(1)}M`;
-	}
-	if (tokens >= 1_000) {
-		return `${(tokens / 1_000).toFixed(1)}K`;
-	}
-	return tokens.toString();
-}
-
 /** Environmental impact constants export for use in commands */
-export const ENVIRONMENTAL = {
-	CO2_PER_1K_TOKENS,
-	CO2_ABSORPTION_PER_TREE_PER_YEAR,
-	WATER_USAGE_PER_1K_TOKENS,
-	// Context comparison constants
-	CO2_PER_KM_DRIVING: 120,          // grams CO2 per km for average car
-	CO2_PER_PHONE_CHARGE: 8.22,       // grams CO2 per smartphone full charge
-	WATER_PER_COFFEE_CUP: 140,        // liters of water per cup of coffee
-	CO2_PER_LED_HOUR: 20,             // grams CO2 per hour for 10W LED bulb
-};
+export { ENVIRONMENTAL } from './constants';
 
 /** Model pricing data export */
 export { modelPricing, tokenEstimators, toolNameMap };

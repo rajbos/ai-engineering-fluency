@@ -11,6 +11,7 @@ import {
 	getAdminUserSummaries, getAdminDailyTotals,
 	type UploadRow, type UserRow, type UserUsageSummary, type AdminDailyRow,
 } from '../db.js';
+import { OAUTH_STATE_MAX_AGE_SECONDS } from '../config.js';
 export const dashboard = new Hono();
 
 const GITHUB_CLIENT_ID = process.env.GITHUB_CLIENT_ID ?? '';
@@ -50,7 +51,7 @@ dashboard.get('/auth/github', (c) => {
 		httpOnly: true,
 		secure: process.env.NODE_ENV === 'production',
 		sameSite: 'Lax',
-		maxAge: 300, // 5 minutes
+		maxAge: OAUTH_STATE_MAX_AGE_SECONDS,
 		path: '/',
 	});
 	return c.redirect(`https://github.com/login/oauth/authorize?${params}`);
@@ -246,6 +247,7 @@ function safeJson(data: unknown): string {
 }
 
 function fmt(n: number): string {
+	if (n >= 1_000_000_000) return `${(n / 1_000_000_000).toFixed(1)}B`;
 	if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(1)}M`;
 	if (n >= 1_000) return `${(n / 1_000).toFixed(1)}K`;
 	return String(n);
@@ -1007,6 +1009,7 @@ var CHART_DATA = ${safeJson(chartData)};
 // Re-compute "Today" stats using browser's local timezone (server pre-renders in UTC)
 (function() {
   function fmtLocal(n) {
+    if (n >= 1000000000) return (n / 1000000000).toFixed(1) + 'B';
     if (n >= 1000000) return (n / 1000000).toFixed(1) + 'M';
     if (n >= 1000) return (n / 1000).toFixed(1) + 'K';
     return String(n);

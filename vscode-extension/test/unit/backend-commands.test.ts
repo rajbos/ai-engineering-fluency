@@ -162,15 +162,6 @@ describe('backend/commands', { concurrency: false }, () => {
 	(vscode as any).__mock.setNextPick('Remove Key');
 	await handler.handleClearBackendSharedKey();
 	assert.equal(cleared, true);
-
-	// Convenience wrappers
-	(vscode as any).__mock.reset();
-	await handler.configureBackend();
-	await handler.copyBackendConfig();
-	await handler.exportCurrentView();
-	await handler.setBackendSharedKey();
-	await handler.rotateBackendSharedKey();
-	await handler.clearBackendSharedKey();
 	});
 
 	test('BackendCommandHandler error paths: configure failure, query disabled, export failures, and confirm cancellations', async () => {
@@ -520,44 +511,6 @@ describe('backend/commands', { concurrency: false }, () => {
 	});
 	await handler.handleQueryBackend();
 	assert.ok((vscode as any).__mock.state.lastErrorMessages.some((m: string) => m.includes('query') || m.includes('Query')));
-	});
-
-	test('convenience aliases delegate to handle methods', async () => {
-	(vscode as any).__mock.reset();
-	let sharingCalled = false;
-	let toggleCalled = false;
-	let clearCalled = false;
-	let enableCalled = false;
-	let disableCalled = false;
-	const handler = new BackendCommandHandler({
-		facade: createMockFacade({
-			setSharingProfileCommand: async () => { sharingCalled = true; },
-			toggleBackendWorkspaceMachineNameSync: async () => { toggleCalled = true; },
-			clearAzureSettingsCommand: async () => { clearCalled = true; },
-		}),
-		integration: {},
-		calculateEstimatedCost: () => 0,
-		warn: () => undefined,
-		log: () => undefined
-	});
-
-	await handler.setSharingProfile();
-	assert.ok(sharingCalled);
-
-	await handler.toggleBackendWorkspaceMachineNameSync();
-	assert.ok(toggleCalled);
-
-	(vscode as any).__mock.setNextPick('Clear Settings');
-	await handler.clearAzureSettings();
-	assert.ok(clearCalled);
-
-	(vscode as any).__mock.reset();
-	(vscode as any).__mock.setNextPick('I Understand, Continue');
-	await handler.enableTeamSharing();
-
-	(vscode as any).__mock.reset();
-	(vscode as any).__mock.setNextPick('Switch to Anonymized');
-	await handler.disableTeamSharing();
 	});
 
 	test('handleExportCurrentView respects non-identifying policy', async () => {

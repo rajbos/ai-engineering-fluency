@@ -4,7 +4,7 @@ import type { ModelUsage, ChatTurn } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { VisualStudioDataAccess } from '../visualstudio';
 import { createEmptyContextRefs } from '../tokenEstimation';
-import { isMcpTool, normalizeMcpToolName, extractMcpServerName } from '../workspaceHelpers';
+import { isMcpTool, normalizeMcpToolName, extractMcpServerName, normalizePathForComparison } from '../workspaceHelpers';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
 
 export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
@@ -18,6 +18,11 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 
 	handles(sessionFile: string): boolean {
 		return this.visualStudio.isVSSessionFile(sessionFile);
+	}
+
+	getDisplayName(sessionFile: string): string {
+		const n = normalizePathForComparison(sessionFile);
+		return n.includes('/ssmsgithubcopilot/') ? 'SSMS' : 'Visual Studio';
 	}
 
 	getBackingPath(sessionFile: string): string {
@@ -79,7 +84,10 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 	}
 
 	getCandidatePaths(): CandidatePath[] {
-		return [{ path: this.visualStudio.getLogDir(), source: 'Visual Studio (log dir)' }];
+		return [
+			{ path: this.visualStudio.getLogDir(), source: 'Visual Studio (log dir)' },
+			{ path: this.visualStudio.getSsmsSessionsDir(), source: 'SSMS (sessions dir)' },
+		];
 	}
 
 	getRawFileContent(sessionFile: string): string {
