@@ -3,36 +3,7 @@ export interface ModelUsage {
 }
 
 import { extractSubAgentData } from './tokenEstimation';
-
-type JsonObject = Record<string, unknown>;
-
-function isObject(value: unknown): value is JsonObject {
-return typeof value === 'object' && value !== null;
-}
-
-function isSafePathSegment(seg: string): boolean {
-// Prevent prototype pollution and other surprising behavior.
-if (typeof seg !== 'string') {
-return false;
-}
-const forbidden = ['__proto__', 'prototype', 'constructor', 'hasOwnProperty'];
-return !forbidden.includes(seg) && !seg.startsWith('__');
-}
-
-function isArrayIndexSegment(seg: string): boolean {
-return /^\d+$/.test(seg);
-}
-
-function normalizeModelId(model: unknown, defaultModel: string): string {
-if (typeof model !== 'string') {
-return defaultModel;
-}
-const trimmed = model.trim();
-if (!trimmed) {
-return defaultModel;
-}
-return trimmed.startsWith('copilot/') ? trimmed.substring('copilot/'.length) : trimmed;
-}
+import { type JsonObject, isObject, isSafePathSegment, isArrayIndexSegment, normalizeModelId } from './utils/typeGuards';
 
 interface MessagePart {
   text?: string;

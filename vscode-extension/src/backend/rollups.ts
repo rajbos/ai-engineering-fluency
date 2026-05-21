@@ -4,6 +4,7 @@
  */
 
 import type { DailyRollupValue } from './types';
+import { isObject } from '../utils/typeGuards';
 
 /**
  * Key identifying a unique daily rollup (dimensions).
@@ -175,10 +176,6 @@ function _mergeJsonFluencyMetrics(ex: FluencyMetrics, val: FluencyMetrics): void
 	}
 }
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
-	return typeof value === 'object' && value !== null;
-}
-
 function mergeNumericValues(existing: unknown, delta: number): number {
 	return (typeof existing === 'number' ? existing : 0) + delta;
 }
@@ -201,7 +198,7 @@ function mergeMetricEntry(existing: unknown, incoming: unknown): unknown {
 	if (typeof incoming === 'number') {
 		return mergeNumericValues(existing, incoming);
 	}
-	if (isPlainObject(incoming) && isPlainObject(existing)) {
+	if (isObject(incoming) && isObject(existing)) {
 		return mergeNestedObject(existing, incoming);
 	}
 	return incoming;
