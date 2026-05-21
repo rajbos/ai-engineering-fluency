@@ -4,6 +4,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, processSessionFile, effectiveTokens, getDiagnosticPaths, fmt, formatTokens, getCacheStats } from '../helpers';
+import { ProgressTracker } from '../progress';
 
 export const statsCommand = new Command('stats')
 	.description('Show overview of discovered session files, sessions, chat turns, and tokens')
@@ -26,9 +27,10 @@ export const statsCommand = new Command('stats')
 		}
 
 		// Discover session files
-		if (!options.json) { process.stdout.write(chalk.dim('Scanning for session files...')); }
+		const progress = new ProgressTracker(!!options.json);
+		progress.show('Scanning for session files...');
 		const files = await discoverSessionFiles();
-		if (!options.json) { process.stdout.write('\r' + ' '.repeat(50) + '\r'); }
+		progress.done();
 
 		if (files.length === 0) {
 			if (options.json) {
@@ -85,12 +87,11 @@ export const statsCommand = new Command('stats')
 			}
 
 			// Progress indicator (human-readable only)
-			if (!options.json && ((i + 1) % 50 === 0 || i === files.length - 1)) {
-				process.stdout.write(`\r${chalk.dim(`Processing: ${i + 1}/${files.length}`)}`);
+			if ((i + 1) % 50 === 0 || i === files.length - 1) {
+				progress.update(`Processing: ${i + 1}/${files.length}`);
 			}
 		}
-		if (!options.json) { process.stdout.write('\r' + ' '.repeat(50) + '\r'); }
-
+		progress.done();
 		if (options.json) {
 			// Machine-readable output: emit pure JSON to stdout and exit
 			const payload = {

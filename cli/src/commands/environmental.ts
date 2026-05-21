@@ -4,6 +4,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, calculateDetailedStats, formatTokens, ENVIRONMENTAL } from '../helpers';
+import { ProgressTracker } from '../progress';
 import type { PeriodStats } from '../../../vscode-extension/src/types';
 
 export const environmentalCommand = new Command('environmental')
@@ -12,20 +13,21 @@ export const environmentalCommand = new Command('environmental')
 	.action(async () => {
 		console.log(chalk.bold.cyan('\n🌍 Copilot Token Tracker - Environmental Impact\n'));
 
-		process.stdout.write(chalk.dim('Scanning for session files...'));
+		const progress = new ProgressTracker();
+		progress.show('Scanning for session files...');
 		const files = await discoverSessionFiles();
-		process.stdout.write('\r' + ' '.repeat(50) + '\r');
+		progress.done();
 
 		if (files.length === 0) {
 			console.log(chalk.yellow('⚠️  No session files found.'));
 			return;
 		}
 
-		process.stdout.write(chalk.dim('Calculating usage...'));
+		progress.show('Calculating usage...');
 		const stats = await calculateDetailedStats(files, (completed, total) => {
-			process.stdout.write(`\r${chalk.dim(`Processing: ${completed}/${total} files`)}`);
+			progress.update(`Processing: ${completed}/${total} files`);
 		});
-		process.stdout.write('\r' + ' '.repeat(50) + '\r');
+		progress.done();
 
 		const periods: { label: string; emoji: string; stats: PeriodStats }[] = [
 			{ label: 'Today', emoji: '📅', stats: stats.today },

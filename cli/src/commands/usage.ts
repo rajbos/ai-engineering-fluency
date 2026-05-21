@@ -4,6 +4,7 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, calculateDetailedStats, fmt, formatTokens, modelPricing } from '../helpers';
+import { ProgressTracker } from '../progress';
 import type { PeriodStats, ModelUsage } from '../../../vscode-extension/src/types';
 import { getModelTier } from '../../../vscode-extension/src/tokenEstimation';
 
@@ -51,13 +52,10 @@ export const usageCommand = new Command('usage')
 
 /** Discover session files (quiet when --json is set). */
 async function discoverFiles(options: { json?: boolean }) {
-	if (!options.json) {
-		process.stdout.write(chalk.dim('Scanning for session files...'));
-	}
+	const progress = new ProgressTracker(!!options.json);
+	progress.show('Scanning for session files...');
 	const files = await discoverSessionFiles();
-	if (!options.json) {
-		process.stdout.write('\r' + ' '.repeat(50) + '\r');
-	}
+	progress.done();
 	if (files.length === 0) {
 		if (options.json) {
 			process.stdout.write('{}');
@@ -71,15 +69,12 @@ async function discoverFiles(options: { json?: boolean }) {
 
 /** Calculate detailed stats (quiet when --json is set). */
 async function calculateStats(files: string[], options: { json?: boolean }) {
-	if (!options.json) {
-		process.stdout.write(chalk.dim('Calculating token usage...'));
-	}
-	const stats = await calculateDetailedStats(files, options.json ? undefined : (completed, total) => {
-		process.stdout.write(`\r${chalk.dim(`Processing: ${completed}/${total} files`)}`);
+	const progress = new ProgressTracker(!!options.json);
+	progress.show('Calculating token usage...');
+	const stats = await calculateDetailedStats(files, (completed, total) => {
+		progress.update(`Processing: ${completed}/${total} files`);
 	});
-	if (!options.json) {
-		process.stdout.write('\r' + ' '.repeat(50) + '\r');
-	}
+	progress.done();
 	return stats;
 }
 

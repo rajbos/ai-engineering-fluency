@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
 import { discoverSessionFiles, getDiagnosticPaths, processSessionFile, effectiveTokens, fmt, formatTokens } from '../helpers';
+import { ProgressTracker } from '../progress';
 import { normalizePathSeparators } from '../../../vscode-extension/src/workspaceHelpers';
 
 interface LocationStats {
@@ -108,9 +109,10 @@ export const diagnosticsCommand = new Command('diagnostics')
 		}
 
 		// --- Discover and process files ---
-		process.stdout.write(chalk.dim('Scanning for session files...'));
+		const progress = new ProgressTracker();
+		progress.show('Scanning for session files...');
 		const files = await discoverSessionFiles();
-		process.stdout.write('\r' + ' '.repeat(60) + '\r');
+		progress.done();
 
 		if (files.length === 0) {
 			console.log(chalk.yellow('⚠️  No session files found in any search path.'));
@@ -140,7 +142,7 @@ export const diagnosticsCommand = new Command('diagnostics')
 		for (let i = 0; i < files.length; i++) {
 			// Progress
 			if ((i + 1) % 25 === 0 || i === files.length - 1) {
-				process.stdout.write(`\r${chalk.dim(`Processing: ${i + 1}/${files.length} files...`)}`);
+				progress.update(`Processing: ${i + 1}/${files.length} files...`);
 			}
 
 			const match = matchToCandidatePath(files[i], candidates);
@@ -172,7 +174,7 @@ export const diagnosticsCommand = new Command('diagnostics')
 			}
 		}
 
-		process.stdout.write('\r' + ' '.repeat(60) + '\r');
+		progress.done();
 
 		// --- Per-location table ---
 		console.log(chalk.bold(`📊 Stats per Search Location`));
