@@ -1,4 +1,4 @@
-﻿import * as vscode from 'vscode';
+import * as vscode from 'vscode';
 import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
 import * as fs from 'fs';
 import * as path from 'path';
@@ -99,6 +99,7 @@ import {
   extractSubAgentData as _extractSubAgentData,
   buildReasoningEffortTimeline as _buildReasoningEffortTimeline,
   extractCachedTokensFromDebugLog as _extractCachedTokensFromDebugLog,
+  extractResponseItemText as _extractResponseItemText,
 } from './tokenEstimation';
 import { SessionDiscovery } from './sessionDiscovery';
 import { CacheManager } from './cacheManager';
@@ -4208,19 +4209,12 @@ usageAnalysis: undefined
 		const mcpTools: { server: string; tool: string }[] = [];
 
 		for (const item of response) {
-			// Separate thinking items
-			if (item.kind === 'thinking') {
-				if (item.value && typeof item.value === 'string') {
-					thinkingText += item.value;
-				}
-				continue;
-			}
-
-			// Extract text content
-			if (item.value && typeof item.value === 'string') {
-				responseText += item.value;
-			} else if (item.kind === 'markdownContent' && item.content?.value) {
-				responseText += item.content.value;
+			if (!item || typeof item !== 'object') { continue; }
+			// Extract text content and thinking via shared utility
+			const { text: itemText, isThinking: itemIsThinking } = _extractResponseItemText(item);
+			if (itemText) {
+				if (itemIsThinking) { thinkingText += itemText; }
+				else { responseText += itemText; }
 			}
 
 			// Extract tool invocations
@@ -4313,11 +4307,6 @@ usageAnalysis: undefined
 					// Estimate tokens from assistant response (output)
 					if (request.response && Array.isArray(request.response)) {
 						for (const responseItem of request.response) {
-							// Separate thinking tokens
-							if (responseItem.kind === 'thinking' && responseItem.value) {
-								totalThinkingTokens += this.estimateTokensFromText(responseItem.value, this.getModelFromRequest(request));
-								continue;
-							}
 							// Sub-agent invocations: count prompt (input) + result (output)
 							const subAgent = _extractSubAgentData(responseItem);
 							if (subAgent) {
@@ -4326,8 +4315,13 @@ usageAnalysis: undefined
 								if (subAgent.result) { totalOutputTokens += this.estimateTokensFromText(subAgent.result, saModel); }
 								continue;
 							}
-							if (responseItem.value) {
-								totalOutputTokens += this.estimateTokensFromText(responseItem.value, this.getModelFromRequest(request));
+							const { text, isThinking } = _extractResponseItemText(responseItem);
+							if (text) {
+								if (isThinking) {
+									totalThinkingTokens += this.estimateTokensFromText(text, this.getModelFromRequest(request));
+								} else {
+									totalOutputTokens += this.estimateTokensFromText(text, this.getModelFromRequest(request));
+								}
 							}
 						}
 					}

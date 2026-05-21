@@ -31,6 +31,7 @@ import {
 	createEmptyContextRefs,
 	extractSubAgentData,
 	buildReasoningEffortTimeline,
+	extractResponseItemText,
 } from './tokenEstimation';
 import {
 	getModeType,
@@ -1909,8 +1910,10 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 						}
 						if (request.response && Array.isArray(request.response)) {
 							for (const responseItem of request.response as ResponseItemRaw[]) {
-								if (responseItem?.value) {
-									modelUsage[requestModel].outputTokens += estimateTokensFromText(responseItem.value, requestModel, deps.tokenEstimators);
+								// Thinking counts as output for model usage; ignore isThinking flag
+								const { text } = extractResponseItemText(responseItem);
+								if (text) {
+									modelUsage[requestModel].outputTokens += estimateTokensFromText(text, requestModel, deps.tokenEstimators);
 								}
 							}
 						}
@@ -1971,8 +1974,10 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 					}
 					if (request.response && Array.isArray(request.response)) {
 						for (const responseItem of request.response as ResponseItemRaw[]) {
-							if (responseItem?.value) {
-								modelUsage[model].outputTokens += estimateTokensFromText(responseItem.value, model, deps.tokenEstimators);
+							// Thinking counts as output for model usage; ignore isThinking flag
+							const { text } = extractResponseItemText(responseItem);
+							if (text) {
+								modelUsage[model].outputTokens += estimateTokensFromText(text, model, deps.tokenEstimators);
 							}
 						}
 					}
