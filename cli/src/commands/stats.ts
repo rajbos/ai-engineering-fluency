@@ -5,18 +5,20 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, processSessionFile, effectiveTokens, getDiagnosticPaths, fmt, formatTokens, getCacheStats } from '../helpers';
 import { clearLine, writeProgress, writeProgressCount } from '../formatting';
+import { shouldOutputJson } from '../commandUtils';
 
 export const statsCommand = new Command('stats')
 	.description('Show overview of discovered session files, sessions, chat turns, and tokens')
 	.option('-v, --verbose', 'Show detailed per-folder breakdown')
 	.option('--json', 'Output raw JSON (for machine consumption)')
 	.action(async (options) => {
-		if (!options.json) {
+		const json = shouldOutputJson(options);
+		if (!json) {
 			console.log(chalk.bold.cyan('\n🔍 Copilot Token Tracker - Session Statistics\n'));
 		}
 
 		// Show search paths if verbose
-		if (options.verbose && !options.json) {
+		if (options.verbose && !json) {
 			const paths = getDiagnosticPaths();
 			console.log(chalk.dim('Search paths:'));
 			for (const p of paths) {
@@ -27,12 +29,12 @@ export const statsCommand = new Command('stats')
 		}
 
 		// Discover session files
-		if (!options.json) { writeProgress('Scanning for session files...'); }
+		if (!json) { writeProgress('Scanning for session files...'); }
 		const files = await discoverSessionFiles();
-		if (!options.json) { clearLine(); }
+		if (!json) { clearLine(); }
 
 		if (files.length === 0) {
-			if (options.json) {
+			if (json) {
 				process.stdout.write('{}');
 			} else {
 				console.log(chalk.yellow('⚠️  No session files found.'));
@@ -41,7 +43,7 @@ export const statsCommand = new Command('stats')
 			return;
 		}
 
-		if (!options.json) {
+		if (!json) {
 			console.log(chalk.green(`📂 Found ${chalk.bold(fmt(files.length))} session file(s)\n`));
 		}
 
@@ -86,13 +88,13 @@ export const statsCommand = new Command('stats')
 			}
 
 			// Progress indicator (human-readable only)
-			if (!options.json && ((i + 1) % 50 === 0 || i === files.length - 1)) {
+			if (!json && ((i + 1) % 50 === 0 || i === files.length - 1)) {
 				writeProgressCount(i + 1, files.length);
 			}
 		}
-		if (!options.json) { clearLine(); }
+		if (!json) { clearLine(); }
 
-		if (options.json) {
+		if (json) {
 			// Machine-readable output: emit pure JSON to stdout and exit
 			const payload = {
 				totalFiles: files.length,
