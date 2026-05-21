@@ -21,28 +21,13 @@ import { CredentialService } from './credentialService';
 import { DataPlaneService } from './dataPlaneService';
 import { BackendUtility } from './utilityService';
 import { SharingServerUploadService, type SharingServerEntry } from './sharingServerUploadService';
+import { SyncLock } from './syncLock';
+import { type IBlobUploadService } from './blobUploadService';
 import { isJsonlContent } from '../../tokenEstimation';
 import { getEditorTypeFromPath } from '../../workspaceHelpers';
 
 /** Ecosystem session per-model usage entry (input, output, optional interactions). */
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
-
-
-/**
- * Interface for blob upload service to avoid circular dependency.
- */
-interface BlobUploadServiceLike {
-	uploadSessionFiles(
-		storageAccount: string,
-		settings: { enabled: boolean; containerName: string; uploadFrequencyHours: number; compressFiles: boolean },
-		credential: unknown,
-		sessionFiles: string[],
-		machineId: string,
-		datasetId: string
-	): Promise<{ success: boolean; filesUploaded: number; message: string }>;
-	shouldUpload(machineId: string, settings: { enabled: boolean; uploadFrequencyHours: number }): boolean;
-	getUploadStatus(machineId: string): { lastUploadTime: number; filesUploaded: number; lastError?: string } | undefined;
-}
 
 /**
  * Validate and normalize consent timestamp.
@@ -75,27 +60,42 @@ function validateConsentTimestamp(ts: string | undefined, logger?: (msg: string)
 	}
 }
 
-export interface SyncServiceDeps {
-	context: vscode.ExtensionContext | undefined;
+/** Logger callbacks for the sync service. */
+export interface SyncServiceLogger {
 	log: (message: string) => void;
 	warn: (message: string) => void;
+}
+
+/** Session file access, stat, caching, and token estimation callbacks. */
+export interface SyncServiceSessionHandlers {
 	getCopilotSessionFiles: () => Promise<string[]>;
 	estimateTokensFromText: (text: string, model: string) => number;
 	getModelFromRequest: (request: ChatRequest) => string;
-	// Cache integration for performance
+	/** Cache integration for performance. */
 	getSessionFileDataCached?: (sessionFilePath: string, mtime: number, fileSize: number) => Promise<SessionFileCache>;
-	// UI refresh callback after successful sync
-	updateTokenStats?: () => Promise<void>;
-	// Stat helper for OpenCode DB virtual paths
+	/** Stat helper for OpenCode DB virtual paths. */
 	statSessionFile: (sessionFile: string) => Promise<fs.Stats>;
-	// OpenCode session handling
+}
+
+/** Per-editor session detection and data extraction callbacks. */
+export interface SyncServiceEditorHandlers {
+	/** OpenCode session handling. */
 	isOpenCodeSession?: (sessionFile: string) => boolean;
 	getOpenCodeSessionData?: (sessionFile: string) => Promise<{ tokens: number; interactions: number; modelUsage: Record<string, ModelUsageEntry>; timestamp: number }>;
-	// Crush session handling (per-project crush.db virtual paths)
+	/** Crush session handling (per-project crush.db virtual paths). */
 	isCrushSession?: (sessionFile: string) => boolean;
 	getCrushSessionData?: (sessionFile: string) => Promise<{ tokens: number; interactions: number; modelUsage: Record<string, ModelUsageEntry>; timestamp: number }>;
-	// Visual Studio session detection (binary MessagePack — cannot be parsed as JSON)
+	/** Visual Studio session detection (binary MessagePack — cannot be parsed as JSON). */
 	isVSSessionFile?: (sessionFile: string) => boolean;
+}
+
+export interface SyncServiceDeps {
+	context: vscode.ExtensionContext | undefined;
+	logger: SyncServiceLogger;
+	sessionHandlers: SyncServiceSessionHandlers;
+	editorHandlers?: SyncServiceEditorHandlers;
+	/** UI refresh callback after successful sync. */
+	updateTokenStats?: () => Promise<void>;
 	/** Returns the current GitHub OAuth access token, or undefined if not authenticated. */
 	getGithubToken?: () => string | undefined;
 }
@@ -109,17 +109,22 @@ export class SyncService {
 	private backendSyncInterval: NodeJS.Timeout | undefined;
 	private consecutiveFailures = 0;
 	private readonly MAX_CONSECUTIVE_FAILURES = 5;
-	/** Stale threshold for the sync lock file (matches the sync timer interval). */
-	private static readonly SYNC_LOCK_STALE_MS = BACKEND_SYNC_MIN_INTERVAL_MS;
+	private readonly syncLock: SyncLock;
 
 	constructor(
 		private readonly deps: SyncServiceDeps,
 		private readonly credentialService: CredentialService,
 		private readonly dataPlaneService: DataPlaneService,
-		private readonly blobUploadService: BlobUploadServiceLike | undefined,
+		private readonly blobUploadService: IBlobUploadService | undefined,
 		private readonly utility: typeof BackendUtility,
 		private readonly sharingServerUploadService: SharingServerUploadService | undefined,
-	) {}
+	) {
+		this.syncLock = new SyncLock(
+			deps.context,
+			deps.logger.log.bind(deps.logger),
+			deps.logger.warn.bind(deps.logger),
+		);
+	}
 
 	// ── Cross-instance file lock ────────────────────────────────────────
 
@@ -132,72 +137,14 @@ export class SyncService {
 	 * syncing to independent endpoints and should not block each other.
 	 */
 	private async acquireSyncLock(backend?: string, serverUrl?: string): Promise<boolean> {
-		const ctx = this.deps.context;
-		if (!ctx) { return true; } // No context → allow (tests)
-		// Use a backend-specific lock so Azure and sharingServer syncs don't block each other.
-		const suffix = backend === 'sharingServer' ? '_sharingserver' : '';
-		const lockPath = path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
-		const lockContent = JSON.stringify({
-			sessionId: vscode.env.sessionId,
-			timestamp: Date.now(),
-			serverUrl,
-		});
-		try {
-			await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
-			const fd = await fs.promises.open(lockPath, 'wx');
-			await fd.writeFile(lockContent);
-			await fd.close();
-			return true;
-		} catch (err: any) {
-			if (err.code !== 'EEXIST') {
-				this.deps.warn(`Sync lock: unexpected error acquiring lock: ${err.message}`);
-				return false;
-			}
-			// Lock file exists — check if it belongs to a different server or is stale
-			try {
-				const content = await fs.promises.readFile(lockPath, 'utf-8');
-				const lock = JSON.parse(content);
-				// Different server URL → the lock does not apply to this instance.
-				if (serverUrl && lock.serverUrl && lock.serverUrl !== serverUrl) {
-					this.deps.log(`Sync lock: lock is held for a different server (${lock.serverUrl}), proceeding for ${serverUrl}`);
-					return true;
-				}
-				if (Date.now() - lock.timestamp > SyncService.SYNC_LOCK_STALE_MS) {
-					this.deps.log('Sync lock: breaking stale lock from another window');
-					await fs.promises.unlink(lockPath);
-					try {
-						const fd = await fs.promises.open(lockPath, 'wx');
-						await fd.writeFile(lockContent);
-						await fd.close();
-						return true;
-					} catch {
-						return false;
-					}
-				}
-			} catch {
-				// Lock file may have been deleted by its owner
-			}
-			return false;
-		}
+		return this.syncLock.acquire(backend, serverUrl);
 	}
 
 	/**
 	 * Release the sync lock, but only if we own it.
 	 */
 	private async releaseSyncLock(backend?: string): Promise<void> {
-		const ctx = this.deps.context;
-		if (!ctx) { return; }
-		const suffix = backend === 'sharingServer' ? '_sharingserver' : '';
-		const lockPath = path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
-		try {
-			const content = await fs.promises.readFile(lockPath, 'utf-8');
-			const lock = JSON.parse(content);
-			if (lock.sessionId === vscode.env.sessionId) {
-				await fs.promises.unlink(lockPath);
-			}
-		} catch {
-			// Lock file already gone or unreadable
-		}
+		return this.syncLock.release(backend);
 	}
 
 	/**
@@ -215,17 +162,17 @@ export class SyncService {
 			});
 			if (!sharingPolicy.allowCloudSync || !isConfigured) {
 				if (!sharingPolicy.allowCloudSync) {
-					this.deps.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
+					this.deps.logger.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
 				} else if (!isConfigured) {
-					this.deps.log('Backend sync: not starting timer (backend not configured)');
+					this.deps.logger.log('Backend sync: not starting timer (backend not configured)');
 				}
 				return;
 			}
 			const intervalMs = BACKEND_SYNC_MIN_INTERVAL_MS;
-			this.deps.log(`Backend sync: starting timer with interval ${intervalMs}ms (${intervalMs / 60000} minutes)`);
+			this.deps.logger.log(`Backend sync: starting timer with interval ${intervalMs}ms (${intervalMs / 60000} minutes)`);
 			this.backendSyncInterval = setInterval(() => {
 				this.syncToBackendStore(false, settings, isConfigured).catch((e) => {
-					this.deps.warn(`Backend sync timer failed: ${e?.message ?? e}`);
+					this.deps.logger.warn(`Backend sync timer failed: ${e?.message ?? e}`);
 					this.consecutiveFailures++;
 					
 					// Show user-facing warning after first few failures
@@ -241,7 +188,7 @@ export class SyncService {
 					}
 					
 					if (this.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
-						this.deps.warn(`Backend sync: stopping timer after ${this.MAX_CONSECUTIVE_FAILURES} consecutive failures`);
+						this.deps.logger.warn(`Backend sync: stopping timer after ${this.MAX_CONSECUTIVE_FAILURES} consecutive failures`);
 						vscode.window.showErrorMessage(
 							'Backend sync stopped after repeated failures. Check your Azure configuration.',
 							'Configure Backend'
@@ -256,10 +203,10 @@ export class SyncService {
 			}, intervalMs);
 			// Immediate initial sync (forced to ensure settings changes take effect)
 			this.syncToBackendStore(true, settings, isConfigured).catch((e) => {
-				this.deps.warn(`Backend sync initial sync failed: ${e?.message ?? e}`);
+				this.deps.logger.warn(`Backend sync initial sync failed: ${e?.message ?? e}`);
 			});
 		} catch (e) {
-			this.deps.warn(`Backend sync timer setup failed: ${e}`);
+			this.deps.logger.warn(`Backend sync timer setup failed: ${e}`);
 		}
 	}
 
@@ -330,7 +277,7 @@ const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
 const model = (event.model || 'gpt-4o').toString();
 const isFileFromToday = dayKey === todayKey;
 if (isFileFromToday && processedLines < 3) {
-this.deps.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} line ${lineCount}: eventMs=${new Date(eventMs).toISOString()}, dayKey=${dayKey}, type=${event.type}`);
+this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} line ${lineCount}: eventMs=${new Date(eventMs).toISOString()}, dayKey=${dayKey}, type=${event.type}`);
 processedLines++;
 }
 // Track interaction for this day+model (count all events, not just user.message)
@@ -431,7 +378,7 @@ typeof req.timestamp !== 'undefined' ? req.timestamp : (sessionObj.lastMessageDa
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { continue; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-const model = this.deps.getModelFromRequest(req);
+const model = this.deps.sessionHandlers.getModelFromRequest(req);
 if (!dayModelInteractions.has(dayKey)) {
 dayModelInteractions.set(dayKey, new Map());
 }
@@ -440,7 +387,7 @@ dayMap.set(model, (dayMap.get(model) || 0) + 1);
 }
 return dayModelInteractions;
 } catch (e) {
-this.deps.warn(`Backend sync: failed to parse JSON for ${sessionFile}: ${e}`);
+this.deps.logger.warn(`Backend sync: failed to parse JSON for ${sessionFile}: ${e}`);
 return null;
 }
 }
@@ -518,7 +465,7 @@ const cachedInput = typeof cachedUsage.inputTokens === 'number' ? cachedUsage.in
 const cachedOutput = typeof cachedUsage.outputTokens === 'number' ? cachedUsage.outputTokens : NaN;
 if (!Number.isFinite(cachedInput) || cachedInput < 0 ||
 !Number.isFinite(cachedOutput) || cachedOutput < 0) {
-this.deps.warn(`Backend sync: invalid inputTokens or outputTokens in model usage for ${sessionFile}`);
+this.deps.logger.warn(`Backend sync: invalid inputTokens or outputTokens in model usage for ${sessionFile}`);
 continue;
 }
 
@@ -544,7 +491,7 @@ fluencyMetrics
 // Log if this file had data for multiple days
 if (dayModelInteractions.size > 1) {
 const days = Array.from(dayModelInteractions.keys()).sort();
-this.deps.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${days.length} days: ${days.join(', ')}`);
+this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${days.length} days: ${days.join(', ')}`);
 }
 }
 
@@ -558,8 +505,9 @@ sessionFile: string,
 fileMtimeMs: number,
 args: { machineId: string; userId: string | undefined; editorForFile: string | undefined; workspaceNamesById: Record<string, string>; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>; startMs: number }
 ): Promise<boolean> {
-if (!this.deps.getOpenCodeSessionData) { return false; }
-const data = await this.deps.getOpenCodeSessionData(sessionFile);
+if (!this.deps.editorHandlers?.getOpenCodeSessionData) { return false; }
+const getOpenCodeSessionData = this.deps.editorHandlers.getOpenCodeSessionData;
+const data = await getOpenCodeSessionData(sessionFile);
 const eventMs = data.timestamp || fileMtimeMs;
 if (!eventMs || eventMs < args.startMs) { return false; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
@@ -586,8 +534,9 @@ sessionFile: string,
 fileMtimeMs: number,
 args: { machineId: string; userId: string | undefined; editorForFile: string | undefined; workspaceNamesById: Record<string, string>; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>; startMs: number }
 ): Promise<boolean> {
-if (!this.deps.getCrushSessionData) { return false; }
-const data = await this.deps.getCrushSessionData(sessionFile);
+if (!this.deps.editorHandlers?.getCrushSessionData) { return false; }
+const getCrushSessionData = this.deps.editorHandlers.getCrushSessionData;
+const data = await getCrushSessionData(sessionFile);
 const eventMs = data.timestamp || fileMtimeMs;
 if (!eventMs || eventMs < args.startMs) { return false; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
@@ -626,19 +575,19 @@ now: Date,
 editor?: string
 ): Promise<boolean> {
 try {
-const cachedData = await this.deps.getSessionFileDataCached!(sessionFile, fileMtimeMs, fileSize);
+const cachedData = await this.deps.sessionHandlers.getSessionFileDataCached!(sessionFile, fileMtimeMs, fileSize);
 
 // Validate cached data structure to prevent injection/corruption
 if (!cachedData || typeof cachedData !== 'object') {
-this.deps.warn(`Backend sync: invalid cached data structure for ${sessionFile}`);
+this.deps.logger.warn(`Backend sync: invalid cached data structure for ${sessionFile}`);
 return false;
 }
 if (typeof cachedData.modelUsage !== 'object' || cachedData.modelUsage === null) {
-this.deps.warn(`Backend sync: invalid modelUsage in cached data for ${sessionFile}`);
+this.deps.logger.warn(`Backend sync: invalid modelUsage in cached data for ${sessionFile}`);
 return false;
 }
 if (!Number.isFinite(cachedData.interactions) || cachedData.interactions < 0) {
-this.deps.warn(`Backend sync: invalid interactions count in cached data for ${sessionFile}`);
+this.deps.logger.warn(`Backend sync: invalid interactions count in cached data for ${sessionFile}`);
 return false;
 }
 
@@ -683,7 +632,7 @@ fluencyMetrics,
 }
 
 if (dayKeys.length > 1) {
-this.deps.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${dayKeys.length} days (dailyRollups fast path): ${dayKeys.join(', ')}`);
+this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${dayKeys.length} days (dailyRollups fast path): ${dayKeys.join(', ')}`);
 }
 return true;
 }
@@ -736,7 +685,7 @@ if (errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
 return false;
 } else {
 // Unexpected error - log as warning
-this.deps.warn(`Backend sync: cache error for ${sessionFile}: ${errorMessage}`);
+this.deps.logger.warn(`Backend sync: cache error for ${sessionFile}: ${errorMessage}`);
 return false;
 }
 }
@@ -859,7 +808,7 @@ return false;
 		if (totalFiles === 0) {return;}
 		
 		const hitRate = ((cacheHits / totalFiles) * 100).toFixed(1);
-		this.deps.log(`Backend sync: Cache performance - Hits: ${cacheHits}, Misses: ${cacheMisses}, Hit Rate: ${hitRate}%`);
+		this.deps.logger.log(`Backend sync: Cache performance - Hits: ${cacheHits}, Misses: ${cacheMisses}, Hit Rate: ${hitRate}%`);
 	}
 
 	/**
@@ -890,12 +839,12 @@ return false;
 				const { validateTeamAlias } = await import('../identity.js');
 				const validation = validateTeamAlias(settings.userId);
 				if (!validation.valid) {
-					this.deps.warn(`⚠ Backend sync: User identity validation failed. Data will be synced WITHOUT user dimension.`);
-					this.deps.warn(`   Reason: ${validation.error}`);
-					this.deps.warn(`   Fix: Update "AI Engineering Fluency: Backend User Id" in settings to a valid team alias.`);
+					this.deps.logger.warn(`⚠ Backend sync: User identity validation failed. Data will be synced WITHOUT user dimension.`);
+					this.deps.logger.warn(`   Reason: ${validation.error}`);
+					this.deps.logger.warn(`   Fix: Update "AI Engineering Fluency: Backend User Id" in settings to a valid team alias.`);
 				}
 			} else {
-				this.deps.warn(`⚠ Backend sync: Could not resolve user identity for mode ${settings.userIdentityMode}. Data will be synced WITHOUT user dimension.`);
+				this.deps.logger.warn(`⚠ Backend sync: Could not resolve user identity for mode ${settings.userIdentityMode}. Data will be synced WITHOUT user dimension.`);
 			}
 		}
 		
@@ -931,16 +880,16 @@ outputTokens = result.metadata.outputTokens;
 // Fallback: text-based estimation — handles both flat text (delta format) and parts array (JSON format)
 const msgText = (req as any).message?.text;
 if (msgText) {
-inputTokens = this.deps.estimateTokensFromText(msgText, model);
+inputTokens = this.deps.sessionHandlers.estimateTokensFromText(msgText, model);
 } else if (req.message?.parts) {
 for (const part of req.message.parts) {
-if (part?.text) { inputTokens += this.deps.estimateTokensFromText(part.text, model); }
+if (part?.text) { inputTokens += this.deps.sessionHandlers.estimateTokensFromText(part.text, model); }
 }
 }
 const response = (req as any).response ?? req.response;
 if (Array.isArray(response)) {
 for (const r of response) {
-if (typeof r?.value === 'string') { outputTokens += this.deps.estimateTokensFromText(r.value, model); }
+if (typeof r?.value === 'string') { outputTokens += this.deps.sessionHandlers.estimateTokensFromText(r.value, model); }
 }
 }
 }
@@ -1024,12 +973,12 @@ let inputTokens = 0;
 let outputTokens = 0;
 let interactions = 0;
 if (event.type === 'user.message' && event.data?.content) {
-inputTokens = this.deps.estimateTokensFromText(event.data.content, model);
+inputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model);
 interactions = 1;
 } else if (event.type === 'assistant.message' && event.data?.content) {
-outputTokens = this.deps.estimateTokensFromText(event.data.content, model);
+outputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model);
 } else if (event.type === 'tool.result' && event.data?.output) {
-inputTokens = this.deps.estimateTokensFromText(event.data.output, model);
+inputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.output, model);
 }
 if (inputTokens === 0 && outputTokens === 0 && interactions === 0) { continue; }
 const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
@@ -1060,11 +1009,11 @@ let sessionJson: unknown;
 try {
 sessionJson = JSON.parse(content);
 if (!sessionJson || typeof sessionJson !== 'object') {
-this.deps.warn(`Backend sync: session file has invalid JSON structure: ${sessionFile}`);
+this.deps.logger.warn(`Backend sync: session file has invalid JSON structure: ${sessionFile}`);
 return false;
 }
 } catch (e) {
-this.deps.warn(`Backend sync: failed to parse JSON session file ${sessionFile}: ${e}`);
+this.deps.logger.warn(`Backend sync: failed to parse JSON session file ${sessionFile}: ${e}`);
 return false;
 }
 const sessionObj = sessionJson as Record<string, unknown>;
@@ -1078,13 +1027,13 @@ typeof req.timestamp !== 'undefined' ? req.timestamp : (sessionObj.lastMessageDa
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { continue; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-const model = this.deps.getModelFromRequest(req);
+const model = this.deps.sessionHandlers.getModelFromRequest(req);
 const { inputTokens, outputTokens } = this.extractTokenCountsFromRequest(req, model);
 if (inputTokens === 0 && outputTokens === 0) { continue; }
 const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
 upsertDailyRollup(rollups, key, { inputTokens, outputTokens, interactions: 1 });
 } catch (e) {
-this.deps.warn(`Backend sync: failed to process request in ${sessionFile}: ${e}`);
+this.deps.logger.warn(`Backend sync: failed to process request in ${sessionFile}: ${e}`);
 }
 }
 return true;
@@ -1113,7 +1062,7 @@ return true;
 		// Log the date range being processed
 		const todayKey = this.utility.toUtcDayKey(now);
 		const startKey = this.utility.toUtcDayKey(start);
-		this.deps.log(`Backend sync: processing sessions from ${startKey} to ${todayKey} (lookback ${lookbackDays} days)`);
+		this.deps.logger.log(`Backend sync: processing sessions from ${startKey} to ${todayKey} (lookback ${lookbackDays} days)`);
 
 		const machineId = vscode.env.machineId;
 		const rollups = new Map<string, { key: DailyRollupKey; value: DailyRollupValue }>();
@@ -1125,21 +1074,21 @@ return true;
 		}
 
 		// Use pre-fetched session files if provided, otherwise fetch them
-		const sessionFiles = args.sessionFiles ?? await this.deps.getCopilotSessionFiles();
-		const useCachedData = !!this.deps.getSessionFileDataCached;
+		const sessionFiles = args.sessionFiles ?? await this.deps.sessionHandlers.getCopilotSessionFiles();
+		const useCachedData = !!this.deps.sessionHandlers.getSessionFileDataCached;
 		let cacheHits = 0;
 		let cacheMisses = 0;
 		let filesSkipped = 0;
 		let filesProcessed = 0;
 		
 		const totalFiles = sessionFiles.length;
-		this.deps.log(`Backend sync: analyzing ${totalFiles} session files`);
+		this.deps.logger.log(`Backend sync: analyzing ${totalFiles} session files`);
 
 		for (const sessionFile of sessionFiles) {
 			let fileMtimeMs: number | undefined;
 			
 			try {
-				const fileStat = await this.deps.statSessionFile(sessionFile);
+				const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
 				fileMtimeMs = fileStat.mtimeMs;
 				
 				// Skip files older than lookback period (unless backfill mode bypasses this filter)
@@ -1154,41 +1103,41 @@ return true;
 					onProgress(filesProcessed, totalFiles, daysFound);
 				}
 			} catch (e) {
-				this.deps.warn(`Backend sync: failed to stat session file ${sessionFile}: ${e}`);
+				this.deps.logger.warn(`Backend sync: failed to stat session file ${sessionFile}: ${e}`);
 				continue;
 			}
 
 			// Determine the editor for this session file (only used when includeEditorDimension is set)
 			const editorForFile = includeEditorDimension
-				? getEditorTypeFromPath(sessionFile, this.deps.isOpenCodeSession)
+				? getEditorTypeFromPath(sessionFile, this.deps.editorHandlers?.isOpenCodeSession)
 				: undefined;
 
 			// Skip Visual Studio session files — they are binary MessagePack, not JSON
-			if (this.deps.isVSSessionFile && this.deps.isVSSessionFile(sessionFile)) {
+			if (this.deps.editorHandlers?.isVSSessionFile && this.deps.editorHandlers?.isVSSessionFile(sessionFile)) {
 				filesSkipped++;
 				continue;
 			}
 
 			// Handle OpenCode sessions separately (different data format)
-			if (this.deps.isOpenCodeSession && this.deps.isOpenCodeSession(sessionFile)) {
+			if (this.deps.editorHandlers?.isOpenCodeSession && this.deps.editorHandlers?.isOpenCodeSession(sessionFile)) {
 				const sessionArgs = this.makeSessionRollupArgs(machineId, userId, editorForFile, workspaceNamesById, rollups, startMs);
 				try {
 					const processed = await this.processOpenCodeSession(sessionFile, fileMtimeMs, sessionArgs);
 					if (!processed) { filesSkipped++; }
 				} catch (e) {
-					this.deps.warn(`Backend sync: failed to process OpenCode session ${sessionFile}: ${e}`);
+					this.deps.logger.warn(`Backend sync: failed to process OpenCode session ${sessionFile}: ${e}`);
 				}
 				continue;
 			}
 
 			// Handle Crush sessions separately (virtual paths pointing to crush.db SQLite entries)
-			if (this.deps.isCrushSession && this.deps.isCrushSession(sessionFile)) {
+			if (this.deps.editorHandlers?.isCrushSession && this.deps.editorHandlers?.isCrushSession(sessionFile)) {
 				const sessionArgs = this.makeSessionRollupArgs(machineId, userId, editorForFile, workspaceNamesById, rollups, startMs);
 				try {
 					const processed = await this.processCrushSession(sessionFile, fileMtimeMs, sessionArgs);
 					if (!processed) { filesSkipped++; }
 				} catch (e) {
-					this.deps.warn(`Backend sync: failed to process Crush session ${sessionFile}: ${e}`);
+					this.deps.logger.warn(`Backend sync: failed to process Crush session ${sessionFile}: ${e}`);
 				}
 				continue;
 			}
@@ -1201,7 +1150,7 @@ return true;
 			// Note: We still parse the file to get accurate day keys from timestamps,
 			// but use cached token counts for performance
 			if (useCachedData) {
-				const fileStat = await this.deps.statSessionFile(sessionFile);
+				const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
 				const cacheSuccess = await this.processCachedSessionFile(
 					sessionFile,
 					fileMtimeMs,
@@ -1228,7 +1177,7 @@ return true;
 			try {
 				content = await fs.promises.readFile(sessionFile, 'utf8');
 			} catch (e) {
-				this.deps.warn(`Backend sync: failed to read session file ${sessionFile}: ${e}`);
+				this.deps.logger.warn(`Backend sync: failed to read session file ${sessionFile}: ${e}`);
 				continue;
 			}
 			// JSONL (Copilot CLI or VS Code chat .json/.jsonl with delta-based content)
@@ -1246,7 +1195,7 @@ return true;
 			this.logCachePerformance(cacheHits, cacheMisses);
 		}
 		
-		this.deps.log(`Backend sync: processed ${filesProcessed} files, skipped ${filesSkipped} files outside lookback period`);
+		this.deps.logger.log(`Backend sync: processed ${filesProcessed} files, skipped ${filesSkipped} files outside lookback period`);
 
 		return { rollups, workspaceNamesById, machineNamesById };
 	}
@@ -1270,9 +1219,9 @@ return true;
 			});
 			if (!sharingPolicy.allowCloudSync || !isConfigured) {
 				if (!sharingPolicy.allowCloudSync) {
-					this.deps.log(`Backend sync: skipping (sharing policy does not allow cloud sync, profile: ${settings.sharingProfile})`);
+					this.deps.logger.log(`Backend sync: skipping (sharing policy does not allow cloud sync, profile: ${settings.sharingProfile})`);
 				} else if (!isConfigured) {
-					this.deps.log('Backend sync: skipping (backend not configured - missing storage account, subscription, or resource group)');
+					this.deps.logger.log('Backend sync: skipping (backend not configured - missing storage account, subscription, or resource group)');
 				}
 				return;
 			}
@@ -1281,7 +1230,7 @@ return true;
 			const lastSyncAt = this.deps.context?.globalState.get<number>('backend.lastSyncAt');
 			if (!force && lastSyncAt && Date.now() - lastSyncAt < BACKEND_SYNC_MIN_INTERVAL_MS) {
 				const secondsSinceLastSync = Math.round((Date.now() - lastSyncAt) / 1000);
-				this.deps.log(`Backend sync: skipping (last sync was ${secondsSinceLastSync}s ago, minimum interval is ${BACKEND_SYNC_MIN_INTERVAL_MS / 1000}s)`);
+				this.deps.logger.log(`Backend sync: skipping (last sync was ${secondsSinceLastSync}s ago, minimum interval is ${BACKEND_SYNC_MIN_INTERVAL_MS / 1000}s)`);
 				return;
 			}
 
@@ -1293,7 +1242,7 @@ return true;
 				: settings.storageAccount;
 			const lockAcquired = await this.acquireSyncLock(settings.backend, serverUrl);
 			if (!lockAcquired) {
-				this.deps.log('Backend sync: skipping (another VS Code window is currently syncing to the same server)');
+				this.deps.logger.log('Backend sync: skipping (another VS Code window is currently syncing to the same server)');
 				return;
 			}
 
@@ -1305,22 +1254,22 @@ return true;
 					try {
 						await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
 					} catch (e) {
-						this.deps.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
+						this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
 					}
 					this.consecutiveFailures = 0;
 					return;
 				}
 
-				this.deps.log('Backend sync: starting rollup sync');
+				this.deps.logger.log('Backend sync: starting rollup sync');
 				const creds = await this.credentialService.getBackendDataPlaneCredentials(settings);
 				if (!creds) {
 					// Shared Key mode selected but key not available (or user canceled). Keep local mode functional.
-					this.deps.warn('Backend sync: skipping (credentials not available - check authentication mode and secrets)');
+					this.deps.logger.warn('Backend sync: skipping (credentials not available - check authentication mode and secrets)');
 					// Update timestamp to prevent stale "last sync" display
 					try {
 						await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
 					} catch (e) {
-						this.deps.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
+						this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
 					}
 					return;
 				}
@@ -1339,16 +1288,16 @@ return true;
 					};
 					blobUploadNeeded = this.blobUploadService.shouldUpload(machineId, uploadSettings);
 					if (blobUploadNeeded) {
-						this.deps.log('Blob upload: will upload session files after table sync');
+						this.deps.logger.log('Blob upload: will upload session files after table sync');
 					} else {
 						const status = this.blobUploadService.getUploadStatus(machineId);
 						const hoursSince = status ? Math.round((Date.now() - status.lastUploadTime) / (1000 * 60 * 60)) : 0;
-						this.deps.log(`Blob upload: not needed (last upload ${hoursSince}h ago, frequency: ${settings.blobUploadFrequencyHours}h)`);
+						this.deps.logger.log(`Blob upload: not needed (last upload ${hoursSince}h ago, frequency: ${settings.blobUploadFrequencyHours}h)`);
 					}
 				}
 
 				// Fetch session files once and reuse for both rollups and blob upload
-				const sessionFiles = await this.deps.getCopilotSessionFiles();
+				const sessionFiles = await this.deps.sessionHandlers.getCopilotSessionFiles();
 
 				const resolvedIdentity = await this.resolveEffectiveUserIdentityForSync(settings, sharingPolicy.includeUserDimension);
 				const { rollups, workspaceNamesById, machineNamesById } = await this.computeDailyRollupsFromLocalSessions({ 
@@ -1364,10 +1313,10 @@ return true;
 				}
 				const sortedDays = Array.from(dayKeys).sort();
 				if (sortedDays.length > 0) {
-					this.deps.log(`Backend sync: processing data for ${sortedDays.length} days: ${sortedDays.join(', ')}`);
+					this.deps.logger.log(`Backend sync: processing data for ${sortedDays.length} days: ${sortedDays.join(', ')}`);
 				}
 				
-				this.deps.log(`Backend sync: upserting ${rollups.size} rollup entities (lookback ${settings.lookbackDays} days)`);
+				this.deps.logger.log(`Backend sync: upserting ${rollups.size} rollup entities (lookback ${settings.lookbackDays} days)`);
 
 				const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
 
@@ -1381,7 +1330,7 @@ return true;
 				if (cacheWasCleared && resolvedIdentity.userId && sortedDays.length > 0) {
 					const startDayKey = sortedDays[0];
 					const endDayKey = sortedDays[sortedDays.length - 1];
-					this.deps.log(`Backend sync: cleaning stale entities for user "${resolvedIdentity.userId}" (${startDayKey} to ${endDayKey})`);
+					this.deps.logger.log(`Backend sync: cleaning stale entities for user "${resolvedIdentity.userId}" (${startDayKey} to ${endDayKey})`);
 					try {
 						const deleteResult = await this.dataPlaneService.deleteEntitiesForUserDataset({
 							tableClient,
@@ -1390,10 +1339,10 @@ return true;
 							startDayKey,
 							endDayKey,
 						});
-						this.deps.log(`Backend sync: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
+						this.deps.logger.log(`Backend sync: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
 						await this.deps.context?.globalState.update('backend.lastCleanSyncVersion', CLEAN_SYNC_VERSION);
 					} catch (e) {
-						this.deps.warn(`Backend sync: failed to clean stale entities: ${e}`);
+						this.deps.logger.warn(`Backend sync: failed to clean stale entities: ${e}`);
 					}
 				}
 
@@ -1421,7 +1370,7 @@ return true;
 						userId: effectiveUserId,
 						userKeyType: resolvedIdentity.userKeyType,
 						shareWithTeam: includeConsent ? true : undefined,
-						consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.log),
+						consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.logger.log),
 						inputTokens: value.inputTokens,
 						outputTokens: value.outputTokens,
 						interactions: value.interactions,
@@ -1433,9 +1382,9 @@ return true;
 				const { successCount, errors } = await this.dataPlaneService.upsertEntitiesBatch(tableClient, entities);
 				
 				if (errors.length > 0) {
-					this.deps.warn(`Backend sync: ${successCount}/${entities.length} entities synced successfully, ${errors.length} failed`);
+					this.deps.logger.warn(`Backend sync: ${successCount}/${entities.length} entities synced successfully, ${errors.length} failed`);
 				} else {
-					this.deps.log(`Backend sync: ${successCount} entities synced successfully`);
+					this.deps.logger.log(`Backend sync: ${successCount} entities synced successfully`);
 				}
 
 				this.consecutiveFailures = 0;
@@ -1443,10 +1392,10 @@ return true;
 				try {
 					await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
 				} catch (e) {
-					this.deps.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
+					this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
 				}
 				
-				this.deps.log('Backend sync: completed');
+				this.deps.logger.log('Backend sync: completed');
 				
 				// Upload session files to Blob Storage if needed (check was done earlier)
 				if (blobUploadNeeded && this.blobUploadService) {
@@ -1459,7 +1408,7 @@ return true;
 							compressFiles: settings.blobCompressFiles
 						};
 
-						this.deps.log('Blob upload: starting');
+						this.deps.logger.log('Blob upload: starting');
 						
 						const uploadResult = await this.blobUploadService.uploadSessionFiles(
 							settings.storageAccount,
@@ -1471,12 +1420,12 @@ return true;
 						);
 						
 						if (uploadResult.success) {
-							this.deps.log(`Blob upload: ${uploadResult.message}`);
+							this.deps.logger.log(`Blob upload: ${uploadResult.message}`);
 						} else {
-							this.deps.warn(`Blob upload: ${uploadResult.message}`);
+							this.deps.logger.warn(`Blob upload: ${uploadResult.message}`);
 						}
 					} catch (blobError: any) {
-						this.deps.warn(`Blob upload: failed - ${blobError?.message ?? blobError}`);
+						this.deps.logger.warn(`Blob upload: failed - ${blobError?.message ?? blobError}`);
 					}
 				}
 
@@ -1487,7 +1436,7 @@ return true;
 					try {
 						await this.syncToSharingServer(settings, sharingPolicy);
 					} catch (ssErr: unknown) {
-						this.deps.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
+						this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
 					}
 				}
 
@@ -1496,14 +1445,14 @@ return true;
 			} catch (e: unknown) {
 				// Keep local mode functional.
 				const secretsToRedact = await this.credentialService.getBackendSecretsToRedactForError(settings);
-				this.deps.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
+				this.deps.logger.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
 
 				// Azure sync failed — still attempt the sharing server sync if configured.
 				if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
 					try {
 						await this.syncToSharingServer(settings, sharingPolicy);
 					} catch (ssErr: unknown) {
-						this.deps.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
+						this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
 					}
 				}
 			} finally {
@@ -1535,13 +1484,13 @@ return true;
 		sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>,
 	): Promise<void> {
 		if (!this.sharingServerUploadService) {
-			this.deps.warn('Sharing server upload: service not available');
+			this.deps.logger.warn('Sharing server upload: service not available');
 			return;
 		}
 
 		const githubToken = this.deps.getGithubToken?.();
 		if (!githubToken) {
-			this.deps.log('Sharing server upload: skipping (no GitHub token — authenticate with GitHub in VS Code first)');
+			this.deps.logger.log('Sharing server upload: skipping (no GitHub token — authenticate with GitHub in VS Code first)');
 			return;
 		}
 
@@ -1557,7 +1506,7 @@ return true;
 			});
 
 		if (rollups.size === 0) {
-			this.deps.log('Sharing server upload: no data to upload');
+			this.deps.logger.log('Sharing server upload: no data to upload');
 			return;
 		}
 
@@ -1582,13 +1531,13 @@ return true;
 
 		const totalInputTokens = entries.reduce((s, e) => s + e.inputTokens, 0);
 		const totalOutputTokens = entries.reduce((s, e) => s + e.outputTokens, 0);
-		this.deps.log(`Sharing server upload: uploading ${entries.length} rollup entries (${(totalInputTokens + totalOutputTokens).toLocaleString()} tokens total)`);
+		this.deps.logger.log(`Sharing server upload: uploading ${entries.length} rollup entries (${(totalInputTokens + totalOutputTokens).toLocaleString()} tokens total)`);
 		await this.sharingServerUploadService.uploadRollups(
 			settings.sharingServerEndpointUrl,
 			githubToken,
 			entries,
-			this.deps.log,
-			this.deps.warn,
+			this.deps.logger.log,
+			this.deps.logger.warn,
 		);
 	}
 
@@ -1611,8 +1560,8 @@ return true;
 			settings.sharingServerEndpointUrl,
 			githubToken,
 			score,
-			this.deps.log,
-			this.deps.warn,
+			this.deps.logger.log,
+			this.deps.logger.warn,
 		);
 	}
 
@@ -1633,15 +1582,15 @@ return true;
 			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
 		});
 		if (!sharingPolicy.allowCloudSync || !isConfigured) {
-			this.deps.warn('Backfill: skipping (cloud sync disabled or backend not configured)');
+			this.deps.logger.warn('Backfill: skipping (cloud sync disabled or backend not configured)');
 			return;
 		}
 
-		this.deps.log(`Backfill: starting deep scan (up to ${maxLookbackDays} days, mtime filter disabled)`);
+		this.deps.logger.log(`Backfill: starting deep scan (up to ${maxLookbackDays} days, mtime filter disabled)`);
 
 		const creds = await this.credentialService.getBackendDataPlaneCredentials(settings);
 		if (!creds) {
-			this.deps.warn('Backfill: skipping (credentials not available)');
+			this.deps.logger.warn('Backfill: skipping (credentials not available)');
 			return;
 		}
 
@@ -1659,7 +1608,7 @@ return true;
 		const dayKeys = new Set<string>();
 		for (const { key } of rollups.values()) { dayKeys.add(key.day); }
 		const sortedDays = Array.from(dayKeys).sort();
-		this.deps.log(`Backfill: found data for ${sortedDays.length} days: ${sortedDays.slice(0, 10).join(', ')}${sortedDays.length > 10 ? '…' : ''}`);
+		this.deps.logger.log(`Backfill: found data for ${sortedDays.length} days: ${sortedDays.slice(0, 10).join(', ')}${sortedDays.length > 10 ? '…' : ''}`);
 
 		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
 		const entities: BackendAggDailyEntityLike[] = [];
@@ -1686,7 +1635,7 @@ return true;
 				userId: effectiveUserId,
 				userKeyType: resolvedIdentity.userKeyType,
 				shareWithTeam: includeConsent ? true : undefined,
-				consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.log),
+				consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.logger.log),
 				inputTokens: value.inputTokens,
 				outputTokens: value.outputTokens,
 				interactions: value.interactions,
@@ -1705,7 +1654,7 @@ return true;
 		if (resolvedIdentity.userId && sortedDays.length > 0) {
 			const startDayKey = sortedDays[0];
 			const endDayKey = sortedDays[sortedDays.length - 1];
-			this.deps.log(`Backfill: cleaning stale entities for user "${resolvedIdentity.userId}" in date range ${startDayKey} to ${endDayKey}`);
+			this.deps.logger.log(`Backfill: cleaning stale entities for user "${resolvedIdentity.userId}" in date range ${startDayKey} to ${endDayKey}`);
 			try {
 				const deleteResult = await this.dataPlaneService.deleteEntitiesForUserDataset({
 					tableClient,
@@ -1714,17 +1663,17 @@ return true;
 					startDayKey,
 					endDayKey,
 				});
-				this.deps.log(`Backfill: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
+				this.deps.logger.log(`Backfill: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
 			} catch (e) {
-				this.deps.warn(`Backfill: failed to clean stale entities (continuing with upsert): ${e}`);
+				this.deps.logger.warn(`Backfill: failed to clean stale entities (continuing with upsert): ${e}`);
 			}
 		}
 
 		const { successCount, errors } = await this.dataPlaneService.upsertEntitiesBatch(tableClient, entities);
 		if (errors.length > 0) {
-			this.deps.warn(`Backfill: ${successCount}/${entities.length} entities synced, ${errors.length} failed`);
+			this.deps.logger.warn(`Backfill: ${successCount}/${entities.length} entities synced, ${errors.length} failed`);
 		} else {
-			this.deps.log(`Backfill: ${successCount} entities synced successfully across ${sortedDays.length} days`);
+			this.deps.logger.log(`Backfill: ${successCount} entities synced successfully across ${sortedDays.length} days`);
 		}
 	}
 }

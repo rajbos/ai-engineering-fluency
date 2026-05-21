@@ -27,10 +27,26 @@ export interface BlobUploadSettings {
 /**
  * Upload status tracking per machine.
  */
-interface UploadStatus {
+export interface UploadStatus {
 	lastUploadTime: number; // Timestamp in ms
 	filesUploaded: number;
 	lastError?: string;
+}
+
+/**
+ * Interface for the blob upload service, enabling DI and testability.
+ */
+export interface IBlobUploadService {
+	uploadSessionFiles(
+		storageAccount: string,
+		settings: BlobUploadSettings,
+		credential: TokenCredential | StorageSharedKeyCredential,
+		sessionFiles: string[],
+		machineId: string,
+		datasetId: string
+	): Promise<{ success: boolean; filesUploaded: number; message: string }>;
+	shouldUpload(machineId: string, settings: BlobUploadSettings): boolean;
+	getUploadStatus(machineId: string): UploadStatus | undefined;
 }
 
 /**

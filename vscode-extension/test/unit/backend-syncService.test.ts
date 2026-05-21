@@ -14,20 +14,52 @@ import { CredentialService } from '../../src/backend/services/credentialService'
 import { DataPlaneService } from '../../src/backend/services/dataPlaneService';
 import { BackendUtility } from '../../src/backend/services/utilityService';
 
-function makeDeps(overrides?: Partial<SyncServiceDeps>): SyncServiceDeps {
+/** Flat override shape that mirrors the original SyncServiceDeps properties for convenient test setup. */
+interface FlatDepsOverrides {
+	context?: vscode.ExtensionContext | undefined;
+	log?: (message: string) => void;
+	warn?: (message: string) => void;
+	getCopilotSessionFiles?: () => Promise<string[]>;
+	estimateTokensFromText?: (text: string, model: string) => number;
+	getModelFromRequest?: (request: any) => string;
+	getSessionFileDataCached?: (sessionFilePath: string, mtime: number, fileSize: number) => Promise<any>;
+	updateTokenStats?: () => Promise<void>;
+	statSessionFile?: (sessionFile: string) => Promise<any>;
+	isOpenCodeSession?: (sessionFile: string) => boolean;
+	getOpenCodeSessionData?: (sessionFile: string) => Promise<any>;
+	isCrushSession?: (sessionFile: string) => boolean;
+	getCrushSessionData?: (sessionFile: string) => Promise<any>;
+	isVSSessionFile?: (sessionFile: string) => boolean;
+	getGithubToken?: () => string | undefined;
+}
+
+function makeDeps(overrides?: FlatDepsOverrides): SyncServiceDeps {
 	return {
-		context: undefined,
-		log: () => {},
-		warn: () => {},
-		getCopilotSessionFiles: async () => [],
-		estimateTokensFromText: () => 0,
-		getModelFromRequest: () => 'gpt-4o',
-		statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
-		...overrides
+		context: overrides?.context ?? undefined,
+		logger: {
+			log: overrides?.log ?? (() => {}),
+			warn: overrides?.warn ?? (() => {}),
+		},
+		sessionHandlers: {
+			getCopilotSessionFiles: overrides?.getCopilotSessionFiles ?? (async () => []),
+			estimateTokensFromText: overrides?.estimateTokensFromText ?? (() => 0),
+			getModelFromRequest: overrides?.getModelFromRequest ?? (() => 'gpt-4o'),
+			getSessionFileDataCached: overrides?.getSessionFileDataCached,
+			statSessionFile: overrides?.statSessionFile ?? (async () => ({ mtimeMs: Date.now(), size: 100 } as any)),
+		},
+		editorHandlers: {
+			isOpenCodeSession: overrides?.isOpenCodeSession,
+			getOpenCodeSessionData: overrides?.getOpenCodeSessionData,
+			isCrushSession: overrides?.isCrushSession,
+			getCrushSessionData: overrides?.getCrushSessionData,
+			isVSSessionFile: overrides?.isVSSessionFile,
+		},
+		updateTokenStats: overrides?.updateTokenStats,
+		getGithubToken: overrides?.getGithubToken,
 	};
 }
 
-function makeService(depsOverrides?: Partial<SyncServiceDeps>): SyncService {
+function makeService(depsOverrides?: FlatDepsOverrides): SyncService {
 	const deps = makeDeps(depsOverrides);
 	const credSvc = new CredentialService(undefined as any);
 	const dataSvc = new DataPlaneService(BackendUtility, () => {}, async () => []);
@@ -38,7 +70,7 @@ function makeService(depsOverrides?: Partial<SyncServiceDeps>): SyncService {
  * Create a SyncService with custom credential/data-plane/blob services for integration-level tests.
  */
 function makeServiceWithServices(
-	depsOverrides?: Partial<SyncServiceDeps>,
+	depsOverrides?: FlatDepsOverrides,
 	credSvcOverride?: any,
 	dataSvcOverride?: any,
 	blobSvcOverride?: any

@@ -126,49 +126,12 @@ api.post('/fluency-score', requireBearerAuth, async (c) => {
 		return c.json({ error: 'Invalid JSON body.' }, 400);
 	}
 
-	if (typeof body !== 'object' || body === null || Array.isArray(body)) {
-		return c.json({ error: 'Body must be a JSON object.' }, 400);
-	}
-
-	const b = body as Record<string, unknown>;
-
-	if (!Number.isInteger(b.overallStage) || (b.overallStage as number) < 1 || (b.overallStage as number) > 4) {
-		return c.json({ error: '"overallStage" must be an integer between 1 and 4.' }, 400);
-	}
-	if (!Array.isArray(b.categories)) {
-		return c.json({ error: '"categories" must be an array.' }, 400);
-	}
-	if (b.categories.length > MAX_FLUENCY_CATEGORIES) {
-		return c.json({ error: `"categories" too long (max ${MAX_FLUENCY_CATEGORIES} items).` }, 400);
-	}
-	if (b.overallLabel !== undefined && b.overallLabel !== null) {
-		if (typeof b.overallLabel !== 'string') {
-			return c.json({ error: '"overallLabel" must be a string.' }, 400);
-		}
-		if (b.overallLabel.length > MAX_FLUENCY_LABEL_LENGTH) {
-			return c.json({ error: `"overallLabel" too long (max ${MAX_FLUENCY_LABEL_LENGTH}).` }, 400);
-		}
-	}
-	if (b.computedAt !== undefined && b.computedAt !== null) {
-		if (typeof b.computedAt !== 'string') {
-			return c.json({ error: '"computedAt" must be a string.' }, 400);
-		}
-		if (b.computedAt.length > 64) {
-			return c.json({ error: '"computedAt" too long (max 64 chars).' }, 400);
-		}
-	}
-	for (let i = 0; i < b.categories.length; i++) {
-		const catErr = validateFluencyCategory(b.categories[i], i);
-		if (catErr) {
-			return c.json({ error: catErr }, 400);
-		}
+	const validationError = validateFluencyScore(body);
+	if (validationError) {
+		return c.json({ error: validationError }, 400);
 	}
 
 	const scoreJson = JSON.stringify(body);
-	if (Buffer.byteLength(scoreJson, 'utf8') > MAX_FLUENCY_SCORE_JSON_BYTES) {
-		return c.json({ error: `Fluency score payload too large (max ${MAX_FLUENCY_SCORE_JSON_BYTES} bytes).` }, 400);
-	}
-
 	upsertUserFluencyScore(user.id, scoreJson);
 	return c.json({ ok: true });
 });
@@ -253,6 +216,57 @@ function validateEntry(entry: unknown): string | null {
 
 function isNonNegativeInt(value: unknown): boolean {
 	return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/**
+ * Validates the fluency score payload.
+ * Returns null if the body is valid, or an error message string describing
+ * the first validation failure found.
+ */
+function validateFluencyScore(body: unknown): string | null {
+	if (typeof body !== 'object' || body === null || Array.isArray(body)) {
+		return 'Body must be a JSON object.';
+	}
+
+	const b = body as Record<string, unknown>;
+
+	if (!Number.isInteger(b.overallStage) || (b.overallStage as number) < 1 || (b.overallStage as number) > 4) {
+		return '"overallStage" must be an integer between 1 and 4.';
+	}
+	if (!Array.isArray(b.categories)) {
+		return '"categories" must be an array.';
+	}
+	if (b.categories.length > MAX_FLUENCY_CATEGORIES) {
+		return `"categories" too long (max ${MAX_FLUENCY_CATEGORIES} items).`;
+	}
+	if (b.overallLabel !== undefined && b.overallLabel !== null) {
+		if (typeof b.overallLabel !== 'string') {
+			return '"overallLabel" must be a string.';
+		}
+		if (b.overallLabel.length > MAX_FLUENCY_LABEL_LENGTH) {
+			return `"overallLabel" too long (max ${MAX_FLUENCY_LABEL_LENGTH}).`;
+		}
+	}
+	if (b.computedAt !== undefined && b.computedAt !== null) {
+		if (typeof b.computedAt !== 'string') {
+			return '"computedAt" must be a string.';
+		}
+		if (b.computedAt.length > 64) {
+			return '"computedAt" too long (max 64 chars).';
+		}
+	}
+	for (let i = 0; i < b.categories.length; i++) {
+		const catErr = validateFluencyCategory(b.categories[i], i);
+		if (catErr) {
+			return catErr;
+		}
+	}
+
+	if (Buffer.byteLength(JSON.stringify(body), 'utf8') > MAX_FLUENCY_SCORE_JSON_BYTES) {
+		return `Fluency score payload too large (max ${MAX_FLUENCY_SCORE_JSON_BYTES} bytes).`;
+	}
+
+	return null;
 }
 
 function validateFluencyCategory(cat: unknown, index: number): string | null {
