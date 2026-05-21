@@ -1,5 +1,6 @@
 // Fluency Level Viewer webview
 import { buttonHtml } from '../shared/buttonConfig';
+import { escapeHtml } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import styles from './styles.css';
 
@@ -55,15 +56,6 @@ const STAGE_DESCRIPTIONS: Record<number, string> = {
 	3: 'Regular, purposeful use across multiple features',
 	4: 'Strategic, advanced use leveraging the full AI ecosystem'
 };
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
-}
 
 /**
  * Convert markdown links to HTML links while escaping other HTML.

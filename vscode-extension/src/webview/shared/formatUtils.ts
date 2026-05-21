@@ -104,3 +104,65 @@ export function formatCost(value: number): string {
 		maximumFractionDigits: 2
 	}).format(value);
 }
+
+/**
+ * Escapes HTML special characters in a string to prevent XSS.
+ */
+export function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#039;');
+}
+
+/**
+ * Formats a byte count as a human-readable file size string.
+ */
+export function formatFileSize(bytes: number): string {
+	const numericBytes = Number(bytes);
+	if (!Number.isFinite(numericBytes) || numericBytes < 0) {
+		return 'N/A';
+	}
+	if (numericBytes < 1024) {
+		return `${numericBytes} B`;
+	}
+	if (numericBytes < 1024 * 1024) {
+		return `${(numericBytes / 1024).toFixed(1)} KB`;
+	}
+	return `${(numericBytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
+ * Returns a human-readable "time since" string for an ISO timestamp.
+ */
+export function getTimeSince(isoString: string): string {
+	try {
+		const now = Date.now();
+		const then = new Date(isoString).getTime();
+		const diffMs = now - then;
+
+		if (diffMs < 0) {
+			return 'Just now';
+		}
+
+		const seconds = Math.floor(diffMs / 1000);
+		const minutes = Math.floor(seconds / 60);
+		const hours = Math.floor(minutes / 60);
+		const days = Math.floor(hours / 24);
+
+		if (days > 0) {
+			return `${days} day${days !== 1 ? 's' : ''} ago`;
+		}
+		if (hours > 0) {
+			return `${hours} hour${hours !== 1 ? 's' : ''} ago`;
+		}
+		if (minutes > 0) {
+			return `${minutes} minute${minutes !== 1 ? 's' : ''} ago`;
+		}
+		return `${seconds} second${seconds !== 1 ? 's' : ''} ago`;
+	} catch {
+		return 'Unknown';
+	}
+}

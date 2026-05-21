@@ -2,7 +2,7 @@
 import { el } from '../shared/domUtils';
 import { buttonHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -264,15 +264,6 @@ type AgentSessionsResult = {
   since: string;
   fetchedAt: string;
 };
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
-}
 
 const EFFORT_DISPLAY_NAMES: Record<string, string> = {
 	xhigh: 'Extra High',
