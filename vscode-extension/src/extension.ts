@@ -2119,10 +2119,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (showCost !== 'none') {
 			const costParts: string[] = [];
 			if (showCost === 'today' || showCost === 'both') {
-				costParts.push(`$${(stats.today.estimatedCostCopilot ?? 0).toFixed(2)}`);
+				costParts.push(`$${(stats.today.estimatedCostCopilot ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 			}
 			if (showCost === 'currentMonth' || showCost === 'both') {
-				costParts.push(`$${(stats.last30Days.estimatedCostCopilot ?? 0).toFixed(2)}`);
+				costParts.push(`$${(stats.last30Days.estimatedCostCopilot ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
 			}
 			parts.push(`$(credit-card) ${costParts.join(' | ')}`);
 		}
