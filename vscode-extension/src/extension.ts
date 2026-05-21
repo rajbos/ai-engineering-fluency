@@ -155,6 +155,7 @@ import {
 import { determineOnboardingAction } from './onboarding';
 import { addModelUsage, addEditorUsage, computeUtcDateRanges, aggregatePeriodStats, type SessionAggregateInput } from './statsHelpers';
 import { getNonce, buildCspMeta } from './utils/webviewUtils';
+import { isGuidMcpTool } from './utils/toolUtils';
 import { buildChartData as _buildChartData } from './chartDataBuilder';
 
 type LocalViewRegressionProbeResult = {
@@ -1154,7 +1155,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const suppressed = new Set<string>(
 			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', [])
 		);
-		return Array.from(allTools).filter(tool => !this.toolNameMap[tool] && !this.toolNameMap[tool.toLowerCase()] && !suppressed.has(tool)).sort();
+		return Array.from(allTools).filter(tool => !this.toolNameMap[tool] && !this.toolNameMap[tool.toLowerCase()] && !isGuidMcpTool(tool) && !suppressed.has(tool)).sort();
 	}
 
 	private async showUnknownMcpToolsBanner(): Promise<void> {

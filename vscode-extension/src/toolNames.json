@@ -659,7 +659,4 @@
   ,"debugger_get_output_window_text": "Debugger Get Output Window Text"
   ,"get_symbols": "Get Symbols"
   ,"lookup_vs": "Lookup VS"
-  ,"mcp__e292a297-0140-4fb7-a4de-39bd4e3f0fd6__read_resource": "Claude MCP: M365 Connector - Read Resource"
-  ,"mcp__e292a297-0140-4fb7-a4de-39bd4e3f0fd6__sharepoint_folder_search": "Claude MCP: M365 Connector - SharePoint Folder Search"
-  ,"mcp__e292a297-0140-4fb7-a4de-39bd4e3f0fd6__sharepoint_search": "Claude MCP: M365 Connector - SharePoint Search"
 }

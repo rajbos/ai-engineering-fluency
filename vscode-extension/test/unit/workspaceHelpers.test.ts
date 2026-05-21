@@ -543,6 +543,11 @@ test('extractMcpServerName: mcp__server__tool format extracts server name', () =
 test('extractMcpServerName: mcp__server__multi__part__tool extracts only first server segment', () => {
         assert.equal(extractMcpServerName('mcp__my_server__tool__with__parts'), 'my_server');
 });
+
+test('extractMcpServerName: GUID-keyed MCP tool returns "Claude MCP"', () => {
+        assert.equal(extractMcpServerName('mcp__e292a297-0140-4fb7-a4de-39bd4e3f0fd6__sharepoint_search'), 'Claude MCP');
+        assert.equal(extractMcpServerName('mcp__a1b2c3d4-0000-1111-2222-333344445555__read_resource'), 'Claude MCP');
+});
 // ── scanWorkspaceCustomizationFiles — category detection ─────────────────
 
 import * as fs from 'node:fs';

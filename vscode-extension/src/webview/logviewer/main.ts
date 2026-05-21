@@ -146,6 +146,7 @@ const vscode = acquireVsCodeApi();
 const initialData = getWindowData<SessionLogData>('__INITIAL_LOGDATA__');
 
 import toolNames from '../../toolNames.json';
+import { resolveGuidMcpToolName } from '../../utils/toolUtils';
 
 let TOOL_NAME_MAP: { [key: string]: string } | null = toolNames || null;
 
@@ -166,7 +167,7 @@ function lookupToolName(id: string): string {
 if (!TOOL_NAME_MAP) {
 return id;
 }
-return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? id;
+return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? id;
 }
 
 function getEffortDisplayName(level: string): string {

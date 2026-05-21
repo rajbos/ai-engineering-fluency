@@ -256,6 +256,7 @@ function getEffortDisplayName(level: string): string {
 
 import toolNames from '../../toolNames.json';
 import automaticToolIds from '../../automaticTools.json';
+import { resolveGuidMcpToolName, isGuidMcpTool } from '../../utils/toolUtils';
 
 let TOOL_NAME_MAP: { [key: string]: string } | null = toolNames || null;
 const AUTOMATIC_TOOL_SET_WV = new Set<string>((automaticToolIds as string[]).map(id => id.toLowerCase()));
@@ -264,7 +265,7 @@ function lookupToolName(id: string): string {
 	if (!TOOL_NAME_MAP) {
 		return id;
 	}
-	return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? id;
+	return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? id;
 }
 
 function lookupMcpToolName(id: string): string {
@@ -292,7 +293,7 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	const suppressed = new Set<string>(stats.suppressedUnknownTools ?? []);
 	
 	// Filter to only unknown tools (not a key in the map, case-insensitively) and not suppressed
-	return Array.from(allTools).filter(tool => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !suppressed.has(tool)).sort();
+	return Array.from(allTools).filter(tool => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !suppressed.has(tool)).sort();
 }
 
 function createMcpToolIssueUrl(unknownTools: string[]): string {

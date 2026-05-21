@@ -20,6 +20,7 @@ import {
 	toPlatformPath
 } from './utils/pathUtils';
 import { withErrorRecoverySync } from './utils/errors';
+import { isGuidMcpTool } from './utils/toolUtils';
 
 export {
 	fileUriToPath,
@@ -607,6 +608,10 @@ export function extractMcpServerName(toolName: string, toolNameMap: { [key: stri
 	// Claude Code double-underscore format: mcp__server__tool
 	// e.g. "mcp__github__create_issue" → "github"
 	if (toolName.startsWith('mcp__')) {
+		// GUID-keyed MCP servers (e.g. tenant-specific M365 Connector)
+		if (isGuidMcpTool(toolName)) {
+			return 'Claude MCP';
+		}
 		const withoutPrefix = toolName.slice('mcp__'.length);
 		const serverEnd = withoutPrefix.indexOf('__');
 		const serverName = serverEnd >= 0 ? withoutPrefix.slice(0, serverEnd) : withoutPrefix;
