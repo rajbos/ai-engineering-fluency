@@ -7,6 +7,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { registerMessageHandler } from '../shared/messageHandler';
 
 type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number; cli: number };
 type ToolCallUsage = { total: number; byTool: { [key: string]: number } };
@@ -1690,8 +1691,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 }
 
 // Listen for messages from the extension
-window.addEventListener('message', (event) => {
-	const message = event.data;
+registerMessageHandler<any>((message) => {
 	switch (message.command) {
 		case 'repoAnalysisResults':
 			displayRepoAnalysisResults(message.data, message.workspacePath);
