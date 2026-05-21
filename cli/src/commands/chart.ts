@@ -3,12 +3,13 @@
  */
 import { Command } from 'commander';
 import { discoverSessionFiles, calculateDailyStats, buildChartPayload } from '../helpers';
+import { shouldOutputJson } from '../commandUtils';
 
 export const chartCommand = new Command('chart')
 	.description('Output daily token usage data for the chart webview')
 	.option('--json', 'Output raw JSON (for machine consumption)')
 	.action(async (options) => {
-		if (!options.json) {
+		if (!shouldOutputJson(options)) {
 			// Human-readable not implemented yet; just emit JSON
 			process.stderr.write('Use --json flag for chart data output\n');
 			return;

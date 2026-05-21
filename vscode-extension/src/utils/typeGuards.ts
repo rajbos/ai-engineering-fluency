@@ -34,6 +34,15 @@ export function isArrayIndexSegment(seg: string): boolean {
 }
 
 /**
+ * Returns true if value is a non-negative safe integer (0, 1, 2, …).
+ * Use this to validate counts, indices, and token values coming from
+ * untrusted sources (parsed JSON, API payloads, etc.).
+ */
+export function isNonNegativeInt(value: unknown): value is number {
+	return typeof value === 'number' && Number.isInteger(value) && value >= 0;
+}
+
+/**
  * Normalise a raw model identifier to a canonical string.
  *
  * - Non-string values fall back to `defaultModel`.

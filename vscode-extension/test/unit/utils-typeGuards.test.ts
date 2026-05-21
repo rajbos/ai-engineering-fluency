@@ -5,6 +5,7 @@ import {
 	isObject,
 	isSafePathSegment,
 	isArrayIndexSegment,
+	isNonNegativeInt,
 	normalizeModelId,
 	type JsonObject
 } from '../../src/utils/typeGuards';
@@ -85,6 +86,54 @@ test('isArrayIndexSegment: returns false for non-digit strings', () => {
 	assert.equal(isArrayIndexSegment('1a'), false);
 	assert.equal(isArrayIndexSegment('-1'), false);
 	assert.equal(isArrayIndexSegment('1.5'), false);
+});
+
+// ── isNonNegativeInt ─────────────────────────────────────────────────────────
+
+test('isNonNegativeInt: returns true for zero', () => {
+	assert.ok(isNonNegativeInt(0));
+});
+
+test('isNonNegativeInt: returns true for positive integers', () => {
+	assert.ok(isNonNegativeInt(1));
+	assert.ok(isNonNegativeInt(42));
+	assert.ok(isNonNegativeInt(1_000_000));
+});
+
+test('isNonNegativeInt: returns false for negative integers', () => {
+	assert.equal(isNonNegativeInt(-1), false);
+	assert.equal(isNonNegativeInt(-100), false);
+});
+
+test('isNonNegativeInt: returns false for floats', () => {
+	assert.equal(isNonNegativeInt(0.5), false);
+	assert.equal(isNonNegativeInt(1.1), false);
+	assert.equal(isNonNegativeInt(-0.1), false);
+});
+
+test('isNonNegativeInt: returns false for non-number types', () => {
+	assert.equal(isNonNegativeInt('0'), false);
+	assert.equal(isNonNegativeInt(null), false);
+	assert.equal(isNonNegativeInt(undefined), false);
+	assert.equal(isNonNegativeInt(true), false);
+	assert.equal(isNonNegativeInt({}), false);
+	assert.equal(isNonNegativeInt([]), false);
+});
+
+test('isNonNegativeInt: returns false for NaN and Infinity', () => {
+	assert.equal(isNonNegativeInt(NaN), false);
+	assert.equal(isNonNegativeInt(Infinity), false);
+	assert.equal(isNonNegativeInt(-Infinity), false);
+});
+
+test('isNonNegativeInt: narrows type to number inside if-branch', () => {
+	const value: unknown = 7;
+	if (isNonNegativeInt(value)) {
+		const typed: number = value;
+		assert.equal(typed, 7);
+	} else {
+		assert.fail('Expected isNonNegativeInt to return true');
+	}
 });
 
 // ── normalizeModelId ─────────────────────────────────────────────────────────

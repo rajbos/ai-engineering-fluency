@@ -44,6 +44,7 @@ import {
 	isUuidPointerFile,
 } from '../tokenEstimation';
 import { isCopilotChatNonSessionFile } from './adapterPredicates';
+import { pathExists } from '../utils/fsAsync';
 
 /** VS Code variants probed across all platforms. */
 const VSCODE_VARIANTS = [
@@ -176,9 +177,6 @@ function getWSLWindowsPathsSync(): string[] {
 	return out;
 }
 
-async function pathExists(p: string): Promise<boolean> {
-	try { await fs.promises.access(p); return true; } catch { return false; }
-}
 
 async function runWithConcurrency<T>(
 	items: T[],

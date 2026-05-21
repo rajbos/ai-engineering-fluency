@@ -32,15 +32,13 @@ import type {
 	CandidatePath,
 } from '../ecosystemAdapter';
 import { parseJetBrainsPartition, type JetBrainsParsedSession, type JetBrainsToolCall } from '../jetbrains';
+import { pathExists } from '../utils/fsAsync';
 
 /** Returns the canonical JetBrains Copilot session directory (~/.copilot/jb). */
 export function getJetBrainsSessionDir(): string {
 	return path.join(os.homedir(), '.copilot', 'jb');
 }
 
-async function pathExists(p: string): Promise<boolean> {
-	try { await fs.promises.access(p); return true; } catch { return false; }
-}
 
 export class JetBrainsAdapter implements IEcosystemAdapter, IDiscoverableEcosystem {
 	readonly id = 'jetbrains';

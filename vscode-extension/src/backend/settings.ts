@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { MIN_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS, DEFAULT_LOOKBACK_DAYS } from './constants';
 import type { BackendUserIdentityMode } from './identity';
 import { parseBackendSharingProfile, type BackendSharingProfile } from './sharingProfile';
+import { inferSharingProfile } from './settingsValidation';
 
 export type BackendType = 'storageTables' | 'sharingServer';
 
@@ -73,16 +74,7 @@ export function getBackendSettings(): BackendSettings {
 	// always default to teamAnonymized (hashed IDs, no user dimension, names off).
 	// Legacy shareWithTeam only affects the profile when an explicit userIdentityMode is set.
 	const backendEnabled = config.get<boolean>('backend.enabled', false);
-	const inferredSharingProfile: BackendSharingProfile = parsedSharingProfile
-		?? (
-			!backendEnabled
-				? 'off'
-				: (shareWithTeam && userIdentityMode !== 'pseudonymous'
-					? 'teamIdentified'
-					: (shareWithTeam && userIdentityMode === 'pseudonymous'
-						? 'teamPseudonymous'
-						: 'teamAnonymized'))
-		);
+	const inferredSharingProfile: BackendSharingProfile = inferSharingProfile(parsedSharingProfile, backendEnabled, shareWithTeam, userIdentityMode);
 
 	return {
 		enabled: config.get<boolean>('backend.enabled', false),

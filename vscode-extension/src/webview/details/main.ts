@@ -12,8 +12,8 @@ import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
+import type { ModelUsage } from '../shared/types';
 
-type ModelUsage = Record<string, { inputTokens: number; outputTokens: number }>;
 type EditorUsage = Record<string, { tokens: number; sessions: number }>;
 type TableSortKey = 'name' | 'today' | 'last30Days' | 'lastMonth' | 'projected';
 type SortDir = 'asc' | 'desc';
