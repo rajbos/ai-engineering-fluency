@@ -95,7 +95,7 @@ type SessionFolder = {
   editorName?: string;
 };
 
-type StatusBarShowOption = 'none' | 'today' | 'currentMonth' | 'both';
+type StatusBarShowOption = 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth';
 
 type DisplaySettings = {
   showTokens: StatusBarShowOption;
@@ -2159,8 +2159,10 @@ Choose what to show in the VS Code status bar toolbar. You can show token counts
   <select id="select-show-tokens" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
     <option value="none" ${(data.displaySettings?.showTokens ?? 'both') === 'none' ? 'selected' : ''}>None</option>
     <option value="today" ${(data.displaySettings?.showTokens ?? 'both') === 'today' ? 'selected' : ''}>Today only</option>
-    <option value="currentMonth" ${(data.displaySettings?.showTokens ?? 'both') === 'currentMonth' ? 'selected' : ''}>Last 30 days only</option>
-    <option value="both" ${(data.displaySettings?.showTokens ?? 'both') === 'both' ? 'selected' : ''}>Both (today + last 30 days)</option>
+    <option value="last30days" ${(data.displaySettings?.showTokens ?? 'both') === 'last30days' ? 'selected' : ''}>Last 30 days only</option>
+    <option value="currentMonth" ${(data.displaySettings?.showTokens ?? 'both') === 'currentMonth' ? 'selected' : ''}>Current calendar month only</option>
+    <option value="both" ${(data.displaySettings?.showTokens ?? 'both') === 'both' ? 'selected' : ''}>Today + last 30 days (default)</option>
+    <option value="todayAndCurrentMonth" ${(data.displaySettings?.showTokens ?? 'both') === 'todayAndCurrentMonth' ? 'selected' : ''}>Today + current calendar month</option>
   </select>
 </div>
 <div style="display: flex; align-items: center; gap: 12px;">
@@ -2168,8 +2170,10 @@ Choose what to show in the VS Code status bar toolbar. You can show token counts
   <select id="select-show-cost" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
     <option value="none" ${(data.displaySettings?.showCost ?? 'none') === 'none' ? 'selected' : ''}>None (hidden)</option>
     <option value="today" ${(data.displaySettings?.showCost ?? 'none') === 'today' ? 'selected' : ''}>Today only</option>
-    <option value="currentMonth" ${(data.displaySettings?.showCost ?? 'none') === 'currentMonth' ? 'selected' : ''}>Last 30 days only</option>
-    <option value="both" ${(data.displaySettings?.showCost ?? 'none') === 'both' ? 'selected' : ''}>Both (today + last 30 days)</option>
+    <option value="last30days" ${(data.displaySettings?.showCost ?? 'none') === 'last30days' ? 'selected' : ''}>Last 30 days only</option>
+    <option value="currentMonth" ${(data.displaySettings?.showCost ?? 'none') === 'currentMonth' ? 'selected' : ''}>Current calendar month only</option>
+    <option value="both" ${(data.displaySettings?.showCost ?? 'none') === 'both' ? 'selected' : ''}>Today + last 30 days</option>
+    <option value="todayAndCurrentMonth" ${(data.displaySettings?.showCost ?? 'none') === 'todayAndCurrentMonth' ? 'selected' : ''}>Today + current calendar month</option>
   </select>
 </div>
 </div>
