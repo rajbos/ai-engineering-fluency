@@ -1618,7 +1618,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (detailedStats.today.sessions === 0 && detailedStats.last30Days.sessions === 0) {
 				this.setStatusBarText('$(symbol-numeric) No session data yet');
 			} else {
-				this.setStatusBarText(`$(symbol-numeric) ${this.formatCompact(detailedStats.today.tokens)} | ${this.formatCompact(detailedStats.last30Days.tokens)}`);
+				this.setStatusBarText(this.buildStatusBarText(detailedStats));
 			}
 
 			// Create detailed tooltip with improved style
@@ -2091,11 +2091,54 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.use24HourTime', true);
 	}
 
+	private getStatusBarShowTokensSetting(): 'none' | 'today' | 'currentMonth' | 'both' {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<'none' | 'today' | 'currentMonth' | 'both'>('display.statusBar.showTokens', 'both');
+	}
+
+	private getStatusBarShowCostSetting(): 'none' | 'today' | 'currentMonth' | 'both' {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<'none' | 'today' | 'currentMonth' | 'both'>('display.statusBar.showCost', 'none');
+	}
+
+	private buildStatusBarText(stats: DetailedStats): string {
+		const showTokens = this.getStatusBarShowTokensSetting();
+		const showCost = this.getStatusBarShowCostSetting();
+
+		const parts: string[] = [];
+
+		if (showTokens !== 'none') {
+			const tokenParts: string[] = [];
+			if (showTokens === 'today' || showTokens === 'both') {
+				tokenParts.push(this.formatCompact(stats.today.tokens));
+			}
+			if (showTokens === 'currentMonth' || showTokens === 'both') {
+				tokenParts.push(this.formatCompact(stats.last30Days.tokens));
+			}
+			parts.push(`$(symbol-numeric) ${tokenParts.join(' | ')}`);
+		}
+
+		if (showCost !== 'none') {
+			const costParts: string[] = [];
+			if (showCost === 'today' || showCost === 'both') {
+				costParts.push(`$${(stats.today.estimatedCostCopilot ?? 0).toFixed(2)}`);
+			}
+			if (showCost === 'currentMonth' || showCost === 'both') {
+				costParts.push(`$${(stats.last30Days.estimatedCostCopilot ?? 0).toFixed(2)}`);
+			}
+			parts.push(`$(credit-card) ${costParts.join(' | ')}`);
+		}
+
+		if (parts.length === 0) {
+			return `$(symbol-numeric) AI Fluency`;
+		}
+
+		return parts.join('  ');
+	}
+
 	private refreshOpenPanelsForSettingChange(): void {
 		const stats = this.lastDetailedStats;
 		if (!stats) { return; }
-		// Refresh status bar text (respects new compact setting)
-		this.setStatusBarText(`$(symbol-numeric) ${this.formatCompact(stats.today.tokens)} | ${this.formatCompact(stats.last30Days.tokens)}`);
+		// Refresh status bar text (respects new display settings)
+		this.setStatusBarText(this.buildStatusBarText(stats));
 		if (this.detailsPanel) {
 			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, stats);
 		}
@@ -7405,6 +7448,20 @@ ${hashtag}`;
             )
           );
           break;
+        case "updateDisplaySetting":
+          if (typeof message.key === 'string' && message.value !== undefined) {
+            await this.dispatch('updateDisplaySetting:diagnostics', async () => {
+              const allowedKeys = [
+                'display.statusBar.showTokens',
+                'display.statusBar.showCost',
+              ];
+              if (allowedKeys.includes(message.key)) {
+                const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
+                await config.update(message.key, message.value, vscode.ConfigurationTarget.Global);
+              }
+            });
+          }
+          break;
         case "resetDebugCounters":
           await this.dispatch('resetDebugCounters:diagnostics', async () => {
             await this.context.globalState.update('extension.openCount', 0);
@@ -7473,8 +7530,7 @@ ${hashtag}`;
           break;
         case "analyzeFolder":
           await this.dispatch('analyzeFolder:diagnostics', async () => {
-            const { folderPath, toolType } = message as { folderPath: string; toolType: string };
-            if (!folderPath) {
+            const { folderPath, toolType } = message as { folderPath: string; toolType: string };            if (!folderPath) {
               if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
                 this.diagnosticsPanel.webview.postMessage({
                   command: "folderAnalysisResult",
@@ -8086,6 +8142,10 @@ ${hashtag}`;
       backendConfigured: this.isBackendConfigured(),
       isDebugMode,
       globalStateCounters,
+      displaySettings: {
+        showTokens: this.getStatusBarShowTokensSetting(),
+        showCost: this.getStatusBarShowCostSetting(),
+      },
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
