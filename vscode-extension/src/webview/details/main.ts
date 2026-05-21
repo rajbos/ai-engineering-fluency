@@ -10,6 +10,7 @@ import tokenEstimatorsJson from '../../tokenEstimators.json';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { registerMessageHandler } from '../shared/messageHandler';
 
 type ModelUsage = Record<string, { inputTokens: number; outputTokens: number }>;
 type EditorUsage = Record<string, { tokens: number; sessions: number }>;
@@ -898,11 +899,10 @@ root.append(fallback);
 }
 
 // Listen for background stat updates from the extension
-window.addEventListener('message', (event: MessageEvent) => {
-const message = event.data as { command: string; data?: DetailedStats };
-if (message.command === 'updateStats' && message.data) {
-render(message.data);
-}
+registerMessageHandler<{ command: string; data?: DetailedStats }>((message) => {
+	if (message.command === 'updateStats') {
+		render(message.data as DetailedStats);
+	}
 });
 
 void bootstrap();

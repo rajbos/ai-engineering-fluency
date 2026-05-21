@@ -8,6 +8,7 @@ import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitch
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { registerMessageHandler } from '../shared/messageHandler';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -1770,8 +1771,7 @@ function wireCopyButtons(): void {
 }
 
 // Listen for messages from the extension
-window.addEventListener('message', (event) => {
-	const message = event.data;
+registerMessageHandler<any>((message) => {
 	switch (message.command) {
 		case 'repoAnalysisResults':
 			displayRepoAnalysisResults(message.data, message.workspacePath);

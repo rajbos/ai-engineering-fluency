@@ -9,6 +9,7 @@ import { StorageManagementClient } from '@azure/arm-storage';
 import { SubscriptionClient } from '@azure/arm-resources-subscriptions';
 import { TableServiceClient } from '@azure/data-tables';
 import { safeStringifyError, isAzurePolicyDisallowedError, isStorageLocalAuthDisallowedByPolicyError } from '../../utils/errors';
+import { getAzureTableStorageEndpoint } from '../../utils/azureEndpoints';
 import type { BackendAuthMode, BackendSettings } from '../settings';
 import { validateTeamAlias, type BackendUserIdentityMode } from '../identity';
 import { CredentialService } from './credentialService';
@@ -455,7 +456,7 @@ export class AzureResourceService {
 			try {
 				const creds = await this.credentialService.getBackendDataPlaneCredentials(finalSettings);
 				if (creds) {
-					const endpoint = `https://${finalSettings.storageAccount}.table.core.windows.net`;
+					const endpoint = getAzureTableStorageEndpoint(finalSettings.storageAccount);
 					const serviceClient = new TableServiceClient(endpoint, creds.tableCredential as any);
 					await serviceClient.createTable(finalSettings.eventsTable);
 					this.deps.log(`Created optional events table: ${finalSettings.eventsTable}`);

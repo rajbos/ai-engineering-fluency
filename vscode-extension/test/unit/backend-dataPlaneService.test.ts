@@ -4,6 +4,7 @@ import * as assert from 'node:assert/strict';
 
 import { DataPlaneService } from '../../src/backend/services/dataPlaneService';
 import { BackendUtility } from '../../src/backend/services/utilityService';
+import { getAzureBlobStorageEndpoint } from '../../src/utils/azureEndpoints';
 import type { TableClientLike, BackendAggDailyEntityLike } from '../../src/backend/storageTables';
 
 function makeService(log?: (msg: string) => void): DataPlaneService {
@@ -32,17 +33,15 @@ function makeMockTableClient(overrides?: {
 	};
 }
 
-// ── getStorageBlobEndpoint ───────────────────────────────────────────────
+// ── azureEndpoints utility ───────────────────────────────────────────────
 
-test('getStorageBlobEndpoint returns correct URL', () => {
-	const svc = makeService();
-	assert.equal(svc.getStorageBlobEndpoint('mystorageacct'), 'https://mystorageacct.blob.core.windows.net');
+test('getAzureBlobStorageEndpoint returns correct URL', () => {
+	assert.equal(getAzureBlobStorageEndpoint('mystorageacct'), 'https://mystorageacct.blob.core.windows.net');
 });
 
-test('getStorageBlobEndpoint handles various account names', () => {
-	const svc = makeService();
-	assert.equal(svc.getStorageBlobEndpoint('a'), 'https://a.blob.core.windows.net');
-	assert.equal(svc.getStorageBlobEndpoint('longstorageaccountname12345'), 'https://longstorageaccountname12345.blob.core.windows.net');
+test('getAzureBlobStorageEndpoint handles various account names', () => {
+	assert.equal(getAzureBlobStorageEndpoint('a'), 'https://a.blob.core.windows.net');
+	assert.equal(getAzureBlobStorageEndpoint('longstorageaccountname12345'), 'https://longstorageaccountname12345.blob.core.windows.net');
 });
 
 // ── createTableClient ────────────────────────────────────────────────────

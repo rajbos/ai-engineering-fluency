@@ -6,6 +6,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { registerMessageHandler } from '../shared/messageHandler';
 
 // --- Analogy constants ---
 /** Average EU petrol car CO₂ emissions per km (grams) */
@@ -302,8 +303,7 @@ function wireButtons(): void {
 	wireExtensionPointButtons(vscode);
 }
 
-window.addEventListener('message', (event: MessageEvent) => {
-	const message = event.data;
+registerMessageHandler<{ command: string; data?: EnvironmentalStats }>((message) => {
 	if (message.command === 'updateStats') {
 		render(message.data as EnvironmentalStats);
 	}

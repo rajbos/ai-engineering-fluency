@@ -237,7 +237,7 @@ export class BackendFacade {
     if (settings.userIdentityMode === "teamAlias") {
       const validation = validateTeamAlias(settings.userId);
       this.deps.log(
-        `[Backend] Team alias validation - input: "${settings.userId}", valid: ${validation.valid}, ${validation.valid ? `alias: "${validation.alias}"` : `error: ${validation.error}`}`,
+        `[Backend] Team alias validation - input: "${settings.userId}", valid: ${validation.valid}, ${validation.valid ? `alias: "${validation.data.alias}"` : `error: ${validation.error}`}`,
       );
     }
 

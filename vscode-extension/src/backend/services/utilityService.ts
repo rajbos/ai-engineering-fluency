@@ -6,8 +6,15 @@
 import * as path from 'path';
 import * as fs from 'fs/promises';
 import { fileUriToPath } from '../../workspaceHelpers';
+import {
+	CODE_WORKSPACE_EXTENSION,
+	DAY_KEY_REGEX,
+	DAY_MS,
+	EPOCH_SECONDS_THRESHOLD,
+	MAX_DAYS_RANGE,
+	MAX_DISPLAY_NAME_LENGTH,
+} from '../constants';
 
-const MAX_DISPLAY_NAME_LENGTH = 64;
 
 /**
  * BackendUtility provides pure static helper functions for the backend module.
@@ -41,7 +48,7 @@ export class BackendUtility {
 		if (!dayKey || typeof dayKey !== 'string') {
 			return false;
 		}
-		if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+		if (!DAY_KEY_REGEX.test(dayKey)) {
 			return false;
 		}
 		const date = new Date(`${dayKey}T00:00:00.000Z`);
@@ -84,16 +91,15 @@ export class BackendUtility {
 			throw new Error(`Invalid endDayKey format: ${endDayKey}`);
 		}
 		
-		const MAX_DAYS = 400;
 		const startDate = new Date(`${startDayKey}T00:00:00.000Z`);
 		const endDate = new Date(`${endDayKey}T00:00:00.000Z`);
-		const dayCount = Math.ceil((endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+		const dayCount = Math.ceil((endDate.getTime() - startDate.getTime()) / DAY_MS) + 1;
 		
 		if (dayCount < 0) {
 			throw new Error(`Invalid date range: startDayKey (${startDayKey}) is after endDayKey (${endDayKey})`);
 		}
-		if (dayCount > MAX_DAYS) {
-			throw new Error(`Date range too large: ${dayCount} days (max ${MAX_DAYS})`);
+		if (dayCount > MAX_DAYS_RANGE) {
+			throw new Error(`Date range too large: ${dayCount} days (max ${MAX_DAYS_RANGE})`);
 		}
 		
 		const result: string[] = [];
@@ -116,7 +122,7 @@ export class BackendUtility {
 		const asNumber = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : undefined;
 		if (typeof asNumber === 'number' && Number.isFinite(asNumber)) {
 			// Treat sub-second epochs as seconds, otherwise assume milliseconds.
-			return asNumber < 1_000_000_000_000 ? asNumber * 1000 : asNumber;
+			return asNumber < EPOCH_SECONDS_THRESHOLD ? asNumber * 1000 : asNumber;
 		}
 
 		if (typeof value === 'string') {
@@ -219,8 +225,8 @@ export class BackendUtility {
 						continue;
 					}
 					// For .code-workspace files, show name without extension.
-					const name = base.toLowerCase().endsWith('.code-workspace')
-						? base.substring(0, base.length - '.code-workspace'.length)
+					const name = base.toLowerCase().endsWith(CODE_WORKSPACE_EXTENSION)
+						? base.substring(0, base.length - CODE_WORKSPACE_EXTENSION.length)
 						: base;
 					return BackendUtility.normalizeNameForStorage(name);
 				} catch {

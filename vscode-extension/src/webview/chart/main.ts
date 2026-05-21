@@ -8,6 +8,7 @@ import { createViewStateManager } from '../shared/viewState';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { registerMessageHandler } from '../shared/messageHandler';
 
 type ChartModule = typeof import('chart.js/auto');
 type ChartConstructor = ChartModule['default'];
