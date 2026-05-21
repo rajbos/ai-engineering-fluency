@@ -6,23 +6,25 @@ import chalk from 'chalk';
 import { discoverSessionFiles, calculateUsageAnalysisStats, fmt, buildCustomizationMatrix } from '../helpers';
 import { ProgressTracker } from '../progress';
 import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
+import { shouldOutputJson } from '../commandUtils';
 
 export const fluencyCommand = new Command('fluency')
 	.description('Show your Copilot Fluency Score and improvement tips')
 	.option('-t, --tips', 'Show improvement tips for each category')
 	.option('--json', 'Output raw JSON (for machine consumption)')
 	.action(async (options) => {
-		if (!options.json) {
+		const json = shouldOutputJson(options);
+		if (!json) {
 			console.log(chalk.bold.cyan('\n🎯 Copilot Token Tracker - Fluency Score\n'));
 		}
 
-		const progress = new ProgressTracker(!!options.json);
+		const progress = new ProgressTracker(json);
 		progress.show('Scanning for session files...');
 		const files = await discoverSessionFiles();
 		progress.done();
 
 		if (files.length === 0) {
-			if (options.json) {
+			if (json) {
 				process.stdout.write('{}');
 			} else {
 				console.log(chalk.yellow('⚠️  No session files found.'));
@@ -47,7 +49,7 @@ export const fluencyCommand = new Command('fluency')
 			false
 		);
 
-		if (options.json) {
+		if (json) {
 			// Machine-readable output: emit pure JSON to stdout and exit
 			const payload = {
 				overallStage: scores.overallStage,
