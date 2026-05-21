@@ -104,3 +104,41 @@ export function formatCost(value: number): string {
 		maximumFractionDigits: 2
 	}).format(value);
 }
+
+/**
+ * Escapes HTML special characters to prevent XSS.
+ */
+export function escapeHtml(text: string): string {
+	return text
+		.replace(/&/g, '&amp;')
+		.replace(/</g, '&lt;')
+		.replace(/>/g, '&gt;')
+		.replace(/"/g, '&quot;')
+		.replace(/'/g, '&#039;');
+}
+
+/**
+ * Converts markdown links to HTML anchor tags while escaping other HTML.
+ * Converts [text](url) to <a href="url" target="_blank" rel="noopener noreferrer">text</a>
+ */
+export function markdownToHtml(text: string): string {
+	let escaped = escapeHtml(text);
+	escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
+	return escaped;
+}
+
+/** Maps stage number (1–4) to its display label. */
+export const STAGE_LABELS: Record<number, string> = {
+	1: 'Stage 1: AI Skeptic',
+	2: 'Stage 2: AI Explorer',
+	3: 'Stage 3: AI Collaborator',
+	4: 'Stage 4: AI Strategist'
+};
+
+/** Maps stage number (1–4) to a one-line description of that stage. */
+export const STAGE_DESCRIPTIONS: Record<number, string> = {
+	1: 'Rarely uses AI tools or uses only basic features',
+	2: 'Exploring AI capabilities with occasional use',
+	3: 'Regular, purposeful use across multiple features',
+	4: 'Strategic, advanced use leveraging the full AI ecosystem'
+};

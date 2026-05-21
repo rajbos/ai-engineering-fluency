@@ -2,6 +2,7 @@
 import { buttonHtml } from '../shared/buttonConfig';
 import type { ContextReferenceUsage } from '../shared/contextRefUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 
@@ -82,22 +83,6 @@ const initialData = window.__INITIAL_MATURITY__;
 let demoModeActive = false;
 let demoStageOverrides: number[] = [];
 let demoPanelExpanded = false; // Hidden by default
-
-// ── Stage labels ───────────────────────────────────────────────────────
-
-const STAGE_LABELS: Record<number, string> = {
-	1: 'Stage 1: AI Skeptic',
-	2: 'Stage 2: AI Explorer',
-	3: 'Stage 3: AI Collaborator',
-	4: 'Stage 4: AI Strategist'
-};
-
-const STAGE_DESCRIPTIONS: Record<number, string> = {
-	1: 'Rarely uses AI tools or uses only basic features',
-	2: 'Exploring AI capabilities with occasional use',
-	3: 'Regular, purposeful use across multiple features',
-	4: 'Strategic, advanced use leveraging the full AI ecosystem'
-};
 
 // ── Radar chart SVG ────────────────────────────────────────────────────
 
@@ -185,28 +170,6 @@ function stageColor(stage: number): string {
 		case 4: return '#10b981';
 		default: return '#666';
 	}
-}
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
-}
-
-/**
- * Convert markdown links to HTML links while escaping other HTML.
- * Converts [text](url) to <a href="url" target="_blank" rel="noopener noreferrer">text</a>
- */
-function markdownToHtml(text: string): string {
-	// First escape all HTML
-	let escaped = escapeHtml(text);
-	// Then convert markdown links to HTML links
-	// Pattern: [text](url) where text and url are already escaped
-	escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-	return escaped;
 }
 
 // ── Demo controls ──────────────────────────────────────────────────────
