@@ -814,8 +814,7 @@ async function bootstrap(): Promise<void> {
 void bootstrap();
 
 // Listen for background data updates from the extension
-window.addEventListener('message', (event: MessageEvent) => {
-	const message = event.data;
+registerMessageHandler((message) => {
 	if (message.command === 'updateChartData') {
 		// Save current toggles for restoration after chart re-initializes
 		pendingView = currentView;

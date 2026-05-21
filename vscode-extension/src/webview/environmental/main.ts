@@ -302,8 +302,7 @@ function wireButtons(): void {
 	wireExtensionPointButtons(vscode);
 }
 
-window.addEventListener('message', (event: MessageEvent) => {
-	const message = event.data;
+registerMessageHandler<{ command: string; data?: EnvironmentalStats }>((message) => {
 	if (message.command === 'updateStats') {
 		render(message.data as EnvironmentalStats);
 	}
