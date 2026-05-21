@@ -184,6 +184,8 @@ type SessionFilePreload = {
 	details?: SessionFileDetails;
 };
 
+type StatusBarDisplaySetting = 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth';
+
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
 	private static readonly CACHE_VERSION = 46; // Restore CLI cache token propagation in tokenEstimation + usageAnalysis (was reverted in 7d9def8)
@@ -2091,53 +2093,56 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.use24HourTime', true);
 	}
 
-	private getStatusBarShowTokensSetting(): 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth' {
-		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth'>('display.statusBar.showTokens', 'both');
+	private getStatusBarShowTokensSetting(): StatusBarDisplaySetting {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<StatusBarDisplaySetting>('display.statusBar.showTokens', 'both');
 	}
 
-	private getStatusBarShowCostSetting(): 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth' {
-		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth'>('display.statusBar.showCost', 'none');
+	private getStatusBarShowCostSetting(): StatusBarDisplaySetting {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<StatusBarDisplaySetting>('display.statusBar.showCost', 'none');
+	}
+
+	private buildTokenParts(show: StatusBarDisplaySetting, stats: DetailedStats): string[] {
+		const parts: string[] = [];
+		if (show === 'today' || show === 'both' || show === 'todayAndCurrentMonth') {
+			parts.push(this.formatCompact(stats.today.tokens));
+		}
+		if (show === 'last30days' || show === 'both') {
+			parts.push(this.formatCompact(stats.last30Days.tokens));
+		}
+		if (show === 'currentMonth' || show === 'todayAndCurrentMonth') {
+			parts.push(this.formatCompact(stats.month.tokens));
+		}
+		return parts;
+	}
+
+	private buildCostParts(show: StatusBarDisplaySetting, stats: DetailedStats): string[] {
+		const fmt = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+		const parts: string[] = [];
+		if (show === 'today' || show === 'both' || show === 'todayAndCurrentMonth') {
+			parts.push(fmt(stats.today.estimatedCostCopilot ?? 0));
+		}
+		if (show === 'last30days' || show === 'both') {
+			parts.push(fmt(stats.last30Days.estimatedCostCopilot ?? 0));
+		}
+		if (show === 'currentMonth' || show === 'todayAndCurrentMonth') {
+			parts.push(fmt(stats.month.estimatedCostCopilot ?? 0));
+		}
+		return parts;
 	}
 
 	private buildStatusBarText(stats: DetailedStats): string {
 		const showTokens = this.getStatusBarShowTokensSetting();
 		const showCost = this.getStatusBarShowCostSetting();
-
 		const parts: string[] = [];
 
 		if (showTokens !== 'none') {
-			const tokenParts: string[] = [];
-			if (showTokens === 'today' || showTokens === 'both' || showTokens === 'todayAndCurrentMonth') {
-				tokenParts.push(this.formatCompact(stats.today.tokens));
-			}
-			if (showTokens === 'last30days' || showTokens === 'both') {
-				tokenParts.push(this.formatCompact(stats.last30Days.tokens));
-			}
-			if (showTokens === 'currentMonth' || showTokens === 'todayAndCurrentMonth') {
-				tokenParts.push(this.formatCompact(stats.month.tokens));
-			}
-			parts.push(`$(symbol-numeric) ${tokenParts.join(' | ')}`);
+			parts.push(`$(symbol-numeric) ${this.buildTokenParts(showTokens, stats).join(' | ')}`);
 		}
-
 		if (showCost !== 'none') {
-			const costParts: string[] = [];
-			if (showCost === 'today' || showCost === 'both' || showCost === 'todayAndCurrentMonth') {
-				costParts.push(`$${(stats.today.estimatedCostCopilot ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-			}
-			if (showCost === 'last30days' || showCost === 'both') {
-				costParts.push(`$${(stats.last30Days.estimatedCostCopilot ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-			}
-			if (showCost === 'currentMonth' || showCost === 'todayAndCurrentMonth') {
-				costParts.push(`$${(stats.month.estimatedCostCopilot ?? 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`);
-			}
-			parts.push(`$(credit-card) ${costParts.join(' | ')}`);
+			parts.push(`$(credit-card) ${this.buildCostParts(showCost, stats).join(' | ')}`);
 		}
 
-		if (parts.length === 0) {
-			return `$(symbol-numeric) AI Fluency`;
-		}
-
-		return parts.join('  ');
+		return parts.length > 0 ? parts.join('  ') : `$(symbol-numeric) AI Fluency`;
 	}
 
 	private refreshOpenPanelsForSettingChange(): void {
