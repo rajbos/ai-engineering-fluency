@@ -11,6 +11,7 @@ import {
     analyzeSessionUsage,
     getModelUsageFromSession,
     deriveConversationPatterns,
+    isParsedSessionJson,
     type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
 import type {
@@ -619,6 +620,130 @@ test('getModelUsageFromSession: delegates to openCode adapter for openCode sessi
     assert.equal(result['gpt-4o'].inputTokens, 99);
 });
 
+test('getModelUsageFromSession: CLI session.shutdown populates cachedReadTokens and cacheCreationTokens', async () => {
+    // Simulates a real Copilot CLI session.shutdown event where inputTokens is the TOTAL
+    // (uncached + cacheRead + cacheWrite) and both cache fields are reported separately.
+    // Without reading these fields, the extension charges full input rate for everything.
+    const shutdownEvent = JSON.stringify({
+        type: 'session.shutdown',
+        data: {
+            shutdownType: 'routine',
+            modelMetrics: {
+                'claude-sonnet-4.6': {
+                    requests: { count: 10, cost: 1 },
+                    usage: {
+                        inputTokens: 1000000,
+                        outputTokens: 5000,
+                        cacheReadTokens: 900000,
+                        cacheWriteTokens: 50000,
+                        reasoningTokens: 0,
+                    },
+                },
+            },
+        },
+        timestamp: '2026-05-13T10:00:00.000Z',
+    });
+    const deps = makeMockDeps();
+    const result = await getModelUsageFromSession(deps, 'fake/path/events.jsonl', shutdownEvent + '\n');
+    const usage = result['claude-sonnet-4.6'];
+    assert.ok(usage, 'claude-sonnet-4.6 key should exist');
+    // inputTokens = total (1,000,000 = 900,000 read + 50,000 write + 50,000 uncached)
+    assert.equal(usage.inputTokens, 1000000);
+    assert.equal(usage.outputTokens, 5000);
+    // Cache fields must be populated so calculateEstimatedCost can apply the discount
+    assert.equal(usage.cachedReadTokens, 900000);
+    assert.equal(usage.cacheCreationTokens, 50000);
+});
+
+test('getModelUsageFromSession: CLI session without cache fields leaves cachedReadTokens undefined', async () => {
+    const shutdownEvent = JSON.stringify({
+        type: 'session.shutdown',
+        data: {
+            shutdownType: 'routine',
+            modelMetrics: {
+                'claude-sonnet-4.6': {
+                    usage: { inputTokens: 100000, outputTokens: 2000 },
+                    // no cacheReadTokens / cacheWriteTokens
+                },
+            },
+        },
+        timestamp: '2026-05-13T10:00:00.000Z',
+    });
+    const deps = makeMockDeps();
+    const result = await getModelUsageFromSession(deps, 'fake/path/events.jsonl', shutdownEvent + '\n');
+    const usage = result['claude-sonnet-4.6'];
+    assert.ok(usage);
+    assert.equal(usage.inputTokens, 100000);
+    // No cache fields → undefined (not 0), so calculateEstimatedCost falls back to full price correctly
+    assert.equal(usage.cachedReadTokens, undefined);
+    assert.equal(usage.cacheCreationTokens, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// CLI live session (no session.shutdown) — content-based estimation
+// ---------------------------------------------------------------------------
+
+test('getModelUsageFromSession: CLI live session uses accumulated content not output ratio', async () => {
+    // 0 tool calls → numTurns=1, contextFactor=1 → inputTokens = raw content estimate
+    const events = [
+        JSON.stringify({ type: 'session.start', data: { selectedModel: 'claude-sonnet-4.5' } }),
+        JSON.stringify({ type: 'user.message', data: { content: 'hello', model: 'claude-sonnet-4.5' } }),
+        JSON.stringify({ type: 'assistant.message', data: { outputTokens: 500, model: 'claude-sonnet-4.5' } }),
+    ].join('\n');
+    const deps = makeMockDeps();
+    const result = await getModelUsageFromSession(deps, 'fake/.copilot/session-state/uuid/events.jsonl', events);
+    const usage = result['claude-sonnet-4.5'];
+    assert.ok(usage, 'claude-sonnet-4.5 key should exist');
+    // outputTokens = real value from API
+    assert.equal(usage.outputTokens, 500);
+    // inputTokens = ceil("hello".length * 0.25) * contextFactor(1) = ceil(1.25) * 1 = 2
+    assert.equal(usage.inputTokens, 2);
+    // cachedReadTokens must NOT be set for live sessions (no shutdown data)
+    assert.equal(usage.cachedReadTokens, undefined);
+});
+
+test('getModelUsageFromSession: CLI live session scales input by context-growth factor from tool calls', async () => {
+    // 10 tool calls → numTurns=5, contextFactor=(5+1)/2=3
+    const toolStart = JSON.stringify({ type: 'tool.execution_start', data: { model: 'claude-sonnet-4.5' } });
+    const toolDone = JSON.stringify({ type: 'tool.execution_complete', data: { result: { content: 'tool' }, model: 'claude-sonnet-4.5' } });
+    const events = [
+        JSON.stringify({ type: 'session.start', data: { selectedModel: 'claude-sonnet-4.5' } }),
+        JSON.stringify({ type: 'user.message', data: { content: 'hello', model: 'claude-sonnet-4.5' } }),
+        ...Array.from({ length: 10 }, () => [toolStart, toolDone]).flat(),
+        JSON.stringify({ type: 'assistant.message', data: { outputTokens: 500, model: 'claude-sonnet-4.5' } }),
+    ].join('\n');
+    const deps = makeMockDeps();
+    const result = await getModelUsageFromSession(deps, 'fake/.copilot/session-state/uuid/events.jsonl', events);
+    const usage = result['claude-sonnet-4.5'];
+    assert.ok(usage, 'claude-sonnet-4.5 key should exist');
+    assert.equal(usage.outputTokens, 500);
+    // accumulatedInput = ceil(5*0.25) + 10*ceil(4*0.25) = 2 + 10*1 = 12
+    // numTurns = max(1, round(10/2)) = 5, contextFactor = (5+1)/2 = 3
+    // inputTokens = round(12 * 3) = 36
+    assert.equal(usage.inputTokens, 36);
+    assert.equal(usage.cachedReadTokens, undefined);
+});
+
+test('getModelUsageFromSession: CLI live session gives far lower estimate than old 130x output ratio', async () => {
+    // Old approach with 30 tool calls + 10K output tokens: 10000 * 130 = 1,300,000
+    // New approach: accumulated content * contextFactor stays well under 100K
+    const toolStart = JSON.stringify({ type: 'tool.execution_start', data: { model: 'claude-sonnet-4.5' } });
+    const toolDone = JSON.stringify({ type: 'tool.execution_complete', data: { result: { content: 'tool' }, model: 'claude-sonnet-4.5' } });
+    const events = [
+        JSON.stringify({ type: 'session.start', data: { selectedModel: 'claude-sonnet-4.5' } }),
+        JSON.stringify({ type: 'user.message', data: { content: 'hello', model: 'claude-sonnet-4.5' } }),
+        ...Array.from({ length: 30 }, () => [toolStart, toolDone]).flat(),
+        JSON.stringify({ type: 'assistant.message', data: { outputTokens: 10000, model: 'claude-sonnet-4.5' } }),
+    ].join('\n');
+    const deps = makeMockDeps();
+    const result = await getModelUsageFromSession(deps, 'fake/.copilot/session-state/uuid/events.jsonl', events);
+    const usage = result['claude-sonnet-4.5'];
+    // accumulated=2+30=32, numTurns=15, contextFactor=8, inputTokens=round(32*8)=256
+    assert.equal(usage.outputTokens, 10000);
+    assert.ok(usage.inputTokens < 100_000, `inputTokens (${usage.inputTokens}) should be far below the old 1.3M estimate`);
+    assert.equal(usage.cachedReadTokens, undefined);
+});
+
 // ---------------------------------------------------------------------------
 // calculateModelSwitching
 // ---------------------------------------------------------------------------
@@ -842,3 +967,75 @@ test('analyzeSessionUsage: empty requests array returns empty analysis', async (
     assert.equal(result.toolCalls.total, 0);
 });
 
+// ---------------------------------------------------------------------------
+// isParsedSessionJson
+// ---------------------------------------------------------------------------
+
+test('isParsedSessionJson: null returns false', () => {
+    assert.equal(isParsedSessionJson(null), false);
+});
+
+test('isParsedSessionJson: string returns false', () => {
+    assert.equal(isParsedSessionJson('{"requests":[]}'), false);
+});
+
+test('isParsedSessionJson: number returns false', () => {
+    assert.equal(isParsedSessionJson(42), false);
+});
+
+test('isParsedSessionJson: array returns false', () => {
+    assert.equal(isParsedSessionJson([{ requests: [] }]), false);
+});
+
+test('isParsedSessionJson: empty object returns true', () => {
+    assert.equal(isParsedSessionJson({}), true);
+});
+
+test('isParsedSessionJson: valid session with requests array returns true', () => {
+    assert.equal(isParsedSessionJson({ requests: [] }), true);
+});
+
+test('isParsedSessionJson: requests as non-array (string) returns false', () => {
+    assert.equal(isParsedSessionJson({ requests: 'not-an-array' }), false);
+});
+
+test('isParsedSessionJson: requests as non-array (number) returns false', () => {
+    assert.equal(isParsedSessionJson({ requests: 42 }), false);
+});
+
+test('isParsedSessionJson: creationDate as string returns false', () => {
+    assert.equal(isParsedSessionJson({ creationDate: '2024-01-01' }), false);
+});
+
+test('isParsedSessionJson: creationDate as number returns true', () => {
+    assert.equal(isParsedSessionJson({ creationDate: 1700000000000 }), true);
+});
+
+test('isParsedSessionJson: lastMessageDate as string returns false', () => {
+    assert.equal(isParsedSessionJson({ lastMessageDate: 'now' }), false);
+});
+
+test('isParsedSessionJson: mode as non-object (string) returns false', () => {
+    assert.equal(isParsedSessionJson({ mode: 'agent' }), false);
+});
+
+test('isParsedSessionJson: mode as array returns false', () => {
+    assert.equal(isParsedSessionJson({ mode: [] }), false);
+});
+
+test('isParsedSessionJson: mode as object returns true', () => {
+    assert.equal(isParsedSessionJson({ mode: { id: 'copilot.agentMode' } }), true);
+});
+
+test('isParsedSessionJson: mode with numeric id returns false', () => {
+    assert.equal(isParsedSessionJson({ mode: { id: 123 } }), false);
+});
+
+test('isParsedSessionJson: full valid session object returns true', () => {
+    assert.equal(isParsedSessionJson({
+        requests: [{ modelId: 'gpt-4o' }],
+        mode: { id: 'copilot.askMode' },
+        creationDate: 1700000000000,
+        lastMessageDate: 1700000060000,
+    }), true);
+});

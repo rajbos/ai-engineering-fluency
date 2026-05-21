@@ -9,6 +9,11 @@ import {
     extractMcpServerName,
     extractCustomAgentName,
     getEditorNameFromRoot,
+    normalizePathSeparators,
+    normalizePathForComparison,
+    normalizePathForDedup,
+    fileUriToPath,
+    parseWorkspaceStorageJsonFile,
 } from '../../src/workspaceHelpers';
 
 // ---------------------------------------------------------------------------
@@ -610,4 +615,141 @@ assert.equal(opencodeFile?.category, 'non-copilot');
 } finally {
 fs.rmSync(tmpDir, { recursive: true, force: true });
 }
+});
+
+// ---------------------------------------------------------------------------
+// parseWorkspaceStorageJsonFile — input validation
+// ---------------------------------------------------------------------------
+
+test('parseWorkspaceStorageJsonFile: returns undefined for null JSON content', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    try {
+        const tmpFile = nodePath.join(tmpDir, 'workspace.json');
+        fs.writeFileSync(tmpFile, 'null', 'utf8');
+        // JSON.parse("null") returns null — must not throw accessing obj[key]
+        assert.equal(parseWorkspaceStorageJsonFile(tmpFile, ['folder', 'workspace']), undefined);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('parseWorkspaceStorageJsonFile: returns undefined for array JSON content', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    try {
+        const tmpFile = nodePath.join(tmpDir, 'workspace.json');
+        fs.writeFileSync(tmpFile, '["item1", "item2"]', 'utf8');
+        assert.equal(parseWorkspaceStorageJsonFile(tmpFile, ['folder']), undefined);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('parseWorkspaceStorageJsonFile: returns undefined for empty jsonPath', () => {
+    assert.equal(parseWorkspaceStorageJsonFile('', ['folder']), undefined);
+});
+
+test('parseWorkspaceStorageJsonFile: returns path from valid object', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-pwsjf-'));
+    try {
+        const tmpFile = nodePath.join(tmpDir, 'workspace.json');
+        // Use a file:// URI as the value so vscode.Uri.parse can resolve it
+        fs.writeFileSync(tmpFile, JSON.stringify({ folder: 'file:///home/user/myproject' }), 'utf8');
+        const result = parseWorkspaceStorageJsonFile(tmpFile, ['folder']);
+        assert.ok(typeof result === 'string' && result.length > 0, 'should return a non-empty path string');
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// normalizePathSeparators
+// ---------------------------------------------------------------------------
+
+test('normalizePathSeparators: converts backslashes to forward slashes', () => {
+    assert.equal(normalizePathSeparators('C:\\Users\\foo\\bar.txt'), 'C:/Users/foo/bar.txt');
+});
+
+test('normalizePathSeparators: preserves forward slashes unchanged', () => {
+    assert.equal(normalizePathSeparators('/home/user/file.txt'), '/home/user/file.txt');
+});
+
+test('normalizePathSeparators: preserves case', () => {
+    assert.equal(normalizePathSeparators('C:\\Users\\FooBar'), 'C:/Users/FooBar');
+});
+
+test('normalizePathSeparators: handles mixed separators', () => {
+    assert.equal(normalizePathSeparators('C:/Users\\foo/bar\\baz.txt'), 'C:/Users/foo/bar/baz.txt');
+});
+
+test('normalizePathSeparators: handles path with spaces', () => {
+    assert.equal(normalizePathSeparators('C:\\My Documents\\file.txt'), 'C:/My Documents/file.txt');
+});
+
+// ---------------------------------------------------------------------------
+// normalizePathForComparison
+// ---------------------------------------------------------------------------
+
+test('normalizePathForComparison: converts backslashes and lower-cases', () => {
+    assert.equal(normalizePathForComparison('C:\\Users\\Foo\\Bar.TXT'), 'c:/users/foo/bar.txt');
+});
+
+test('normalizePathForComparison: already forward-slash path gets lower-cased', () => {
+    assert.equal(normalizePathForComparison('/Home/User/File.TXT'), '/home/user/file.txt');
+});
+
+test('normalizePathForComparison: path with spaces', () => {
+    assert.equal(normalizePathForComparison('C:\\My Documents\\Test'), 'c:/my documents/test');
+});
+
+test('normalizePathForComparison: UNC-style path', () => {
+    assert.equal(normalizePathForComparison('\\\\Server\\Share\\Folder'), '//server/share/folder');
+});
+
+test('normalizePathForComparison: already normalised path is a no-op', () => {
+    assert.equal(normalizePathForComparison('/home/user/.claude/projects'), '/home/user/.claude/projects');
+});
+
+// ---------------------------------------------------------------------------
+// normalizePathForDedup
+// ---------------------------------------------------------------------------
+
+test('normalizePathForDedup: on linux preserves case but normalizes separators', () => {
+    assert.equal(normalizePathForDedup('C:\\Users\\Foo', 'linux'), 'C:/Users/Foo');
+});
+
+test('normalizePathForDedup: on win32 lower-cases and normalizes separators', () => {
+    assert.equal(normalizePathForDedup('C:\\Users\\Foo', 'win32'), 'c:/users/foo');
+});
+
+test('normalizePathForDedup: on darwin lower-cases and normalizes separators', () => {
+    assert.equal(normalizePathForDedup('/Users/Foo/Bar', 'darwin'), '/users/foo/bar');
+});
+
+test('normalizePathForDedup: forward-slash path on linux unchanged', () => {
+    assert.equal(normalizePathForDedup('/home/user/file', 'linux'), '/home/user/file');
+});
+
+// ---------------------------------------------------------------------------
+// fileUriToPath
+// ---------------------------------------------------------------------------
+
+test('fileUriToPath: returns non-file URIs unchanged', () => {
+    assert.equal(fileUriToPath('/plain/path'), '/plain/path');
+    assert.equal(fileUriToPath('C:\\plain\\path'), 'C:\\plain\\path');
+    assert.equal(fileUriToPath('https://example.com'), 'https://example.com');
+});
+
+test('fileUriToPath: unix path from file URI', () => {
+    const result = fileUriToPath('file:///home/user/file.txt');
+    assert.equal(result, '/home/user/file.txt');
+});
+
+test('fileUriToPath: decodes URI-encoded spaces', () => {
+    const result = fileUriToPath('file:///home/user/my%20file.txt');
+    assert.equal(result, '/home/user/my file.txt');
+});
+
+test('fileUriToPath: localhost authority is transparent', () => {
+    const result = fileUriToPath('file://localhost/home/user/file.txt');
+    assert.equal(result, '/home/user/file.txt');
 });

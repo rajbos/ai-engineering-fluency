@@ -9,6 +9,7 @@ import type { ModelUsage, SessionStats, StatsForPeriod } from '../types';
 import { CredentialService } from './credentialService';
 import { DataPlaneService } from './dataPlaneService';
 import { BackendUtility } from './utilityService';
+import { safeStringifyError } from '../../utils/errors';
 
 export interface BackendQueryResultLike {
 	stats: SessionStats;
@@ -278,8 +279,8 @@ export class QueryService {
 				month: monthResult.stats.today,
 				lastUpdated: new Date()
 			};
-		} catch (e: any) {
-			this.deps.warn(`Backend query failed: ${e?.message ?? e}`);
+		} catch (e: unknown) {
+			this.deps.warn(`Backend query failed: ${safeStringifyError(e)}`);
 			return undefined;
 		}
 	}
@@ -309,8 +310,8 @@ export class QueryService {
 				month: monthResult.stats.today,
 				lastUpdated: new Date()
 			};
-		} catch (e: any) {
-			this.deps.warn(`Backend query failed: ${e?.message ?? e}`);
+		} catch (e: unknown) {
+			this.deps.warn(`Backend query failed: ${safeStringifyError(e)}`);
 			return undefined;
 		}
 	}

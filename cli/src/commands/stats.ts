@@ -153,6 +153,7 @@ export const statsCommand = new Command('stats')
 	});
 
 function getEditorDisplayName(source: string): string {
+	if (!source) { return 'Unknown'; }
 	const names: Record<string, string> = {
 		'vscode': 'VS Code',
 		'vscode-insiders': 'VS Code Insiders',

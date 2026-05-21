@@ -5,6 +5,7 @@ import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, D
 import { OpenCodeDataAccess } from '../opencode';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { withErrorRecovery } from '../utils/errors';
 
 export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'opencode';
@@ -50,10 +51,11 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 		if (this.openCode.isOpenCodeDbSession(sessionFile) && sessionId) {
 			session = await this.openCode.readOpenCodeDbSession(sessionId);
 		} else {
-			try {
-				const content = await fs.promises.readFile(sessionFile, 'utf8');
-				session = JSON.parse(content);
-			} catch { /* ignore */ }
+			session = await withErrorRecovery(
+				async () => JSON.parse(await fs.promises.readFile(sessionFile, 'utf8')),
+				null,
+				`openCodeAdapter getMeta readFile(${sessionFile})`
+			);
 		}
 		if (session) {
 			title = session.title || session.slug;
@@ -91,52 +93,63 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 		// Scan JSON session files
 		log(`📁 Checking OpenCode JSON path: ${sessionDir}`);
 		log(`📁 Checking OpenCode DB path: ${dbPath}`);
-		try {
-			await fs.promises.access(sessionDir);
+		let sessionDirExists = false;
+		try { await fs.promises.access(sessionDir); sessionDirExists = true; } catch { /* sessionDir doesn't exist — skip */ }
+		if (sessionDirExists) {
 			const scanDir = async (dir: string) => {
+				let entries: fs.Dirent[] = [];
 				try {
-					const entries = await fs.promises.readdir(dir, { withFileTypes: true });
-					for (const entry of entries) {
-						if (entry.isDirectory()) {
-							await scanDir(path.join(dir, entry.name));
-						} else if (entry.name.startsWith('ses_') && entry.name.endsWith('.json')) {
-							const fullPath = path.join(dir, entry.name);
-							try {
-								const stats = await fs.promises.stat(fullPath);
-								if (stats.size > 0) { sessionFiles.push(fullPath); }
-							} catch { /* ignore */ }
+					entries = await fs.promises.readdir(dir, { withFileTypes: true });
+				} catch (err) {
+					console.error(`[openCodeAdapter] Failed to read dir ${dir}:`, err);
+				}
+				for (const entry of entries) {
+					if (entry.isDirectory()) {
+						await scanDir(path.join(dir, entry.name));
+					} else if (entry.name.startsWith('ses_') && entry.name.endsWith('.json')) {
+						const fullPath = path.join(dir, entry.name);
+						try {
+							const stats = await fs.promises.stat(fullPath);
+							if (stats.size > 0) { sessionFiles.push(fullPath); }
+						} catch (err) {
+							console.error(`[openCodeAdapter] Failed to stat ${fullPath}:`, err);
 						}
 					}
-				} catch { /* ignore */ }
+				}
 			};
 			await scanDir(sessionDir);
 			const jsonCount = sessionFiles.length;
 			if (jsonCount > 0) {
 				log(`📄 Found ${jsonCount} session files in OpenCode storage`);
 			}
-		} catch { /* sessionDir doesn't exist — skip */ }
+		}
 
 		// Scan SQLite database for additional sessions (deduplicating against JSON)
-		try {
-			await fs.promises.access(dbPath);
-			const existingIds = new Set(
-				sessionFiles
-					.filter(f => this.openCode.isOpenCodeSessionFile(f))
-					.map(f => this.openCode.getOpenCodeSessionId(f))
-					.filter(Boolean)
-			);
-			const dbSessionIds = await this.openCode.discoverOpenCodeDbSessions();
-			let dbNewCount = 0;
-			for (const sessionId of dbSessionIds) {
-				if (!existingIds.has(sessionId)) {
-					sessionFiles.push(path.join(dataDir, `opencode.db#${sessionId}`));
-					dbNewCount++;
+		let dbExists = false;
+		try { await fs.promises.access(dbPath); dbExists = true; } catch { /* DB doesn't exist — skip */ }
+		if (dbExists) {
+			try {
+				const existingIds = new Set(
+					sessionFiles
+						.filter(f => this.openCode.isOpenCodeSessionFile(f))
+						.map(f => this.openCode.getOpenCodeSessionId(f))
+						.filter(Boolean)
+				);
+				const dbSessionIds = await this.openCode.discoverOpenCodeDbSessions();
+				let dbNewCount = 0;
+				for (const sessionId of dbSessionIds) {
+					if (!existingIds.has(sessionId)) {
+						sessionFiles.push(path.join(dataDir, `opencode.db#${sessionId}`));
+						dbNewCount++;
+					}
 				}
+				if (dbNewCount > 0) {
+					log(`📄 Found ${dbNewCount} additional session(s) in OpenCode database`);
+				}
+			} catch (err) {
+				log(`OpenCode DB exists but could not be read: ${err}`);
 			}
-			if (dbNewCount > 0) {
-				log(`📄 Found ${dbNewCount} additional session(s) in OpenCode database`);
-			}
-		} catch { /* DB doesn't exist — skip */ }
+		}
 
 		return { sessionFiles, candidatePaths };
 	}

@@ -13,32 +13,21 @@ import type { DailyRollupKey } from '../rollups';
 import { upsertDailyRollup } from '../rollups';
 import type { BackendSettings } from '../settings';
 import { BACKEND_SYNC_MIN_INTERVAL_MS } from '../constants';
-import type { DailyRollupValue, ChatRequest, SessionFileCache } from '../types';
+import type { DailyRollupValue, ChatRequest, SessionFileCache, ModelUsage } from '../types';
 import { resolveUserIdentityForSync, type BackendUserIdentityMode } from '../identity';
 import { computeBackendSharingPolicy, hashMachineIdForTeam, hashWorkspaceIdForTeam } from '../sharingProfile';
-import { createDailyAggEntity } from '../storageTables';
+import { createDailyAggEntity, type BackendAggDailyEntityLike } from '../storageTables';
 import { CredentialService } from './credentialService';
 import { DataPlaneService } from './dataPlaneService';
 import { BackendUtility } from './utilityService';
 import { SharingServerUploadService, type SharingServerEntry } from './sharingServerUploadService';
+import { SyncLock } from './syncLock';
+import { type IBlobUploadService } from './blobUploadService';
 import { isJsonlContent } from '../../tokenEstimation';
 import { getEditorTypeFromPath } from '../../workspaceHelpers';
 
-/**
- * Interface for blob upload service to avoid circular dependency.
- */
-interface BlobUploadServiceLike {
-	uploadSessionFiles(
-		storageAccount: string,
-		settings: { enabled: boolean; containerName: string; uploadFrequencyHours: number; compressFiles: boolean },
-		credential: any,
-		sessionFiles: string[],
-		machineId: string,
-		datasetId: string
-	): Promise<{ success: boolean; filesUploaded: number; message: string }>;
-	shouldUpload(machineId: string, settings: { enabled: boolean; uploadFrequencyHours: number }): boolean;
-	getUploadStatus(machineId: string): { lastUploadTime: number; filesUploaded: number; lastError?: string } | undefined;
-}
+/** Ecosystem session per-model usage entry (input, output, optional interactions). */
+type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
 
 /**
  * Validate and normalize consent timestamp.
@@ -71,27 +60,42 @@ function validateConsentTimestamp(ts: string | undefined, logger?: (msg: string)
 	}
 }
 
-export interface SyncServiceDeps {
-	context: vscode.ExtensionContext | undefined;
+/** Logger callbacks for the sync service. */
+export interface SyncServiceLogger {
 	log: (message: string) => void;
 	warn: (message: string) => void;
+}
+
+/** Session file access, stat, caching, and token estimation callbacks. */
+export interface SyncServiceSessionHandlers {
 	getCopilotSessionFiles: () => Promise<string[]>;
 	estimateTokensFromText: (text: string, model: string) => number;
 	getModelFromRequest: (request: ChatRequest) => string;
-	// Cache integration for performance
+	/** Cache integration for performance. */
 	getSessionFileDataCached?: (sessionFilePath: string, mtime: number, fileSize: number) => Promise<SessionFileCache>;
-	// UI refresh callback after successful sync
-	updateTokenStats?: () => Promise<void>;
-	// Stat helper for OpenCode DB virtual paths
+	/** Stat helper for OpenCode DB virtual paths. */
 	statSessionFile: (sessionFile: string) => Promise<fs.Stats>;
-	// OpenCode session handling
+}
+
+/** Per-editor session detection and data extraction callbacks. */
+export interface SyncServiceEditorHandlers {
+	/** OpenCode session handling. */
 	isOpenCodeSession?: (sessionFile: string) => boolean;
-	getOpenCodeSessionData?: (sessionFile: string) => Promise<{ tokens: number; interactions: number; modelUsage: any; timestamp: number }>;
-	// Crush session handling (per-project crush.db virtual paths)
+	getOpenCodeSessionData?: (sessionFile: string) => Promise<{ tokens: number; interactions: number; modelUsage: Record<string, ModelUsageEntry>; timestamp: number }>;
+	/** Crush session handling (per-project crush.db virtual paths). */
 	isCrushSession?: (sessionFile: string) => boolean;
-	getCrushSessionData?: (sessionFile: string) => Promise<{ tokens: number; interactions: number; modelUsage: any; timestamp: number }>;
-	// Visual Studio session detection (binary MessagePack — cannot be parsed as JSON)
+	getCrushSessionData?: (sessionFile: string) => Promise<{ tokens: number; interactions: number; modelUsage: Record<string, ModelUsageEntry>; timestamp: number }>;
+	/** Visual Studio session detection (binary MessagePack — cannot be parsed as JSON). */
 	isVSSessionFile?: (sessionFile: string) => boolean;
+}
+
+export interface SyncServiceDeps {
+	context: vscode.ExtensionContext | undefined;
+	logger: SyncServiceLogger;
+	sessionHandlers: SyncServiceSessionHandlers;
+	editorHandlers?: SyncServiceEditorHandlers;
+	/** UI refresh callback after successful sync. */
+	updateTokenStats?: () => Promise<void>;
 	/** Returns the current GitHub OAuth access token, or undefined if not authenticated. */
 	getGithubToken?: () => string | undefined;
 }
@@ -105,17 +109,22 @@ export class SyncService {
 	private backendSyncInterval: NodeJS.Timeout | undefined;
 	private consecutiveFailures = 0;
 	private readonly MAX_CONSECUTIVE_FAILURES = 5;
-	/** Stale threshold for the sync lock file (matches the sync timer interval). */
-	private static readonly SYNC_LOCK_STALE_MS = BACKEND_SYNC_MIN_INTERVAL_MS;
+	private readonly syncLock: SyncLock;
 
 	constructor(
 		private readonly deps: SyncServiceDeps,
 		private readonly credentialService: CredentialService,
 		private readonly dataPlaneService: DataPlaneService,
-		private readonly blobUploadService: BlobUploadServiceLike | undefined,
+		private readonly blobUploadService: IBlobUploadService | undefined,
 		private readonly utility: typeof BackendUtility,
 		private readonly sharingServerUploadService: SharingServerUploadService | undefined,
-	) {}
+	) {
+		this.syncLock = new SyncLock(
+			deps.context,
+			deps.logger.log.bind(deps.logger),
+			deps.logger.warn.bind(deps.logger),
+		);
+	}
 
 	// ── Cross-instance file lock ────────────────────────────────────────
 
@@ -128,72 +137,14 @@ export class SyncService {
 	 * syncing to independent endpoints and should not block each other.
 	 */
 	private async acquireSyncLock(backend?: string, serverUrl?: string): Promise<boolean> {
-		const ctx = this.deps.context;
-		if (!ctx) { return true; } // No context → allow (tests)
-		// Use a backend-specific lock so Azure and sharingServer syncs don't block each other.
-		const suffix = backend === 'sharingServer' ? '_sharingserver' : '';
-		const lockPath = path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
-		const lockContent = JSON.stringify({
-			sessionId: vscode.env.sessionId,
-			timestamp: Date.now(),
-			serverUrl,
-		});
-		try {
-			await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
-			const fd = await fs.promises.open(lockPath, 'wx');
-			await fd.writeFile(lockContent);
-			await fd.close();
-			return true;
-		} catch (err: any) {
-			if (err.code !== 'EEXIST') {
-				this.deps.warn(`Sync lock: unexpected error acquiring lock: ${err.message}`);
-				return false;
-			}
-			// Lock file exists — check if it belongs to a different server or is stale
-			try {
-				const content = await fs.promises.readFile(lockPath, 'utf-8');
-				const lock = JSON.parse(content);
-				// Different server URL → the lock does not apply to this instance.
-				if (serverUrl && lock.serverUrl && lock.serverUrl !== serverUrl) {
-					this.deps.log(`Sync lock: lock is held for a different server (${lock.serverUrl}), proceeding for ${serverUrl}`);
-					return true;
-				}
-				if (Date.now() - lock.timestamp > SyncService.SYNC_LOCK_STALE_MS) {
-					this.deps.log('Sync lock: breaking stale lock from another window');
-					await fs.promises.unlink(lockPath);
-					try {
-						const fd = await fs.promises.open(lockPath, 'wx');
-						await fd.writeFile(lockContent);
-						await fd.close();
-						return true;
-					} catch {
-						return false;
-					}
-				}
-			} catch {
-				// Lock file may have been deleted by its owner
-			}
-			return false;
-		}
+		return this.syncLock.acquire(backend, serverUrl);
 	}
 
 	/**
 	 * Release the sync lock, but only if we own it.
 	 */
 	private async releaseSyncLock(backend?: string): Promise<void> {
-		const ctx = this.deps.context;
-		if (!ctx) { return; }
-		const suffix = backend === 'sharingServer' ? '_sharingserver' : '';
-		const lockPath = path.join(ctx.globalStorageUri.fsPath, `backend_sync${suffix}.lock`);
-		try {
-			const content = await fs.promises.readFile(lockPath, 'utf-8');
-			const lock = JSON.parse(content);
-			if (lock.sessionId === vscode.env.sessionId) {
-				await fs.promises.unlink(lockPath);
-			}
-		} catch {
-			// Lock file already gone or unreadable
-		}
+		return this.syncLock.release(backend);
 	}
 
 	/**
@@ -211,17 +162,17 @@ export class SyncService {
 			});
 			if (!sharingPolicy.allowCloudSync || !isConfigured) {
 				if (!sharingPolicy.allowCloudSync) {
-					this.deps.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
+					this.deps.logger.log(`Backend sync: not starting timer (cloud sync disabled, profile: ${settings.sharingProfile})`);
 				} else if (!isConfigured) {
-					this.deps.log('Backend sync: not starting timer (backend not configured)');
+					this.deps.logger.log('Backend sync: not starting timer (backend not configured)');
 				}
 				return;
 			}
 			const intervalMs = BACKEND_SYNC_MIN_INTERVAL_MS;
-			this.deps.log(`Backend sync: starting timer with interval ${intervalMs}ms (${intervalMs / 60000} minutes)`);
+			this.deps.logger.log(`Backend sync: starting timer with interval ${intervalMs}ms (${intervalMs / 60000} minutes)`);
 			this.backendSyncInterval = setInterval(() => {
 				this.syncToBackendStore(false, settings, isConfigured).catch((e) => {
-					this.deps.warn(`Backend sync timer failed: ${e?.message ?? e}`);
+					this.deps.logger.warn(`Backend sync timer failed: ${e?.message ?? e}`);
 					this.consecutiveFailures++;
 					
 					// Show user-facing warning after first few failures
@@ -237,7 +188,7 @@ export class SyncService {
 					}
 					
 					if (this.consecutiveFailures >= this.MAX_CONSECUTIVE_FAILURES) {
-						this.deps.warn(`Backend sync: stopping timer after ${this.MAX_CONSECUTIVE_FAILURES} consecutive failures`);
+						this.deps.logger.warn(`Backend sync: stopping timer after ${this.MAX_CONSECUTIVE_FAILURES} consecutive failures`);
 						vscode.window.showErrorMessage(
 							'Backend sync stopped after repeated failures. Check your Azure configuration.',
 							'Configure Backend'
@@ -252,10 +203,10 @@ export class SyncService {
 			}, intervalMs);
 			// Immediate initial sync (forced to ensure settings changes take effect)
 			this.syncToBackendStore(true, settings, isConfigured).catch((e) => {
-				this.deps.warn(`Backend sync initial sync failed: ${e?.message ?? e}`);
+				this.deps.logger.warn(`Backend sync initial sync failed: ${e?.message ?? e}`);
 			});
 		} catch (e) {
-			this.deps.warn(`Backend sync timer setup failed: ${e}`);
+			this.deps.logger.warn(`Backend sync timer setup failed: ${e}`);
 		}
 	}
 
@@ -284,345 +235,461 @@ export class SyncService {
 		return this.syncQueue;
 	}
 
-	/**
-	 * Process a session file using cached data for token counts but extracting accurate timestamps.
-	 * Returns true if successful, false if cache miss (caller should parse file).
-	 * Validates all cached data at runtime to prevent injection/corruption.
-	 * 
-	 * CRITICAL: We parse the file to extract actual interaction timestamps and create per-day
-	 * rollups, but use cached token counts for performance. This ensures accurate day assignment
-	 * while still benefiting from cached calculations.
-	 */
-	private async processCachedSessionFile(
-		sessionFile: string,
-		fileMtimeMs: number,
-		fileSize: number,
-		workspaceId: string,
-		machineId: string,
-		userId: string | undefined,
-		rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
-		startMs: number,
-		now: Date,
-		editor?: string
-	): Promise<boolean> {
-		try {
-			const cachedData = await this.deps.getSessionFileDataCached!(sessionFile, fileMtimeMs, fileSize);
-			
-			// Validate cached data structure to prevent injection/corruption
-			if (!cachedData || typeof cachedData !== 'object') {
-				this.deps.warn(`Backend sync: invalid cached data structure for ${sessionFile}`);
-				return false;
-			}
-			if (typeof cachedData.modelUsage !== 'object' || cachedData.modelUsage === null) {
-				this.deps.warn(`Backend sync: invalid modelUsage in cached data for ${sessionFile}`);
-				return false;
-			}
-			if (!Number.isFinite(cachedData.interactions) || cachedData.interactions < 0) {
-				this.deps.warn(`Backend sync: invalid interactions count in cached data for ${sessionFile}`);
-				return false;
-			}
 
-			// Fast path: use pre-computed dailyRollups (same data as extension stats — avoids re-parsing the file).
-			// When present, token attribution is already distributed per-UTC-day and per-model, so results
-			// will exactly match what the extension shows locally.
-			if (cachedData.dailyRollups && Object.keys(cachedData.dailyRollups).length > 0) {
-				const totalSessionInteractions = cachedData.interactions || 1;
-				const dayKeys = Object.keys(cachedData.dailyRollups).sort();
+/** Arguments shared across per-session rollup helper methods. */
+private makeSessionRollupArgs(
+machineId: string,
+userId: string | undefined,
+editorForFile: string | undefined,
+workspaceNamesById: Record<string, string>,
+rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
+startMs: number
+): { machineId: string; userId: string | undefined; editorForFile: string | undefined; workspaceNamesById: Record<string, string>; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>; startMs: number } {
+return { machineId, userId, editorForFile, workspaceNamesById, rollups, startMs };
+}
 
-				for (const dayKey of dayKeys) {
-					const dayEntry = cachedData.dailyRollups[dayKey];
-					const dayStartMs = new Date(dayKey + 'T00:00:00Z').getTime();
-					if (dayStartMs < startMs) { continue; }
+/**
+ * Build day→model interaction counts from Copilot CLI non-delta JSONL format.
+ * Each JSONL line is a single event; counts all events per day per model.
+ */
+private buildDayModelInteractionsFromCliJsonl(
+content: string,
+sessionFile: string,
+fileMtimeMs: number,
+startMs: number,
+now: Date
+): Map<string, Map<string, number>> {
+const dayModelInteractions = new Map<string, Map<string, number>>();
+const lines = content.trim().split('\n');
+const todayKey = this.utility.toUtcDayKey(now);
+let lineCount = 0;
+let processedLines = 0;
+for (const line of lines) {
+lineCount++;
+if (!line.trim()) { continue; }
+try {
+const event = JSON.parse(line);
+if (!event || typeof event !== 'object') { continue; }
+const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
+const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
+if (!eventMs || eventMs < startMs) { continue; }
+const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
+const model = (event.model || 'gpt-4o').toString();
+const isFileFromToday = dayKey === todayKey;
+if (isFileFromToday && processedLines < 3) {
+this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} line ${lineCount}: eventMs=${new Date(eventMs).toISOString()}, dayKey=${dayKey}, type=${event.type}`);
+processedLines++;
+}
+// Track interaction for this day+model (count all events, not just user.message)
+if (!dayModelInteractions.has(dayKey)) {
+dayModelInteractions.set(dayKey, new Map());
+}
+const dayMap = dayModelInteractions.get(dayKey)!;
+dayMap.set(model, (dayMap.get(model) || 0) + 1);
+} catch {
+// skip malformed line
+}
+}
+return dayModelInteractions;
+}
 
-					const modelEntries = Object.entries(dayEntry.modelUsage).filter(([, mu]) =>
-						mu && ((mu.inputTokens || 0) > 0 || (mu.outputTokens || 0) > 0)
-					);
-					if (modelEntries.length === 0) { continue; }
+/**
+ * Build day→model interaction counts from VS Code delta-based JSONL format.
+ * Handles kind:0/1/2 events with per-request deduplication.
+ */
+private buildDayModelInteractionsFromDeltaJsonl(
+content: string,
+fileMtimeMs: number,
+startMs: number
+): Map<string, Map<string, number>> {
+const dayModelInteractions = new Map<string, Map<string, number>>();
+let defaultModel = 'unknown';
+const seenRequestIds = new Set<string>();
+const lines = content.trim().split('\n');
+for (const line of lines) {
+if (!line.trim()) { continue; }
+try {
+const event = JSON.parse(line);
+if (!event || typeof event !== 'object') { continue; }
+// Extract session-level default model (same logic as getModelUsageFromSession)
+if (event.kind === 0) {
+const modelId = event.v?.selectedModel?.identifier ||
+event.v?.selectedModel?.metadata?.id ||
+event.v?.inputState?.selectedModel?.metadata?.id;
+if (modelId) { defaultModel = modelId.replace(/^copilot\//, ''); }
+}
+if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'selectedModel') {
+const modelId = event.v?.identifier || event.v?.metadata?.id;
+if (modelId) { defaultModel = modelId.replace(/^copilot\//, ''); }
+}
+// kind:2, k[0]==='requests' events append new request(s)
+if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
+for (const request of event.v) {
+const req = request as ChatRequest;
+const reqId = (req as any).requestId as string | undefined;
+if (reqId && seenRequestIds.has(reqId)) { continue; }
+if (reqId) { seenRequestIds.add(reqId); }
+const normalizedTs = this.utility.normalizeTimestampToMs(
+typeof req.timestamp !== 'undefined' ? req.timestamp : undefined
+);
+const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
+if (!eventMs || eventMs < startMs) { continue; }
+const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
+// Use per-request modelId if present, otherwise fall back to session default
+const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
+const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
+if (!dayModelInteractions.has(dayKey)) {
+dayModelInteractions.set(dayKey, new Map());
+}
+const dayMap = dayModelInteractions.get(dayKey)!;
+dayMap.set(model, (dayMap.get(model) || 0) + 1);
+}
+}
+} catch {
+// skip malformed lines
+}
+}
+return dayModelInteractions;
+}
 
-					// Distribute this day's interactions across models proportionally by output token share.
-					const totalDayOutput = modelEntries.reduce((s, [, mu]) => s + (mu.outputTokens || 0), 0);
-					const dayFraction = totalSessionInteractions > 0 ? dayEntry.interactions / totalSessionInteractions : 1;
-					const fluencyMetrics = this.extractFluencyMetricsFromCache(cachedData, dayFraction);
+/**
+ * Build day→model interaction counts from regular JSON session format.
+ * Returns null if JSON parsing fails (logs a warning internally).
+ */
+private buildDayModelInteractionsFromJson(
+content: string,
+fileMtimeMs: number,
+startMs: number,
+sessionFile: string
+): Map<string, Map<string, number>> | null {
+try {
+const sessionJson = JSON.parse(content);
+if (!sessionJson || typeof sessionJson !== 'object') {
+return null;
+}
+const sessionObj = sessionJson as Record<string, unknown>;
+const requests = Array.isArray(sessionObj.requests) ? (sessionObj.requests as unknown[]) : [];
+const dayModelInteractions = new Map<string, Map<string, number>>();
+for (const request of requests) {
+const req = request as ChatRequest;
+const normalizedTs = this.utility.normalizeTimestampToMs(
+typeof req.timestamp !== 'undefined' ? req.timestamp : (sessionObj.lastMessageDate as unknown)
+);
+const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
+if (!eventMs || eventMs < startMs) { continue; }
+const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
+const model = this.deps.sessionHandlers.getModelFromRequest(req);
+if (!dayModelInteractions.has(dayKey)) {
+dayModelInteractions.set(dayKey, new Map());
+}
+const dayMap = dayModelInteractions.get(dayKey)!;
+dayMap.set(model, (dayMap.get(model) || 0) + 1);
+}
+return dayModelInteractions;
+} catch (e) {
+this.deps.logger.warn(`Backend sync: failed to parse JSON for ${sessionFile}: ${e}`);
+return null;
+}
+}
 
-					let remainingInteractions = dayEntry.interactions;
-					for (let i = 0; i < modelEntries.length; i++) {
-						const [model, mu] = modelEntries[i];
-						const isLast = i === modelEntries.length - 1;
-						const share = (!isLast && totalDayOutput > 0) ? (mu.outputTokens || 0) / totalDayOutput : 1;
-						const modelInteractions = isLast
-							? remainingInteractions
-							: Math.min(Math.round(dayEntry.interactions * share), remainingInteractions);
-						remainingInteractions -= modelInteractions;
+/**
+ * Remap event model names to cached model names when there is a mismatch.
+ * CLI sessions often omit the model in individual events while session.shutdown
+ * provides the actual model. Without remapping, token lookups silently fail.
+ */
+private remapUnmappedModels(
+dayModelInteractions: Map<string, Map<string, number>>,
+cachedModelUsage: ModelUsage
+): void {
+const cachedModelNames = Object.keys(cachedModelUsage);
+if (cachedModelNames.length === 0) { return; }
+const allEventModels = new Set<string>();
+for (const modelMap of dayModelInteractions.values()) {
+for (const m of modelMap.keys()) { allEventModels.add(m); }
+}
+const unmappedModels = new Set<string>();
+for (const m of allEventModels) {
+if (!cachedModelUsage[m]) { unmappedModels.add(m); }
+}
+if (unmappedModels.size === 0) { return; }
+const totalCachedTokens = cachedModelNames.reduce((sum, m) =>
+sum + cachedModelUsage[m].inputTokens + cachedModelUsage[m].outputTokens, 0);
+for (const [, modelMap] of dayModelInteractions) {
+let unmappedCount = 0;
+for (const um of unmappedModels) {
+unmappedCount += modelMap.get(um) || 0;
+modelMap.delete(um);
+}
+if (unmappedCount > 0) {
+for (const cm of cachedModelNames) {
+const ct = cachedModelUsage[cm].inputTokens + cachedModelUsage[cm].outputTokens;
+const share = totalCachedTokens > 0 ? ct / totalCachedTokens : 1 / cachedModelNames.length;
+const redistributed = Math.round(unmappedCount * share);
+if (redistributed > 0) {
+modelMap.set(cm, (modelMap.get(cm) || 0) + redistributed);
+}
+}
+}
+}
+}
 
-						const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor };
-						upsertDailyRollup(rollups, key, {
-							inputTokens: mu.inputTokens || 0,
-							outputTokens: mu.outputTokens || 0,
-							interactions: Math.max(0, modelInteractions),
-							fluencyMetrics,
-						});
-					}
-				}
+/**
+ * Build daily rollup entries from day→model interaction counts and cached token data.
+ * Applies proportional fractions for multi-day sessions.
+ */
+private buildRollupsFromDayModelInteractions(
+dayModelInteractions: Map<string, Map<string, number>>,
+cachedData: SessionFileCache,
+sessionFile: string,
+workspaceId: string,
+machineId: string,
+userId: string | undefined,
+rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
+editor?: string
+): void {
+// Total interactions per model across all days — used to compute each day's fraction.
+const totalInteractionsPerModel = new Map<string, number>();
+for (const modelMap of dayModelInteractions.values()) {
+for (const [m, c] of modelMap) {
+totalInteractionsPerModel.set(m, (totalInteractionsPerModel.get(m) || 0) + c);
+}
+}
 
-				if (dayKeys.length > 1) {
-					this.deps.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${dayKeys.length} days (dailyRollups fast path): ${dayKeys.join(', ')}`);
-				}
-				return true;
-			}
+for (const [dayKey, modelMap] of dayModelInteractions) {
+for (const [model, interactions] of modelMap) {
+const cachedUsage = cachedData.modelUsage[model];
+if (!cachedUsage) { continue; }
 
-			// Slow path: parse the session file to get actual request timestamps and create per-day rollups.
-			// Used when dailyRollups is absent (old cache entries before CACHE_VERSION bump).
-			// Note: ecosystem sessions (Mistral Vibe, Claude Desktop Cowork) now always have dailyRollups
-			// populated via the firstInteraction fallback in getSessionFileDataCached, so they use the fast path above.
-			const content = await fs.promises.readFile(sessionFile, 'utf8');
-			
-			// Map to track per-day per-model interactions for proper distribution
-			const dayModelInteractions = new Map<string, Map<string, number>>();
-			
-			// Detect whether this is a delta-based (VS Code Insiders) JSONL file or a CLI JSONL file.
-			// Both can use .jsonl extension, but delta-based files have kind:0/1/2 numeric events
-			// while CLI files use event types like user.message, assistant.message, etc.
-			// Check the first non-empty line for a numeric "kind" property to distinguish.
-			let isDeltaBasedJsonl = false;
-			if (isJsonlContent(content)) {
-				const firstLine = content.trim().split('\n')[0]?.trim();
-				if (firstLine) {
-					try {
-						const firstEvent = JSON.parse(firstLine);
-						isDeltaBasedJsonl = typeof firstEvent.kind === 'number';
-					} catch { /* not valid JSON, leave as false */ }
-				}
-			}
+// Validate individual model token values — reject negative or non-finite values.
+const cachedInput = typeof cachedUsage.inputTokens === 'number' ? cachedUsage.inputTokens : NaN;
+const cachedOutput = typeof cachedUsage.outputTokens === 'number' ? cachedUsage.outputTokens : NaN;
+if (!Number.isFinite(cachedInput) || cachedInput < 0 ||
+!Number.isFinite(cachedOutput) || cachedOutput < 0) {
+this.deps.logger.warn(`Backend sync: invalid inputTokens or outputTokens in model usage for ${sessionFile}`);
+continue;
+}
 
-			// Handle non-delta JSONL format (Copilot CLI)
-			if (sessionFile.endsWith('.jsonl') && !isDeltaBasedJsonl) {
-				const lines = content.trim().split('\n');
-			const todayKey = this.utility.toUtcDayKey(now);
-			let lineCount = 0;
-			let processedLines = 0;
-			
-			for (const line of lines) {
-				lineCount++;
-				if (!line.trim()) { continue; }
-				try {
-					const event = JSON.parse(line);
-					if (!event || typeof event !== 'object') { continue; }
-					
-					const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
-					const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-					if (!eventMs || eventMs < startMs) { continue; }
-					
-					const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-					const model = (event.model || 'gpt-4o').toString();
-					const isFileFromToday = dayKey === todayKey;
-					if (isFileFromToday && processedLines < 3) {
-					this.deps.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} line ${lineCount}: eventMs=${new Date(eventMs).toISOString()}, dayKey=${dayKey}, type=${event.type}`);
-					processedLines++;
-				}
-						// Track interaction for this day+model (count all events, not just user.message)
-						if (!dayModelInteractions.has(dayKey)) {
-							dayModelInteractions.set(dayKey, new Map());
-						}
-						const dayMap = dayModelInteractions.get(dayKey)!;
-						dayMap.set(model, (dayMap.get(model) || 0) + 1);
-					} catch {
-						// skip malformed line
-					}
-				}
-			} else if (isDeltaBasedJsonl) {
-				// VS Code delta-based JSONL files (.json or .jsonl extension with kind:0/1/2 events).
-				// Process kind:2 events where k[0]==='requests' — each appends requests to the array.
-				// Deduplicate by requestId so incrementally-added requests are counted once.
-				// Track the session-level defaultModel from kind:0 and kind:2/selectedModel events so
-				// that requests without an explicit modelId still resolve to the correct model key
-				// (matching what getModelUsageFromSession stores in cachedData.modelUsage).
-				let defaultModel = 'gpt-4o';
-				const seenRequestIds = new Set<string>();
-				const lines = content.trim().split('\n');
-				for (const line of lines) {
-					if (!line.trim()) { continue; }
-					try {
-						const event = JSON.parse(line);
-						if (!event || typeof event !== 'object') { continue; }
-						// Extract session-level default model (same logic as getModelUsageFromSession)
-						if (event.kind === 0) {
-							const modelId = event.v?.selectedModel?.identifier ||
-								event.v?.selectedModel?.metadata?.id ||
-								event.v?.inputState?.selectedModel?.metadata?.id;
-							if (modelId) { defaultModel = modelId.replace(/^copilot\//, ''); }
-						}
-						if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'selectedModel') {
-							const modelId = event.v?.identifier || event.v?.metadata?.id;
-							if (modelId) { defaultModel = modelId.replace(/^copilot\//, ''); }
-						}
-						// kind:2, k[0]==='requests' events append new request(s)
-						if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
-							for (const request of event.v) {
-								const req = request as ChatRequest;
-								const reqId = (req as any).requestId as string | undefined;
-								if (reqId && seenRequestIds.has(reqId)) { continue; }
-								if (reqId) { seenRequestIds.add(reqId); }
-								const normalizedTs = this.utility.normalizeTimestampToMs(
-									typeof req.timestamp !== 'undefined' ? req.timestamp : undefined
-								);
-								const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-								if (!eventMs || eventMs < startMs) { continue; }
-								const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-								// Use per-request modelId if present, otherwise fall back to the session
-								// default model (mirrors getModelUsageFromSession delta logic)
-								const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
-								const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
-								if (!dayModelInteractions.has(dayKey)) {
-									dayModelInteractions.set(dayKey, new Map());
-								}
-								const dayMap = dayModelInteractions.get(dayKey)!;
-								dayMap.set(model, (dayMap.get(model) || 0) + 1);
-							}
-						}
-					} catch {
-						// skip malformed lines
-					}
-				}
-			} else {
-				// Handle regular JSON format (VS Code Copilot Chat legacy / OpenCode JSON)
-				try {
-					const sessionJson = JSON.parse(content);
-					if (!sessionJson || typeof sessionJson !== 'object') {
-						return false;
-					}
-					const sessionObj = sessionJson as Record<string, unknown>;
-					const requests = Array.isArray(sessionObj.requests) ? (sessionObj.requests as unknown[]) : [];
-					
-					for (const request of requests) {
-						const req = request as ChatRequest;
-						const normalizedTs = this.utility.normalizeTimestampToMs(
-							typeof req.timestamp !== 'undefined' ? req.timestamp : (sessionObj.lastMessageDate as unknown)
-						);
-						const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-						if (!eventMs || eventMs < startMs) { continue; }
-						
-						const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-						const model = this.deps.getModelFromRequest(req);
+const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor };
 
-						// Track interaction for this day+model
-						if (!dayModelInteractions.has(dayKey)) {
-							dayModelInteractions.set(dayKey, new Map());
-						}
-						const dayMap = dayModelInteractions.get(dayKey)!;
-						dayMap.set(model, (dayMap.get(model) || 0) + 1);
-					}
-				} catch (e) {
-					this.deps.warn(`Backend sync: failed to parse JSON for ${sessionFile}: ${e}`);
-					return false;
-				}
-			}
-			
-			// Remap event model names to cached model names when there is a mismatch.
-			// CLI sessions often omit the model in individual events (defaulting to 'gpt-4o')
-			// while session.shutdown provides the actual model (e.g. 'claude-sonnet-4.6').
-			// Without remapping, the lookup `cachedData.modelUsage[eventModel]` silently fails.
-			const cachedModelNames = Object.keys(cachedData.modelUsage);
-			if (cachedModelNames.length > 0) {
-				const allEventModels = new Set<string>();
-				for (const modelMap of dayModelInteractions.values()) {
-					for (const m of modelMap.keys()) { allEventModels.add(m); }
-				}
-				const unmappedModels = new Set<string>();
-				for (const m of allEventModels) {
-					if (!cachedData.modelUsage[m]) { unmappedModels.add(m); }
-				}
-				if (unmappedModels.size > 0) {
-					const totalCachedTokens = cachedModelNames.reduce((sum, m) =>
-						sum + cachedData.modelUsage[m].inputTokens + cachedData.modelUsage[m].outputTokens, 0);
-					for (const [, modelMap] of dayModelInteractions) {
-						let unmappedCount = 0;
-						for (const um of unmappedModels) {
-							unmappedCount += modelMap.get(um) || 0;
-							modelMap.delete(um);
-						}
-						if (unmappedCount > 0) {
-							for (const cm of cachedModelNames) {
-								const ct = cachedData.modelUsage[cm].inputTokens + cachedData.modelUsage[cm].outputTokens;
-								const share = totalCachedTokens > 0 ? ct / totalCachedTokens : 1 / cachedModelNames.length;
-								const redistributed = Math.round(unmappedCount * share);
-								if (redistributed > 0) {
-									modelMap.set(cm, (modelMap.get(cm) || 0) + redistributed);
-								}
-							}
-						}
-					}
-				}
-			}
+// Fraction of this model's interactions that fall on this day (for multi-day sessions).
+const totalModelInteractions = totalInteractionsPerModel.get(model) || 1;
+const dayFraction = totalModelInteractions > 0 ? interactions / totalModelInteractions : 1;
 
-			// Total interactions per model (across all days) — used to compute each day's fraction
-			// for multi-day sessions.
-			const totalInteractionsPerModel = new Map<string, number>();
-			for (const modelMap of dayModelInteractions.values()) {
-				for (const [m, c] of modelMap) {
-					totalInteractionsPerModel.set(m, (totalInteractionsPerModel.get(m) || 0) + c);
-				}
-			}
+const inputTokens = Math.round(cachedInput * dayFraction);
+const outputTokens = Math.round(cachedOutput * dayFraction);
 
-			for (const [dayKey, modelMap] of dayModelInteractions) {
-				for (const [model, interactions] of modelMap) {
-					const cachedUsage = cachedData.modelUsage[model] as any;
-					if (!cachedUsage) { continue; }
+const fluencyMetrics = this.extractFluencyMetricsFromCache(cachedData, dayFraction);
+upsertDailyRollup(rollups, key, {
+inputTokens,
+outputTokens,
+interactions,
+fluencyMetrics
+});
+}
+}
 
-					// Validate individual model token values — reject negative or non-finite values.
-					const cachedInput = typeof cachedUsage.inputTokens === 'number' ? cachedUsage.inputTokens : NaN;
-					const cachedOutput = typeof cachedUsage.outputTokens === 'number' ? cachedUsage.outputTokens : NaN;
-					if (!Number.isFinite(cachedInput) || cachedInput < 0 ||
-						!Number.isFinite(cachedOutput) || cachedOutput < 0) {
-						this.deps.warn(`Backend sync: invalid inputTokens or outputTokens in model usage for ${sessionFile}`);
-						continue;
-					}
+// Log if this file had data for multiple days
+if (dayModelInteractions.size > 1) {
+const days = Array.from(dayModelInteractions.keys()).sort();
+this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${days.length} days: ${days.join(', ')}`);
+}
+}
 
-					const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor };
+/**
+ * Process an OpenCode session file and add its data to the rollups map.
+ * Returns false if outside the lookback window or no handler is registered.
+ * Throws on data retrieval errors (caller should catch and log).
+ */
+private async processOpenCodeSession(
+sessionFile: string,
+fileMtimeMs: number,
+args: { machineId: string; userId: string | undefined; editorForFile: string | undefined; workspaceNamesById: Record<string, string>; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>; startMs: number }
+): Promise<boolean> {
+if (!this.deps.editorHandlers?.getOpenCodeSessionData) { return false; }
+const getOpenCodeSessionData = this.deps.editorHandlers.getOpenCodeSessionData;
+const data = await getOpenCodeSessionData(sessionFile);
+const eventMs = data.timestamp || fileMtimeMs;
+if (!eventMs || eventMs < args.startMs) { return false; }
+const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
+const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
+await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, args.workspaceNamesById);
+for (const [model, usage] of Object.entries(data.modelUsage)) {
+const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId: args.machineId, userId: args.userId, editor: args.editorForFile };
+upsertDailyRollup(args.rollups, key, {
+inputTokens: usage.inputTokens || 0,
+outputTokens: usage.outputTokens || 0,
+interactions: usage.interactions || 0,
+});
+}
+return true;
+}
 
-					// Fraction of this model's interactions that fall on this day (for multi-day sessions).
-					// For single-day sessions dayFraction = 1.0 and the full cached model usage is used.
-					const totalModelInteractions = totalInteractionsPerModel.get(model) || 1;
-					const dayFraction = totalModelInteractions > 0 ? interactions / totalModelInteractions : 1;
+/**
+ * Process a Crush session file and add its data to the rollups map.
+ * Returns false if outside the lookback window or no handler is registered.
+ * Throws on data retrieval errors (caller should catch and log).
+ */
+private async processCrushSession(
+sessionFile: string,
+fileMtimeMs: number,
+args: { machineId: string; userId: string | undefined; editorForFile: string | undefined; workspaceNamesById: Record<string, string>; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>; startMs: number }
+): Promise<boolean> {
+if (!this.deps.editorHandlers?.getCrushSessionData) { return false; }
+const getCrushSessionData = this.deps.editorHandlers.getCrushSessionData;
+const data = await getCrushSessionData(sessionFile);
+const eventMs = data.timestamp || fileMtimeMs;
+if (!eventMs || eventMs < args.startMs) { return false; }
+const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
+// Crush paths: <project>/.crush/crush.db#<id>  — no workspaceStorage segment
+const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
+await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, args.workspaceNamesById);
+for (const [model, usage] of Object.entries(data.modelUsage)) {
+const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId: args.machineId, userId: args.userId, editor: args.editorForFile };
+upsertDailyRollup(args.rollups, key, {
+inputTokens: usage.inputTokens || 0,
+outputTokens: usage.outputTokens || 0,
+interactions: usage.interactions || 0,
+});
+}
+return true;
+}
+/**
+ * Process a session file using cached data for token counts but extracting accurate timestamps.
+ * Returns true if successful, false if cache miss (caller should parse file).
+ * Validates all cached data at runtime to prevent injection/corruption.
+ *
+ * CRITICAL: We parse the file to extract actual interaction timestamps and create per-day
+ * rollups, but use cached token counts for performance. This ensures accurate day assignment
+ * while still benefiting from cached calculations.
+ */
+private async processCachedSessionFile(
+sessionFile: string,
+fileMtimeMs: number,
+fileSize: number,
+workspaceId: string,
+machineId: string,
+userId: string | undefined,
+rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
+startMs: number,
+now: Date,
+editor?: string
+): Promise<boolean> {
+try {
+const cachedData = await this.deps.sessionHandlers.getSessionFileDataCached!(sessionFile, fileMtimeMs, fileSize);
 
-					// Apply dayFraction directly to the cached per-model tokens.
-					// For API-actual data, cachedUsage already holds the exact per-model totals from the
-					// session, so no additional scaling is needed. For text-estimate sessions, both
-					// cachedData.tokens and cachedUsage are from the same estimation and are consistent.
-					const inputTokens = Math.round(cachedInput * dayFraction);
-					const outputTokens = Math.round(cachedOutput * dayFraction);
+// Validate cached data structure to prevent injection/corruption
+if (!cachedData || typeof cachedData !== 'object') {
+this.deps.logger.warn(`Backend sync: invalid cached data structure for ${sessionFile}`);
+return false;
+}
+if (typeof cachedData.modelUsage !== 'object' || cachedData.modelUsage === null) {
+this.deps.logger.warn(`Backend sync: invalid modelUsage in cached data for ${sessionFile}`);
+return false;
+}
+if (!Number.isFinite(cachedData.interactions) || cachedData.interactions < 0) {
+this.deps.logger.warn(`Backend sync: invalid interactions count in cached data for ${sessionFile}`);
+return false;
+}
 
-					const fluencyMetrics = this.extractFluencyMetricsFromCache(cachedData, dayFraction);
+// Fast path: use pre-computed dailyRollups (same data as extension stats — avoids re-parsing the file).
+if (cachedData.dailyRollups && Object.keys(cachedData.dailyRollups).length > 0) {
+const totalSessionInteractions = cachedData.interactions || 1;
+const dayKeys = Object.keys(cachedData.dailyRollups).sort();
 
-					upsertDailyRollup(rollups, key, {
-						inputTokens,
-						outputTokens,
-						interactions: interactions,
-						fluencyMetrics
-					});
-				}
-			}
-			
-			// Log if this file had data for multiple days (for debugging)
-			if (dayModelInteractions.size > 1) {
-				const days = Array.from(dayModelInteractions.keys()).sort();
-				this.deps.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${days.length} days: ${days.join(', ')}`);
-			}
-			
-			return true;
-		} catch (e) {
-			// Differentiate between cache miss (expected) and errors (unexpected)
-			const errorMessage = e instanceof Error ? e.message : String(e);
-			if (errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
-				// Expected cache miss - file doesn't exist or not cached yet
-				return false;
-			} else {
-				// Unexpected error - log as warning
-				this.deps.warn(`Backend sync: cache error for ${sessionFile}: ${errorMessage}`);
-				return false;
-			}
-		}
-	}
+for (const dayKey of dayKeys) {
+const dayEntry = cachedData.dailyRollups[dayKey];
+const dayStartMs = new Date(dayKey + 'T00:00:00Z').getTime();
+if (dayStartMs < startMs) { continue; }
 
+const modelEntries = Object.entries(dayEntry.modelUsage).filter(([, mu]) =>
+mu && ((mu.inputTokens || 0) > 0 || (mu.outputTokens || 0) > 0)
+);
+if (modelEntries.length === 0) { continue; }
+
+// Distribute this day's interactions across models proportionally by output token share.
+const totalDayOutput = modelEntries.reduce((s, [, mu]) => s + (mu.outputTokens || 0), 0);
+const dayFraction = totalSessionInteractions > 0 ? dayEntry.interactions / totalSessionInteractions : 1;
+const fluencyMetrics = this.extractFluencyMetricsFromCache(cachedData, dayFraction);
+
+let remainingInteractions = dayEntry.interactions;
+for (let i = 0; i < modelEntries.length; i++) {
+const [model, mu] = modelEntries[i];
+const isLast = i === modelEntries.length - 1;
+const share = (!isLast && totalDayOutput > 0) ? (mu.outputTokens || 0) / totalDayOutput : 1;
+const modelInteractions = isLast
+? remainingInteractions
+: Math.min(Math.round(dayEntry.interactions * share), remainingInteractions);
+remainingInteractions -= modelInteractions;
+
+const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor };
+upsertDailyRollup(rollups, key, {
+inputTokens: mu.inputTokens || 0,
+outputTokens: mu.outputTokens || 0,
+interactions: Math.max(0, modelInteractions),
+fluencyMetrics,
+});
+}
+}
+
+if (dayKeys.length > 1) {
+this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${dayKeys.length} days (dailyRollups fast path): ${dayKeys.join(', ')}`);
+}
+return true;
+}
+
+// Slow path: parse the session file to get actual request timestamps and create per-day rollups.
+// Used when dailyRollups is absent (old cache entries before CACHE_VERSION bump).
+const content = await fs.promises.readFile(sessionFile, 'utf8');
+
+// Detect whether this is a delta-based (VS Code Insiders) JSONL file or a CLI JSONL file.
+let isDeltaBasedJsonl = false;
+if (isJsonlContent(content)) {
+const firstLine = content.trim().split('\n')[0]?.trim();
+if (firstLine) {
+try {
+const firstEvent = JSON.parse(firstLine);
+isDeltaBasedJsonl = typeof firstEvent.kind === 'number';
+} catch { /* not valid JSON, leave as false */ }
+}
+}
+
+// Build the day→model interaction count map using the appropriate format handler.
+let dayModelInteractions: Map<string, Map<string, number>>;
+if (sessionFile.endsWith('.jsonl') && !isDeltaBasedJsonl) {
+// Copilot CLI non-delta JSONL format
+dayModelInteractions = this.buildDayModelInteractionsFromCliJsonl(content, sessionFile, fileMtimeMs, startMs, now);
+} else if (isDeltaBasedJsonl) {
+// VS Code delta-based JSONL format (kind:0/1/2 events)
+dayModelInteractions = this.buildDayModelInteractionsFromDeltaJsonl(content, fileMtimeMs, startMs);
+} else {
+// Regular JSON format (VS Code Copilot Chat legacy / OpenCode JSON)
+const result = this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, sessionFile);
+if (result === null) {
+return false;
+}
+dayModelInteractions = result;
+}
+
+// Remap event model names to cached model names when there is a mismatch.
+this.remapUnmappedModels(dayModelInteractions, cachedData.modelUsage);
+
+// Build rollups from the day/model interaction map using cached token counts.
+this.buildRollupsFromDayModelInteractions(dayModelInteractions, cachedData, sessionFile, workspaceId, machineId, userId, rollups, editor);
+
+return true;
+} catch (e) {
+// Differentiate between cache miss (expected) and errors (unexpected)
+const errorMessage = e instanceof Error ? e.message : String(e);
+if (errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
+// Expected cache miss - file doesn't exist or not cached yet
+return false;
+} else {
+// Unexpected error - log as warning
+this.deps.logger.warn(`Backend sync: cache error for ${sessionFile}: ${errorMessage}`);
+return false;
+}
+}
+}
 	/**
 	 * Extract fluency metrics from cached session data and serialize for storage.
 	 * @param cachedData - The cached session file data
@@ -741,7 +808,7 @@ export class SyncService {
 		if (totalFiles === 0) {return;}
 		
 		const hitRate = ((cacheHits / totalFiles) * 100).toFixed(1);
-		this.deps.log(`Backend sync: Cache performance - Hits: ${cacheHits}, Misses: ${cacheMisses}, Hit Rate: ${hitRate}%`);
+		this.deps.logger.log(`Backend sync: Cache performance - Hits: ${cacheHits}, Misses: ${cacheMisses}, Hit Rate: ${hitRate}%`);
 	}
 
 	/**
@@ -772,18 +839,205 @@ export class SyncService {
 				const { validateTeamAlias } = await import('../identity.js');
 				const validation = validateTeamAlias(settings.userId);
 				if (!validation.valid) {
-					this.deps.warn(`⚠ Backend sync: User identity validation failed. Data will be synced WITHOUT user dimension.`);
-					this.deps.warn(`   Reason: ${validation.error}`);
-					this.deps.warn(`   Fix: Update "AI Engineering Fluency: Backend User Id" in settings to a valid team alias.`);
+					this.deps.logger.warn(`⚠ Backend sync: User identity validation failed. Data will be synced WITHOUT user dimension.`);
+					this.deps.logger.warn(`   Reason: ${validation.error}`);
+					this.deps.logger.warn(`   Fix: Update "AI Engineering Fluency: Backend User Id" in settings to a valid team alias.`);
 				}
 			} else {
-				this.deps.warn(`⚠ Backend sync: Could not resolve user identity for mode ${settings.userIdentityMode}. Data will be synced WITHOUT user dimension.`);
+				this.deps.logger.warn(`⚠ Backend sync: Could not resolve user identity for mode ${settings.userIdentityMode}. Data will be synced WITHOUT user dimension.`);
 			}
 		}
 		
 		return resolved;
 	}
 
+
+/**
+ * Extract token counts from a chat request, preferring actual API-reported counts
+ * and falling back to text-based estimation.
+ * Handles multiple request formats (pre-Feb 2026, Feb 2026+, VS Code Insiders).
+ */
+private extractTokenCountsFromRequest(
+req: ChatRequest,
+model: string
+): { inputTokens: number; outputTokens: number } {
+let inputTokens = 0;
+let outputTokens = 0;
+const result = (req as any).result;
+if (result?.usage) {
+// OLD FORMAT (pre-Feb 2026)
+inputTokens = typeof result.usage.promptTokens === 'number' ? result.usage.promptTokens : 0;
+outputTokens = typeof result.usage.completionTokens === 'number' ? result.usage.completionTokens : 0;
+} else if (typeof result?.promptTokens === 'number' && typeof result?.outputTokens === 'number') {
+// NEW FORMAT (Feb 2026+)
+inputTokens = result.promptTokens;
+outputTokens = result.outputTokens;
+} else if (result?.metadata && typeof result.metadata.promptTokens === 'number' && typeof result.metadata.outputTokens === 'number') {
+// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
+inputTokens = result.metadata.promptTokens;
+outputTokens = result.metadata.outputTokens;
+} else {
+// Fallback: text-based estimation — handles both flat text (delta format) and parts array (JSON format)
+const msgText = (req as any).message?.text;
+if (msgText) {
+inputTokens = this.deps.sessionHandlers.estimateTokensFromText(msgText, model);
+} else if (req.message?.parts) {
+for (const part of req.message.parts) {
+if (part?.text) { inputTokens += this.deps.sessionHandlers.estimateTokensFromText(part.text, model); }
+}
+}
+const response = (req as any).response ?? req.response;
+if (Array.isArray(response)) {
+for (const r of response) {
+if (typeof r?.value === 'string') { outputTokens += this.deps.sessionHandlers.estimateTokensFromText(r.value, model); }
+}
+}
+}
+return { inputTokens, outputTokens };
+}
+
+/**
+ * Process the fallback JSONL content when cached data is unavailable.
+ * Handles both VS Code delta-based and Copilot CLI JSONL formats, computing tokens directly.
+ */
+private processJsonlSessionFallback(
+content: string,
+sessionFile: string,
+fileMtimeMs: number,
+startMs: number,
+workspaceId: string,
+machineId: string,
+userId: string | undefined,
+editorForFile: string | undefined,
+rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>
+): void {
+let defaultModel = 'unknown';
+let isVsCodeFormat = false;
+const firstLine = content.trim().split('\n')[0]?.trim();
+if (firstLine) {
+try {
+const firstEv = JSON.parse(firstLine);
+isVsCodeFormat = typeof firstEv.kind === 'number';
+} catch { /* leave as false */ }
+}
+const seenReqIds = new Set<string>();
+const lines = content.trim().split('\n');
+for (const line of lines) {
+if (!line.trim()) { continue; }
+try {
+const event = JSON.parse(line);
+if (!event || typeof event !== 'object') { continue; }
+// VS Code delta-based format
+if (isVsCodeFormat) {
+if (event.kind === 0) {
+const mId = event.v?.selectedModel?.identifier || event.v?.selectedModel?.metadata?.id || event.v?.inputState?.selectedModel?.metadata?.id;
+if (mId) { defaultModel = mId.replace(/^copilot\//, ''); }
+}
+if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'selectedModel') {
+const mId = event.v?.identifier || event.v?.metadata?.id;
+if (mId) { defaultModel = mId.replace(/^copilot\//, ''); }
+}
+if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
+for (const request of event.v) {
+const req = request as ChatRequest;
+const reqId = (req as any).requestId as string | undefined;
+if (reqId && seenReqIds.has(reqId)) { continue; }
+if (reqId) { seenReqIds.add(reqId); }
+const normalizedTs = this.utility.normalizeTimestampToMs(typeof req.timestamp !== 'undefined' ? req.timestamp : undefined);
+const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
+if (!eventMs || eventMs < startMs) { continue; }
+const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
+const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
+const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
+const { inputTokens, outputTokens } = this.extractTokenCountsFromRequest(req, model);
+if (inputTokens === 0 && outputTokens === 0) { continue; }
+const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
+upsertDailyRollup(rollups, key, { inputTokens, outputTokens, interactions: 1 });
+}
+}
+continue; // processed as VS Code delta event; skip CLI logic below
+}
+// Copilot CLI non-delta format
+if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') {
+defaultModel = event.data.selectedModel;
+}
+if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
+defaultModel = event.data.newModel;
+}
+const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
+const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
+if (!eventMs || eventMs < startMs) { continue; }
+const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
+const model = (event.data?.model || event.model || defaultModel).toString();
+let inputTokens = 0;
+let outputTokens = 0;
+let interactions = 0;
+if (event.type === 'user.message' && event.data?.content) {
+inputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model);
+interactions = 1;
+} else if (event.type === 'assistant.message' && event.data?.content) {
+outputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model);
+} else if (event.type === 'tool.result' && event.data?.output) {
+inputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.output, model);
+}
+if (inputTokens === 0 && outputTokens === 0 && interactions === 0) { continue; }
+const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
+upsertDailyRollup(rollups, key, { inputTokens, outputTokens, interactions });
+} catch {
+// skip malformed line
+}
+}
+}
+
+/**
+ * Process the fallback JSON content when cached data is unavailable.
+ * Handles the VS Code Copilot Chat legacy JSON format.
+ * Returns false if the JSON cannot be parsed (a warning is logged internally).
+ */
+private processJsonSessionFallback(
+content: string,
+sessionFile: string,
+fileMtimeMs: number,
+startMs: number,
+workspaceId: string,
+machineId: string,
+userId: string | undefined,
+editorForFile: string | undefined,
+rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>
+): boolean {
+let sessionJson: unknown;
+try {
+sessionJson = JSON.parse(content);
+if (!sessionJson || typeof sessionJson !== 'object') {
+this.deps.logger.warn(`Backend sync: session file has invalid JSON structure: ${sessionFile}`);
+return false;
+}
+} catch (e) {
+this.deps.logger.warn(`Backend sync: failed to parse JSON session file ${sessionFile}: ${e}`);
+return false;
+}
+const sessionObj = sessionJson as Record<string, unknown>;
+const requests = Array.isArray(sessionObj.requests) ? (sessionObj.requests as unknown[]) : [];
+for (const request of requests) {
+try {
+const req = request as ChatRequest;
+const normalizedTs = this.utility.normalizeTimestampToMs(
+typeof req.timestamp !== 'undefined' ? req.timestamp : (sessionObj.lastMessageDate as unknown)
+);
+const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
+if (!eventMs || eventMs < startMs) { continue; }
+const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
+const model = this.deps.sessionHandlers.getModelFromRequest(req);
+const { inputTokens, outputTokens } = this.extractTokenCountsFromRequest(req, model);
+if (inputTokens === 0 && outputTokens === 0) { continue; }
+const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
+upsertDailyRollup(rollups, key, { inputTokens, outputTokens, interactions: 1 });
+} catch (e) {
+this.deps.logger.warn(`Backend sync: failed to process request in ${sessionFile}: ${e}`);
+}
+}
+return true;
+}
 	/**
 	 * Compute daily rollups from local session files.
 	 * Uses cached session data when available to avoid re-parsing files.
@@ -808,7 +1062,7 @@ export class SyncService {
 		// Log the date range being processed
 		const todayKey = this.utility.toUtcDayKey(now);
 		const startKey = this.utility.toUtcDayKey(start);
-		this.deps.log(`Backend sync: processing sessions from ${startKey} to ${todayKey} (lookback ${lookbackDays} days)`);
+		this.deps.logger.log(`Backend sync: processing sessions from ${startKey} to ${todayKey} (lookback ${lookbackDays} days)`);
 
 		const machineId = vscode.env.machineId;
 		const rollups = new Map<string, { key: DailyRollupKey; value: DailyRollupValue }>();
@@ -820,21 +1074,21 @@ export class SyncService {
 		}
 
 		// Use pre-fetched session files if provided, otherwise fetch them
-		const sessionFiles = args.sessionFiles ?? await this.deps.getCopilotSessionFiles();
-		const useCachedData = !!this.deps.getSessionFileDataCached;
+		const sessionFiles = args.sessionFiles ?? await this.deps.sessionHandlers.getCopilotSessionFiles();
+		const useCachedData = !!this.deps.sessionHandlers.getSessionFileDataCached;
 		let cacheHits = 0;
 		let cacheMisses = 0;
 		let filesSkipped = 0;
 		let filesProcessed = 0;
 		
 		const totalFiles = sessionFiles.length;
-		this.deps.log(`Backend sync: analyzing ${totalFiles} session files`);
+		this.deps.logger.log(`Backend sync: analyzing ${totalFiles} session files`);
 
 		for (const sessionFile of sessionFiles) {
 			let fileMtimeMs: number | undefined;
 			
 			try {
-				const fileStat = await this.deps.statSessionFile(sessionFile);
+				const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
 				fileMtimeMs = fileStat.mtimeMs;
 				
 				// Skip files older than lookback period (unless backfill mode bypasses this filter)
@@ -849,92 +1103,45 @@ export class SyncService {
 					onProgress(filesProcessed, totalFiles, daysFound);
 				}
 			} catch (e) {
-				this.deps.warn(`Backend sync: failed to stat session file ${sessionFile}: ${e}`);
+				this.deps.logger.warn(`Backend sync: failed to stat session file ${sessionFile}: ${e}`);
 				continue;
 			}
 
 			// Determine the editor for this session file (only used when includeEditorDimension is set)
 			const editorForFile = includeEditorDimension
-				? getEditorTypeFromPath(sessionFile, this.deps.isOpenCodeSession)
+				? getEditorTypeFromPath(sessionFile, this.deps.editorHandlers?.isOpenCodeSession)
 				: undefined;
 
 			// Skip Visual Studio session files — they are binary MessagePack, not JSON
-			if (this.deps.isVSSessionFile && this.deps.isVSSessionFile(sessionFile)) {
+			if (this.deps.editorHandlers?.isVSSessionFile && this.deps.editorHandlers?.isVSSessionFile(sessionFile)) {
 				filesSkipped++;
 				continue;
 			}
 
 			// Handle OpenCode sessions separately (different data format)
-			if (this.deps.isOpenCodeSession && this.deps.isOpenCodeSession(sessionFile)) {
-				if (!this.deps.getOpenCodeSessionData) {
-					filesSkipped++;
-					continue;
-				}
-				
+			if (this.deps.editorHandlers?.isOpenCodeSession && this.deps.editorHandlers?.isOpenCodeSession(sessionFile)) {
+				const sessionArgs = this.makeSessionRollupArgs(machineId, userId, editorForFile, workspaceNamesById, rollups, startMs);
 				try {
-					const data = await this.deps.getOpenCodeSessionData(sessionFile);
-					const eventMs = data.timestamp || fileMtimeMs;
-					
-					if (!eventMs || eventMs < startMs) {
-						filesSkipped++;
-						continue;
-					}
-
-					const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-					const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
-					await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, workspaceNamesById);
-
-					// Process each model's usage with per-model interaction counts
-					for (const [model, usage] of Object.entries(data.modelUsage)) {
-						const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
-						upsertDailyRollup(rollups as any, key, {
-							inputTokens: (usage as any).inputTokens || 0,
-							outputTokens: (usage as any).outputTokens || 0,
-							interactions: (usage as any).interactions || 0
-						});
-					}
-					continue;
+					const processed = await this.processOpenCodeSession(sessionFile, fileMtimeMs, sessionArgs);
+					if (!processed) { filesSkipped++; }
 				} catch (e) {
-					this.deps.warn(`Backend sync: failed to process OpenCode session ${sessionFile}: ${e}`);
-					continue;
+					this.deps.logger.warn(`Backend sync: failed to process OpenCode session ${sessionFile}: ${e}`);
 				}
+				continue;
 			}
 
 			// Handle Crush sessions separately (virtual paths pointing to crush.db SQLite entries)
-			if (this.deps.isCrushSession && this.deps.isCrushSession(sessionFile)) {
-				if (!this.deps.getCrushSessionData) {
-					filesSkipped++;
-					continue;
-				}
-
+			if (this.deps.editorHandlers?.isCrushSession && this.deps.editorHandlers?.isCrushSession(sessionFile)) {
+				const sessionArgs = this.makeSessionRollupArgs(machineId, userId, editorForFile, workspaceNamesById, rollups, startMs);
 				try {
-					const data = await this.deps.getCrushSessionData(sessionFile);
-					const eventMs = data.timestamp || fileMtimeMs;
-
-					if (!eventMs || eventMs < startMs) {
-						filesSkipped++;
-						continue;
-					}
-
-					const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-					// Crush paths: <project>/.crush/crush.db#<id>  — no workspaceStorage segment
-					const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
-					await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, workspaceNamesById);
-
-					for (const [model, usage] of Object.entries(data.modelUsage)) {
-						const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
-						upsertDailyRollup(rollups as any, key, {
-							inputTokens: (usage as any).inputTokens || 0,
-							outputTokens: (usage as any).outputTokens || 0,
-							interactions: (usage as any).interactions || 0,
-						});
-					}
-					continue;
+					const processed = await this.processCrushSession(sessionFile, fileMtimeMs, sessionArgs);
+					if (!processed) { filesSkipped++; }
 				} catch (e) {
-					this.deps.warn(`Backend sync: failed to process Crush session ${sessionFile}: ${e}`);
-					continue;
+					this.deps.logger.warn(`Backend sync: failed to process Crush session ${sessionFile}: ${e}`);
 				}
+				continue;
 			}
+
 
 			const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
 			await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, workspaceNamesById);
@@ -943,7 +1150,7 @@ export class SyncService {
 			// Note: We still parse the file to get accurate day keys from timestamps,
 			// but use cached token counts for performance
 			if (useCachedData) {
-				const fileStat = await this.deps.statSessionFile(sessionFile);
+				const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
 				const cacheSuccess = await this.processCachedSessionFile(
 					sessionFile,
 					fileMtimeMs,
@@ -970,191 +1177,17 @@ export class SyncService {
 			try {
 				content = await fs.promises.readFile(sessionFile, 'utf8');
 			} catch (e) {
-				this.deps.warn(`Backend sync: failed to read session file ${sessionFile}: ${e}`);
+				this.deps.logger.warn(`Backend sync: failed to read session file ${sessionFile}: ${e}`);
 				continue;
 			}
 			// JSONL (Copilot CLI or VS Code chat .json/.jsonl with delta-based content)
 			if (sessionFile.endsWith('.jsonl') || isJsonlContent(content)) {
-				let defaultModel = 'gpt-4o';
-				// Delta-based format can come from .json or .jsonl files; detect by first-line kind property
-				let isVsCodeFormat = false;
-				const firstJsonlLine = content.trim().split('\n')[0]?.trim();
-				if (firstJsonlLine) {
-					try {
-						const firstEv = JSON.parse(firstJsonlLine);
-						isVsCodeFormat = typeof firstEv.kind === 'number';
-					} catch { /* leave as false */ }
-				}
-				const seenReqIds = new Set<string>();
-				const lines = content.trim().split('\n');
-				for (const line of lines) {
-					if (!line.trim()) {
-						continue;
-					}
-					try {
-						const event = JSON.parse(line);
-						if (!event || typeof event !== 'object') {
-							continue;
-						}
-						// VS Code delta-based: track default model from session header events
-						if (isVsCodeFormat) {
-							if (event.kind === 0) {
-								const mId = event.v?.selectedModel?.identifier || event.v?.selectedModel?.metadata?.id || event.v?.inputState?.selectedModel?.metadata?.id;
-								if (mId) { defaultModel = mId.replace(/^copilot\//, ''); }
-							}
-							if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'selectedModel') {
-								const mId = event.v?.identifier || event.v?.metadata?.id;
-								if (mId) { defaultModel = mId.replace(/^copilot\//, ''); }
-							}
-							if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
-								for (const request of event.v) {
-									const req = request as ChatRequest;
-									const reqId = (req as any).requestId as string | undefined;
-									if (reqId && seenReqIds.has(reqId)) { continue; }
-									if (reqId) { seenReqIds.add(reqId); }
-									const normalizedTs = this.utility.normalizeTimestampToMs(typeof req.timestamp !== 'undefined' ? req.timestamp : undefined);
-									const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-									if (!eventMs || eventMs < startMs) { continue; }
-									const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-									const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
-									const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
-
-									let inputTokens = 0;
-									let outputTokens = 0;
-									// Prefer actual API token counts when available in the request
-									const reqResult = (req as any).result;
-									if (reqResult?.usage) {
-										inputTokens = typeof reqResult.usage.promptTokens === 'number' ? reqResult.usage.promptTokens : 0;
-										outputTokens = typeof reqResult.usage.completionTokens === 'number' ? reqResult.usage.completionTokens : 0;
-									} else if (typeof reqResult?.promptTokens === 'number' && typeof reqResult?.outputTokens === 'number') {
-										inputTokens = reqResult.promptTokens;
-										outputTokens = reqResult.outputTokens;
-									} else if (reqResult?.metadata && typeof reqResult.metadata.promptTokens === 'number' && typeof reqResult.metadata.outputTokens === 'number') {
-										inputTokens = reqResult.metadata.promptTokens;
-										outputTokens = reqResult.metadata.outputTokens;
-									} else {
-										// Fallback to text-based estimation
-										if ((req as any).message?.text) {
-											inputTokens = this.deps.estimateTokensFromText((req as any).message.text, model);
-										}
-										if (Array.isArray((req as any).response)) {
-											for (const r of (req as any).response) {
-												if (typeof r?.value === 'string') { outputTokens += this.deps.estimateTokensFromText(r.value, model); }
-											}
-										}
-									}
-									if (inputTokens === 0 && outputTokens === 0) { continue; }
-									const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
-									upsertDailyRollup(rollups as any, key, { inputTokens, outputTokens, interactions: 1 });
-								}
-							}
-							continue; // processed as VS Code delta event; skip CLI logic below
-						}
-						// Copilot CLI non-delta format below
-						const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
-						const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-						if (!eventMs || eventMs < startMs) {
-							continue;
-						}
-						const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-						const model = (event.model || defaultModel).toString();
-
-						let inputTokens = 0;
-						let outputTokens = 0;
-						let interactions = 0;
-						if (event.type === 'user.message' && event.data?.content) {
-							inputTokens = this.deps.estimateTokensFromText(event.data.content, model);
-							interactions = 1;
-						} else if (event.type === 'assistant.message' && event.data?.content) {
-							outputTokens = this.deps.estimateTokensFromText(event.data.content, model);
-						} else if (event.type === 'tool.result' && event.data?.output) {
-							inputTokens = this.deps.estimateTokensFromText(event.data.output, model);
-						}
-						if (inputTokens === 0 && outputTokens === 0 && interactions === 0) {
-							continue;
-						}
-
-						const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
-						upsertDailyRollup(rollups as any, key, { inputTokens, outputTokens, interactions });
-					} catch {
-						// skip malformed line
-					}
-				}
+				this.processJsonlSessionFallback(content, sessionFile, fileMtimeMs, startMs, workspaceId, machineId, userId, editorForFile, rollups);
 				continue;
 			}
 
 			// JSON (VS Code Copilot Chat)
-			let sessionJson: unknown;
-			try {
-				sessionJson = JSON.parse(content);
-				if (!sessionJson || typeof sessionJson !== 'object') {
-					this.deps.warn(`Backend sync: session file has invalid JSON structure: ${sessionFile}`);
-					continue;
-				}
-			} catch (e) {
-				this.deps.warn(`Backend sync: failed to parse JSON session file ${sessionFile}: ${e}`);
-				continue;
-			}
-			const sessionObj = sessionJson as Record<string, unknown>; // Safe due to check above
-
-			const requests = Array.isArray(sessionObj.requests) ? (sessionObj.requests as unknown[]) : [];
-			for (const request of requests) {
-				try {
-					// Cast to ChatRequest since it comes from validated JSON object
-					const req = request as ChatRequest;
-					const normalizedTs = this.utility.normalizeTimestampToMs(
-						typeof req.timestamp !== 'undefined' ? req.timestamp : (sessionObj.lastMessageDate as unknown)
-					);
-					const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-					if (!eventMs || eventMs < startMs) {
-						continue;
-					}
-					const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-					const model = this.deps.getModelFromRequest(req);
-
-					let inputTokens = 0;
-					let outputTokens = 0;
-					// Prefer actual API token counts when available
-					const result = (req as any).result;
-					if (result?.usage) {
-						// OLD FORMAT (pre-Feb 2026)
-						inputTokens = typeof result.usage.promptTokens === 'number' ? result.usage.promptTokens : 0;
-						outputTokens = typeof result.usage.completionTokens === 'number' ? result.usage.completionTokens : 0;
-					} else if (typeof result?.promptTokens === 'number' && typeof result?.outputTokens === 'number') {
-						// NEW FORMAT (Feb 2026+)
-						inputTokens = result.promptTokens;
-						outputTokens = result.outputTokens;
-					} else if (result?.metadata && typeof result.metadata.promptTokens === 'number' && typeof result.metadata.outputTokens === 'number') {
-						// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
-						inputTokens = result.metadata.promptTokens;
-						outputTokens = result.metadata.outputTokens;
-					} else {
-						// Fallback to text-based estimation
-						if (req.message && req.message.parts) {
-							for (const part of req.message.parts) {
-								if (part?.text) {
-									inputTokens += this.deps.estimateTokensFromText(part.text, model);
-								}
-							}
-						}
-						if (req.response && Array.isArray(req.response)) {
-							for (const responseItem of req.response) {
-								if (typeof responseItem?.value === 'string') {
-									outputTokens += this.deps.estimateTokensFromText(responseItem.value, model);
-								}
-							}
-						}
-					}
-					if (inputTokens === 0 && outputTokens === 0) {
-						continue;
-					}
-
-					const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
-					upsertDailyRollup(rollups as any, key, { inputTokens, outputTokens, interactions: 1 });
-				} catch (e) {
-					this.deps.warn(`Backend sync: failed to process request in ${sessionFile}: ${e}`);
-				}
-			}
+			this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, startMs, workspaceId, machineId, userId, editorForFile, rollups);
 		}
 
 		// Log cache performance statistics
@@ -1162,7 +1195,7 @@ export class SyncService {
 			this.logCachePerformance(cacheHits, cacheMisses);
 		}
 		
-		this.deps.log(`Backend sync: processed ${filesProcessed} files, skipped ${filesSkipped} files outside lookback period`);
+		this.deps.logger.log(`Backend sync: processed ${filesProcessed} files, skipped ${filesSkipped} files outside lookback period`);
 
 		return { rollups, workspaceNamesById, machineNamesById };
 	}
@@ -1186,9 +1219,9 @@ export class SyncService {
 			});
 			if (!sharingPolicy.allowCloudSync || !isConfigured) {
 				if (!sharingPolicy.allowCloudSync) {
-					this.deps.log(`Backend sync: skipping (sharing policy does not allow cloud sync, profile: ${settings.sharingProfile})`);
+					this.deps.logger.log(`Backend sync: skipping (sharing policy does not allow cloud sync, profile: ${settings.sharingProfile})`);
 				} else if (!isConfigured) {
-					this.deps.log('Backend sync: skipping (backend not configured - missing storage account, subscription, or resource group)');
+					this.deps.logger.log('Backend sync: skipping (backend not configured - missing storage account, subscription, or resource group)');
 				}
 				return;
 			}
@@ -1197,7 +1230,7 @@ export class SyncService {
 			const lastSyncAt = this.deps.context?.globalState.get<number>('backend.lastSyncAt');
 			if (!force && lastSyncAt && Date.now() - lastSyncAt < BACKEND_SYNC_MIN_INTERVAL_MS) {
 				const secondsSinceLastSync = Math.round((Date.now() - lastSyncAt) / 1000);
-				this.deps.log(`Backend sync: skipping (last sync was ${secondsSinceLastSync}s ago, minimum interval is ${BACKEND_SYNC_MIN_INTERVAL_MS / 1000}s)`);
+				this.deps.logger.log(`Backend sync: skipping (last sync was ${secondsSinceLastSync}s ago, minimum interval is ${BACKEND_SYNC_MIN_INTERVAL_MS / 1000}s)`);
 				return;
 			}
 
@@ -1209,7 +1242,7 @@ export class SyncService {
 				: settings.storageAccount;
 			const lockAcquired = await this.acquireSyncLock(settings.backend, serverUrl);
 			if (!lockAcquired) {
-				this.deps.log('Backend sync: skipping (another VS Code window is currently syncing to the same server)');
+				this.deps.logger.log('Backend sync: skipping (another VS Code window is currently syncing to the same server)');
 				return;
 			}
 
@@ -1221,22 +1254,22 @@ export class SyncService {
 					try {
 						await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
 					} catch (e) {
-						this.deps.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
+						this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
 					}
 					this.consecutiveFailures = 0;
 					return;
 				}
 
-				this.deps.log('Backend sync: starting rollup sync');
+				this.deps.logger.log('Backend sync: starting rollup sync');
 				const creds = await this.credentialService.getBackendDataPlaneCredentials(settings);
 				if (!creds) {
 					// Shared Key mode selected but key not available (or user canceled). Keep local mode functional.
-					this.deps.warn('Backend sync: skipping (credentials not available - check authentication mode and secrets)');
+					this.deps.logger.warn('Backend sync: skipping (credentials not available - check authentication mode and secrets)');
 					// Update timestamp to prevent stale "last sync" display
 					try {
 						await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
 					} catch (e) {
-						this.deps.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
+						this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
 					}
 					return;
 				}
@@ -1255,16 +1288,16 @@ export class SyncService {
 					};
 					blobUploadNeeded = this.blobUploadService.shouldUpload(machineId, uploadSettings);
 					if (blobUploadNeeded) {
-						this.deps.log('Blob upload: will upload session files after table sync');
+						this.deps.logger.log('Blob upload: will upload session files after table sync');
 					} else {
 						const status = this.blobUploadService.getUploadStatus(machineId);
 						const hoursSince = status ? Math.round((Date.now() - status.lastUploadTime) / (1000 * 60 * 60)) : 0;
-						this.deps.log(`Blob upload: not needed (last upload ${hoursSince}h ago, frequency: ${settings.blobUploadFrequencyHours}h)`);
+						this.deps.logger.log(`Blob upload: not needed (last upload ${hoursSince}h ago, frequency: ${settings.blobUploadFrequencyHours}h)`);
 					}
 				}
 
 				// Fetch session files once and reuse for both rollups and blob upload
-				const sessionFiles = await this.deps.getCopilotSessionFiles();
+				const sessionFiles = await this.deps.sessionHandlers.getCopilotSessionFiles();
 
 				const resolvedIdentity = await this.resolveEffectiveUserIdentityForSync(settings, sharingPolicy.includeUserDimension);
 				const { rollups, workspaceNamesById, machineNamesById } = await this.computeDailyRollupsFromLocalSessions({ 
@@ -1280,10 +1313,10 @@ export class SyncService {
 				}
 				const sortedDays = Array.from(dayKeys).sort();
 				if (sortedDays.length > 0) {
-					this.deps.log(`Backend sync: processing data for ${sortedDays.length} days: ${sortedDays.join(', ')}`);
+					this.deps.logger.log(`Backend sync: processing data for ${sortedDays.length} days: ${sortedDays.join(', ')}`);
 				}
 				
-				this.deps.log(`Backend sync: upserting ${rollups.size} rollup entities (lookback ${settings.lookbackDays} days)`);
+				this.deps.logger.log(`Backend sync: upserting ${rollups.size} rollup entities (lookback ${settings.lookbackDays} days)`);
 
 				const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
 
@@ -1297,7 +1330,7 @@ export class SyncService {
 				if (cacheWasCleared && resolvedIdentity.userId && sortedDays.length > 0) {
 					const startDayKey = sortedDays[0];
 					const endDayKey = sortedDays[sortedDays.length - 1];
-					this.deps.log(`Backend sync: cleaning stale entities for user "${resolvedIdentity.userId}" (${startDayKey} to ${endDayKey})`);
+					this.deps.logger.log(`Backend sync: cleaning stale entities for user "${resolvedIdentity.userId}" (${startDayKey} to ${endDayKey})`);
 					try {
 						const deleteResult = await this.dataPlaneService.deleteEntitiesForUserDataset({
 							tableClient,
@@ -1306,14 +1339,14 @@ export class SyncService {
 							startDayKey,
 							endDayKey,
 						});
-						this.deps.log(`Backend sync: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
+						this.deps.logger.log(`Backend sync: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
 						await this.deps.context?.globalState.update('backend.lastCleanSyncVersion', CLEAN_SYNC_VERSION);
 					} catch (e) {
-						this.deps.warn(`Backend sync: failed to clean stale entities: ${e}`);
+						this.deps.logger.warn(`Backend sync: failed to clean stale entities: ${e}`);
 					}
 				}
 
-				const entities = [];
+				const entities: BackendAggDailyEntityLike[] = [];
 				for (const { key, value } of rollups.values()) {
 					const effectiveUserId = (key.userId ?? '').trim() || undefined;
 					const includeConsent = sharingPolicy.includeUserDimension && !!effectiveUserId;
@@ -1337,7 +1370,7 @@ export class SyncService {
 						userId: effectiveUserId,
 						userKeyType: resolvedIdentity.userKeyType,
 						shareWithTeam: includeConsent ? true : undefined,
-						consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.log),
+						consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.logger.log),
 						inputTokens: value.inputTokens,
 						outputTokens: value.outputTokens,
 						interactions: value.interactions,
@@ -1349,9 +1382,9 @@ export class SyncService {
 				const { successCount, errors } = await this.dataPlaneService.upsertEntitiesBatch(tableClient, entities);
 				
 				if (errors.length > 0) {
-					this.deps.warn(`Backend sync: ${successCount}/${entities.length} entities synced successfully, ${errors.length} failed`);
+					this.deps.logger.warn(`Backend sync: ${successCount}/${entities.length} entities synced successfully, ${errors.length} failed`);
 				} else {
-					this.deps.log(`Backend sync: ${successCount} entities synced successfully`);
+					this.deps.logger.log(`Backend sync: ${successCount} entities synced successfully`);
 				}
 
 				this.consecutiveFailures = 0;
@@ -1359,10 +1392,10 @@ export class SyncService {
 				try {
 					await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
 				} catch (e) {
-					this.deps.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
+					this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
 				}
 				
-				this.deps.log('Backend sync: completed');
+				this.deps.logger.log('Backend sync: completed');
 				
 				// Upload session files to Blob Storage if needed (check was done earlier)
 				if (blobUploadNeeded && this.blobUploadService) {
@@ -1375,7 +1408,7 @@ export class SyncService {
 							compressFiles: settings.blobCompressFiles
 						};
 
-						this.deps.log('Blob upload: starting');
+						this.deps.logger.log('Blob upload: starting');
 						
 						const uploadResult = await this.blobUploadService.uploadSessionFiles(
 							settings.storageAccount,
@@ -1387,12 +1420,12 @@ export class SyncService {
 						);
 						
 						if (uploadResult.success) {
-							this.deps.log(`Blob upload: ${uploadResult.message}`);
+							this.deps.logger.log(`Blob upload: ${uploadResult.message}`);
 						} else {
-							this.deps.warn(`Blob upload: ${uploadResult.message}`);
+							this.deps.logger.warn(`Blob upload: ${uploadResult.message}`);
 						}
 					} catch (blobError: any) {
-						this.deps.warn(`Blob upload: failed - ${blobError?.message ?? blobError}`);
+						this.deps.logger.warn(`Blob upload: failed - ${blobError?.message ?? blobError}`);
 					}
 				}
 
@@ -1402,24 +1435,24 @@ export class SyncService {
 				if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
 					try {
 						await this.syncToSharingServer(settings, sharingPolicy);
-					} catch (ssErr: any) {
-						this.deps.warn(`Sharing server sync: failed - ${ssErr?.message ?? ssErr}`);
+					} catch (ssErr: unknown) {
+						this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
 					}
 				}
 
 				// DO NOT trigger UI refresh here - it causes redundant analysis and blocks UI
 				// The periodic timer in extension.ts will handle UI updates
-			} catch (e: any) {
+			} catch (e: unknown) {
 				// Keep local mode functional.
 				const secretsToRedact = await this.credentialService.getBackendSecretsToRedactForError(settings);
-				this.deps.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
+				this.deps.logger.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
 
 				// Azure sync failed — still attempt the sharing server sync if configured.
 				if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
 					try {
 						await this.syncToSharingServer(settings, sharingPolicy);
-					} catch (ssErr: any) {
-						this.deps.warn(`Sharing server sync: failed - ${ssErr?.message ?? ssErr}`);
+					} catch (ssErr: unknown) {
+						this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
 					}
 				}
 			} finally {
@@ -1451,13 +1484,13 @@ export class SyncService {
 		sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>,
 	): Promise<void> {
 		if (!this.sharingServerUploadService) {
-			this.deps.warn('Sharing server upload: service not available');
+			this.deps.logger.warn('Sharing server upload: service not available');
 			return;
 		}
 
 		const githubToken = this.deps.getGithubToken?.();
 		if (!githubToken) {
-			this.deps.log('Sharing server upload: skipping (no GitHub token — authenticate with GitHub in VS Code first)');
+			this.deps.logger.log('Sharing server upload: skipping (no GitHub token — authenticate with GitHub in VS Code first)');
 			return;
 		}
 
@@ -1473,7 +1506,7 @@ export class SyncService {
 			});
 
 		if (rollups.size === 0) {
-			this.deps.log('Sharing server upload: no data to upload');
+			this.deps.logger.log('Sharing server upload: no data to upload');
 			return;
 		}
 
@@ -1498,13 +1531,13 @@ export class SyncService {
 
 		const totalInputTokens = entries.reduce((s, e) => s + e.inputTokens, 0);
 		const totalOutputTokens = entries.reduce((s, e) => s + e.outputTokens, 0);
-		this.deps.log(`Sharing server upload: uploading ${entries.length} rollup entries (${(totalInputTokens + totalOutputTokens).toLocaleString()} tokens total)`);
+		this.deps.logger.log(`Sharing server upload: uploading ${entries.length} rollup entries (${(totalInputTokens + totalOutputTokens).toLocaleString()} tokens total)`);
 		await this.sharingServerUploadService.uploadRollups(
 			settings.sharingServerEndpointUrl,
 			githubToken,
 			entries,
-			this.deps.log,
-			this.deps.warn,
+			this.deps.logger.log,
+			this.deps.logger.warn,
 		);
 	}
 
@@ -1527,8 +1560,8 @@ export class SyncService {
 			settings.sharingServerEndpointUrl,
 			githubToken,
 			score,
-			this.deps.log,
-			this.deps.warn,
+			this.deps.logger.log,
+			this.deps.logger.warn,
 		);
 	}
 
@@ -1549,15 +1582,15 @@ export class SyncService {
 			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
 		});
 		if (!sharingPolicy.allowCloudSync || !isConfigured) {
-			this.deps.warn('Backfill: skipping (cloud sync disabled or backend not configured)');
+			this.deps.logger.warn('Backfill: skipping (cloud sync disabled or backend not configured)');
 			return;
 		}
 
-		this.deps.log(`Backfill: starting deep scan (up to ${maxLookbackDays} days, mtime filter disabled)`);
+		this.deps.logger.log(`Backfill: starting deep scan (up to ${maxLookbackDays} days, mtime filter disabled)`);
 
 		const creds = await this.credentialService.getBackendDataPlaneCredentials(settings);
 		if (!creds) {
-			this.deps.warn('Backfill: skipping (credentials not available)');
+			this.deps.logger.warn('Backfill: skipping (credentials not available)');
 			return;
 		}
 
@@ -1575,10 +1608,10 @@ export class SyncService {
 		const dayKeys = new Set<string>();
 		for (const { key } of rollups.values()) { dayKeys.add(key.day); }
 		const sortedDays = Array.from(dayKeys).sort();
-		this.deps.log(`Backfill: found data for ${sortedDays.length} days: ${sortedDays.slice(0, 10).join(', ')}${sortedDays.length > 10 ? '…' : ''}`);
+		this.deps.logger.log(`Backfill: found data for ${sortedDays.length} days: ${sortedDays.slice(0, 10).join(', ')}${sortedDays.length > 10 ? '…' : ''}`);
 
 		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
-		const entities = [];
+		const entities: BackendAggDailyEntityLike[] = [];
 		for (const { key, value } of rollups.values()) {
 			const effectiveUserId = (key.userId ?? '').trim() || undefined;
 			const includeConsent = sharingPolicy.includeUserDimension && !!effectiveUserId;
@@ -1602,7 +1635,7 @@ export class SyncService {
 				userId: effectiveUserId,
 				userKeyType: resolvedIdentity.userKeyType,
 				shareWithTeam: includeConsent ? true : undefined,
-				consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.log),
+				consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.logger.log),
 				inputTokens: value.inputTokens,
 				outputTokens: value.outputTokens,
 				interactions: value.interactions,
@@ -1621,7 +1654,7 @@ export class SyncService {
 		if (resolvedIdentity.userId && sortedDays.length > 0) {
 			const startDayKey = sortedDays[0];
 			const endDayKey = sortedDays[sortedDays.length - 1];
-			this.deps.log(`Backfill: cleaning stale entities for user "${resolvedIdentity.userId}" in date range ${startDayKey} to ${endDayKey}`);
+			this.deps.logger.log(`Backfill: cleaning stale entities for user "${resolvedIdentity.userId}" in date range ${startDayKey} to ${endDayKey}`);
 			try {
 				const deleteResult = await this.dataPlaneService.deleteEntitiesForUserDataset({
 					tableClient,
@@ -1630,17 +1663,17 @@ export class SyncService {
 					startDayKey,
 					endDayKey,
 				});
-				this.deps.log(`Backfill: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
+				this.deps.logger.log(`Backfill: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
 			} catch (e) {
-				this.deps.warn(`Backfill: failed to clean stale entities (continuing with upsert): ${e}`);
+				this.deps.logger.warn(`Backfill: failed to clean stale entities (continuing with upsert): ${e}`);
 			}
 		}
 
 		const { successCount, errors } = await this.dataPlaneService.upsertEntitiesBatch(tableClient, entities);
 		if (errors.length > 0) {
-			this.deps.warn(`Backfill: ${successCount}/${entities.length} entities synced, ${errors.length} failed`);
+			this.deps.logger.warn(`Backfill: ${successCount}/${entities.length} entities synced, ${errors.length} failed`);
 		} else {
-			this.deps.log(`Backfill: ${successCount} entities synced successfully across ${sortedDays.length} days`);
+			this.deps.logger.log(`Backfill: ${successCount} entities synced successfully across ${sortedDays.length} days`);
 		}
 	}
 }

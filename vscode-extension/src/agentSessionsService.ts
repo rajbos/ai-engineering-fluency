@@ -1,4 +1,5 @@
 import * as https from 'https';
+import { GITHUB_API_HOSTNAME, buildGitHubApiHeaders } from './githubApiConfig';
 
 export type AgentSessionSource = 'cloud-agent' | 'cli-remote' | 'unknown';
 
@@ -89,14 +90,9 @@ export function fetchAgentTasksPage(
 
 		const req = https.request(
 			{
-				hostname: 'api.github.com',
+				hostname: GITHUB_API_HOSTNAME,
 				path: `/agents/repos/${owner}/${repo}/tasks?${queryParams}`,
-				headers: {
-					Authorization: `Bearer ${token}`,
-					'User-Agent': 'copilot-token-tracker',
-					Accept: 'application/vnd.github.v3+json',
-					'X-GitHub-Api-Version': '2022-11-28',
-				},
+				headers: buildGitHubApiHeaders(token),
 			},
 			(res) => {
 				let data = '';
@@ -135,14 +131,9 @@ export function fetchAgentTaskDetail(
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: 'api.github.com',
+				hostname: GITHUB_API_HOSTNAME,
 				path: `/agents/repos/${owner}/${repo}/tasks/${encodeURIComponent(taskId)}`,
-				headers: {
-					Authorization: `Bearer ${token}`,
-					'User-Agent': 'copilot-token-tracker',
-					Accept: 'application/vnd.github.v3+json',
-					'X-GitHub-Api-Version': '2022-11-28',
-				},
+				headers: buildGitHubApiHeaders(token),
 			},
 			(res) => {
 				let data = '';

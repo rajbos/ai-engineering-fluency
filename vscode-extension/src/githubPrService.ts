@@ -1,5 +1,6 @@
 import * as https from 'https';
 import * as childProcess from 'child_process';
+import { GITHUB_API_HOSTNAME, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3 } from './githubApiConfig';
 
 export type RepoPrDetail = {
 	number: number;
@@ -47,11 +48,11 @@ function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: 'api.github.com',
+				hostname: GITHUB_API_HOSTNAME,
 				path: '/copilot_internal/user',
 				headers: {
 					Authorization: `Bearer ${token}`,
-					'User-Agent': 'copilot-token-tracker',
+					'User-Agent': GITHUB_API_USER_AGENT,
 					Accept: 'application/json',
 				},
 			},
@@ -117,12 +118,12 @@ export function fetchRepoPrsPage(
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: 'api.github.com',
+				hostname: GITHUB_API_HOSTNAME,
 				path: `/repos/${owner}/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc&page=${page}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
-					'User-Agent': 'copilot-token-tracker',
-					Accept: 'application/vnd.github.v3+json',
+					'User-Agent': GITHUB_API_USER_AGENT,
+					Accept: GITHUB_API_ACCEPT_V3,
 				},
 			},
 			(res) => {

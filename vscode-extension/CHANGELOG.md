@@ -2,9 +2,39 @@
 
 All notable changes to the VS Code extension will be documented in this file.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
+## [0.10.1] - 2026-05-19
 
-## [Unreleased]
+### Bug Fixes
+- Implement IAnalyzableEcosystem on CopilotCliAdapter to prevent ENOENT errors on virtual session paths (#931)
+
+## [0.10.0] - 2026-05-19
+
+### Features
+- Surface Copilot CLI chat-only sessions from session-store.db (#915)
+- Add friendly display names for additional tools (#920)
+- Persist chart view/period/displayMode selection across navigation (#911)
+
+### Bug Fixes
+- Propagate cachedReadTokens/cacheCreationTokens in calculateDailyStats (#907)
+- Fix N+1 inefficiency in processing OpenCode sessions (#922)
+
+### Performance
+- Apply mtime-based DB caching to crush adapter to fix N+1 inefficiency (#924)
+- Eliminate redundant JSON.parse calls in session analysis (#910)
+
+## [0.9.0] - 2026-05-14
+
+### Features
+- Add oh-my-posh segment command and Copilot CLI statusline support (#876)
+- Post-process SLM output to fix acronym capitalization (MCP, GitHub, etc.) (#880)
+- Add SLM-powered job to generate friendly tool names from issues (#875)
+
+### Bug Fixes
+- Populate cache tokens from CLI session.shutdown events (#869)
+- Pin Ollama install to versioned GitHub release with SHA256 verification (#881)
+
+### Improvements
+- Add friendly display names for 50+ tools (#862, #864, #865, #866, #867, #868, #872, #873, #874, #879)
 
 ## [0.8.0] - 2026-05-12
 

@@ -125,6 +125,51 @@ test('renderBackendConfigHtml renders error messages when present', () => {
 	assert.ok(html.includes('Dataset ID is required.'));
 });
 
+// ── XSS prevention tests ──────────────────────────────────────────────────
+
+test('renderBackendConfigHtml does not inject raw XSS payload from privacyBadge', () => {
+	const xss = '<script>alert(1)</script>';
+	const state = makeState({ privacyBadge: xss });
+	const html = renderBackendConfigHtml(makeWebview(), state);
+	// Raw script tag must not appear verbatim; safeJsonForInlineScript encodes < and >
+	assert.ok(!html.includes(xss), 'XSS payload in privacyBadge must not appear raw in HTML');
+});
+
+test('renderBackendConfigHtml does not inject raw XSS payload from authStatus', () => {
+	const xss = '"><img src=x onerror=alert(1)>';
+	const state = makeState({ authStatus: xss });
+	const html = renderBackendConfigHtml(makeWebview(), state);
+	assert.ok(!html.includes(xss), 'XSS payload in authStatus must not appear raw in HTML');
+});
+
+test('renderBackendConfigHtml does not inject raw XSS payload from draft fields', () => {
+	const xss = '</script><script>alert(1)</script>';
+	const state = makeState({
+		draft: { ...toDraft(baseSettings), storageAccount: xss, userId: xss, datasetId: 'safe-id' }
+	});
+	const html = renderBackendConfigHtml(makeWebview(), state);
+	assert.ok(!html.includes(xss), 'XSS payload in draft fields must not appear raw in HTML');
+});
+
+test('renderBackendConfigHtml CSP is restrictive with default-src none', () => {
+	const html = renderBackendConfigHtml(makeWebview(), makeState());
+	assert.ok(html.includes("default-src 'none'"), "CSP must include default-src 'none'");
+	assert.ok(html.includes('Content-Security-Policy'), 'CSP meta tag must be present');
+});
+
+test('renderBackendConfigHtml embeds toolkitUri as JSON-encoded string in import', () => {
+	const webview = {
+		cspSource: 'test-csp-source',
+		asWebviewUri: (_uri: any) => ({
+			toString: () => "vscode-webview://test-toolkit.js"
+		})
+	} as any;
+	const html = renderBackendConfigHtml(webview, makeState());
+	// After our fix, toolkitUri must appear as a JSON double-quoted string in import()
+	assert.ok(html.includes('await import("vscode-webview://test-toolkit.js")'),
+		'toolkitUri must be embedded as a JSON-encoded string in the import() call');
+});
+
 // ── BackendConfigPanel class tests ───────────────────────────────────────
 
 function makeDraft() {

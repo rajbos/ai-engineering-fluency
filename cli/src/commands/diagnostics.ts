@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
 import { discoverSessionFiles, getDiagnosticPaths, processSessionFile, effectiveTokens, fmt, formatTokens } from '../helpers';
+import { normalizePathSeparators } from '../../../vscode-extension/src/workspaceHelpers';
 
 interface LocationStats {
 	label: string;
@@ -23,7 +24,7 @@ function matchToCandidatePath(
 	filePath: string,
 	candidates: { path: string; exists: boolean; source: string }[]
 ): { path: string; source: string } | null {
-	const normalized = filePath.replace(/\\/g, '/');
+	const normalized = normalizePathSeparators(filePath);
 	// For OpenCode DB virtual paths, resolve to the db file path
 	const effectivePath = normalized.includes('opencode.db#') ? normalized.split('#')[0] : normalized;
 
@@ -31,7 +32,7 @@ function matchToCandidatePath(
 	let best: { path: string; source: string } | null = null;
 	let bestLen = 0;
 	for (const cand of candidates) {
-		const candNorm = cand.path.replace(/\\/g, '/');
+		const candNorm = normalizePathSeparators(cand.path);
 		if (effectivePath.startsWith(candNorm) && candNorm.length > bestLen) {
 			best = { path: cand.path, source: cand.source };
 			bestLen = candNorm.length;
@@ -42,6 +43,7 @@ function matchToCandidatePath(
 
 /** Truncate a path for display, keeping the last N segments */
 function truncatePath(p: string, maxLen = 55): string {
+	if (!p) { return ''; }
 	if (p.length <= maxLen) { return p; }
 	const parts = p.replace(/\\/g, '/').split('/');
 	let result = p;
@@ -54,6 +56,10 @@ function truncatePath(p: string, maxLen = 55): string {
 
 /** Print a simple aligned table to stdout */
 function printTable(headers: string[], rows: string[][], colWidths: number[]): void {
+	if (!headers || !rows || !colWidths) { return; }
+	if (headers.length !== colWidths.length) {
+		throw new Error(`printTable: headers.length (${headers.length}) !== colWidths.length (${colWidths.length})`);
+	}
 	const sep = chalk.dim('─'.repeat(colWidths.reduce((a, b) => a + b + 3, -1)));
 
 	// Header

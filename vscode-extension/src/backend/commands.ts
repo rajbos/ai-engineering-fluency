@@ -14,6 +14,8 @@ import { writeClipboardText } from '../utils/clipboard';
 import type { BackendFacadeInterface } from './types';
 import type { BackendSettings } from './settings';
 import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messages';
+import { MANUAL_SYNC_COOLDOWN_MS } from './constants';
+import { RateLimiter } from '../utils/rateLimiter';
 
 /**
  * Handles backend-related commands.
@@ -21,8 +23,7 @@ import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messa
 export class BackendCommandHandler {
 	private readonly facade: BackendFacadeInterface;
 	private readonly displayNameStore: DisplayNameStore | undefined;
-	private lastManualSyncAt = 0;
-	private readonly MANUAL_SYNC_COOLDOWN_MS = 5000; // 5 seconds
+	private readonly syncRateLimiter = new RateLimiter(MANUAL_SYNC_COOLDOWN_MS);
 
 	constructor(deps: {
 		facade: BackendFacadeInterface;
@@ -50,43 +51,9 @@ export class BackendCommandHandler {
 		}
 	}
 
-	// Convenience methods matching the old interface
-	async configureBackend(): Promise<void> {
-		return this.handleConfigureBackend();
-	}
-
-	async copyBackendConfig(): Promise<void> {
-		return this.handleCopyBackendConfig();
-	}
-
-	async exportCurrentView(): Promise<void> {
-		return this.handleExportCurrentView();
-	}
-
-	async setBackendSharedKey(): Promise<void> {
-		return this.handleSetBackendSharedKey();
-	}
-
-	async rotateBackendSharedKey(): Promise<void> {
-		return this.handleRotateBackendSharedKey();
-	}
-
-	async clearBackendSharedKey(): Promise<void> {
-		return this.handleClearBackendSharedKey();
-	}
-
-	async toggleBackendWorkspaceMachineNameSync(): Promise<void> {
-		return this.handleToggleBackendWorkspaceMachineNameSync();
-	}
-
-	async enableTeamSharing(): Promise<void> {
-		return this.handleEnableTeamSharing();
-	}
-
-	async disableTeamSharing(): Promise<void> {
-		return this.handleDisableTeamSharing();
-	}
-
+	/**
+	 * Handles the "Toggle Workspace/Machine Name Sync" command.
+	 */
 	async handleToggleBackendWorkspaceMachineNameSync(): Promise<void> {
 		try {
 			await this.facade.toggleBackendWorkspaceMachineNameSync();
@@ -96,14 +63,9 @@ export class BackendCommandHandler {
 		}
 	}
 
-	async setSharingProfile(): Promise<void> {
-		return this.handleSetSharingProfile();
-	}
-
-	async clearAzureSettings(): Promise<void> {
-		return this.handleClearAzureSettings();
-	}
-
+	/**
+	 * Handles the "Set Sharing Profile" command.
+	 */
 	async handleSetSharingProfile(): Promise<void> {
 		try {
 			await this.facade.setSharingProfileCommand();
@@ -127,12 +89,11 @@ export class BackendCommandHandler {
 	 * Triggers an immediate manual sync.
 	 */
 	async handleSyncBackendNow(): Promise<void> {
-		const now = Date.now();
-		if (now - this.lastManualSyncAt < this.MANUAL_SYNC_COOLDOWN_MS) {
+		if (!this.syncRateLimiter.canExecute()) {
 			vscode.window.showWarningMessage('Please wait a few seconds before syncing again.');
 			return;
 		}
-		this.lastManualSyncAt = now;
+		this.syncRateLimiter.recordExecution();
 
 		const settings = this.facade.getSettings() as BackendSettings;
 		if (!settings.enabled) {

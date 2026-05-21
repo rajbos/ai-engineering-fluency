@@ -20,10 +20,10 @@
  */
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isDiscoverable } from './ecosystemAdapter';
+import { normalizePathForDedup } from './workspaceHelpers';
 
 export interface SessionDiscoveryDeps {
 	log: (message: string) => void;
@@ -31,21 +31,6 @@ export interface SessionDiscoveryDeps {
 	error: (message: string, error?: any) => void;
 	ecosystems: IEcosystemAdapter[];
 	sampleDataDirectoryOverride?: () => string | undefined;
-}
-
-/**
- * Normalize a filesystem path for deduplication.
- *
- * On Windows and macOS the filesystem is typically case-insensitive, so two
- * adapters that report the same file under different casings must collapse
- * to one entry. On Linux the FS is case-sensitive so we preserve case.
- *
- * Backslashes are normalized to forward slashes so comparisons are
- * platform-agnostic regardless of which adapter formatted the path.
- */
-function normalizePathForDedup(p: string): string {
-	const fwd = p.replace(/\\/g, '/');
-	return os.platform() === 'linux' ? fwd : fwd.toLowerCase();
 }
 
 export class SessionDiscovery {
@@ -172,6 +157,7 @@ export class SessionDiscovery {
 
 		const sessionFiles: string[] = [];
 		try {
+			const discoveryStartMs = Date.now();
 			this.deps.log(`🔍 Searching for session files via ${this.deps.ecosystems.filter(isDiscoverable).length} discoverable ecosystem adapter(s)`);
 			for (const eco of this.deps.ecosystems) {
 				if (!isDiscoverable(eco)) { continue; }
@@ -201,7 +187,7 @@ export class SessionDiscovery {
 				this.deps.log(`🧹 Deduplicated ${dupCount} duplicate session path(s)`);
 			}
 
-			this.deps.log(`✨ Total: ${deduped.length} session file(s) discovered`);
+			this.deps.log(`✨ Total: ${deduped.length} session file(s) discovered in ${((Date.now() - discoveryStartMs) / 1000).toFixed(1)}s`);
 			if (deduped.length === 0) {
 				this.deps.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
 			}

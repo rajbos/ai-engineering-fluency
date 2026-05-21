@@ -106,6 +106,36 @@ Prefer VS Code's debugger with breakpoints rather than adding log statements:
 2. Set breakpoints in `vscode-extension/src/extension.ts`
 3. Use the Debug Console to inspect variables
 
+## Parallel Model Usage Aggregation Paths
+
+Multiple places in `extension.ts` accumulate per-model token counts into a `ModelUsage` map. Historically these were written as inline `for` loops, which caused bugs when new token fields were added (e.g. cache tokens) because not all copies were updated.
+
+**The shared helper** — `addModelUsage(target: ModelUsage, source: ModelUsage): void` — lives in `vscode-extension/src/statsHelpers.ts` and handles all four token fields:
+- `inputTokens`
+- `outputTokens`
+- `cachedReadTokens` (optional)
+- `cacheCreationTokens` (optional)
+
+All accumulation sites must call this helper. The current locations are:
+
+| Location | Call |
+|---|---|
+| `calculateDailyStats()` — per-UTC-day rollup path | `addModelUsage(dailyEntry.modelUsage, dayRollup.modelUsage)` |
+| `calculateDailyStats()` — session-level fallback path | `addModelUsage(dailyEntry.modelUsage, modelUsage)` |
+| `buildChartData()` — `mergeInto()` local helper | `addModelUsage(target.modelUsage, src.modelUsage)` |
+| Backend sharing-server aggregation | `addModelUsage(personalModelUsage, { [model]: { inputTokens, outputTokens } })` |
+
+`aggregatePeriodStats()` in `statsHelpers.ts` also uses `addModelUsage` internally.
+
+**Rule**: Any new token type added to the `ModelUsage` interface **must** be handled inside `addModelUsage`. This ensures all accumulation sites are covered automatically.
+
+To find all accumulation sites, grep for:
+```
+modelUsage\[model\]\.inputTokens \+=
+```
+
+If you find any match outside of `addModelUsage` itself, convert it to use the helper.
+
 ## Key Files & Conventions
 
 - **`vscode-extension/src/extension.ts`**: The single source file containing all logic.
@@ -147,6 +177,81 @@ To maintain a consistent, VS Code-native look across all webview panels (Details
   - Keep navigation command names unchanged so `extension.ts` handlers continue to work.
   - Run `npm run compile` and verify TypeScript and ESLint pass.
   - Visually compare the header with the Details and other panels to confirm parity.
+
+## Webview State Persistence
+
+Webview panels are created with `retainContextWhenHidden: false`. When the user switches to a different tab (e.g. navigates from Chart to Details), VS Code **destroys the webview's JavaScript context**. When they switch back, the JS module re-executes with all variables reset to their defaults.
+
+`vscode.setState()` / `vscode.getState()` survive this cycle (and VS Code restarts). They are the correct mechanism for preserving user UI selections.
+
+### Standard pattern — `createViewStateManager`
+
+Use the shared factory from `vscode-extension/src/webview/shared/viewState.ts`:
+
+```ts
+import { createViewStateManager } from '../shared/viewState';
+
+// 1. Declare the state shape and its defaults (module-level, after acquireVsCodeApi())
+type MyViewState = {
+  activeTab: string;
+  sortDir: 'asc' | 'desc';
+};
+
+const viewState = createViewStateManager<MyViewState>(vscode, {
+  activeTab: 'report',
+  sortDir: 'asc',
+});
+
+// 2. In bootstrap() — restore before rendering:
+const { activeTab, sortDir } = viewState.restore();
+
+// 3. When the user changes a single field (safe partial update):
+viewState.patch({ activeTab: newTab });
+
+// 4. When saving the full state at once:
+viewState.save({ activeTab: currentTab, sortDir: currentSort });
+```
+
+**`restore()`** merges saved state with defaults, so adding new fields to the state type never breaks older persisted values.
+
+**`patch()`** does a read-modify-write atomically — no need to spread `vscode.getState()` manually. Always prefer `patch()` over raw `vscode.setState()` calls.
+
+### Two-layer persistence (for critical preferences)
+
+Some preferences (e.g. chart period, chart view) are also stored in the extension backend so they survive panel close/reopen:
+
+1. **Webview → extension**: post a `setXxxPreference` message when the value changes.
+2. **Extension**: handle the message and store it in a `lastXxx` field (e.g. `lastChartPeriod`, `lastChartView`).
+3. **Extension → webview**: inject the saved value into `__INITIAL_DATA__` as `initialXxx` when the panel is created.
+4. **Webview `bootstrap()`**: use `viewState.restore()` first (for tab-switch navigation); fall back to `initialData.initialXxx` when no saved state exists (fresh panel).
+
+Only add the backend layer for preferences the user would expect to persist across sessions. Tab selections and sort orders within a panel usually only need the `vscode.setState()` layer.
+
+### What state to save
+
+| ✅ Save | ❌ Don't save |
+|--------|--------------|
+| Active tab / subtab selection | Loading flags (`isLoading`, `isFetching`) |
+| Selected view / period | Cached API responses |
+| Sort column & direction | DOM element references |
+| Filter values | `setTimeout` / interval IDs |
+| Toggle states (e.g. rolling avg, demo mode) | Transient error messages |
+
+### Webview status
+
+| Webview | State manager | Notes |
+|---------|--------------|-------|
+| `chart/main.ts` | ✅ `createViewStateManager` | period, view, displayMode; also backend-persisted |
+| `diagnostics/main.ts` | ✅ `createViewStateManager` | activeTab, activeSubtab |
+| `usage/main.ts` | ⬜ Not yet wired | activeTab, selectedRepo, sort prefs |
+| `details/main.ts` | ⬜ Not yet wired | sort column/dir, expansion state |
+| `maturity/main.ts` | ⬜ Not yet wired | demo mode, stage overrides |
+| `fluency-level-viewer/main.ts` | ⬜ Not yet wired | selectedCategoryIndex |
+| `environmental/main.ts` | N/A | Stateless — data-driven view |
+| `logviewer/main.ts` | N/A | Ephemeral session-specific view |
+| `dashboard/main.ts` | N/A | Always re-fetches live backend data |
+
+When adding state to an unwired view, use `createViewStateManager` — do not call `vscode.setState` directly.
 
 ## Adding a New Editor / Data Source
 

@@ -77,6 +77,7 @@ export const environmentalCommand = new Command('environmental')
 
 /** Format CO₂ in grams, switching to kg notation when ≥ 1 000 g */
 function formatCo2(grams: number): string {
+	if (grams == null || !Number.isFinite(grams) || grams < 0) { return '0.000 gCO₂e'; }
 	if (grams >= 1000) {
 		return `${(grams / 1000).toFixed(2)} kgCO₂e`;
 	}
@@ -87,7 +88,7 @@ function printEnvironmentalStats(label: string, emoji: string, stats: PeriodStat
 	console.log(chalk.bold(`${emoji} ${label}`));
 	console.log(chalk.dim('─'.repeat(55)));
 
-	if (stats.sessions === 0) {
+	if (!stats || stats.sessions === 0) {
 		console.log(chalk.dim('  No activity in this period'));
 		console.log();
 		return;

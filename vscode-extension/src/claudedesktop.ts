@@ -59,6 +59,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { normalizeClaudeModelId } from './claudecode';
 import type { ModelUsage } from './types';
+import { normalizePathForComparison } from './workspaceHelpers';
 
 /** Package name for the Claude Desktop Windows Store app. */
 const CLAUDE_DESKTOP_PACKAGE = 'Claude_pzs8sxrjxfjjc';
@@ -100,7 +101,7 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Cowork session files live inside local-agent-mode-sessions/ and end with .jsonl.
 	 */
 	isCoworkSessionFile(filePath: string): boolean {
-		const normalized = filePath.toLowerCase().replace(/\\/g, '/');
+		const normalized = normalizePathForComparison(filePath);
 		return normalized.includes('/local-agent-mode-sessions/') && normalized.endsWith('.jsonl');
 	}
 

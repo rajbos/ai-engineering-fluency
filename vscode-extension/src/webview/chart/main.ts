@@ -3,6 +3,8 @@ import { el, createButton } from '../shared/domUtils';
 import { BUTTONS } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
+import { createViewStateManager } from '../shared/viewState';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -33,7 +35,7 @@ type ChartPeriodData = {
 	avgCostPerPeriod: number;
 };
 
-type ChartPeriod = 'day' | 'week' | 'month';
+type ChartPeriod = import('./projectionUtils').ChartPeriod;
 
 type InitialChartData = {
 	labels: string[];
@@ -53,6 +55,7 @@ type InitialChartData = {
 	compactNumbers?: boolean;
 	periodsReady?: boolean;
 	initialPeriod?: ChartPeriod;
+	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
 	periods?: {
 		day: ChartPeriodData;
 		week: ChartPeriodData;
@@ -90,6 +93,22 @@ let pendingPeriod: ChartPeriod | null = null;
 
 type DisplayMode = 'actual' | 'rolling';
 let currentDisplayMode: DisplayMode = 'actual';
+
+type ChartWebviewState = {
+	period: ChartPeriod;
+	view: 'total' | 'model' | 'editor' | 'repository' | 'cost';
+	displayMode: DisplayMode;
+};
+
+const chartState = createViewStateManager<ChartWebviewState>(vscode, {
+	period: 'day',
+	view: 'total',
+	displayMode: 'actual',
+});
+
+function saveWebviewState(): void {
+	chartState.save({ period: currentPeriod, view: currentView, displayMode: currentDisplayMode });
+}
 const ROLLING_WINDOW: Record<ChartPeriod, number> = { day: 7, week: 4, month: 3 };
 
 function computeRollingAverage(data: number[], window: number): number[] {
@@ -410,6 +429,7 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 	}
 	currentPeriod = period;
 	vscode.postMessage({ command: 'setPeriodPreference', period });
+	saveWebviewState();
 	setActivePeriod(period);
 	updateSummaryCards(data);
 	if (!chart) {
@@ -440,6 +460,8 @@ async function switchView(view: 'total' | 'model' | 'editor' | 'repository' | 'c
 		currentDisplayMode = 'actual';
 	}
 	currentView = view;
+	vscode.postMessage({ command: 'setViewPreference', view });
+	saveWebviewState();
 	setActiveView(view);
 	const rollingBtnEl = document.getElementById('view-rolling');
 	if (rollingBtnEl) {
@@ -493,6 +515,7 @@ function setActiveDisplayMode(mode: DisplayMode): void {
 async function switchDisplayMode(data: InitialChartData): Promise<void> {
 	currentDisplayMode = currentDisplayMode === 'actual' ? 'rolling' : 'actual';
 	setActiveDisplayMode(currentDisplayMode);
+	saveWebviewState();
 	updateSummaryCards(data);
 	if (!chart) { return; }
 	const canvas = chart.canvas as HTMLCanvasElement | null;
@@ -517,6 +540,13 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 
 	// Make grid lines very subtle with low opacity
 	const gridColor = 'rgba(128, 128, 128, 0.15)';
+
+	// Projection labels per period
+	const PROJECTION_LABELS: Record<ChartPeriod, string> = {
+		day:   '📈 Projected (today)',
+		week:  '📈 Projected (this week)',
+		month: '📈 Projected (this month)',
+	};
 
 	const baseOptions = {
 		responsive: true,
@@ -543,6 +573,20 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 		const isRolling = currentDisplayMode === 'rolling';
 		const rollingLabel = getRollingLabel();
 		const tokenData = isRolling ? computeRollingAverage(period.tokensData, ROLLING_WINDOW[currentPeriod]) : period.tokensData;
+
+		// Projection: only in actual (non-rolling) mode, for the last bar (current period)
+		const lastIdx = period.tokensData.length - 1;
+		const fraction = getCurrentPeriodFraction(currentPeriod);
+		const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], fraction) : null;
+		const projDataset = projExtra !== null ? [{
+			label: PROJECTION_LABELS[currentPeriod],
+			data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0),
+			backgroundColor: 'rgba(54, 162, 235, 0.2)',
+			borderColor: 'rgba(54, 162, 235, 0.5)',
+			borderWidth: 1,
+			yAxisID: 'y'
+		}] : [];
+
 		return {
 			type: 'bar' as const,
 			data: {
@@ -559,6 +603,7 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 						fill: isRolling ? false : undefined,
 						yAxisID: 'y'
 					},
+					...projDataset,
 					{
 						label: 'Sessions',
 						data: period.sessionsData,
@@ -573,8 +618,9 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 			options: {
 				...baseOptions,
 				scales: {
-					...baseOptions.scales,
+					x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
 					y: {
+						stacked: true,
 						type: 'linear' as const,
 						display: true,
 						position: 'left' as const,
@@ -601,6 +647,20 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 		const isRolling = currentDisplayMode === 'rolling';
 		const rollingLabel = getRollingLabel();
 		const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
+
+		// Projection for cost: only in actual (non-rolling) mode
+		const lastIdx = period.costData.length - 1;
+		const fraction = getCurrentPeriodFraction(currentPeriod);
+		const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.costData[lastIdx], fraction) : null;
+		const projDataset = projExtra !== null ? [{
+			label: PROJECTION_LABELS[currentPeriod],
+			data: period.costData.map((_: number, i: number) => i === lastIdx ? projExtra : 0),
+			backgroundColor: 'rgba(34, 197, 94, 0.2)',
+			borderColor: 'rgba(34, 197, 94, 0.5)',
+			borderWidth: 1,
+			yAxisID: 'y'
+		}] : [];
+
 		return {
 			type: 'bar' as const,
 			data: {
@@ -616,7 +676,8 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 						tension: isRolling ? 0.4 : undefined,
 						fill: isRolling ? false : undefined,
 						yAxisID: 'y'
-					}
+					},
+					...projDataset
 				]
 			},
 			options: {
@@ -631,8 +692,9 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 					}
 				},
 				scales: {
-					x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
+					x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
 					y: {
+						stacked: true,
 						type: 'linear' as const,
 						display: true,
 						position: 'left' as const,
@@ -644,6 +706,19 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 			}
 		};
 	}
+
+	// Stacked views: model / editor / repository
+	// Compute total-token projection for the last bar and add a single "Projected" segment on top.
+	const lastIdx = period.tokensData.length - 1;
+	const fraction = getCurrentPeriodFraction(currentPeriod);
+	const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], fraction) : null;
+	const projDataset = projExtra !== null ? [{
+		label: PROJECTION_LABELS[currentPeriod],
+		data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0),
+		backgroundColor: 'rgba(200, 200, 200, 0.25)',
+		borderColor: 'rgba(200, 200, 200, 0.5)',
+		borderWidth: 1,
+	}] : [];
 
 	// Add sessions line as an overlay on all stacked views
 	const sessionsDataset = {
@@ -659,7 +734,7 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 
 	return {
 		type: 'bar' as const,
-		data: { labels: period.labels, datasets: [...datasets, sessionsDataset] },
+		data: { labels: period.labels, datasets: [...datasets, ...projDataset, sessionsDataset] },
 		options: {
 			...baseOptions,
 			plugins: {
@@ -715,9 +790,21 @@ async function bootstrap(): Promise<void> {
 		}
 		return;
 	}
-	if (initialData.initialPeriod) {
-		currentPeriod = initialData.initialPeriod;
+
+	// Restore view state — vscode.getState() survives context destruction (retainContextWhenHidden: false)
+	const saved = chartState.restore();
+	// chartState.restore() merges defaults, so only override if the saved value differs from default
+	const hasSaved = !!vscode.getState();
+	if (hasSaved) {
+		currentPeriod = saved.period;
+		currentView = saved.view;
+		currentDisplayMode = saved.displayMode;
+	} else {
+		// Fall back to server-supplied initial values (e.g., panel closed and reopened)
+		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
+		if (initialData.initialView) { currentView = initialData.initialView; }
 	}
+
 	renderLayout(initialData);
 }
 

@@ -5,6 +5,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { fileUriToPath } from '../../workspaceHelpers';
 
 const MAX_DISPLAY_NAME_LENGTH = 64;
 
@@ -208,21 +209,7 @@ export class BackendUtility {
 					}
 					
 					// Parse the URI string to get the file path
-					// This is a simplified version that doesn't require vscode.Uri
-					let fsPath: string;
-					if (uriStr.startsWith('file://')) {
-						// file:// URI - extract path after protocol
-						fsPath = uriStr.substring('file://'.length);
-						// Handle Windows drive letters (e.g., file:///C:/path -> C:/path)
-						if (fsPath.startsWith('/') && /^\/[a-zA-Z]:\//.test(fsPath)) {
-							fsPath = fsPath.substring(1);
-						}
-						// Decode URI components
-						fsPath = decodeURIComponent(fsPath);
-					} else {
-						// Assume it's already a file path
-						fsPath = uriStr;
-					}
+					const fsPath = uriStr.startsWith('file://') ? fileUriToPath(uriStr) : uriStr;
 					
 					if (!fsPath) {
 						continue;

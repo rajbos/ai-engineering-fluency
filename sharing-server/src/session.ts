@@ -1,9 +1,9 @@
 import { createHmac, timingSafeEqual } from 'crypto';
+import { SESSION_MAX_AGE_SECONDS } from './config.js';
 
 const SESSION_SECRET = process.env.SESSION_SECRET ?? 'dev-secret-change-me-in-production';
 export const COOKIE_NAME = 'sharing-session';
 export const OAUTH_STATE_COOKIE = 'oauth-state';
-const MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
 /** Minimal claims stored in the session cookie. User details are re-read from DB on every request. */
 export interface SessionClaims {
@@ -53,7 +53,7 @@ export function decodeSession(cookie: string): SessionClaims | null {
 
 export function makeClaims(userId: number): SessionClaims {
 	const now = Math.floor(Date.now() / 1000);
-	return { sub: userId, iat: now, exp: now + MAX_AGE_SECONDS };
+	return { sub: userId, iat: now, exp: now + SESSION_MAX_AGE_SECONDS };
 }
 
-export const SESSION_MAX_AGE = MAX_AGE_SECONDS;
+export const SESSION_MAX_AGE = SESSION_MAX_AGE_SECONDS;

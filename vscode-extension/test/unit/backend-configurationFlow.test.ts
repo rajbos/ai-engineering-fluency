@@ -7,6 +7,7 @@ import {
 	clampLookback,
 	deriveShareWithTeam,
 	sharingLevel,
+	SharingLevel,
 	needsConsent,
 	validateDraft,
 	applyDraftToSettings,
@@ -119,16 +120,21 @@ test('deriveShareWithTeam returns false for non-team profiles', () => {
 
 // ── sharingLevel ─────────────────────────────────────────────────────────
 
-test('sharingLevel returns correct numeric levels', () => {
-	assert.equal(sharingLevel('off'), 0);
-	assert.equal(sharingLevel('teamAnonymized'), 1);
-	assert.equal(sharingLevel('teamPseudonymous'), 2);
-	assert.equal(sharingLevel('soloFull'), 2.5);
-	assert.equal(sharingLevel('teamIdentified'), 3);
+test('sharingLevel returns correct enum levels', () => {
+	assert.equal(sharingLevel('off'), SharingLevel.Off);
+	assert.equal(sharingLevel('teamAnonymized'), SharingLevel.TeamAnonymized);
+	assert.equal(sharingLevel('teamPseudonymous'), SharingLevel.TeamPseudonymous);
+	assert.equal(sharingLevel('soloFull'), SharingLevel.SoloFull);
+	assert.equal(sharingLevel('teamIdentified'), SharingLevel.TeamIdentified);
 });
 
-test('sharingLevel returns 0 for unknown profiles', () => {
-	assert.equal(sharingLevel('unknown' as any), 0);
+test('sharingLevel returns Off for unknown profiles', () => {
+	assert.equal(sharingLevel('unknown' as any), SharingLevel.Off);
+});
+
+test('SharingLevel ordering: soloFull is between teamPseudonymous and teamIdentified', () => {
+	assert.ok(SharingLevel.TeamPseudonymous < SharingLevel.SoloFull);
+	assert.ok(SharingLevel.SoloFull < SharingLevel.TeamIdentified);
 });
 
 // ── needsConsent ─────────────────────────────────────────────────────────

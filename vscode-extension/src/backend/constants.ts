@@ -98,3 +98,9 @@ export const MAX_CONSECUTIVE_SYNC_FAILURES = 5;
  * Maximum number of retries for Azure SDK calls.
  */
 export const MAX_RETRY_ATTEMPTS = 3;
+
+/**
+ * Cooldown duration for manual backend sync in milliseconds (5 seconds).
+ * Prevents users from triggering rapid consecutive syncs.
+ */
+export const MANUAL_SYNC_COOLDOWN_MS = 5000;

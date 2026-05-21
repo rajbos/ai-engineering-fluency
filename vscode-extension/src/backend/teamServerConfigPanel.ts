@@ -1,9 +1,5 @@
 import * as vscode from 'vscode';
-import * as crypto from 'crypto';
-
-function getNonce(): string {
-	return crypto.randomBytes(16).toString('hex');
-}
+import { getNonce } from '../utils/webviewUtils';
 
 export class TeamServerConfigPanel implements vscode.Disposable {
 	private static current: TeamServerConfigPanel | undefined;

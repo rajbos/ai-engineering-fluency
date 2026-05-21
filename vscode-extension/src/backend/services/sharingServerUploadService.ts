@@ -3,6 +3,8 @@
  * Sends daily rollup data to a configured endpoint using a GitHub Bearer token.
  */
 
+import { safeStringifyError } from '../../utils/errors';
+
 export interface SharingServerEntry {
 	day: string;
 	model: string;
@@ -67,8 +69,8 @@ export class SharingServerUploadService {
 			const message = `Uploaded ${totalUploaded} entries`;
 			log(`Sharing server upload: ${message}`);
 			return { success: true, entriesUploaded: totalUploaded, message };
-		} catch (e: any) {
-			const message = `Upload failed: ${e?.message ?? e}`;
+		} catch (e: unknown) {
+			const message = `Upload failed: ${safeStringifyError(e)}`;
 			warn(`Sharing server upload: ${message}`);
 			return { success: false, entriesUploaded: 0, message };
 		}
@@ -102,8 +104,8 @@ export class SharingServerUploadService {
 				return;
 			}
 			log('Sharing server fluency-score upload: ok');
-		} catch (e: any) {
-			warn(`Sharing server fluency-score upload failed: ${e?.message ?? e}`);
+		} catch (e: unknown) {
+			warn(`Sharing server fluency-score upload failed: ${safeStringifyError(e)}`);
 		}
 	}
 }
