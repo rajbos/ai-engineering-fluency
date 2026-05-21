@@ -58,6 +58,18 @@ function isSubAgentToolSpecificData(obj: unknown): obj is SubAgentToolSpecificDa
 	return (obj as SubAgentToolSpecificData).kind === 'subagent';
 }
 
+// --- Token estimation ratio constants ---
+// Thresholds for classifying agent sessions by tool-call volume
+const TOOL_CALLS_HIGH_THRESHOLD = 20;
+const TOOL_CALLS_MED_THRESHOLD = 5;
+
+// Empirical input:output token ratios per tool-call tier.
+// Heavy agent sessions (many tool calls) show ~130x input:output ratio;
+// medium sessions ~50x; low/chat sessions ~10x.
+const TOKEN_RATIO_HIGH_TOOLS = 130;
+const TOKEN_RATIO_MED_TOOLS = 50;
+const TOKEN_RATIO_LOW_TOOLS = 10;
+
 export function estimateTokensFromText(text: string, model: string = 'gpt-4', tokenEstimators: Record<string, TokenEstimator> = {}): number {
 	// Token estimation based on character count and model
 	let tokensPerChar = 0.25; // default
@@ -114,6 +126,37 @@ export function extractSubAgentData(item: unknown): { prompt: string; result: st
 	return (prompt || result) ? { prompt, result, modelName } : null;
 }
 
+/**
+ * Extract text content from a single response item, separating thinking from regular response text.
+ * Prefers content.value over value to avoid double-counting when both are present.
+ *
+ * @returns text - the extracted text, or empty string if none
+ * @returns isThinking - true if this is a thinking (extended reasoning) item
+ */
+export function extractResponseItemText(item: unknown): { text: string; isThinking: boolean } {
+	if (typeof item !== 'object' || item === null) {
+		return { text: '', isThinking: false };
+	}
+	const obj = item as Record<string, unknown>;
+	if (obj['kind'] === 'thinking') {
+		const value = obj['value'];
+		return { text: typeof value === 'string' ? value : '', isThinking: true };
+	}
+	// Prefer content.value when present to avoid double-counting wrapper text.
+	const content = obj['content'];
+	if (typeof content === 'object' && content !== null) {
+		const contentValue = (content as Record<string, unknown>)['value'];
+		if (typeof contentValue === 'string' && contentValue) {
+			return { text: contentValue, isThinking: false };
+		}
+	}
+	const value = obj['value'];
+	if (typeof value === 'string' && value) {
+		return { text: value, isThinking: false };
+	}
+	return { text: '', isThinking: false };
+}
+
 /** Return type for all token estimation strategies. */
 export type TokenEstimationResult = {
 	tokens: number;
@@ -166,16 +209,12 @@ export class DeltaTokenStrategy implements TokenEstimationStrategy {
 				// Incremental response items (kind:2 append to response array)
 				if (event.kind === 2 && event.k?.includes('response') && Array.isArray(event.v)) {
 					for (const responseItem of event.v) {
-						if (responseItem.kind === 'thinking' && responseItem.value) {
-							totalThinkingTokens += estimateTokensFromText(responseItem.value);
-							continue;
-						}
 						// Sub-agent results are incomplete mid-stream; count from reconstructed state below.
 						if (extractSubAgentData(responseItem)) { continue; }
-						if (responseItem.value) {
-							totalTokens += estimateTokensFromText(responseItem.value);
-						} else if (responseItem.kind === 'markdownContent' && responseItem.content?.value) {
-							totalTokens += estimateTokensFromText(responseItem.content.value);
+						const { text, isThinking } = extractResponseItemText(responseItem);
+						if (text) {
+							if (isThinking) { totalThinkingTokens += estimateTokensFromText(text); }
+							else { totalTokens += estimateTokensFromText(text); }
 						}
 					}
 				}
@@ -365,7 +404,9 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 		// No session.shutdown: use real outputTokens from assistant.message + observed input:output ratios.
 		// Heavy agent sessions show ~130x ratio; cache reads ≈ input (50% of total from completed sessions).
 		if (!cliActualTokens && cliRealOutputByModel) {
-			const inputOutputRatio = totalEstToolCalls > 20 ? 130 : totalEstToolCalls > 5 ? 50 : 10;
+			const inputOutputRatio = totalEstToolCalls > TOOL_CALLS_HIGH_THRESHOLD ? TOKEN_RATIO_HIGH_TOOLS
+			: totalEstToolCalls > TOOL_CALLS_MED_THRESHOLD ? TOKEN_RATIO_MED_TOOLS
+			: TOKEN_RATIO_LOW_TOOLS;
 			for (const realOutput of Object.values(cliRealOutputByModel)) {
 				const estimatedInput = Math.round(realOutput * inputOutputRatio);
 				cliActualTokens += estimatedInput + realOutput;  // input + output (cache is a subset of input)
