@@ -89,7 +89,7 @@ export const statsCommand = new Command('stats')
 			}
 
 			// Progress indicator (human-readable only)
-			if ((i + 1) % 50 === 0 || i === files.length - 1) {
+		if ((i + 1) % 50 === 0 || i === files.length - 1) {
 				progress.update(`Processing: ${i + 1}/${files.length}`);
 			}
 		}

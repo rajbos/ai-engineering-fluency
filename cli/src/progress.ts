@@ -1,10 +1,11 @@
 /**
  * ProgressTracker - Reusable inline progress output for CLI commands.
  *
- * Writes dimmed progress messages to stdout using carriage-return overwriting.
+ * Wraps the shared formatting helpers with a stateful silent-mode flag so
+ * callers don't need to sprinkle `if (!json)` guards around every call.
  * Construct with `silent = true` to suppress all output (e.g. when --json is active).
  */
-import chalk from 'chalk';
+import { clearLine, writeProgress } from './formatting';
 
 const CLEAR_LINE_WIDTH = 80;
 
@@ -18,21 +19,22 @@ export class ProgressTracker {
 	/** Write a progress message inline (no newline). */
 	show(msg: string): void {
 		if (!this.silent) {
-			process.stdout.write(chalk.dim(msg));
+			writeProgress(msg);
 		}
 	}
 
 	/** Overwrite the current line with an updated progress message. */
 	update(msg: string): void {
 		if (!this.silent) {
-			process.stdout.write(`\r${chalk.dim(msg)}`);
+			process.stdout.write('\r');
+			writeProgress(msg);
 		}
 	}
 
 	/** Clear the current progress line. */
 	done(): void {
 		if (!this.silent) {
-			process.stdout.write('\r' + ' '.repeat(CLEAR_LINE_WIDTH) + '\r');
+			clearLine(CLEAR_LINE_WIDTH);
 		}
 	}
 }
