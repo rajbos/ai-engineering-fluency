@@ -5,18 +5,10 @@
 import './vscode-shim-register';
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import * as vscode from 'vscode';
+import { createMockMemento } from './vscode-test-helpers';
 import { DisplayNameStore } from '../../src/backend/displayNames';
 
-function makeGlobalState(): vscode.Memento & { storage: Map<string, any> } {
-	const storage = new Map<string, any>();
-	return {
-		storage,
-		get: (key: string, defaultValue?: any) => storage.get(key) ?? defaultValue,
-		update: async (key: string, value: any) => { storage.set(key, value); },
-		keys: () => Array.from(storage.keys())
-	};
-}
+const makeGlobalState = () => createMockMemento();
 
 // ── getWorkspaceName / getMachineName ─────────────────────────────────────
 

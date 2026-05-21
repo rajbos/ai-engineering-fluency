@@ -171,8 +171,7 @@ test.skip('configureBackendWizard handles policy-blocked storage creation and fa
 		},
 		async validateAccess() {
 			validateAccessCalled = true;
-		},
-		getStorageBlobEndpoint: (account: string) => `https://${account}.blob.core.windows.net`
+		}
 	} as any;
 
 	const settings = {
@@ -337,8 +336,7 @@ test.skip('configureBackendWizard disables Shared Key when Entra ID auth is sele
 
 	const dataPlaneService = {
 		async ensureTableExists() {},
-		async validateAccess() {},
-		getStorageBlobEndpoint: (account: string) => `https://${account}.blob.core.windows.net`
+		async validateAccess() {}
 	} as any;
 
 	const settings = {
@@ -501,8 +499,7 @@ test.skip('configureBackendWizard enables Shared Key when shared-key auth is sel
 
 	const dataPlaneService = {
 		async ensureTableExists() {},
-		async validateAccess() {},
-		getStorageBlobEndpoint: (account: string) => `https://${account}.blob.core.windows.net`
+		async validateAccess() {}
 	} as any;
 
 	const settings = {

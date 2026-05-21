@@ -6,15 +6,13 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { CacheManager } from '../../src/cacheManager';
+import { createMockMemento } from './vscode-test-helpers';
 
 function makeManager(dir: string): CacheManager {
 	const context: any = {
 		extensionMode: 1, // Production
 		globalStorageUri: { fsPath: dir },
-		globalState: {
-			get: () => undefined,
-			update: async () => {}
-		}
+		globalState: createMockMemento()
 	};
 	const deps = { log: () => {}, warn: () => {}, error: () => {} };
 	return new CacheManager(context, deps, 1);
@@ -26,7 +24,7 @@ function makeDirAndManager(): { dir: string; manager: CacheManager; logs: string
 	const context: any = {
 		extensionMode: 1,
 		globalStorageUri: { fsPath: dir },
-		globalState: { get: () => undefined, update: async () => {} }
+		globalState: createMockMemento()
 	};
 	const deps = { log: (m: string) => logs.push(m), warn: () => {}, error: () => {} };
 	const manager = new CacheManager(context, deps, 1);
@@ -130,3 +128,4 @@ test('releaseCacheLock: only releases own lock', async () => {
 	// Clean up
 	fs.unlinkSync(lockPath);
 });
+

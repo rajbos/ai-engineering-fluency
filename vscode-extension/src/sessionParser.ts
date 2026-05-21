@@ -3,6 +3,7 @@ export interface ModelUsage {
 }
 
 import { extractSubAgentData, extractResponseItemText } from './tokenEstimation';
+import { safeJsonParse } from './utils/jsonParse';
 import { type JsonObject, isObject, isSafePathSegment, isArrayIndexSegment, normalizeModelId } from './utils/typeGuards';
 
 interface MessagePart {
@@ -291,13 +292,15 @@ if (sessionFilePath.endsWith('.jsonl')) {
 const lines = fileContent.split(/\r?\n/).filter(l => l.trim());
 let isDeltaBased = false;
 if (lines.length > 0) {
-try { const first = JSON.parse(lines[0]); if (first && typeof first.kind === 'number') { isDeltaBased = true; } } catch (err) { console.error('[sessionParser] Failed to parse first JSONL line to detect format:', err); }
+const first = safeJsonParse<{ kind?: number }>(lines[0], 'sessionParser');
+if (first && typeof first.kind === 'number') { isDeltaBased = true; }
 }
 
 if (isDeltaBased) {
 let sessionState: unknown = Object.create(null);
 for (const line of lines) {
-try { const delta = JSON.parse(line); sessionState = applyDelta(sessionState, delta); } catch (err) { console.error('[sessionParser] Failed to parse or apply JSONL delta line:', err); }
+const delta = safeJsonParse<unknown>(line, 'sessionParser');
+if (delta !== undefined) { sessionState = applyDelta(sessionState, delta); }
 }
 
 const sessionStateObj = isObject(sessionState) ? sessionState : null;
@@ -319,12 +322,14 @@ actualTokens: 0,
 }
 
 // Fallback: sometimes .jsonl contains a single JSON object
-try { sessionJson = JSON.parse(fileContent.trim()); } catch (err) { console.error('[sessionParser] Failed to parse JSONL file as single JSON object:', err); return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
+sessionJson = safeJsonParse<unknown>(fileContent.trim(), 'sessionParser');
+if (sessionJson === undefined) { return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
 }
 
 // Non-jsonl (JSON file) - try to parse full JSON
 if (!sessionJson) {
-try { sessionJson = JSON.parse(fileContent); } catch (err) { console.error('[sessionParser] Failed to parse session JSON file:', err); return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
+sessionJson = safeJsonParse<unknown>(fileContent, 'sessionParser');
+if (sessionJson === undefined) { return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
 }
 
 if (!isObject(sessionJson) || Array.isArray(sessionJson)) {

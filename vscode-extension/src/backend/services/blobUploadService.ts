@@ -11,6 +11,7 @@ import { promisify } from 'util';
 import type { TokenCredential } from '@azure/core-auth';
 import { BlobServiceClient, ContainerClient, StorageSharedKeyCredential } from '@azure/storage-blob';
 import { safeStringifyError, getErrorStatusCode, getErrorCode } from '../../utils/errors';
+import { getAzureBlobStorageEndpoint } from '../../utils/azureEndpoints';
 
 const gzip = promisify(zlib.gzip);
 
@@ -65,13 +66,6 @@ export class BlobUploadService {
 	}
 
 	/**
-	 * Get the Azure Blob Storage endpoint for a storage account.
-	 */
-	private getStorageBlobEndpoint(storageAccount: string): string {
-		return `https://${storageAccount}.blob.core.windows.net`;
-	}
-
-	/**
 	 * Create a BlobServiceClient for the storage account.
 	 */
 	private createBlobServiceClient(
@@ -79,7 +73,7 @@ export class BlobUploadService {
 		credential: TokenCredential | StorageSharedKeyCredential
 	): BlobServiceClient {
 		return new BlobServiceClient(
-			this.getStorageBlobEndpoint(storageAccount),
+			getAzureBlobStorageEndpoint(storageAccount),
 			credential
 		);
 	}
