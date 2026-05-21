@@ -8,6 +8,7 @@ import { AzureNamedKeyCredential } from "@azure/core-auth";
 import { TableClient, TableServiceClient } from "@azure/data-tables";
 import * as vscode from "vscode";
 import { withErrorHandling, getErrorStatusCode, getErrorCode } from "../../utils/errors";
+import { getAzureTableStorageEndpoint, getAzureBlobStorageEndpoint } from "../../utils/azureEndpoints";
 import { AZURE_SDK_QUERY_TIMEOUT_MS } from "../constants";
 import type { BackendSettings } from "../settings";
 import type {
@@ -60,20 +61,6 @@ export class DataPlaneService {
   ) {}
 
   /**
-   * Get the Azure Table Storage endpoint for a storage account.
-   */
-  private getStorageTableEndpoint(storageAccount: string): string {
-    return `https://${storageAccount}.table.core.windows.net`;
-  }
-
-  /**
-   * Get the Azure Blob Storage endpoint for a storage account.
-   */
-  getStorageBlobEndpoint(storageAccount: string): string {
-    return `https://${storageAccount}.blob.core.windows.net`;
-  }
-
-  /**
    * Create a TableClient for the backend aggregate table.
    * @param settings - Backend settings with storage account and table names
    * @param credential - Azure credential (TokenCredential or AzureNamedKeyCredential)
@@ -84,7 +71,7 @@ export class DataPlaneService {
     credential: TokenCredential | AzureNamedKeyCredential,
   ): TableClient {
     return new TableClient(
-      this.getStorageTableEndpoint(settings.storageAccount),
+      getAzureTableStorageEndpoint(settings.storageAccount),
       settings.aggTable,
       credential as TokenCredential,
     );
@@ -101,7 +88,7 @@ export class DataPlaneService {
     credential: TokenCredential | AzureNamedKeyCredential,
   ): Promise<void> {
     const serviceClient = new TableServiceClient(
-      this.getStorageTableEndpoint(settings.storageAccount),
+      getAzureTableStorageEndpoint(settings.storageAccount),
       credential as TokenCredential,
     );
     await withErrorHandling(

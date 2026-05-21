@@ -978,7 +978,6 @@ test('syncToBackendStore completes full sync flow with mocked services', async (
 					upsertedEntities = entities;
 					return { successCount: entities.length, errors: [] };
 				},
-				getStorageBlobEndpoint: () => 'https://sa1.blob.core.windows.net',
 			}
 		);
 		await svc.syncToBackendStore(true, {
@@ -1036,7 +1035,6 @@ test('syncToBackendStore logs warning when upsertEntitiesBatch has errors', asyn
 					successCount: 0,
 					errors: entities.map((e: any) => ({ entity: e, error: new Error('write failed') })),
 				}),
-				getStorageBlobEndpoint: () => 'https://sa.blob.core.windows.net',
 			}
 		);
 		await svc.syncToBackendStore(true, {
@@ -1075,7 +1073,6 @@ test('syncToBackendStore handles ensureTableExists or validateAccess failure gra
 			validateAccess: async () => {},
 			createTableClient: () => ({}),
 			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
-			getStorageBlobEndpoint: () => 'https://sa.blob.core.windows.net',
 		}
 	);
 	await svc.syncToBackendStore(true, {
@@ -1114,7 +1111,6 @@ test('syncToBackendStore still attempts sharing server sync when Azure sync fail
 			validateAccess: async () => {},
 			createTableClient: () => ({}),
 			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
-			getStorageBlobEndpoint: () => '',
 		} as any,
 		undefined,
 		BackendUtility,
@@ -1309,7 +1305,6 @@ test(`syncToBackendStore also syncs to sharing server when backend=storageTables
 			createTableClient: () => ({}),
 			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
 			deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
-			getStorageBlobEndpoint: () => '',
 		};
 		const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
 		const svc = new SyncService(deps, credSvc as any, dataSvc as any, undefined, BackendUtility, sharingServerSvc as any);
@@ -1362,7 +1357,6 @@ test(`syncToBackendStore does NOT sync to sharing server when sharingServerEnabl
 			createTableClient: () => ({}),
 			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
 			deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
-			getStorageBlobEndpoint: () => '',
 		}
 	);
 	await svc.syncToBackendStore(true, {
