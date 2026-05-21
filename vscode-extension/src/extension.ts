@@ -155,6 +155,7 @@ import {
 import { determineOnboardingAction } from './onboarding';
 import { addModelUsage, addEditorUsage, computeUtcDateRanges, aggregatePeriodStats, type SessionAggregateInput } from './statsHelpers';
 import { getNonce, buildCspMeta } from './utils/webviewUtils';
+import { isGuidMcpTool } from './utils/toolUtils';
 import { buildChartData as _buildChartData } from './chartDataBuilder';
 
 type LocalViewRegressionProbeResult = {
@@ -184,6 +185,8 @@ type SessionFilePreload = {
 	/** Only populated for files with interactions > 0 (avoids fetching details for empty sessions). */
 	details?: SessionFileDetails;
 };
+
+type StatusBarDisplaySetting = 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth';
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
@@ -1152,7 +1155,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const suppressed = new Set<string>(
 			vscode.workspace.getConfiguration('aiEngineeringFluency').get<string[]>('suppressedUnknownTools', [])
 		);
-		return Array.from(allTools).filter(tool => !this.toolNameMap[tool] && !this.toolNameMap[tool.toLowerCase()] && !suppressed.has(tool)).sort();
+		return Array.from(allTools).filter(tool => !this.toolNameMap[tool] && !this.toolNameMap[tool.toLowerCase()] && !isGuidMcpTool(tool) && !suppressed.has(tool)).sort();
 	}
 
 	private async showUnknownMcpToolsBanner(): Promise<void> {
@@ -1619,7 +1622,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (detailedStats.today.sessions === 0 && detailedStats.last30Days.sessions === 0) {
 				this.setStatusBarText('$(symbol-numeric) No session data yet');
 			} else {
-				this.setStatusBarText(`$(symbol-numeric) ${this.formatCompact(detailedStats.today.tokens)} | ${this.formatCompact(detailedStats.last30Days.tokens)}`);
+				this.setStatusBarText(this.buildStatusBarText(detailedStats));
 			}
 
 			// Create detailed tooltip with improved style
@@ -2092,11 +2095,63 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.use24HourTime', true);
 	}
 
+	private getStatusBarShowTokensSetting(): StatusBarDisplaySetting {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<StatusBarDisplaySetting>('display.statusBar.showTokens', 'both');
+	}
+
+	private getStatusBarShowCostSetting(): StatusBarDisplaySetting {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<StatusBarDisplaySetting>('display.statusBar.showCost', 'none');
+	}
+
+	private buildTokenParts(show: StatusBarDisplaySetting, stats: DetailedStats): string[] {
+		const parts: string[] = [];
+		if (show === 'today' || show === 'both' || show === 'todayAndCurrentMonth') {
+			parts.push(this.formatCompact(stats.today.tokens));
+		}
+		if (show === 'last30days' || show === 'both') {
+			parts.push(this.formatCompact(stats.last30Days.tokens));
+		}
+		if (show === 'currentMonth' || show === 'todayAndCurrentMonth') {
+			parts.push(this.formatCompact(stats.month.tokens));
+		}
+		return parts;
+	}
+
+	private buildCostParts(show: StatusBarDisplaySetting, stats: DetailedStats): string[] {
+		const fmt = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+		const parts: string[] = [];
+		if (show === 'today' || show === 'both' || show === 'todayAndCurrentMonth') {
+			parts.push(fmt(stats.today.estimatedCostCopilot ?? 0));
+		}
+		if (show === 'last30days' || show === 'both') {
+			parts.push(fmt(stats.last30Days.estimatedCostCopilot ?? 0));
+		}
+		if (show === 'currentMonth' || show === 'todayAndCurrentMonth') {
+			parts.push(fmt(stats.month.estimatedCostCopilot ?? 0));
+		}
+		return parts;
+	}
+
+	private buildStatusBarText(stats: DetailedStats): string {
+		const showTokens = this.getStatusBarShowTokensSetting();
+		const showCost = this.getStatusBarShowCostSetting();
+		const parts: string[] = [];
+
+		if (showTokens !== 'none') {
+			parts.push(`$(symbol-numeric) ${this.buildTokenParts(showTokens, stats).join(' | ')}`);
+		}
+		if (showCost !== 'none') {
+			parts.push(`$(credit-card) ${this.buildCostParts(showCost, stats).join(' | ')}`);
+		}
+
+		return parts.length > 0 ? parts.join('  ') : `$(symbol-numeric) AI Fluency`;
+	}
+
 	private refreshOpenPanelsForSettingChange(): void {
 		const stats = this.lastDetailedStats;
 		if (!stats) { return; }
-		// Refresh status bar text (respects new compact setting)
-		this.setStatusBarText(`$(symbol-numeric) ${this.formatCompact(stats.today.tokens)} | ${this.formatCompact(stats.last30Days.tokens)}`);
+		// Refresh status bar text (respects new display settings)
+		this.setStatusBarText(this.buildStatusBarText(stats));
 		if (this.detailsPanel) {
 			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, stats);
 		}
@@ -7406,6 +7461,20 @@ ${hashtag}`;
             )
           );
           break;
+        case "updateDisplaySetting":
+          if (typeof message.key === 'string' && message.value !== undefined) {
+            await this.dispatch('updateDisplaySetting:diagnostics', async () => {
+              const allowedKeys = [
+                'display.statusBar.showTokens',
+                'display.statusBar.showCost',
+              ];
+              if (allowedKeys.includes(message.key)) {
+                const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
+                await config.update(message.key, message.value, vscode.ConfigurationTarget.Global);
+              }
+            });
+          }
+          break;
         case "resetDebugCounters":
           await this.dispatch('resetDebugCounters:diagnostics', async () => {
             await this.context.globalState.update('extension.openCount', 0);
@@ -7474,8 +7543,7 @@ ${hashtag}`;
           break;
         case "analyzeFolder":
           await this.dispatch('analyzeFolder:diagnostics', async () => {
-            const { folderPath, toolType } = message as { folderPath: string; toolType: string };
-            if (!folderPath) {
+            const { folderPath, toolType } = message as { folderPath: string; toolType: string };            if (!folderPath) {
               if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
                 this.diagnosticsPanel.webview.postMessage({
                   command: "folderAnalysisResult",
@@ -8087,6 +8155,10 @@ ${hashtag}`;
       backendConfigured: this.isBackendConfigured(),
       isDebugMode,
       globalStateCounters,
+      displaySettings: {
+        showTokens: this.getStatusBarShowTokensSetting(),
+        showCost: this.getStatusBarShowCostSetting(),
+      },
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>

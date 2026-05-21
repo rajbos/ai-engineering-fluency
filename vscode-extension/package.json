@@ -339,6 +339,34 @@
           "default": true,
           "description": "Show times in 24-hour format (e.g. 14:30). When disabled, 12-hour AM/PM format is used (e.g. 2:30 PM)."
         },
+        "aiEngineeringFluency.display.statusBar.showTokens": {
+          "type": "string",
+          "enum": ["none", "today", "last30days", "currentMonth", "both", "todayAndCurrentMonth"],
+          "enumDescriptions": [
+            "Do not show token counts in the status bar",
+            "Show today's token count only",
+            "Show the last 30 days (rolling window) token count only",
+            "Show the current calendar month's token count only",
+            "Show both today's and last 30 days' token counts (default)",
+            "Show both today's and current calendar month's token counts"
+          ],
+          "default": "both",
+          "description": "Controls which token counts are shown in the status bar. Token counts are estimated from session log files."
+        },
+        "aiEngineeringFluency.display.statusBar.showCost": {
+          "type": "string",
+          "enum": ["none", "today", "last30days", "currentMonth", "both", "todayAndCurrentMonth"],
+          "enumDescriptions": [
+            "Do not show estimated cost in the status bar (default)",
+            "Show today's estimated cost only",
+            "Show the last 30 days (rolling window) estimated cost only",
+            "Show the current calendar month's estimated cost only",
+            "Show both today's and last 30 days' estimated costs",
+            "Show both today's and current calendar month's estimated costs"
+          ],
+          "default": "none",
+          "description": "Controls which estimated costs (in USD) are shown in the status bar. Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing)."
+        },
         "aiEngineeringFluency.backend.enabled": {
           "type": "boolean",
           "default": false,

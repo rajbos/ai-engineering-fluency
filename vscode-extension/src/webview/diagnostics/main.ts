@@ -95,6 +95,13 @@ type SessionFolder = {
   editorName?: string;
 };
 
+type StatusBarShowOption = 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth';
+
+type DisplaySettings = {
+  showTokens: StatusBarShowOption;
+  showCost: StatusBarShowOption;
+};
+
 type DiagnosticsData = {
   report: string;
   sessionFiles: { file: string; size: number; modified: string }[];
@@ -106,6 +113,7 @@ type DiagnosticsData = {
   globalStateCounters?: GlobalStateCounters;
   githubAuth?: GitHubAuthStatus;
   sessionFolders?: SessionFolder[];
+  displaySettings?: DisplaySettings;
 };
 
 type DiagnosticsViewState = {
@@ -1466,6 +1474,22 @@ function setupBackendButtonHandlers(): void {
     });
 }
 
+function setupDisplaySettingHandlers(): void {
+  document
+    .getElementById("select-show-tokens")
+    ?.addEventListener("change", (e) => {
+      const value = (e.target as HTMLSelectElement).value;
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showTokens", value });
+    });
+
+  document
+    .getElementById("select-show-cost")
+    ?.addEventListener("change", (e) => {
+      const value = (e.target as HTMLSelectElement).value;
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showCost", value });
+    });
+}
+
 function setupSubtabHandlers(): void {
   document.querySelectorAll(".subtab").forEach((subtab) => {
     subtab.addEventListener("click", () => {
@@ -2122,7 +2146,38 @@ ${renderGitHubAuthPanel(data.githubAuth)}
 <div id="tab-display" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">⚙️ Display Settings</div>
-<div>Configure how numbers are displayed across the extension. Changes take effect immediately in the Settings editor and are applied the next time a view is opened or refreshed.</div>
+<div>Configure what is shown in the status bar at the bottom of VS Code. Changes take effect immediately — no data refresh needed.</div>
+</div>
+<div class="backend-card">
+<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Status Bar Display</h4>
+<p style="color: #ccc; margin-bottom: 16px;">
+Choose what to show in the VS Code status bar toolbar. You can show token counts, estimated costs, both, or neither for each period.
+</p>
+<div style="display: grid; gap: 16px;">
+<div style="display: flex; align-items: center; gap: 12px;">
+  <label style="color: #ccc; min-width: 160px; font-size: 13px;">🔢 Token counts:</label>
+  <select id="select-show-tokens" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
+    <option value="none" ${(data.displaySettings?.showTokens ?? 'both') === 'none' ? 'selected' : ''}>None</option>
+    <option value="today" ${(data.displaySettings?.showTokens ?? 'both') === 'today' ? 'selected' : ''}>Today only</option>
+    <option value="last30days" ${(data.displaySettings?.showTokens ?? 'both') === 'last30days' ? 'selected' : ''}>Last 30 days only</option>
+    <option value="currentMonth" ${(data.displaySettings?.showTokens ?? 'both') === 'currentMonth' ? 'selected' : ''}>Current calendar month only</option>
+    <option value="both" ${(data.displaySettings?.showTokens ?? 'both') === 'both' ? 'selected' : ''}>Today + last 30 days (default)</option>
+    <option value="todayAndCurrentMonth" ${(data.displaySettings?.showTokens ?? 'both') === 'todayAndCurrentMonth' ? 'selected' : ''}>Today + current calendar month</option>
+  </select>
+</div>
+<div style="display: flex; align-items: center; gap: 12px;">
+  <label style="color: #ccc; min-width: 160px; font-size: 13px;">💰 Estimated cost (USD):</label>
+  <select id="select-show-cost" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
+    <option value="none" ${(data.displaySettings?.showCost ?? 'none') === 'none' ? 'selected' : ''}>None (hidden)</option>
+    <option value="today" ${(data.displaySettings?.showCost ?? 'none') === 'today' ? 'selected' : ''}>Today only</option>
+    <option value="last30days" ${(data.displaySettings?.showCost ?? 'none') === 'last30days' ? 'selected' : ''}>Last 30 days only</option>
+    <option value="currentMonth" ${(data.displaySettings?.showCost ?? 'none') === 'currentMonth' ? 'selected' : ''}>Current calendar month only</option>
+    <option value="both" ${(data.displaySettings?.showCost ?? 'none') === 'both' ? 'selected' : ''}>Today + last 30 days</option>
+    <option value="todayAndCurrentMonth" ${(data.displaySettings?.showCost ?? 'none') === 'todayAndCurrentMonth' ? 'selected' : ''}>Today + current calendar month</option>
+  </select>
+</div>
+</div>
+<p style="color: #888; font-size: 11px; margin-top: 12px;">Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing). Changes apply to the status bar immediately.</p>
 </div>
 <div class="backend-card">
 <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🔢 Number Formatting</h4>
@@ -2168,6 +2223,7 @@ ${renderFolderAnalyzerTab()}
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
   setupButtonHandlers();
+  setupDisplaySettingHandlers();
 
   const savedState = diagState.restore();
   if (savedState?.activeTab && !activateTab(savedState.activeTab)) {
