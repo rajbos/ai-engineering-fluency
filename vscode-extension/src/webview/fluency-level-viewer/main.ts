@@ -4,22 +4,9 @@ import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '..
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import styles from './styles.css';
 import { getWindowData } from '../shared/dataLoader';
+import type { CategoryLevelData } from '../shared/types';
 
 // ── Types ──────────────────────────────────────────────────────────────
-
-type CategoryLevelData = {
-	category: string;
-	icon: string;
-	levels: LevelInfo[];
-};
-
-type LevelInfo = {
-	stage: number;
-	label: string;
-	description: string;
-	thresholds: string[];
-	tips: string[];
-};
 
 type FluencyLevelData = {
 	categories: CategoryLevelData[];
