@@ -246,6 +246,7 @@ jobs:
 
       - name: Find .vsix artifact
         id: vsix
+        if: always()
         shell: pwsh
         run: |
           $vsix = Get-ChildItem -Path "visualstudio-extension" -Filter "*.vsix" -Recurse |
@@ -258,6 +259,7 @@ jobs:
           echo "vsix_name=$($vsix.Name)"     >> $env:GITHUB_OUTPUT
 
       - name: Upload .vsix as artifact
+        if: steps.vsix.outputs.vsix_path != ''
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: copilot-token-tracker-vs-${{ github.sha }}

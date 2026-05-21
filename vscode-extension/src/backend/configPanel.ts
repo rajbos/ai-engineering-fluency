@@ -1,5 +1,5 @@
 import * as vscode from 'vscode';
-import * as crypto from 'crypto';
+import { getNonce } from '../utils/webviewUtils';
 import { safeJsonForInlineScript } from '../utils/html';
 import type { BackendConfigDraft } from './configurationFlow';
 
@@ -830,7 +830,7 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
  * Accepts extensionUri to resolve the VS Code Webview UI Toolkit script path.
  */
 export function buildHtml(webview: vscode.Webview, extensionUri: vscode.Uri, state: BackendConfigPanelState): string {
-	const nonce = crypto.randomBytes(16).toString('base64');
+	const nonce = getNonce();
 	const toolkitUri = webview.asWebviewUri(vscode.Uri.joinPath(extensionUri, 'dist', 'toolkit', 'toolkit.js')).toString();
 	const initialState = safeJsonForInlineScript(state);
 	const aliasRegex = safeJsonForInlineScript('^[A-Za-z0-9][A-Za-z0-9_-]*$');

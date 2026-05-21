@@ -136,6 +136,39 @@ export function buildOdataEqFilter(field: string, value: string): string {
 }
 
 /**
+ * Normalizes fluency metric fields from a source object into a partial entity suitable for spreading.
+ * Handles optional numeric and JSON string fields, coercing string values where necessary.
+ * Shared by both listAggDailyEntitiesFromTableClient and createDailyAggEntity.
+ * @param source - Object containing optional fluency metric fields
+ * @returns Partial entity with only the present, normalized fluency metrics
+ */
+export function normalizeFluencyMetrics(source: Partial<BackendAggDailyEntityLike>): Partial<BackendAggDailyEntityLike> {
+	return {
+		...(typeof source.askModeCount === 'number' ? { askModeCount: source.askModeCount } : {}),
+		...(typeof source.editModeCount === 'number' ? { editModeCount: source.editModeCount } : {}),
+		...(typeof source.agentModeCount === 'number' ? { agentModeCount: source.agentModeCount } : {}),
+		...(typeof source.planModeCount === 'number' ? { planModeCount: source.planModeCount } : {}),
+		...(typeof source.customAgentModeCount === 'number' ? { customAgentModeCount: source.customAgentModeCount } : {}),
+		...(source.toolCallsJson ? { toolCallsJson: String(source.toolCallsJson) } : {}),
+		...(source.contextRefsJson ? { contextRefsJson: String(source.contextRefsJson) } : {}),
+		...(source.mcpToolsJson ? { mcpToolsJson: String(source.mcpToolsJson) } : {}),
+		...(source.modelSwitchingJson ? { modelSwitchingJson: String(source.modelSwitchingJson) } : {}),
+		...(source.editScopeJson ? { editScopeJson: String(source.editScopeJson) } : {}),
+		...(source.agentTypesJson ? { agentTypesJson: String(source.agentTypesJson) } : {}),
+		...(source.repositoriesJson ? { repositoriesJson: String(source.repositoriesJson) } : {}),
+		...(source.applyUsageJson ? { applyUsageJson: String(source.applyUsageJson) } : {}),
+		...(source.sessionDurationJson ? { sessionDurationJson: String(source.sessionDurationJson) } : {}),
+		...(typeof source.repoCustomizationRate === 'number' ? { repoCustomizationRate: source.repoCustomizationRate } : {}),
+		...(typeof source.multiTurnSessions === 'number' ? { multiTurnSessions: source.multiTurnSessions } : {}),
+		...(typeof source.avgTurnsPerSession === 'number' ? { avgTurnsPerSession: source.avgTurnsPerSession } : {}),
+		...(typeof source.multiFileEdits === 'number' ? { multiFileEdits: source.multiFileEdits } : {}),
+		...(typeof source.avgFilesPerEdit === 'number' ? { avgFilesPerEdit: source.avgFilesPerEdit } : {}),
+		...(typeof source.codeBlockApplyRate === 'number' ? { codeBlockApplyRate: source.codeBlockApplyRate } : {}),
+		...(typeof source.sessionCount === 'number' ? { sessionCount: source.sessionCount } : {}),
+	};
+}
+
+/**
  * Lists all daily aggregate entities from a table partition.
  * @param args - Arguments including tableClient, partitionKey, and defaultDayKey
  * @returns Array of entities
@@ -191,27 +224,7 @@ export async function listAggDailyEntitiesFromTableClient(args: {
 				interactions,
 				updatedAt: entity.updatedAt?.toString() || new Date().toISOString(),
 				// Fluency metrics (schema version 4+)
-				...(typeof entity.askModeCount === 'number' ? { askModeCount: entity.askModeCount } : {}),
-				...(typeof entity.editModeCount === 'number' ? { editModeCount: entity.editModeCount } : {}),
-				...(typeof entity.agentModeCount === 'number' ? { agentModeCount: entity.agentModeCount } : {}),
-				...(typeof entity.planModeCount === 'number' ? { planModeCount: entity.planModeCount } : {}),
-				...(typeof entity.customAgentModeCount === 'number' ? { customAgentModeCount: entity.customAgentModeCount } : {}),
-				...(entity.toolCallsJson ? { toolCallsJson: entity.toolCallsJson.toString() } : {}),
-				...(entity.contextRefsJson ? { contextRefsJson: entity.contextRefsJson.toString() } : {}),
-				...(entity.mcpToolsJson ? { mcpToolsJson: entity.mcpToolsJson.toString() } : {}),
-				...(entity.modelSwitchingJson ? { modelSwitchingJson: entity.modelSwitchingJson.toString() } : {}),
-				...(entity.editScopeJson ? { editScopeJson: entity.editScopeJson.toString() } : {}),
-				...(entity.agentTypesJson ? { agentTypesJson: entity.agentTypesJson.toString() } : {}),
-				...(entity.repositoriesJson ? { repositoriesJson: entity.repositoriesJson.toString() } : {}),
-				...(entity.applyUsageJson ? { applyUsageJson: entity.applyUsageJson.toString() } : {}),
-				...(entity.sessionDurationJson ? { sessionDurationJson: entity.sessionDurationJson.toString() } : {}),
-				...(typeof entity.repoCustomizationRate === 'number' ? { repoCustomizationRate: entity.repoCustomizationRate } : {}),
-				...(typeof entity.multiTurnSessions === 'number' ? { multiTurnSessions: entity.multiTurnSessions } : {}),
-				...(typeof entity.avgTurnsPerSession === 'number' ? { avgTurnsPerSession: entity.avgTurnsPerSession } : {}),
-				...(typeof entity.multiFileEdits === 'number' ? { multiFileEdits: entity.multiFileEdits } : {}),
-				...(typeof entity.avgFilesPerEdit === 'number' ? { avgFilesPerEdit: entity.avgFilesPerEdit } : {}),
-				...(typeof entity.codeBlockApplyRate === 'number' ? { codeBlockApplyRate: entity.codeBlockApplyRate } : {}),
-				...(typeof entity.sessionCount === 'number' ? { sessionCount: entity.sessionCount } : {}),
+				...normalizeFluencyMetrics(entity),
 			};
 
 			results.push(normalized);
@@ -310,26 +323,6 @@ export function createDailyAggEntity(args: {
 		interactions,
 		updatedAt: new Date().toISOString(),
 		// Add fluency metrics if provided
-		...(fluencyMetrics?.askModeCount !== undefined ? { askModeCount: fluencyMetrics.askModeCount } : {}),
-		...(fluencyMetrics?.editModeCount !== undefined ? { editModeCount: fluencyMetrics.editModeCount } : {}),
-		...(fluencyMetrics?.agentModeCount !== undefined ? { agentModeCount: fluencyMetrics.agentModeCount } : {}),
-		...(fluencyMetrics?.planModeCount !== undefined ? { planModeCount: fluencyMetrics.planModeCount } : {}),
-		...(fluencyMetrics?.customAgentModeCount !== undefined ? { customAgentModeCount: fluencyMetrics.customAgentModeCount } : {}),
-		...(fluencyMetrics?.toolCallsJson ? { toolCallsJson: fluencyMetrics.toolCallsJson } : {}),
-		...(fluencyMetrics?.contextRefsJson ? { contextRefsJson: fluencyMetrics.contextRefsJson } : {}),
-		...(fluencyMetrics?.mcpToolsJson ? { mcpToolsJson: fluencyMetrics.mcpToolsJson } : {}),
-		...(fluencyMetrics?.modelSwitchingJson ? { modelSwitchingJson: fluencyMetrics.modelSwitchingJson } : {}),
-		...(fluencyMetrics?.editScopeJson ? { editScopeJson: fluencyMetrics.editScopeJson } : {}),
-		...(fluencyMetrics?.agentTypesJson ? { agentTypesJson: fluencyMetrics.agentTypesJson } : {}),
-		...(fluencyMetrics?.repositoriesJson ? { repositoriesJson: fluencyMetrics.repositoriesJson } : {}),
-		...(fluencyMetrics?.applyUsageJson ? { applyUsageJson: fluencyMetrics.applyUsageJson } : {}),
-		...(fluencyMetrics?.sessionDurationJson ? { sessionDurationJson: fluencyMetrics.sessionDurationJson } : {}),
-		...(fluencyMetrics?.repoCustomizationRate !== undefined ? { repoCustomizationRate: fluencyMetrics.repoCustomizationRate } : {}),
-		...(fluencyMetrics?.multiTurnSessions !== undefined ? { multiTurnSessions: fluencyMetrics.multiTurnSessions } : {}),
-		...(fluencyMetrics?.avgTurnsPerSession !== undefined ? { avgTurnsPerSession: fluencyMetrics.avgTurnsPerSession } : {}),
-		...(fluencyMetrics?.multiFileEdits !== undefined ? { multiFileEdits: fluencyMetrics.multiFileEdits } : {}),
-		...(fluencyMetrics?.avgFilesPerEdit !== undefined ? { avgFilesPerEdit: fluencyMetrics.avgFilesPerEdit } : {}),
-		...(fluencyMetrics?.codeBlockApplyRate !== undefined ? { codeBlockApplyRate: fluencyMetrics.codeBlockApplyRate } : {}),
-		...(fluencyMetrics?.sessionCount !== undefined ? { sessionCount: fluencyMetrics.sessionCount } : {})
+		...normalizeFluencyMetrics(fluencyMetrics ?? {}),
 	};
 }

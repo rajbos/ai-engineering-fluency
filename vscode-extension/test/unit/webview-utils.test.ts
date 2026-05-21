@@ -9,7 +9,11 @@ import {
 	formatFixed,
 	formatPercent,
 	formatNumber,
-	formatCost
+	formatCost,
+	escapeHtml,
+	markdownToHtml,
+	STAGE_LABELS,
+	STAGE_DESCRIPTIONS
 } from '../../src/webview/shared/formatUtils';
 
 // ── getModelDisplayName ─────────────────────────────────────────────────
@@ -95,4 +99,65 @@ test('formatCost: zero cost', () => {
 	const result = formatCost(0);
 	assert.ok(result.includes('$'), 'should contain dollar sign');
 	assert.ok(result.includes('0.00'), 'should show two decimal zeros');
+});
+
+// ── escapeHtml ──────────────────────────────────────────────────────────
+
+test('escapeHtml: escapes ampersand, angle brackets, double quote, single quote', () => {
+	assert.equal(escapeHtml('a & b'), 'a &amp; b');
+	assert.equal(escapeHtml('<div>'), '&lt;div&gt;');
+	assert.equal(escapeHtml('"quoted"'), '&quot;quoted&quot;');
+	assert.equal(escapeHtml("it's"), 'it&#039;s');
+});
+
+test('escapeHtml: leaves safe text unchanged', () => {
+	assert.equal(escapeHtml('hello world'), 'hello world');
+});
+
+test('escapeHtml: neutralises a script injection attempt', () => {
+	const result = escapeHtml('<script>alert("xss")</script>');
+	assert.ok(!result.includes('<script'));
+	assert.equal(result, '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+});
+
+// ── markdownToHtml ──────────────────────────────────────────────────────
+
+test('markdownToHtml: converts markdown link to anchor tag', () => {
+	const result = markdownToHtml('[click here](https://example.com)');
+	assert.equal(result, '<a href="https://example.com" target="_blank" rel="noopener noreferrer">click here</a>');
+});
+
+test('markdownToHtml: escapes HTML outside of links', () => {
+	const result = markdownToHtml('See <this> & [link](https://example.com)');
+	assert.ok(result.includes('&lt;this&gt;'));
+	assert.ok(result.includes('&amp;'));
+	assert.ok(result.includes('<a href='));
+});
+
+test('markdownToHtml: plain text without links is just HTML-escaped', () => {
+	assert.equal(markdownToHtml('hello & world'), 'hello &amp; world');
+});
+
+test('markdownToHtml: generated anchor has target=_blank and rel=noopener noreferrer', () => {
+	const result = markdownToHtml('[docs](https://docs.example.com)');
+	assert.ok(result.includes('target="_blank"'));
+	assert.ok(result.includes('rel="noopener noreferrer"'));
+});
+
+// ── STAGE_LABELS ────────────────────────────────────────────────────────
+
+test('STAGE_LABELS: defines labels for all four stages', () => {
+	assert.equal(STAGE_LABELS[1], 'Stage 1: AI Skeptic');
+	assert.equal(STAGE_LABELS[2], 'Stage 2: AI Explorer');
+	assert.equal(STAGE_LABELS[3], 'Stage 3: AI Collaborator');
+	assert.equal(STAGE_LABELS[4], 'Stage 4: AI Strategist');
+});
+
+// ── STAGE_DESCRIPTIONS ──────────────────────────────────────────────────
+
+test('STAGE_DESCRIPTIONS: defines descriptions for all four stages', () => {
+	assert.ok(STAGE_DESCRIPTIONS[1].length > 0);
+	assert.ok(STAGE_DESCRIPTIONS[2].length > 0);
+	assert.ok(STAGE_DESCRIPTIONS[3].length > 0);
+	assert.ok(STAGE_DESCRIPTIONS[4].length > 0);
 });

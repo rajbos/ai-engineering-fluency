@@ -2,38 +2,9 @@ export interface ModelUsage {
     [model: string]: { inputTokens: number; outputTokens: number };
 }
 
-import { extractSubAgentData } from './tokenEstimation';
+import { extractSubAgentData, extractResponseItemText } from './tokenEstimation';
 import { safeJsonParse } from './utils/jsonParse';
-
-type JsonObject = Record<string, unknown>;
-
-function isObject(value: unknown): value is JsonObject {
-return typeof value === 'object' && value !== null;
-}
-
-function isSafePathSegment(seg: string): boolean {
-// Prevent prototype pollution and other surprising behavior.
-if (typeof seg !== 'string') {
-return false;
-}
-const forbidden = ['__proto__', 'prototype', 'constructor', 'hasOwnProperty'];
-return !forbidden.includes(seg) && !seg.startsWith('__');
-}
-
-function isArrayIndexSegment(seg: string): boolean {
-return /^\d+$/.test(seg);
-}
-
-function normalizeModelId(model: unknown, defaultModel: string): string {
-if (typeof model !== 'string') {
-return defaultModel;
-}
-const trimmed = model.trim();
-if (!trimmed) {
-return defaultModel;
-}
-return trimmed.startsWith('copilot/') ? trimmed.substring('copilot/'.length) : trimmed;
-}
+import { type JsonObject, isObject, isSafePathSegment, isArrayIndexSegment, normalizeModelId } from './utils/typeGuards';
 
 interface MessagePart {
   text?: string;
@@ -206,27 +177,10 @@ return { responseText: '', thinkingText: '' };
 let responseText = '';
 let thinkingText = '';
 for (const item of response) {
-if (!isObject(item)) {
-continue;
-}
-// Separate thinking items from regular response text
-if (item['kind'] === 'thinking') {
-const value = item['value'];
-if (typeof value === 'string' && value) {
-thinkingText += value;
-}
-continue;
-}
-const content = item['content'];
-const contentValue = isObject(content) ? content['value'] : undefined;
-const value = item['value'];
-// Prefer content.value when present to avoid double-counting wrapper text.
-if (typeof contentValue === 'string' && contentValue) {
-responseText += contentValue;
-continue;
-}
-if (typeof value === 'string' && value) {
-responseText += value;
+const { text, isThinking } = extractResponseItemText(item);
+if (text) {
+if (isThinking) { thinkingText += text; }
+else { responseText += text; }
 }
 }
 return { responseText, thinkingText };

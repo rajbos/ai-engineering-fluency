@@ -8,6 +8,7 @@ import { AzureNamedKeyCredential } from "@azure/core-auth";
 import { TableClient, TableServiceClient } from "@azure/data-tables";
 import * as vscode from "vscode";
 import { withErrorHandling, getErrorStatusCode, getErrorCode } from "../../utils/errors";
+import { withTimeout } from "../../utils/promises";
 import { AZURE_SDK_QUERY_TIMEOUT_MS } from "../constants";
 import type { BackendSettings } from "../settings";
 import type {
@@ -18,34 +19,6 @@ import type {
   listAggDailyEntitiesFromTableClient,
 } from "../storageTables";
 import { BackendUtility } from "./utilityService";
-
-/**
- * Wraps a promise with a timeout to prevent indefinite hangs.
- * @param promise - The promise to wrap
- * @param timeoutMs - Timeout in milliseconds
- * @param operation - Description of the operation for error messages
- * @returns Promise that rejects if timeout is exceeded
- */
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  operation: string,
-): Promise<T> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
-  return Promise.race([
-    promise.finally(() => {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }),
-    new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`${operation} timed out after ${timeoutMs}ms`)),
-        timeoutMs,
-      );
-    }),
-  ]);
-}
 
 /**
  * DataPlaneService manages Azure Table Storage clients and operations.
