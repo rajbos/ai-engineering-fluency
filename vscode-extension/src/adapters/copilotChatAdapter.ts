@@ -43,6 +43,7 @@ import {
 	isJsonlContent,
 	isUuidPointerFile,
 } from '../tokenEstimation';
+import { isCopilotChatNonSessionFile } from './adapterPredicates';
 
 /** VS Code variants probed across all platforms. */
 const VSCODE_VARIANTS = [
@@ -175,24 +176,6 @@ function getWSLWindowsPathsSync(): string[] {
 	return out;
 }
 
-/** Filenames we explicitly skip when recursively scanning Copilot Chat globalStorage. */
-const NON_SESSION_PATTERNS = [
-	'embeddings',
-	'index',
-	'cache',
-	'preferences',
-	'settings',
-	'config',
-	'workspacesessions',
-	'globalsessions',
-	'api.json',
-];
-
-function isNonSessionFile(filename: string): boolean {
-	const lower = filename.toLowerCase();
-	return NON_SESSION_PATTERNS.some(p => lower.includes(p));
-}
-
 async function pathExists(p: string): Promise<boolean> {
 	try { await fs.promises.access(p); return true; } catch { return false; }
 }
@@ -237,41 +220,12 @@ async function scanGlobalStorageRecursively(
 			continue;
 		}
 		if (!entry.name.endsWith('.json') && !entry.name.endsWith('.jsonl')) { continue; }
-		if (isNonSessionFile(entry.name)) { continue; }
+		if (isCopilotChatNonSessionFile(entry.name)) { continue; }
 		try {
 			const stats = await fs.promises.stat(full);
 			if (stats.size > 0) { out.push(full); }
 		} catch { /* ignore */ }
 	}
-}
-
-/**
- * Path predicate that recognises Copilot Chat session storage shapes. Kept
- * narrow so it never accidentally claims unrelated VS Code files.
- */
-export function isCopilotChatSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
-	if (!/\.jsonl?$/.test(norm)) { return false; }
-
-	// workspaceStorage/<hash>/chatSessions/<file>  (legacy)
-	if (/\/workspaceStorage\/[^/]+\/chatSessions\/[^/]+$/.test(norm)) {
-		return true;
-	}
-	// workspaceStorage/<hash>/{extension}/chatSessions/<file>
-	if (/\/workspaceStorage\/[^/]+\/(?:GitHub\.copilot-chat|github\.copilot-chat|GitHub\.copilot|github\.copilot)\/chatSessions\/[^/]+$/.test(norm)) {
-		return true;
-	}
-	// workspaceStorage/<hash>/{extension}/debug-logs/<file>
-	if (/\/workspaceStorage\/[^/]+\/(?:GitHub\.copilot-chat|github\.copilot-chat|GitHub\.copilot|github\.copilot)\/debug-logs\/[^/]+$/.test(norm)) {
-		return true;
-	}
-	// globalStorage/emptyWindowChatSessions/<file>
-	if (/\/globalStorage\/emptyWindowChatSessions\/[^/]+$/.test(norm)) { return true; }
-	// globalStorage/{GitHub,github}.copilot-chat/** and {GitHub,github}.copilot/**
-	if (/\/globalStorage\/(?:GitHub|github)\.copilot(?:-chat)?\/.+$/.test(norm)) {
-		return !isNonSessionFile(path.basename(norm));
-	}
-	return false;
 }
 
 export class CopilotChatAdapter implements IEcosystemAdapter, IDiscoverableEcosystem {

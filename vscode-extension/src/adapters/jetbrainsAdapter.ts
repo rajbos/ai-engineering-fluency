@@ -38,15 +38,6 @@ export function getJetBrainsSessionDir(): string {
 	return path.join(os.homedir(), '.copilot', 'jb');
 }
 
-/**
- * Path predicate matching JetBrains partition files under ~/.copilot/jb/.
- * Matches paths containing /.copilot/jb/ that end with /partition-{n}.jsonl.
- */
-export function isJetBrainsSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
-	return norm.includes('/.copilot/jb/') && /\/partition-\d+\.jsonl$/.test(norm);
-}
-
 async function pathExists(p: string): Promise<boolean> {
 	try { await fs.promises.access(p); return true; } catch { return false; }
 }

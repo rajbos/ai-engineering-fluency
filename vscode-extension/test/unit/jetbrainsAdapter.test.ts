@@ -10,9 +10,9 @@ import * as os from 'node:os';
 
 import {
 	JetBrainsAdapter,
-	isJetBrainsSessionPath,
 	getJetBrainsSessionDir,
 } from '../../src/adapters/jetbrainsAdapter';
+import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { isDiscoverable } from '../../src/ecosystemAdapter';
 
 const adapter = new JetBrainsAdapter();

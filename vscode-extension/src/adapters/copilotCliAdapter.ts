@@ -33,12 +33,6 @@ export function getCopilotCliSessionStateDir(): string {
 	return path.join(os.homedir(), '.copilot', 'session-state');
 }
 
-/** Path predicate matching any file under ~/.copilot/session-state/ (any depth). */
-export function isCopilotCliSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
-	return norm.includes('/.copilot/session-state/');
-}
-
 async function pathExists(p: string): Promise<boolean> {
 	try { await fs.promises.access(p); return true; } catch { return false; }
 }

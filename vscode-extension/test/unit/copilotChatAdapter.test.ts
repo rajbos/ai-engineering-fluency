@@ -19,10 +19,10 @@ import * as os from 'node:os';
 
 import {
     CopilotChatAdapter,
-    isCopilotChatSessionPath,
     getVSCodeUserPaths,
     isWSL,
 } from '../../src/adapters/copilotChatAdapter';
+import { isCopilotChatSessionPath } from '../../src/adapters/adapterPredicates';
 import { isDiscoverable } from '../../src/ecosystemAdapter';
 
 const adapter = new CopilotChatAdapter();

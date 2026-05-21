@@ -81,7 +81,7 @@ import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { getEcosystemDisplayName } from './ecosystemAdapter';
 import { buildAdapterRegistry, createDataAccessInstances } from './adapters';
 import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
-import { isJetBrainsSessionPath } from './adapters/jetbrainsAdapter';
+import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from './jetbrains';
 import {
   estimateTokensFromText as _estimateTokensFromText,

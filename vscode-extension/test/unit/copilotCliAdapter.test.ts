@@ -10,9 +10,9 @@ import * as os from 'node:os';
 
 import {
     CopilotCliAdapter,
-    isCopilotCliSessionPath,
     getCopilotCliSessionStateDir,
 } from '../../src/adapters/copilotCliAdapter';
+import { isCopilotCliSessionPath } from '../../src/adapters/adapterPredicates';
 import { isDiscoverable } from '../../src/ecosystemAdapter';
 
 const adapter = new CopilotCliAdapter();

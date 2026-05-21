@@ -40,7 +40,7 @@ import {
 	extractMcpServerName,
 	normalizePathForComparison,
 } from './workspaceHelpers';
-import { isJetBrainsSessionPath } from './adapters/jetbrainsAdapter';
+import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
 import { detectJetBrainsModeFromContent, type JetBrainsMode } from './jetbrains';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isAnalyzable } from './ecosystemAdapter';
