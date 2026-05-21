@@ -8351,77 +8351,43 @@ async function checkForLegacyExtensionConflict(context: vscode.ExtensionContext)
   }
 }
 
-export async function activate(context: vscode.ExtensionContext): Promise<AiFluencyExtensionApi> {
-  // Create the token tracker
-  const tokenTracker = new CopilotTokenTracker(context.extensionUri, context);
+function createBackendFacade(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): BackendFacade {
+  return new BackendFacade({
+    context,
+    log: (m: string) => tokenTracker.log(m),
+    warn: (m: string) => tokenTracker.warn(m),
+    updateTokenStats: async () => { await tokenTracker.updateTokenStats(); },
+    calculateEstimatedCost: (modelUsage: ModelUsage) => tokenTracker.calculateEstimatedCost(modelUsage),
+    co2Per1kTokens: 0.2,
+    waterUsagePer1kTokens: 0.3,
+    co2AbsorptionPerTreePerYear: 21000,
+    getCopilotSessionFiles: () =>
+      tokenTracker.sessionDiscovery.getCopilotSessionFiles(),
+    estimateTokensFromText: (text: string, model?: string) =>
+      tokenTracker.estimateTokensFromText(text, model),
+    getModelFromRequest: (req: any) =>
+      tokenTracker.getModelFromRequest(req),
+    getSessionFileDataCached: (p: string, m: number, s: number) =>
+      tokenTracker.getSessionFileDataCached(p, m, s),
+    statSessionFile: (sessionFile: string) =>
+      tokenTracker.statSessionFile(sessionFile),
+    isOpenCodeSession: (sessionFile: string) =>
+      tokenTracker.openCode.isOpenCodeSessionFile(sessionFile),
+    getOpenCodeSessionData: (sessionFile: string) =>
+      tokenTracker.openCode.getOpenCodeSessionData(sessionFile),
+    isCrushSession: (sessionFile: string) =>
+      tokenTracker.crush.isCrushSessionFile(sessionFile),
+    getCrushSessionData: (sessionFile: string) =>
+      tokenTracker.crush.getCrushSessionData(sessionFile),
+    isVSSessionFile: (sessionFile: string) =>
+      tokenTracker.visualStudio.isVSSessionFile(sessionFile),
+    getGithubToken: () => tokenTracker.githubSession?.accessToken,
+  });
+}
 
-  // Migrate settings from the old copilotTokenTracker namespace to aiEngineeringFluency.
-  // Run before any other settings are read so the new keys are populated first.
-  await migrateSettingsIfNeeded((m) => tokenTracker.log(m));
-
-  // If the legacy extension is also installed, nudge the user to uninstall it.
-  // Fire-and-forget: don't block activation on the user's response.
-  void (async () => {
-    try {
-      await checkForLegacyExtensionConflict(context);
-    } catch {
-      /* ignore */
-    }
-  })();
-
-  // Wire up backend facade and commands so the diagnostics webview can launch the
-  // configuration wizard. Uses tokenTracker logging and helpers via casting to any.
+function setupBackend(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
   try {
-    const backendFacade = new BackendFacade({
-      context,
-      log: (m: string) => tokenTracker.log(m),
-      warn: (m: string) => tokenTracker.warn(m),
-      updateTokenStats: async () => { await tokenTracker.updateTokenStats(); },
-      calculateEstimatedCost: (modelUsage: ModelUsage) => tokenTracker.calculateEstimatedCost(modelUsage),
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-      co2Per1kTokens: 0.2,
-      waterUsagePer1kTokens: 0.3,
-      co2AbsorptionPerTreePerYear: 21000,
-      getCopilotSessionFiles: () =>
-        tokenTracker.sessionDiscovery.getCopilotSessionFiles(),
-      estimateTokensFromText: (text: string, model?: string) =>
-        tokenTracker.estimateTokensFromText(text, model),
-      getModelFromRequest: (req: any) =>
-        tokenTracker.getModelFromRequest(req),
-      getSessionFileDataCached: (p: string, m: number, s: number) =>
-        tokenTracker.getSessionFileDataCached(p, m, s),
-      statSessionFile: (sessionFile: string) =>
-        tokenTracker.statSessionFile(sessionFile),
-      isOpenCodeSession: (sessionFile: string) =>
-        tokenTracker.openCode.isOpenCodeSessionFile(sessionFile),
-      getOpenCodeSessionData: (sessionFile: string) =>
-        tokenTracker.openCode.getOpenCodeSessionData(sessionFile),
-      isCrushSession: (sessionFile: string) =>
-        tokenTracker.crush.isCrushSessionFile(sessionFile),
-      getCrushSessionData: (sessionFile: string) =>
-        tokenTracker.crush.getCrushSessionData(sessionFile),
-      isVSSessionFile: (sessionFile: string) =>
-        tokenTracker.visualStudio.isVSSessionFile(sessionFile),
-      getGithubToken: () => tokenTracker.githubSession?.accessToken,
-    });
+    const backendFacade = createBackendFacade(context, tokenTracker);
 
     const backendHandler = new BackendCommandHandler({
       facade: backendFacade as any,
@@ -8433,9 +8399,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
 
     // Store backend facade in the tracker instance for dashboard access
     tokenTracker.backend = backendFacade;
-
-    // Backend sync timer will be started after initial token analysis completes
-    // (see startBackendSyncAfterInitialAnalysis method)
 
     const configureBackendCommand = vscode.commands.registerCommand(
       "aiEngineeringFluency.configureBackend",
@@ -8460,8 +8423,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
       "Failed to wire backend commands: " + String(err),
     );
   }
+}
 
-  // Register the refresh command
+function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
   const refreshCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.refresh",
     async () => {
@@ -8471,7 +8435,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
     },
   );
 
-  // Register the show details command
   const showDetailsCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showDetails",
     async () => {
@@ -8480,7 +8443,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
     },
   );
 
-  // Register the show chart command
   const showChartCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showChart",
     async () => {
@@ -8489,7 +8451,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
     },
   );
 
-  // Register the show usage analysis command
   const showUsageAnalysisCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showUsageAnalysis",
     async () => {
@@ -8498,7 +8459,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
     },
   );
 
-  // Register the show maturity / fluency score command
   const showMaturityCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showMaturity",
     async () => {
@@ -8507,7 +8467,6 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
     },
   );
 
-  // Register the show dashboard command
   const showDashboardCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showDashboard",
     async () => {
@@ -8524,6 +8483,18 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
     },
   );
 
+  context.subscriptions.push(
+    refreshCommand,
+    showDetailsCommand,
+    showChartCommand,
+    showUsageAnalysisCommand,
+    showMaturityCommand,
+    showDashboardCommand,
+    showEnvironmentalCommand,
+  );
+}
+
+function registerDiagnosticAndAuthCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
   // Register the show fluency level viewer command (debug-only)
   const showFluencyLevelViewerCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showFluencyLevelViewer",
@@ -8577,23 +8548,39 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
     },
   );
 
-  // Add to subscriptions for proper cleanup
   context.subscriptions.push(
-    refreshCommand,
-    showDetailsCommand,
-    showChartCommand,
-    showUsageAnalysisCommand,
-    showMaturityCommand,
     showFluencyLevelViewerCommand,
     runLocalViewRegressionCommand,
-    showDashboardCommand,
-    showEnvironmentalCommand,
     generateDiagnosticReportCommand,
     clearCacheCommand,
     authenticateGitHubCommand,
     signOutGitHubCommand,
-    tokenTracker,
   );
+}
+
+export async function activate(context: vscode.ExtensionContext): Promise<AiFluencyExtensionApi> {
+  // Create the token tracker
+  const tokenTracker = new CopilotTokenTracker(context.extensionUri, context);
+
+  // Migrate settings from the old copilotTokenTracker namespace to aiEngineeringFluency.
+  // Run before any other settings are read so the new keys are populated first.
+  await migrateSettingsIfNeeded((m) => tokenTracker.log(m));
+
+  // If the legacy extension is also installed, nudge the user to uninstall it.
+  // Fire-and-forget: don't block activation on the user's response.
+  void (async () => {
+    try {
+      await checkForLegacyExtensionConflict(context);
+    } catch {
+      /* ignore */
+    }
+  })();
+
+  setupBackend(context, tokenTracker);
+  registerViewCommands(context, tokenTracker);
+  registerDiagnosticAndAuthCommands(context, tokenTracker);
+
+  context.subscriptions.push(tokenTracker);
 
   tokenTracker.log("Extension activation complete");
 
