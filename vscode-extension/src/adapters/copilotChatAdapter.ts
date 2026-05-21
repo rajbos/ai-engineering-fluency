@@ -43,6 +43,7 @@ import {
 	isJsonlContent,
 	isUuidPointerFile,
 } from '../tokenEstimation';
+import { pathExists } from '../utils/fsAsync';
 
 /** VS Code variants probed across all platforms. */
 const VSCODE_VARIANTS = [
@@ -191,10 +192,6 @@ const NON_SESSION_PATTERNS = [
 function isNonSessionFile(filename: string): boolean {
 	const lower = filename.toLowerCase();
 	return NON_SESSION_PATTERNS.some(p => lower.includes(p));
-}
-
-async function pathExists(p: string): Promise<boolean> {
-	try { await fs.promises.access(p); return true; } catch { return false; }
 }
 
 async function runWithConcurrency<T>(
