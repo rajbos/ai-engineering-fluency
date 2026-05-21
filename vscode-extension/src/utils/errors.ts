@@ -119,44 +119,8 @@ export function getErrorCode(error: unknown): string | number | undefined {
 	return typeof code === 'string' || typeof code === 'number' ? code : undefined;
 }
 
-/**
- * Checks if an error is an Azure Policy "RequestDisallowedByPolicy" error.
- * @param error - The error to check
- * @returns True if this is an Azure Policy disallowed error
- */
-export function isAzurePolicyDisallowedError(error: unknown): boolean {
-	if (!error || typeof error !== 'object') {
-		return false;
-	}
-	const e = error as any;
-	// Azure Resource Manager returns this error code when policy blocks an operation
-	if (e.code === 'RequestDisallowedByPolicy') {
-		return true;
-	}
-	// Also check in message
-	const message = e.message || '';
-	return message.includes('RequestDisallowedByPolicy') || message.includes('policy assignment');
-}
-
-/**
- * Checks if an error indicates Storage account local auth (Shared Key) is disabled by Azure Policy.
- * @param error - The error to check
- * @returns True if this is a Storage local auth disabled error
- */
-export function isStorageLocalAuthDisallowedByPolicyError(error: unknown): boolean {
-	if (!error || typeof error !== 'object') {
-		return false;
-	}
-	const e = error as any;
-	const message = (e.message || '').toLowerCase();
-	
-	// Common patterns in policy error messages
-	return (
-		message.includes('allowsharedkeyaccess') ||
-		message.includes('local authentication') ||
-		message.includes('shared key') && message.includes('policy')
-	);
-}
+// Re-exported from azureErrorClassifier.ts for backward compatibility.
+export { isAzurePolicyDisallowedError, isStorageLocalAuthDisallowedByPolicyError, isAuthError, isNotFoundError, isConflictError, isRetryableError, isNetworkError } from './azureErrorClassifier';
 
 /**
  * Wraps an async function with error handling and optional retry logic.

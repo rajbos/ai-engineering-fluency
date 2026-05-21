@@ -10,7 +10,7 @@ import * as zlib from 'zlib';
 import { promisify } from 'util';
 import type { TokenCredential } from '@azure/core-auth';
 import { BlobServiceClient, ContainerClient, StorageSharedKeyCredential } from '@azure/storage-blob';
-import { safeStringifyError, getErrorStatusCode, getErrorCode } from '../../utils/errors';
+import { safeStringifyError, isAuthError } from '../../utils/errors';
 
 const gzip = promisify(zlib.gzip);
 
@@ -162,7 +162,7 @@ export class BlobUploadService {
 					const errorMsg = safeStringifyError(error);
 
 					// Stop immediately on authorization errors — retrying other files won't help.
-					if (getErrorStatusCode(error) === 403 || getErrorCode(error) === 'AuthorizationPermissionMismatch') {
+					if (isAuthError(error)) {
 						const isEntraId = !('accountName' in credential);
 						const hint = isEntraId
 							? 'Your Entra ID identity needs the "Storage Blob Data Contributor" role on this storage account. '

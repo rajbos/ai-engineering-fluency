@@ -7,7 +7,7 @@ import type { TokenCredential } from "@azure/core-auth";
 import { AzureNamedKeyCredential } from "@azure/core-auth";
 import { TableClient, TableServiceClient } from "@azure/data-tables";
 import * as vscode from "vscode";
-import { withErrorHandling, getErrorStatusCode, getErrorCode } from "../../utils/errors";
+import { withErrorHandling, isConflictError, isAuthError, isRetryableError } from "../../utils/errors";
 import { AZURE_SDK_QUERY_TIMEOUT_MS } from "../constants";
 import type { BackendSettings } from "../settings";
 import type {
@@ -111,8 +111,7 @@ export class DataPlaneService {
           this.log(`Backend sync: created table ${settings.aggTable}`);
         } catch (e: unknown) {
           // 409 = already exists
-          const status = getErrorStatusCode(e) ?? getErrorCode(e);
-          if (status === 409 || getErrorCode(e) === "TableAlreadyExists") {
+          if (isConflictError(e)) {
             this.log(
               `Backend sync: table ${settings.aggTable} already exists (OK)`,
             );
@@ -161,8 +160,7 @@ export class DataPlaneService {
         "Table entity delete",
       );
     } catch (e: unknown) {
-      const status = getErrorStatusCode(e);
-      if (status === 403) {
+      if (isAuthError(e)) {
         throw new Error(
           `Missing Azure RBAC data-plane permissions for Tables. Assign 'Storage Table Data Contributor' (read/write) or 'Storage Table Data Reader' (read-only) on the Storage account or table service.`,
         );
@@ -441,12 +439,7 @@ export class DataPlaneService {
         lastError = error instanceof Error ? error : new Error(String(error));
 
         // Check if error is retryable (429 throttling, 503 unavailable)
-        const statusCode = getErrorStatusCode(error) ?? getErrorCode(error);
-        const isRetryable =
-          statusCode === 429 ||
-          statusCode === 503 ||
-          statusCode === "ETIMEDOUT";
-
+        const isRetryable = isRetryableError(error);
         if (!isRetryable || attempt === maxRetries) {
           throw lastError;
         }

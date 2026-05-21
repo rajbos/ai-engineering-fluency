@@ -1,7 +1,7 @@
 import * as vscode from "vscode";
 import type { Stats } from "fs";
 
-import { safeStringifyError } from "../utils/errors";
+import { safeStringifyError, isAuthError, isNotFoundError, isNetworkError } from "../utils/errors";
 import {
   BackendConfigPanel,
   type BackendConfigPanelState,
@@ -997,29 +997,16 @@ export class BackendFacade {
           );
           return { ok: true, message: SuccessMessages.connected() };
         } catch (error: unknown) {
-          const details = safeStringifyError(error);
-          if (details.includes("403") || details.includes("Forbidden")) {
-            return {
-              ok: false,
-              message: ErrorMessages.auth("Check storage account permissions"),
-            };
+          if (isAuthError(error)) {
+            return { ok: false, message: ErrorMessages.auth("Check storage account permissions") };
           }
-          if (details.includes("404") || details.includes("NotFound")) {
-            return {
-              ok: false,
-              message:
-                "Storage account or table not found. Verify resource names.",
-            };
+          if (isNotFoundError(error)) {
+            return { ok: false, message: "Storage account or table not found. Verify resource names." };
           }
-          if (details.includes("ENOTFOUND") || details.includes("ETIMEDOUT")) {
-            return {
-              ok: false,
-              message: ErrorMessages.connection(
-                "Check network and storage account name",
-              ),
-            };
+          if (isNetworkError(error)) {
+            return { ok: false, message: ErrorMessages.connection("Check network and storage account name") };
           }
-          return { ok: false, message: details };
+          return { ok: false, message: safeStringifyError(error) };
         }
       },
     );
