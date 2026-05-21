@@ -3,12 +3,13 @@
  */
 import { Command } from 'commander';
 import { discoverSessionFiles, calculateUsageAnalysisStats } from '../helpers';
+import { shouldOutputJson } from '../commandUtils';
 
 export const usageAnalysisCommand = new Command('usage-analysis')
 	.description('Output usage analysis stats for the usage analysis webview')
 	.option('--json', 'Output raw JSON (for machine consumption)')
 	.action(async (options) => {
-		if (!options.json) {
+		if (!shouldOutputJson(options)) {
 			process.stderr.write('Use --json flag for usage analysis data output\n');
 			return;
 		}

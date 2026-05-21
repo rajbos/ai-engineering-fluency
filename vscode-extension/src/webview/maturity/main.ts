@@ -3,7 +3,7 @@ import { buttonHtml } from '../shared/buttonConfig';
 import type { ContextReferenceUsage } from '../shared/contextRefUtils';
 import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
+import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../shared/dataLoader';
@@ -30,12 +30,6 @@ type CategoryScore = {
 	stage: number;       // 1-4
 	evidence: string[];  // what signals led to this score
 	tips: string[];      // suggestions to reach next stage
-};
-
-type CategoryLevelData = {
-	category: string;
-	icon: string;
-	levels: Array<{ stage: number; label: string; description: string; thresholds: string[]; tips: string[] }>;
 };
 
 type MaturityData = {

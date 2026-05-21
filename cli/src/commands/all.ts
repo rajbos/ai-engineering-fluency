@@ -13,12 +13,13 @@ import {
 	buildCustomizationMatrix,
 } from '../helpers';
 import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
+import { shouldOutputJson } from '../commandUtils';
 
 export const allCommand = new Command('all')
 	.description('Output all view data in a single JSON response (for Visual Studio extension)')
 	.option('--json', 'Output raw JSON (required)')
 	.action(async (options) => {
-		if (!options.json) {
+		if (!shouldOutputJson(options)) {
 			process.stderr.write('Use --json flag for all data output\n');
 			return;
 		}

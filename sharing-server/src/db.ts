@@ -1,6 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync, existsSync, copyFileSync } from 'fs';
-import { join, dirname } from 'path';
+import { dirname } from 'path';
+import { getDatabasePath, getBackupPath } from './config/databaseConfig';
 
 export interface UserRow {
 	id: number;
@@ -71,30 +72,11 @@ export interface UploadEntry {
 
 let _db: DatabaseSync | undefined;
 
-// SQLite runs on the container's LOCAL ephemeral disk (LOCAL_DATA_DIR / /tmp/db).
-// Azure Files (/data) is used ONLY for backup/restore via plain file copy — never
-// as a live SQLite database. Azure Files SMB does not support the POSIX advisory
-// byte-range locks that SQLite requires, causing persistent "database is locked"
-// errors when using Azure Files as the live database path.
-function resolveLocalDbPath(): string {
-	const dir = process.env.LOCAL_DATA_DIR
-		?? process.env.DATA_DIR
-		?? (process.env.NODE_ENV === 'production' ? '/tmp/db' : './data');
-	return join(dir, 'sharing.db');
-}
-
-function resolveBackupPath(): string | null {
-	// Backup is only meaningful when LOCAL_DATA_DIR is set (SQLite not on DATA_DIR).
-	if (!process.env.LOCAL_DATA_DIR) return null;
-	const backupDir = process.env.DATA_DIR ?? (process.env.NODE_ENV === 'production' ? '/data' : null);
-	return backupDir ? join(backupDir, 'sharing.db') : null;
-}
-
 /** Restore the database from Azure Files backup (if one exists) onto local disk. */
 export function restoreFromBackup(): void {
-	const backupPath = resolveBackupPath();
+	const backupPath = getBackupPath();
 	if (!backupPath || !existsSync(backupPath)) return;
-	const localPath = resolveLocalDbPath();
+	const localPath = getDatabasePath();
 	try {
 		mkdirSync(dirname(localPath), { recursive: true });
 		copyFileSync(backupPath, localPath);
@@ -106,9 +88,9 @@ export function restoreFromBackup(): void {
 
 /** Copy the local database to Azure Files for persistence across container restarts. */
 export function backupToAzureFiles(): void {
-	const backupPath = resolveBackupPath();
+	const backupPath = getBackupPath();
 	if (!backupPath) return;
-	const localPath = resolveLocalDbPath();
+	const localPath = getDatabasePath();
 	if (!existsSync(localPath)) return;
 	try {
 		mkdirSync(dirname(backupPath), { recursive: true });
@@ -121,7 +103,7 @@ export function backupToAzureFiles(): void {
 
 export function getDb(): DatabaseSync {
 	if (!_db) {
-		const dbPath = resolveLocalDbPath();
+		const dbPath = getDatabasePath();
 		const dataDir = dirname(dbPath);
 		if (!existsSync(dataDir)) {
 			mkdirSync(dataDir, { recursive: true });

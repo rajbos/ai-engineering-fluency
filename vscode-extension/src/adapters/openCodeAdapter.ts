@@ -6,6 +6,7 @@ import { OpenCodeDataAccess } from '../opencode';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
 import { withErrorRecovery } from '../utils/errors';
+import { pathExists } from '../utils/fsAsync';
 
 export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'opencode';
@@ -93,8 +94,7 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 		// Scan JSON session files
 		log(`📁 Checking OpenCode JSON path: ${sessionDir}`);
 		log(`📁 Checking OpenCode DB path: ${dbPath}`);
-		let sessionDirExists = false;
-		try { await fs.promises.access(sessionDir); sessionDirExists = true; } catch { /* sessionDir doesn't exist — skip */ }
+		const sessionDirExists = await pathExists(sessionDir);
 		if (sessionDirExists) {
 			const scanDir = async (dir: string) => {
 				let entries: fs.Dirent[] = [];
@@ -125,8 +125,7 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 		}
 
 		// Scan SQLite database for additional sessions (deduplicating against JSON)
-		let dbExists = false;
-		try { await fs.promises.access(dbPath); dbExists = true; } catch { /* DB doesn't exist — skip */ }
+		const dbExists = await pathExists(dbPath);
 		if (dbExists) {
 			try {
 				const existingIds = new Set(

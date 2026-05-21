@@ -28,6 +28,7 @@ import { CopilotCliStoreAccess } from '../copilotCliStore';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
 import { normalizePath } from '../utils/pathUtils';
+import { pathExists } from '../utils/fsAsync';
 
 /** Returns the canonical Copilot CLI session-state directory (~/.copilot/session-state). */
 export function getCopilotCliSessionStateDir(): string {
@@ -38,10 +39,6 @@ export function getCopilotCliSessionStateDir(): string {
 export function isCopilotCliSessionPath(filePath: string): boolean {
 	const norm = normalizePath(filePath);
 	return norm.includes('/.copilot/session-state/');
-}
-
-async function pathExists(p: string): Promise<boolean> {
-	try { await fs.promises.access(p); return true; } catch { return false; }
 }
 
 export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {

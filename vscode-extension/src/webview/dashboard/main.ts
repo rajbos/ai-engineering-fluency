@@ -7,8 +7,7 @@ import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
 import { getWindowData } from "../shared/dataLoader";
-
-type ModelUsage = Record<string, { inputTokens: number; outputTokens: number }>;
+import type { ModelUsage } from "../shared/types";
 
 interface UserSummary {
   userId: string;
