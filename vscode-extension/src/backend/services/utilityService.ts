@@ -5,7 +5,7 @@
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
-import { fileUriToPath } from '../../workspaceHelpers';
+import { fileUriToPath, normalizePath } from '../../workspaceHelpers';
 import {
 	CODE_WORKSPACE_EXTENSION,
 	DAY_KEY_REGEX,
@@ -163,7 +163,7 @@ export class BackendUtility {
 	 * Extract workspace ID from a session file path.
 	 */
 	static extractWorkspaceIdFromSessionPath(sessionFile: string): string {
-		const normalized = sessionFile.replace(/\\/g, '/');
+		const normalized = normalizePath(sessionFile);
 		const parts = normalized.split('/');
 		const idx = parts.findIndex(p => p.toLowerCase() === 'workspacestorage');
 		if (idx >= 0 && parts[idx + 1]) {
@@ -186,7 +186,7 @@ export class BackendUtility {
 	 */
 	static async tryResolveWorkspaceNameFromSessionPath(sessionFile: string): Promise<string | undefined> {
 		try {
-			const normalized = sessionFile.replace(/\\/g, '/');
+			const normalized = normalizePath(sessionFile);
 			const marker = '/workspacestorage/';
 			const idx = normalized.toLowerCase().indexOf(marker);
 			if (idx < 0) {

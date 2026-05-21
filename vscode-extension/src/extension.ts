@@ -140,6 +140,7 @@ import {
   isMcpTool as _isMcpTool,
   normalizeMcpToolName as _normalizeMcpToolName,
   extractMcpServerName as _extractMcpServerName,
+  normalizePath as _normalizePath,
 } from './workspaceHelpers';
 import {
   createViewRegressionProbeScript,
@@ -2573,7 +2574,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// (Unix-style absolute path, e.g. "/workspaces/repo" or "/home/user/repo")
 				const isRemotePath = (p: string) => {
 					if (process.platform !== 'win32') { return false; }
-					const normalized = p.replace(/\\/g, '/');
+					const normalized = _normalizePath(p);
 					return normalized.startsWith('/');
 				};
 
@@ -4373,7 +4374,7 @@ usageAnalysis: undefined
 	 * Returns 0 when no debug log is found or contains no cached-token data.
 	 */
 	private async readCachedTokensFromDebugLog(sessionFilePath: string): Promise<number> {
-		const norm = sessionFilePath.replace(/\\/g, '/');
+		const norm = _normalizePath(sessionFilePath);
 		const sessionId = path.basename(sessionFilePath, path.extname(sessionFilePath));
 		// Only process UUID-named session files (e.g. e84b3e82-c1fb-43de-8f52-367f4c74826a)
 		if (!/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(sessionId)) {

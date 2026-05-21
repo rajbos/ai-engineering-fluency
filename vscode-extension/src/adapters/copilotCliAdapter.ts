@@ -27,6 +27,7 @@ import type {
 import { CopilotCliStoreAccess } from '../copilotCliStore';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
+import { normalizePath } from '../utils/pathUtils';
 
 /** Returns the canonical Copilot CLI session-state directory (~/.copilot/session-state). */
 export function getCopilotCliSessionStateDir(): string {
@@ -35,7 +36,7 @@ export function getCopilotCliSessionStateDir(): string {
 
 /** Path predicate matching any file under ~/.copilot/session-state/ (any depth). */
 export function isCopilotCliSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
+	const norm = normalizePath(filePath);
 	return norm.includes('/.copilot/session-state/');
 }
 

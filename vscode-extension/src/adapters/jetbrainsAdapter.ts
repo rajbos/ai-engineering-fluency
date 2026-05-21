@@ -32,6 +32,7 @@ import type {
 	CandidatePath,
 } from '../ecosystemAdapter';
 import { parseJetBrainsPartition, type JetBrainsParsedSession, type JetBrainsToolCall } from '../jetbrains';
+import { normalizePath } from '../utils/pathUtils';
 
 /** Returns the canonical JetBrains Copilot session directory (~/.copilot/jb). */
 export function getJetBrainsSessionDir(): string {
@@ -43,7 +44,7 @@ export function getJetBrainsSessionDir(): string {
  * Matches paths containing /.copilot/jb/ that end with /partition-{n}.jsonl.
  */
 export function isJetBrainsSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
+	const norm = normalizePath(filePath);
 	return norm.includes('/.copilot/jb/') && /\/partition-\d+\.jsonl$/.test(norm);
 }
 

@@ -20,6 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
+import { normalizePath } from './utils/pathUtils';
 
 export class MistralVibeDataAccess {
 
@@ -48,7 +49,7 @@ return path.join(this.getVibeHomeDir(), 'logs', 'session');
  * Session files are meta.json files under ~/.vibe/logs/session/
  */
 isVibeSessionFile(filePath: string): boolean {
-const normalized = filePath.replace(/\\/g, '/');
+const normalized = normalizePath(filePath);
 return normalized.includes('/.vibe/logs/session/') && normalized.endsWith('/meta.json');
 }
 

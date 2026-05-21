@@ -3,7 +3,7 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ChatTurn, ModelUsage, PromptTokenDetail } from './types';
 import { createEmptyContextRefs } from './tokenEstimation';
-import { normalizePathForComparison } from './workspaceHelpers';
+import { normalizePathForComparison, normalizePath } from './workspaceHelpers';
 
 interface GeminiCliSessionHeader {
 	sessionId: string;
@@ -465,7 +465,7 @@ export class GeminiCliDataAccess {
 	}
 
 	private getProjectBucketFromPath(sessionFilePath: string): string | undefined {
-		const normalized = sessionFilePath.replace(/\\/g, '/');
+		const normalized = normalizePath(sessionFilePath);
 		const parts = normalized.split('/').filter(part => part.length > 0);
 		const chatsIndex = parts.lastIndexOf('chats');
 		if (chatsIndex > 0) {
@@ -560,7 +560,7 @@ export class GeminiCliDataAccess {
 	}
 
 	private looksLikePath(value: string): boolean {
-		const normalized = value.replace(/\\/g, '/');
+		const normalized = normalizePath(value);
 		return /^[a-zA-Z]:/.test(value) || normalized.startsWith('/') || normalized.startsWith('~') || normalized.startsWith('file://');
 	}
 
