@@ -1,6 +1,7 @@
-﻿// Diagnostics Report webview with tabbed interface
+// Diagnostics Report webview with tabbed interface
 import { buttonHtml } from "../shared/buttonConfig";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
+import { escapeHtml, formatFileSize, getTimeSince } from "../shared/formatUtils";
 import { createViewStateManager } from "../shared/viewState";
 // CSS imported as text via esbuild
 import themeStyles from "../shared/theme.css";
@@ -153,15 +154,6 @@ let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
-
 function removeSessionFilesSection(reportText: string): string {
   return reportText.replace(SESSION_FILES_SECTION_REGEX, "");
 }
@@ -175,51 +167,6 @@ function formatDate(isoString: string | null): string {
   } catch {
     return escapeHtml(isoString);
   }
-}
-
-function getTimeSince(isoString: string): string {
-  try {
-    const now = Date.now();
-    const then = new Date(isoString).getTime();
-    const diffMs = now - then;
-
-    if (diffMs < 0) {
-      return "Just now";
-    }
-
-    const seconds = Math.floor(diffMs / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) {
-      return `${days} day${days !== 1 ? "s" : ""} ago`;
-    }
-    if (hours > 0) {
-      return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
-    }
-    if (minutes > 0) {
-      return `${minutes} minute${minutes !== 1 ? "s" : ""} ago`;
-    }
-    return `${seconds} second${seconds !== 1 ? "s" : ""} ago`;
-  } catch {
-    return "Unknown";
-  }
-}
-
-function formatFileSize(bytes: number): string {
-  const numericBytes = Number(bytes);
-  if (!Number.isFinite(numericBytes) || numericBytes < 0) {
-    // Fallback for unexpected or untrusted values
-    return "N/A";
-  }
-  if (numericBytes < 1024) {
-    return `${numericBytes} B`;
-  }
-  if (numericBytes < 1024 * 1024) {
-    return `${(numericBytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(numericBytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 function sanitizeNumber(value: number | undefined | null): string {

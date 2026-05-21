@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { extractSubAgentData, normalizeDisplayModelName } from '../../src/tokenEstimation';
+import { extractSubAgentData, normalizeDisplayModelName, extractResponseItemText } from '../../src/tokenEstimation';
 
 test('normalizeDisplayModelName: lowercases and replaces spaces with hyphens', () => {
 	assert.equal(normalizeDisplayModelName('Claude Haiku 4.5'), 'claude-haiku-4.5');
@@ -82,6 +82,64 @@ test('extractSubAgentData: handles missing modelName gracefully', () => {
 });
 
 // ── Mutation-killing tests ──────────────────────────────────────────────
+
+// ── extractResponseItemText ──────────────────────────────────────────────
+
+test('extractResponseItemText: null returns empty non-thinking', () => {
+	const result = extractResponseItemText(null);
+	assert.equal(result.text, '');
+	assert.equal(result.isThinking, false);
+});
+
+test('extractResponseItemText: non-object returns empty non-thinking', () => {
+	assert.deepEqual(extractResponseItemText('string'), { text: '', isThinking: false });
+	assert.deepEqual(extractResponseItemText(42), { text: '', isThinking: false });
+	assert.deepEqual(extractResponseItemText(undefined), { text: '', isThinking: false });
+});
+
+test('extractResponseItemText: thinking item returns isThinking=true with text', () => {
+	const result = extractResponseItemText({ kind: 'thinking', value: 'extended reasoning here' });
+	assert.equal(result.text, 'extended reasoning here');
+	assert.equal(result.isThinking, true);
+});
+
+test('extractResponseItemText: thinking item with empty value returns empty string', () => {
+	const result = extractResponseItemText({ kind: 'thinking', value: '' });
+	assert.equal(result.text, '');
+	assert.equal(result.isThinking, true);
+});
+
+test('extractResponseItemText: prefers content.value over value to avoid double-counting', () => {
+	const result = extractResponseItemText({ kind: 'markdownContent', value: 'WRAPPER', content: { value: 'ACTUAL' } });
+	assert.equal(result.text, 'ACTUAL');
+	assert.equal(result.isThinking, false);
+});
+
+test('extractResponseItemText: falls back to value when content.value is empty', () => {
+	const result = extractResponseItemText({ kind: 'markdownContent', value: 'fallback', content: { value: '' } });
+	assert.equal(result.text, 'fallback');
+	assert.equal(result.isThinking, false);
+});
+
+test('extractResponseItemText: uses value when no content property', () => {
+	const result = extractResponseItemText({ kind: 'markdownContent', value: 'response text' });
+	assert.equal(result.text, 'response text');
+	assert.equal(result.isThinking, false);
+});
+
+test('extractResponseItemText: content.value works for any kind, not just markdownContent', () => {
+	const result = extractResponseItemText({ kind: 'otherKind', value: 'WRAPPER', content: { value: 'INNER' } });
+	assert.equal(result.text, 'INNER');
+	assert.equal(result.isThinking, false);
+});
+
+test('extractResponseItemText: returns empty for item with no text fields', () => {
+	const result = extractResponseItemText({ kind: 'toolInvocationSerialized', toolId: 'someTool' });
+	assert.equal(result.text, '');
+	assert.equal(result.isThinking, false);
+});
+
+
 
 import {
         estimateTokensFromText,

@@ -1,7 +1,8 @@
-﻿// Log Viewer webview - displays session file details and chat turns
+// Log Viewer webview - displays session file details and chat turns
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
-import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers } from '../shared/formatUtils';
 import { getModelDisplayName } from '../shared/modelUtils';
+import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -48,9 +49,6 @@ actualUsage?: ActualUsage;
 thinkingEffort?: string;
 };
 
-type ToolCallUsage = { total: number; byTool: { [key: string]: number } };
-type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number; cli: number };
-type McpToolUsage = { total: number; byServer: { [key: string]: number }; byTool: { [key: string]: number } };
 type ThinkingEffortUsage = { byEffort: { [effort: string]: number }; switchCount: number; defaultEffort: string | null };
 type SessionUsageAnalysis = {
 toolCalls: ToolCallUsage;
@@ -170,15 +168,6 @@ return id;
 return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? id;
 }
 
-function escapeHtml(text: string): string {
-return text
-.replace(/&/g, '&amp;')
-.replace(/</g, '&lt;')
-.replace(/>/g, '&gt;')
-.replace(/"/g, '&quot;')
-.replace(/'/g, '&#039;');
-}
-
 function getEffortDisplayName(level: string): string {
 return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
@@ -190,12 +179,6 @@ return new Date(isoString).toLocaleString();
 } catch {
 return isoString;
 }
-}
-
-function formatFileSize(bytes: number): string {
-if (bytes < 1024) { return `${bytes} B`; }
-if (bytes < 1024 * 1024) { return `${(bytes / 1024).toFixed(1)} KB`; }
-return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
 }
 
 function getContextRefBadges(refs: ContextReferenceUsage): string {
