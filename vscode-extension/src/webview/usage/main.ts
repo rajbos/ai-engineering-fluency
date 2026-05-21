@@ -1770,8 +1770,8 @@ function wireCopyButtons(): void {
 }
 
 // Listen for messages from the extension
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-registerMessageHandler<any>((message) => {
+window.addEventListener('message', (event) => {
+	const message = event.data;
 	switch (message.command) {
 		case 'repoAnalysisResults':
 			displayRepoAnalysisResults(message.data, message.workspacePath);

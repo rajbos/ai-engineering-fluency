@@ -898,7 +898,8 @@ root.append(fallback);
 }
 
 // Listen for background stat updates from the extension
-registerMessageHandler<{ command: string; data?: DetailedStats }>((message) => {
+window.addEventListener('message', (event: MessageEvent) => {
+const message = event.data as { command: string; data?: DetailedStats };
 if (message.command === 'updateStats' && message.data) {
 render(message.data);
 }

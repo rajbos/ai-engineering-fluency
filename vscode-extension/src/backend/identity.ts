@@ -1,10 +1,11 @@
 import { createHash } from 'crypto';
 import { ValidationMessages } from './ui/messages';
-import { type ValidationResult, validResult, invalidResult } from './validation';
 
 export type BackendUserIdentityMode = 'pseudonymous' | 'teamAlias' | 'entraObjectId';
 
-export type TeamAliasValidationResult = ValidationResult<{ alias: string }>;
+export type TeamAliasValidationResult =
+	| { valid: true; alias: string }
+	| { valid: false; error: string };
 
 const TEAM_ALIAS_REGEX = /^[a-zA-Z0-9-]+$/;
 const MAX_TEAM_ALIAS_LENGTH = 32;
@@ -13,24 +14,42 @@ const COMMON_NAME_PATTERNS = /\b(john|jane|smith|doe|admin|user|dev|test|demo)\b
 export function validateTeamAlias(input: string): TeamAliasValidationResult {
 	const alias = (input ?? '').trim().toLowerCase();
 	if (!alias) {
-		return invalidResult(ValidationMessages.required('Team alias', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.'));
+		return { 
+			valid: false, 
+			error: ValidationMessages.required('Team alias', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.')
+		};
 	}
 	if (alias.length > MAX_TEAM_ALIAS_LENGTH) {
-		return invalidResult(`Team alias is too long (maximum ${MAX_TEAM_ALIAS_LENGTH} characters). Use a shorter handle like "Alex-Dev".`);
+		return { 
+			valid: false, 
+			error: `Team alias is too long (maximum ${MAX_TEAM_ALIAS_LENGTH} characters). Use a shorter handle like "Alex-Dev".`
+		};
 	}
 	if (alias.includes('@')) {
-		return invalidResult(`Team alias cannot contain @ symbol (looks like an email). Use a handle like "Alex-Dev" instead. ${ValidationMessages.piiWarning('Do not use email addresses.')}`);
+		return { 
+			valid: false, 
+			error: `Team alias cannot contain @ symbol (looks like an email). Use a handle like "Alex-Dev" instead. ${ValidationMessages.piiWarning('Do not use email addresses.')}`
+		};
 	}
 	if (alias.includes(' ')) {
-		return invalidResult(`Team alias cannot contain spaces (looks like a display name). Use dashes instead. Example: "Alex-Dev". ${ValidationMessages.piiWarning('Do not use real names.')}`);
+		return { 
+			valid: false, 
+			error: `Team alias cannot contain spaces (looks like a display name). Use dashes instead. Example: "Alex-Dev". ${ValidationMessages.piiWarning('Do not use real names.')}`
+		};
 	}
 	if (!TEAM_ALIAS_REGEX.test(alias)) {
-		return invalidResult(ValidationMessages.format('Team alias', 'use only letters, numbers, and dashes', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.'));
+		return { 
+			valid: false, 
+			error: ValidationMessages.format('Team alias', 'use only letters, numbers, and dashes', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.')
+		};
 	}
 	if (COMMON_NAME_PATTERNS.test(alias)) {
-		return invalidResult(`Team alias "${alias}" looks like a real name or common identifier. Use a non-identifying handle like "Team-Frontend" or "QA-Lead".`);
+		return { 
+			valid: false, 
+			error: `Team alias "${alias}" looks like a real name or common identifier. Use a non-identifying handle like "Team-Frontend" or "QA-Lead".`
+		};
 	}
-	return validResult({ alias });
+	return { valid: true, alias };
 }
 
 export interface JwtClaims {
@@ -101,7 +120,7 @@ export function resolveUserIdentityForSync(args: {
 		if (!res.valid) {
 			return {};
 		}
-		return { userId: res.data.alias, userKeyType: 'teamAlias' };
+		return { userId: res.alias, userKeyType: 'teamAlias' };
 	}
 
 	if (args.userIdentityMode === 'entraObjectId') {
