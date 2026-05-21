@@ -2,7 +2,7 @@ export interface ModelUsage {
     [model: string]: { inputTokens: number; outputTokens: number };
 }
 
-import { extractSubAgentData } from './tokenEstimation';
+import { extractSubAgentData, extractResponseItemText } from './tokenEstimation';
 
 type JsonObject = Record<string, unknown>;
 
@@ -205,27 +205,10 @@ return { responseText: '', thinkingText: '' };
 let responseText = '';
 let thinkingText = '';
 for (const item of response) {
-if (!isObject(item)) {
-continue;
-}
-// Separate thinking items from regular response text
-if (item['kind'] === 'thinking') {
-const value = item['value'];
-if (typeof value === 'string' && value) {
-thinkingText += value;
-}
-continue;
-}
-const content = item['content'];
-const contentValue = isObject(content) ? content['value'] : undefined;
-const value = item['value'];
-// Prefer content.value when present to avoid double-counting wrapper text.
-if (typeof contentValue === 'string' && contentValue) {
-responseText += contentValue;
-continue;
-}
-if (typeof value === 'string' && value) {
-responseText += value;
+const { text, isThinking } = extractResponseItemText(item);
+if (text) {
+if (isThinking) { thinkingText += text; }
+else { responseText += text; }
 }
 }
 return { responseText, thinkingText };

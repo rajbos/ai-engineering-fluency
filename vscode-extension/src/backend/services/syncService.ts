@@ -21,28 +21,12 @@ import { CredentialService } from './credentialService';
 import { DataPlaneService } from './dataPlaneService';
 import { BackendUtility } from './utilityService';
 import { SharingServerUploadService, type SharingServerEntry } from './sharingServerUploadService';
+import { type IBlobUploadService } from './blobUploadService';
 import { isJsonlContent } from '../../tokenEstimation';
 import { getEditorTypeFromPath } from '../../workspaceHelpers';
 
 /** Ecosystem session per-model usage entry (input, output, optional interactions). */
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
-
-
-/**
- * Interface for blob upload service to avoid circular dependency.
- */
-interface BlobUploadServiceLike {
-	uploadSessionFiles(
-		storageAccount: string,
-		settings: { enabled: boolean; containerName: string; uploadFrequencyHours: number; compressFiles: boolean },
-		credential: unknown,
-		sessionFiles: string[],
-		machineId: string,
-		datasetId: string
-	): Promise<{ success: boolean; filesUploaded: number; message: string }>;
-	shouldUpload(machineId: string, settings: { enabled: boolean; uploadFrequencyHours: number }): boolean;
-	getUploadStatus(machineId: string): { lastUploadTime: number; filesUploaded: number; lastError?: string } | undefined;
-}
 
 /**
  * Validate and normalize consent timestamp.
@@ -131,7 +115,7 @@ export class SyncService {
 		private readonly deps: SyncServiceDeps,
 		private readonly credentialService: CredentialService,
 		private readonly dataPlaneService: DataPlaneService,
-		private readonly blobUploadService: BlobUploadServiceLike | undefined,
+		private readonly blobUploadService: IBlobUploadService | undefined,
 		private readonly utility: typeof BackendUtility,
 		private readonly sharingServerUploadService: SharingServerUploadService | undefined,
 	) {}
