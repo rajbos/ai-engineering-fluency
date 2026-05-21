@@ -1,7 +1,8 @@
-﻿// Log Viewer webview - displays session file details and chat turns
+// Log Viewer webview - displays session file details and chat turns
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { getModelDisplayName } from '../shared/modelUtils';
+import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -48,9 +49,6 @@ actualUsage?: ActualUsage;
 thinkingEffort?: string;
 };
 
-type ToolCallUsage = { total: number; byTool: { [key: string]: number } };
-type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number; cli: number };
-type McpToolUsage = { total: number; byServer: { [key: string]: number }; byTool: { [key: string]: number } };
 type ThinkingEffortUsage = { byEffort: { [effort: string]: number }; switchCount: number; defaultEffort: string | null };
 type SessionUsageAnalysis = {
 toolCalls: ToolCallUsage;

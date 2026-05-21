@@ -4,25 +4,13 @@ import { buttonHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
 import { formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 
-type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number; cli: number };
-type ToolCallUsage = { total: number; byTool: { [key: string]: number } };
-type McpToolUsage = { total: number; byServer: { [key: string]: number }; byTool: { [key: string]: number } };
-
-type ModelSwitchingAnalysis = {
-	modelsPerSession: number[];
-	totalSessions: number;
-	averageModelsPerSession: number;
-	maxModelsPerSession: number;
+type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
-	switchingFrequency: number;
-	standardModels: string[];
-	premiumModels: string[];
-	unknownModels: string[];
-	mixedTierSessions: number;
 	standardRequests: number;
 	premiumRequests: number;
 	unknownRequests: number;

@@ -2,25 +2,9 @@
 import { buttonHtml } from '../shared/buttonConfig';
 import type { ContextReferenceUsage } from '../shared/contextRefUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-
-// ── Types ──────────────────────────────────────────────────────────────
-
-type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number; cli: number };
-type ToolCallUsage = { total: number; byTool: { [key: string]: number } };
-type McpToolUsage = { total: number; byServer: { [key: string]: number }; byTool: { [key: string]: number } };
-type ModelSwitchingAnalysis = {
-	modelsPerSession: number[];
-	totalSessions: number;
-	averageModelsPerSession: number;
-	maxModelsPerSession: number;
-	switchingFrequency: number;
-	standardModels: string[];
-	premiumModels: string[];
-	unknownModels: string[];
-	mixedTierSessions: number;
-};
 
 type UsageAnalysisPeriod = {
 	sessions: number;
