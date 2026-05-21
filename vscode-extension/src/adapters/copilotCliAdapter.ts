@@ -27,6 +27,7 @@ import type {
 import { CopilotCliStoreAccess } from '../copilotCliStore';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
+import { normalizePath } from '../utils/pathUtils';
 import { pathExists } from '../utils/fsAsync';
 
 /** Returns the canonical Copilot CLI session-state directory (~/.copilot/session-state). */

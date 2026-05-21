@@ -7,6 +7,7 @@
  * adapter implementation files.
  */
 import * as path from 'path';
+import { normalizePath } from '../utils/pathUtils';
 
 // ---------------------------------------------------------------------------
 // Copilot Chat
@@ -36,7 +37,7 @@ export function isCopilotChatNonSessionFile(filename: string): boolean {
  * narrow so it never accidentally claims unrelated VS Code files.
  */
 export function isCopilotChatSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
+	const norm = normalizePath(filePath);
 	if (!/\.jsonl?$/.test(norm)) { return false; }
 
 	// workspaceStorage/<hash>/chatSessions/<file>  (legacy)
@@ -66,7 +67,7 @@ export function isCopilotChatSessionPath(filePath: string): boolean {
 
 /** Path predicate matching any file under ~/.copilot/session-state/ (any depth). */
 export function isCopilotCliSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
+	const norm = normalizePath(filePath);
 	return norm.includes('/.copilot/session-state/');
 }
 
@@ -79,6 +80,6 @@ export function isCopilotCliSessionPath(filePath: string): boolean {
  * Matches paths containing /.copilot/jb/ that end with /partition-{n}.jsonl.
  */
 export function isJetBrainsSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
+	const norm = normalizePath(filePath);
 	return norm.includes('/.copilot/jb/') && /\/partition-\d+\.jsonl$/.test(norm);
 }

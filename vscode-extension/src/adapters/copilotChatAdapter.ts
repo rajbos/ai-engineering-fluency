@@ -44,6 +44,7 @@ import {
 	isUuidPointerFile,
 } from '../tokenEstimation';
 import { isCopilotChatNonSessionFile } from './adapterPredicates';
+import { normalizePath } from '../utils/pathUtils';
 import { pathExists } from '../utils/fsAsync';
 
 /** VS Code variants probed across all platforms. */
@@ -281,7 +282,7 @@ export class CopilotChatAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	getEditorRoot(sessionFile: string): string {
 		// Walk up from the session file to the VS Code "User" directory.
-		const norm = sessionFile.replace(/\\/g, '/');
+		const norm = normalizePath(sessionFile);
 		const userIdx = norm.lastIndexOf('/User/');
 		if (userIdx >= 0) {
 			return norm.substring(0, userIdx + '/User'.length);

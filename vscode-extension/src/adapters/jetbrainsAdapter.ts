@@ -32,6 +32,7 @@ import type {
 	CandidatePath,
 } from '../ecosystemAdapter';
 import { parseJetBrainsPartition, type JetBrainsParsedSession, type JetBrainsToolCall } from '../jetbrains';
+import { normalizePath } from '../utils/pathUtils';
 import { pathExists } from '../utils/fsAsync';
 
 /** Returns the canonical JetBrains Copilot session directory (~/.copilot/jb). */

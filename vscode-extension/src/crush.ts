@@ -16,6 +16,7 @@ import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 import type { UriLike } from './opencode';
+import { normalizePath } from './utils/pathUtils';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace.
 type SqlJsStatic = initSqlJs.SqlJsStatic;
@@ -171,7 +172,7 @@ export class CrushDataAccess {
 	 * Virtual paths contain the substring `/.crush/crush.db#` (with OS path separators normalised).
 	 */
 	isCrushSessionFile(filePath: string): boolean {
-		const normalized = filePath.replace(/\\/g, '/');
+		const normalized = normalizePath(filePath);
 		return normalized.includes('/.crush/crush.db#');
 	}
 

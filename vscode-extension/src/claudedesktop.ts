@@ -59,7 +59,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { normalizeClaudeModelId } from './claudecode';
 import type { ModelUsage } from './types';
-import { normalizePathForComparison } from './workspaceHelpers';
+import { normalizePathForComparison, normalizePath } from './workspaceHelpers';
 
 /** Package name for the Claude Desktop Windows Store app. */
 const CLAUDE_DESKTOP_PACKAGE = 'Claude_pzs8sxrjxfjjc';
@@ -288,7 +288,7 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Metadata:  .../local-agent-mode-sessions/<app>/<machine>/local_<id>.json
 	 */
 	private getMetadataPathFromJsonl(jsonlPath: string): string | null {
-		const normalized = jsonlPath.replace(/\\/g, '/');
+		const normalized = normalizePath(jsonlPath);
 		const parts = normalized.split('/');
 		// Find the index of '.claude' — session directory is just before it
 		const dotClaudeIdx = parts.lastIndexOf('.claude');

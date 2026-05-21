@@ -23,6 +23,7 @@ import { withErrorRecoverySync } from './utils/errors';
 
 export {
 	fileUriToPath,
+	normalizePath,
 	normalizePathForComparison,
 	normalizePathForDedup,
 	normalizePathSeparators
