@@ -4,6 +4,7 @@ import type { ContextReferenceUsage } from '../shared/contextRefUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { getWindowData } from '../shared/dataLoader';
 
 // ── Types ──────────────────────────────────────────────────────────────
 
@@ -70,12 +71,8 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 	getState: () => TState | undefined;
 };
 
-declare global {
-	interface Window { __INITIAL_MATURITY__?: MaturityData; }
-}
-
 const vscode = acquireVsCodeApi();
-const initialData = window.__INITIAL_MATURITY__;
+const initialData = getWindowData<MaturityData>('__INITIAL_MATURITY__');
 
 // ── Demo mode state ─────────────────────────────────────────────────────
 

@@ -7,6 +7,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { getWindowData } from '../shared/dataLoader';
 
 type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number; cli: number };
 type ToolCallUsage = { total: number; byTool: { [key: string]: number } };
@@ -99,22 +100,14 @@ interface MissedPotentialWorkspace {
 	nonCopilotFiles: CustomizationFileEntry[];
 }
 
-declare global {
-	interface Window { 
-		__INITIAL_USAGE__?: UsageAnalysisStats & { 
-			customizationMatrix?: WorkspaceCustomizationMatrix | null;
-			missedPotential?: MissedPotentialWorkspace[];
-		} 
-	}
-}
-
 interface RepoAnalysisRecord {
 	data?: any;
 	error?: string;
 }
 
 const vscode = acquireVsCodeApi();
-const initialData = window.__INITIAL_USAGE__;
+type InitialUsageData = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null; missedPotential?: MissedPotentialWorkspace[] };
+const initialData = getWindowData<InitialUsageData>('__INITIAL_USAGE__');
 let hygieneMatrixState: WorkspaceCustomizationMatrix | null = null;
 const repoAnalysisState = new Map<string, RepoAnalysisRecord>();
 let selectedRepoPath: string | null = null;
@@ -282,7 +275,7 @@ function createMcpToolIssueUrl(unknownTools: string[]): string {
 }
 
 function renderMissedPotential(stats: UsageAnalysisStats): string {
-	const missed = stats.missedPotential || window.__INITIAL_USAGE__?.missedPotential || [];
+	const missed = stats.missedPotential || initialData?.missedPotential || [];
 	if (missed.length === 0) {
 		return `
 			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px;">
@@ -857,7 +850,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 
 	const matrix =
 		((stats as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined | null) ??
-		((window.__INITIAL_USAGE__ as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined | null);
+		((initialData as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined | null);
 	hygieneMatrixState = matrix ?? null;
 	if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
 		selectedRepoPath = null;

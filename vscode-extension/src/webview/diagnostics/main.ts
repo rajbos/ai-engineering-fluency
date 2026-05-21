@@ -4,6 +4,7 @@ import { wireExtensionPointButtons } from "../shared/extensionPoints";
 // CSS imported as text via esbuild
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
+import { getWindowData } from "../shared/dataLoader";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -118,14 +119,8 @@ declare function acquireVsCodeApi<TState = DiagnosticsViewState>(): {
   getState: () => TState | undefined;
 };
 
-declare global {
-  interface Window {
-    __INITIAL_DIAGNOSTICS__?: DiagnosticsData;
-  }
-}
-
 const vscode = acquireVsCodeApi<DiagnosticsViewState>();
-const initialData = window.__INITIAL_DIAGNOSTICS__;
+const initialData = getWindowData<DiagnosticsData>('__INITIAL_DIAGNOSTICS__');
 
 // Sorting and filtering state
 let currentSortColumn: "lastInteraction" | "size" | "tokens" | "interactions" | "contextRefs" = "lastInteraction";

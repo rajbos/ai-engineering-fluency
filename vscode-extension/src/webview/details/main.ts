@@ -10,6 +10,7 @@ import tokenEstimatorsJson from '../../tokenEstimators.json';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { getWindowData } from '../shared/dataLoader';
 
 type ModelUsage = Record<string, { inputTokens: number; outputTokens: number }>;
 type EditorUsage = Record<string, { tokens: number; sessions: number }>;
@@ -66,15 +67,14 @@ type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
 declare global {
 	interface Window {
-		__INITIAL_DETAILS__?: DetailedStats;
-		Chart?: any;
+				Chart?: any;
 	}
 }
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = window.__INITIAL_DETAILS__;
+const initialData = getWindowData<DetailedStats>('__INITIAL_DETAILS__');
 console.log('[CopilotTokenTracker] details webview loaded');
-console.log('[CopilotTokenTracker] window.__INITIAL_DETAILS__:', window.__INITIAL_DETAILS__);
+console.log('[CopilotTokenTracker] initialData:', initialData);
 console.log('[CopilotTokenTracker] initialData:', initialData);
 
 const _initSort = initialData?.sortSettings;

@@ -6,6 +6,7 @@ import { getModelDisplayName } from "../shared/modelUtils";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
+import { getWindowData } from "../shared/dataLoader";
 
 type ModelUsage = Record<string, { inputTokens: number; outputTokens: number }>;
 
@@ -72,13 +73,12 @@ interface DashboardConfig {
 
 declare global {
   interface Window {
-    __INITIAL_DASHBOARD__?: DashboardStats;
     __DASHBOARD_CONFIG__?: DashboardConfig;
   }
 }
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = window.__INITIAL_DASHBOARD__;
+const initialData = getWindowData<DashboardStats>('__INITIAL_DASHBOARD__');
 console.log("[CopilotTokenTracker] dashboard webview loaded");
 console.log("[CopilotTokenTracker] initialData:", initialData);
 

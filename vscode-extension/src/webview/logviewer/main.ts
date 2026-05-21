@@ -5,6 +5,7 @@ import { getModelDisplayName } from '../shared/modelUtils';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { getWindowData } from '../shared/dataLoader';
 
 type PromptTokenDetail = {
 	category: string;
@@ -81,7 +82,7 @@ declare global {
 }
 
 const vscode = acquireVsCodeApi();
-const initialData = window.__INITIAL_LOGDATA__;
+const initialData = getWindowData<SessionLogData>('__INITIAL_LOGDATA__');
 
 import toolNames from '../../toolNames.json';
 

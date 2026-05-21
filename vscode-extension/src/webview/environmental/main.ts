@@ -6,6 +6,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { getWindowData } from '../shared/dataLoader';
 
 // --- Analogy constants ---
 /** Average EU petrol car CO₂ emissions per km (grams) */
@@ -58,14 +59,8 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 
 type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
-declare global {
-	interface Window {
-		__INITIAL_ENVIRONMENTAL__?: EnvironmentalStats;
-	}
-}
-
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = window.__INITIAL_ENVIRONMENTAL__;
+const initialData = getWindowData<EnvironmentalStats>('__INITIAL_ENVIRONMENTAL__');
 
 function calculateProjection(last30DaysValue: number): number {
 	return (last30DaysValue / 30) * 365.25;
