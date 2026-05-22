@@ -14,6 +14,7 @@
  */
 import type { IEcosystemAdapter } from '../ecosystemAdapter';
 import { OpenCodeDataAccess } from '../opencode';
+import type { UriLike } from '../opencode';
 import { CrushDataAccess } from '../crush';
 import { ContinueDataAccess } from '../continue';
 import { VisualStudioDataAccess } from '../visualstudio';
@@ -68,7 +69,7 @@ export type DataAccessInstances = Omit<AdapterRegistryDeps, 'estimateTokens' | '
  * @param extensionUri - VS Code extension URI (or equivalent fake URI in the CLI)
  *   passed to data-access constructors that require it for WASM loading.
  */
-export function createDataAccessInstances(extensionUri: any): DataAccessInstances {
+export function createDataAccessInstances(extensionUri: UriLike): DataAccessInstances {
 	return {
 		openCode: new OpenCodeDataAccess(extensionUri),
 		crush: new CrushDataAccess(extensionUri),
