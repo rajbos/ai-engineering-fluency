@@ -8,11 +8,14 @@
 import { calculateEstimatedCost } from '../../vscode-extension/src/tokenEstimation';
 import { normalizePathForComparison } from '../../vscode-extension/src/workspaceHelpers';
 import { createEmptyContextRefs } from '../../vscode-extension/src/tokenEstimation';
-import type { ModelUsage, PeriodStats, UsageAnalysisPeriod } from '../../vscode-extension/src/types';
+import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../vscode-extension/src/types';
+
+/** Type alias for a single model pricing entry from modelPricing.json. */
+export type ModelPricingEntry = ModelPricing;
 
 // Import JSON data file used by buildChartPayload
 import modelPricingData from '../../vscode-extension/src/modelPricing.json';
-const modelPricing = modelPricingData.pricing as { [key: string]: any };
+const modelPricing = modelPricingData.pricing as Record<string, ModelPricingEntry>;
 
 // ── Types ────────────────────────────────────────────────────────────────────────────────
 
