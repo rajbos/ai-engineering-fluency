@@ -4878,7 +4878,9 @@ usageAnalysis: undefined
 							await config.update('suppressedUnknownTools', [...current, toolName], vscode.ConfigurationTarget.Global);
 							this.log(`🔇 Suppressed unknown tool: ${toolName}`);
 						}
-						await this.dispatch('refresh:analysis', () => this.refreshAnalysisPanel());
+						// Immediately update the webview UI without waiting for a full stats recalculation.
+						// The webview removes the tool chip directly from the DOM.
+						this.analysisPanel?.webview.postMessage({ command: 'toolSuppressed', toolName });
 					}
 					break;
 				}
