@@ -262,6 +262,81 @@ function recordToolOrMcpInvocation(
 	}
 }
 
+/** Timing metrics extracted from a single request */
+interface TimingMetrics {
+	timestamp: number | undefined;
+	timings: { firstProgress?: number; totalElapsed?: number } | undefined;
+	waitTime: number | undefined;
+}
+
+/** Agent type classification extracted from a single request */
+interface AgentMetrics {
+	agentType: 'editsAgent' | 'defaultAgent' | 'workspaceAgent' | 'other' | null;
+}
+
+/** Edit and codeblock metrics extracted from a single request */
+interface EditMetrics {
+	editedFilePaths: string[];
+	codeBlocks: number;
+	applies: number;
+}
+
+/**
+ * Extract timing-related metrics (timestamp, timings, wait time) from a request.
+ */
+function extractTimingMetrics(req: SessionRequestRaw): TimingMetrics {
+	return {
+		timestamp: req.timestamp,
+		timings: req.result?.timings,
+		waitTime: req.timeSpentWaiting,
+	};
+}
+
+/**
+ * Extract agent type classification from a request.
+ * Returns null agentType when no agent id is present.
+ */
+function extractAgentMetrics(req: SessionRequestRaw): AgentMetrics {
+	if (!req.agent?.id) {
+		return { agentType: null };
+	}
+	const agentId = req.agent.id;
+	if (agentId.includes('edit')) {
+		return { agentType: 'editsAgent' };
+	} else if (agentId.includes('default')) {
+		return { agentType: 'defaultAgent' };
+	} else if (agentId.includes('workspace')) {
+		return { agentType: 'workspaceAgent' };
+	}
+	return { agentType: 'other' };
+}
+
+/**
+ * Extract edited file paths and codeblock/apply counts from a request's response items.
+ */
+function extractEditMetrics(req: SessionRequestRaw): EditMetrics {
+	const editedFilePaths: string[] = [];
+	let codeBlocks = 0;
+	let applies = 0;
+
+	if (req.response && Array.isArray(req.response)) {
+		for (const respRaw of req.response as ResponseItemRaw[]) {
+			if (!respRaw) { continue; }
+			if (respRaw.kind === 'textEditGroup' && respRaw.uri) {
+				editedFilePaths.push(respRaw.uri.path || JSON.stringify(respRaw.uri));
+			}
+			if (respRaw.kind === 'codeblockUri') {
+				codeBlocks++;
+				if (respRaw.isEdit === true) {
+					applies++;
+				}
+			}
+		}
+	}
+
+	return { editedFilePaths, codeBlocks, applies };
+}
+
 /**
  * Process a list of session requests, accumulating enhanced metrics in-place.
  * Mutates editedFiles, timestamps, timingsData, waitTimes and agentCounts.
@@ -279,52 +354,21 @@ function processRequestsForEnhancedMetrics(
 	let totalCodeBlocks = 0;
 	for (const requestRaw of requests) {
 		if (!requestRaw) { continue; }
-		const request = requestRaw;
 
-		// Track timestamps
-		if (request.timestamp !== undefined) { timestamps.push(request.timestamp); }
+		const timing = extractTimingMetrics(requestRaw);
+		if (timing.timestamp !== undefined) { timestamps.push(timing.timestamp); }
+		if (timing.timings) { timingsData.push(timing.timings); }
+		if (timing.waitTime !== undefined) { waitTimes.push(timing.waitTime); }
 
-		// Track timings
-		if (request.result?.timings) {
-			timingsData.push(request.result.timings);
+		const agent = extractAgentMetrics(requestRaw);
+		if (agent.agentType !== null) {
+			agentCounts[agent.agentType]++;
 		}
 
-		// Track wait times
-		if (request.timeSpentWaiting !== undefined) {
-			waitTimes.push(request.timeSpentWaiting);
-		}
-
-		// Track agent types
-		if (request.agent?.id) {
-			const agentId = request.agent.id;
-			if (agentId.includes('edit')) {
-				agentCounts.editsAgent++;
-			} else if (agentId.includes('default')) {
-				agentCounts.defaultAgent++;
-			} else if (agentId.includes('workspace')) {
-				agentCounts.workspaceAgent++;
-			} else {
-				agentCounts.other++;
-			}
-		}
-
-		// Track edit scope and apply usage
-		if (request.response && Array.isArray(request.response)) {
-			for (const respRaw of request.response as ResponseItemRaw[]) {
-				if (!respRaw) { continue; }
-				const resp = respRaw;
-				if (resp.kind === 'textEditGroup' && resp.uri) {
-					const filePath = resp.uri.path || JSON.stringify(resp.uri);
-					editedFiles.add(filePath);
-				}
-				if (resp.kind === 'codeblockUri') {
-					totalCodeBlocks++;
-					if (resp.isEdit === true) {
-						totalApplies++;
-					}
-				}
-			}
-		}
+		const edits = extractEditMetrics(requestRaw);
+		for (const filePath of edits.editedFilePaths) { editedFiles.add(filePath); }
+		totalCodeBlocks += edits.codeBlocks;
+		totalApplies += edits.applies;
 	}
 	return { totalApplies, totalCodeBlocks };
 }
