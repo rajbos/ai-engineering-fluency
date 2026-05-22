@@ -69,6 +69,19 @@ export class SessionDiscovery {
 		}
 	}
 
+	/** Checks whether a path exists and logs a debug message when it does not. */
+	private pathExistsWithLogging(p: string, context: string): boolean {
+		try {
+			const exists = fs.existsSync(p);
+			if (!exists) {
+				this.deps.log(`🔍 Path not found [${context}]: ${p}`);
+			}
+			return exists;
+		} catch {
+			return false;
+		}
+	}
+
 	/**
 	 * Returns the candidate filesystem paths the extension considers when
 	 * scanning for session files, along with whether each path exists on
@@ -84,8 +97,7 @@ export class SessionDiscovery {
 			try {
 				const ecoPaths = eco.getCandidatePaths();
 				for (const cp of ecoPaths) {
-					let exists = false;
-					try { exists = fs.existsSync(cp.path); } catch { /* ignore */ }
+					const exists = this.pathExistsWithLogging(cp.path, cp.source);
 					candidates.push({ path: cp.path, exists, source: cp.source });
 				}
 			} catch { /* ignore individual adapter errors */ }
