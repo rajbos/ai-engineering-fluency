@@ -376,6 +376,10 @@ function getEditorBadgeClass(editor: string): string {
   if (lower.includes("mistral")) {
     return "editor-badge editor-badge-mistral-vibe";
   }
+  // Antigravity must be checked before gemini (both contain 'gemini' in their path)
+  if (lower.includes("antigravity")) {
+    return "editor-badge editor-badge-antigravity";
+  }
   if (lower.includes("gemini")) {
     return "editor-badge editor-badge-gemini-cli";
   }
@@ -395,6 +399,10 @@ function getEditorIcon(editor: string): string {
   }
   if (lower.includes("mistral")) {
     return "🔥";
+  }
+  // Antigravity: rocket emoji — evokes the anti-gravity concept and space theme
+  if (lower.includes("antigravity")) {
+    return "🚀";
   }
   if (lower.includes("gemini")) {
     return "💎";
@@ -2250,3 +2258,4 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap();
+

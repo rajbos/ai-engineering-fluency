@@ -403,6 +403,12 @@ background-repeat: no-repeat;
 background-position: center;
 }
 
+.editor-badge-antigravity {
+	background: #0a1628;
+	color: #4285f4;
+	border: 1px solid #1a73e8;
+}
+
 .editor-badge-gemini-cli {
 	background: #111827;
 	color: #8ec5ff;
@@ -603,3 +609,4 @@ background-position: center;
 @keyframes spin {
 	to { transform: rotate(360deg); }
 }
+

@@ -8,6 +8,7 @@ export { ClaudeCodeAdapter } from './claudeCodeAdapter';
 export { VisualStudioAdapter } from './visualStudioAdapter';
 export { MistralVibeAdapter } from './mistralVibeAdapter';
 export { GeminiCliAdapter } from './geminiCliAdapter';
+export { AntigravityAdapter } from './antigravityAdapter';
 export { CopilotChatAdapter } from './copilotChatAdapter';
 export { CopilotCliAdapter } from './copilotCliAdapter';
 export { JetBrainsAdapter } from './jetbrainsAdapter';
