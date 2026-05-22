@@ -109,29 +109,30 @@ export function needsConsent(previous: BackendConfigDraft, next: BackendConfigDr
 	return { required: reasons.length > 0, reasons };
 }
 
-export function validateDraft(draft: BackendConfigDraft): DraftValidationResult {
-	const errors: Record<string, string> = {};
-	const requireAzure = draft.enabled;
-
-	const requireString = (value: string, field: string, fieldLabel: string, example?: string) => {
-		if (!value || !value.trim()) {
-			errors[field] = ValidationMessages.required(fieldLabel, example);
-		}
-	};
-
+function validateDatasetId(draft: BackendConfigDraft, errors: Record<string, string>): void {
 	if (!draft.datasetId || !draft.datasetId.trim()) {
 		errors.datasetId = ValidationMessages.required('Dataset ID', '"my-team-copilot"');
 	} else if (!ALIAS_REGEX.test(draft.datasetId.trim())) {
 		errors.datasetId = ValidationMessages.alphanumeric('Dataset ID', 'my-team-copilot');
 	}
+}
 
-	if (requireAzure) {
-		requireString(draft.subscriptionId, 'subscriptionId', 'Subscription ID');
-		requireString(draft.resourceGroup, 'resourceGroup', 'Resource Group', 'copilot-tokens-rg');
-		requireString(draft.storageAccount, 'storageAccount', 'Storage Account', 'copilottokensrg');
-		requireString(draft.aggTable, 'aggTable', 'Aggregate Table', 'usageAggDaily');
+function validateAzureResources(draft: BackendConfigDraft, errors: Record<string, string>): void {
+	if (!draft.enabled) {
+		return;
 	}
+	const requireString = (value: string, field: string, fieldLabel: string, example?: string) => {
+		if (!value || !value.trim()) {
+			errors[field] = ValidationMessages.required(fieldLabel, example);
+		}
+	};
+	requireString(draft.subscriptionId, 'subscriptionId', 'Subscription ID');
+	requireString(draft.resourceGroup, 'resourceGroup', 'Resource Group', 'copilot-tokens-rg');
+	requireString(draft.storageAccount, 'storageAccount', 'Storage Account', 'copilottokensrg');
+	requireString(draft.aggTable, 'aggTable', 'Aggregate Table', 'usageAggDaily');
+}
 
+function validateTableNames(draft: BackendConfigDraft, errors: Record<string, string>): void {
 	const tableFields: Array<['aggTable' | 'eventsTable', string, string]> = [
 		['aggTable', draft.aggTable, 'Aggregate Table'],
 		['eventsTable', draft.eventsTable, 'Events Table']
@@ -141,43 +142,65 @@ export function validateDraft(draft: BackendConfigDraft): DraftValidationResult 
 			errors[key] = ValidationMessages.alphanumeric(label, 'usageAggDaily');
 		}
 	}
+}
 
+function validateLookbackDays(draft: BackendConfigDraft, errors: Record<string, string>): void {
 	const lookback = Number(draft.lookbackDays);
 	if (!Number.isFinite(lookback)) {
 		errors.lookbackDays = 'Lookback days must be a number. Enter a value between 1 and 90.';
 	} else if (lookback < MIN_LOOKBACK_DAYS || lookback > MAX_LOOKBACK_DAYS) {
 		errors.lookbackDays = ValidationMessages.range('Lookback days', MIN_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS);
 	}
+}
 
-	if (draft.sharingProfile === 'teamIdentified') {
-		if (draft.userIdentityMode === 'teamAlias') {
-			const res = validateTeamAlias(draft.userId);
-			if (!res.valid) {
-				errors.userId = res.error;
-			}
-		} else if (draft.userIdentityMode === 'entraObjectId') {
-			const trimmed = (draft.userId ?? '').trim();
-			if (!trimmed) {
-				errors.userId = ValidationMessages.required('Entra object ID');
-			} else if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(trimmed)) {
-				errors.userId = ValidationMessages.guidFormat('Entra object ID');
-			}
+function validateUserIdentity(draft: BackendConfigDraft, errors: Record<string, string>): void {
+	if (draft.sharingProfile !== 'teamIdentified') {
+		return;
+	}
+	if (draft.userIdentityMode === 'teamAlias') {
+		const res = validateTeamAlias(draft.userId);
+		if (!res.valid) {
+			errors.userId = res.error;
+		}
+	} else if (draft.userIdentityMode === 'entraObjectId') {
+		const trimmed = (draft.userId ?? '').trim();
+		if (!trimmed) {
+			errors.userId = ValidationMessages.required('Entra object ID');
+		} else if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(trimmed)) {
+			errors.userId = ValidationMessages.guidFormat('Entra object ID');
 		}
 	}
+}
 
+function validateAuthMode(draft: BackendConfigDraft, errors: Record<string, string>): void {
 	if (draft.authMode !== 'entraId' && draft.authMode !== 'sharedKey') {
 		errors.authMode = ValidationMessages.required('Auth mode');
 	}
+}
 
-	if (draft.blobUploadEnabled) {
-		const freq = Number(draft.blobUploadFrequencyHours);
-		if (!Number.isFinite(freq) || freq < 1 || freq > 168) {
-			errors.blobUploadFrequencyHours = 'Upload frequency must be between 1 and 168 hours.';
-		}
-		if (!draft.blobContainerName || !draft.blobContainerName.trim()) {
-			errors.blobContainerName = 'Container name is required when blob upload is enabled.';
-		}
+function validateBlobUpload(draft: BackendConfigDraft, errors: Record<string, string>): void {
+	if (!draft.blobUploadEnabled) {
+		return;
 	}
+	const freq = Number(draft.blobUploadFrequencyHours);
+	if (!Number.isFinite(freq) || freq < 1 || freq > 168) {
+		errors.blobUploadFrequencyHours = 'Upload frequency must be between 1 and 168 hours.';
+	}
+	if (!draft.blobContainerName || !draft.blobContainerName.trim()) {
+		errors.blobContainerName = 'Container name is required when blob upload is enabled.';
+	}
+}
+
+export function validateDraft(draft: BackendConfigDraft): DraftValidationResult {
+	const errors: Record<string, string> = {};
+
+	validateDatasetId(draft, errors);
+	validateAzureResources(draft, errors);
+	validateTableNames(draft, errors);
+	validateLookbackDays(draft, errors);
+	validateUserIdentity(draft, errors);
+	validateAuthMode(draft, errors);
+	validateBlobUpload(draft, errors);
 
 	return { valid: Object.keys(errors).length === 0, errors };
 }
