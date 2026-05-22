@@ -52,6 +52,22 @@ const log = (msg: string) => { /* quiet by default */ };
 const warn = (msg: string) => { /* quiet by default */ };
 const error = (msg: string, err?: any) => console.error(chalk.red(msg), err || '');
 
+/**
+ * Safely reads and parses a JSON file.
+ * Returns null if the file does not exist (silently) or on any other error (with a structured log message).
+ */
+async function readJsonFile<T>(filePath: string): Promise<T | null> {
+	try {
+		const raw = await fs.promises.readFile(filePath, 'utf-8');
+		return JSON.parse(raw) as T;
+	} catch (err: any) {
+		if (err?.code !== 'ENOENT') {
+			error(`[readJsonFile] Failed to read or parse JSON at ${filePath}:`, err);
+		}
+		return null;
+	}
+}
+
 /** Synchronous lazy-initialized ecosystem registry — created once on first use. */
 let _ecosystems: IEcosystemAdapter[] | null = null;
 
@@ -120,18 +136,13 @@ export async function buildCustomizationMatrix(sessionFiles: string[]): Promise<
 		const hashDir = path.dirname(chatSessionsDir);
 		const workspaceJsonPath = path.join(hashDir, 'workspace.json');
 
-		try {
-			const workspaceJsonExists = await fs.promises.access(workspaceJsonPath).then(() => true).catch(() => false);
-			if (!workspaceJsonExists) { continue; }
-			const content = JSON.parse(await fs.promises.readFile(workspaceJsonPath, 'utf-8'));
-			const folderUri: string | undefined = content.folder;
-			if (!folderUri || !folderUri.startsWith('file://')) { continue; }
+		const workspaceJson = await readJsonFile<{ folder?: string }>(workspaceJsonPath);
+		if (!workspaceJson) { continue; }
+		const folderUri: string | undefined = workspaceJson.folder;
+		if (!folderUri || !folderUri.startsWith('file://')) { continue; }
 
-			const folderPath = resolveFileUri(folderUri);
-			if (folderPath) { workspacePaths.add(folderPath); }
-		} catch (err) {
-			console.error(`[buildCustomizationMatrix] Failed to read workspace.json at ${workspaceJsonPath}:`, err);
-		}
+		const folderPath = resolveFileUri(folderUri);
+		if (folderPath) { workspacePaths.add(folderPath); }
 	}
 
 	if (workspacePaths.size === 0) { return undefined; }
