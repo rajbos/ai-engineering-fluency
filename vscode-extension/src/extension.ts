@@ -1,34 +1,19 @@
+// --- Node.js built-ins & VS Code ---
 import * as vscode from 'vscode';
-import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import * as childProcess from 'child_process';
+
+// --- JSON data files ---
 import tokenEstimatorsData from './tokenEstimators.json';
 import modelPricingData from './modelPricing.json';
 import toolNamesData from './toolNames.json';
 import customizationPatternsData from './customizationPatterns.json';
 import copilotPlansData from './copilotPlans.json';
-import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
-import { BackendFacade } from './backend/facade';
-import { BackendCommandHandler } from './backend/commands';
-import { TeamServerConfigPanel } from './backend/teamServerConfigPanel';
 import * as packageJson from '../package.json';
-import { getModelDisplayName } from './webview/shared/modelUtils';
-import { ConfirmationMessages } from "./backend/ui/messages";
 
-import {
-	detectAiType,
-	discoverGitHubRepos,
-	fetchRepoPrs,
-	fetchCopilotPlanInfo,
-	type CopilotPlanInfo,
-	type RepoPrDetail,
-	type RepoPrInfo,
-	type RepoPrStatsResult,
-} from './githubPrService';
-import { fetchAgentSessionsForRepo } from './agentSessionsService';
-
+// --- Core types ---
 import type {
   TokenUsageStats,
   ModelUsage,
@@ -69,6 +54,8 @@ import type {
   AgentSessionsResult,
   TokenEstimator,
 } from './types';
+
+// --- Ecosystem adapter types & helpers ---
 import type { OpenCodeDataAccess } from './opencode';
 import type { CrushDataAccess } from './crush';
 import type { VisualStudioDataAccess } from './visualstudio';
@@ -83,6 +70,8 @@ import { buildAdapterRegistry, createDataAccessInstances } from './adapters';
 import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from './jetbrains';
+
+// --- Session parsing & token estimation ---
 import {
   estimateTokensFromText as _estimateTokensFromText,
   estimateTokensFromJsonlSession as _estimateTokensFromJsonlSession,
@@ -102,7 +91,11 @@ import {
   extractResponseItemText as _extractResponseItemText,
 } from './tokenEstimation';
 import { SessionDiscovery } from './sessionDiscovery';
+
+// --- Cache ---
 import { CacheManager } from './cacheManager';
+
+// --- Usage analysis ---
 import {
   mergeUsageAnalysis as _mergeUsageAnalysis,
   analyzeContextReferences as _analyzeContextReferences,
@@ -116,11 +109,15 @@ import {
   getModelUsageFromSession as _getModelUsageFromSession,
   type UsageAnalysisDeps,
 } from './usageAnalysis';
+
+// --- Maturity & fluency scoring ---
 import {
   getFluencyLevelData as _getFluencyLevelData,
   calculateFluencyScoreForTeamMember as _calculateFluencyScoreForTeamMember,
   calculateMaturityScores as _calculateMaturityScores,
 } from './maturityScoring';
+
+// --- Workspace helpers ---
 import {
   parseWorkspaceStorageJsonFile as _parseWorkspaceStorageJsonFile,
   extractWorkspaceIdFromSessionPath as _extractWorkspaceIdFromSessionPath,
@@ -142,6 +139,27 @@ import {
   extractMcpServerName as _extractMcpServerName,
   normalizePath as _normalizePath,
 } from './workspaceHelpers';
+
+// --- Chart building ---
+import { buildChartData as _buildChartData } from './chartDataBuilder';
+
+// --- Stats helpers ---
+import { addModelUsage, addEditorUsage, computeUtcDateRanges, aggregatePeriodStats, type SessionAggregateInput } from './statsHelpers';
+
+// --- GitHub & agent sessions ---
+import {
+	detectAiType,
+	discoverGitHubRepos,
+	fetchRepoPrs,
+	fetchCopilotPlanInfo,
+	type CopilotPlanInfo,
+	type RepoPrDetail,
+	type RepoPrInfo,
+	type RepoPrStatsResult,
+} from './githubPrService';
+import { fetchAgentSessionsForRepo } from './agentSessionsService';
+
+// --- View regression ---
 import {
   createViewRegressionProbeScript,
   evaluateViewRegressionProbe,
@@ -152,11 +170,20 @@ import {
   type ViewRegressionProbeConfig,
   type ViewRegressionProbeSnapshot,
 } from './viewRegression';
-import { determineOnboardingAction } from './onboarding';
-import { addModelUsage, addEditorUsage, computeUtcDateRanges, aggregatePeriodStats, type SessionAggregateInput } from './statsHelpers';
+
+// --- Backend & UI ---
+import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
+import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
+import { BackendFacade } from './backend/facade';
+import { BackendCommandHandler } from './backend/commands';
+import { TeamServerConfigPanel } from './backend/teamServerConfigPanel';
+import { getModelDisplayName } from './webview/shared/modelUtils';
+import { ConfirmationMessages } from './backend/ui/messages';
+
+// --- Utilities ---
 import { getNonce, buildCspMeta } from './utils/webviewUtils';
 import { isGuidMcpTool } from './utils/toolUtils';
-import { buildChartData as _buildChartData } from './chartDataBuilder';
+import { determineOnboardingAction } from './onboarding';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
