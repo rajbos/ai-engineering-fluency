@@ -14,6 +14,15 @@ import {
 } from '../helpers';
 import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
 import { shouldOutputJson } from '../commandUtils';
+import {
+	createEmptyDetailsPayload,
+	createEmptyChartPayload,
+	createEmptyUsageAnalysisPayload,
+	createEmptyFluencyPayload,
+	createDetailsPayload,
+	createUsageAnalysisPayload,
+	createFluencyPayload,
+} from './payloads';
 
 export const allCommand = new Command('all')
 	.description('Output all view data in a single JSON response (for Visual Studio extension)')
@@ -29,23 +38,10 @@ export const allCommand = new Command('all')
 
 		if (files.length === 0) {
 			const empty = {
-				details: {
-					today: {}, month: {}, lastMonth: {}, last30Days: {},
-					lastUpdated: now.toISOString(), backendConfigured: false,
-				},
-				chart: {
-					labels: [], tokensData: [], sessionsData: [], modelDatasets: [],
-					editorDatasets: [], editorTotalsMap: {}, repositoryDatasets: [],
-					repositoryTotalsMap: {}, dailyCount: 0, totalTokens: 0,
-					avgTokensPerDay: 0, totalSessions: 0,
-					lastUpdated: now.toISOString(), backendConfigured: false,
-				},
-				usage: {
-					today: {}, last30Days: {}, month: {},
-					locale: Intl.DateTimeFormat().resolvedOptions().locale,
-					lastUpdated: now.toISOString(), backendConfigured: false,
-				},
-				fluency: {},
+				details: createEmptyDetailsPayload(now),
+				chart:   createEmptyChartPayload(now),
+				usage:   createEmptyUsageAnalysisPayload(now),
+				fluency: createEmptyFluencyPayload(),
 			};
 			process.stdout.write(JSON.stringify(empty));
 			return;
@@ -64,22 +60,10 @@ export const allCommand = new Command('all')
 		const chartPayload = buildChartPayload(labels, days, allDaysMap);
 
 		// Build details payload (mirrors the `usage --json` output)
-		const detailsPayload = {
-			today:      detailedStats.today,
-			month:      detailedStats.month,
-			lastMonth:  detailedStats.lastMonth,
-			last30Days: detailedStats.last30Days,
-			lastUpdated: detailedStats.lastUpdated.toISOString(),
-			backendConfigured: false,
-		};
+		const detailsPayload = createDetailsPayload(detailedStats);
 
 		// Build usage-analysis payload (mirrors the `usage-analysis --json` output)
-		const usagePayload = {
-			...usageStats,
-			locale: Intl.DateTimeFormat().resolvedOptions().locale,
-			lastUpdated: now.toISOString(),
-			backendConfigured: false,
-		};
+		const usagePayload = createUsageAnalysisPayload(usageStats, now);
 
 		// Build fluency/maturity payload (mirrors the `fluency --json` output)
 		const customizationMatrix = await buildCustomizationMatrix(files);
@@ -88,14 +72,7 @@ export const allCommand = new Command('all')
 			async () => usageStats,
 			false
 		);
-		const fluencyPayload = {
-			overallStage: scores.overallStage,
-			overallLabel: scores.overallLabel,
-			categories:   scores.categories,
-			period:       scores.period,
-			lastUpdated:  scores.lastUpdated,
-			backendConfigured: false,
-		};
+		const fluencyPayload = createFluencyPayload(scores);
 
 		const payload = {
 			details: detailsPayload,

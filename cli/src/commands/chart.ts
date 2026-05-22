@@ -4,6 +4,7 @@
 import { Command } from 'commander';
 import { discoverSessionFiles, calculateDailyStats, buildChartPayload } from '../helpers';
 import { shouldOutputJson } from '../commandUtils';
+import { createEmptyChartPayload } from './payloads';
 
 export const chartCommand = new Command('chart')
 	.description('Output daily token usage data for the chart webview')
@@ -17,7 +18,7 @@ export const chartCommand = new Command('chart')
 
 		const files = await discoverSessionFiles();
 		if (files.length === 0) {
-			process.stdout.write(JSON.stringify({ labels: [], tokensData: [], sessionsData: [], modelDatasets: [], editorDatasets: [], editorTotalsMap: {}, repositoryDatasets: [], repositoryTotalsMap: {}, dailyCount: 0, totalTokens: 0, avgTokensPerDay: 0, totalSessions: 0, lastUpdated: new Date().toISOString(), backendConfigured: false }));
+			process.stdout.write(JSON.stringify(createEmptyChartPayload()));
 			return;
 		}
 

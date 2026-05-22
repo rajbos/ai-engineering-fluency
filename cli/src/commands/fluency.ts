@@ -7,6 +7,7 @@ import { discoverSessionFiles, calculateUsageAnalysisStats, fmt, buildCustomizat
 import { ProgressTracker } from '../progress';
 import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
 import { shouldOutputJson } from '../commandUtils';
+import { createFluencyPayload } from './payloads';
 
 export const fluencyCommand = new Command('fluency')
 	.description('Show your Copilot Fluency Score and improvement tips')
@@ -51,15 +52,7 @@ export const fluencyCommand = new Command('fluency')
 
 		if (json) {
 			// Machine-readable output: emit pure JSON to stdout and exit
-			const payload = {
-				overallStage: scores.overallStage,
-				overallLabel: scores.overallLabel,
-				categories: scores.categories,
-				period: scores.period,
-				lastUpdated: scores.lastUpdated,
-				backendConfigured: false,
-			};
-			process.stdout.write(JSON.stringify(payload));
+			process.stdout.write(JSON.stringify(createFluencyPayload(scores)));
 			return;
 		}
 

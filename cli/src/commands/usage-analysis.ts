@@ -4,6 +4,7 @@
 import { Command } from 'commander';
 import { discoverSessionFiles, calculateUsageAnalysisStats } from '../helpers';
 import { shouldOutputJson } from '../commandUtils';
+import { createEmptyUsageAnalysisPayload, createUsageAnalysisPayload } from './payloads';
 
 export const usageAnalysisCommand = new Command('usage-analysis')
 	.description('Output usage analysis stats for the usage analysis webview')
@@ -17,21 +18,11 @@ export const usageAnalysisCommand = new Command('usage-analysis')
 		const files = await discoverSessionFiles();
 		const now = new Date();
 		if (files.length === 0) {
-			process.stdout.write(JSON.stringify({
-				today: {}, last30Days: {}, month: {},
-				locale: Intl.DateTimeFormat().resolvedOptions().locale,
-				lastUpdated: now.toISOString(),
-				backendConfigured: false,
-			}));
+			process.stdout.write(JSON.stringify(createEmptyUsageAnalysisPayload(now)));
 			return;
 		}
 
 		const stats = await calculateUsageAnalysisStats(files);
-		const payload = {
-			...stats,
-			locale: Intl.DateTimeFormat().resolvedOptions().locale,
-			lastUpdated: now.toISOString(),
-			backendConfigured: false,
-		};
+		const payload = createUsageAnalysisPayload(stats, now);
 		process.stdout.write(JSON.stringify(payload));
 	});
