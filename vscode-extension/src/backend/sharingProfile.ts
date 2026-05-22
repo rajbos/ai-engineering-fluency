@@ -47,8 +47,9 @@ export function computeBackendSharingPolicy(args: {
 	profile: BackendSharingProfile | undefined;
 	shareWorkspaceMachineNames: boolean;
 }): BackendSharingPolicy {
-	const resolvedProfile = args.profile ?? 'off';
-	const template = SHARING_POLICY_MAP[resolvedProfile] ?? SHARING_POLICY_MAP['off'];
+	// Fall back to teamAnonymized (hashed IDs, no names) for unknown/undefined profiles
+	const resolvedProfile = (args.profile && args.profile in SHARING_POLICY_MAP) ? args.profile : 'teamAnonymized';
+	const template = SHARING_POLICY_MAP[resolvedProfile];
 	return {
 		...template,
 		allowCloudSync: args.enabled && resolvedProfile !== 'off',
