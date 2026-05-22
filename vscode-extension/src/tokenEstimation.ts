@@ -59,20 +59,57 @@ function isSubAgentToolSpecificData(obj: unknown): obj is SubAgentToolSpecificDa
 }
 
 // --- Token estimation ratio constants ---
-// Thresholds for classifying agent sessions by tool-call volume
+
+/**
+ * Minimum tool-call count to classify a session as "high" agent activity.
+ * Sessions with 20+ tool calls are treated as heavy agent workflows that accumulate
+ * large context windows across many turns.
+ */
 const TOOL_CALLS_HIGH_THRESHOLD = 20;
+
+/**
+ * Minimum tool-call count to classify a session as "medium" agent activity.
+ * Sessions with 5–19 tool calls fall between a simple chat and a full agent run.
+ */
 const TOOL_CALLS_MED_THRESHOLD = 5;
 
-// Empirical input:output token ratios per tool-call tier.
-// Heavy agent sessions (many tool calls) show ~130x input:output ratio;
-// medium sessions ~50x; low/chat sessions ~10x.
+/**
+ * Estimated input:output token ratio for high-activity sessions (≥ 20 tool calls).
+ * Derived from empirical analysis of completed Copilot CLI agent sessions: heavy runs
+ * accumulate large context windows across many turns, yielding ~130 input tokens per
+ * 1 output token.
+ */
 const TOKEN_RATIO_HIGH_TOOLS = 130;
+
+/**
+ * Estimated input:output token ratio for medium-activity sessions (5–19 tool calls).
+ * From empirical analysis of mid-complexity agent sessions: approximately 50 input
+ * tokens are consumed per 1 output token.
+ */
 const TOKEN_RATIO_MED_TOOLS = 50;
+
+/**
+ * Estimated input:output token ratio for low-activity (chat-style) sessions (< 5 tool calls).
+ * Simple chat interactions without many tool uses show an approximately 10:1 ratio.
+ */
 const TOKEN_RATIO_LOW_TOOLS = 10;
+
+/**
+ * Default token-to-character ratio used when no model-specific estimator is registered.
+ * Based on the GPT-4 average of roughly 4 characters per token (i.e. 0.25 tokens/char).
+ */
+const DEFAULT_TOKENS_PER_CHAR = 0.25;
+
+/**
+ * Number of non-empty lines inspected at the start of a JSONL file to detect its format.
+ * Checking the first 10 lines is sufficient to identify a VS Code delta-based file
+ * (which always starts with a `kind:0` event) without scanning the entire file.
+ */
+const FORMAT_DETECTION_LINE_LIMIT = 10;
 
 export function estimateTokensFromText(text: string, model: string = 'gpt-4', tokenEstimators: Record<string, TokenEstimator> = {}): number {
 	// Token estimation based on character count and model
-	let tokensPerChar = 0.25; // default
+	let tokensPerChar = DEFAULT_TOKENS_PER_CHAR;
 
 	// Find matching model
 	for (const [modelKey, ratio] of Object.entries(tokenEstimators)) {
@@ -436,7 +473,7 @@ export function selectTokenEstimationStrategy(lines: string[]): TokenEstimationS
 	let checked = 0;
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
-		if (++checked > 10) { break; }
+		if (++checked > FORMAT_DETECTION_LINE_LIMIT) { break; }
 		try {
 			const event = JSON.parse(line);
 			if (typeof event.kind === 'number') { return new DeltaTokenStrategy(); }
