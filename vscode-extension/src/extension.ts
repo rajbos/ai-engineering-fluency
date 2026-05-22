@@ -2096,11 +2096,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private getStatusBarShowTokensSetting(): StatusBarDisplaySetting {
-		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<StatusBarDisplaySetting>('display.statusBar.showTokens', 'both');
+		return vscode.workspace.getConfiguration('aiEngineeringFluency.display.statusBar').get<StatusBarDisplaySetting>('showTokens', 'both');
 	}
 
 	private getStatusBarShowCostSetting(): StatusBarDisplaySetting {
-		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<StatusBarDisplaySetting>('display.statusBar.showCost', 'none');
+		return vscode.workspace.getConfiguration('aiEngineeringFluency.display.statusBar').get<StatusBarDisplaySetting>('showCost', 'none');
 	}
 
 	private buildTokenParts(show: StatusBarDisplaySetting, stats: DetailedStats): string[] {
@@ -7573,13 +7573,19 @@ ${hashtag}`;
         case "updateDisplaySetting":
           if (typeof message.key === 'string' && message.value !== undefined) {
             await this.dispatch('updateDisplaySetting:diagnostics', async () => {
-              const allowedKeys = [
-                'display.statusBar.showTokens',
-                'display.statusBar.showCost',
-              ];
-              if (allowedKeys.includes(message.key)) {
-                const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
-                await config.update(message.key, message.value, vscode.ConfigurationTarget.Global);
+              // Map webview keys to leaf property names under aiEngineeringFluency.display.statusBar.
+              // Using getConfiguration('aiEngineeringFluency.display.statusBar').update('showTokens')
+              // instead of getConfiguration('aiEngineeringFluency').update('display.statusBar.showTokens')
+              // avoids VS Code rejecting multi-segment relative keys in update() as "not a registered
+              // configuration" even when the full key exists in contributes.configuration.properties.
+              const statusBarLeafKeyMap: Record<string, string> = {
+                'display.statusBar.showTokens': 'showTokens',
+                'display.statusBar.showCost': 'showCost',
+              };
+              const leafKey = statusBarLeafKeyMap[message.key];
+              if (leafKey) {
+                const config = vscode.workspace.getConfiguration('aiEngineeringFluency.display.statusBar');
+                await config.update(leafKey, message.value, vscode.ConfigurationTarget.Global);
               }
             });
           }
