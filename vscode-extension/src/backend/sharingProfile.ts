@@ -44,13 +44,14 @@ export const SHARING_POLICY_MAP: Record<BackendSharingProfile, PolicyTemplate> =
  */
 export function computeBackendSharingPolicy(args: {
 	enabled: boolean;
-	profile: BackendSharingProfile;
+	profile: BackendSharingProfile | undefined;
 	shareWorkspaceMachineNames: boolean;
 }): BackendSharingPolicy {
-	const template = SHARING_POLICY_MAP[args.profile];
+	const resolvedProfile = args.profile ?? 'off';
+	const template = SHARING_POLICY_MAP[resolvedProfile] ?? SHARING_POLICY_MAP['off'];
 	return {
 		...template,
-		allowCloudSync: args.enabled && args.profile !== 'off',
+		allowCloudSync: args.enabled && resolvedProfile !== 'off',
 		includeNames: template.includeNames ?? args.shareWorkspaceMachineNames,
 	};
 }
