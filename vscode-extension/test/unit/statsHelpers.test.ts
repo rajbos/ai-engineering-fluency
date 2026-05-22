@@ -734,10 +734,10 @@ assert.ok(!result.dailyStatsMap.has('2026-04-05'), 'not in daily chart');
 assert.equal(result.skippedCount, 0);
 });
 
-// ── Cached tokens included in Tokens (total) ─────────────────────────────────
+// ── Cached tokens NOT included in Tokens (input+output) ──────────────────────
 
-test('aggregatePeriodStats: rollup – cached tokens are included in tokens total', () => {
-// When actualTokens=19.6M and cachedReadTokens=27.4M, tokens total should be ~47M, not 19.6M.
+test('aggregatePeriodStats: rollup – tokens total is input+output only, not including cached', () => {
+// tokens = actualTokens only; cachedReadTokens tracked separately in cachedTokens
 const ranges = makeRanges('2025-03-15');
 const input: SessionAggregateInput = {
 editorType: 'vscode',
@@ -749,10 +749,10 @@ dailyRollups: {
 }),
 };
 const result = aggregatePeriodStats([input], ranges);
-assert.equal(result.todayStats.tokens, 500, 'actualTokens(200) + cachedReadTokens(300) = 500');
+assert.equal(result.todayStats.tokens, 200, 'tokens = actualTokens(200) only, cachedReadTokens(300) excluded');
 assert.equal(result.todayStats.cachedTokens, 300, 'cachedTokens accumulates separately');
-assert.equal(result.monthStats.tokens, 500);
-assert.equal(result.last30DaysStats.tokens, 500);
+assert.equal(result.monthStats.tokens, 200);
+assert.equal(result.last30DaysStats.tokens, 200);
 });
 
 test('aggregatePeriodStats: rollup – missing cachedReadTokens does not affect total', () => {
@@ -770,7 +770,7 @@ const result = aggregatePeriodStats([input], ranges);
 assert.equal(result.todayStats.tokens, 150, 'no cachedReadTokens → actualTokens only');
 });
 
-test('aggregatePeriodStats: rollup – estimated tokens fallback also adds cached', () => {
+test('aggregatePeriodStats: rollup – estimated tokens fallback used when actualTokens=0, cached excluded', () => {
 const ranges = makeRanges('2025-03-15');
 const input: SessionAggregateInput = {
 editorType: 'vscode',
@@ -782,10 +782,10 @@ dailyRollups: {
 }),
 };
 const result = aggregatePeriodStats([input], ranges);
-assert.equal(result.todayStats.tokens, 150, 'estimatedTokens(100) + cachedReadTokens(50) = 150');
+assert.equal(result.todayStats.tokens, 100, 'estimatedTokens(100) only; cachedReadTokens(50) excluded from total');
 });
 
-test('aggregatePeriodStats: fallback – cacheReadTokens added to session tokens total', () => {
+test('aggregatePeriodStats: fallback – tokens total is input+output only, cacheReadTokens excluded', () => {
 const ranges = makeRanges('2025-03-15');
 const input: SessionAggregateInput = {
 editorType: 'vscode',
@@ -794,7 +794,7 @@ lastInteraction: '2025-03-15T10:00:00.000Z',
 sessionData: makeSession({ tokens: 100, actualTokens: 200, cacheReadTokens: 400, interactions: 1 }),
 };
 const result = aggregatePeriodStats([input], ranges);
-assert.equal(result.todayStats.tokens, 600, 'actualTokens(200) + cacheReadTokens(400) = 600');
+assert.equal(result.todayStats.tokens, 200, 'tokens = actualTokens(200) only; cacheReadTokens(400) excluded');
 assert.equal(result.todayStats.cachedTokens, 400, 'cachedTokens accumulates separately');
 });
 

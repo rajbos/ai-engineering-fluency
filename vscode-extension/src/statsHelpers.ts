@@ -195,7 +195,7 @@ const inLastMonth = dayKey >= lastMonthUtcStartKey && dayKey <= lastMonthUtcEndK
 // Skip days outside both the rolling 30-day window and the previous calendar month.
 if (!inLast30Days && !inLastMonth) { continue; }
 
-const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens) + (dayRollup.cachedReadTokens ?? 0);
+const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
 const dayInteractions = dayRollup.interactions;
 
 if (inLast30Days) {
@@ -281,7 +281,7 @@ const interactions = sessionData.interactions;
 const estimatedTokens = sessionData.tokens;
 const actualTokens = sessionData.actualTokens || 0;
 const cacheReadTokens = sessionData.cacheReadTokens || 0;
-const tokens = (actualTokens > 0 ? actualTokens : estimatedTokens) + cacheReadTokens;
+const tokens = (actualTokens > 0 ? actualTokens : estimatedTokens);
 const modelUsage = sessionData.modelUsage;
 
 const lastInteractionStr = lastInteraction || null;
