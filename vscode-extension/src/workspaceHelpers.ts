@@ -122,23 +122,54 @@ export function extractWorkspaceIdFromSessionPath(sessionFilePath: string): stri
 	}
 }
 
+/** Escape all regex special characters in a literal string fragment. */
+export function escapeRegexSpecials(pattern: string): string {
+	return pattern.replace(/([.+^=!:${}()|[\]\\])/g, '\\$1');
+}
+
+/**
+ * Replace globstar tokens with a placeholder so they survive the single-star
+ * replacement step.  Two cases:
+ *   - double-star between slashes (or at start) in the middle of a path -> optional sub-tree
+ *   - standalone or trailing double-star                                 -> any depth remainder
+ */
+export function replaceGlobstars(pattern: string): string {
+	let result = pattern.replace(/(^|\/)\*\*\/(?!$)/g, '$1__GLOBSTAR__/');
+	result = result.replace(/\*\*/g, '__GLOBSTAR__');
+	return result;
+}
+
+/** Replace single `*` with a segment-local wildcard `[^/]*`. */
+export function replaceWildcards(pattern: string): string {
+	return pattern.replace(/\*/g, '[^/]*');
+}
+
+/** Replace `?` with a single-character matcher `.`. */
+export function replaceQuestionMarks(pattern: string): string {
+	return pattern.replace(/\?/g, '.');
+}
+
+/** Expand the globstar placeholder back to its proper regex fragments. */
+function expandGlobstarPlaceholder(pattern: string): string {
+	let result = pattern.replace(/__GLOBSTAR__\//g, '(?:.*?/?)');
+	result = result.replace(/__GLOBSTAR__/g, '.*');
+	return result;
+}
+
 /**
  * Convert a simple glob pattern to a RegExp.
  * Supports: ** (match multiple path segments), * (match within a segment), ?.
  */
 export function globToRegExp(glob: string, caseInsensitive: boolean = false): RegExp {
-	// Normalize to posix-style
-	let pattern = normalizePath(glob);
-	// Escape regex special chars
-	pattern = pattern.replace(/([.+^=!:${}()|[\]\\])/g, '\\$1');
-	// Replace /**/ or ** with placeholder
-	pattern = pattern.replace(/(^|\/)\*\*\/(?!$)/g, '$1__GLOBSTAR__/');
-	pattern = pattern.replace(/\*\*/g, '__GLOBSTAR__');
-	// Replace single * with [^/]* and ? with .
-	pattern = pattern.replace(/\*/g, '[^/]*').replace(/\?/g, '.');
-	// Replace globstar placeholder with .* (allow path separators)
-	pattern = pattern.replace(/__GLOBSTAR__\//g, '(?:.*?/?)').replace(/__GLOBSTAR__/g, '.*');
-	// Anchor
+	const pattern = [
+		normalizePath(glob),
+	]
+		.map(escapeRegexSpecials)
+		.map(replaceGlobstars)
+		.map(replaceWildcards)
+		.map(replaceQuestionMarks)
+		.map(expandGlobstarPlaceholder)[0];
+
 	const flags = caseInsensitive ? 'i' : '';
 	return new RegExp('^' + pattern + '$', flags);
 }
