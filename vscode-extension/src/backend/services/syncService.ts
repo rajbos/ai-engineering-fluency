@@ -30,34 +30,45 @@ import { getEditorTypeFromPath } from '../../workspaceHelpers';
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };
 
 /**
+ * Pure consent-timestamp parser — no side effects.
+ * Returns a `Date` when `raw` represents a valid, non-future timestamp,
+ * or an `Error` describing why the value is invalid.
+ * The caller is responsible for any logging based on the result.
+ */
+export function parseConsentTimestamp(raw: unknown): Date | Error {
+	const ts = raw == null ? '' : String(raw);
+	if (!ts) {
+		return new Error('no consent timestamp provided');
+	}
+	try {
+		const parsed = new Date(ts);
+		if (isNaN(parsed.getTime())) {
+			return new Error(`Invalid consent timestamp (not a valid date): "${ts}"`);
+		}
+		if (parsed.getTime() > Date.now()) {
+			return new Error(`Invalid consent timestamp (future date): "${ts}" (parsed: ${parsed.toISOString()})`);
+		}
+		return parsed;
+	} catch (e) {
+		return new Error(`Failed to parse consent timestamp: "${ts}", error: ${e}`);
+	}
+}
+
+/**
  * Validate and normalize consent timestamp.
  * Returns ISO string if valid, undefined if invalid or in the future.
+ * Delegates parsing to {@link parseConsentTimestamp} and logs any error via the optional logger.
  */
 function validateConsentTimestamp(ts: string | undefined, logger?: (msg: string) => void): string | undefined {
 	if (!ts) {
 		return undefined;
 	}
-	try {
-		const parsed = new Date(ts);
-		if (isNaN(parsed.getTime())) {
-			if (logger) {
-				logger(`Invalid consent timestamp (not a valid date): "${ts}"`);
-			}
-			return undefined;
-		}
-		if (parsed.getTime() > Date.now()) {
-			if (logger) {
-				logger(`Invalid consent timestamp (future date): "${ts}" (parsed: ${parsed.toISOString()})`);
-			}
-			return undefined;
-		}
-		return parsed.toISOString();
-	} catch (e) {
-		if (logger) {
-			logger(`Failed to parse consent timestamp: "${ts}", error: ${e}`);
-		}
+	const result = parseConsentTimestamp(ts);
+	if (result instanceof Error) {
+		logger?.(result.message);
 		return undefined;
 	}
+	return result.toISOString();
 }
 
 /** Logger callbacks for the sync service. */

@@ -9,7 +9,7 @@ import * as vscode from 'vscode';
 
 // We can test timer management and the syncQueue serialization.
 // Most sync methods require heavy I/O mocking.
-import { SyncService, type SyncServiceDeps } from '../../src/backend/services/syncService';
+import { SyncService, parseConsentTimestamp, type SyncServiceDeps } from '../../src/backend/services/syncService';
 import { CredentialService } from '../../src/backend/services/credentialService';
 import { DataPlaneService } from '../../src/backend/services/dataPlaneService';
 import { BackendUtility } from '../../src/backend/services/utilityService';
@@ -1378,4 +1378,55 @@ test(`syncToBackendStore does NOT sync to sharing server when sharingServerEnabl
 		!logs.some(m => m.includes('Sharing server')),
 		`Expected no sharing server logs but got: ${logs.join('\n')}`
 	);
+});
+
+// ── parseConsentTimestamp ─────────────────────────────────────────────────
+
+test('parseConsentTimestamp returns Error for undefined', () => {
+	const result = parseConsentTimestamp(undefined);
+	assert.ok(result instanceof Error);
+});
+
+test('parseConsentTimestamp returns Error for null', () => {
+	const result = parseConsentTimestamp(null);
+	assert.ok(result instanceof Error);
+});
+
+test('parseConsentTimestamp returns Error for empty string', () => {
+	const result = parseConsentTimestamp('');
+	assert.ok(result instanceof Error);
+});
+
+test('parseConsentTimestamp returns Error for invalid date string', () => {
+	const result = parseConsentTimestamp('not-a-date');
+	assert.ok(result instanceof Error);
+	assert.ok(result.message.includes('not a valid date'));
+});
+
+test('parseConsentTimestamp returns Error for future date', () => {
+	const future = new Date(Date.now() + 86_400_000).toISOString();
+	const result = parseConsentTimestamp(future);
+	assert.ok(result instanceof Error);
+	assert.ok(result.message.includes('future date'));
+});
+
+test('parseConsentTimestamp returns Date for valid past timestamp', () => {
+	const past = new Date(Date.now() - 86_400_000).toISOString();
+	const result = parseConsentTimestamp(past);
+	assert.ok(result instanceof Date);
+	assert.ok(!isNaN(result.getTime()));
+});
+
+test('parseConsentTimestamp coerces Date object to string before parsing', () => {
+	// A Date object stringifies to a locale date string that new Date() can re-parse
+	const pastDate = new Date(Date.now() - 86_400_000);
+	const result = parseConsentTimestamp(pastDate);
+	assert.ok(result instanceof Date);
+});
+
+test('parseConsentTimestamp returned Date matches input ISO string', () => {
+	const isoString = '2023-01-15T10:30:00.000Z';
+	const result = parseConsentTimestamp(isoString);
+	assert.ok(result instanceof Date);
+	assert.equal((result as Date).toISOString(), isoString);
 });
