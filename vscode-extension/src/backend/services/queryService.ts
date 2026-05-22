@@ -23,6 +23,32 @@ export interface BackendQueryResultLike {
 	machineTokenTotals: Array<{ machineId: string; tokens: number }>;
 }
 
+interface EntityRollup {
+	model: string;
+	workspaceId: string;
+	workspaceName: string;
+	machineId: string;
+	machineName: string;
+	userId: string;
+	inputTokens: number;
+	outputTokens: number;
+	interactions: number;
+}
+
+interface RollupAccumulator {
+	modelsSet: Set<string>;
+	workspacesSet: Set<string>;
+	machinesSet: Set<string>;
+	usersSet: Set<string>;
+	workspaceNamesById: Record<string, string>;
+	machineNamesById: Record<string, string>;
+	totalTokens: number;
+	totalInteractions: number;
+	modelUsage: ModelUsage;
+	workspaceTokens: Map<string, number>;
+	machineTokens: Map<string, number>;
+}
+
 export interface QueryServiceDeps {
 	warn: (message: string) => void;
 	calculateEstimatedCost: (modelUsage: ModelUsage) => number;
@@ -145,73 +171,48 @@ export class QueryService {
 			startDayKey,
 			endDayKey
 		});
-		const modelsSet = new Set<string>();
-		const workspacesSet = new Set<string>();
-		const machinesSet = new Set<string>();
-		const usersSet = new Set<string>();
-		const workspaceNamesById: Record<string, string> = {};
-		const machineNamesById: Record<string, string> = {};
-
-		let totalTokens = 0;
-		let totalInteractions = 0;
-		const modelUsage: ModelUsage = {};
-		const workspaceTokens = new Map<string, number>();
-		const machineTokens = new Map<string, number>();
+		const acc: RollupAccumulator = {
+			modelsSet: new Set<string>(),
+			workspacesSet: new Set<string>(),
+			machinesSet: new Set<string>(),
+			usersSet: new Set<string>(),
+			workspaceNamesById: {},
+			machineNamesById: {},
+			totalTokens: 0,
+			totalInteractions: 0,
+			modelUsage: {},
+			workspaceTokens: new Map<string, number>(),
+			machineTokens: new Map<string, number>()
+		};
 
 		for (const entity of allEntities) {
-			const model = (entity.model ?? '').toString();
-			const workspaceId = (entity.workspaceId ?? '').toString();
-			const workspaceName = typeof (entity as any).workspaceName === 'string' ? (entity as any).workspaceName.trim() : '';
-			const machineId = (entity.machineId ?? '').toString();
-			const machineName = typeof (entity as any).machineName === 'string' ? (entity as any).machineName.trim() : '';
-			const userId = (entity.userId ?? '').toString();
-			const inputTokens = Number.isFinite(Number(entity.inputTokens)) ? Number(entity.inputTokens) : 0;
-			const outputTokens = Number.isFinite(Number(entity.outputTokens)) ? Number(entity.outputTokens) : 0;
-			const interactions = Number.isFinite(Number(entity.interactions)) ? Number(entity.interactions) : 0;
-
-			if (!model || !workspaceId || !machineId) {
+			const rollup = this.mapEntityToRollup(entity);
+			if (!rollup) {
 				continue;
 			}
 
-			modelsSet.add(model);
-			workspacesSet.add(workspaceId);
-			machinesSet.add(machineId);
-			if (userId) {
-				usersSet.add(userId);
+			acc.modelsSet.add(rollup.model);
+			acc.workspacesSet.add(rollup.workspaceId);
+			acc.machinesSet.add(rollup.machineId);
+			if (rollup.userId) {
+				acc.usersSet.add(rollup.userId);
 			}
-			if (workspaceName && !workspaceNamesById[workspaceId]) {
-				workspaceNamesById[workspaceId] = workspaceName;
+			if (rollup.workspaceName && !acc.workspaceNamesById[rollup.workspaceId]) {
+				acc.workspaceNamesById[rollup.workspaceId] = rollup.workspaceName;
 			}
-			if (machineName && !machineNamesById[machineId]) {
-				machineNamesById[machineId] = machineName;
+			if (rollup.machineName && !acc.machineNamesById[rollup.machineId]) {
+				acc.machineNamesById[rollup.machineId] = rollup.machineName;
 			}
 
-			if (filters.model && filters.model !== model) {
-				continue;
-			}
-			if (filters.workspaceId && filters.workspaceId !== workspaceId) {
-				continue;
-			}
-			if (filters.machineId && filters.machineId !== machineId) {
-				continue;
-			}
-			if (filters.userId && filters.userId !== userId) {
+			if (!this.filterRollup(rollup, filters)) {
 				continue;
 			}
 
-			const tokens = inputTokens + outputTokens;
-			totalTokens += tokens;
-			totalInteractions += interactions;
-
-			if (!modelUsage[model]) {
-				modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
-			}
-			modelUsage[model].inputTokens += inputTokens;
-			modelUsage[model].outputTokens += outputTokens;
-
-			workspaceTokens.set(workspaceId, (workspaceTokens.get(workspaceId) ?? 0) + tokens);
-			machineTokens.set(machineId, (machineTokens.get(machineId) ?? 0) + tokens);
+			this.accumulateRollup(acc, rollup);
 		}
+
+		const { modelsSet, workspacesSet, machinesSet, usersSet, workspaceNamesById, machineNamesById,
+			totalTokens, totalInteractions, modelUsage, workspaceTokens, machineTokens } = acc;
 
 		const cost = this.deps.calculateEstimatedCost(modelUsage);
 		const co2 = (totalTokens / 1000) * this.deps.co2Per1kTokens;
@@ -314,5 +315,46 @@ export class QueryService {
 			this.deps.warn(`Backend query failed: ${safeStringifyError(e)}`);
 			return undefined;
 		}
+	}
+
+	private mapEntityToRollup(entity: any): EntityRollup | null {
+		const model = (entity.model ?? '').toString();
+		const workspaceId = (entity.workspaceId ?? '').toString();
+		const machineId = (entity.machineId ?? '').toString();
+		if (!model || !workspaceId || !machineId) {
+			return null;
+		}
+		return {
+			model,
+			workspaceId,
+			workspaceName: typeof entity.workspaceName === 'string' ? entity.workspaceName.trim() : '',
+			machineId,
+			machineName: typeof entity.machineName === 'string' ? entity.machineName.trim() : '',
+			userId: (entity.userId ?? '').toString(),
+			inputTokens: Number.isFinite(Number(entity.inputTokens)) ? Number(entity.inputTokens) : 0,
+			outputTokens: Number.isFinite(Number(entity.outputTokens)) ? Number(entity.outputTokens) : 0,
+			interactions: Number.isFinite(Number(entity.interactions)) ? Number(entity.interactions) : 0
+		};
+	}
+
+	private filterRollup(rollup: EntityRollup, filters: BackendQueryFilters): boolean {
+		if (filters.model && filters.model !== rollup.model) { return false; }
+		if (filters.workspaceId && filters.workspaceId !== rollup.workspaceId) { return false; }
+		if (filters.machineId && filters.machineId !== rollup.machineId) { return false; }
+		if (filters.userId && filters.userId !== rollup.userId) { return false; }
+		return true;
+	}
+
+	private accumulateRollup(acc: RollupAccumulator, rollup: EntityRollup): void {
+		const tokens = rollup.inputTokens + rollup.outputTokens;
+		acc.totalTokens += tokens;
+		acc.totalInteractions += rollup.interactions;
+		if (!acc.modelUsage[rollup.model]) {
+			acc.modelUsage[rollup.model] = { inputTokens: 0, outputTokens: 0 };
+		}
+		acc.modelUsage[rollup.model].inputTokens += rollup.inputTokens;
+		acc.modelUsage[rollup.model].outputTokens += rollup.outputTokens;
+		acc.workspaceTokens.set(rollup.workspaceId, (acc.workspaceTokens.get(rollup.workspaceId) ?? 0) + tokens);
+		acc.machineTokens.set(rollup.machineId, (acc.machineTokens.get(rollup.machineId) ?? 0) + tokens);
 	}
 }
