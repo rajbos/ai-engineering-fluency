@@ -105,11 +105,12 @@ test('renderBackendConfigHtml renders navigation sections', () => {
 });
 
 test('renderBackendConfigHtml includes form field values from draft', () => {
+	const cp1base = toDraft(baseSettings);
 	const state = makeState({
 		draft: {
-			...toDraft(baseSettings),
+			...cp1base,
 			datasetId: 'my-team-data',
-			storageAccount: 'myStorAcct'
+			azureResources: { ...cp1base.azureResources, storageAccount: 'myStorAcct' }
 		}
 	});
 	const html = renderBackendConfigHtml(makeWebview(), state);
@@ -144,8 +145,9 @@ test('renderBackendConfigHtml does not inject raw XSS payload from authStatus', 
 
 test('renderBackendConfigHtml does not inject raw XSS payload from draft fields', () => {
 	const xss = '</script><script>alert(1)</script>';
+	const cp2base = toDraft(baseSettings);
 	const state = makeState({
-		draft: { ...toDraft(baseSettings), storageAccount: xss, userId: xss, datasetId: 'safe-id' }
+		draft: { ...cp2base, datasetId: 'safe-id', azureResources: { ...cp2base.azureResources, storageAccount: xss }, identity: { ...cp2base.identity, userId: xss } }
 	});
 	const html = renderBackendConfigHtml(makeWebview(), state);
 	assert.ok(!html.includes(xss), 'XSS payload in draft fields must not appear raw in HTML');

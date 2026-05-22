@@ -1,84 +1,107 @@
-import { MIN_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS } from './constants';
+﻿import { MIN_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS } from './constants';
 import type { BackendSettings, BackendAuthMode, BackendType } from './settings';
 import type { BackendSharingProfile } from './sharingProfile';
 import type { BackendUserIdentityMode } from './identity';
 import { validateTeamAlias } from './identity';
 import { ValidationMessages } from './ui/messages';
 
+export interface AzureResourcesConfig {
+subscriptionId: string;
+resourceGroup: string;
+storageAccount: string;
+aggTable: string;
+eventsTable: string;
+}
+
+export interface IdentityConfig {
+userIdentityMode: BackendUserIdentityMode;
+userId: string;
+}
+
+export interface BlobUploadConfig {
+blobUploadEnabled: boolean;
+blobContainerName: string;
+blobUploadFrequencyHours: number;
+blobCompressFiles: boolean;
+}
+
+export interface SharingConfig {
+sharingProfile: BackendSharingProfile;
+shareWorkspaceMachineNames: boolean;
+sharingServerEnabled: boolean;
+sharingServerEndpointUrl: string;
+}
+
 export interface BackendConfigDraft {
-	enabled: boolean;
-	backend: BackendType;
-	authMode: BackendAuthMode;
-	sharingProfile: BackendSharingProfile;
-	shareWorkspaceMachineNames: boolean;
-	includeMachineBreakdown: boolean;
-	datasetId: string;
-	lookbackDays: number;
-	subscriptionId: string;
-	resourceGroup: string;
-	storageAccount: string;
-	aggTable: string;
-	eventsTable: string;
-	userIdentityMode: BackendUserIdentityMode;
-	userId: string;
-	sharingServerEnabled: boolean;
-	sharingServerEndpointUrl: string;
-	// Blob upload settings
-	blobUploadEnabled: boolean;
-	blobContainerName: string;
-	blobUploadFrequencyHours: number;
-	blobCompressFiles: boolean;
+enabled: boolean;
+backend: BackendType;
+authMode: BackendAuthMode;
+datasetId: string;
+lookbackDays: number;
+includeMachineBreakdown: boolean;
+azureResources: AzureResourcesConfig;
+identity: IdentityConfig;
+blobUpload: BlobUploadConfig;
+sharing: SharingConfig;
 }
 
 export interface DraftValidationResult {
-	valid: boolean;
-	errors: Record<string, string>;
+valid: boolean;
+errors: Record<string, string>;
 }
 
 export const ALIAS_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
 export function toDraft(settings: BackendSettings): BackendConfigDraft {
-	return {
-		enabled: settings.enabled,
-		backend: settings.backend,
-		authMode: settings.authMode,
-		sharingProfile: settings.sharingProfile,
-		shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames,
-		includeMachineBreakdown: settings.includeMachineBreakdown,
-		datasetId: settings.datasetId,
-		lookbackDays: clampLookback(settings.lookbackDays),
-		subscriptionId: settings.subscriptionId,
-		resourceGroup: settings.resourceGroup,
-		storageAccount: settings.storageAccount,
-		aggTable: settings.aggTable,
-		eventsTable: settings.eventsTable,
-		userIdentityMode: settings.userIdentityMode,
-		userId: settings.userId,
-		sharingServerEnabled: settings.sharingServerEnabled,
-		sharingServerEndpointUrl: settings.sharingServerEndpointUrl,
-		blobUploadEnabled: settings.blobUploadEnabled,
-		blobContainerName: settings.blobContainerName,
-		blobUploadFrequencyHours: settings.blobUploadFrequencyHours,
-		blobCompressFiles: settings.blobCompressFiles
-	};
+return {
+enabled: settings.enabled,
+backend: settings.backend,
+authMode: settings.authMode,
+datasetId: settings.datasetId,
+lookbackDays: clampLookback(settings.lookbackDays),
+includeMachineBreakdown: settings.includeMachineBreakdown,
+azureResources: {
+subscriptionId: settings.subscriptionId,
+resourceGroup: settings.resourceGroup,
+storageAccount: settings.storageAccount,
+aggTable: settings.aggTable,
+eventsTable: settings.eventsTable,
+},
+identity: {
+userIdentityMode: settings.userIdentityMode,
+userId: settings.userId,
+},
+blobUpload: {
+blobUploadEnabled: settings.blobUploadEnabled,
+blobContainerName: settings.blobContainerName,
+blobUploadFrequencyHours: settings.blobUploadFrequencyHours,
+blobCompressFiles: settings.blobCompressFiles,
+},
+sharing: {
+sharingProfile: settings.sharingProfile,
+shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames,
+sharingServerEnabled: settings.sharingServerEnabled,
+sharingServerEndpointUrl: settings.sharingServerEndpointUrl,
+},
+};
 }
 
 export function clampLookback(value: number): number {
-	const numeric = Number.isFinite(value) ? Number(value) : MIN_LOOKBACK_DAYS;
-	return Math.max(MIN_LOOKBACK_DAYS, Math.min(MAX_LOOKBACK_DAYS, Math.round(numeric)));
+const numeric = Number.isFinite(value) ? Number(value) : MIN_LOOKBACK_DAYS;
+return Math.max(MIN_LOOKBACK_DAYS, Math.min(MAX_LOOKBACK_DAYS, Math.round(numeric)));
 }
 
 export function deriveShareWithTeam(profile: BackendSharingProfile): boolean {
-	return profile === 'teamPseudonymous' || profile === 'teamIdentified';
+return profile === 'teamPseudonymous' || profile === 'teamIdentified';
 }
 
 /** Ordering of sharing profiles from least to most permissive. Higher value = more data leaves the machine. */
 export enum SharingLevel {
-	Off = 0,
-	TeamAnonymized = 10,
-	TeamPseudonymous = 20,
-	SoloFull = 25, // personal but includes readable names; sits between TeamPseudonymous and TeamIdentified
-	TeamIdentified = 30
+Off = 0,
+TeamAnonymized = 10,
+TeamPseudonymous = 20,
+SoloFull = 25, // personal but includes readable names; sits between TeamPseudonymous and TeamIdentified
+TeamIdentified = 30
 }
 
 const SHARING_LEVEL_MAP: Record<BackendSharingProfile, SharingLevel> = {
@@ -94,14 +117,14 @@ export function sharingLevel(profile: BackendSharingProfile): SharingLevel {
 }
 
 export function needsConsent(previous: BackendConfigDraft, next: BackendConfigDraft): { required: boolean; reasons: string[] } {
-	const reasons: string[] = [];
-	if (sharingLevel(next.sharingProfile) > sharingLevel(previous.sharingProfile)) {
-		reasons.push('Sharing profile becomes more permissive');
-	}
-	if (!previous.shareWorkspaceMachineNames && next.shareWorkspaceMachineNames) {
-		reasons.push('Readable workspace/machine names will be uploaded');
-	}
-	return { required: reasons.length > 0, reasons };
+const reasons: string[] = [];
+if (sharingLevel(next.sharing.sharingProfile) > sharingLevel(previous.sharing.sharingProfile)) {
+reasons.push('Sharing profile becomes more permissive');
+}
+if (!previous.sharing.shareWorkspaceMachineNames && next.sharing.shareWorkspaceMachineNames) {
+reasons.push('Readable workspace/machine names will be uploaded');
+}
+return { required: reasons.length > 0, reasons };
 }
 
 function validateDatasetId(draft: BackendConfigDraft, errors: Record<string, string>): void {
@@ -121,16 +144,16 @@ function validateAzureResources(draft: BackendConfigDraft, errors: Record<string
 			errors[field] = ValidationMessages.required(fieldLabel, example);
 		}
 	};
-	requireString(draft.subscriptionId, 'subscriptionId', 'Subscription ID');
-	requireString(draft.resourceGroup, 'resourceGroup', 'Resource Group', 'copilot-tokens-rg');
-	requireString(draft.storageAccount, 'storageAccount', 'Storage Account', 'copilottokensrg');
-	requireString(draft.aggTable, 'aggTable', 'Aggregate Table', 'usageAggDaily');
+	requireString(draft.azureResources.subscriptionId, 'subscriptionId', 'Subscription ID');
+	requireString(draft.azureResources.resourceGroup, 'resourceGroup', 'Resource Group', 'copilot-tokens-rg');
+	requireString(draft.azureResources.storageAccount, 'storageAccount', 'Storage Account', 'copilottokensrg');
+	requireString(draft.azureResources.aggTable, 'aggTable', 'Aggregate Table', 'usageAggDaily');
 }
 
 function validateTableNames(draft: BackendConfigDraft, errors: Record<string, string>): void {
 	const tableFields: Array<['aggTable' | 'eventsTable', string, string]> = [
-		['aggTable', draft.aggTable, 'Aggregate Table'],
-		['eventsTable', draft.eventsTable, 'Events Table']
+		['aggTable', draft.azureResources.aggTable, 'Aggregate Table'],
+		['eventsTable', draft.azureResources.eventsTable, 'Events Table']
 	];
 	for (const [key, value, label] of tableFields) {
 		if (value && !ALIAS_REGEX.test(value.trim())) {
@@ -149,16 +172,16 @@ function validateLookbackDays(draft: BackendConfigDraft, errors: Record<string, 
 }
 
 function validateUserIdentity(draft: BackendConfigDraft, errors: Record<string, string>): void {
-	if (draft.sharingProfile !== 'teamIdentified') {
+	if (draft.sharing.sharingProfile !== 'teamIdentified') {
 		return;
 	}
-	if (draft.userIdentityMode === 'teamAlias') {
-		const res = validateTeamAlias(draft.userId);
+	if (draft.identity.userIdentityMode === 'teamAlias') {
+		const res = validateTeamAlias(draft.identity.userId);
 		if (!res.valid) {
 			errors.userId = res.error;
 		}
-	} else if (draft.userIdentityMode === 'entraObjectId') {
-		const trimmed = (draft.userId ?? '').trim();
+	} else if (draft.identity.userIdentityMode === 'entraObjectId') {
+		const trimmed = (draft.identity.userId ?? '').trim();
 		if (!trimmed) {
 			errors.userId = ValidationMessages.required('Entra object ID');
 		} else if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(trimmed)) {
@@ -174,14 +197,14 @@ function validateAuthMode(draft: BackendConfigDraft, errors: Record<string, stri
 }
 
 function validateBlobUpload(draft: BackendConfigDraft, errors: Record<string, string>): void {
-	if (!draft.blobUploadEnabled) {
+	if (!draft.blobUpload.blobUploadEnabled) {
 		return;
 	}
-	const freq = Number(draft.blobUploadFrequencyHours);
+	const freq = Number(draft.blobUpload.blobUploadFrequencyHours);
 	if (!Number.isFinite(freq) || freq < 1 || freq > 168) {
 		errors.blobUploadFrequencyHours = 'Upload frequency must be between 1 and 168 hours.';
 	}
-	if (!draft.blobContainerName || !draft.blobContainerName.trim()) {
+	if (!draft.blobUpload.blobContainerName || !draft.blobUpload.blobContainerName.trim()) {
 		errors.blobContainerName = 'Container name is required when blob upload is enabled.';
 	}
 }
@@ -197,59 +220,59 @@ export function validateDraft(draft: BackendConfigDraft): DraftValidationResult 
 	validateAuthMode(draft, errors);
 	validateBlobUpload(draft, errors);
 
-	return { valid: Object.keys(errors).length === 0, errors };
+return { valid: Object.keys(errors).length === 0, errors };
 }
 
 export function applyDraftToSettings(
-	previous: BackendSettings,
-	draft: BackendConfigDraft,
-	consentAt: string | undefined
+previous: BackendSettings,
+draft: BackendConfigDraft,
+consentAt: string | undefined
 ): BackendSettings {
-	const shareWithTeam = deriveShareWithTeam(draft.sharingProfile);
-	const sanitizedDataset = draft.datasetId.trim() || 'default';
-	const sanitizedUserId = draft.userId.trim();
+const shareWithTeam = deriveShareWithTeam(draft.sharing.sharingProfile);
+const sanitizedDataset = draft.datasetId.trim() || 'default';
+const sanitizedUserId = draft.identity.userId.trim();
 
-	return {
-		...previous,
-		enabled: draft.enabled,
-		authMode: draft.authMode,
-		datasetId: sanitizedDataset,
-		sharingProfile: draft.sharingProfile,
-		shareWithTeam,
-		shareWorkspaceMachineNames: draft.shareWorkspaceMachineNames,
-		shareConsentAt: shareWithTeam ? (consentAt ?? previous.shareConsentAt) : '',
-		userIdentityMode: draft.userIdentityMode,
-		userId: sanitizedUserId,
-		userIdMode: draft.userIdentityMode === 'entraObjectId' ? 'custom' : 'alias',
-		subscriptionId: draft.subscriptionId.trim(),
-		resourceGroup: draft.resourceGroup.trim(),
-		storageAccount: draft.storageAccount.trim(),
-		aggTable: draft.aggTable.trim(),
-		eventsTable: draft.eventsTable.trim(),
-		lookbackDays: clampLookback(draft.lookbackDays),
-		backend: draft.backend ?? 'storageTables',
-		sharingServerEnabled: !!draft.sharingServerEnabled,
-		sharingServerEndpointUrl: (draft.sharingServerEndpointUrl || '').trim(),
-		includeMachineBreakdown: !!draft.includeMachineBreakdown,
-		blobUploadEnabled: !!draft.blobUploadEnabled,
-		blobContainerName: (draft.blobContainerName || '').trim() || 'copilot-session-logs',
-		blobUploadFrequencyHours: Math.max(1, Math.min(168, Number(draft.blobUploadFrequencyHours) || 24)),
-		blobCompressFiles: draft.blobCompressFiles !== false
-	};
+return {
+...previous,
+enabled: draft.enabled,
+authMode: draft.authMode,
+datasetId: sanitizedDataset,
+sharingProfile: draft.sharing.sharingProfile,
+shareWithTeam,
+shareWorkspaceMachineNames: draft.sharing.shareWorkspaceMachineNames,
+shareConsentAt: shareWithTeam ? (consentAt ?? previous.shareConsentAt) : '',
+userIdentityMode: draft.identity.userIdentityMode,
+userId: sanitizedUserId,
+userIdMode: draft.identity.userIdentityMode === 'entraObjectId' ? 'custom' : 'alias',
+subscriptionId: draft.azureResources.subscriptionId.trim(),
+resourceGroup: draft.azureResources.resourceGroup.trim(),
+storageAccount: draft.azureResources.storageAccount.trim(),
+aggTable: draft.azureResources.aggTable.trim(),
+eventsTable: draft.azureResources.eventsTable.trim(),
+lookbackDays: clampLookback(draft.lookbackDays),
+backend: draft.backend ?? 'storageTables',
+sharingServerEnabled: !!draft.sharing.sharingServerEnabled,
+sharingServerEndpointUrl: (draft.sharing.sharingServerEndpointUrl || '').trim(),
+includeMachineBreakdown: !!draft.includeMachineBreakdown,
+blobUploadEnabled: !!draft.blobUpload.blobUploadEnabled,
+blobContainerName: (draft.blobUpload.blobContainerName || '').trim() || 'copilot-session-logs',
+blobUploadFrequencyHours: Math.max(1, Math.min(168, Number(draft.blobUpload.blobUploadFrequencyHours) || 24)),
+blobCompressFiles: draft.blobUpload.blobCompressFiles !== false
+};
 }
 
 export function getPrivacyBadge(profile: BackendSharingProfile, includeNames: boolean): string {
-	if (profile === 'off') {
-		return 'Local-only';
-	}
-	if (profile === 'soloFull') {
-		return 'Solo';
-	}
-	if (profile === 'teamAnonymized') {
-		return includeNames ? 'Team (Names)' : 'Team Anonymized';
-	}
-	if (profile === 'teamPseudonymous') {
-		return includeNames ? 'Team Pseudonymous (Names)' : 'Team Pseudonymous';
-	}
-	return includeNames ? 'Team Identified (Names)' : 'Team Identified';
+if (profile === 'off') {
+return 'Local-only';
+}
+if (profile === 'soloFull') {
+return 'Solo';
+}
+if (profile === 'teamAnonymized') {
+return includeNames ? 'Team (Names)' : 'Team Anonymized';
+}
+if (profile === 'teamPseudonymous') {
+return includeNames ? 'Team Pseudonymous (Names)' : 'Team Pseudonymous';
+}
+return includeNames ? 'Team Identified (Names)' : 'Team Identified';
 }

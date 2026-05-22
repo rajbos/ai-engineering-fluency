@@ -46,21 +46,16 @@ const baseSettings: BackendSettings = {
 };
 
 test('validateDraft enforces lookback bounds, alias rules, and dataset/table format', () => {
+	const base0 = toDraft(baseSettings);
 	const invalidDraft: BackendConfigDraft = {
-		...toDraft(baseSettings),
+		...base0,
 		enabled: true,
-		sharingProfile: 'teamIdentified',
-		userIdentityMode: 'teamAlias',
-		userId: 'john doe',
 		datasetId: 'bad dataset',
-		aggTable: 'agg table',
-		eventsTable: 'events#1',
 		lookbackDays: 0,
-		subscriptionId: '',
-		resourceGroup: '',
-		storageAccount: '',
 		includeMachineBreakdown: true,
-		shareWorkspaceMachineNames: true
+		azureResources: { ...base0.azureResources, subscriptionId: '', resourceGroup: '', storageAccount: '', aggTable: 'agg table', eventsTable: 'events#1' },
+		identity: { userIdentityMode: 'teamAlias', userId: 'john doe' },
+		sharing: { ...base0.sharing, sharingProfile: 'teamIdentified', shareWorkspaceMachineNames: true },
 	};
 
 	const result = validateDraft(invalidDraft);
@@ -73,8 +68,9 @@ test('validateDraft enforces lookback bounds, alias rules, and dataset/table for
 });
 
 test('needsConsent detects more permissive sharing and name uploads, and applyDraftToSettings clears consent when team sharing is off', () => {
-	const previous: BackendConfigDraft = { ...toDraft(baseSettings), sharingProfile: 'teamAnonymized', shareWorkspaceMachineNames: false };
-	const next: BackendConfigDraft = { ...previous, sharingProfile: 'teamIdentified', shareWorkspaceMachineNames: true };
+	const prev0 = toDraft(baseSettings);
+	const previous: BackendConfigDraft = { ...prev0, sharing: { ...prev0.sharing, sharingProfile: 'teamAnonymized', shareWorkspaceMachineNames: false } };
+	const next: BackendConfigDraft = { ...previous, sharing: { ...previous.sharing, sharingProfile: 'teamIdentified', shareWorkspaceMachineNames: true } };
 	const consent = needsConsent(previous, next);
 	assert.equal(consent.required, true);
 	assert.ok(consent.reasons.some((r) => r.includes('more permissive')));
@@ -85,7 +81,8 @@ test('needsConsent detects more permissive sharing and name uploads, and applyDr
 		shareWithTeam: true,
 		shareConsentAt: '2024-01-01T00:00:00.000Z'
 	};
-	const cleared = applyDraftToSettings(settingsWithConsent, { ...toDraft(settingsWithConsent), sharingProfile: 'off', enabled: false }, undefined);
+	const sc = toDraft(settingsWithConsent);
+	const cleared = applyDraftToSettings(settingsWithConsent, { ...sc, enabled: false, sharing: { ...sc.sharing, sharingProfile: 'off' } }, undefined);
 	assert.equal(cleared.shareWithTeam, false);
 	assert.equal(cleared.shareConsentAt, '');
 });
@@ -119,14 +116,13 @@ test('saveDraft persists settings, records consent, and clamps values', async ()
 	facade.clearQueryCache = () => { cleared++; };
 	facade['deps'].updateTokenStats = async () => { statsUpdated++; };
 
+	const base1 = toDraft(current);
 	const draft: BackendConfigDraft = {
-		...toDraft(current),
+		...base1,
 		enabled: true,
-		sharingProfile: 'teamIdentified',
-		shareWorkspaceMachineNames: true,
-		userIdentityMode: 'teamAlias',
-		userId: 'team-handle',
-		lookbackDays: 90
+		lookbackDays: 90,
+		identity: { ...base1.identity, userIdentityMode: 'teamAlias', userId: 'team-handle' },
+		sharing: { ...base1.sharing, sharingProfile: 'teamIdentified', shareWorkspaceMachineNames: true },
 	};
 
 	const result = await facade.saveDraft(draft);
@@ -163,12 +159,11 @@ test('saveDraft blocks when consent is withheld', async () => {
 	facade.getSettings = () => current;
 	facade.updateConfiguration = async (next: BackendSettings) => { updates.push(next); current = next; };
 
+	const base2 = toDraft(current);
 	const draft: BackendConfigDraft = {
-		...toDraft(current),
-		sharingProfile: 'teamIdentified',
-		shareWorkspaceMachineNames: true,
-		userIdentityMode: 'teamAlias',
-		userId: 'alias-ok'
+		...base2,
+		identity: { ...base2.identity, userIdentityMode: 'teamAlias', userId: 'alias-ok' },
+		sharing: { ...base2.sharing, sharingProfile: 'teamIdentified', shareWorkspaceMachineNames: true },
 	};
 
 	const result = await facade.saveDraft(draft);

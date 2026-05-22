@@ -1,4 +1,4 @@
-import * as vscode from "vscode";
+﻿import * as vscode from "vscode";
 import type { Stats } from "fs";
 
 import { safeStringifyError, isAuthError, isNotFoundError, isNetworkError } from "../utils/errors";
@@ -642,14 +642,14 @@ export class BackendFacade {
     const settings = this.getSettings();
     const draft = draftOverride ?? toDraft(settings);
     const sharedKeySet = !!(
-      draft.storageAccount &&
+      draft.azureResources.storageAccount &&
       (await this.credentialService.getStoredStorageSharedKey(
-        draft.storageAccount,
+        draft.azureResources.storageAccount,
       ))
     );
     const privacyBadge = getPrivacyBadge(
-      draft.sharingProfile,
-      draft.shareWorkspaceMachineNames,
+      draft.sharing.sharingProfile,
+      draft.sharing.shareWorkspaceMachineNames,
     );
     const authStatus =
       draft.authMode === "sharedKey"
@@ -847,12 +847,12 @@ export class BackendFacade {
 
   private async disableBackend(): Promise<BackendConfigPanelState> {
     const settings = this.getSettings();
+    const disableBase = toDraft(settings);
     const draft: BackendConfigDraft = {
-      ...toDraft(settings),
+      ...disableBase,
       enabled: false,
-      sharingProfile: "off",
-      shareWorkspaceMachineNames: false,
       includeMachineBreakdown: false,
+      sharing: { ...disableBase.sharing, sharingProfile: "off", shareWorkspaceMachineNames: false },
     };
     const next = applyDraftToSettings(settings, draft, undefined);
     await this.updateConfiguration(next);
@@ -891,24 +891,32 @@ export class BackendFacade {
       enabled: false,
       backend: "storageTables",
       authMode: "entraId",
-      sharingProfile: "off",
-      shareWorkspaceMachineNames: false,
-      includeMachineBreakdown: false,
       datasetId: "default",
       lookbackDays: 30,
-      subscriptionId: "",
-      resourceGroup: "",
-      storageAccount: "",
-      aggTable: "usageAggDaily",
-      eventsTable: "usageEvents",
-      userIdentityMode: "pseudonymous",
-      userId: "",
-      sharingServerEnabled: false,
-      sharingServerEndpointUrl: "",
-      blobUploadEnabled: false,
-      blobContainerName: "copilot-session-logs",
-      blobUploadFrequencyHours: 24,
-      blobCompressFiles: true,
+      includeMachineBreakdown: false,
+      azureResources: {
+        subscriptionId: "",
+        resourceGroup: "",
+        storageAccount: "",
+        aggTable: "usageAggDaily",
+        eventsTable: "usageEvents",
+      },
+      identity: {
+        userIdentityMode: "pseudonymous",
+        userId: "",
+      },
+      blobUpload: {
+        blobUploadEnabled: false,
+        blobContainerName: "copilot-session-logs",
+        blobUploadFrequencyHours: 24,
+        blobCompressFiles: true,
+      },
+      sharing: {
+        sharingProfile: "off",
+        shareWorkspaceMachineNames: false,
+        sharingServerEnabled: false,
+        sharingServerEndpointUrl: "",
+      },
     };
 
     const next = applyDraftToSettings(settings, draft, undefined);
@@ -1074,24 +1082,32 @@ export class BackendFacade {
       enabled: false,
       backend: "storageTables",
       authMode: "entraId",
-      sharingProfile: "off",
-      shareWorkspaceMachineNames: false,
-      includeMachineBreakdown: false,
       datasetId: "default",
       lookbackDays: 30,
-      subscriptionId: "",
-      resourceGroup: "",
-      storageAccount: "",
-      aggTable: "usageAggDaily",
-      eventsTable: "usageEvents",
-      userIdentityMode: "pseudonymous",
-      userId: "",
-      sharingServerEnabled: false,
-      sharingServerEndpointUrl: "",
-      blobUploadEnabled: false,
-      blobContainerName: "copilot-session-logs",
-      blobUploadFrequencyHours: 24,
-      blobCompressFiles: true,
+      includeMachineBreakdown: false,
+      azureResources: {
+        subscriptionId: "",
+        resourceGroup: "",
+        storageAccount: "",
+        aggTable: "usageAggDaily",
+        eventsTable: "usageEvents",
+      },
+      identity: {
+        userIdentityMode: "pseudonymous",
+        userId: "",
+      },
+      blobUpload: {
+        blobUploadEnabled: false,
+        blobContainerName: "copilot-session-logs",
+        blobUploadFrequencyHours: 24,
+        blobCompressFiles: true,
+      },
+      sharing: {
+        sharingProfile: "off",
+        shareWorkspaceMachineNames: false,
+        sharingServerEnabled: false,
+        sharingServerEndpointUrl: "",
+      },
     };
     const next = applyDraftToSettings(settings, draft, undefined);
     await this.updateConfiguration(next);

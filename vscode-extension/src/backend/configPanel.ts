@@ -404,37 +404,37 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 
 		function setFieldValues(state) {
 			byId('enabledToggle').checked = !!state.draft.enabled;
-			byId('enabledToggleTeam').checked = !!state.draft.sharingServerEnabled;
+			byId('enabledToggleTeam').checked = !!state.draft.sharing.sharingServerEnabled;
 			byId('backendType').value = state.draft.backend || 'storageTables';
-			byId('sharingProfile').value = state.draft.sharingProfile;
+			byId('sharingProfile').value = state.draft.sharing.sharingProfile;
 			byId('authMode').value = state.draft.authMode;
-			byId('subscriptionId').value = state.draft.subscriptionId || '';
-			byId('resourceGroup').value = state.draft.resourceGroup || '';
-			byId('storageAccount').value = state.draft.storageAccount || '';
-			byId('aggTable').value = state.draft.aggTable || '';
-			byId('eventsTable').value = state.draft.eventsTable || '';
+			byId('subscriptionId').value = state.draft.azureResources.subscriptionId || '';
+			byId('resourceGroup').value = state.draft.azureResources.resourceGroup || '';
+			byId('storageAccount').value = state.draft.azureResources.storageAccount || '';
+			byId('aggTable').value = state.draft.azureResources.aggTable || '';
+			byId('eventsTable').value = state.draft.azureResources.eventsTable || '';
 			byId('datasetId').value = state.draft.datasetId || '';
 			byId('lookbackDays').value = state.draft.lookbackDays ?? '';
-			byId('userIdentityMode').value = state.draft.userIdentityMode;
-			byId('userId').value = state.draft.userId || '';
-			byId('sharingServerEndpointUrl').value = state.draft.sharingServerEndpointUrl || '';
+			byId('userIdentityMode').value = state.draft.identity.userIdentityMode;
+			byId('userId').value = state.draft.identity.userId || '';
+			byId('sharingServerEndpointUrl').value = state.draft.sharing.sharingServerEndpointUrl || '';
 			updateUserIdPlaceholder();
-			byId('blobUploadEnabled').checked = !!state.draft.blobUploadEnabled;
-			byId('blobContainerName').value = state.draft.blobContainerName || '';
-			byId('blobUploadFrequencyHours').value = state.draft.blobUploadFrequencyHours ?? '';
-			byId('blobCompressFiles').checked = state.draft.blobCompressFiles !== false;
+			byId('blobUploadEnabled').checked = !!state.draft.blobUpload.blobUploadEnabled;
+			byId('blobContainerName').value = state.draft.blobUpload.blobContainerName || '';
+			byId('blobUploadFrequencyHours').value = state.draft.blobUpload.blobUploadFrequencyHours ?? '';
+			byId('blobCompressFiles').checked = state.draft.blobUpload.blobCompressFiles !== false;
 			byId('privacyBadge').innerText = 'Privacy: ' + state.privacyBadge;
 			byId('authBadge').innerText = state.authStatus;
-			byId('backendStateBadge').innerText = (state.draft.enabled || state.draft.sharingServerEnabled) ? 'Backend: Enabled' : 'Backend: Disabled';
-			const showGithubWarning = state.draft.sharingServerEnabled && !state.githubTokenAvailable;
+			byId('backendStateBadge').innerText = (state.draft.enabled || state.draft.sharing.sharingServerEnabled) ? 'Backend: Enabled' : 'Backend: Disabled';
+			const showGithubWarning = state.draft.sharing.sharingServerEnabled && !state.githubTokenAvailable;
 			byId('githubAuthWarning').style.display = showGithubWarning ? 'block' : 'none';
 			updateLastSyncLine(state.lastSyncAt);
 
 			// Update overview details
 			const detailsDiv = byId('overviewDetails');
-			if (state.draft.enabled || state.draft.sharingServerEnabled) {
+			if (state.draft.enabled || state.draft.sharing.sharingServerEnabled) {
 				detailsDiv.style.display = 'grid';
-				byId('overviewProfile').textContent = state.draft.sharingProfile;
+				byId('overviewProfile').textContent = state.draft.sharing.sharingProfile;
 				byId('overviewDataset').textContent = state.draft.datasetId || 'not set';
 				byId('statusMessage').textContent = state.message || '';
 			} else {
@@ -505,26 +505,34 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			const shareWorkspaceMachineNames = profile === 'soloFull' || profile === 'teamPseudonymous' || profile === 'teamIdentified';
 			return {
 				enabled: enabledChecked,
-				sharingServerEnabled: sharingServerEnabledChecked,
 				backend: backendType,
 				authMode: byId('authMode').value,
-				sharingProfile: profile,
-				shareWorkspaceMachineNames,
 				includeMachineBreakdown: true, // Always enabled
 				datasetId: byId('datasetId').value,
 				lookbackDays: Number(byId('lookbackDays').value),
-				subscriptionId: byId('subscriptionId').value,
-				resourceGroup: byId('resourceGroup').value,
-				storageAccount: byId('storageAccount').value,
-				aggTable: byId('aggTable').value,
-				eventsTable: byId('eventsTable').value,
-				userIdentityMode: byId('userIdentityMode').value,
-				userId: byId('userId').value,
-				sharingServerEndpointUrl: byId('sharingServerEndpointUrl').value,
-				blobUploadEnabled: byId('blobUploadEnabled').checked,
-				blobContainerName: byId('blobContainerName').value,
-				blobUploadFrequencyHours: Number(byId('blobUploadFrequencyHours').value),
-				blobCompressFiles: byId('blobCompressFiles').checked
+				azureResources: {
+					subscriptionId: byId('subscriptionId').value,
+					resourceGroup: byId('resourceGroup').value,
+					storageAccount: byId('storageAccount').value,
+					aggTable: byId('aggTable').value,
+					eventsTable: byId('eventsTable').value,
+				},
+				identity: {
+					userIdentityMode: byId('userIdentityMode').value,
+					userId: byId('userId').value,
+				},
+				blobUpload: {
+					blobUploadEnabled: byId('blobUploadEnabled').checked,
+					blobContainerName: byId('blobContainerName').value,
+					blobUploadFrequencyHours: Number(byId('blobUploadFrequencyHours').value),
+					blobCompressFiles: byId('blobCompressFiles').checked,
+				},
+				sharing: {
+					sharingProfile: profile,
+					shareWorkspaceMachineNames,
+					sharingServerEnabled: sharingServerEnabledChecked,
+					sharingServerEndpointUrl: byId('sharingServerEndpointUrl').value,
+				},
 			};
 		}
 
@@ -534,32 +542,34 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			else if (!aliasRegex.test(draft.datasetId.trim())) errors.datasetId = 'Use letters, numbers, dashes, underscores';
 			if (draft.enabled) {
 				['subscriptionId','resourceGroup','storageAccount','aggTable'].forEach(f => {
-					if (!draft[f] || !draft[f].trim()) errors[f] = 'Required';
+					const v = draft.azureResources[f];
+					if (!v || !v.trim()) errors[f] = 'Required';
 				});
 			}
-			if (draft.sharingServerEnabled) {
-				if (!draft.sharingServerEndpointUrl || !draft.sharingServerEndpointUrl.trim()) {
+			if (draft.sharing.sharingServerEnabled) {
+				if (!draft.sharing.sharingServerEndpointUrl || !draft.sharing.sharingServerEndpointUrl.trim()) {
 					errors.sharingServerEndpointUrl = 'Required';
 				} else {
-					try { new URL(draft.sharingServerEndpointUrl); } catch { errors.sharingServerEndpointUrl = 'Enter a valid URL'; }
+					try { new URL(draft.sharing.sharingServerEndpointUrl); } catch { errors.sharingServerEndpointUrl = 'Enter a valid URL'; }
 				}
 			}
 			['aggTable','eventsTable'].forEach(f => {
-				if (draft[f] && !aliasRegex.test(draft[f].trim())) errors[f] = 'Use letters, numbers, dashes, underscores';
+				const v = draft.azureResources[f];
+				if (v && !aliasRegex.test(v.trim())) errors[f] = 'Use letters, numbers, dashes, underscores';
 			});
 			if (draft.lookbackDays < 1 || draft.lookbackDays > 90 || Number.isNaN(draft.lookbackDays)) {
 				errors.lookbackDays = '1-90';
 			}
-			if (draft.blobUploadEnabled) {
-				if (!draft.blobContainerName || !draft.blobContainerName.trim()) errors.blobContainerName = 'Required';
-				const freq = Number(draft.blobUploadFrequencyHours);
+			if (draft.blobUpload.blobUploadEnabled) {
+				if (!draft.blobUpload.blobContainerName || !draft.blobUpload.blobContainerName.trim()) errors.blobContainerName = 'Required';
+				const freq = Number(draft.blobUpload.blobUploadFrequencyHours);
 				if (!Number.isFinite(freq) || freq < 1 || freq > 168) errors.blobUploadFrequencyHours = '1-168';
 			}
-			if (draft.sharingProfile === 'teamIdentified') {
-				const id = (draft.userId || '').trim();
+			if (draft.sharing.sharingProfile === 'teamIdentified') {
+				const id = (draft.identity.userId || '').trim();
 				if (!id) {
 					errors.userId = 'Alias or object ID required';
-				} else if (draft.userIdentityMode === 'entraObjectId' && !/^[-0-9a-fA-F]{36}$/.test(id)) {
+				} else if (draft.identity.userIdentityMode === 'entraObjectId' && !/^[-0-9a-fA-F]{36}$/.test(id)) {
 					errors.userId = 'Use an Entra object ID (GUID)';
 				}
 			}
@@ -592,14 +602,14 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 
 		function hasSharedKey() {
 			const storage = (byId('storageAccount').value || '').trim();
-			const storedFor = (currentState?.draft?.storageAccount || '').trim();
+			const storedFor = (currentState?.draft?.azureResources?.storageAccount || '').trim();
 			return !!currentState.sharedKeySet && storage && storage === storedFor;
 		}
 
 		function updateEnabledState() {
 			const draft = readDraft();
 			const enabled = draft.enabled;
-			const sharingServerEnabled = draft.sharingServerEnabled;
+			const sharingServerEnabled = draft.sharing.sharingServerEnabled;
 			const azureSection = document.getElementById('azure');
 			const sharingSection = document.getElementById('sharing');
 			const advancedSection = document.getElementById('advanced');
@@ -661,13 +671,13 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 
 			let html = '';
 
-			const eitherEnabled = draft.enabled || draft.sharingServerEnabled;
+			const eitherEnabled = draft.enabled || draft.sharing.sharingServerEnabled;
 			if (!eitherEnabled) {
 				html = '<div class="change-item danger"><div class="change-label">⚠️ All Backends Disabled</div><div class="change-value">All token usage data will stay local-only. No sync to any backend.</div></div>';
 			} else {
 				if (draft.enabled) {
-					if (draft.subscriptionId && draft.resourceGroup && draft.storageAccount) {
-						html += '<div class="change-item"><div class="change-label">✓ Azure Storage Enabled</div><div class="change-value">Subscription: ' + escHtml(draft.subscriptionId) + '<br>Resource Group: ' + escHtml(draft.resourceGroup) + '<br>Storage Account: ' + escHtml(draft.storageAccount) + '</div></div>';
+					if (draft.azureResources.subscriptionId && draft.azureResources.resourceGroup && draft.azureResources.storageAccount) {
+						html += '<div class="change-item"><div class="change-label">✓ Azure Storage Enabled</div><div class="change-value">Subscription: ' + escHtml(draft.azureResources.subscriptionId) + '<br>Resource Group: ' + escHtml(draft.azureResources.resourceGroup) + '<br>Storage Account: ' + escHtml(draft.azureResources.storageAccount) + '</div></div>';
 					} else {
 						html += '<div class="change-item warning"><div class="change-label">⚠️ Azure Storage Enabled (incomplete)</div><div class="change-value">Not fully configured — some Azure fields are missing</div></div>';
 					}
@@ -675,9 +685,9 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 					html += '<div class="change-item"><div class="change-label">Azure Auth</div><div class="change-value">' + authLabel + '</div></div>';
 				}
 
-				if (draft.sharingServerEnabled) {
-					if (draft.sharingServerEndpointUrl) {
-						html += '<div class="change-item"><div class="change-label">✓ Team Server Enabled</div><div class="change-value">URL: ' + escHtml(draft.sharingServerEndpointUrl) + '</div></div>';
+				if (draft.sharing.sharingServerEnabled) {
+					if (draft.sharing.sharingServerEndpointUrl) {
+						html += '<div class="change-item"><div class="change-label">✓ Team Server Enabled</div><div class="change-value">URL: ' + escHtml(draft.sharing.sharingServerEndpointUrl) + '</div></div>';
 					} else {
 						html += '<div class="change-item warning"><div class="change-label">⚠️ Team Server Enabled (incomplete)</div><div class="change-value">Server URL not configured</div></div>';
 					}
@@ -690,21 +700,21 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 					'teamPseudonymous': 'Team Pseudonymous',
 					'teamIdentified': 'Team Identified'
 				};
-				const profileLabel = escHtml(profileLabels[draft.sharingProfile] || draft.sharingProfile);
+				const profileLabel = escHtml(profileLabels[draft.sharing.sharingProfile] || draft.sharing.sharingProfile);
 				let nameSync = 'Hashed IDs';
-				if (draft.sharingProfile === 'soloFull' || draft.sharingProfile === 'teamPseudonymous' || draft.sharingProfile === 'teamIdentified') {
+				if (draft.sharing.sharingProfile === 'soloFull' || draft.sharing.sharingProfile === 'teamPseudonymous' || draft.sharing.sharingProfile === 'teamIdentified') {
 					nameSync = 'Readable names';
 				}
 				html += '<div class="change-item"><div class="change-label">Privacy &amp; Sharing</div><div class="change-value">Profile: ' + profileLabel + '<br>Workspace/Machine Names: ' + nameSync + '<br>Per-machine breakdown: Always enabled</div></div>';
 
-				if (draft.sharingProfile === 'teamIdentified' && draft.userId) {
-					html += '<div class="change-item"><div class="change-label">User Identity</div><div class="change-value">' + escHtml(draft.userId) + ' (' + (draft.userIdentityMode === 'entraObjectId' ? 'Entra Object ID' : 'Team Alias') + ')</div></div>';
+				if (draft.sharing.sharingProfile === 'teamIdentified' && draft.identity.userId) {
+					html += '<div class="change-item"><div class="change-label">User Identity</div><div class="change-value">' + escHtml(draft.identity.userId) + ' (' + (draft.identity.userIdentityMode === 'entraObjectId' ? 'Entra Object ID' : 'Team Alias') + ')</div></div>';
 				}
 
 				html += '<div class="change-item"><div class="change-label">Dataset &amp; Lookback</div><div class="change-value">Dataset ID: ' + escHtml(draft.datasetId || 'default') + '<br>Lookback: ' + escHtml(draft.lookbackDays || 30) + ' days</div></div>';
 
-				if (draft.blobUploadEnabled) {
-					html += '<div class="change-item warning"><div class="change-label">⚠️ Blob Upload</div><div class="change-value">Enabled — full session log files (prompts, responses, code) will be uploaded<br>Container: ' + escHtml(draft.blobContainerName || 'copilot-session-logs') + '<br>Frequency: every ' + escHtml(draft.blobUploadFrequencyHours || 24) + ' hours<br>Compression: ' + (draft.blobCompressFiles !== false ? 'On' : 'Off') + '</div></div>';
+				if (draft.blobUpload.blobUploadEnabled) {
+					html += '<div class="change-item warning"><div class="change-label">⚠️ Blob Upload</div><div class="change-value">Enabled — full session log files (prompts, responses, code) will be uploaded<br>Container: ' + escHtml(draft.blobUpload.blobContainerName || 'copilot-session-logs') + '<br>Frequency: every ' + escHtml(draft.blobUpload.blobUploadFrequencyHours || 24) + ' hours<br>Compression: ' + (draft.blobUpload.blobCompressFiles !== false ? 'On' : 'Off') + '</div></div>';
 				}
 			}
 

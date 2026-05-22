@@ -238,22 +238,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const draft = {
 			enabled: true,
 			authMode: 'entraId',
-			sharingProfile: 'soloFull' as const,
-			shareWorkspaceMachineNames: true,
 			includeMachineBreakdown: true,
 			datasetId: 'mydata',
 			lookbackDays: 7,
-			subscriptionId: 'sub1',
-			resourceGroup: 'rg1',
-			storageAccount: 'acct1',
-			aggTable: 'usageAggDaily',
-			eventsTable: 'usageEvents',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: 'sub1', resourceGroup: 'rg1', storageAccount: 'acct1', aggTable: 'usageAggDaily', eventsTable: 'usageEvents' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull' as const, shareWorkspaceMachineNames: true, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		};
 		const state = await facade.getConfigPanelState(draft);
 		assert.equal(state.draft.enabled, true);
@@ -269,11 +260,17 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 
 	test('testConnectionFromDraft returns validation error for invalid draft', async () => {
 		const facade: any = createFacade();
-		// enabled but missing required fields
+		// enabled but missing required Azure fields
 		const result = await facade.testConnectionFromDraft({
 			enabled: true,
-			storageAccount: '',
-			aggTable: '',
+			authMode: 'entraId',
+			includeMachineBreakdown: false,
+			datasetId: 'default',
+			lookbackDays: 30,
+			azureResources: { subscriptionId: '', resourceGroup: '', storageAccount: '', aggTable: '', eventsTable: '' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		});
 		assert.equal(result.ok, false);
 		assert.ok(result.message.includes('validation'));
@@ -298,22 +295,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const draft = {
 			enabled: true,
 			authMode: 'entraId',
-			sharingProfile: 'soloFull',
-			shareWorkspaceMachineNames: false,
 			includeMachineBreakdown: false,
 			datasetId: 'default',
 			lookbackDays: 30,
-			subscriptionId: 'sub',
-			resourceGroup: 'rg',
-			storageAccount: 'acct',
-			aggTable: 'table1',
-			eventsTable: 'events1',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'acct', aggTable: 'table1', eventsTable: 'events1' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		};
 		const result = await facade.testConnectionFromDraft(draft);
 		assert.equal(result.ok, false);
@@ -333,22 +321,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const draft = {
 			enabled: true,
 			authMode: 'entraId',
-			sharingProfile: 'soloFull',
-			shareWorkspaceMachineNames: false,
 			includeMachineBreakdown: false,
 			datasetId: 'default',
 			lookbackDays: 30,
-			subscriptionId: 'sub',
-			resourceGroup: 'rg',
-			storageAccount: 'acct',
-			aggTable: 'table1',
-			eventsTable: 'events1',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'acct', aggTable: 'table1', eventsTable: 'events1' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		};
 		const result = await facade.testConnectionFromDraft(draft);
 		assert.equal(result.ok, false);
@@ -368,22 +347,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const draft = {
 			enabled: true,
 			authMode: 'entraId',
-			sharingProfile: 'soloFull',
-			shareWorkspaceMachineNames: false,
 			includeMachineBreakdown: false,
 			datasetId: 'default',
 			lookbackDays: 30,
-			subscriptionId: 'sub',
-			resourceGroup: 'rg',
-			storageAccount: 'acct',
-			aggTable: 'table1',
-			eventsTable: 'events1',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'acct', aggTable: 'table1', eventsTable: 'events1' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		};
 		const result = await facade.testConnectionFromDraft(draft);
 		assert.equal(result.ok, false);
@@ -396,22 +366,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const draft = {
 			enabled: true,
 			authMode: 'sharedKey',
-			sharingProfile: 'soloFull',
-			shareWorkspaceMachineNames: false,
 			includeMachineBreakdown: false,
 			datasetId: 'default',
 			lookbackDays: 30,
-			subscriptionId: 'sub',
-			resourceGroup: 'rg',
-			storageAccount: 'acct',
-			aggTable: 'table1',
-			eventsTable: 'events1',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'acct', aggTable: 'table1', eventsTable: 'events1' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		};
 		const result = await facade.testConnectionFromDraft(draft);
 		assert.equal(result.ok, false);
@@ -429,22 +390,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const draft = {
 			enabled: true,
 			authMode: 'entraId',
-			sharingProfile: 'soloFull',
-			shareWorkspaceMachineNames: false,
 			includeMachineBreakdown: false,
 			datasetId: 'default',
 			lookbackDays: 30,
-			subscriptionId: 'sub',
-			resourceGroup: 'rg',
-			storageAccount: 'acct',
-			aggTable: 'table1',
-			eventsTable: 'events1',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'acct', aggTable: 'table1', eventsTable: 'events1' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		};
 		const result = await facade.testConnectionFromDraft(draft);
 		assert.equal(result.ok, true);
@@ -464,22 +416,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const draft = {
 			enabled: true,
 			authMode: 'entraId',
-			sharingProfile: 'soloFull',
-			shareWorkspaceMachineNames: false,
 			includeMachineBreakdown: false,
 			datasetId: 'default',
 			lookbackDays: 30,
-			subscriptionId: 'sub',
-			resourceGroup: 'rg',
-			storageAccount: 'acct',
-			aggTable: 'table1',
-			eventsTable: 'events1',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: 'sub', resourceGroup: 'rg', storageAccount: 'acct', aggTable: 'table1', eventsTable: 'events1' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		};
 		const result = await facade.testConnectionFromDraft(draft);
 		assert.equal(result.ok, false);
@@ -492,22 +435,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const result = await facade.saveDraft({
 			enabled: true,
 			authMode: 'entraId',
-			sharingProfile: 'soloFull',
-			shareWorkspaceMachineNames: false,
 			includeMachineBreakdown: false,
 			datasetId: 'default',
 			lookbackDays: 30,
-			subscriptionId: '',
-			resourceGroup: '',
-			storageAccount: '',
-			aggTable: '',
-			eventsTable: '',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: '', resourceGroup: '', storageAccount: '', aggTable: '', eventsTable: '' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'soloFull', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		});
 		assert.ok(result.errors);
 		assert.ok(result.message?.includes('validation') || result.message?.includes('Fix'));
@@ -521,22 +455,13 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const result = await facade.saveDraft({
 			enabled: true,
 			authMode: 'entraId',
-			sharingProfile: 'off',
-			shareWorkspaceMachineNames: false,
 			includeMachineBreakdown: false,
 			datasetId: 'default',
 			lookbackDays: 30,
-			subscriptionId: 'sub-123',
-			resourceGroup: 'rg-test',
-			storageAccount: 'testaccount',
-			aggTable: 'usageAggDaily',
-			eventsTable: 'usageEvents',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: '',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true,
+			azureResources: { subscriptionId: 'sub-123', resourceGroup: 'rg-test', storageAccount: 'testaccount', aggTable: 'usageAggDaily', eventsTable: 'usageEvents' },
+			identity: { userIdentityMode: 'pseudonymous' as const, userId: '' },
+			blobUpload: { blobUploadEnabled: false, blobContainerName: 'copilot-session-logs', blobUploadFrequencyHours: 24, blobCompressFiles: true },
+			sharing: { sharingProfile: 'off', shareWorkspaceMachineNames: false, sharingServerEnabled: false, sharingServerEndpointUrl: '' },
 		});
 		assert.ok(result.message?.includes('saved') || result.message?.includes('Saved'));
 		assert.ok(result.state);
@@ -549,7 +474,7 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		facade.queryService.clearQueryCache = () => {};
 		const state = await facade.disableBackend();
 		assert.equal(state.draft.enabled, false);
-		assert.equal(state.draft.sharingProfile, 'off');
+		assert.equal(state.draft.sharing.sharingProfile, 'off');
 	});
 
 	test('clearAzureSettings cancels when user dismisses confirmation', async () => {
@@ -569,7 +494,7 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		facade.queryService.clearQueryCache = () => {};
 		const state = await facade.clearAzureSettings();
 		assert.equal(state.draft.enabled, false);
-		assert.equal(state.draft.storageAccount, '');
+		assert.equal(state.draft.azureResources.storageAccount, '');
 	});
 
 	test('updateSharedKey returns error when storageAccount is empty', async () => {
@@ -715,7 +640,7 @@ describe('BackendFacade private methods via casting', { concurrency: false }, ()
 		const state = await facade.disableBackend();
 		assert.ok(state);
 		assert.equal(state.draft.enabled, false);
-		assert.equal(state.draft.sharingProfile, 'off');
+		assert.equal(state.draft.sharing.sharingProfile, 'off');
 	});
 
 	test('showConfigPanel creates and shows config panel', async () => {
