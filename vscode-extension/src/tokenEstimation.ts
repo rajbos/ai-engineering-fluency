@@ -46,6 +46,52 @@ interface SubAgentToolSpecificData {
 	modelName?: unknown;
 }
 
+/** Shape of the `result.metadata` block containing per-request token counts (Insiders format). */
+interface RequestResultMetadata {
+	promptTokens?: number;
+	outputTokens?: number;
+}
+
+/** Shape of the `result.usage` block from the usage-based token format. */
+interface RequestResultUsage {
+	promptTokens?: number;
+	completionTokens?: number;
+}
+
+/** Shape of the `result` field on a reconstructed delta session request. */
+export interface RequestResult {
+	promptTokens?: number;
+	outputTokens?: number;
+	metadata?: RequestResultMetadata;
+	usage?: RequestResultUsage;
+}
+
+/**
+ * Type-safe accessor: extracts the `result` object from an unknown request value.
+ * Returns the typed `RequestResult` if the value is an object with an object `result`,
+ * or `undefined` if the shape does not match.
+ */
+export function getRequestResult(req: unknown): RequestResult | undefined {
+	if (typeof req !== 'object' || req === null) { return undefined; }
+	const obj = req as Record<string, unknown>;
+	const result = obj['result'];
+	if (typeof result !== 'object' || result === null) { return undefined; }
+	return result as RequestResult;
+}
+
+/**
+ * Type-safe accessor: extracts the `response` array from an unknown request value.
+ * Returns the array if the value is an object with an array `response`,
+ * or `undefined` if the shape does not match.
+ */
+export function getResponseArray(req: unknown): unknown[] | undefined {
+	if (typeof req !== 'object' || req === null) { return undefined; }
+	const obj = req as Record<string, unknown>;
+	const response = obj['response'];
+	if (!Array.isArray(response)) { return undefined; }
+	return response;
+}
+
 /** Type guard: narrows an unknown value to a ToolInvocationSerializedItem. */
 function isToolInvocationSerialized(obj: unknown): obj is ToolInvocationSerializedItem {
 	if (typeof obj !== 'object' || obj === null) { return false; }
@@ -237,10 +283,9 @@ export class DeltaTokenStrategy implements TokenEstimationStrategy {
 		}
 		let totalActualTokens = 0;
 		for (let i = 0; i < maxIndex; i++) {
-			const request = requests[i] as { result?: { promptTokens?: number; outputTokens?: number; metadata?: { promptTokens?: number; outputTokens?: number }; usage?: { promptTokens?: number; completionTokens?: number } } } | undefined;
+			const result = getRequestResult(requests[i]);
 			let found = false;
-			if (request?.result) {
-				const result = request.result;
+			if (result) {
 				if (typeof result.promptTokens === 'number' && typeof result.outputTokens === 'number') {
 					totalActualTokens += result.promptTokens + result.outputTokens;
 					found = true;
@@ -267,9 +312,9 @@ export class DeltaTokenStrategy implements TokenEstimationStrategy {
 		// Sub-agent results are built up char-by-char via delta events and are only
 		// complete in the fully reconstructed state — count them here.
 		for (const request of requests) {
-			const req = request as { response?: unknown[] } | undefined;
-			if (!req?.response || !Array.isArray(req.response)) { continue; }
-			for (const responseItem of req.response) {
+			const responseItems = getResponseArray(request);
+			if (!responseItems) { continue; }
+			for (const responseItem of responseItems) {
 				const subAgent = extractSubAgentData(responseItem);
 				if (subAgent) {
 					if (subAgent.prompt) { totalTokens += estimateTokensFromText(subAgent.prompt); }

@@ -923,3 +923,92 @@ test('EventJsonlTokenStrategy: returns empty result for empty input', () => {
         assert.equal(result.actualTokens, 0);
         assert.deepEqual(result.modelUsage, {});
 });
+
+// ── getRequestResult ────────────────────────────────────────────────────────
+
+import { getRequestResult, getResponseArray } from '../../src/tokenEstimation';
+
+test('getRequestResult: returns undefined for null', () => {
+        assert.equal(getRequestResult(null), undefined);
+});
+
+test('getRequestResult: returns undefined for non-object primitives', () => {
+        assert.equal(getRequestResult(42), undefined);
+        assert.equal(getRequestResult('string'), undefined);
+        assert.equal(getRequestResult(undefined), undefined);
+});
+
+test('getRequestResult: returns undefined when result is missing', () => {
+        assert.equal(getRequestResult({}), undefined);
+        assert.equal(getRequestResult({ message: { text: 'hi' } }), undefined);
+});
+
+test('getRequestResult: returns undefined when result is not an object', () => {
+        assert.equal(getRequestResult({ result: 'string' }), undefined);
+        assert.equal(getRequestResult({ result: 42 }), undefined);
+        assert.equal(getRequestResult({ result: null }), undefined);
+});
+
+test('getRequestResult: returns typed result for valid promptTokens/outputTokens shape', () => {
+        const req = { result: { promptTokens: 100, outputTokens: 50 } };
+        const result = getRequestResult(req);
+        assert.ok(result !== undefined);
+        assert.equal(result!.promptTokens, 100);
+        assert.equal(result!.outputTokens, 50);
+});
+
+test('getRequestResult: returns typed result for Insiders metadata shape', () => {
+        const req = { result: { metadata: { promptTokens: 200, outputTokens: 80 } } };
+        const result = getRequestResult(req);
+        assert.ok(result !== undefined);
+        assert.ok(result!.metadata !== undefined);
+        assert.equal(result!.metadata!.promptTokens, 200);
+        assert.equal(result!.metadata!.outputTokens, 80);
+});
+
+test('getRequestResult: returns typed result for usage shape', () => {
+        const req = { result: { usage: { promptTokens: 50, completionTokens: 30 } } };
+        const result = getRequestResult(req);
+        assert.ok(result !== undefined);
+        assert.ok(result!.usage !== undefined);
+        assert.equal(result!.usage!.promptTokens, 50);
+        assert.equal(result!.usage!.completionTokens, 30);
+});
+
+// ── getResponseArray ────────────────────────────────────────────────────────
+
+test('getResponseArray: returns undefined for null', () => {
+        assert.equal(getResponseArray(null), undefined);
+});
+
+test('getResponseArray: returns undefined for non-object primitives', () => {
+        assert.equal(getResponseArray(42), undefined);
+        assert.equal(getResponseArray('string'), undefined);
+        assert.equal(getResponseArray(undefined), undefined);
+});
+
+test('getResponseArray: returns undefined when response is missing', () => {
+        assert.equal(getResponseArray({}), undefined);
+        assert.equal(getResponseArray({ result: {} }), undefined);
+});
+
+test('getResponseArray: returns undefined when response is not an array', () => {
+        assert.equal(getResponseArray({ response: 'not-array' }), undefined);
+        assert.equal(getResponseArray({ response: 42 }), undefined);
+        assert.equal(getResponseArray({ response: null }), undefined);
+        assert.equal(getResponseArray({ response: {} }), undefined);
+});
+
+test('getResponseArray: returns the array when response is a valid array', () => {
+        const items = [{ kind: 'markdownContent', value: 'hello' }, { kind: 'thinking', value: 'think' }];
+        const result = getResponseArray({ response: items });
+        assert.ok(Array.isArray(result));
+        assert.equal(result!.length, 2);
+        assert.deepEqual(result, items);
+});
+
+test('getResponseArray: returns empty array when response is []', () => {
+        const result = getResponseArray({ response: [] });
+        assert.ok(Array.isArray(result));
+        assert.equal(result!.length, 0);
+});
