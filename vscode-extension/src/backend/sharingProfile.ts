@@ -19,10 +19,26 @@ export function parseBackendSharingProfile(value: unknown): BackendSharingProfil
 }
 
 /**
+ * Per-profile defaults. `includeNames: null` means the value is taken from
+ * `shareWorkspaceMachineNames` at call-time; a boolean means it is fixed.
+ */
+type PolicyTemplate = Omit<BackendSharingPolicy, 'allowCloudSync' | 'includeNames'> & {
+	includeNames: boolean | null;
+};
+
+export const SHARING_POLICY_MAP: Record<BackendSharingProfile, PolicyTemplate> = {
+	off:                { profile: 'off',                includeUserDimension: false, includeNames: false, workspaceIdStrategy: 'raw',    machineIdStrategy: 'raw'    },
+	soloFull:           { profile: 'soloFull',           includeUserDimension: false, includeNames: true,  workspaceIdStrategy: 'raw',    machineIdStrategy: 'raw'    },
+	teamAnonymized:     { profile: 'teamAnonymized',     includeUserDimension: false, includeNames: false, workspaceIdStrategy: 'hashed', machineIdStrategy: 'hashed' },
+	teamPseudonymous:   { profile: 'teamPseudonymous',   includeUserDimension: true,  includeNames: null,  workspaceIdStrategy: 'hashed', machineIdStrategy: 'hashed' },
+	teamIdentified:     { profile: 'teamIdentified',     includeUserDimension: true,  includeNames: null,  workspaceIdStrategy: 'hashed', machineIdStrategy: 'hashed' },
+};
+
+/**
  * Computes the effective sharing policy based on settings and sharing profile.
  * Implements five privacy profiles: off, soloFull, teamAnonymized, teamPseudonymous, teamIdentified.
  * Privacy by default: team modes use hashed IDs, names only included when explicitly enabled.
- * 
+ *
  * @param args - Configuration including enabled flag, profile, and name sharing preference
  * @returns Concrete policy object that controls sync behavior
  */
@@ -31,48 +47,11 @@ export function computeBackendSharingPolicy(args: {
 	profile: BackendSharingProfile;
 	shareWorkspaceMachineNames: boolean;
 }): BackendSharingPolicy {
-	const allowCloudSync = args.enabled && args.profile !== 'off';
-
-	if (args.profile === 'off') {
-		return {
-			profile: 'off',
-			allowCloudSync,
-			includeUserDimension: false,
-			includeNames: false,
-			workspaceIdStrategy: 'raw',
-			machineIdStrategy: 'raw'
-		};
-	}
-
-	if (args.profile === 'soloFull') {
-		return {
-			profile: 'soloFull',
-			allowCloudSync,
-			includeUserDimension: false,
-			includeNames: true,
-			workspaceIdStrategy: 'raw',
-			machineIdStrategy: 'raw'
-		};
-	}
-
-	if (args.profile === 'teamAnonymized') {
-		return {
-			profile: 'teamAnonymized',
-			allowCloudSync,
-			includeUserDimension: false,
-			includeNames: false,
-			workspaceIdStrategy: 'hashed',
-			machineIdStrategy: 'hashed'
-		};
-	}
-
+	const template = SHARING_POLICY_MAP[args.profile];
 	return {
-		profile: args.profile,
-		allowCloudSync,
-		includeUserDimension: true,
-		includeNames: args.shareWorkspaceMachineNames,
-		workspaceIdStrategy: 'hashed',
-		machineIdStrategy: 'hashed'
+		...template,
+		allowCloudSync: args.enabled && args.profile !== 'off',
+		includeNames: template.includeNames ?? args.shareWorkspaceMachineNames,
 	};
 }
 
