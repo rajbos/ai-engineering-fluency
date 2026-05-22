@@ -30,7 +30,7 @@ export class CredentialService {
 	 * Get the secret storage key for a storage account's shared key.
 	 */
 	private getSharedKeySecretStorageKey(storageAccount: string): string {
-		return `copilotTokenTracker.backend.storageSharedKey:${storageAccount}`;
+		return `aiEngineeringFluency.backend.storageSharedKey:${storageAccount}`;
 	}
 
 	/**

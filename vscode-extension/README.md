@@ -184,9 +184,9 @@ The extension can also upload your local session log files to Azure Blob Storage
 To enable log file uploads:
 ```json
 {
-  "copilotTokenTracker.backend.blobUploadEnabled": true,
-  "copilotTokenTracker.backend.blobContainerName": "copilot-session-logs",
-  "copilotTokenTracker.backend.blobUploadFrequencyHours": 24
+  "aiEngineeringFluency.backend.blobUploadEnabled": true,
+  "aiEngineeringFluency.backend.blobContainerName": "copilot-session-logs",
+  "aiEngineeringFluency.backend.blobUploadFrequencyHours": 24
 }
 ```
 

@@ -8504,7 +8504,40 @@ async function migrateSettingsIfNeeded(context: vscode.ExtensionContext, log: (m
   await context.globalState.update(SETTINGS_MIGRATION_DONE_KEY, true);
 }
 
-const NEW_EXTENSION_ID = 'RobBos.ai-engineering-fluency';
+const SECRETS_MIGRATION_DONE_KEY = 'secretsMigrationFromCopilotTokenTrackerDone';
+
+/**
+ * One-time migration: copies any stored shared key secret from the old
+ * `copilotTokenTracker.backend.storageSharedKey:*` SecretStorage key to the new
+ * `aiEngineeringFluency.backend.storageSharedKey:*` key.
+ *
+ * Uses globalState to record completion so the migration only runs once.
+ */
+async function migrateSecretsIfNeeded(context: vscode.ExtensionContext, log: (m: string) => void): Promise<void> {
+  if (context.globalState.get<boolean>(SECRETS_MIGRATION_DONE_KEY)) {
+    return;
+  }
+
+  try {
+    const storageAccount = vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('backend.storageAccount', '');
+    if (storageAccount) {
+      const oldKey = `copilotTokenTracker.backend.storageSharedKey:${storageAccount}`;
+      const newKey = `aiEngineeringFluency.backend.storageSharedKey:${storageAccount}`;
+      const existingSecret = await context.secrets.get(oldKey);
+      if (existingSecret) {
+        await context.secrets.store(newKey, existingSecret);
+        await context.secrets.delete(oldKey);
+        log(`Migrated shared key secret for storage account '${storageAccount}' to new key name.`);
+      }
+    }
+  } catch (error) {
+    log(`Error migrating secrets: ${error}`);
+  }
+
+  await context.globalState.update(SECRETS_MIGRATION_DONE_KEY, true);
+}
+
+
 const LEGACY_EXTENSION_ID = 'RobBos.copilot-token-tracker';
 
 /**
@@ -8760,6 +8793,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<AiFlue
   // Migrate settings from the old copilotTokenTracker namespace to aiEngineeringFluency.
   // Run before any other settings are read so the new keys are populated first.
   await migrateSettingsIfNeeded(context, (m) => tokenTracker.log(m));
+
+  // Migrate any stored shared key secrets from the old key name to the new key name.
+  await migrateSecretsIfNeeded(context, (m) => tokenTracker.log(m));
 
   // If the legacy extension is also installed, nudge the user to uninstall it.
   // Fire-and-forget: don't block activation on the user's response.

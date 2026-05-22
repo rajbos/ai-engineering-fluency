@@ -8,9 +8,9 @@ Add to your VS Code `settings.json`:
 
 ```json
 {
-  "copilotTokenTracker.backend.enabled": true,
-  "copilotTokenTracker.backend.storageAccount": "your-storage-account",
-  "copilotTokenTracker.backend.blobUploadEnabled": true
+  "aiEngineeringFluency.backend.enabled": true,
+  "aiEngineeringFluency.backend.storageAccount": "your-storage-account",
+  "aiEngineeringFluency.backend.blobUploadEnabled": true
 }
 ```
 

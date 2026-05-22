@@ -77,9 +77,9 @@ In VS Code settings (JSON):
 
 ```json
 {
-  "copilotTokenTracker.backend.enabled": true,
-  "copilotTokenTracker.backend.backend": "sharingServer",
-  "copilotTokenTracker.backend.sharingServer.endpointUrl": "https://your-server.example.com"
+  "aiEngineeringFluency.backend.enabled": true,
+  "aiEngineeringFluency.backend.backend": "sharingServer",
+  "aiEngineeringFluency.backend.sharingServer.endpointUrl": "https://your-server.example.com"
 }
 ```
 

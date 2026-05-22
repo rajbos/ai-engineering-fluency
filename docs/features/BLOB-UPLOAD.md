@@ -13,7 +13,7 @@ The Copilot Token Tracker extension can upload your local GitHub Copilot session
 ### Prerequisites
 
 - Azure Storage account configured in extension settings
-- Backend sync enabled (`copilotTokenTracker.backend.enabled: true`)
+- Backend sync enabled (`aiEngineeringFluency.backend.enabled: true`)
 - Appropriate Azure permissions:
   - **Storage Blob Data Contributor** (for uploading)
   - **Storage Blob Data Reader** (for downloading)
@@ -24,12 +24,12 @@ Add these settings to your VS Code `settings.json`:
 
 ```json
 {
-  "copilotTokenTracker.backend.enabled": true,
-  "copilotTokenTracker.backend.storageAccount": "your-storage-account-name",
-  "copilotTokenTracker.backend.blobUploadEnabled": true,
-  "copilotTokenTracker.backend.blobContainerName": "copilot-session-logs",
-  "copilotTokenTracker.backend.blobUploadFrequencyHours": 24,
-  "copilotTokenTracker.backend.blobCompressFiles": true
+  "aiEngineeringFluency.backend.enabled": true,
+  "aiEngineeringFluency.backend.storageAccount": "your-storage-account-name",
+  "aiEngineeringFluency.backend.blobUploadEnabled": true,
+  "aiEngineeringFluency.backend.blobContainerName": "copilot-session-logs",
+  "aiEngineeringFluency.backend.blobUploadFrequencyHours": 24,
+  "aiEngineeringFluency.backend.blobCompressFiles": true
 }
 ```
 
@@ -263,8 +263,8 @@ If operating in the EU or with EU users:
 **Check settings:**
 ```json
 {
-  "copilotTokenTracker.backend.enabled": true,
-  "copilotTokenTracker.backend.blobUploadEnabled": true
+  "aiEngineeringFluency.backend.enabled": true,
+  "aiEngineeringFluency.backend.blobUploadEnabled": true
 }
 ```
 

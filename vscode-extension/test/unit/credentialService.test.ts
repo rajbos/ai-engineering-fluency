@@ -64,7 +64,7 @@ test('getBackendSecretsToRedactForError returns stored key when available', asyn
 	(vscode as any).__mock.reset();
 	const ctx = makeContext();
 	const svc = new CredentialService(ctx);
-	await ctx.secrets.store('copilotTokenTracker.backend.storageSharedKey:sa', 'secret');
+	await ctx.secrets.store('aiEngineeringFluency.backend.storageSharedKey:sa', 'secret');
 	const secrets = await svc.getBackendSecretsToRedactForError(sharedKeySettings);
 	assert.deepEqual(secrets, ['secret']);
 });
@@ -106,7 +106,7 @@ test('clearStoredStorageSharedKey deletes the stored key', async () => {
 	(vscode as any).__mock.reset();
 	const ctx = makeContext();
 	const svc = new CredentialService(ctx);
-	await ctx.secrets.store('copilotTokenTracker.backend.storageSharedKey:sa', 'mykey');
+	await ctx.secrets.store('aiEngineeringFluency.backend.storageSharedKey:sa', 'mykey');
 	// Verify it exists
 	const before = await svc.getStoredStorageSharedKey('sa');
 	assert.equal(before, 'mykey');
@@ -126,7 +126,7 @@ test('clearStoredStorageSharedKey throws when SecretStorage is unavailable', asy
 test('getBackendDataPlaneCredentials returns existing shared key without prompting', async () => {
 	(vscode as any).__mock.reset();
 	const ctx = makeContext();
-	await ctx.secrets.store('copilotTokenTracker.backend.storageSharedKey:sa', 'preexisting-key');
+	await ctx.secrets.store('aiEngineeringFluency.backend.storageSharedKey:sa', 'preexisting-key');
 	const svc = new CredentialService(ctx);
 	const creds = await svc.getBackendDataPlaneCredentials(sharedKeySettings);
 	assert.ok(creds);

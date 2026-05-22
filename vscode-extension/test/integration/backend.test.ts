@@ -67,7 +67,7 @@ suite('Extension Test Suite', () => {
 
 			const json = JSON.stringify(payload);
 			assert.ok(!json.includes('storageSharedKey'), 'Payload must not mention SecretStorage key names');
-			assert.ok(!json.includes('copilotTokenTracker.backend.storageSharedKey'), 'Payload must not contain SecretStorage key prefix');
+			assert.ok(!json.includes('aiEngineeringFluency.backend.storageSharedKey'), 'Payload must not contain SecretStorage key prefix');
 			assert.ok(!json.includes('backend.storageSharedKey'), 'Payload must not contain config key name for shared key');
 		});
 		});
