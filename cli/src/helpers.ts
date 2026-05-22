@@ -50,7 +50,10 @@ const toolNameMap = toolNamesData as { [key: string]: string };
 /** Logging functions for the CLI context */
 const log = (msg: string) => { /* quiet by default */ };
 const warn = (msg: string) => { /* quiet by default */ };
-const error = (msg: string, err?: any) => console.error(chalk.red(msg), err || '');
+const error = (msg: string, err?: unknown) => {
+	const errMsg = err instanceof Error ? err.message : (err !== undefined ? String(err) : '');
+	console.error(chalk.red(msg), errMsg);
+};
 
 /** Synchronous lazy-initialized ecosystem registry — created once on first use. */
 let _ecosystems: IEcosystemAdapter[] | null = null;
