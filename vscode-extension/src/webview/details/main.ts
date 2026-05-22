@@ -339,14 +339,19 @@ thead.append(headerRow);
 table.append(thead);
 
 const tbody = document.createElement('tbody');
+const sumInput  = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.inputTokens,  0);
+const sumOutput = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.outputTokens, 0);
+const hasActual = (p: PeriodStats) => (p.actualTokens || 0) > 0;
 const rows: Array<{ label: string; labelTooltip?: string; icon: string; color?: string; today: string; last30Days: string; lastMonth: string; projected: string }> = [
 { label: 'Tokens (total)', icon: '🟣', color: '#c37bff', today: formatCompact(stats.today.tokens), last30Days: formatCompact(stats.last30Days.tokens), lastMonth: formatCompact(stats.lastMonth.tokens), projected: formatCompact(projections.projectedTokens) },
-{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },
-{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: (stats.today.actualTokens || 0) > 0 ? formatPercent(((stats.today.actualTokens - stats.today.estimatedTokens) / stats.today.actualTokens) * 100) : '—', last30Days: (stats.last30Days.actualTokens || 0) > 0 ? formatPercent(((stats.last30Days.actualTokens - stats.last30Days.estimatedTokens) / stats.last30Days.actualTokens) * 100) : '—', lastMonth: (stats.lastMonth.actualTokens || 0) > 0 ? formatPercent(((stats.lastMonth.actualTokens - stats.lastMonth.estimatedTokens) / stats.lastMonth.actualTokens) * 100) : '—', projected: '—' },
-{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
+{ label: 'Input tokens', icon: '⬆️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumInput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumInput(stats.last30Days)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumInput(stats.lastMonth)) : '—', projected: '—' },
+{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumOutput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumOutput(stats.last30Days)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumOutput(stats.lastMonth)) : '—', projected: '—' },
 ...((stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.lastMonth.cachedTokens)
 ? [{ label: 'Cached tokens', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }]
 : []),
+{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },
+{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: hasActual(stats.today) ? formatPercent(((stats.today.actualTokens - stats.today.estimatedTokens) / stats.today.actualTokens) * 100) : '—', last30Days: hasActual(stats.last30Days) ? formatPercent(((stats.last30Days.actualTokens - stats.last30Days.estimatedTokens) / stats.last30Days.actualTokens) * 100) : '—', lastMonth: hasActual(stats.lastMonth) ? formatPercent(((stats.lastMonth.actualTokens - stats.lastMonth.estimatedTokens) / stats.lastMonth.actualTokens) * 100) : '—', projected: '—' },
+{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
 {
 label: 'Estimated cost (UBB)',
 labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.',
