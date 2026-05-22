@@ -24,27 +24,43 @@ const IDENTITY_VALIDATION = {
 	ENTRA_OBJECT_ID_REGEX: /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
 };
 
+type AliasValidator = (alias: string) => string | null;
+
+function runValidators(value: string, validators: readonly AliasValidator[]): string | null {
+	for (const validator of validators) {
+		const error = validator(value);
+		if (error !== null) {
+			return error;
+		}
+	}
+	return null;
+}
+
+const TEAM_ALIAS_VALIDATORS: readonly AliasValidator[] = [
+	(alias) => !alias
+		? ValidationMessages.required('Team alias', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.')
+		: null,
+	(alias) => alias.length > IDENTITY_VALIDATION.MAX_TEAM_ALIAS_LENGTH
+		? `Team alias is too long (maximum ${IDENTITY_VALIDATION.MAX_TEAM_ALIAS_LENGTH} characters). Use a shorter handle like "Alex-Dev".`
+		: null,
+	(alias) => alias.includes('@')
+		? `Team alias cannot contain @ symbol (looks like an email). Use a handle like "Alex-Dev" instead. ${ValidationMessages.piiWarning('Do not use email addresses.')}`
+		: null,
+	(alias) => alias.includes(' ')
+		? `Team alias cannot contain spaces (looks like a display name). Use dashes instead. Example: "Alex-Dev". ${ValidationMessages.piiWarning('Do not use real names.')}`
+		: null,
+	(alias) => !IDENTITY_VALIDATION.TEAM_ALIAS_REGEX.test(alias)
+		? ValidationMessages.format('Team alias', 'use only letters, numbers, and dashes', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.')
+		: null,
+	(alias) => IDENTITY_VALIDATION.COMMON_NAME_PATTERNS.test(alias)
+		? `Team alias "${alias}" looks like a real name or common identifier. Use a non-identifying handle like "Team-Frontend" or "QA-Lead".`
+		: null,
+];
+
 export function validateTeamAlias(input: string): TeamAliasValidationResult {
 	const alias = (input ?? '').trim().toLowerCase();
-	if (!alias) {
-		return invalidResult(ValidationMessages.required('Team alias', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.'));
-	}
-	if (alias.length > IDENTITY_VALIDATION.MAX_TEAM_ALIAS_LENGTH) {
-		return invalidResult(`Team alias is too long (maximum ${IDENTITY_VALIDATION.MAX_TEAM_ALIAS_LENGTH} characters). Use a shorter handle like "Alex-Dev".`);
-	}
-	if (alias.includes('@')) {
-		return invalidResult(`Team alias cannot contain @ symbol (looks like an email). Use a handle like "Alex-Dev" instead. ${ValidationMessages.piiWarning('Do not use email addresses.')}`);
-	}
-	if (alias.includes(' ')) {
-		return invalidResult(`Team alias cannot contain spaces (looks like a display name). Use dashes instead. Example: "Alex-Dev". ${ValidationMessages.piiWarning('Do not use real names.')}`);
-	}
-	if (!IDENTITY_VALIDATION.TEAM_ALIAS_REGEX.test(alias)) {
-		return invalidResult(ValidationMessages.format('Team alias', 'use only letters, numbers, and dashes', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.'));
-	}
-	if (IDENTITY_VALIDATION.COMMON_NAME_PATTERNS.test(alias)) {
-		return invalidResult(`Team alias "${alias}" looks like a real name or common identifier. Use a non-identifying handle like "Team-Frontend" or "QA-Lead".`);
-	}
-	return validResult({ alias });
+	const error = runValidators(alias, TEAM_ALIAS_VALIDATORS);
+	return error !== null ? invalidResult(error) : validResult({ alias });
 }
 
 export interface JwtClaims {
