@@ -6,17 +6,31 @@ export type BackendUserIdentityMode = 'pseudonymous' | 'teamAlias' | 'entraObjec
 
 export type TeamAliasValidationResult = ValidationResult<{ alias: string }>;
 
-const TEAM_ALIAS_REGEX = /^[a-zA-Z0-9-]+$/;
-const MAX_TEAM_ALIAS_LENGTH = 32;
-const COMMON_NAME_PATTERNS = /\b(john|jane|smith|doe|admin|user|dev|test|demo)\b/i;
+/**
+ * Validation rules for user identity inputs.
+ * Centralises all constraints so they are easy to audit and adjust together.
+ */
+const IDENTITY_VALIDATION = {
+	/** Allows only alphanumeric characters and dashes — no spaces, underscores, or special chars. */
+	TEAM_ALIAS_REGEX: /^[a-zA-Z0-9-]+$/,
+
+	/** Maximum number of characters permitted in a team alias to keep storage keys compact. */
+	MAX_TEAM_ALIAS_LENGTH: 32,
+
+	/** Word-boundary pattern that rejects aliases containing common first/last names or role words that could identify a real person. */
+	COMMON_NAME_PATTERNS: /\b(john|jane|smith|doe|admin|user|dev|test|demo)\b/i,
+
+	/** Standard RFC 4122 UUID / GUID format required for Entra Object ID values. */
+	ENTRA_OBJECT_ID_REGEX: /^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/,
+};
 
 export function validateTeamAlias(input: string): TeamAliasValidationResult {
 	const alias = (input ?? '').trim().toLowerCase();
 	if (!alias) {
 		return invalidResult(ValidationMessages.required('Team alias', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.'));
 	}
-	if (alias.length > MAX_TEAM_ALIAS_LENGTH) {
-		return invalidResult(`Team alias is too long (maximum ${MAX_TEAM_ALIAS_LENGTH} characters). Use a shorter handle like "Alex-Dev".`);
+	if (alias.length > IDENTITY_VALIDATION.MAX_TEAM_ALIAS_LENGTH) {
+		return invalidResult(`Team alias is too long (maximum ${IDENTITY_VALIDATION.MAX_TEAM_ALIAS_LENGTH} characters). Use a shorter handle like "Alex-Dev".`);
 	}
 	if (alias.includes('@')) {
 		return invalidResult(`Team alias cannot contain @ symbol (looks like an email). Use a handle like "Alex-Dev" instead. ${ValidationMessages.piiWarning('Do not use email addresses.')}`);
@@ -24,10 +38,10 @@ export function validateTeamAlias(input: string): TeamAliasValidationResult {
 	if (alias.includes(' ')) {
 		return invalidResult(`Team alias cannot contain spaces (looks like a display name). Use dashes instead. Example: "Alex-Dev". ${ValidationMessages.piiWarning('Do not use real names.')}`);
 	}
-	if (!TEAM_ALIAS_REGEX.test(alias)) {
+	if (!IDENTITY_VALIDATION.TEAM_ALIAS_REGEX.test(alias)) {
 		return invalidResult(ValidationMessages.format('Team alias', 'use only letters, numbers, and dashes', 'Alex-Dev') + ' ' + ValidationMessages.piiWarning('Do not use email addresses or real names.'));
 	}
-	if (COMMON_NAME_PATTERNS.test(alias)) {
+	if (IDENTITY_VALIDATION.COMMON_NAME_PATTERNS.test(alias)) {
 		return invalidResult(`Team alias "${alias}" looks like a real name or common identifier. Use a non-identifying handle like "Team-Frontend" or "QA-Lead".`);
 	}
 	return validResult({ alias });
@@ -107,7 +121,7 @@ export function resolveUserIdentityForSync(args: {
 	if (args.userIdentityMode === 'entraObjectId') {
 		const id = (args.configuredUserId ?? '').trim();
 		// Keep it strict: objectId should be a GUID.
-		if (!/^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$/.test(id)) {
+		if (!IDENTITY_VALIDATION.ENTRA_OBJECT_ID_REGEX.test(id)) {
 			return {};
 		}
 		return { userId: id, userKeyType: 'entraObjectId' };
