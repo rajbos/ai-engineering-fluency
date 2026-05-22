@@ -38,7 +38,7 @@ export const allCommand = new Command('all')
 
 		if (files.length === 0) {
 			const empty = {
-				details: createEmptyDetailsPayload(now),
+			details: createEmptyDetailsPayload(now),
 				chart:   createEmptyChartPayload(now),
 				usage:   createEmptyUsageAnalysisPayload(now),
 				fluency: createEmptyFluencyPayload(),
