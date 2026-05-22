@@ -2,6 +2,23 @@ import type { DailyTokenStats, ChartDataPayload, ModelUsage } from './types';
 import { addModelUsage } from './statsHelpers';
 import { getModelDisplayName } from './webview/shared/modelUtils';
 
+/** Chart.js-compatible colour palette for dataset series. */
+export const MODEL_COLORS = [
+	{ bg: "rgba(54, 162, 235, 0.6)", border: "rgba(54, 162, 235, 1)" },
+	{ bg: "rgba(255, 99, 132, 0.6)", border: "rgba(255, 99, 132, 1)" },
+	{ bg: "rgba(75, 192, 192, 0.6)", border: "rgba(75, 192, 192, 1)" },
+	{ bg: "rgba(153, 102, 255, 0.6)", border: "rgba(153, 102, 255, 1)" },
+	{ bg: "rgba(255, 159, 64, 0.6)", border: "rgba(255, 159, 64, 1)" },
+	{ bg: "rgba(255, 205, 86, 0.6)", border: "rgba(255, 205, 86, 1)" },
+	{ bg: "rgba(201, 203, 207, 0.6)", border: "rgba(201, 203, 207, 1)" },
+	{ bg: "rgba(100, 181, 246, 0.6)", border: "rgba(100, 181, 246, 1)" },
+];
+
+/** Returns the colour entry for the given series index, wrapping around the palette. */
+export function getModelColor(index: number): { bg: string; border: string } {
+	return MODEL_COLORS[index % MODEL_COLORS.length];
+}
+
 /** Dependencies injected into buildChartData to decouple it from extension state. */
 export interface ChartDataBuilderDeps {
 	/** Format a raw repository URL into a short display name (e.g. "owner/repo"). */
@@ -22,17 +39,6 @@ export interface ChartDataBuilderDeps {
  */
 export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDataBuilderDeps): ChartDataPayload {
 	const now = deps.now ?? new Date();
-
-	const modelColors = [
-		{ bg: "rgba(54, 162, 235, 0.6)", border: "rgba(54, 162, 235, 1)" },
-		{ bg: "rgba(255, 99, 132, 0.6)", border: "rgba(255, 99, 132, 1)" },
-		{ bg: "rgba(75, 192, 192, 0.6)", border: "rgba(75, 192, 192, 1)" },
-		{ bg: "rgba(153, 102, 255, 0.6)", border: "rgba(153, 102, 255, 1)" },
-		{ bg: "rgba(255, 159, 64, 0.6)", border: "rgba(255, 159, 64, 1)" },
-		{ bg: "rgba(255, 205, 86, 0.6)", border: "rgba(255, 205, 86, 1)" },
-		{ bg: "rgba(201, 203, 207, 0.6)", border: "rgba(201, 203, 207, 1)" },
-		{ bg: "rgba(100, 181, 246, 0.6)", border: "rgba(100, 181, 246, 1)" },
-	];
 
 	const fmtKey = (d: Date) =>
 		`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -84,7 +90,7 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 		const otherModels = sortedModels.slice(5);
 
 		const modelDatasets = topModels.map((model, idx) => {
-			const color = modelColors[idx % modelColors.length];
+			const color = getModelColor(idx);
 			return {
 				label: getModelDisplayName(model),
 				data: entries.map(e => { const u = e.modelUsage[model]; return u ? u.inputTokens + u.outputTokens : 0; }),
@@ -107,7 +113,7 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 		const allEditors = new Set<string>();
 		entries.forEach(e => Object.keys(e.editorUsage).forEach(ed => allEditors.add(ed)));
 		const editorDatasets = Array.from(allEditors).map((editor, idx) => {
-			const color = modelColors[idx % modelColors.length];
+			const color = getModelColor(idx);
 			return {
 				label: editor,
 				data: entries.map(e => e.editorUsage[editor]?.tokens || 0),
@@ -120,7 +126,7 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 			.filter(r => r !== 'Unknown')
 			.forEach(r => allRepos.add(r)));
 		const repositoryDatasets = Array.from(allRepos).map((repo, idx) => {
-			const color = modelColors[idx % modelColors.length];
+			const color = getModelColor(idx);
 			return {
 				label: deps.getRepoDisplayName(repo),
 				fullRepo: repo,
