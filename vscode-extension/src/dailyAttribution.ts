@@ -100,11 +100,17 @@ class JsonDailyFractionStrategy implements DailyFractionStrategy {
 	}
 }
 
+/** Parse and validate a raw timestamp value. Returns a Date or null if invalid/absent. */
+function parseAndValidateTimestamp(raw: unknown): Date | null {
+	if (raw === undefined || raw === null) { return null; }
+	const date = new Date(raw as string | number);
+	return isNaN(date.getTime()) ? null : date;
+}
+
 /** Record a timestamp into a day-count map, ignoring null/undefined/invalid values. */
 function recordTimestamp(ts: unknown, dayCounts: Record<string, number>): void {
-	if (ts === undefined || ts === null) { return; }
-	const date = new Date(ts as string | number);
-	if (!isNaN(date.getTime())) {
+	const date = parseAndValidateTimestamp(ts);
+	if (date !== null) {
 		const key = date.toISOString().slice(0, 10);
 		dayCounts[key] = (dayCounts[key] || 0) + 1;
 	}
