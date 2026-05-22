@@ -11,6 +11,12 @@ import { StorageSharedKeyCredential } from '@azure/storage-blob';
 import type { BackendSettings } from '../settings';
 import { shouldPromptToSetSharedKey } from '../settings';
 
+/** Namespace prefix used for all secret storage keys in this extension. */
+const CREDENTIAL_NAMESPACE = 'copilotTokenTracker.backend';
+
+/** Secret storage key segment for the storage account shared key. */
+const SHARED_KEY_STORAGE_KEY = 'storageSharedKey';
+
 /**
  * CredentialService manages authentication credentials for Azure backend resources.
  */
@@ -30,7 +36,7 @@ export class CredentialService {
 	 * Get the secret storage key for a storage account's shared key.
 	 */
 	private getSharedKeySecretStorageKey(storageAccount: string): string {
-		return `aiEngineeringFluency.backend.storageSharedKey:${storageAccount}`;
+		return `${CREDENTIAL_NAMESPACE}.${SHARED_KEY_STORAGE_KEY}:${storageAccount}`;
 	}
 
 	/**
