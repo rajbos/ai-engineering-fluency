@@ -8537,7 +8537,7 @@ async function migrateSecretsIfNeeded(context: vscode.ExtensionContext, log: (m:
   await context.globalState.update(SECRETS_MIGRATION_DONE_KEY, true);
 }
 
-
+const NEW_EXTENSION_ID = 'RobBos.ai-engineering-fluency';
 const LEGACY_EXTENSION_ID = 'RobBos.copilot-token-tracker';
 
 /**
