@@ -2,6 +2,16 @@
 
 All notable changes to the VS Code extension will be documented in this file.
 
+## [0.11.3] - 2026-05-22
+
+### Maintenance
+- Patch version bump
+
+## [0.11.2] - 2026-05-22
+
+### Bug Fixes
+- fix(vscode): use getConfiguration() with full key for statusBar update() calls (#1046)
+
 ## [0.11.1] - 2026-05-22
 
 ### Bug Fixes
