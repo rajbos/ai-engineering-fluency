@@ -38,6 +38,90 @@ export const STAGE_LABELS: Record<Stage, string> = {
 	4: 'Stage 4: AI Strategist',
 };
 
+/**
+ * Centralised threshold configuration for all maturity/fluency stage promotions.
+ * Change a value here to adjust the bar for that stage across every scoring function
+ * (both the per-session `_score*` functions and `calculateFluencyScoreForTeamMember`).
+ */
+export const STAGE_THRESHOLDS = {
+	promptEngineering: {
+		/** Minimum total interactions (ask + edit + agent + cli) to reach Stage 2. */
+		stage2MinInteractions: 5,
+		/** Minimum avg turns per session to promote to at least Stage 2. */
+		stage2MinAvgTurns: 3,
+		/** Minimum avg turns per session to promote to at least Stage 3. */
+		stage3MinAvgTurns: 5,
+		/** Minimum total interactions (alongside slash commands or agent mode) to reach Stage 3. */
+		stage3MinInteractions: 30,
+		/** Minimum slash commands used (alongside stage3MinInteractions) to qualify for Stage 3. */
+		stage3MinSlashCommands: 2,
+		/** Minimum total interactions (alongside agent mode and model switching) to reach Stage 4. */
+		stage4MinInteractions: 100,
+		/** Minimum slash commands used as an alternative to model switching to qualify for Stage 4. */
+		stage4MinSlashCommands: 3,
+	},
+	contextEngineering: {
+		/** Minimum total context refs (file + selection + symbol + codebase + workspace) to reach Stage 2. */
+		stage2MinTotalRefs: 1,
+		/** Minimum distinct reference types used to reach Stage 3. */
+		stage3MinRefTypes: 3,
+		/** Minimum total context references to reach Stage 3. */
+		stage3MinTotalRefs: 10,
+		/** Minimum distinct reference types used to reach Stage 4. */
+		stage4MinRefTypes: 5,
+		/** Minimum total context references to reach Stage 4. */
+		stage4MinTotalRefs: 30,
+	},
+	agentic: {
+		/** Minimum avg files per edit session to promote to at least Stage 3. */
+		stage3MinAvgFilesPerSession: 3,
+		/** Minimum agent/CLI interactions (alongside non-auto tools) to reach Stage 3. */
+		stage3MinAgentInteractions: 10,
+		/** Minimum non-automatic tools used (alongside agent interactions) to reach Stage 3. */
+		stage3MinNonAutoTools: 3,
+		/** Minimum agent/CLI interactions (alongside non-auto tools) to reach Stage 4. */
+		stage4MinAgentInteractions: 50,
+		/** Minimum non-automatic tools used (alongside agent interactions) to reach Stage 4. */
+		stage4MinNonAutoTools: 5,
+		/** Minimum multi-file edit sessions (alongside avgFilesPerSession) to promote to Stage 4. */
+		stage4MinMultiFileEdits: 20,
+	},
+	toolUsage: {
+		/** Minimum number of distinct advanced built-in tools used to promote to Stage 3. */
+		stage3MinAdvancedTools: 2,
+		/** Minimum number of distinct MCP servers connected to reach Stage 4. */
+		stage4MinMcpServers: 2,
+	},
+	customization: {
+		/** Minimum fraction of repos with customization to reach Stage 3 (requires stage3MinCustomizedRepos). */
+		stage3MinCustomizationRate: 0.3,
+		/** Minimum number of repos with customization to reach Stage 3 (requires stage3MinCustomizationRate). */
+		stage3MinCustomizedRepos: 2,
+		/** Minimum fraction of repos with customization to reach Stage 4 (requires stage4MinCustomizedRepos). */
+		stage4MinCustomizationRate: 0.7,
+		/** Minimum number of repos with customization to reach Stage 4 (requires stage4MinCustomizationRate). */
+		stage4MinCustomizedRepos: 3,
+		/** Minimum number of distinct AI models used to promote to at least Stage 3. */
+		stage3MinUniqueModels: 3,
+		/** Minimum distinct models used (alongside stage4MinCustomizedRepos) to reach Stage 4. */
+		stage4MinUniqueModels: 5,
+	},
+	workflowIntegration: {
+		/** Minimum sessions in the scoring period to reach Stage 2. */
+		stage2MinSessions: 3,
+		/** Minimum code-block apply rate (percentage) to promote to at least Stage 2. */
+		stage2MinApplyRatePct: 50,
+		/** Minimum number of distinct usage modes to promote to at least Stage 3. */
+		stage3MinModesUsed: 2,
+		/** Minimum total context references to be counted as "explicit context" evidence. */
+		hasExplicitContextMinRefs: 10,
+		/** Minimum total context references to promote to at least Stage 3. */
+		stage3MinContextRefs: 20,
+		/** Minimum sessions (alongside modes and context) to reach Stage 4. */
+		stage4MinSessions: 15,
+	},
+} as const;
+
 /** Computes the median stage from an array of category stage scores. */
 function computeMedianStage(stages: Stage[]): Stage {
 	const sorted = [...stages].sort((a, b) => a - b);
@@ -85,16 +169,16 @@ function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
 		if (p.conversationPatterns.multiTurnSessions > 0) {
 			evidence.push(`${fmt(p.conversationPatterns.multiTurnSessions)} multi-turn sessions (${multiTurnRate}%)`);
 		}
-		if (p.conversationPatterns.avgTurnsPerSession >= 3) {
+		if (p.conversationPatterns.avgTurnsPerSession >= STAGE_THRESHOLDS.promptEngineering.stage2MinAvgTurns) {
 			evidence.push(`Avg ${p.conversationPatterns.avgTurnsPerSession.toFixed(1)} exchanges per session`);
 			stage = promoteStage(stage, 2);
 		}
-		if (p.conversationPatterns.avgTurnsPerSession >= 5) {
+		if (p.conversationPatterns.avgTurnsPerSession >= STAGE_THRESHOLDS.promptEngineering.stage3MinAvgTurns) {
 			stage = promoteStage(stage, 3);
 		}
 	}
 
-	if (totalInteractions >= 5) { stage = 2; }
+	if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage2MinInteractions) { stage = 2; }
 
 	const usedSlashCommands = getUsedSlashCommands(p.toolCalls.byTool);
 	if (usedSlashCommands.length > 0) { evidence.push(`Used slash commands: /${usedSlashCommands.join(', /')}`); }
@@ -102,8 +186,8 @@ function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
 	const hasModelSwitching = p.modelSwitching.mixedTierSessions > 0 || p.modelSwitching.switchingFrequency > 0;
 	const hasAgentMode = p.modeUsage.agent > 0 || p.modeUsage.cli > 0;
 
-	if (totalInteractions >= 30 && (usedSlashCommands.length >= 2 || hasAgentMode)) { stage = 3; }
-	if (totalInteractions >= 100 && hasAgentMode && (hasModelSwitching || usedSlashCommands.length >= 3)) { stage = 4; }
+	if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage3MinInteractions && (usedSlashCommands.length >= STAGE_THRESHOLDS.promptEngineering.stage3MinSlashCommands || hasAgentMode)) { stage = 3; }
+	if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage4MinInteractions && hasAgentMode && (hasModelSwitching || usedSlashCommands.length >= STAGE_THRESHOLDS.promptEngineering.stage4MinSlashCommands)) { stage = 4; }
 
 	if (hasModelSwitching) {
 		evidence.push(`Switched models in ${Math.round(p.modelSwitching.switchingFrequency)}% of sessions`);
@@ -115,12 +199,12 @@ function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
 	if (stage < 2) { tips.push('Try asking Copilot a question using the Chat panel'); }
 	if (stage < 3) {
 		if (!hasAgentMode) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-file changes'); }
-		if (usedSlashCommands.length < 2) { tips.push('Use [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /fix, or /tests to give structured prompts'); }
+		if (usedSlashCommands.length < STAGE_THRESHOLDS.promptEngineering.stage3MinSlashCommands) { tips.push('Use [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /fix, or /tests to give structured prompts'); }
 	}
 	if (stage < 4) {
 		if (!hasAgentMode) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for autonomous, multi-step coding tasks'); }
 		if (!hasModelSwitching) { tips.push('Experiment with [different models](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_choose-a-language-model) for different tasks - use fast models for simple queries and reasoning models for complex problems'); }
-		if (usedSlashCommands.length < 3 && hasAgentMode && hasModelSwitching) { tips.push('Explore more [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /tests, or /doc to diversify your prompting'); }
+		if (usedSlashCommands.length < STAGE_THRESHOLDS.promptEngineering.stage4MinSlashCommands && hasAgentMode && hasModelSwitching) { tips.push('Explore more [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /tests, or /doc to diversify your prompting'); }
 	}
 
 	return { stage, evidence, tips };
@@ -152,9 +236,9 @@ function _scoreContextEngineering(p: UsageAnalysisPeriod): CategoryScore {
 	if (refs.terminalLastCommand > 0) { evidence.push(`${fmt(refs.terminalLastCommand)} #terminalLastCommand references`); }
 	if (refs.terminalSelection > 0) { evidence.push(`${fmt(refs.terminalSelection)} #terminalSelection references`); }
 
-	if (totalContextRefs >= 1) { stage = 2; }
-	if (usedRefTypeCount >= 3 && totalContextRefs >= 10) { stage = 3; }
-	if (usedRefTypeCount >= 5 && totalContextRefs >= 30) { stage = 4; }
+	if (totalContextRefs >= STAGE_THRESHOLDS.contextEngineering.stage2MinTotalRefs) { stage = 2; }
+	if (usedRefTypeCount >= STAGE_THRESHOLDS.contextEngineering.stage3MinRefTypes && totalContextRefs >= STAGE_THRESHOLDS.contextEngineering.stage3MinTotalRefs) { stage = 3; }
+	if (usedRefTypeCount >= STAGE_THRESHOLDS.contextEngineering.stage4MinRefTypes && totalContextRefs >= STAGE_THRESHOLDS.contextEngineering.stage4MinTotalRefs) { stage = 4; }
 
 	const imageRefs = refs.byKind['copilot.image'] || 0;
 	if (imageRefs > 0) {
@@ -165,8 +249,8 @@ function _scoreContextEngineering(p: UsageAnalysisPeriod): CategoryScore {
 	if (stage < 2) { tips.push('Try adding [#file or #selection](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) references to give Copilot more context'); }
 	if (stage < 3) { tips.push('Explore [@workspace, #codebase, and @terminal](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) for broader context'); }
 	if (stage < 4) {
-		const typesStillNeeded = Math.max(0, 5 - usedRefTypeCount);
-		const refsStillNeeded = Math.max(0, 30 - totalContextRefs);
+		const typesStillNeeded = Math.max(0, STAGE_THRESHOLDS.contextEngineering.stage4MinRefTypes - usedRefTypeCount);
+		const refsStillNeeded = Math.max(0, STAGE_THRESHOLDS.contextEngineering.stage4MinTotalRefs - totalContextRefs);
 		const specializedItems = [
 			{ name: 'image attachments', used: imageRefs > 0 },
 			{ name: '#changes', used: refs.changes > 0 },
@@ -187,8 +271,8 @@ function _scoreContextEngineering(p: UsageAnalysisPeriod): CategoryScore {
 				...specializedItems,
 			].filter(i => !i.used).map(i => i.name);
 			const gapParts: string[] = [];
-			if (typesStillNeeded > 0) { gapParts.push(`${fmt(usedRefTypeCount)} of 5 different reference types used`); }
-			if (refsStillNeeded > 0) { gapParts.push(`${fmt(totalContextRefs)} of 30 total references`); }
+			if (typesStillNeeded > 0) { gapParts.push(`${fmt(usedRefTypeCount)} of ${STAGE_THRESHOLDS.contextEngineering.stage4MinRefTypes} different reference types used`); }
+			if (refsStillNeeded > 0) { gapParts.push(`${fmt(totalContextRefs)} of ${STAGE_THRESHOLDS.contextEngineering.stage4MinTotalRefs} total references`); }
 			if (gapParts.length > 0) {
 				const suggest = allTypesNotUsed.slice(0, 3);
 				const suggStr = suggest.length > 0 ? ` — try ${suggest.join(', ')}` : '';
@@ -225,7 +309,7 @@ function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
 			evidence.push(`${fmt(p.editScope.multiFileEdits)} multi-file edit sessions (${multiFileRate}%)`);
 			stage = promoteStage(stage, 2);
 		}
-		if (p.editScope.avgFilesPerSession >= 3) {
+		if (p.editScope.avgFilesPerSession >= STAGE_THRESHOLDS.agentic.stage3MinAvgFilesPerSession) {
 			evidence.push(`Avg ${p.editScope.avgFilesPerSession.toFixed(1)} files per edit session`);
 			stage = promoteStage(stage, 3);
 		}
@@ -237,9 +321,9 @@ function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
 	}
 
 	const nonAutoToolCount = countNonAutoTools(p.toolCalls.byTool);
-	if ((p.modeUsage.agent + p.modeUsage.cli) >= 10 && nonAutoToolCount >= 3) { stage = 3; }
-	if ((p.modeUsage.agent + p.modeUsage.cli) >= 50 && nonAutoToolCount >= 5) { stage = 4; }
-	if (p.editScope && p.editScope.multiFileEdits >= 20 && p.editScope.avgFilesPerSession >= 3) {
+	if ((p.modeUsage.agent + p.modeUsage.cli) >= STAGE_THRESHOLDS.agentic.stage3MinAgentInteractions && nonAutoToolCount >= STAGE_THRESHOLDS.agentic.stage3MinNonAutoTools) { stage = 3; }
+	if ((p.modeUsage.agent + p.modeUsage.cli) >= STAGE_THRESHOLDS.agentic.stage4MinAgentInteractions && nonAutoToolCount >= STAGE_THRESHOLDS.agentic.stage4MinNonAutoTools) { stage = 4; }
+	if (p.editScope && p.editScope.multiFileEdits >= STAGE_THRESHOLDS.agentic.stage4MinMultiFileEdits && p.editScope.avgFilesPerSession >= STAGE_THRESHOLDS.agentic.stage3MinAvgFilesPerSession) {
 		stage = promoteStage(stage, 4);
 	}
 
@@ -284,14 +368,14 @@ function _scoreToolUsage(p: UsageAnalysisPeriod): CategoryScore {
 	const usedAdvanced = Object.keys(advancedToolFriendlyNames).filter(t => (p.toolCalls.byTool[t] || 0) > 0);
 	if (usedAdvanced.length > 0) {
 		evidence.push(`Advanced tools: ${usedAdvanced.map(t => advancedToolFriendlyNames[t]).join(', ')}`);
-		if (usedAdvanced.length >= 2) { stage = promoteStage(stage, 3); }
+		if (usedAdvanced.length >= STAGE_THRESHOLDS.toolUsage.stage3MinAdvancedTools) { stage = promoteStage(stage, 3); }
 	}
 
 	const mcpServers = Object.keys(p.mcpTools.byServer);
 	if (p.mcpTools.total > 0) {
 		evidence.push(`${fmt(p.mcpTools.total)} MCP tool calls across ${mcpServers.length} server(s)`);
 		stage = promoteStage(stage, 3);
-		if (mcpServers.length >= 2) { stage = 4; }
+		if (mcpServers.length >= STAGE_THRESHOLDS.toolUsage.stage4MinMcpServers) { stage = 4; }
 	}
 
 	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) to let Copilot use built-in tools for file operations and terminal commands'); }
@@ -327,12 +411,12 @@ function _scoreCustomization(p: UsageAnalysisPeriod, lastCustomizationMatrix: Wo
 
 	if (totalRepos > 0) { evidence.push(`Worked in ${totalRepos} repositor${totalRepos === 1 ? 'y' : 'ies'}`); }
 	if (reposWithCustomization > 0) { stage = 2; }
-	if (customizationRate >= 0.3 && reposWithCustomization >= 2) { stage = 3; }
-	if (customizationRate >= 0.7 && reposWithCustomization >= 3) { stage = 4; }
+	if (customizationRate >= STAGE_THRESHOLDS.customization.stage3MinCustomizationRate && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage3MinCustomizedRepos) { stage = 3; }
+	if (customizationRate >= STAGE_THRESHOLDS.customization.stage4MinCustomizationRate && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage4MinCustomizedRepos) { stage = 4; }
 
 	const uniqueModels = [...new Set([...p.modelSwitching.standardModels, ...p.modelSwitching.premiumModels])];
-	if (uniqueModels.length >= 3) {
-		const hasStage4Models = uniqueModels.length >= 5 && reposWithCustomization >= 3;
+	if (uniqueModels.length >= STAGE_THRESHOLDS.customization.stage3MinUniqueModels) {
+		const hasStage4Models = uniqueModels.length >= STAGE_THRESHOLDS.customization.stage4MinUniqueModels && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage4MinCustomizedRepos;
 		evidence.push(`Used ${uniqueModels.length} different models`);
 		if (hasStage4Models) {
 			stage = 4;
@@ -342,9 +426,9 @@ function _scoreCustomization(p: UsageAnalysisPeriod, lastCustomizationMatrix: Wo
 	}
 
 	if (stage >= 4) {
-		evidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized (70%+ with 3+ repos → Stage 4)`);
+		evidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized (${STAGE_THRESHOLDS.customization.stage4MinCustomizationRate * 100}%+ with ${STAGE_THRESHOLDS.customization.stage4MinCustomizedRepos}+ repos → Stage 4)`);
 	} else if (stage >= 3) {
-		evidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized (30%+ with 2+ repos → Stage 3)`);
+		evidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized (${STAGE_THRESHOLDS.customization.stage3MinCustomizationRate * 100}%+ with ${STAGE_THRESHOLDS.customization.stage3MinCustomizedRepos}+ repos → Stage 3)`);
 	} else if (reposWithCustomization > 0) {
 		evidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos with custom instructions or agents.md`);
 	}
@@ -393,12 +477,12 @@ function _scoreWorkflowIntegration(p: UsageAnalysisPeriod): CategoryScore {
 	const tips: string[] = [];
 	let stage: Stage = 1;
 
-	if (p.sessions >= 3) { evidence.push(`${fmt(p.sessions)} sessions in the last 30 days`); stage = 2; }
+	if (p.sessions >= STAGE_THRESHOLDS.workflowIntegration.stage2MinSessions) { evidence.push(`${fmt(p.sessions)} sessions in the last 30 days`); stage = 2; }
 
 	if (p.applyUsage && p.applyUsage.totalCodeBlocks > 0) {
 		const applyRatePercent = Math.round(p.applyUsage.applyRate);
 		evidence.push(`${applyRatePercent}% code block apply rate (${fmt(p.applyUsage.totalApplies)}/${fmt(p.applyUsage.totalCodeBlocks)})`);
-		if (applyRatePercent >= 50) { stage = promoteStage(stage, 2); }
+		if (applyRatePercent >= STAGE_THRESHOLDS.workflowIntegration.stage2MinApplyRatePct) { stage = promoteStage(stage, 2); }
 	}
 
 	if (p.sessionDuration && p.sessionDuration.avgDurationMs > 0) {
@@ -409,29 +493,29 @@ function _scoreWorkflowIntegration(p: UsageAnalysisPeriod): CategoryScore {
 	const totalContextRefs = p.contextReferences.file + p.contextReferences.selection +
 		p.contextReferences.symbol + p.contextReferences.codebase + p.contextReferences.workspace;
 	const modesUsed = [p.modeUsage.ask > 0, p.modeUsage.agent > 0, p.modeUsage.cli > 0].filter(Boolean).length;
-	if (modesUsed >= 2) {
+	if (modesUsed >= STAGE_THRESHOLDS.workflowIntegration.stage3MinModesUsed) {
 		evidence.push(`Uses ${modesUsed} modes (ask/agent/cli)`);
 		stage = promoteStage(stage, 3);
 	}
 
-	const hasExplicitContext = totalContextRefs >= 10;
+	const hasExplicitContext = totalContextRefs >= STAGE_THRESHOLDS.workflowIntegration.hasExplicitContextMinRefs;
 	if (hasExplicitContext) {
 		evidence.push(`${fmt(totalContextRefs)} explicit context references`);
-		if (totalContextRefs >= 20) { stage = promoteStage(stage, 3); }
+		if (totalContextRefs >= STAGE_THRESHOLDS.workflowIntegration.stage3MinContextRefs) { stage = promoteStage(stage, 3); }
 	}
 
-	if (p.sessions >= 15 && modesUsed >= 2 && totalContextRefs >= 20) {
+	if (p.sessions >= STAGE_THRESHOLDS.workflowIntegration.stage4MinSessions && modesUsed >= STAGE_THRESHOLDS.workflowIntegration.stage3MinModesUsed && totalContextRefs >= STAGE_THRESHOLDS.workflowIntegration.stage3MinContextRefs) {
 		stage = 4;
 		evidence.push('Deep integration: regular usage with multi-mode and explicit context');
 	}
 
 	if (stage < 2) { tips.push('Use AI more regularly - even for quick questions'); }
 	if (stage < 3) {
-		if (modesUsed < 2) { tips.push('Combine [ask mode with agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) in your daily workflow'); }
-		if (totalContextRefs < 10) { tips.push('Use explicit [context references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like #file, @workspace, and #selection'); }
+		if (modesUsed < STAGE_THRESHOLDS.workflowIntegration.stage3MinModesUsed) { tips.push('Combine [ask mode with agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) in your daily workflow'); }
+		if (totalContextRefs < STAGE_THRESHOLDS.workflowIntegration.hasExplicitContextMinRefs) { tips.push('Use explicit [context references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like #file, @workspace, and #selection'); }
 	}
 	if (stage < 4) {
-		if (totalContextRefs < 20) { tips.push('Make explicit context a habit - use [#file, @workspace, and other references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) consistently'); }
+		if (totalContextRefs < STAGE_THRESHOLDS.workflowIntegration.stage3MinContextRefs) { tips.push('Make explicit context a habit - use [#file, @workspace, and other references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) consistently'); }
 		tips.push('Make AI part of every coding task: planning, coding, testing, and reviewing');
 	}
 
@@ -508,22 +592,22 @@ export function calculateFluencyScoreForTeamMember(fd: {
     // 1. Prompt Engineering
     let peStage: Stage = 1;
     const usedSlashCommands = getUsedSlashCommands(fd.toolCallsByTool);
-    if (avgTurnsPerSession >= 3) { peStage = promoteStage(peStage, 2); }
-    if (avgTurnsPerSession >= 5) { peStage = promoteStage(peStage, 3); }
-    if (totalInteractions >= 5) { peStage = promoteStage(peStage, 2); }
-    if (totalInteractions >= 30 && (usedSlashCommands.length >= 2 || hasAgentMode)) { peStage = promoteStage(peStage, 3); }
-    if (totalInteractions >= 100 && hasAgentMode && (hasModelSwitching || usedSlashCommands.length >= 3)) { peStage = 4; }
+    if (avgTurnsPerSession >= STAGE_THRESHOLDS.promptEngineering.stage2MinAvgTurns) { peStage = promoteStage(peStage, 2); }
+    if (avgTurnsPerSession >= STAGE_THRESHOLDS.promptEngineering.stage3MinAvgTurns) { peStage = promoteStage(peStage, 3); }
+    if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage2MinInteractions) { peStage = promoteStage(peStage, 2); }
+    if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage3MinInteractions && (usedSlashCommands.length >= STAGE_THRESHOLDS.promptEngineering.stage3MinSlashCommands || hasAgentMode)) { peStage = promoteStage(peStage, 3); }
+    if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage4MinInteractions && hasAgentMode && (hasModelSwitching || usedSlashCommands.length >= STAGE_THRESHOLDS.promptEngineering.stage4MinSlashCommands)) { peStage = 4; }
     if (hasModelSwitching && fd.mixedTierSessions > 0) { peStage = promoteStage(peStage, 3); }
     const peTips: string[] = [];
     if (peStage < 2) { peTips.push("Try asking Copilot a question using the Chat panel"); }
     if (peStage < 3) {
       if (!hasAgentMode) { peTips.push("Try agent mode for multi-file changes"); }
-      if (usedSlashCommands.length < 2) { peTips.push("Use slash commands like /explain, /fix, or /tests for structured prompts"); }
+      if (usedSlashCommands.length < STAGE_THRESHOLDS.promptEngineering.stage3MinSlashCommands) { peTips.push("Use slash commands like /explain, /fix, or /tests for structured prompts"); }
     }
     if (peStage < 4) {
       if (!hasAgentMode) { peTips.push("Try agent mode for autonomous, multi-step coding tasks"); }
       if (!hasModelSwitching) { peTips.push("Experiment with different models — fast models for simple queries, reasoning models for complex problems"); }
-      if (usedSlashCommands.length < 3 && hasAgentMode && hasModelSwitching) { peTips.push("Explore more slash commands like /explain, /tests, or /doc"); }
+      if (usedSlashCommands.length < STAGE_THRESHOLDS.promptEngineering.stage4MinSlashCommands && hasAgentMode && hasModelSwitching) { peTips.push("Explore more slash commands like /explain, /tests, or /doc"); }
     }
 
     // 2. Context Engineering
@@ -533,16 +617,16 @@ export function calculateFluencyScoreForTeamMember(fd: {
       fd.ctxTerminal, fd.ctxVscode, fd.ctxClipboard, fd.ctxChanges,
       fd.ctxProblemsPanel, fd.ctxOutputPanel, fd.ctxTerminalLastCommand, fd.ctxTerminalSelection,
     ].filter(v => v > 0).length;
-    if (totalContextRefs >= 1) { ceStage = 2; }
-    if (usedRefTypeCount >= 3 && totalContextRefs >= 10) { ceStage = 3; }
-    if (usedRefTypeCount >= 5 && totalContextRefs >= 30) { ceStage = 4; }
+    if (totalContextRefs >= STAGE_THRESHOLDS.contextEngineering.stage2MinTotalRefs) { ceStage = 2; }
+    if (usedRefTypeCount >= STAGE_THRESHOLDS.contextEngineering.stage3MinRefTypes && totalContextRefs >= STAGE_THRESHOLDS.contextEngineering.stage3MinTotalRefs) { ceStage = 3; }
+    if (usedRefTypeCount >= STAGE_THRESHOLDS.contextEngineering.stage4MinRefTypes && totalContextRefs >= STAGE_THRESHOLDS.contextEngineering.stage4MinTotalRefs) { ceStage = 4; }
     if ((fd.ctxByKind["copilot.image"] ?? 0) > 0) { ceStage = promoteStage(ceStage, 3); }
     const ceTips: string[] = [];
     if (ceStage < 2) { ceTips.push("Add #file or #selection references to give Copilot more context"); }
     if (ceStage < 3) { ceTips.push("Explore @workspace, #codebase, and @terminal for broader context"); }
     if (ceStage < 4) {
-        const typesStillNeeded = Math.max(0, 5 - usedRefTypeCount);
-        const refsStillNeeded = Math.max(0, 30 - totalContextRefs);
+        const typesStillNeeded = Math.max(0, STAGE_THRESHOLDS.contextEngineering.stage4MinRefTypes - usedRefTypeCount);
+        const refsStillNeeded = Math.max(0, STAGE_THRESHOLDS.contextEngineering.stage4MinTotalRefs - totalContextRefs);
         const specializedItems = [
             { name: 'image attachments', used: (fd.ctxByKind["copilot.image"] ?? 0) > 0 },
             { name: '#changes', used: fd.ctxChanges > 0 },
@@ -564,8 +648,8 @@ export function calculateFluencyScoreForTeamMember(fd: {
                 ...specializedItems,
             ].filter(i => !i.used).map(i => i.name);
             const gapParts: string[] = [];
-            if (typesStillNeeded > 0) { gapParts.push(`${fmt(usedRefTypeCount)} of 5 different reference types used`); }
-            if (refsStillNeeded > 0) { gapParts.push(`${fmt(totalContextRefs)} of 30 total references`); }
+            if (typesStillNeeded > 0) { gapParts.push(`${fmt(usedRefTypeCount)} of ${STAGE_THRESHOLDS.contextEngineering.stage4MinRefTypes} different reference types used`); }
+            if (refsStillNeeded > 0) { gapParts.push(`${fmt(totalContextRefs)} of ${STAGE_THRESHOLDS.contextEngineering.stage4MinTotalRefs} total references`); }
             if (gapParts.length > 0) {
                 const suggest = allTypesNotUsed.slice(0, 3);
                 const suggStr = suggest.length > 0 ? ` — try ${suggest.join(', ')}` : '';
@@ -586,11 +670,11 @@ export function calculateFluencyScoreForTeamMember(fd: {
     let agStage: Stage = 1;
     if (hasAgentMode) { agStage = 2; }
     if (fd.multiFileEdits > 0) { agStage = promoteStage(agStage, 2); }
-    if (avgFilesPerSession >= 3) { agStage = promoteStage(agStage, 3); }
+    if (avgFilesPerSession >= STAGE_THRESHOLDS.agentic.stage3MinAvgFilesPerSession) { agStage = promoteStage(agStage, 3); }
     if (fd.editsAgentCount > 0) { agStage = promoteStage(agStage, 2); }
-    if (fd.agentModeCount >= 10 && nonAutoToolCount >= 3) { agStage = promoteStage(agStage, 3); }
-    if (fd.agentModeCount >= 50 && nonAutoToolCount >= 5) { agStage = 4; }
-    if (fd.multiFileEdits >= 20 && avgFilesPerSession >= 3) { agStage = promoteStage(agStage, 4); }
+    if (fd.agentModeCount >= STAGE_THRESHOLDS.agentic.stage3MinAgentInteractions && nonAutoToolCount >= STAGE_THRESHOLDS.agentic.stage3MinNonAutoTools) { agStage = promoteStage(agStage, 3); }
+    if (fd.agentModeCount >= STAGE_THRESHOLDS.agentic.stage4MinAgentInteractions && nonAutoToolCount >= STAGE_THRESHOLDS.agentic.stage4MinNonAutoTools) { agStage = 4; }
+    if (fd.multiFileEdits >= STAGE_THRESHOLDS.agentic.stage4MinMultiFileEdits && avgFilesPerSession >= STAGE_THRESHOLDS.agentic.stage3MinAvgFilesPerSession) { agStage = promoteStage(agStage, 4); }
     const agTips: string[] = [];
     if (agStage < 2) { agTips.push("Try agent mode — it can run terminal commands, edit files, and explore codebases autonomously"); }
     if (agStage < 3) { agTips.push("Use agent mode for multi-step tasks; let it chain tools like file search, terminal, and code edits"); }
@@ -602,9 +686,9 @@ export function calculateFluencyScoreForTeamMember(fd: {
     if (fd.workspaceAgentCount > 0) { tuStage = promoteStage(tuStage, 3); }
     const advancedToolIds = ["github_pull_request", "github_repo", "run_in_terminal", "editFiles", "listFiles"];
     const usedAdvancedCount = advancedToolIds.filter(t => (fd.toolCallsByTool[t] ?? 0) > 0).length;
-    if (usedAdvancedCount >= 2) { tuStage = promoteStage(tuStage, 3); }
+    if (usedAdvancedCount >= STAGE_THRESHOLDS.toolUsage.stage3MinAdvancedTools) { tuStage = promoteStage(tuStage, 3); }
     if (fd.mcpTotal > 0) { tuStage = promoteStage(tuStage, 3); }
-    if (Object.keys(fd.mcpByServer).length >= 2) { tuStage = 4; }
+    if (Object.keys(fd.mcpByServer).length >= STAGE_THRESHOLDS.toolUsage.stage4MinMcpServers) { tuStage = 4; }
     const tuTips: string[] = [];
     if (tuStage < 2) { tuTips.push("Try agent mode to let Copilot use built-in tools for file operations and terminal commands"); }
     if (tuStage < 3) {
@@ -622,11 +706,11 @@ export function calculateFluencyScoreForTeamMember(fd: {
     const reposWithCustomization = fd.repositoriesWithCustomization.size;
     const customizationRate = totalRepos > 0 ? reposWithCustomization / totalRepos : 0;
     if (reposWithCustomization > 0) { cuStage = 2; }
-    if (customizationRate >= 0.3 && reposWithCustomization >= 2) { cuStage = 3; }
-    if (customizationRate >= 0.7 && reposWithCustomization >= 3) { cuStage = 4; }
+    if (customizationRate >= STAGE_THRESHOLDS.customization.stage3MinCustomizationRate && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage3MinCustomizedRepos) { cuStage = 3; }
+    if (customizationRate >= STAGE_THRESHOLDS.customization.stage4MinCustomizationRate && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage4MinCustomizedRepos) { cuStage = 4; }
     const uniqueModels = new Set([...fd.standardModels, ...fd.premiumModels]);
-    if (uniqueModels.size >= 3) { cuStage = promoteStage(cuStage, 3); }
-    if (uniqueModels.size >= 5 && reposWithCustomization >= 3) { cuStage = 4; }
+    if (uniqueModels.size >= STAGE_THRESHOLDS.customization.stage3MinUniqueModels) { cuStage = promoteStage(cuStage, 3); }
+    if (uniqueModels.size >= STAGE_THRESHOLDS.customization.stage4MinUniqueModels && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage4MinCustomizedRepos) { cuStage = 4; }
     const cuTips: string[] = [];
     if (cuStage < 2) { cuTips.push("Create a .github/copilot-instructions.md or CLAUDE.md file with project-specific guidelines"); }
     if (cuStage < 3) { cuTips.push("Add custom instructions to more repositories to standardize your Copilot experience"); }
@@ -647,20 +731,20 @@ export function calculateFluencyScoreForTeamMember(fd: {
     // 6. Workflow Integration
     const effectiveSessions = Math.max(dashboardSessions, fd.sessionCount);
     let wiStage: Stage = 1;
-    if (effectiveSessions >= 3) { wiStage = 2; }
-    if (avgApplyRate >= 50) { wiStage = promoteStage(wiStage, 2); }
+    if (effectiveSessions >= STAGE_THRESHOLDS.workflowIntegration.stage2MinSessions) { wiStage = 2; }
+    if (avgApplyRate >= STAGE_THRESHOLDS.workflowIntegration.stage2MinApplyRatePct) { wiStage = promoteStage(wiStage, 2); }
     const modesUsed = [fd.askModeCount > 0, fd.agentModeCount > 0].filter(Boolean).length;
-    if (modesUsed >= 2) { wiStage = promoteStage(wiStage, 3); }
-    if (totalContextRefs >= 20) { wiStage = promoteStage(wiStage, 3); }
-    if (effectiveSessions >= 15 && modesUsed >= 2 && totalContextRefs >= 20) { wiStage = 4; }
+    if (modesUsed >= STAGE_THRESHOLDS.workflowIntegration.stage3MinModesUsed) { wiStage = promoteStage(wiStage, 3); }
+    if (totalContextRefs >= STAGE_THRESHOLDS.workflowIntegration.stage3MinContextRefs) { wiStage = promoteStage(wiStage, 3); }
+    if (effectiveSessions >= STAGE_THRESHOLDS.workflowIntegration.stage4MinSessions && modesUsed >= STAGE_THRESHOLDS.workflowIntegration.stage3MinModesUsed && totalContextRefs >= STAGE_THRESHOLDS.workflowIntegration.stage3MinContextRefs) { wiStage = 4; }
     const wiTips: string[] = [];
     if (wiStage < 2) { wiTips.push("Use Copilot more regularly — even for quick questions"); }
     if (wiStage < 3) {
-      if (modesUsed < 2) { wiTips.push("Combine ask mode with agent mode in your daily workflow"); }
-      if (totalContextRefs < 10) { wiTips.push("Use explicit context references like #file, @workspace, and #selection"); }
+      if (modesUsed < STAGE_THRESHOLDS.workflowIntegration.stage3MinModesUsed) { wiTips.push("Combine ask mode with agent mode in your daily workflow"); }
+      if (totalContextRefs < STAGE_THRESHOLDS.workflowIntegration.hasExplicitContextMinRefs) { wiTips.push("Use explicit context references like #file, @workspace, and #selection"); }
     }
     if (wiStage < 4) {
-      if (totalContextRefs < 20) { wiTips.push("Make explicit context a habit — use #file, @workspace, and other references consistently"); }
+      if (totalContextRefs < STAGE_THRESHOLDS.workflowIntegration.stage3MinContextRefs) { wiTips.push("Make explicit context a habit — use #file, @workspace, and other references consistently"); }
       wiTips.push("Make Copilot part of every coding task: planning, coding, testing, and reviewing");
     }
 
