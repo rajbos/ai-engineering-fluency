@@ -186,6 +186,38 @@ else { responseText += text; }
 return { responseText, thinkingText };
 }
 
+/** Accumulates per-model and aggregate token counts during session parsing. */
+export class TokenAccumulator {
+    readonly modelUsage: ModelUsage = {};
+    totalInputTokens = 0;
+    totalOutputTokens = 0;
+
+    constructor(
+        private readonly defaultModel: string,
+        private readonly estimateTokens: (text: string, model?: string) => number
+    ) {}
+
+    ensureModel(m?: string): string {
+        return typeof m === 'string' && m ? m : this.defaultModel;
+    }
+
+    addInput(model: string, text: string): void {
+        const m = this.ensureModel(model);
+        if (!this.modelUsage[m]) { this.modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
+        const t = this.estimateTokens(text, m);
+        this.modelUsage[m].inputTokens += t;
+        this.totalInputTokens += t;
+    }
+
+    addOutput(model: string, text: string): void {
+        const m = this.ensureModel(model);
+        if (!this.modelUsage[m]) { this.modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
+        const t = this.estimateTokens(text, m);
+        this.modelUsage[m].outputTokens += t;
+        this.totalOutputTokens += t;
+    }
+}
+
 export function parseSessionFileContent(
 sessionFilePath: string,
 fileContent: string,
@@ -193,31 +225,17 @@ estimateTokensFromText: (text: string, model?: string) => number,
 getModelFromRequest?: (req: ProcessableRequest) => string
 ) {
 // Aggregates and helpers are declared up front; the heavy lifting is delegated
-const modelUsage: ModelUsage = {};
 let interactions = 0;
-let totalInputTokens = 0;
-let totalOutputTokens = 0;
 let totalThinkingTokens = 0;
 let totalActualTokens = 0;
 
 let sessionJson: unknown;
-let defaultModel = 'unknown';
+const defaultModel = 'unknown';
 
-const ensureModel = (m?: string) => (typeof m === 'string' && m ? m : defaultModel);
-const addInput = (model: string, text: string) => {
-const m = ensureModel(model);
-if (!modelUsage[m]) { modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
-const t = estimateTokensFromText(text, m);
-modelUsage[m].inputTokens += t;
-totalInputTokens += t;
-};
-const addOutput = (model: string, text: string) => {
-const m = ensureModel(model);
-if (!modelUsage[m]) { modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
-const t = estimateTokensFromText(text, m);
-modelUsage[m].outputTokens += t;
-totalOutputTokens += t;
-};
+const accumulator = new TokenAccumulator(defaultModel, estimateTokensFromText);
+const { modelUsage } = accumulator;
+const addInput = accumulator.addInput.bind(accumulator);
+const addOutput = accumulator.addOutput.bind(accumulator);
 
 // Process a single request (used by both JSON and reconstructed delta flows)
 const processRequest = (request: unknown) => {
@@ -313,7 +331,7 @@ return isObject(msg) && typeof msg['text'] === 'string' && (msg['text'] as strin
 }).length;
 for (const r of requests) { processRequest(r); }
 return {
-tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens,
+tokens: accumulator.totalInputTokens + accumulator.totalOutputTokens + totalThinkingTokens,
 interactions,
 modelUsage,
 thinkingTokens: totalThinkingTokens,
@@ -341,7 +359,7 @@ interactions = requests.length;
 for (const request of requests) { processRequest(request); }
 
 return {
-tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens,
+tokens: accumulator.totalInputTokens + accumulator.totalOutputTokens + totalThinkingTokens,
 interactions,
 modelUsage,
 thinkingTokens: totalThinkingTokens,
