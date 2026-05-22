@@ -32,15 +32,15 @@ export const AZURE_ERROR_CODES = {
 	ECONNREFUSED: 'ECONNREFUSED',
 } as const;
 
-function _sc(e: unknown): number | undefined {
-if (!e || typeof e !== 'object') { return undefined; }
-const v = (e as any)['statusCode'];
-return typeof v === 'number' ? v : undefined;
-}
-function _code(e: unknown): string | number | undefined {
-if (!e || typeof e !== 'object') { return undefined; }
-const v = (e as any)['code'];
-return typeof v === 'string' || typeof v === 'number' ? v : undefined;
+function extractErrorInfo(err: unknown): { statusCode?: number; code?: string } {
+if (!err || typeof err !== 'object') { return {}; }
+const obj = err as Record<string, unknown>;
+const sc = obj['statusCode'];
+const c = obj['code'];
+return {
+statusCode: typeof sc === 'number' ? sc : undefined,
+code: typeof c === 'string' ? c : (typeof c === 'number' ? String(c) : undefined),
+};
 }
 
 export function isAzurePolicyDisallowedError(error: unknown): boolean {
@@ -57,28 +57,30 @@ return m.includes('allowsharedkeyaccess') || m.includes('local authentication') 
 (m.includes('shared key') && m.includes('policy'));
 }
 export function isAuthError(error: unknown): boolean {
-if (_sc(error) === HTTP_STATUS.FORBIDDEN) { return true; }
-if (_code(error) === AZURE_ERROR_CODES.AUTHORIZATION_PERMISSION_MISMATCH) { return true; }
+const { statusCode, code } = extractErrorInfo(error);
+if (statusCode === HTTP_STATUS.FORBIDDEN) { return true; }
+if (code === AZURE_ERROR_CODES.AUTHORIZATION_PERMISSION_MISMATCH) { return true; }
 const m = (error as any)?.message ?? '';
 return m.includes('403') || m.includes('Forbidden');
 }
 export function isNotFoundError(error: unknown): boolean {
-if (_sc(error) === HTTP_STATUS.NOT_FOUND) { return true; }
+const { statusCode } = extractErrorInfo(error);
+if (statusCode === HTTP_STATUS.NOT_FOUND) { return true; }
 const m = (error as any)?.message ?? '';
 return m.includes('404') || m.includes('NotFound');
 }
 export function isConflictError(error: unknown): boolean {
-if (_sc(error) === HTTP_STATUS.CONFLICT) { return true; }
-const c = _code(error);
-return c === AZURE_ERROR_CODES.TABLE_ALREADY_EXISTS || c === HTTP_STATUS.CONFLICT;
+const { statusCode, code } = extractErrorInfo(error);
+if (statusCode === HTTP_STATUS.CONFLICT) { return true; }
+return code === AZURE_ERROR_CODES.TABLE_ALREADY_EXISTS || code === String(HTTP_STATUS.CONFLICT);
 }
 export function isRetryableError(error: unknown): boolean {
-const s = _sc(error) ?? _code(error);
-return s === HTTP_STATUS.TOO_MANY_REQUESTS || s === HTTP_STATUS.SERVICE_UNAVAILABLE || s === AZURE_ERROR_CODES.ETIMEDOUT;
+const { statusCode, code } = extractErrorInfo(error);
+return statusCode === HTTP_STATUS.TOO_MANY_REQUESTS || statusCode === HTTP_STATUS.SERVICE_UNAVAILABLE || code === AZURE_ERROR_CODES.ETIMEDOUT;
 }
 export function isNetworkError(error: unknown): boolean {
-const c = _code(error);
-if (c === AZURE_ERROR_CODES.ENOTFOUND || c === AZURE_ERROR_CODES.ETIMEDOUT || c === AZURE_ERROR_CODES.ECONNREFUSED) { return true; }
+const { code } = extractErrorInfo(error);
+if (code === AZURE_ERROR_CODES.ENOTFOUND || code === AZURE_ERROR_CODES.ETIMEDOUT || code === AZURE_ERROR_CODES.ECONNREFUSED) { return true; }
 const m = (error as any)?.message ?? '';
 return m.includes('ENOTFOUND') || m.includes('ETIMEDOUT') || m.includes('ECONNREFUSED');
 }
