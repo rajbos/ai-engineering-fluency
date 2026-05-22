@@ -81,21 +81,16 @@ export enum SharingLevel {
 	TeamIdentified = 30
 }
 
+const SHARING_LEVEL_MAP: Record<BackendSharingProfile, SharingLevel> = {
+	off: SharingLevel.Off,
+	teamAnonymized: SharingLevel.TeamAnonymized,
+	teamPseudonymous: SharingLevel.TeamPseudonymous,
+	soloFull: SharingLevel.SoloFull,
+	teamIdentified: SharingLevel.TeamIdentified,
+};
+
 export function sharingLevel(profile: BackendSharingProfile): SharingLevel {
-	switch (profile) {
-		case 'off':
-			return SharingLevel.Off;
-		case 'teamAnonymized':
-			return SharingLevel.TeamAnonymized;
-		case 'teamPseudonymous':
-			return SharingLevel.TeamPseudonymous;
-		case 'teamIdentified':
-			return SharingLevel.TeamIdentified;
-		case 'soloFull':
-			return SharingLevel.SoloFull;
-		default:
-			return SharingLevel.Off;
-	}
+	return SHARING_LEVEL_MAP[profile] ?? SharingLevel.Off;
 }
 
 export function needsConsent(previous: BackendConfigDraft, next: BackendConfigDraft): { required: boolean; reasons: string[] } {
