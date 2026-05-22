@@ -129,10 +129,12 @@ export class CacheManager {
 			}));
 			await fd.close();
 			return true;
-		} catch (err: any) {
-			if (err.code !== 'EEXIST') {
+		} catch (err: unknown) {
+			const errCode = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
+			if (errCode !== 'EEXIST') {
 				// Unexpected error (permissions, disk full, etc.)
-				this.deps.warn(`Unexpected error acquiring cache lock: ${err.message}`);
+				const message = err instanceof Error ? err.message : String(err);
+				this.deps.warn(`Unexpected error acquiring cache lock: ${message}`);
 				return false;
 			}
 
@@ -147,8 +149,8 @@ export class CacheManager {
 				if (typeof lock.pid === 'number') {
 					try {
 						process.kill(lock.pid, 0); // Signal 0 checks existence without signalling
-					} catch (killErr: any) {
-						if (killErr.code === 'ESRCH') {
+					} catch (killErr: unknown) {
+						if (killErr instanceof Error && (killErr as NodeJS.ErrnoException).code === 'ESRCH') {
 							ownerAlive = false; // Process no longer exists
 						}
 						// EPERM means process exists but is owned by another user — treat as alive
