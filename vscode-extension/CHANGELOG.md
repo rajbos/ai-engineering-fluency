@@ -2,6 +2,12 @@
 
 All notable changes to the VS Code extension will be documented in this file.
 
+## [0.11.1] - 2026-05-22
+
+### Bug Fixes
+- fix(vscode): use leaf-key getConfiguration for statusBar settings to fix 'not registered' error (#1044)
+- fix: muting unknown tool now instant, skips full stats recalc (#1043)
+
 ## [0.11.0] - 2026-05-22
 
 ### Features

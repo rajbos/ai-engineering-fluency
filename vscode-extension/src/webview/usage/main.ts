@@ -1807,6 +1807,24 @@ registerMessageHandler<any>((message) => {
 			clearLoadingTimeout();
 			showLoadError('Failed to calculate usage analysis. Check the Output panel for details.');
 			break;
+		case 'toolSuppressed': {
+			// Immediately remove the suppressed tool chip from the DOM without a full re-render.
+			const suppressedName = message.toolName as string;
+			if (suppressedName) {
+				const section = document.getElementById('unknown-mcp-tools-section');
+				if (section) {
+					section.querySelectorAll<HTMLButtonElement>('button[data-suppress-tool]').forEach(btn => {
+						if (btn.getAttribute('data-suppress-tool') === suppressedName) {
+							btn.closest('span')?.remove();
+						}
+					});
+					if (section.querySelectorAll('button[data-suppress-tool]').length === 0) {
+						section.remove();
+					}
+				}
+			}
+			break;
+		}
 		case 'highlightUnknownTools': {
 			// Switch to tools tab
 			activeTab = 'tools';
