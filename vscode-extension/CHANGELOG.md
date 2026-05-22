@@ -2,6 +2,35 @@
 
 All notable changes to the VS Code extension will be documented in this file.
 
+## [0.11.0] - 2026-05-22
+
+### Features
+- Configurable status bar: independently show token counts and/or cost (#1036)
+- Added 17+ friendly tool names for Claude in Chrome, Cowork, M365 Connector, and other tools (#1037, #1038, #1039)
+
+### Security
+- Added HTML escaping to prevent XSS in configPanel webview
+
+### Maintenance
+- Enhanced token tracking: extract all tokens from debug log and update session cache structure (#1040)
+- Centralised adapter session path predicates to adapterPredicates.ts (#1034)
+- Refactored extension.ts activate() into focused registration helpers (#1035)
+- Extracted pathExists helper to utils/fsAsync.ts (#1031)
+- Extracted settings validation helpers to backend/settingsValidation.ts (#1030)
+- Consolidated path normalisation helpers to utils/pathUtils.ts (#1032)
+- Consolidated duplicated webview type definitions to shared/types.ts (#1033)
+- Added isNonNegativeInt type guard and safeJsonParse utility (#1029, #1013)
+- Extracted registerMessageHandler helper from webview message listeners (#1022)
+- Centralised Azure error classification in azureErrorClassifier.ts (#1017)
+- Introduced ValidationResult<T> discriminated union for type-safe validation (#1021)
+- Extracted Azure Storage endpoint URL builders to shared utility (#1005)
+- Multiple additional refactoring improvements for maintainability and type safety
+
+## [0.10.2] - 2026-05-13
+
+### Maintenance
+- Internal refactoring and dependency updates
+
 ## [0.10.1] - 2026-05-19
 
 ### Bug Fixes
