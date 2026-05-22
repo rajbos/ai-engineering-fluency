@@ -22,28 +22,54 @@ export function setCompactNumbers(enabled: boolean): void {
 	compactNumbersEnabled = enabled;
 }
 
+/** Union of all known editor display names that have explicit icon mappings. */
+export type EditorName =
+	| 'VS Code'
+	| 'VS Code Insiders'
+	| 'VS Code Exploration'
+	| 'VS Code Server'
+	| 'VS Code Server (Insiders)'
+	| 'VSCodium'
+	| 'Cursor'
+	| 'Copilot CLI'
+	| 'OpenCode'
+	| 'Visual Studio'
+	| 'Claude Code'
+	| 'Claude Desktop Cowork'
+	| 'Mistral Vibe'
+	| 'Gemini CLI'
+	| 'Unknown';
+
+/**
+ * Maps known editor display names to their representative emoji icons.
+ *
+ * Icon format: a single Unicode emoji character (e.g. '💙', '⚡').
+ * Editors not present in this map fall back to '📝' in {@link getEditorIcon}.
+ */
+export const EDITOR_ICON_MAP: Record<EditorName, string> = {
+	'VS Code': '💙',
+	'VS Code Insiders': '💚',
+	'VS Code Exploration': '🧪',
+	'VS Code Server': '☁️',
+	'VS Code Server (Insiders)': '☁️',
+	'VSCodium': '🔷',
+	'Cursor': '⚡',
+	'Copilot CLI': '🤖',
+	'OpenCode': '🟢',
+	'Visual Studio': '🪟',
+	'Claude Code': '🟠',
+	'Claude Desktop Cowork': '🟠',
+	'Mistral Vibe': '🔥',
+	'Gemini CLI': '💎',
+	'Unknown': '❓'
+};
+
 /**
  * Returns an icon for a given editor name.
+ * Falls back to '📝' for editors not present in {@link EDITOR_ICON_MAP}.
  */
 export function getEditorIcon(editor: string): string {
-	const icons: Record<string, string> = {
-		'VS Code': '💙',
-		'VS Code Insiders': '💚',
-		'VS Code Exploration': '🧪',
-		'VS Code Server': '☁️',
-		'VS Code Server (Insiders)': '☁️',
-		'VSCodium': '🔷',
-		'Cursor': '⚡',
-		'Copilot CLI': '🤖',
-		'OpenCode': '🟢',
-            'Visual Studio': '🪟',
-		'Claude Code': '🟠',
-		'Claude Desktop Cowork': '🟠',
-		'Mistral Vibe': '🔥',
-		'Gemini CLI': '💎',
-		'Unknown': '❓'
-	};
-	return icons[editor] || '📝';
+	return EDITOR_ICON_MAP[editor as EditorName] || '📝';
 }
 
 /**
