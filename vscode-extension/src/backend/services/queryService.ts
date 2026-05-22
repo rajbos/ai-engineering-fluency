@@ -6,6 +6,7 @@
 import type { BackendQueryFilters, BackendSettings } from '../settings';
 import { QUERY_CACHE_TTL_MS, MAX_UI_LIST_ITEMS, MIN_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS, DEFAULT_LOOKBACK_DAYS } from '../constants';
 import type { ModelUsage, SessionStats, StatsForPeriod } from '../types';
+import type { TableClientLike } from '../storageTables';
 import { CredentialService } from './credentialService';
 import { DataPlaneService } from './dataPlaneService';
 import { BackendUtility } from './utilityService';
@@ -164,9 +165,9 @@ export class QueryService {
 			return this.backendLastQueryResult;
 		}
 		const creds = await this.credentialService.getBackendDataPlaneCredentialsOrThrow(settings);
-		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
+		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential) as unknown as TableClientLike;
 		const allEntities = await this.dataPlaneService.listEntitiesForRange({
-			tableClient: tableClient as any,
+			tableClient,
 			datasetId: settings.datasetId,
 			startDayKey,
 			endDayKey
@@ -262,7 +263,7 @@ export class QueryService {
 	/**
 	 * Try to get backend detailed stats for status bar.
 	 */
-	async tryGetBackendDetailedStatsForStatusBar(settings: BackendSettings, isConfigured: boolean, sharingPolicy: { allowCloudSync: boolean }): Promise<any | undefined> {
+	async tryGetBackendDetailedStatsForStatusBar(settings: BackendSettings, isConfigured: boolean, sharingPolicy: { allowCloudSync: boolean }): Promise<SessionStats | undefined> {
 		if (!sharingPolicy.allowCloudSync || !isConfigured) {
 			return undefined;
 		}
@@ -289,7 +290,7 @@ export class QueryService {
 	/**
 	 * Get stats for details panel.
 	 */
-	async getStatsForDetailsPanel(settings: BackendSettings, isConfigured: boolean, sharingPolicy: { allowCloudSync: boolean }): Promise<any | undefined> {
+	async getStatsForDetailsPanel(settings: BackendSettings, isConfigured: boolean, sharingPolicy: { allowCloudSync: boolean }): Promise<SessionStats | undefined> {
 		if (!sharingPolicy.allowCloudSync || !isConfigured) {
 			return undefined;
 		}
