@@ -7575,19 +7575,17 @@ ${hashtag}`;
         case "updateDisplaySetting":
           if (typeof message.key === 'string' && message.value !== undefined) {
             await this.dispatch('updateDisplaySetting:diagnostics', async () => {
-              // Map webview keys to leaf property names under aiEngineeringFluency.display.statusBar.
-              // Using getConfiguration('aiEngineeringFluency.display.statusBar').update('showTokens')
-              // instead of getConfiguration('aiEngineeringFluency').update('display.statusBar.showTokens')
-              // avoids VS Code rejecting multi-segment relative keys in update() as "not a registered
-              // configuration" even when the full key exists in contributes.configuration.properties.
-              const statusBarLeafKeyMap: Record<string, string> = {
-                'display.statusBar.showTokens': 'showTokens',
-                'display.statusBar.showCost': 'showCost',
+              // Map webview keys to fully-qualified setting names.
+              // Using getConfiguration() with no section + full key avoids VS Code rejecting
+              // multi-segment relative keys in update() as "not a registered configuration",
+              // which happens even when the key is declared in contributes.configuration.properties.
+              const fullKeyMap: Record<string, string> = {
+                'display.statusBar.showTokens': 'aiEngineeringFluency.display.statusBar.showTokens',
+                'display.statusBar.showCost': 'aiEngineeringFluency.display.statusBar.showCost',
               };
-              const leafKey = statusBarLeafKeyMap[message.key];
-              if (leafKey) {
-                const config = vscode.workspace.getConfiguration('aiEngineeringFluency.display.statusBar');
-                await config.update(leafKey, message.value, vscode.ConfigurationTarget.Global);
+              const fullKey = fullKeyMap[message.key];
+              if (fullKey) {
+                await vscode.workspace.getConfiguration().update(fullKey, message.value, vscode.ConfigurationTarget.Global);
               }
             });
           }
