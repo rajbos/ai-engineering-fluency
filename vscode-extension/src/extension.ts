@@ -144,7 +144,7 @@ import {
 import { buildChartData as _buildChartData } from './chartDataBuilder';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, computeUtcDateRanges, aggregatePeriodStats, type SessionAggregateInput } from './statsHelpers';
+import { addModelUsage, addEditorUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, type SessionAggregateInput } from './statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -170,7 +170,6 @@ import {
   type ViewRegressionProbeConfig,
   type ViewRegressionProbeSnapshot,
 } from './viewRegression';
-
 // --- Backend & UI ---
 import type { AiFluencyExtensionApi, ExtensionPointButton } from './extensionPoints';
 import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
@@ -1881,10 +1880,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// calendar month, so April 1–12 sessions are not skipped on May 13.
 		const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 
-		let todayStats = { tokens: 0, thinkingTokens: 0, cachedTokens: 0, estimatedTokens: 0, actualTokens: 0, sessions: 0, interactions: 0, modelUsage: {} as ModelUsage, editorUsage: {} as EditorUsage };
-		let monthStats = { tokens: 0, thinkingTokens: 0, cachedTokens: 0, estimatedTokens: 0, actualTokens: 0, sessions: 0, interactions: 0, modelUsage: {} as ModelUsage, editorUsage: {} as EditorUsage };
-		let lastMonthStats = { tokens: 0, thinkingTokens: 0, cachedTokens: 0, estimatedTokens: 0, actualTokens: 0, sessions: 0, interactions: 0, modelUsage: {} as ModelUsage, editorUsage: {} as EditorUsage };
-		let last30DaysStats = { tokens: 0, thinkingTokens: 0, cachedTokens: 0, estimatedTokens: 0, actualTokens: 0, sessions: 0, interactions: 0, modelUsage: {} as ModelUsage, editorUsage: {} as EditorUsage };
+		let todayStats = makePeriodAccumulator();
+		let monthStats = makePeriodAccumulator();
+		let lastMonthStats = makePeriodAccumulator();
+		let last30DaysStats = makePeriodAccumulator();
 
 		// Daily stats map for the chart (populated by aggregatePeriodStats, finalized below)
 		let dailyStatsMap = new Map<string, DailyTokenStats>();

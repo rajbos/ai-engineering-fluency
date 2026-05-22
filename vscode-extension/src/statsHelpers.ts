@@ -132,7 +132,7 @@ dailyStatsMap: Map<string, DailyTokenStats>;
 skippedCount: number;
 }
 
-function makePeriodAccumulator(): PeriodAccumulator {
+export function makePeriodAccumulator(): PeriodAccumulator {
 return {
 tokens: 0,
 thinkingTokens: 0,
