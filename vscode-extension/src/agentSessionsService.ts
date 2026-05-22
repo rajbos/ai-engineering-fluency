@@ -65,10 +65,16 @@ export interface TaskDetailResult {
 	error?: string;
 }
 
-export type FetchTaskPageFn = (
-	owner: string, repo: string, token: string,
-	page: number, archived: boolean, since?: string,
-) => Promise<TaskPageResult>;
+export interface FetchTaskPageOptions {
+	owner: string;
+	repo: string;
+	token: string;
+	page: number;
+	archived: boolean;
+	since?: string;
+}
+
+export type FetchTaskPageFn = (options: FetchTaskPageOptions) => Promise<TaskPageResult>;
 
 export type FetchTaskDetailFn = (
 	owner: string, repo: string, taskId: string, token: string,
@@ -76,12 +82,7 @@ export type FetchTaskDetailFn = (
 
 /** Fetch one page of agent tasks from the GitHub API. */
 export function fetchAgentTasksPage(
-	owner: string,
-	repo: string,
-	token: string,
-	page: number,
-	archived: boolean,
-	since?: string,
+	{ owner, repo, token, page, archived, since }: FetchTaskPageOptions,
 ): Promise<TaskPageResult> {
 	return new Promise((resolve) => {
 		let queryParams = `per_page=100&page=${page}`;
@@ -190,7 +191,7 @@ export async function fetchAgentSessionsForRepo(
 	// Fetch active and archived task lists
 	for (const archived of [false, true]) {
 		for (let page = 1; page <= 5; page++) {
-			const { tasks, statusCode, error } = await fetchTaskPage(owner, repo, token, page, archived, sinceStr);
+			const { tasks, statusCode, error } = await fetchTaskPage({ owner, repo, token, page, archived, since: sinceStr });
 			if (tasks.length === 0 || error) {
 				if (page === 1 && !archived && error) {
 					const msg = statusCode === 404
