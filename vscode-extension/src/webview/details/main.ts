@@ -407,94 +407,69 @@ modelOtherExpanded
 });
 }
 
-function buildEditorTbody(stats: DetailedStats, allEditors: string[]): HTMLTableSectionElement {
-const todayTotal = Object.values(stats.today.editorUsage).reduce((sum, e) => sum + e.tokens, 0);
-const last30DaysTotal = Object.values(stats.last30Days.editorUsage).reduce((sum, e) => sum + e.tokens, 0);
-const monthTotal = Object.values(stats.month.editorUsage).reduce((sum, e) => sum + e.tokens, 0);
-const lastMonthTotal = Object.values(stats.lastMonth.editorUsage).reduce((sum, e) => sum + e.tokens, 0);
-
 type EditorItem = {
-editor: string;
-todayUsage: { tokens: number; sessions: number };
-last30DaysUsage: { tokens: number; sessions: number };
-monthUsage: { tokens: number; sessions: number };
-lastMonthUsage: { tokens: number; sessions: number };
-projectedTokens: number;
-projectedSessions: number;
+	editor: string;
+	todayUsage: { tokens: number; sessions: number };
+	last30DaysUsage: { tokens: number; sessions: number };
+	monthUsage: { tokens: number; sessions: number };
+	lastMonthUsage: { tokens: number; sessions: number };
+	projectedTokens: number;
+	projectedSessions: number;
 };
 
+function buildEditorRow(item: EditorItem, totals: { today: number; last30Days: number; month: number; lastMonth: number }): HTMLTableRowElement {
+	const { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens, projectedSessions } = item;
+	const todayPct = totals.today > 0 ? (todayUsage.tokens / totals.today) * 100 : 0;
+	const last30Pct = totals.last30Days > 0 ? (last30DaysUsage.tokens / totals.last30Days) * 100 : 0;
+	const monthPct = totals.month > 0 ? (monthUsage.tokens / totals.month) * 100 : 0;
+	const lastMonthPct = totals.lastMonth > 0 ? (lastMonthUsage.tokens / totals.lastMonth) * 100 : 0;
+	const tr = document.createElement('tr');
+	if (editor === 'JetBrains') { tr.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.'; }
+	if (editor === 'Antigravity') { tr.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.'; }
+	const labelTd = document.createElement('td');
+	const labelWrapper = document.createElement('span');
+	labelWrapper.className = 'metric-label';
+	labelWrapper.textContent = `${getEditorIcon(editor)} ${editor}`;
+	if (editor === 'JetBrains' || editor === 'Antigravity') { labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`; }
+	labelTd.append(labelWrapper);
+	tr.append(labelTd,
+		buildValueCell(formatCompact(todayUsage.tokens), `${formatPercent(todayPct)} · ${todayUsage.sessions} sessions`),
+		buildValueCell(formatCompact(last30DaysUsage.tokens), `${formatPercent(last30Pct)} · ${last30DaysUsage.sessions} sessions`),
+		buildValueCell(formatCompact(monthUsage.tokens), `${formatPercent(monthPct)} · ${monthUsage.sessions} sessions`),
+		buildValueCell(formatCompact(lastMonthUsage.tokens), `${formatPercent(lastMonthPct)} · ${lastMonthUsage.sessions} sessions`),
+		buildValueCell(formatCompact(projectedTokens), `${projectedSessions} sessions`));
+	return tr;
+}
+
+function buildEditorTbody(stats: DetailedStats, allEditors: string[]): HTMLTableSectionElement {
+const totals = {
+	today: Object.values(stats.today.editorUsage).reduce((s, e) => s + e.tokens, 0),
+	last30Days: Object.values(stats.last30Days.editorUsage).reduce((s, e) => s + e.tokens, 0),
+	month: Object.values(stats.month.editorUsage).reduce((s, e) => s + e.tokens, 0),
+	lastMonth: Object.values(stats.lastMonth.editorUsage).reduce((s, e) => s + e.tokens, 0),
+};
 const items: EditorItem[] = allEditors.map(editor => {
-const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
-const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
-const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
-const lastMonthUsage = stats.lastMonth.editorUsage[editor] || { tokens: 0, sessions: 0 };
-return {
-editor,
-todayUsage,
-last30DaysUsage,
-monthUsage,
-lastMonthUsage,
-projectedTokens: Math.round(calculateProjection(last30DaysUsage.tokens)),
-projectedSessions: Math.round(calculateProjection(last30DaysUsage.sessions))
-};
+	const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
+	const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
+	const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
+	const lastMonthUsage = stats.lastMonth.editorUsage[editor] || { tokens: 0, sessions: 0 };
+	return { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens: Math.round(calculateProjection(last30DaysUsage.tokens)), projectedSessions: Math.round(calculateProjection(last30DaysUsage.sessions)) };
 });
-
 items.sort((a, b) => {
-let cmp: number;
-switch (editorSortKey) {
-case 'name': cmp = a.editor.localeCompare(b.editor); break;
-case 'today': cmp = a.todayUsage.tokens - b.todayUsage.tokens; break;
-case 'last30Days': cmp = a.last30DaysUsage.tokens - b.last30DaysUsage.tokens; break;
-case 'month': cmp = a.monthUsage.tokens - b.monthUsage.tokens; break;
-case 'lastMonth': cmp = a.lastMonthUsage.tokens - b.lastMonthUsage.tokens; break;
-case 'projected': cmp = a.projectedTokens - b.projectedTokens; break;
-default: cmp = 0;
-}
-return editorSortDir === 'asc' ? cmp : -cmp;
+	let cmp: number;
+	switch (editorSortKey) {
+		case 'name': cmp = a.editor.localeCompare(b.editor); break;
+		case 'today': cmp = a.todayUsage.tokens - b.todayUsage.tokens; break;
+		case 'last30Days': cmp = a.last30DaysUsage.tokens - b.last30DaysUsage.tokens; break;
+		case 'month': cmp = a.monthUsage.tokens - b.monthUsage.tokens; break;
+		case 'lastMonth': cmp = a.lastMonthUsage.tokens - b.lastMonthUsage.tokens; break;
+		case 'projected': cmp = a.projectedTokens - b.projectedTokens; break;
+		default: cmp = 0;
+	}
+	return editorSortDir === 'asc' ? cmp : -cmp;
 });
-
 const tbody = document.createElement('tbody');
-
-items.forEach(({ editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens, projectedSessions }) => {
-const todayPercent = todayTotal > 0 ? (todayUsage.tokens / todayTotal) * 100 : 0;
-const last30DaysPercent = last30DaysTotal > 0 ? (last30DaysUsage.tokens / last30DaysTotal) * 100 : 0;
-const monthPercent = monthTotal > 0 ? (monthUsage.tokens / monthTotal) * 100 : 0;
-const lastMonthPercent = lastMonthTotal > 0 ? (lastMonthUsage.tokens / lastMonthTotal) * 100 : 0;
-
-const tr = document.createElement('tr');
-// JetBrains JSONL only persists user messages and assistant text — no
-// API token counts, no thinking tokens. Surface that caveat as a row
-// tooltip so users don't compare these numbers apples-to-apples with
-// editors that report actual usage.
-if (editor === 'JetBrains') {
-tr.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.';
-}
-if (editor === 'Antigravity') {
-tr.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.';
-}
-const labelTd = document.createElement('td');
-const labelWrapper = document.createElement('span');
-labelWrapper.className = 'metric-label';
-labelWrapper.textContent = `${getEditorIcon(editor)} ${editor}`;
-if (editor === 'JetBrains') {
-labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`;
-}
-if (editor === 'Antigravity') {
-labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`;
-}
-labelTd.append(labelWrapper);
-
-tr.append(
-labelTd,
-buildValueCell(formatCompact(todayUsage.tokens), `${formatPercent(todayPercent)} · ${todayUsage.sessions} sessions`),
-buildValueCell(formatCompact(last30DaysUsage.tokens), `${formatPercent(last30DaysPercent)} · ${last30DaysUsage.sessions} sessions`),
-buildValueCell(formatCompact(monthUsage.tokens), `${formatPercent(monthPercent)} · ${monthUsage.sessions} sessions`),
-buildValueCell(formatCompact(lastMonthUsage.tokens), `${formatPercent(lastMonthPercent)} · ${lastMonthUsage.sessions} sessions`),
-buildValueCell(formatCompact(projectedTokens), `${projectedSessions} sessions`)
-);
-tbody.append(tr);
-});
-
+items.forEach(item => tbody.append(buildEditorRow(item, totals)));
 return tbody;
 }
 
@@ -553,189 +528,129 @@ return section;
 
 const TOP_N_MODELS = 5;
 
-function buildModelTbody(stats: DetailedStats, topModels: string[], otherModels: string[], onToggleOther: () => void): HTMLTableSectionElement {
 type ModelItem = {
-model: string;
-todayTotal: number;
-todayInputPct: number;
-todayOutputPct: number;
-last30DaysTotal: number;
-last30DaysInputPct: number;
-last30DaysOutputPct: number;
-monthTotal: number;
-monthInputPct: number;
-monthOutputPct: number;
-lastMonthTotal: number;
-lastMonthInputPct: number;
-lastMonthOutputPct: number;
-projected: number;
-charsPerToken: number;
+	model: string;
+	todayTotal: number; todayInputPct: number; todayOutputPct: number;
+	last30DaysTotal: number; last30DaysInputPct: number; last30DaysOutputPct: number;
+	monthTotal: number; monthInputPct: number; monthOutputPct: number;
+	lastMonthTotal: number; lastMonthInputPct: number; lastMonthOutputPct: number;
+	projected: number; charsPerToken: number;
 };
 
-function toModelItem(model: string): ModelItem {
-const todayUsage = stats.today.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-const last30DaysUsage = stats.last30Days.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-const monthUsage = stats.month.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-const lastMonthUsage = stats.lastMonth.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-const todayTotal = todayUsage.inputTokens + todayUsage.outputTokens;
-const last30DaysTotal = last30DaysUsage.inputTokens + last30DaysUsage.outputTokens;
-const monthTotal = monthUsage.inputTokens + monthUsage.outputTokens;
-const lastMonthTotal = lastMonthUsage.inputTokens + lastMonthUsage.outputTokens;
-return {
-model,
-todayTotal,
-todayInputPct: todayTotal > 0 ? (todayUsage.inputTokens / todayTotal) * 100 : 0,
-todayOutputPct: todayTotal > 0 ? (todayUsage.outputTokens / todayTotal) * 100 : 0,
-last30DaysTotal,
-last30DaysInputPct: last30DaysTotal > 0 ? (last30DaysUsage.inputTokens / last30DaysTotal) * 100 : 0,
-last30DaysOutputPct: last30DaysTotal > 0 ? (last30DaysUsage.outputTokens / last30DaysTotal) * 100 : 0,
-monthTotal,
-monthInputPct: monthTotal > 0 ? (monthUsage.inputTokens / monthTotal) * 100 : 0,
-monthOutputPct: monthTotal > 0 ? (monthUsage.outputTokens / monthTotal) * 100 : 0,
-lastMonthTotal,
-lastMonthInputPct: lastMonthTotal > 0 ? (lastMonthUsage.inputTokens / lastMonthTotal) * 100 : 0,
-lastMonthOutputPct: lastMonthTotal > 0 ? (lastMonthUsage.outputTokens / lastMonthTotal) * 100 : 0,
-projected: Math.round(calculateProjection(last30DaysTotal)),
-charsPerToken: getCharsPerToken(model)
-};
+function toModelItem(stats: DetailedStats, model: string): ModelItem {
+	const todayUsage = stats.today.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
+	const last30DaysUsage = stats.last30Days.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
+	const monthUsage = stats.month.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
+	const lastMonthUsage = stats.lastMonth.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
+	const todayTotal = todayUsage.inputTokens + todayUsage.outputTokens;
+	const last30DaysTotal = last30DaysUsage.inputTokens + last30DaysUsage.outputTokens;
+	const monthTotal = monthUsage.inputTokens + monthUsage.outputTokens;
+	const lastMonthTotal = lastMonthUsage.inputTokens + lastMonthUsage.outputTokens;
+	return {
+		model, todayTotal,
+		todayInputPct: todayTotal > 0 ? (todayUsage.inputTokens / todayTotal) * 100 : 0,
+		todayOutputPct: todayTotal > 0 ? (todayUsage.outputTokens / todayTotal) * 100 : 0,
+		last30DaysTotal,
+		last30DaysInputPct: last30DaysTotal > 0 ? (last30DaysUsage.inputTokens / last30DaysTotal) * 100 : 0,
+		last30DaysOutputPct: last30DaysTotal > 0 ? (last30DaysUsage.outputTokens / last30DaysTotal) * 100 : 0,
+		monthTotal,
+		monthInputPct: monthTotal > 0 ? (monthUsage.inputTokens / monthTotal) * 100 : 0,
+		monthOutputPct: monthTotal > 0 ? (monthUsage.outputTokens / monthTotal) * 100 : 0,
+		lastMonthTotal,
+		lastMonthInputPct: lastMonthTotal > 0 ? (lastMonthUsage.inputTokens / lastMonthTotal) * 100 : 0,
+		lastMonthOutputPct: lastMonthTotal > 0 ? (lastMonthUsage.outputTokens / lastMonthTotal) * 100 : 0,
+		projected: Math.round(calculateProjection(last30DaysTotal)), charsPerToken: getCharsPerToken(model),
+	};
 }
 
-function sortItems(items: ModelItem[]): void {
-items.sort((a, b) => {
-let cmp: number;
-switch (modelSortKey) {
-case 'name': cmp = a.model.localeCompare(b.model); break;
-case 'today': cmp = a.todayTotal - b.todayTotal; break;
-case 'last30Days': cmp = a.last30DaysTotal - b.last30DaysTotal; break;
-case 'month': cmp = a.monthTotal - b.monthTotal; break;
-case 'lastMonth': cmp = a.lastMonthTotal - b.lastMonthTotal; break;
-case 'projected': cmp = a.projected - b.projected; break;
-default: cmp = 0;
-}
-return modelSortDir === 'asc' ? cmp : -cmp;
-});
-}
-
-function buildModelRow(item: ModelItem, isOtherChild: boolean): HTMLTableRowElement {
-const tr = document.createElement('tr');
-if (isOtherChild) {
-tr.style.opacity = '0.85';
-}
-const labelTd = document.createElement('td');
-const labelWrapper = document.createElement('span');
-labelWrapper.className = 'metric-label';
-
-// XSS-safe DOM construction — no innerHTML with dynamic content
-if (isOtherChild) {
-const indentSpan = document.createElement('span');
-indentSpan.style.cssText = 'display:inline-block;width:12px';
-labelWrapper.append(indentSpan);
-}
-const nameText = document.createTextNode(`${getModelDisplayName(item.model)} `);
-const charsSpan = document.createElement('span');
-charsSpan.style.cssText = 'color:#9aa0a6;font-size:11px;font-weight:500;';
-charsSpan.textContent = `(~${item.charsPerToken.toFixed(1)} chars/tk)`;
-labelWrapper.append(nameText, charsSpan);
-labelTd.append(labelWrapper);
-
-tr.append(
-labelTd,
-buildValueCell(formatCompact(item.todayTotal), `↑${formatPercent(item.todayInputPct)} ↓${formatPercent(item.todayOutputPct)}`),
-buildValueCell(formatCompact(item.last30DaysTotal), `↑${formatPercent(item.last30DaysInputPct)} ↓${formatPercent(item.last30DaysOutputPct)}`),
-buildValueCell(formatCompact(item.monthTotal), `↑${formatPercent(item.monthInputPct)} ↓${formatPercent(item.monthOutputPct)}`),
-buildValueCell(formatCompact(item.lastMonthTotal), `↑${formatPercent(item.lastMonthInputPct)} ↓${formatPercent(item.lastMonthOutputPct)}`),
-buildValueCell(formatCompact(item.projected))
-);
-return tr;
+function sortModelItems(items: ModelItem[]): void {
+	items.sort((a, b) => {
+		let cmp: number;
+		switch (modelSortKey) {
+			case 'name': cmp = a.model.localeCompare(b.model); break;
+			case 'today': cmp = a.todayTotal - b.todayTotal; break;
+			case 'last30Days': cmp = a.last30DaysTotal - b.last30DaysTotal; break;
+			case 'month': cmp = a.monthTotal - b.monthTotal; break;
+			case 'lastMonth': cmp = a.lastMonthTotal - b.lastMonthTotal; break;
+			case 'projected': cmp = a.projected - b.projected; break;
+			default: cmp = 0;
+		}
+		return modelSortDir === 'asc' ? cmp : -cmp;
+	});
 }
 
-const topItems = topModels.map(toModelItem);
-sortItems(topItems);
-
-const tbody = document.createElement('tbody');
-topItems.forEach(item => tbody.append(buildModelRow(item, false)));
-
-// "Other" group — only rendered when there are more than TOP_N_MODELS models
-if (otherModels.length > 0) {
-// Aggregate summed stats across all periods for the "Other" group
-const sumUsage = (period: 'today' | 'last30Days' | 'month' | 'lastMonth') =>
-otherModels.reduce(
-(acc, m) => {
-const u = stats[period].modelUsage[m] || { inputTokens: 0, outputTokens: 0 };
-return { inputTokens: acc.inputTokens + u.inputTokens, outputTokens: acc.outputTokens + u.outputTokens };
-},
-{ inputTokens: 0, outputTokens: 0 }
-);
-const otherToday = sumUsage('today');
-const otherLast30 = sumUsage('last30Days');
-const otherMonth = sumUsage('month');
-const otherLastMonth = sumUsage('lastMonth');
-const otherTodayTotal = otherToday.inputTokens + otherToday.outputTokens;
-const otherLast30Total = otherLast30.inputTokens + otherLast30.outputTokens;
-const otherMonthTotal = otherMonth.inputTokens + otherMonth.outputTokens;
-const otherLastMonthTotal = otherLastMonth.inputTokens + otherLastMonth.outputTokens;
-const otherProjected = Math.round(calculateProjection(otherLast30Total));
-
-const pct = (part: number, total: number) => (total > 0 ? (part / total) * 100 : 0);
-
-// "Other" summary row
-const otherTr = document.createElement('tr');
-otherTr.style.cursor = 'pointer';
-otherTr.style.background = 'var(--list-hover-bg)';
-otherTr.title = modelOtherExpanded ? 'Collapse other models' : 'Expand other models';
-
-const otherLabelTd = document.createElement('td');
-const otherLabelWrapper = document.createElement('span');
-otherLabelWrapper.className = 'metric-label';
-
-// XSS-safe DOM construction — no innerHTML with dynamic content
-const otherNameSpan = document.createElement('span');
-otherNameSpan.style.cssText = 'color:var(--text-secondary);font-weight:600;';
-otherNameSpan.textContent = `📦 Other (${otherModels.length} model${otherModels.length !== 1 ? 's' : ''})`;
-const toggleIcon = modelOtherExpanded ? '▲' : '▼';
-const otherToggleSpan = document.createElement('span');
-otherToggleSpan.style.cssText = 'font-size:10px;color:var(--text-muted)';
-otherToggleSpan.textContent = ` ${toggleIcon}`;
-otherLabelWrapper.append(otherNameSpan, otherToggleSpan);
-otherLabelTd.append(otherLabelWrapper);
-
-const otherTodayTd = buildValueCell(formatCompact(otherTodayTotal));
-if (otherTodayTotal > 0) {
-otherTodayTd.append(el('div', 'muted', `↑${formatPercent(pct(otherToday.inputTokens, otherTodayTotal))} ↓${formatPercent(pct(otherToday.outputTokens, otherTodayTotal))}`));
+function buildModelRowEl(item: ModelItem, isOtherChild: boolean): HTMLTableRowElement {
+	const tr = document.createElement('tr');
+	if (isOtherChild) { tr.style.opacity = '0.85'; }
+	const labelTd = document.createElement('td');
+	const labelWrapper = document.createElement('span');
+	labelWrapper.className = 'metric-label';
+	if (isOtherChild) {
+		const indentSpan = document.createElement('span');
+		indentSpan.style.cssText = 'display:inline-block;width:12px';
+		labelWrapper.append(indentSpan);
+	}
+	const charsSpan = document.createElement('span');
+	charsSpan.style.cssText = 'color:#9aa0a6;font-size:11px;font-weight:500;';
+	charsSpan.textContent = `(~${item.charsPerToken.toFixed(1)} chars/tk)`;
+	labelWrapper.append(document.createTextNode(`${getModelDisplayName(item.model)} `), charsSpan);
+	labelTd.append(labelWrapper);
+	tr.append(labelTd,
+		buildValueCell(formatCompact(item.todayTotal), `↑${formatPercent(item.todayInputPct)} ↓${formatPercent(item.todayOutputPct)}`),
+		buildValueCell(formatCompact(item.last30DaysTotal), `↑${formatPercent(item.last30DaysInputPct)} ↓${formatPercent(item.last30DaysOutputPct)}`),
+		buildValueCell(formatCompact(item.monthTotal), `↑${formatPercent(item.monthInputPct)} ↓${formatPercent(item.monthOutputPct)}`),
+		buildValueCell(formatCompact(item.lastMonthTotal), `↑${formatPercent(item.lastMonthInputPct)} ↓${formatPercent(item.lastMonthOutputPct)}`),
+		buildValueCell(formatCompact(item.projected)));
+	return tr;
 }
 
-const otherLast30Td = buildValueCell(formatCompact(otherLast30Total));
-if (otherLast30Total > 0) {
-otherLast30Td.append(el('div', 'muted', `↑${formatPercent(pct(otherLast30.inputTokens, otherLast30Total))} ↓${formatPercent(pct(otherLast30.outputTokens, otherLast30Total))}`));
+function appendOtherModels(stats: DetailedStats, otherModels: string[], onToggleOther: () => void, tbody: HTMLTableSectionElement): void {
+	const sumUsage = (period: 'today' | 'last30Days' | 'month' | 'lastMonth') =>
+		otherModels.reduce((acc, m) => {
+			const u = stats[period].modelUsage[m] || { inputTokens: 0, outputTokens: 0 };
+			return { inputTokens: acc.inputTokens + u.inputTokens, outputTokens: acc.outputTokens + u.outputTokens };
+		}, { inputTokens: 0, outputTokens: 0 });
+	const pct = (part: number, total: number) => (total > 0 ? (part / total) * 100 : 0);
+	const otherToday = sumUsage('today'); const otherLast30 = sumUsage('last30Days');
+	const otherMonth = sumUsage('month'); const otherLastMonth = sumUsage('lastMonth');
+	const tTotal = otherToday.inputTokens + otherToday.outputTokens;
+	const l30Total = otherLast30.inputTokens + otherLast30.outputTokens;
+	const mTotal = otherMonth.inputTokens + otherMonth.outputTokens;
+	const lmTotal = otherLastMonth.inputTokens + otherLastMonth.outputTokens;
+	const otherTr = document.createElement('tr');
+	otherTr.style.cursor = 'pointer'; otherTr.style.background = 'var(--list-hover-bg)';
+	otherTr.title = modelOtherExpanded ? 'Collapse other models' : 'Expand other models';
+	const otherLabelWrapper = document.createElement('span'); otherLabelWrapper.className = 'metric-label';
+	const otherNameSpan = document.createElement('span');
+	otherNameSpan.style.cssText = 'color:var(--text-secondary);font-weight:600;';
+	otherNameSpan.textContent = `📦 Other (${otherModels.length} model${otherModels.length !== 1 ? 's' : ''})`;
+	const otherToggleSpan = document.createElement('span');
+	otherToggleSpan.style.cssText = 'font-size:10px;color:var(--text-muted)';
+	otherToggleSpan.textContent = ` ${modelOtherExpanded ? '▲' : '▼'}`;
+	otherLabelWrapper.append(otherNameSpan, otherToggleSpan);
+	const otherLabelTd = document.createElement('td'); otherLabelTd.append(otherLabelWrapper);
+	const mkOtherTd = (io: { inputTokens: number; outputTokens: number }, total: number) => {
+		const td = buildValueCell(formatCompact(total));
+		if (total > 0) { td.append(el('div', 'muted', `↑${formatPercent(pct(io.inputTokens, total))} ↓${formatPercent(pct(io.outputTokens, total))}`)); }
+		return td;
+	};
+	otherTr.append(otherLabelTd, mkOtherTd(otherToday, tTotal), mkOtherTd(otherLast30, l30Total), mkOtherTd(otherMonth, mTotal), mkOtherTd(otherLastMonth, lmTotal), buildValueCell(formatCompact(Math.round(calculateProjection(l30Total)))));
+	otherTr.addEventListener('click', () => { modelOtherExpanded = !modelOtherExpanded; saveSortSettings(); onToggleOther(); });
+	tbody.append(otherTr);
+	if (modelOtherExpanded) {
+		const otherItems = otherModels.map(m => toModelItem(stats, m));
+		sortModelItems(otherItems);
+		otherItems.forEach(item => tbody.append(buildModelRowEl(item, true)));
+	}
 }
 
-const otherMonthTd = buildValueCell(formatCompact(otherMonthTotal));
-if (otherMonthTotal > 0) {
-otherMonthTd.append(el('div', 'muted', `↑${formatPercent(pct(otherMonth.inputTokens, otherMonthTotal))} ↓${formatPercent(pct(otherMonth.outputTokens, otherMonthTotal))}`));
-}
-
-const otherLastMonthTd = buildValueCell(formatCompact(otherLastMonthTotal));
-if (otherLastMonthTotal > 0) {
-otherLastMonthTd.append(el('div', 'muted', `↑${formatPercent(pct(otherLastMonth.inputTokens, otherLastMonthTotal))} ↓${formatPercent(pct(otherLastMonth.outputTokens, otherLastMonthTotal))}`));
-}
-
-otherTr.append(otherLabelTd, otherTodayTd, otherLast30Td, otherMonthTd, otherLastMonthTd, buildValueCell(formatCompact(otherProjected)));
-otherTr.addEventListener('click', () => {
-modelOtherExpanded = !modelOtherExpanded;
-saveSortSettings();
-onToggleOther();
-});
-tbody.append(otherTr);
-
-// When expanded, show individual "other" model rows beneath the summary row
-if (modelOtherExpanded) {
-const otherItems = otherModels.map(toModelItem);
-sortItems(otherItems);
-otherItems.forEach(item => tbody.append(buildModelRow(item, true)));
-}
-}
-
-return tbody;
+function buildModelTbody(stats: DetailedStats, topModels: string[], otherModels: string[], onToggleOther: () => void): HTMLTableSectionElement {
+	const topItems = topModels.map(m => toModelItem(stats, m));
+	sortModelItems(topItems);
+	const tbody = document.createElement('tbody');
+	topItems.forEach(item => tbody.append(buildModelRowEl(item, false)));
+	if (otherModels.length > 0) { appendOtherModels(stats, otherModels, onToggleOther, tbody); }
+	return tbody;
 }
 
 function buildModelUsageSection(stats: DetailedStats): HTMLElement | null {
