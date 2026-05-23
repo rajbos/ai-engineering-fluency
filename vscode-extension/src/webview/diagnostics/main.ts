@@ -494,212 +494,76 @@ function safeText(value: unknown): string {
   return escapeHtml(String(value));
 }
 
+type ContextRefCounts = { file: number; symbol: number; selection: number; implicitSelection: number; codebase: number; workspace: number; terminal: number; vscode: number; copilotInstructions: number; agentsMd: number };
+type FilteredSessionResult = { filteredFiles: SessionFileDetails[]; zeroInteractionCount: number };
+
+function applySessionFilters(detailedFiles: SessionFileDetails[]): FilteredSessionResult {
+  let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => sf.editorSource === currentEditorFilter) : detailedFiles;
+  if (currentContextRefFilter) {
+    filteredFiles = filteredFiles.filter((sf) => { const value = sf.contextReferences[currentContextRefFilter!]; return typeof value === "number" && value > 0; });
+  }
+  const zeroInteractionCount = filteredFiles.filter(sf => sf.interactions === 0).length;
+  if (hideEmptySessions && zeroInteractionCount === filteredFiles.length && filteredFiles.length > 0) { hideEmptySessions = false; }
+  if (hideEmptySessions) { filteredFiles = filteredFiles.filter(sf => sf.interactions > 0); }
+  return { filteredFiles, zeroInteractionCount };
+}
+
+function aggregateContextRefs(filteredFiles: SessionFileDetails[]): ContextRefCounts {
+  return filteredFiles.reduce((agg, sf) => {
+    const r = sf.contextReferences;
+    agg.file += r.file; agg.symbol += r.symbol; agg.selection += r.selection; agg.implicitSelection += r.implicitSelection;
+    agg.codebase += r.codebase; agg.workspace += r.workspace; agg.terminal += r.terminal; agg.vscode += r.vscode;
+    agg.copilotInstructions += r.copilotInstructions; agg.agentsMd += r.agentsMd;
+    return agg;
+  }, { file: 0, symbol: 0, selection: 0, implicitSelection: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, copilotInstructions: 0, agentsMd: 0 });
+}
+
+function buildEditorPanelsHtml(detailedFiles: SessionFileDetails[], editorStats: Record<string, { count: number; interactions: number }>, editors: string[]): string {
+  return `<div class="editor-filter-panels">
+    <div class="editor-panel ${currentEditorFilter === null ? "active" : ""}" data-editor=""><div class="editor-panel-icon">🌐</div><div class="editor-panel-name">All Editors</div><div class="editor-panel-stats">${detailedFiles.length} sessions</div></div>
+    ${editors.map((editor) => `<div class="editor-panel ${currentEditorFilter === editor ? "active" : ""}" data-editor="${escapeHtml(editor)}"><div class="editor-panel-icon">${getEditorIcon(editor)}</div><div class="editor-panel-name">${escapeHtml(editor)}</div><div class="editor-panel-stats">${editorStats[editor].count} sessions · ${editorStats[editor].interactions} interactions</div></div>`).join("")}
+  </div>`;
+}
+
+function buildSessionSummaryCardsHtml(filteredFiles: SessionFileDetails[], totalInteractions: number, totalTokens: number, totalContextRefs: number, agg: ContextRefCounts, zeroInteractionCount: number): string {
+  const mkRef = (key: keyof ContextRefCounts, icon: string, label: string) => agg[key] > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === key ? "active" : ""}" data-ref-type="${key}">${icon} ${label} ${agg[key]}</div>` : "";
+  return `<div class="summary-cards">
+    <div class="summary-card"><div class="summary-label">📁 ${currentEditorFilter ? "Filtered" : "Total"} Sessions</div><div class="summary-value">${filteredFiles.length}</div></div>
+    <div class="summary-card"><div class="summary-label">💬 Interactions</div><div class="summary-value">${totalInteractions}</div></div>
+    <div class="summary-card"><div class="summary-label">🪙 Tokens</div><div class="summary-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div></div>
+    <div class="summary-card"><div class="summary-label">🔗 Context References</div><div class="summary-value">${safeText(totalContextRefs)}</div><div class="summary-sub">${totalContextRefs === 0 ? "None" : ""}${mkRef("file","","#file")}${mkRef("symbol","","#sym")}${mkRef("implicitSelection","","implicit")}${mkRef("copilotInstructions","📋","instructions")}${mkRef("agentsMd","🤖","agents")}${mkRef("workspace","","@workspace")}${mkRef("vscode","","@vscode")}</div></div>
+    <div class="summary-card"><div class="summary-label">📅 Time Range</div><div class="summary-value">Last 14 days</div></div>
+  </div>
+  <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ''}</label></div>`;
+}
+
+function buildSessionTableHtml(sortedFiles: SessionFileDetails[]): string {
+  const rows = sortedFiles.map((sf, idx) => {
+    const editorLabel = sf.editorName || sf.editorSource;
+    const titleHtml = sf.title ? `<a href="#" class="session-file-link" data-file="${encodeURIComponent(sf.file)}" title="${escapeHtml(sf.title)}">${escapeHtml(sf.title.length > 40 ? sf.title.substring(0, 40) + "..." : sf.title)}</a>` : `<a href="#" class="session-file-link empty-session-link" data-file="${encodeURIComponent(sf.file)}" title="Empty session">(Empty session)</a>`;
+    const repoLabel = sf.repository ? escapeHtml(getRepoDisplayName(sf.repository)) : (sf.file.includes('session-store.db') ? '<span style="color: #888; font-style: italic;">No workspace</span>' : '<span style="color: #666;">—</span>');
+    const repoTitle = sf.repository ? escapeHtml(sf.repository) : (sf.file.includes('session-store.db') ? 'Chat session — no workspace connected' : 'No repository detected');
+    const isUnknownEditor = (sf.editorName || sf.editorSource || "Unknown") === "Unknown";
+    return `<tr><td>${idx + 1}</td><td><span class="${getEditorBadgeClass(editorLabel)}" title="${escapeHtml(sf.editorSource)}">${getEditorIcon(editorLabel)} ${escapeHtml(editorLabel)}</span></td><td class="session-title" title="${sf.title ? escapeHtml(sf.title) : "Empty session"}">${titleHtml}</td><td class="repository-cell" title="${repoTitle}">${repoLabel}</td><td>${formatFileSize(sf.size)}</td><td title="${Number(sf.tokens || 0).toLocaleString()} tokens">${formatTokenCount(sf.tokens)}</td><td>${sanitizeNumber(sf.interactions)}</td><td title="${escapeHtml(getContextRefsSummary(sf.contextReferences))}">${sanitizeNumber(getTotalContextRefs(sf.contextReferences))}</td><td>${formatDate(sf.lastInteraction)}</td><td><a href="#" class="view-formatted-link" data-file="${encodeURIComponent(sf.file)}" title="View formatted JSONL file">📄 View</a>${isUnknownEditor ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.file)}" title="Report this unknown path so we can add editor support">📢 Report</a>` : ""}</td></tr>`;
+  }).join("");
+  return `<div class="table-container"><table class="session-table"><thead><tr><th>#</th><th>Editor</th><th>Title</th><th>Repository</th><th class="sortable" data-sort="size">Size${getSortIndicator("size")}</th><th class="sortable" data-sort="tokens">Tokens${getSortIndicator("tokens")}</th><th class="sortable" data-sort="interactions">Interactions${getSortIndicator("interactions")}</th><th class="sortable" data-sort="contextRefs">Context Refs${getSortIndicator("contextRefs")}</th><th class="sortable" data-sort="lastInteraction">Last Interaction${getSortIndicator("lastInteraction")}</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 function renderSessionTable(
   detailedFiles: SessionFileDetails[],
   isLoading: boolean = false,
 ): string {
-  if (isLoading) {
-    return `
-			<div class="loading-state">
-				<div class="loading-spinner">⏳</div>
-				<div class="loading-text">Loading session files...</div>
-				<div class="loading-subtext">Analyzing up to 500 files from the last 14 days</div>
-			</div>
-		`;
-  }
-
-  if (detailedFiles.length === 0) {
-    return '<p style="color: #999;">No session files with activity in the last 14 days.</p>';
-  }
-
-  // Get editor stats for ALL files (before filtering)
+  if (isLoading) { return `<div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`; }
+  if (detailedFiles.length === 0) { return '<p style="color: #999;">No session files with activity in the last 14 days.</p>'; }
   const editorStats = getEditorStats(detailedFiles);
   const editors = Object.keys(editorStats).sort();
-
-  // Apply editor filter
-  let filteredFiles = currentEditorFilter
-    ? detailedFiles.filter((sf) => sf.editorSource === currentEditorFilter)
-    : detailedFiles;
-
-  // Apply context ref filter
-  if (currentContextRefFilter) {
-    filteredFiles = filteredFiles.filter((sf) => {
-      const refType = currentContextRefFilter!; // Assert non-null since we're inside the if block
-      const value = sf.contextReferences[refType];
-      return typeof value === "number" && value > 0;
-    });
-  }
-
-  // Count zero-interaction sessions (before hiding them) for the toggle label
-  const zeroInteractionCount = filteredFiles.filter(sf => sf.interactions === 0).length;
-
-  // Auto-reveal hidden sessions when the current filter would leave nothing visible
-  if (hideEmptySessions && zeroInteractionCount === filteredFiles.length && filteredFiles.length > 0) {
-    hideEmptySessions = false;
-  }
-
-  // Hide sessions with 0 interactions when filter is active
-  if (hideEmptySessions) {
-    filteredFiles = filteredFiles.filter(sf => sf.interactions > 0);
-  }
-
-  // Summary stats for filtered files
-  const totalInteractions = filteredFiles.reduce(
-    (sum, sf) => sum + Number(sf.interactions || 0),
-    0,
-  );
-  const totalTokens = filteredFiles.reduce(
-    (sum, sf) => sum + Number(sf.tokens || 0),
-    0,
-  );
-  const totalContextRefs = filteredFiles.reduce(
-    (sum, sf) => sum + getTotalContextRefs(sf.contextReferences),
-    0,
-  );
-
-  // Aggregate context ref breakdown
-  const aggContextRefs = filteredFiles.reduce(
-    (agg, sf) => {
-      const r = sf.contextReferences;
-      agg.file += r.file;
-      agg.symbol += r.symbol;
-      agg.selection += r.selection;
-      agg.implicitSelection += r.implicitSelection;
-      agg.codebase += r.codebase;
-      agg.workspace += r.workspace;
-      agg.terminal += r.terminal;
-      agg.vscode += r.vscode;
-      agg.copilotInstructions += r.copilotInstructions;
-      agg.agentsMd += r.agentsMd;
-      return agg;
-    },
-    {
-      file: 0,
-      symbol: 0,
-      selection: 0,
-      implicitSelection: 0,
-      codebase: 0,
-      workspace: 0,
-      terminal: 0,
-      vscode: 0,
-      copilotInstructions: 0,
-      agentsMd: 0,
-    },
-  );
-
-  // Sort filtered files
+  const { filteredFiles, zeroInteractionCount } = applySessionFilters(detailedFiles);
+  const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+  const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+  const totalContextRefs = filteredFiles.reduce((sum, sf) => sum + getTotalContextRefs(sf.contextReferences), 0);
+  const agg = aggregateContextRefs(filteredFiles);
   const sortedFiles = sortSessionFiles(filteredFiles);
-
-  // Build editor filter panels
-  const editorPanelsHtml = `
-		<div class="editor-filter-panels">
-			<div class="editor-panel ${currentEditorFilter === null ? "active" : ""}" data-editor="">
-				<div class="editor-panel-icon">🌐</div>
-				<div class="editor-panel-name">All Editors</div>
-				<div class="editor-panel-stats">${detailedFiles.length} sessions</div>
-			</div>
-			${editors
-        .map(
-          (editor) => `
-				<div class="editor-panel ${currentEditorFilter === editor ? "active" : ""}" data-editor="${escapeHtml(editor)}">
-					<div class="editor-panel-icon">${getEditorIcon(editor)}</div>
-					<div class="editor-panel-name">${escapeHtml(editor)}</div>
-					<div class="editor-panel-stats">${editorStats[editor].count} sessions · ${editorStats[editor].interactions} interactions</div>
-				</div>
-			`,
-        )
-        .join("")}
-		</div>
-	`;
-
-  return `
-		${editorPanelsHtml}
-
-		<div class="summary-cards">
-			<div class="summary-card">
-				<div class="summary-label">📁 ${currentEditorFilter ? "Filtered" : "Total"} Sessions</div>
-				<div class="summary-value">${filteredFiles.length}</div>
-			</div>
-			<div class="summary-card">
-				<div class="summary-label">💬 Interactions</div>
-				<div class="summary-value">${totalInteractions}</div>
-			</div>
-			<div class="summary-card">
-				<div class="summary-label">🪙 Tokens</div>
-				<div class="summary-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div>
-			</div>
-			<div class="summary-card">
-				<div class="summary-label">🔗 Context References</div>
-				<div class="summary-value">${safeText(totalContextRefs)}</div>
-				<div class="summary-sub">
-				${totalContextRefs === 0 ? "None" : ""}
-				${aggContextRefs.file > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "file" ? "active" : ""}" data-ref-type="file">#file ${aggContextRefs.file}</div>` : ""}
-				${aggContextRefs.symbol > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "symbol" ? "active" : ""}" data-ref-type="symbol">#sym ${aggContextRefs.symbol}</div>` : ""}
-				${aggContextRefs.implicitSelection > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "implicitSelection" ? "active" : ""}" data-ref-type="implicitSelection">implicit ${aggContextRefs.implicitSelection}</div>` : ""}
-				${aggContextRefs.copilotInstructions > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "copilotInstructions" ? "active" : ""}" data-ref-type="copilotInstructions">📋 instructions ${aggContextRefs.copilotInstructions}</div>` : ""}
-				${aggContextRefs.agentsMd > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "agentsMd" ? "active" : ""}" data-ref-type="agentsMd">🤖 agents ${aggContextRefs.agentsMd}</div>` : ""}
-				${aggContextRefs.workspace > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "workspace" ? "active" : ""}" data-ref-type="workspace">@workspace ${aggContextRefs.workspace}</div>` : ""}
-				${aggContextRefs.vscode > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "vscode" ? "active" : ""}" data-ref-type="vscode">@vscode ${aggContextRefs.vscode}</div>` : ""}
-				</div>
-			</div>
-			<div class="summary-card">
-				<div class="summary-label">📅 Time Range</div>
-				<div class="summary-value">Last 14 days</div>
-			</div>
-		</div>
-
-		<div class="filter-options">
-			<label class="empty-sessions-toggle">
-				<input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>
-				Hide sessions with 0 interactions
-				${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ''}
-			</label>
-		</div>
-
-		<div class="table-container">
-			<table class="session-table">
-				<thead>
-					<tr>
-						<th>#</th>
-						<th>Editor</th>
-						<th>Title</th>
-						<th>Repository</th>
-						<th class="sortable" data-sort="size">Size${getSortIndicator("size")}</th>
-						<th class="sortable" data-sort="tokens">Tokens${getSortIndicator("tokens")}</th>
-						<th class="sortable" data-sort="interactions">Interactions${getSortIndicator("interactions")}</th>
-						<th class="sortable" data-sort="contextRefs">Context Refs${getSortIndicator("contextRefs")}</th>
-						<th class="sortable" data-sort="lastInteraction">Last Interaction${getSortIndicator("lastInteraction")}</th>
-						<th>Actions</th>
-					</tr>
-				</thead>
-				<tbody>
-					${sortedFiles
-            .map(
-              (sf, idx) => `
-						<tr>
-							<td>${idx + 1}</td>
-							<td><span class="${getEditorBadgeClass(sf.editorName || sf.editorSource)}" title="${escapeHtml(sf.editorSource)}">${getEditorIcon(sf.editorName || sf.editorSource)} ${escapeHtml(sf.editorName || sf.editorSource)}</span></td>
-							<td class="session-title" title="${sf.title ? escapeHtml(sf.title) : "Empty session"}">
-								${sf.title ? `<a href="#" class="session-file-link" data-file="${encodeURIComponent(sf.file)}" title="${escapeHtml(sf.title)}">${escapeHtml(sf.title.length > 40 ? sf.title.substring(0, 40) + "..." : sf.title)}</a>` : `<a href="#" class="session-file-link empty-session-link" data-file="${encodeURIComponent(sf.file)}" title="Empty session">(Empty session)</a>`}
-							</td>
-							<td class="repository-cell" title="${sf.repository ? escapeHtml(sf.repository) : (sf.file.includes('session-store.db') ? 'Chat session — no workspace connected' : 'No repository detected')}">${sf.repository ? escapeHtml(getRepoDisplayName(sf.repository)) : (sf.file.includes('session-store.db') ? '<span style="color: #888; font-style: italic;">No workspace</span>' : '<span style="color: #666;">—</span>')}</td>
-							<td>${formatFileSize(sf.size)}</td>
-							<td title="${Number(sf.tokens || 0).toLocaleString()} tokens">${formatTokenCount(sf.tokens)}</td>
-							<td>${sanitizeNumber(sf.interactions)}</td>
-							<td title="${escapeHtml(getContextRefsSummary(sf.contextReferences))}">${sanitizeNumber(getTotalContextRefs(sf.contextReferences))}</td>
-							<td>${formatDate(sf.lastInteraction)}</td>
-							<td>
-								<a href="#" class="view-formatted-link" data-file="${encodeURIComponent(sf.file)}" title="View formatted JSONL file">📄 View</a>
-								${(sf.editorName || sf.editorSource || "Unknown") === "Unknown" ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.file)}" title="Report this unknown path so we can add editor support">📢 Report</a>` : ""}
-							</td>
-						</tr>
-					`,
-            )
-            .join("")}
-				</tbody>
-			</table>
-		</div>
-	`;
+  return `${buildEditorPanelsHtml(detailedFiles, editorStats, editors)}${buildSessionSummaryCardsHtml(filteredFiles, totalInteractions, totalTokens, totalContextRefs, agg, zeroInteractionCount)}${buildSessionTableHtml(sortedFiles)}`;
 }
 
 function counterRow(key: string, label: string, value: number): string {
