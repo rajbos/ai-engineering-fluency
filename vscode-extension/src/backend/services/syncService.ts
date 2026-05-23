@@ -1064,13 +1064,10 @@ return true;
 		const onProgress = args.onProgress;
 		const userId = (args.userId ?? '').trim() || undefined;
 		const now = new Date();
-		// Include all events from the start of the first day in the range (UTC).
 		const start = new Date(now.getTime());
 		start.setUTCHours(0, 0, 0, 0);
 		start.setUTCDate(start.getUTCDate() - (lookbackDays - 1));
 		const startMs = start.getTime();
-		
-		// Log the date range being processed
 		const todayKey = this.utility.toUtcDayKey(now);
 		const startKey = this.utility.toUtcDayKey(start);
 		this.deps.logger.log(`Backend sync: processing sessions from ${startKey} to ${todayKey} (lookback ${lookbackDays} days)`);
@@ -1080,135 +1077,125 @@ return true;
 		const workspaceNamesById: Record<string, string> = {};
 		const machineNamesById: Record<string, string> = {};
 		const machineName = this.utility.normalizeNameForStorage(this.utility.stripHostnameDomain(os.hostname()));
-		if (machineName) {
-			machineNamesById[machineId] = machineName;
-		}
+		if (machineName) { machineNamesById[machineId] = machineName; }
 
-		// Use pre-fetched session files if provided, otherwise fetch them
 		const sessionFiles = args.sessionFiles ?? await this.deps.sessionHandlers.getCopilotSessionFiles();
 		const useCachedData = !!this.deps.sessionHandlers.getSessionFileDataCached;
-		let cacheHits = 0;
-		let cacheMisses = 0;
-		let filesSkipped = 0;
-		let filesProcessed = 0;
-		
+		const progress = { filesSkipped: 0, filesProcessed: 0, cacheHits: 0, cacheMisses: 0 };
 		const totalFiles = sessionFiles.length;
 		this.deps.logger.log(`Backend sync: analyzing ${totalFiles} session files`);
 
 		for (const sessionFile of sessionFiles) {
-			let fileMtimeMs: number | undefined;
-			
-			try {
-				const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
-				fileMtimeMs = fileStat.mtimeMs;
-				
-				// Skip files older than lookback period (unless backfill mode bypasses this filter)
-				if (!skipMtimeFilter && fileMtimeMs < startMs) {
-					filesSkipped++;
-					continue;
-				}
-				filesProcessed++;
-				// Report progress every 10 files (avoids flooding the callback)
-				if (onProgress && filesProcessed % 10 === 0) {
-					const daysFound = new Set(Array.from(rollups.values()).map(r => r.key.day)).size;
-					onProgress(filesProcessed, totalFiles, daysFound);
-				}
-			} catch (e) {
-				this.deps.logger.warn(`Backend sync: failed to stat session file ${sessionFile}: ${e}`);
-				continue;
-			}
-
-			// Determine the editor for this session file (only used when includeEditorDimension is set)
-			const editorForFile = includeEditorDimension
-				? getEditorTypeFromPath(sessionFile, this.deps.editorHandlers?.isOpenCodeSession)
-				: undefined;
-
-			// Skip Visual Studio session files — they are binary MessagePack, not JSON
-			if (this.deps.editorHandlers?.isVSSessionFile && this.deps.editorHandlers?.isVSSessionFile(sessionFile)) {
-				filesSkipped++;
-				continue;
-			}
-
-			// Handle OpenCode sessions separately (different data format)
-			if (this.deps.editorHandlers?.isOpenCodeSession && this.deps.editorHandlers?.isOpenCodeSession(sessionFile)) {
-				const sessionArgs = this.makeSessionRollupArgs(machineId, userId, editorForFile, workspaceNamesById, rollups, startMs);
-				try {
-					const processed = await this.processOpenCodeSession(sessionFile, fileMtimeMs, sessionArgs);
-					if (!processed) { filesSkipped++; }
-				} catch (e) {
-					this.deps.logger.warn(`Backend sync: failed to process OpenCode session ${sessionFile}: ${e}`);
-				}
-				continue;
-			}
-
-			// Handle Crush sessions separately (virtual paths pointing to crush.db SQLite entries)
-			if (this.deps.editorHandlers?.isCrushSession && this.deps.editorHandlers?.isCrushSession(sessionFile)) {
-				const sessionArgs = this.makeSessionRollupArgs(machineId, userId, editorForFile, workspaceNamesById, rollups, startMs);
-				try {
-					const processed = await this.processCrushSession(sessionFile, fileMtimeMs, sessionArgs);
-					if (!processed) { filesSkipped++; }
-				} catch (e) {
-					this.deps.logger.warn(`Backend sync: failed to process Crush session ${sessionFile}: ${e}`);
-				}
-				continue;
-			}
-
-
-			const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
-			await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, workspaceNamesById);
-
-			// Try to use cached data first (faster than full recomputation)
-			// Note: We still parse the file to get accurate day keys from timestamps,
-			// but use cached token counts for performance
-			if (useCachedData) {
-				const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
-				const cacheSuccess = await this.processCachedSessionFile(
-					sessionFile,
-					fileMtimeMs,
-					fileStat.size,
-					workspaceId,
-					machineId,
-					userId,
-					rollups,
-					startMs,
-					now,
-					editorForFile
-				);
-				
-				if (cacheSuccess) {
-					cacheHits++;
-					continue;
-				} else {
-					cacheMisses++;
-				}
-			}
-
-			// Fallback: parse file directly (legacy path or cache unavailable)
-			let content: string;
-			try {
-				content = await fs.promises.readFile(sessionFile, 'utf8');
-			} catch (e) {
-				this.deps.logger.warn(`Backend sync: failed to read session file ${sessionFile}: ${e}`);
-				continue;
-			}
-			// JSONL (Copilot CLI or VS Code chat .json/.jsonl with delta-based content)
-			if (sessionFile.endsWith('.jsonl') || isJsonlContent(content)) {
-				this.processJsonlSessionFallback(content, sessionFile, fileMtimeMs, startMs, workspaceId, machineId, userId, editorForFile, rollups);
-				continue;
-			}
-
-			// JSON (VS Code Copilot Chat)
-			this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, startMs, workspaceId, machineId, userId, editorForFile, rollups);
+			await this.processOneSessionForRollup(sessionFile, {
+				skipMtimeFilter, startMs, now, machineId, userId,
+				includeEditorDimension, useCachedData, rollups,
+				workspaceNamesById, totalFiles, onProgress, progress
+			});
 		}
 
-		// Log cache performance statistics
-		if (useCachedData) {
-			this.logCachePerformance(cacheHits, cacheMisses);
-		}
-		
-		this.deps.logger.log(`Backend sync: processed ${filesProcessed} files, skipped ${filesSkipped} files outside lookback period`);
-
+		if (useCachedData) { this.logCachePerformance(progress.cacheHits, progress.cacheMisses); }
+		this.deps.logger.log(`Backend sync: processed ${progress.filesProcessed} files, skipped ${progress.filesSkipped} files outside lookback period`);
 		return { rollups, workspaceNamesById, machineNamesById };
+	}
+
+	private async processOneSessionForRollup(
+		sessionFile: string,
+		ctx: {
+			skipMtimeFilter: boolean; startMs: number; now: Date; machineId: string;
+			userId: string | undefined; includeEditorDimension: boolean; useCachedData: boolean;
+			rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>;
+			workspaceNamesById: Record<string, string>; totalFiles: number;
+			onProgress: ((processed: number, total: number, daysFound: number) => void) | undefined;
+			progress: { filesSkipped: number; filesProcessed: number; cacheHits: number; cacheMisses: number };
+		}
+	): Promise<void> {
+		const fileMtimeMs = await this.statSessionFileForRollup(sessionFile, ctx);
+		if (fileMtimeMs === undefined) { return; }
+
+		const editorForFile = this.getEditorForFile(sessionFile, ctx.includeEditorDimension);
+
+		if (this.isVSSessionFileType(sessionFile)) { ctx.progress.filesSkipped++; return; }
+
+		const sessionArgs = this.makeSessionRollupArgs(ctx.machineId, ctx.userId, editorForFile, ctx.workspaceNamesById, ctx.rollups, ctx.startMs);
+		if (this.isOpenCodeSessionType(sessionFile)) {
+			try {
+				const processed = await this.processOpenCodeSession(sessionFile, fileMtimeMs, sessionArgs);
+				if (!processed) { ctx.progress.filesSkipped++; }
+			} catch (e) { this.deps.logger.warn(`Backend sync: failed to process OpenCode session ${sessionFile}: ${e}`); }
+			return;
+		}
+		if (this.isCrushSessionType(sessionFile)) {
+			try {
+				const processed = await this.processCrushSession(sessionFile, fileMtimeMs, sessionArgs);
+				if (!processed) { ctx.progress.filesSkipped++; }
+			} catch (e) { this.deps.logger.warn(`Backend sync: failed to process Crush session ${sessionFile}: ${e}`); }
+			return;
+		}
+
+		const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
+		await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, ctx.workspaceNamesById);
+
+		if (ctx.useCachedData) {
+			const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
+			const cacheSuccess = await this.processCachedSessionFile(sessionFile, fileMtimeMs, fileStat.size, workspaceId, ctx.machineId, ctx.userId, ctx.rollups, ctx.startMs, ctx.now, editorForFile);
+			if (cacheSuccess) { ctx.progress.cacheHits++; return; }
+			ctx.progress.cacheMisses++;
+		}
+
+		let content: string;
+		try {
+			content = await fs.promises.readFile(sessionFile, 'utf8');
+		} catch (e) {
+			this.deps.logger.warn(`Backend sync: failed to read session file ${sessionFile}: ${e}`);
+			return;
+		}
+		if (sessionFile.endsWith('.jsonl') || isJsonlContent(content)) {
+			this.processJsonlSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForFile, ctx.rollups);
+			return;
+		}
+		this.processJsonSessionFallback(content, sessionFile, fileMtimeMs, ctx.startMs, workspaceId, ctx.machineId, ctx.userId, editorForFile, ctx.rollups);
+	}
+
+	private async statSessionFileForRollup(
+		sessionFile: string,
+		ctx: {
+			skipMtimeFilter: boolean; startMs: number; totalFiles: number;
+			onProgress: ((processed: number, total: number, daysFound: number) => void) | undefined;
+			rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>;
+			progress: { filesSkipped: number; filesProcessed: number; cacheHits: number; cacheMisses: number };
+		}
+	): Promise<number | undefined> {
+		try {
+			const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
+			const fileMtimeMs = fileStat.mtimeMs;
+			if (!ctx.skipMtimeFilter && fileMtimeMs < ctx.startMs) { ctx.progress.filesSkipped++; return undefined; }
+			ctx.progress.filesProcessed++;
+			if (ctx.onProgress && ctx.progress.filesProcessed % 10 === 0) {
+				const daysFound = new Set(Array.from(ctx.rollups.values()).map(r => r.key.day)).size;
+				ctx.onProgress(ctx.progress.filesProcessed, ctx.totalFiles, daysFound);
+			}
+			return fileMtimeMs;
+		} catch (e) {
+			this.deps.logger.warn(`Backend sync: failed to stat session file ${sessionFile}: ${e}`);
+			return undefined;
+		}
+	}
+
+	private getEditorForFile(sessionFile: string, includeEditorDimension: boolean): string | undefined {
+		if (!includeEditorDimension) { return undefined; }
+		return getEditorTypeFromPath(sessionFile, this.deps.editorHandlers?.isOpenCodeSession);
+	}
+
+	private isVSSessionFileType(sessionFile: string): boolean {
+		return !!(this.deps.editorHandlers?.isVSSessionFile?.(sessionFile));
+	}
+
+	private isOpenCodeSessionType(sessionFile: string): boolean {
+		return !!(this.deps.editorHandlers?.isOpenCodeSession?.(sessionFile));
+	}
+
+	private isCrushSessionType(sessionFile: string): boolean {
+		return !!(this.deps.editorHandlers?.isCrushSession?.(sessionFile));
 	}
 
 	/**
