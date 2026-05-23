@@ -4274,59 +4274,50 @@ usageAnalysis: undefined
 		toolCalls: { toolName: string; arguments?: string; result?: string; isSubAgent?: boolean; subAgentModel?: string }[];
 		mcpTools: { server: string; tool: string }[];
 	} {
-		let responseText = '';
-		let thinkingText = '';
-		const toolCalls: { toolName: string; arguments?: string; result?: string; isSubAgent?: boolean; subAgentModel?: string }[] = [];
-		const mcpTools: { server: string; tool: string }[] = [];
-
+		const acc = { responseText: '', thinkingText: '', toolCalls: [] as any[], mcpTools: [] as any[] };
 		for (const item of response) {
 			if (!item || typeof item !== 'object') { continue; }
-			// Extract text content and thinking via shared utility
-			const { text: itemText, isThinking: itemIsThinking } = _extractResponseItemText(item);
-			if (itemText) {
-				if (itemIsThinking) { thinkingText += itemText; }
-				else { responseText += itemText; }
-			}
-
-			// Extract tool invocations
-			if (item.kind === 'toolInvocationSerialized' || item.kind === 'prepareToolInvocation') {
-				// Detect sub-agent calls first — tag them for the log viewer
-				const subAgentData = _extractSubAgentData(item);
-				if (subAgentData) {
-					const displayName = (item.toolSpecificData?.agentName as string | undefined) || 'Sub-Agent';
-					toolCalls.push({
-						toolName: displayName,
-						arguments: subAgentData.prompt || undefined,
-						result: undefined,
-						isSubAgent: true,
-						subAgentModel: subAgentData.modelName || undefined,
-					});
-				} else {
-					const toolName = item.toolId || item.toolName || item.invocationMessage?.toolName || item.toolSpecificData?.kind || 'unknown';
-					// Check if this is an MCP tool by name pattern
-					if (this.isMcpTool(toolName)) {
-						const serverName = this.extractMcpServerName(toolName);
-						mcpTools.push({ server: serverName, tool: toolName });
-					} else {
-						// Add to regular tool calls
-						toolCalls.push({
-							toolName,
-							arguments: item.input ? JSON.stringify(item.input) : undefined,
-							result: item.result ? (typeof item.result === 'string' ? item.result : JSON.stringify(item.result)) : undefined
-						});
-					}
-				}
-			}
-
-			// Extract MCP tools
-			if (item.kind === 'mcpServersStarting' && item.didStartServerIds) {
-				for (const serverId of item.didStartServerIds) {
-					mcpTools.push({ server: serverId, tool: 'start' });
-				}
-			}
+			this.processResponseItem(item, acc);
 		}
+		return acc;
+	}
 
-		return { responseText, thinkingText, toolCalls, mcpTools };
+	private processResponseItem(item: any, acc: { responseText: string; thinkingText: string; toolCalls: any[]; mcpTools: any[] }): void {
+		const { text, isThinking } = _extractResponseItemText(item);
+		if (text) { if (isThinking) { acc.thinkingText += text; } else { acc.responseText += text; } }
+		if (item.kind === 'toolInvocationSerialized' || item.kind === 'prepareToolInvocation') {
+			this.handleToolInvocationItem(item, acc.toolCalls, acc.mcpTools);
+		}
+		if (item.kind === 'mcpServersStarting' && item.didStartServerIds) {
+			for (const serverId of item.didStartServerIds) { acc.mcpTools.push({ server: serverId, tool: 'start' }); }
+		}
+	}
+
+	private handleToolInvocationItem(item: any, toolCalls: { toolName: string; arguments?: string; result?: string; isSubAgent?: boolean; subAgentModel?: string }[], mcpTools: { server: string; tool: string }[]): void {
+		const subAgentData = _extractSubAgentData(item);
+		if (subAgentData) {
+			toolCalls.push({
+				toolName: (item.toolSpecificData?.agentName as string | undefined) || 'Sub-Agent',
+				arguments: subAgentData.prompt || undefined, result: undefined,
+				isSubAgent: true, subAgentModel: subAgentData.modelName || undefined,
+			});
+			return;
+		}
+		const toolName = this.resolveToolInvocationName(item);
+		if (this.isMcpTool(toolName)) {
+			mcpTools.push({ server: this.extractMcpServerName(toolName), tool: toolName });
+		} else {
+			toolCalls.push({ toolName, arguments: item.input ? JSON.stringify(item.input) : undefined, result: this.formatToolResult(item.result) });
+		}
+	}
+
+	private resolveToolInvocationName(item: any): string {
+		return item.toolId || item.toolName || item.invocationMessage?.toolName || item.toolSpecificData?.kind || 'unknown';
+	}
+
+	private formatToolResult(result: any): string | undefined {
+		if (!result) { return undefined; }
+		return typeof result === 'string' ? result : JSON.stringify(result);
 	}
 
 	public calculateEstimatedCost(modelUsage: ModelUsage, pricingSource: 'provider' | 'copilot' = 'provider'): number {
@@ -4343,82 +4334,82 @@ usageAnalysis: undefined
 		try {
 			const eco = this.findEcosystem(sessionFilePath);
 			if (eco) { return eco.getTokens(sessionFilePath); }
-
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFilePath, 'utf8');
-
-			// Check if this is a UUID-only file (new Copilot CLI format)
-			if (this.isUuidPointerFile(fileContent)) {
-				return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
-			}
-
-			// Handle .jsonl files OR .json files with JSONL content (each line is a separate JSON object)
-			const isJsonlContent = sessionFilePath.endsWith('.jsonl') || this.isJsonlContent(fileContent);
-			if (isJsonlContent) {
+			if (this.isUuidPointerFile(fileContent)) { return { tokens: 0, thinkingTokens: 0, actualTokens: 0 }; }
+			if (sessionFilePath.endsWith('.jsonl') || this.isJsonlContent(fileContent)) {
 				return this.estimateTokensFromJsonlSession(fileContent);
 			}
-
-			// Handle regular .json files
 			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			let totalInputTokens = 0;
-			let totalOutputTokens = 0;
-			let totalThinkingTokens = 0;
-			let totalActualTokens = 0;
-
-			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-				for (const request of sessionContent.requests) {
-					// Estimate tokens from user message (input)
-					if (request.message && request.message.parts) {
-						for (const part of request.message.parts) {
-							if (part.text) {
-								totalInputTokens += this.estimateTokensFromText(part.text);
-							}
-						}
-					}
-
-					// Estimate tokens from assistant response (output)
-					if (request.response && Array.isArray(request.response)) {
-						for (const responseItem of request.response) {
-							// Sub-agent invocations: count prompt (input) + result (output)
-							const subAgent = _extractSubAgentData(responseItem);
-							if (subAgent) {
-								const saModel = subAgent.modelName || this.getModelFromRequest(request);
-								if (subAgent.prompt) { totalInputTokens += this.estimateTokensFromText(subAgent.prompt, saModel); }
-								if (subAgent.result) { totalOutputTokens += this.estimateTokensFromText(subAgent.result, saModel); }
-								continue;
-							}
-							const { text, isThinking } = _extractResponseItemText(responseItem);
-							if (text) {
-								if (isThinking) {
-									totalThinkingTokens += this.estimateTokensFromText(text, this.getModelFromRequest(request));
-								} else {
-									totalOutputTokens += this.estimateTokensFromText(text, this.getModelFromRequest(request));
-								}
-							}
-						}
-					}
-
-					// Extract actual token counts from LLM API usage data
-					if (request.result?.usage) {
-						// OLD FORMAT (pre-Feb 2026)
-						const u = request.result.usage;
-						const prompt = typeof u.promptTokens === 'number' ? u.promptTokens : 0;
-						const completion = typeof u.completionTokens === 'number' ? u.completionTokens : 0;
-						totalActualTokens += prompt + completion;
-					} else if (typeof request.result?.promptTokens === 'number' && typeof request.result?.outputTokens === 'number') {
-						// NEW FORMAT (Feb 2026+)
-						totalActualTokens += request.result.promptTokens + request.result.outputTokens;
-					} else if (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number' && typeof request.result.metadata.outputTokens === 'number') {
-						// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
-						totalActualTokens += request.result.metadata.promptTokens + request.result.metadata.outputTokens;
-					}
-				}
-			}
-
-			return { tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens, thinkingTokens: totalThinkingTokens, actualTokens: totalActualTokens };
+			return this.estimateTokensFromJsonSession(sessionContent);
 		} catch (error) {
 			this.warn(`Error parsing session file ${sessionFilePath}: ${error}`);
 			return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
 		}
+	}
+
+	private estimateTokensFromJsonSession(sessionContent: any): { tokens: number; thinkingTokens: number; actualTokens: number } {
+		let totalInputTokens = 0; let totalOutputTokens = 0; let totalThinkingTokens = 0; let totalActualTokens = 0;
+		if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) {
+			return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
+		}
+		for (const request of sessionContent.requests) {
+			totalInputTokens += this.estimateRequestInputTokens(request);
+			const { output, thinking } = this.estimateRequestOutputTokens(request);
+			totalOutputTokens += output; totalThinkingTokens += thinking;
+			totalActualTokens += this.extractActualTokensFromRequest(request);
+		}
+		return { tokens: totalInputTokens + totalOutputTokens + totalThinkingTokens, thinkingTokens: totalThinkingTokens, actualTokens: totalActualTokens };
+	}
+
+	private estimateRequestInputTokens(request: any): number {
+		let tokens = 0;
+		if (request.message?.parts) {
+			for (const part of request.message.parts) {
+				if (part.text) { tokens += this.estimateTokensFromText(part.text); }
+			}
+		}
+		return tokens;
+	}
+
+	private estimateRequestOutputTokens(request: any): { output: number; thinking: number } {
+		let output = 0; let thinking = 0;
+		if (!request.response || !Array.isArray(request.response)) { return { output, thinking }; }
+		const model = this.getModelFromRequest(request);
+		for (const responseItem of request.response) {
+			const subAgent = _extractSubAgentData(responseItem);
+			if (subAgent) {
+				const saModel = subAgent.modelName || model;
+				output += this.estimateSubAgentTokens(subAgent, saModel);
+				continue;
+			}
+			const { text, isThinking } = _extractResponseItemText(responseItem);
+			if (!text) { continue; }
+			if (isThinking) { thinking += this.estimateTokensFromText(text, model); }
+			else { output += this.estimateTokensFromText(text, model); }
+		}
+		return { output, thinking };
+	}
+
+	private estimateSubAgentTokens(subAgent: { prompt?: string; result?: string }, model: string): number {
+		let tokens = 0;
+		if (subAgent.prompt) { tokens += this.estimateTokensFromText(subAgent.prompt, model); }
+		if (subAgent.result) { tokens += this.estimateTokensFromText(subAgent.result, model); }
+		return tokens;
+	}
+
+	private extractActualTokensFromRequest(request: any): number {
+		if (request.result?.usage) {
+			const u = request.result.usage;
+			return (typeof u.promptTokens === 'number' ? u.promptTokens : 0) + (typeof u.completionTokens === 'number' ? u.completionTokens : 0);
+		}
+		if (typeof request.result?.promptTokens === 'number' && typeof request.result?.outputTokens === 'number') {
+			return request.result.promptTokens + request.result.outputTokens;
+		}
+		const meta = request.result?.metadata;
+		if (meta && typeof meta.promptTokens === 'number' && typeof meta.outputTokens === 'number') {
+			return meta.promptTokens + meta.outputTokens;
+		}
+		return 0;
 	}
 
 	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number } {
