@@ -74,57 +74,68 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 		const sessionMeta = this.mistralVibe.getSessionMeta(sessionFile);
 		const tokenData = this.mistralVibe.getTokensFromSession(sessionFile);
 		const model: string = sessionMeta.model || 'devstral';
-
-		const userMsgIndices: number[] = [];
-		for (let i = 0; i < messages.length; i++) {
-			if (messages[i].role === 'user' && messages[i].injected !== true) {
-				userMsgIndices.push(i);
-			}
-		}
+		const userMsgIndices = this.findUserMessageIndices(messages);
 
 		for (let t = 0; t < userMsgIndices.length; t++) {
 			const userIdx = userMsgIndices[t];
 			const nextUserIdx = t + 1 < userMsgIndices.length ? userMsgIndices[t + 1] : messages.length;
-			const userMsg = messages[userIdx];
-			const userText = typeof userMsg.content === 'string' ? userMsg.content : '';
-			let assistantText = '';
-			const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
-
-			for (let j = userIdx + 1; j < nextUserIdx; j++) {
-				const msg = messages[j];
-				if (msg.role === 'assistant') {
-					if (typeof msg.content === 'string') { assistantText += msg.content; }
-					if (Array.isArray(msg.tool_calls)) {
-						for (const tc of msg.tool_calls) {
-							toolCalls.push({
-								toolName: tc.function?.name || tc.name || 'unknown',
-								arguments: tc.function?.arguments ? JSON.stringify(tc.function.arguments) : undefined
-							});
-						}
-					}
-				} else if (msg.role === 'tool') {
-					const last = toolCalls[toolCalls.length - 1];
-					if (last) { last.result = typeof msg.content === 'string' ? msg.content : undefined; }
-				}
-			}
-
-			turns.push({
-				turnNumber: t + 1,
-				timestamp: sessionMeta.firstInteraction,
-				mode: 'cli',
-				userMessage: userText,
-				assistantResponse: assistantText,
-				model,
-				toolCalls,
-				contextReferences: createEmptyContextRefs(),
-				mcpTools: [],
-				inputTokensEstimate: 0,
-				outputTokensEstimate: 0,
-				thinkingTokensEstimate: 0
-			});
+			turns.push(this.buildMistralTurn(messages, userIdx, nextUserIdx, sessionMeta, model, t + 1));
 		}
 
 		return { turns, actualTokens: tokenData.tokens };
+	}
+
+	private findUserMessageIndices(messages: any[]): number[] {
+		const indices: number[] = [];
+		for (let i = 0; i < messages.length; i++) {
+			if (messages[i].role === 'user' && messages[i].injected !== true) {
+				indices.push(i);
+			}
+		}
+		return indices;
+	}
+
+	private buildMistralTurn(messages: any[], userIdx: number, nextUserIdx: number, sessionMeta: any, model: string, turnNumber: number): ChatTurn {
+		const userMsg = messages[userIdx];
+		const userText = typeof userMsg.content === 'string' ? userMsg.content : '';
+		const { assistantText, toolCalls } = this.collectMistralTurnContent(messages, userIdx, nextUserIdx);
+		return {
+			turnNumber,
+			timestamp: sessionMeta.firstInteraction,
+			mode: 'cli',
+			userMessage: userText,
+			assistantResponse: assistantText,
+			model,
+			toolCalls,
+			contextReferences: createEmptyContextRefs(),
+			mcpTools: [],
+			inputTokensEstimate: 0,
+			outputTokensEstimate: 0,
+			thinkingTokensEstimate: 0
+		};
+	}
+
+	private collectMistralTurnContent(messages: any[], userIdx: number, nextUserIdx: number): {
+		assistantText: string; toolCalls: { toolName: string; arguments?: string; result?: string }[];
+	} {
+		let assistantText = '';
+		const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
+		for (let j = userIdx + 1; j < nextUserIdx; j++) {
+			const msg = messages[j];
+			if (msg.role === 'assistant') {
+				if (typeof msg.content === 'string') { assistantText += msg.content; }
+				for (const tc of (Array.isArray(msg.tool_calls) ? msg.tool_calls : [])) {
+					toolCalls.push({
+						toolName: tc.function?.name || tc.name || 'unknown',
+						arguments: tc.function?.arguments ? JSON.stringify(tc.function.arguments) : undefined
+					});
+				}
+			} else if (msg.role === 'tool') {
+				const last = toolCalls[toolCalls.length - 1];
+				if (last) { last.result = typeof msg.content === 'string' ? msg.content : undefined; }
+			}
+		}
+		return { assistantText, toolCalls };
 	}
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
