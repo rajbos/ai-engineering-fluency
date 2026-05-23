@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Usage analysis functions for session data processing.
  * Analysis and aggregation functions extracted from CopilotTokenTracker.
  */
