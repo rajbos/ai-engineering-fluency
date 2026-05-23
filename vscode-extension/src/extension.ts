@@ -214,6 +214,55 @@ type SessionFilePreload = {
 
 type StatusBarDisplaySetting = 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth';
 
+// ── extension.ts module-level helpers ────────────────────────────────────────
+
+function _dwbcPickWinner(
+	key: string, canonical: string,
+	keyIsRemote: boolean, canonIsRemote: boolean,
+	sessionCounts: Map<string, number>
+): string {
+	if (!keyIsRemote && canonIsRemote) { return key; }
+	if (!canonIsRemote && keyIsRemote) { return canonical; }
+	return (sessionCounts.get(key) || 0) >= (sessionCounts.get(canonical) || 0) ? key : canonical;
+}
+
+function _cifjlProcessEvent(event: any): number {
+	let count = 0;
+	if (event.type === 'user.message') { count++; }
+	if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
+		for (const request of event.v) {
+			if (request.requestId) { count++; }
+		}
+	}
+	return count;
+}
+
+function _scdlBuildFromBreakdown(modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>): ModelUsage {
+	const modelUsage: ModelUsage = {};
+	for (const [model, bd] of Object.entries(modelBreakdown)) {
+		modelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+	}
+	return modelUsage;
+}
+
+function _scdlDistributeToDays(
+	dailyRollups: Record<string, DailyRollupEntry>,
+	supplementModelUsage: ModelUsage
+): Record<string, DailyRollupEntry> | undefined {
+	const totalDayInteractions = Object.values(dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
+	if (totalDayInteractions <= 0) { return undefined; }
+	const result: Record<string, DailyRollupEntry> = {};
+	for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
+		const fraction = dayRollup.interactions / totalDayInteractions;
+		const dayModelUsage: ModelUsage = {};
+		for (const [model, usage] of Object.entries(supplementModelUsage)) {
+			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}) };
+		}
+		result[dayKey] = { ...dayRollup, modelUsage: dayModelUsage };
+	}
+	return result;
+}
+
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
 	private static readonly CACHE_VERSION = 53; // Add Antigravity ecosystem adapter + LOC support
@@ -2437,12 +2486,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const lower = key.toLowerCase();
 			if (!lowerToCanonical.has(lower)) { lowerToCanonical.set(lower, key); continue; }
 			const canonical = lowerToCanonical.get(lower)!;
-			const keyIsRemote = isRemotePath(key);
-			const canonIsRemote = isRemotePath(canonical);
-			let winner: string;
-			if (!keyIsRemote && canonIsRemote) { winner = key; }
-			else if (!canonIsRemote && keyIsRemote) { winner = canonical; }
-			else { winner = (sessionCounts.get(key) || 0) >= (sessionCounts.get(canonical) || 0) ? key : canonical; }
+			const winner = _dwbcPickWinner(key, canonical, isRemotePath(key), isRemotePath(canonical), sessionCounts);
 			this.mergeWorkspaceInto(winner, winner === key ? canonical : key, sessionCounts, interactionCounts);
 			lowerToCanonical.set(lower, winner);
 		}
@@ -2592,15 +2636,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let interactions = 0;
 		for (const line of lines) {
 			if (!line.trim()) { continue; }
-			try {
-				const event = JSON.parse(line);
-				if (event.type === 'user.message') { interactions++; }
-				if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-					for (const request of event.v) {
-						if (request.requestId) { interactions++; }
-					}
-				}
-			} catch (e) { /* skip malformed */ }
+			try { interactions += _cifjlProcessEvent(JSON.parse(line)); } catch { /* skip malformed */ }
 		}
 		return interactions;
 	}
@@ -2741,11 +2777,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private extractMetadataFromJsonl(lines: string[]): { title: string | undefined; timestamps: number[]; requestTimestamps: number[] } {
-		let title: string | undefined;
 		const timestamps: number[] = [];
 		const requestTimestamps: number[] = [];
-		let firstUserMessage: string | undefined;
+		const { loopTitle, firstUserMessage } = this._emfjlProcessLines(lines, timestamps, requestTimestamps);
+		let title = loopTitle;
+		if (!title && firstUserMessage) {
+			const trimmed = firstUserMessage.trim();
+			title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
+		}
+		return { title, timestamps, requestTimestamps };
+	}
 
+	private _emfjlProcessLines(lines: string[], timestamps: number[], requestTimestamps: number[]): { loopTitle: string | undefined; firstUserMessage: string | undefined } {
+		let loopTitle: string | undefined;
+		let firstUserMessage: string | undefined;
 		for (const line of lines) {
 			if (!line.trim()) { continue; }
 			try {
@@ -2753,20 +2798,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const userMsg = this.processUserMessageMetadata(event, timestamps, requestTimestamps);
 				if (userMsg && !firstUserMessage) { firstUserMessage = userMsg; }
 				const renameTitle = this.processRenameSessionTitle(event);
-				if (renameTitle) { title = renameTitle; }
+				if (renameTitle) { loopTitle = renameTitle; }
 				const kind0Title = this.processKind0Metadata(event, timestamps);
-				if (kind0Title) { title = kind0Title; }
+				if (kind0Title) { loopTitle = kind0Title; }
 				this.processKind2Requests(event, timestamps, requestTimestamps);
 				const kind1Title = this.processKind1TitleUpdate(event);
-				if (kind1Title) { title = kind1Title; }
+				if (kind1Title) { loopTitle = kind1Title; }
 			} catch { /* skip malformed */ }
 		}
-
-		if (!title && firstUserMessage) {
-			const trimmed = firstUserMessage.trim();
-			title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
-		}
-		return { title, timestamps, requestTimestamps };
+		return { loopTitle, firstUserMessage };
 	}
 
 	private processUserMessageMetadata(event: any, timestamps: number[], requestTimestamps: number[]): string | undefined {
@@ -2901,7 +2941,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async supplementCacheWithDebugLog(cached: SessionFileCache, sessionFilePath: string, fileSize: number): Promise<SessionFileCache | null> {
 		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
 		if (!debugLogTokens || (debugLogTokens.inputTokens + debugLogTokens.outputTokens) === 0) {
-			// Mark sentinel so we don't re-probe 4 ENOENT paths on every subsequent warm startup
 			const marked = { ...cached, debugLogChecked: true as const };
 			this.setCachedSessionData(sessionFilePath, marked, fileSize);
 			this._cacheHits++;
@@ -2910,23 +2949,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let supplementModelUsage = cached.modelUsage;
 		let supplementDailyRollups = cached.dailyRollups;
 		if (Object.keys(debugLogTokens.modelBreakdown).length > 0) {
-			supplementModelUsage = {};
-			for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-				supplementModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
-			}
+			supplementModelUsage = _scdlBuildFromBreakdown(debugLogTokens.modelBreakdown);
 			if (cached.dailyRollups) {
-				const totalDayInteractions = Object.values(cached.dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
-				if (totalDayInteractions > 0) {
-					supplementDailyRollups = {};
-					for (const [dayKey, dayRollup] of Object.entries(cached.dailyRollups)) {
-						const fraction = dayRollup.interactions / totalDayInteractions;
-						const dayModelUsage: ModelUsage = {};
-						for (const [model, usage] of Object.entries(supplementModelUsage)) {
-							dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}) };
-						}
-						supplementDailyRollups[dayKey] = { ...dayRollup, modelUsage: dayModelUsage };
-					}
-				}
+				supplementDailyRollups = _scdlDistributeToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups;
 			}
 		}
 		const supplemented: SessionFileCache = {
