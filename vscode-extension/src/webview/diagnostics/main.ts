@@ -755,6 +755,30 @@ function renderFolderAnalyzerTab(): string {
   `;
 }
 
+function buildFolderFileTableRow(f: FolderFileResult, idx: number, folderPath: string): string {
+  const hasData = f.interactions > 0 || f.tokens > 0;
+  const rel = f.file.startsWith(folderPath)
+    ? f.file.slice(folderPath.length).replace(/^[/\\]/, "")
+    : getFileName(f.file);
+  const safeInteractions = Number(f.interactions);
+  const interactionsCell = safeInteractions > 0
+    ? `<strong>${escapeHtml(String(safeInteractions))}</strong>`
+    : `<span style="color: var(--text-muted);">0</span>`;
+  const safeTokens = Number(f.tokens);
+  const tokensCell = safeTokens > 0
+    ? `<strong title="${escapeHtml(String(safeTokens.toLocaleString()))} tokens">${escapeHtml(String(formatTokenCount(safeTokens)))}</strong>`
+    : `<span style="color: var(--text-muted);">0</span>`;
+  return `
+    <tr style="${hasData ? "" : "opacity: 0.45;"}">
+      <td>${idx + 1}</td>
+      <td title="${escapeHtml(f.file)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(rel)}</td>
+      <td>${escapeHtml(String(formatFileSize(f.size)))}</td>
+      <td>${interactionsCell}</td>
+      <td>${tokensCell}</td>
+      <td>${formatDate(f.modified)}</td>
+    </tr>`;
+}
+
 function renderFolderAnalysisResults(
   files: FolderFileResult[],
   totalScanned: number,
@@ -785,29 +809,7 @@ function renderFolderAnalysisResults(
       <div style="font-size: 12px; margin-top: 8px;">Try a different folder path or tool type.</div>
     </div>`;
 
-  const tableRows = sorted.map((f, idx) => {
-    const hasData = f.interactions > 0 || f.tokens > 0;
-    const rel = f.file.startsWith(folderPath)
-      ? f.file.slice(folderPath.length).replace(/^[/\\]/, "")
-      : getFileName(f.file);
-    const safeInteractions = Number(f.interactions);
-    const interactionsCell = safeInteractions > 0
-      ? `<strong>${escapeHtml(String(safeInteractions))}</strong>`
-      : `<span style="color: var(--text-muted);">0</span>`;
-    const safeTokens = Number(f.tokens);
-    const tokensCell = safeTokens > 0
-      ? `<strong title="${escapeHtml(String(safeTokens.toLocaleString()))} tokens">${escapeHtml(String(formatTokenCount(safeTokens)))}</strong>`
-      : `<span style="color: var(--text-muted);">0</span>`;
-    return `
-      <tr style="${hasData ? "" : "opacity: 0.45;"}">
-        <td>${idx + 1}</td>
-        <td title="${escapeHtml(f.file)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(rel)}</td>
-        <td>${escapeHtml(String(formatFileSize(f.size)))}</td>
-        <td>${interactionsCell}</td>
-        <td>${tokensCell}</td>
-        <td>${formatDate(f.modified)}</td>
-      </tr>`;
-  }).join("");
+  const tableRows = sorted.map((f, idx) => buildFolderFileTableRow(f, idx, folderPath)).join("");
 
   return `
     <div class="section" style="margin-top: 0;">
@@ -892,6 +894,52 @@ function getHomeDirectory(): string {
   return win.process?.env?.HOME || win.process?.env?.USERPROFILE || "";
 }
 
+function buildSessionFolderRow(sf: SessionFolder, home: string | null): HTMLElement {
+  let display = sf.dir;
+  if (home && display.startsWith(home)) {
+    display = display.replace(home, "~");
+  }
+  const editorName = sf.editorName || "Unknown";
+
+  const row = document.createElement("tr");
+
+  const folderCell = document.createElement("td");
+  folderCell.setAttribute("title", sf.dir);
+  folderCell.textContent = display;
+  row.appendChild(folderCell);
+
+  const editorCell = document.createElement("td");
+  const editorBadge = document.createElement("span");
+  editorBadge.className = getEditorBadgeClass(editorName);
+  editorBadge.textContent = `${getEditorIcon(editorName)} ${editorName}`;
+  editorCell.appendChild(editorBadge);
+  row.appendChild(editorCell);
+
+  const countCell = document.createElement("td");
+  countCell.textContent = String(sf.count);
+  row.appendChild(countCell);
+
+  const openCell = document.createElement("td");
+  const openLink = document.createElement("a");
+  openLink.href = "#";
+  openLink.className = "reveal-link";
+  openLink.setAttribute("data-path", encodeURIComponent(sf.dir));
+  openLink.textContent = "Open directory";
+  openCell.appendChild(openLink);
+  if (editorName === "Unknown") {
+    const reportLink = document.createElement("a");
+    reportLink.href = "#";
+    reportLink.className = "report-editor-link";
+    reportLink.setAttribute("data-path", encodeURIComponent(sf.dir));
+    reportLink.setAttribute("title", "Report this unknown path so we can add editor support");
+    reportLink.textContent = "📢 Report";
+    openCell.appendChild(document.createTextNode(" "));
+    openCell.appendChild(reportLink);
+  }
+  row.appendChild(openCell);
+  return row;
+}
+
 function buildSessionFoldersElement(folders: SessionFolder[]): HTMLElement {
   const sorted = [...folders].sort((a, b) => b.count - a.count);
   const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
@@ -922,49 +970,7 @@ function buildSessionFoldersElement(folders: SessionFolder[]): HTMLElement {
   table.appendChild(tbody);
 
   for (const sf of sorted) {
-    let display = sf.dir;
-    if (home && display.startsWith(home)) {
-      display = display.replace(home, "~");
-    }
-    const editorName = sf.editorName || "Unknown";
-
-    const row = document.createElement("tr");
-
-    const folderCell = document.createElement("td");
-    folderCell.setAttribute("title", sf.dir);
-    folderCell.textContent = display;
-    row.appendChild(folderCell);
-
-    const editorCell = document.createElement("td");
-    const editorBadge = document.createElement("span");
-    editorBadge.className = getEditorBadgeClass(editorName);
-    editorBadge.textContent = `${getEditorIcon(editorName)} ${editorName}`;
-    editorCell.appendChild(editorBadge);
-    row.appendChild(editorCell);
-
-    const countCell = document.createElement("td");
-    countCell.textContent = String(sf.count);
-    row.appendChild(countCell);
-
-    const openCell = document.createElement("td");
-    const openLink = document.createElement("a");
-    openLink.href = "#";
-    openLink.className = "reveal-link";
-    openLink.setAttribute("data-path", encodeURIComponent(sf.dir));
-    openLink.textContent = "Open directory";
-    openCell.appendChild(openLink);
-    if (editorName === "Unknown") {
-      const reportLink = document.createElement("a");
-      reportLink.href = "#";
-      reportLink.className = "report-editor-link";
-      reportLink.setAttribute("data-path", encodeURIComponent(sf.dir));
-      reportLink.setAttribute("title", "Report this unknown path so we can add editor support");
-      reportLink.textContent = "📢 Report";
-      openCell.appendChild(document.createTextNode(" "));
-      openCell.appendChild(reportLink);
-    }
-    row.appendChild(openCell);
-    tbody.appendChild(row);
+    tbody.appendChild(buildSessionFolderRow(sf, home));
   }
 
   const totalRow = document.createElement("tr");
