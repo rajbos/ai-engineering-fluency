@@ -3435,74 +3435,72 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details: SessionFileDetails,
 		tokenResult?: { tokens: number; thinkingTokens: number; actualTokens: number }
 	): Promise<void> {
-		// Get existing cache entry if available
 		const existingCache = this.getCachedSessionData(sessionFile);
+		const resolved = this.resolveTokensForCacheUpdate(tokenResult, existingCache);
+		details.tokens = resolved.actualTokens || resolved.tokens || 0;
 
-		// Prefer fresh token data (eco path supplies this) over any cached value.
-		// For Copilot Chat sessions no tokenResult is provided, so we fall back to
-		// the existing cache that was already populated by getSessionFileDataCached().
-		const resolvedActualTokens = tokenResult?.actualTokens ?? existingCache?.actualTokens;
-		const resolvedTokens = tokenResult?.tokens ?? existingCache?.tokens ?? 0;
-		const resolvedThinkingTokens = tokenResult?.thinkingTokens ?? existingCache?.thinkingTokens;
-		const resolvedCacheReadTokens = (tokenResult as any)?.cacheReadTokens ?? existingCache?.cacheReadTokens;
-		details.tokens = resolvedActualTokens || resolvedTokens || 0;
-
-		// Create or update cache entry
 		const cacheEntry: SessionFileCache = {
-			tokens: resolvedTokens,
+			tokens: resolved.tokens,
 			interactions: details.interactions,
 			modelUsage: existingCache?.modelUsage || {},
 			mtime: stat.mtime.getTime(),
 			size: stat.size,
-			actualTokens: resolvedActualTokens,
-			thinkingTokens: resolvedThinkingTokens,
-			...(resolvedCacheReadTokens ? { cacheReadTokens: resolvedCacheReadTokens } : {}),
-			// Preserve existing dailyRollups so this partial update does not discard
-			// the per-day breakdown computed by getSessionFileDataCached().
+			actualTokens: resolved.actualTokens,
+			thinkingTokens: resolved.thinkingTokens,
+			...(resolved.cacheReadTokens ? { cacheReadTokens: resolved.cacheReadTokens } : {}),
 			dailyRollups: existingCache?.dailyRollups,
-			// Preserve debug-log token data so a partial updateCacheWithSessionDetails call
-			// does not wipe out values already populated by getSessionFileDataCached().
-			...(existingCache?.modelTurns !== undefined ? { modelTurns: existingCache.modelTurns } : {}),
-			...(existingCache?.debugLogInputTokens !== undefined ? { debugLogInputTokens: existingCache.debugLogInputTokens } : {}),
-			...(existingCache?.debugLogOutputTokens !== undefined ? { debugLogOutputTokens: existingCache.debugLogOutputTokens } : {}),
-			// Preserve LOC fields from existing cache
-			...(existingCache?.linesAdded !== undefined ? { linesAdded: existingCache.linesAdded } : {}),
-			...(existingCache?.linesRemoved !== undefined ? { linesRemoved: existingCache.linesRemoved } : {}),
-			...(existingCache?.languageUsage !== undefined ? { languageUsage: existingCache.languageUsage } : {}),
-			usageAnalysis: existingCache?.usageAnalysis || {
-				toolCalls: { total: 0, byTool: {} },
-				modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
-				contextReferences: {
-					file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0,
-					workspace: 0, terminal: 0, vscode: 0,
-					terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0,
-					// Extended fields expected by SessionUsageAnalysis in the webview
-					byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {}
-				},
-				mcpTools: { total: 0, byServer: {}, byTool: {} },
-				modelSwitching: {
-					uniqueModels: [],
-					modelCount: 0,
-					switchCount: 0,
-					tiers: { standard: [], premium: [], unknown: [] },
-					hasMixedTiers: false,
-					standardRequests: 0,
-					premiumRequests: 0,
-					unknownRequests: 0,
-					totalRequests: 0
-				}
-			},
+			...this.preserveExistingDebugLogFields(existingCache),
+			...this.preserveExistingLocFields(existingCache),
+			usageAnalysis: existingCache?.usageAnalysis || this.buildDefaultUsageAnalysis(),
 			firstInteraction: details.firstInteraction,
 			lastInteraction: details.lastInteraction,
 			title: details.title,
 			repository: details.repository
 		};
 
-		// Update the contextReferences in usageAnalysis with the current data
-		// usageAnalysis is guaranteed to exist here since we always initialize it above
 		cacheEntry.usageAnalysis!.contextReferences = details.contextReferences;
-
 		this.setCachedSessionData(sessionFile, cacheEntry, stat.size);
+	}
+
+	private resolveTokensForCacheUpdate(tokenResult: { tokens: number; thinkingTokens: number; actualTokens: number } | undefined, existingCache: SessionFileCache | undefined): { tokens: number; actualTokens: number | undefined; thinkingTokens: number | undefined; cacheReadTokens: number | undefined } {
+		return {
+			actualTokens: tokenResult?.actualTokens ?? existingCache?.actualTokens,
+			tokens: tokenResult?.tokens ?? existingCache?.tokens ?? 0,
+			thinkingTokens: tokenResult?.thinkingTokens ?? existingCache?.thinkingTokens,
+			cacheReadTokens: (tokenResult as any)?.cacheReadTokens ?? existingCache?.cacheReadTokens,
+		};
+	}
+
+	private preserveExistingDebugLogFields(existingCache: SessionFileCache | undefined): Partial<SessionFileCache> {
+		return {
+			...(existingCache?.modelTurns !== undefined ? { modelTurns: existingCache.modelTurns } : {}),
+			...(existingCache?.debugLogInputTokens !== undefined ? { debugLogInputTokens: existingCache.debugLogInputTokens } : {}),
+			...(existingCache?.debugLogOutputTokens !== undefined ? { debugLogOutputTokens: existingCache.debugLogOutputTokens } : {}),
+		};
+	}
+
+	private preserveExistingLocFields(existingCache: SessionFileCache | undefined): Partial<SessionFileCache> {
+		return {
+			...(existingCache?.linesAdded !== undefined ? { linesAdded: existingCache.linesAdded } : {}),
+			...(existingCache?.linesRemoved !== undefined ? { linesRemoved: existingCache.linesRemoved } : {}),
+			...(existingCache?.languageUsage !== undefined ? { languageUsage: existingCache.languageUsage } : {}),
+		};
+	}
+
+	private buildDefaultUsageAnalysis(): SessionUsageAnalysis {
+		return {
+			toolCalls: { total: 0, byTool: {} },
+			modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
+			contextReferences: {
+				file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0,
+				workspace: 0, terminal: 0, vscode: 0,
+				terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0,
+				outputPanel: 0, problemsPanel: 0, pullRequest: 0,
+				byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {}
+			},
+			mcpTools: { total: 0, byServer: {}, byTool: {} },
+			modelSwitching: { uniqueModels: [], modelCount: 0, switchCount: 0, tiers: { standard: [], premium: [], unknown: [] }, hasMixedTiers: false, standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0 }
+		};
 	}
 
 	/**
@@ -3513,11 +3511,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async getSessionFileDetails(sessionFile: string): Promise<SessionFileDetails> {
 		const stat = await this.statSessionFile(sessionFile);
 
-		// Try to get details from cache first
 		const cachedDetails = await this.getSessionFileDetailsFromCache(sessionFile, stat);
 		if (cachedDetails) {
-			// Invalidate cache if repository field is missing (needed for new repository extraction feature)
-			// Only re-parse JSONL files since they're likely to have contentReferences
 			if (cachedDetails.repository === undefined && sessionFile.endsWith('.jsonl')) {
 				// Fall through to re-parse
 			} else {
@@ -3529,280 +3524,181 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._cacheMisses++;
 
 		const details: SessionFileDetails = {
-			file: sessionFile,
-			size: stat.size,
-			modified: stat.mtime.toISOString(),
-			interactions: 0,
-			contextReferences: {
-				file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0,
-				workspace: 0, terminal: 0, vscode: 0,
-				terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0,
-				byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {}
-			},
-			firstInteraction: null,
-			lastInteraction: null,
-			editorSource: this.detectEditorSource(sessionFile)
+			file: sessionFile, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0,
+			contextReferences: { file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0, byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {} },
+			firstInteraction: null, lastInteraction: null, editorSource: this.detectEditorSource(sessionFile)
 		};
 
-		// Determine top-level editor root path for this session file (up to the folder before 'User')
 		this.enrichDetailsWithEditorInfo(sessionFile, details);
 
 		try {
-			// Handle all non-Copilot-Chat ecosystems via adapter dispatch
 			const eco = this.findEcosystem(sessionFile);
-			if (eco) {
-				// Fetch meta, tokens, and interaction count in parallel to minimise file-read latency.
-				// getTokens() is the key addition here: it reads the actual API token counts so the
-				// diagnostics view shows the same (correct) total that the file viewer header does.
-				const [meta, tokenResult, interactionCount] = await Promise.all([
-					eco.getMeta(sessionFile),
-					eco.getTokens(sessionFile),
-					eco.countInteractions(sessionFile)
-				]);
-				details.title = meta.title;
-				details.firstInteraction = meta.firstInteraction;
-				details.lastInteraction = meta.lastInteraction;
-				details.interactions = interactionCount;
-				details.editorRoot = eco.getEditorRoot(sessionFile);
-				details.editorName = getEcosystemDisplayName(eco, sessionFile);
-				if (meta.workspacePath) {
-					details.repository = path.basename(meta.workspacePath);
-				}
-				// Pass fresh tokenResult so updateCacheWithSessionDetails stores the correct counts
-				// and does not overwrite a good full-cache entry with a stale/zero token value.
-				await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult);
-				return details;
-			}
+			if (eco) { return this.processEcosystemSessionDetails(eco, sessionFile, stat, details); }
 
 			const fileContent = await fs.promises.readFile(sessionFile, 'utf8');
-
-			// Check if this is a UUID-only file (new Copilot CLI format where the file contains just a session ID)
-			// These files act as session pointers, with actual data stored elsewhere
 			if (this.isUuidPointerFile(fileContent)) {
-				// This is a session ID pointer file, not actual session data
-				// Skip parsing and return empty details (no interactions to count)
 				await this.updateCacheWithSessionDetails(sessionFile, stat, details);
 				return details;
 			}
 
-			// Handle .jsonl files OR .json files with JSONL content (Copilot CLI format and VS Code incremental format)
 			const isJsonlContent = sessionFile.endsWith('.jsonl') || this.isJsonlContent(fileContent);
 			if (isJsonlContent) {
-				const lines = fileContent.trim().split('\n').filter(l => l.trim());
-				const timestamps: number[] = [];
-				const allContentReferences: any[] = []; // Collect for repository extraction
-
-				// Detect if this is delta-based format (VS Code incremental)
-				let isDeltaBased = false;
-				if (lines.length > 0) {
-					try {
-						const firstLine = JSON.parse(lines[0]);
-						if (firstLine && typeof firstLine.kind === 'number') {
-							isDeltaBased = true;
-						}
-					} catch {
-						// Not delta format
-					}
-				}
-
-				if (isDeltaBased) {
-					// Delta-based format: reconstruct full state asynchronously to avoid
-					// blocking the extension host event loop on large files.
-					const { sessionState } = await _reconstructJsonlStateAsync(lines);
-
-					// Extract session metadata from reconstructed state
-					if (sessionState.creationDate) {
-						timestamps.push(sessionState.creationDate);
-					}
-					if (sessionState.customTitle) {
-						details.title = sessionState.customTitle;
-					}
-
-					// Process reconstructed requests array
-					const requests = sessionState.requests || [];
-					details.interactions = requests.length;
-
-					for (const request of requests) {
-						if (!request) { continue; }
-
-						if (request.timestamp) {
-							timestamps.push(request.timestamp);
-						}
-
-						// Analyze all context references from this request (unified method)
-						this.analyzeRequestContext(request, details.contextReferences);
-
-						// Collect contentReferences for repository extraction
-						if (request.contentReferences && Array.isArray(request.contentReferences)) {
-							allContentReferences.push(...request.contentReferences);
-						}
-					}
-
-					if (timestamps.length > 0) {
-						timestamps.sort((a, b) => a - b);
-						details.firstInteraction = new Date(timestamps[0]).toISOString();
-						// Use the last content timestamp directly. Do NOT mix in stat.mtime: mtime is set
-						// when VS Code writes the file (e.g. after midnight), which would shift yesterday's
-						// session into 'today', breaking the 30-day/today cutoff boundaries.
-						details.lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
-					} else {
-						details.lastInteraction = stat.mtime.toISOString();
-					}
-
-					// Extract repository from collected contentReferences
-					if (allContentReferences.length > 0) {
-						details.repository = await this.extractRepositoryFromContentReferences(allContentReferences);
-					}
-
-					// Update cache with the details we just collected
-					await this.updateCacheWithSessionDetails(sessionFile, stat, details);
-
-					return details;
-				}
-
-				// Non-delta JSONL (Copilot CLI format) - process line-by-line
-				let firstUserMessage: string | undefined;
-				for (const line of lines) {
-					if (!line.trim()) { continue; }
-					try {
-						const event = JSON.parse(line);
-
-						// Handle Copilot CLI format (type: 'user.message')
-						if (event.type === 'user.message') {
-							details.interactions++;
-							if (event.timestamp || event.ts || event.data?.timestamp) {
-								const ts = event.timestamp || event.ts || event.data?.timestamp;
-								timestamps.push(new Date(ts).getTime());
-							}
-							if (event.data?.content) {
-								this.analyzeContextReferences(event.data.content, details.contextReferences);
-								if (!firstUserMessage) { firstUserMessage = event.data.content; }
-							}
-						}
-
-						// Handle Copilot CLI rename_session tool call - always use the last rename
-						if (event.type === 'tool.execution_start' && event.data?.toolName === 'rename_session') {
-							if (event.data?.arguments?.title) { details.title = event.data.arguments.title; }
-						}
-
-						// Collect file paths from tool arguments for repository detection
-						if (event.type === 'tool.execution_start' && event.data?.arguments) {
-							const args = event.data.arguments as Record<string, unknown>;
-							for (const val of Object.values(args)) {
-								if (typeof val === 'string' && val.length > 3 && (val.includes('/') || val.includes('\\'))) {
-									allContentReferences.push({ kind: 'reference', reference: { fsPath: val } });
-								}
-							}
-						}
-					} catch {
-						// Skip malformed lines
-					}
-				}
-
-				// Fall back to first user message if no explicit title was set
-				if (!details.title && firstUserMessage) {
-					const trimmed = firstUserMessage.trim();
-					details.title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
-				}
-
-				if (timestamps.length > 0) {
-					timestamps.sort((a, b) => a - b);
-					details.firstInteraction = new Date(timestamps[0]).toISOString();
-					// Use the last content timestamp directly. Do NOT mix in stat.mtime: mtime is set
-					// when VS Code writes the file (e.g. after midnight), which would shift yesterday's
-					// session into 'today', breaking the 30-day/today cutoff boundaries.
-					details.lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
-				} else {
-					// Fallback to file modification time if no timestamps in content
-					details.lastInteraction = stat.mtime.toISOString();
-				}
-
-				// Extract repository from collected contentReferences
-				if (allContentReferences.length > 0) {
-					details.repository = await this.extractRepositoryFromContentReferences(allContentReferences);
-				}
-
-				// Update cache with the details we just collected
-				await this.updateCacheWithSessionDetails(sessionFile, stat, details);
-
-				return details;
+				return this.processJsonlSessionDetails(sessionFile, stat, details, fileContent);
 			}
 
-			// Handle regular .json files
 			const sessionContent = JSON.parse(fileContent);
-
-			// Extract session title if available
-			if (sessionContent.customTitle) {
-				details.title = sessionContent.customTitle;
+			if (sessionContent.customTitle) { details.title = sessionContent.customTitle; }
+			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
+				await this.processJsonRequestsDetails(sessionContent.requests, sessionFile, stat, details);
 			}
-
-			const hasRequests = sessionContent.requests && Array.isArray(sessionContent.requests);
-
-			if (hasRequests) {
-				details.interactions = sessionContent.requests.length;
-				const timestamps: number[] = [];
-				const allContentReferences: any[] = []; // Collect for repository extraction
-
-				for (const request of sessionContent.requests) {
-					// Extract timestamps from requests
-					if (request.timestamp || request.ts || request.result?.timestamp) {
-						const ts = request.timestamp || request.ts || request.result?.timestamp;
-						timestamps.push(new Date(ts).getTime());
-					}
-
-					// Analyze all context references from this request
-					this.analyzeRequestContext(request, details.contextReferences);
-					// Analyze context references
-					if (request.message?.text) {
-						this.analyzeContextReferences(request.message.text, details.contextReferences);
-					}
-					if (request.message?.parts) {
-						for (const part of request.message.parts) {
-							if (part.text) {
-								this.analyzeContextReferences(part.text, details.contextReferences);
-							}
-						}
-					}
-
-					// Collect contentReferences for repository extraction
-					if (request.contentReferences && Array.isArray(request.contentReferences)) {
-						allContentReferences.push(...request.contentReferences);
-					}
-
-					// Check variableData for @workspace, @terminal, @vscode references
-					if (request.variableData) {
-						const varDataStr = JSON.stringify(request.variableData).toLowerCase();
-						if (varDataStr.includes('workspace')) { details.contextReferences.workspace++; }
-						if (varDataStr.includes('terminal')) { details.contextReferences.terminal++; }
-						if (varDataStr.includes('vscode')) { details.contextReferences.vscode++; }
-					}
-				}
-
-				if (timestamps.length > 0) {
-					timestamps.sort((a, b) => a - b);
-					details.firstInteraction = new Date(timestamps[0]).toISOString();
-					// Use the last content timestamp directly. Do NOT mix in stat.mtime: mtime is set
-					// when VS Code writes the file (e.g. after midnight), which would shift yesterday's
-					// session into 'today', breaking the 30-day/today cutoff boundaries.
-					details.lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
-				} else {
-					// Fallback to file modification time if no timestamps in content
-					details.lastInteraction = stat.mtime.toISOString();
-				}
-
-				// Extract repository from collected contentReferences
-				if (allContentReferences.length > 0) {
-					details.repository = await this.extractRepositoryFromContentReferences(allContentReferences);
-				}
-			}
-
-			// Update cache with the details we just collected
 			await this.updateCacheWithSessionDetails(sessionFile, stat, details);
 		} catch (error) {
 			this.warn(`Error analyzing session file details for ${sessionFile}: ${error}`);
 		}
 
 		return details;
+	}
+
+	private async processEcosystemSessionDetails(eco: IEcosystemAdapter, sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<SessionFileDetails> {
+		const [meta, tokenResult, interactionCount] = await Promise.all([
+			eco.getMeta(sessionFile), eco.getTokens(sessionFile), eco.countInteractions(sessionFile)
+		]);
+		details.title = meta.title;
+		details.firstInteraction = meta.firstInteraction;
+		details.lastInteraction = meta.lastInteraction;
+		details.interactions = interactionCount;
+		details.editorRoot = eco.getEditorRoot(sessionFile);
+		details.editorName = getEcosystemDisplayName(eco, sessionFile);
+		if (meta.workspacePath) { details.repository = path.basename(meta.workspacePath); }
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult);
+		return details;
+	}
+
+	private async processJsonlSessionDetails(sessionFile: string, stat: fs.Stats, details: SessionFileDetails, fileContent: string): Promise<SessionFileDetails> {
+		const lines = fileContent.trim().split('\n').filter(l => l.trim());
+		const timestamps: number[] = [];
+		const allContentReferences: any[] = [];
+
+		let isDeltaBased = false;
+		if (lines.length > 0) {
+			try { const firstLine = JSON.parse(lines[0]); if (firstLine && typeof firstLine.kind === 'number') { isDeltaBased = true; } } catch { /* not delta */ }
+		}
+
+		if (isDeltaBased) {
+			return this.processDeltaJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences);
+		}
+		return this.processCliJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences);
+	}
+
+	private async processDeltaJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): Promise<SessionFileDetails> {
+		const { sessionState } = await _reconstructJsonlStateAsync(lines);
+		if (sessionState.creationDate) { timestamps.push(sessionState.creationDate); }
+		if (sessionState.customTitle) { details.title = sessionState.customTitle; }
+
+		const requests = sessionState.requests || [];
+		details.interactions = requests.length;
+		for (const request of requests) {
+			if (!request) { continue; }
+			if (request.timestamp) { timestamps.push(request.timestamp); }
+			this.analyzeRequestContext(request, details.contextReferences);
+			if (request.contentReferences && Array.isArray(request.contentReferences)) {
+				allContentReferences.push(...request.contentReferences);
+			}
+		}
+
+		this.setDetailsTimestamps(details, timestamps, stat);
+		if (allContentReferences.length > 0) { details.repository = await this.extractRepositoryFromContentReferences(allContentReferences); }
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+		return details;
+	}
+
+	private async processCliJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): Promise<SessionFileDetails> {
+		let firstUserMessage: string | undefined;
+		for (const line of lines) {
+			if (!line.trim()) { continue; }
+			try {
+				const event = JSON.parse(line);
+				const userMsg = this.processCliJsonlEvent(event, details, timestamps, allContentReferences);
+				if (userMsg && !firstUserMessage) { firstUserMessage = userMsg; }
+			} catch { /* skip malformed */ }
+		}
+
+		if (!details.title && firstUserMessage) {
+			const trimmed = firstUserMessage.trim();
+			details.title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
+		}
+		this.setDetailsTimestamps(details, timestamps, stat);
+		if (allContentReferences.length > 0) { details.repository = await this.extractRepositoryFromContentReferences(allContentReferences); }
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+		return details;
+	}
+
+	private processCliJsonlEvent(event: any, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): string | undefined {
+		let userMessageContent: string | undefined;
+		if (event.type === 'user.message') {
+			details.interactions++;
+			if (event.timestamp || event.ts || event.data?.timestamp) {
+				timestamps.push(new Date(event.timestamp || event.ts || event.data.timestamp).getTime());
+			}
+			if (event.data?.content) {
+				this.analyzeContextReferences(event.data.content, details.contextReferences);
+				userMessageContent = event.data.content;
+			}
+		}
+		if (event.type === 'tool.execution_start' && event.data?.toolName === 'rename_session' && event.data?.arguments?.title) {
+			details.title = event.data.arguments.title;
+		}
+		if (event.type === 'tool.execution_start' && event.data?.arguments) {
+			const args = event.data.arguments as Record<string, unknown>;
+			for (const val of Object.values(args)) {
+				if (typeof val === 'string' && val.length > 3 && (val.includes('/') || val.includes('\\'))) {
+					allContentReferences.push({ kind: 'reference', reference: { fsPath: val } });
+				}
+			}
+		}
+		return userMessageContent;
+	}
+
+	private async processJsonRequestsDetails(requests: any[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<void> {
+		details.interactions = requests.length;
+		const timestamps: number[] = [];
+		const allContentReferences: any[] = [];
+
+		for (const request of requests) {
+			this.processJsonRequest(request, details, timestamps, allContentReferences);
+		}
+
+		this.setDetailsTimestamps(details, timestamps, stat);
+		if (allContentReferences.length > 0) { details.repository = await this.extractRepositoryFromContentReferences(allContentReferences); }
+	}
+
+	private processJsonRequest(request: any, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): void {
+		if (request.timestamp || request.ts || request.result?.timestamp) {
+			const ts = request.timestamp || request.ts || request.result?.timestamp;
+			timestamps.push(new Date(ts).getTime());
+		}
+		this.analyzeRequestContext(request, details.contextReferences);
+		if (request.message?.text) { this.analyzeContextReferences(request.message.text, details.contextReferences); }
+		if (request.message?.parts) {
+			for (const part of request.message.parts) { if (part.text) { this.analyzeContextReferences(part.text, details.contextReferences); } }
+		}
+		if (request.contentReferences && Array.isArray(request.contentReferences)) { allContentReferences.push(...request.contentReferences); }
+		if (request.variableData) {
+			const varDataStr = JSON.stringify(request.variableData).toLowerCase();
+			if (varDataStr.includes('workspace')) { details.contextReferences.workspace++; }
+			if (varDataStr.includes('terminal')) { details.contextReferences.terminal++; }
+			if (varDataStr.includes('vscode')) { details.contextReferences.vscode++; }
+		}
+	}
+
+	private setDetailsTimestamps(details: SessionFileDetails, timestamps: number[], stat: fs.Stats): void {
+		if (timestamps.length > 0) {
+			timestamps.sort((a, b) => a - b);
+			details.firstInteraction = new Date(timestamps[0]).toISOString();
+			details.lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
+		} else {
+			details.lastInteraction = stat.mtime.toISOString();
+		}
 	}
 
 	/**
