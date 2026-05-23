@@ -1634,24 +1634,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 					await new Promise(r => setTimeout(r, 20));
 					continue;
 				}
-				const i = readIndex++;
-				const sessionFile = queue[i];
-				try {
-					const fileStats = await this.statSessionFile(sessionFile);
-					const mtime = fileStats.mtime.getTime();
-					const fileSize = fileStats.size;
-					if (mtime >= cutoffMs) {
-						const cachedData = this.getCachedSessionData(sessionFile);
-						const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
-						const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-						const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile, fileStats) : undefined;
-						preloaded.push({ sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload);
-						if (!wasCached) {
-							// Yield after CPU-intensive cache-miss work to keep VS Code responsive
-							await new Promise(r => setImmediate(r));
-						}
-					}
-				} catch { /* skip files that fail to stat/parse */ }
+				const sessionFile = queue[readIndex++];
+				try { await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded); } catch { /* skip files that fail to stat/parse */ }
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
 			}
@@ -1675,6 +1659,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		return { sessionFiles, preloaded };
+	}
+
+	private async processPreloadQueueFile(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[]): Promise<void> {
+		const fileStats = await this.statSessionFile(sessionFile);
+		const mtime = fileStats.mtime.getTime();
+		const fileSize = fileStats.size;
+		if (mtime < cutoffMs) { return; }
+		const cachedData = this.getCachedSessionData(sessionFile);
+		const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+		const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
+		const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile, fileStats) : undefined;
+		preloaded.push({ sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload);
+		if (!wasCached) {
+			// Yield after CPU-intensive cache-miss work to keep VS Code responsive
+			await new Promise(r => setImmediate(r));
+		}
 	}
 
 	private async _runUpdateTokenStats(silent: boolean): Promise<DetailedStats | undefined> {
@@ -2328,543 +2328,37 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * @param useCache If true, return cached stats if available. If false, force recalculation.
 	 */
 	private async calculateUsageAnalysisStats(useCache = true, preloaded?: SessionFilePreload[]): Promise<UsageAnalysisStats> {
-		// Return cached stats if available and cache is allowed
 		if (useCache && this.lastUsageAnalysisStats) {
 			this.log('🔍 [Usage Analysis] Using cached stats');
 			return this.lastUsageAnalysisStats;
 		}
-
 		const now = new Date();
-		// UTC-based day keys for consistent period boundaries (matching server-side)
 		const { todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
-		const usageAnalysisFileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
-
+		const cutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 		this.log('🔍 [Usage Analysis] Starting calculation...');
-		this._cacheHits = 0; // Reset cache hit counter
-		this._cacheMisses = 0; // Reset cache miss counter
-
-		const emptyPeriod = (): UsageAnalysisPeriod => ({
-			sessions: 0,
-			toolCalls: { total: 0, byTool: {} },
-			modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
-			contextReferences: {
-				file: 0,
-				selection: 0,
-				implicitSelection: 0,
-				symbol: 0,
-				codebase: 0,
-				workspace: 0,
-				terminal: 0,
-				vscode: 0,
-				terminalLastCommand: 0,
-				terminalSelection: 0,
-				clipboard: 0,
-				changes: 0,
-				outputPanel: 0,
-				problemsPanel: 0,
-				pullRequest: 0,
-				byKind: {},
-				copilotInstructions: 0,
-				agentsMd: 0,
-				byPath: {}
-			},
-			mcpTools: { total: 0, byServer: {}, byTool: {} },
-			modelSwitching: {
-				modelsPerSession: [],
-				totalSessions: 0,
-				averageModelsPerSession: 0,
-				maxModelsPerSession: 0,
-				minModelsPerSession: 0,
-				switchingFrequency: 0,
-				standardModels: [],
-				premiumModels: [],
-				unknownModels: [],
-				mixedTierSessions: 0,
-				standardRequests: 0,
-				premiumRequests: 0,
-				unknownRequests: 0,
-				totalRequests: 0
-			},
-			repositories: [],
-			repositoriesWithCustomization: [],
-			editScope: {
-				singleFileEdits: 0,
-				multiFileEdits: 0,
-				totalEditedFiles: 0,
-				avgFilesPerSession: 0
-			},
-			applyUsage: {
-				totalApplies: 0,
-				totalCodeBlocks: 0,
-				applyRate: 0
-			},
-			sessionDuration: {
-				totalDurationMs: 0,
-				avgDurationMs: 0,
-				avgFirstProgressMs: 0,
-				avgTotalElapsedMs: 0,
-				avgWaitTimeMs: 0
-			},
-			conversationPatterns: {
-				multiTurnSessions: 0,
-				singleTurnSessions: 0,
-				avgTurnsPerSession: 0,
-				maxTurnsInSession: 0
-			},
-			agentTypes: {
-				editsAgent: 0,
-				defaultAgent: 0,
-				workspaceAgent: 0,
-				other: 0
-			}
-		});
-
-		const todayStats = emptyPeriod();
-		const last30DaysStats = emptyPeriod();
-		const monthStats = emptyPeriod();
+		this._cacheHits = 0;
+		this._cacheMisses = 0;
+		const todayStats = this.createEmptyUsagePeriod();
+		const last30DaysStats = this.createEmptyUsagePeriod();
+		const monthStats = this.createEmptyUsagePeriod();
 		const todaySessionsList: TodaySessionSummary[] = [];
-
-		// Track session counts per resolved workspace (workspaces with activity in last 30 days)
 		const workspaceSessionCounts = new Map<string, number>();
-		// Track interaction counts per resolved workspace (for prioritization)
 		const workspaceInteractionCounts = new Map<string, number>();
-		// Track unresolved workspace IDs (failed resolution or no workspace)
 		const unresolvedWorkspaceIds = new Set<string>();
-		// Track interaction counts for unresolved workspace IDs
 		const unresolvedWorkspaceInteractionCounts = new Map<string, number>();
-
-		// Clear short-lived caches for this analysis run
 		this._workspaceIdToFolderCache.clear();
 		this._customizationFilesCache.clear();
-
 		try {
-			let totalFiles: number;
-			let usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[];
-
-			if (preloaded) {
-				// Single-pass path: reuse pre-loaded data — no filesystem re-scan needed.
-				this.log(`🔍 [Usage Analysis] Processing ${preloaded.length} preloaded session files`);
-				totalFiles = preloaded.length;
-				usageResults = preloaded.map(p => ({ sessionFile: p.sessionFile, sessionData: p.sessionData, mtime: p.mtime }));
-			} else {
-				const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-				this.log(`🔍 [Usage Analysis] Processing ${sessionFiles.length} session files`);
-				totalFiles = sessionFiles.length;
-
-				// Gather stat + session data in parallel, then aggregate sequentially.
-				// The workspace/customization-cache mutations below are not async, so they are safe
-				// to run in the sequential aggregation pass even after parallel data fetch.
-				usageResults = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
-					const fileStats = await this.statSessionFile(sessionFile);
-					const mtime = fileStats.mtime.getTime();
-					const fileSize = fileStats.size;
-					if (mtime < usageAnalysisFileLoadCutoffMs) { return null; }
-					const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-					return { sessionFile, sessionData, mtime };
-				});
-			}
-
-			let processed = 0;
-			const progressInterval = Math.max(1, Math.floor(totalFiles / 20)); // Log every 5%
-
-			for (const r of usageResults) {
-				try {
-					if (!r) {
-						processed++;
-						if (processed % progressInterval === 0) {
-							this.log(`🔍 [Usage Analysis] Progress: ${processed}/${totalFiles} files (${Math.round(processed / totalFiles * 100)}%)`);
-						}
-						continue;
-					}
-					const { sessionFile, sessionData, mtime } = r;
-
-					const interactions = sessionData.interactions;
-					const analysis = sessionData.usageAnalysis || {
-						toolCalls: { total: 0, byTool: {} },
-						modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
-						contextReferences: {
-							file: 0,
-							selection: 0,
-							implicitSelection: 0,
-							symbol: 0,
-								codebase: 0,
-								workspace: 0,
-								terminal: 0,
-								vscode: 0,
-								terminalLastCommand: 0,
-								terminalSelection: 0,
-								clipboard: 0,
-								changes: 0,
-								outputPanel: 0,
-								problemsPanel: 0,
-								pullRequest: 0,
-								byKind: {},
-								copilotInstructions: 0,
-								agentsMd: 0,
-								byPath: {}
-							},
-							mcpTools: { total: 0, byServer: {}, byTool: {} },
-							modelSwitching: {
-								uniqueModels: [],
-								modelCount: 0,
-								switchCount: 0,
-								tiers: { standard: [], premium: [], unknown: [] },
-								hasMixedTiers: false,
-								standardRequests: 0,
-								premiumRequests: 0,
-								unknownRequests: 0,
-								totalRequests: 0
-							}
-						};
-
-						// Exclude empty sessions (no interactions) from usage analysis
-						if (interactions === 0) {
-							// Skip counting this session as it contains no user interactions
-							processed++;
-							if (processed % progressInterval === 0) {
-								this.log(`🔍 [Usage Analysis] Progress: ${processed}/${totalFiles} files (${Math.round(processed / totalFiles * 100)}%)`);
-							}
-							continue;
-						}
-
-						// Derive lastActivityUtcKey using dailyRollups if available, else lastInteraction
-						let lastActivityUtcKey: string;
-						if (sessionData.dailyRollups && Object.keys(sessionData.dailyRollups).length > 0) {
-							// Use the most recent day in the rollups
-							lastActivityUtcKey = Object.keys(sessionData.dailyRollups).sort().pop()!;
-						} else {
-							const lastActivity = sessionData.lastInteraction
-								? new Date(sessionData.lastInteraction)
-								: new Date(mtime);
-							lastActivityUtcKey = lastActivity.toISOString().slice(0, 10);
-						}
-
-						// Add to last 30 days stats
-						if (lastActivityUtcKey < last30DaysUtcStartKey) {
-							processed++;
-							continue;
-						}
-						last30DaysStats.sessions++;
-						this.mergeUsageAnalysis(last30DaysStats, analysis);
-
-						// Resolve workspace folder and track session counts; also pre-scan customization files for this workspace
-						// Extract workspace ID first (this operation should be safe and not throw)
-						const workspaceId = _extractWorkspaceIdFromSessionPath(sessionFile);
-						try {
-							const workspaceFolder = _resolveWorkspaceFolderFromSessionPath(sessionFile, this._workspaceIdToFolderCache);
-							if (workspaceFolder) {
-								const norm = path.normalize(workspaceFolder);
-								workspaceSessionCounts.set(norm, (workspaceSessionCounts.get(norm) || 0) + 1);
-								workspaceInteractionCounts.set(norm, (workspaceInteractionCounts.get(norm) || 0) + interactions);
-								if (!this._customizationFilesCache.has(norm)) {
-									try {
-										const files = _scanWorkspaceCustomizationFiles(norm);
-										this._customizationFilesCache.set(norm, files);
-									} catch (e) {
-										// ignore scan errors per workspace
-									}
-								}
-							} else if (workspaceId) {
-								// Workspace resolution failed but we have a workspace ID
-								// Track it as unresolved so it counts toward total repos
-								unresolvedWorkspaceIds.add(workspaceId);
-								unresolvedWorkspaceInteractionCounts.set(workspaceId, (unresolvedWorkspaceInteractionCounts.get(workspaceId) || 0) + interactions);
-							}
-						} catch (e) {
-							// Resolution threw an exception; track as unresolved if we have a workspace ID
-							if (workspaceId) {
-								unresolvedWorkspaceIds.add(workspaceId);
-								unresolvedWorkspaceInteractionCounts.set(workspaceId, (unresolvedWorkspaceInteractionCounts.get(workspaceId) || 0) + interactions);
-							}
-						}
-
-						// Add to month stats if activity falls in this calendar month
-						if (lastActivityUtcKey >= monthUtcStartKey) {
-							monthStats.sessions++;
-							this.mergeUsageAnalysis(monthStats, analysis);
-						}
-
-						// Add to today stats if activity falls today
-						if (lastActivityUtcKey === todayUtcKey) {
-							todayStats.sessions++;
-							this.mergeUsageAnalysis(todayStats, analysis);
-
-							// Collect per-session summary for "Today's Sessions" tab
-							const modelUsage = sessionData.modelUsage || {};
-							let inputTok = 0, outputTok = 0, cachedTok = 0;
-							for (const usage of Object.values(modelUsage)) {
-								inputTok += usage.inputTokens || 0;
-								outputTok += usage.outputTokens || 0;
-								cachedTok += usage.cachedReadTokens || 0;
-							}
-							// Prefer debug-log totals when available — they sum all LLM API calls
-							// in the session (agent-mode makes multiple calls per user turn).
-							if (sessionData.debugLogInputTokens !== undefined) { inputTok = sessionData.debugLogInputTokens; }
-							if (sessionData.debugLogOutputTokens !== undefined) { outputTok = sessionData.debugLogOutputTokens; }
-							if (sessionData.cacheReadTokens !== undefined) { cachedTok = sessionData.cacheReadTokens; }
-							todaySessionsList.push({
-								title: sessionData.title || null,
-								filePath: sessionFile,
-								interactions,
-								toolCalls: analysis.toolCalls.total,
-								inputTokens: inputTok,
-								outputTokens: outputTok,
-								thinkingTokens: sessionData.thinkingTokens || 0,
-								cachedTokens: cachedTok,
-								totalTokens: sessionData.actualTokens || sessionData.tokens || 0,
-								estimatedCost: this.calculateEstimatedCost(modelUsage),
-								editor: this.detectEditorSource(sessionFile),
-								models: Object.keys(modelUsage),
-								lastActivity: sessionData.lastInteraction || new Date(mtime).toISOString(),
-							});
-						}
-
-					processed++;
-					if (processed % progressInterval === 0) {
-						this.log(`🔍 [Usage Analysis] Progress: ${processed}/${totalFiles} files (${Math.round(processed / totalFiles * 100)}%)`);
-					}
-				} catch (fileError) {
-					this.warn(`Error processing session file for usage analysis: ${fileError}`);
-					processed++;
-				}
-			}
-
-			// Deduplicate workspace paths that resolve to the same physical repository.
-			// Two sources of duplication are handled:
-			//
-			// 1. Case differences on case-insensitive filesystems (Windows/macOS):
-			//    Different VS Code variants may store the same folder as "C:\Users\..." vs "c:\users\...".
-			//    Detected by lowercasing the full path.
-			//
-			// 2. Remote/devcontainer paths for the same local repo:
-			//    Opening a devcontainer for a local project stores a vscode-remote:// URI whose
-			//    resolved fsPath is the *container-internal* path (e.g. "/workspaces/my-repo"),
-			//    while normal sessions store the local Windows path.
-			//    Both have the same basename, and one of them is a non-local path
-			//    (starts with "/workspaces/" or is a Unix-style absolute path on Windows).
-			//    Detected by matching basename case-insensitively when one entry is a remote path.
-			//
-			// In both cases: session/interaction counts are summed; customization file scan results
-			// are kept from whichever path has more files (the local path wins for scanning).
-			{
-				const mergeInto = (winner: string, loser: string) => {
-					workspaceSessionCounts.set(winner,
-						(workspaceSessionCounts.get(winner) || 0) + (workspaceSessionCounts.get(loser) || 0));
-					workspaceInteractionCounts.set(winner,
-						(workspaceInteractionCounts.get(winner) || 0) + (workspaceInteractionCounts.get(loser) || 0));
-					workspaceSessionCounts.delete(loser);
-					workspaceInteractionCounts.delete(loser);
-					const winnerFiles = this._customizationFilesCache.get(winner) || [];
-					const loserFiles = this._customizationFilesCache.get(loser) || [];
-					if (winnerFiles.length === 0 && loserFiles.length > 0) {
-						this._customizationFilesCache.set(winner, loserFiles);
-					}
-					this._customizationFilesCache.delete(loser);
-				};
-
-				// Helper: true when path looks like a remote/devcontainer path on Windows
-				// (Unix-style absolute path, e.g. "/workspaces/repo" or "/home/user/repo")
-				const isRemotePath = (p: string) => {
-					if (process.platform !== 'win32') { return false; }
-					const normalized = _normalizePath(p);
-					return normalized.startsWith('/');
-				};
-
-				// Pass 1 — case-insensitive dedup (covers casing differences between editor variants)
-				if (process.platform === 'win32' || process.platform === 'darwin') {
-					const lowerToCanonical = new Map<string, string>();
-					for (const key of Array.from(workspaceSessionCounts.keys())) {
-						const lower = key.toLowerCase();
-						if (!lowerToCanonical.has(lower)) {
-							lowerToCanonical.set(lower, key);
-						} else {
-							const canonical = lowerToCanonical.get(lower)!;
-							// Prefer the local (non-remote) path as winner; otherwise more sessions wins
-							const canonicalIsRemote = isRemotePath(canonical);
-							const keyIsRemote = isRemotePath(key);
-							const winner = (!keyIsRemote && canonicalIsRemote)
-								? key
-								: (!canonicalIsRemote && keyIsRemote)
-									? canonical
-									: (workspaceSessionCounts.get(key) || 0) >= (workspaceSessionCounts.get(canonical) || 0)
-										? key : canonical;
-							const loser = winner === key ? canonical : key;
-							mergeInto(winner, loser);
-							lowerToCanonical.set(lower, winner);
-						}
-					}
-				}
-
-				// Pass 2 — basename dedup for remote/devcontainer paths.
-				// When one path is a remote (Unix-style) path and another is a local path with the
-				// same basename, they represent the same physical repo opened via a devcontainer.
-				if (process.platform === 'win32') {
-					const basenameToLocal = new Map<string, string>(); // lower-basename → local path key
-					for (const key of Array.from(workspaceSessionCounts.keys())) {
-						if (!isRemotePath(key)) {
-							basenameToLocal.set(path.basename(key).toLowerCase(), key);
-						}
-					}
-					for (const key of Array.from(workspaceSessionCounts.keys())) {
-						if (isRemotePath(key)) {
-							const base = path.basename(key).toLowerCase();
-							const localKey = basenameToLocal.get(base);
-							if (localKey && workspaceSessionCounts.has(key)) {
-								// Merge remote into local — local wins because we can scan its files
-								mergeInto(localKey, key);
-							}
-						}
-					}
-				}
-
-				// Pass 3 — Copilot CLI worktree dedup.
-				// The Copilot CLI creates per-branch worktrees at:
-				//   <home>/.copilot/copilot-worktrees/<repo-name>/<branch-name>
-				// Each branch shows up as a separate workspace with the branch name as basename,
-				// skewing the repo list. Merge all worktrees for the same repo into one entry,
-				// preferring the main checkout at <home>/.copilot/repos/<repo-name> when it exists.
-				{
-					const worktreeToCanonical = new Map<string, string>();
-
-					for (const key of Array.from(workspaceSessionCounts.keys())) {
-						const segments = key.split(path.sep);
-						const lowerSegments = segments.map(s => s.toLowerCase());
-						const wtIdx = lowerSegments.lastIndexOf('copilot-worktrees');
-						// Need at least <repo> and <branch> after copilot-worktrees
-						if (wtIdx === -1 || wtIdx + 2 >= segments.length) { continue; }
-
-						const repoName = segments[wtIdx + 1];
-						const reposPath = path.normalize(
-							segments.slice(0, wtIdx).concat('repos', repoName).join(path.sep)
-						);
-						const canonical = fs.existsSync(reposPath)
-							? reposPath
-							: path.normalize(segments.slice(0, wtIdx + 2).join(path.sep));
-						worktreeToCanonical.set(key, canonical);
-					}
-
-					const canonicals = new Set(worktreeToCanonical.values());
-					for (const canonical of canonicals) {
-						if (!workspaceSessionCounts.has(canonical)) {
-							workspaceSessionCounts.set(canonical, 0);
-							workspaceInteractionCounts.set(canonical, 0);
-						}
-						for (const [worktree, canon] of worktreeToCanonical) {
-							if (canon === canonical && worktree !== canonical && workspaceSessionCounts.has(worktree)) {
-								mergeInto(canonical, worktree);
-							}
-						}
-						if (!this._customizationFilesCache.has(canonical)) {
-							try {
-								const files = _scanWorkspaceCustomizationFiles(canonical);
-								this._customizationFilesCache.set(canonical, files);
-							} catch (e) {
-								// ignore scan errors per workspace
-							}
-						}
-					}
-				}
-			}
-
-			// Build the customization matrix using scanned workspace data and session counts
-			try {
-				// Unique customization types based on Copilot patterns only
-				const uniqueTypes = new Map<string, { icon: string; label: string }>();
-				for (const pattern of (customizationPatternsData as any).patterns || []) {
-					if (pattern.category && pattern.category !== 'copilot') {
-						continue;
-					}
-					if (!uniqueTypes.has(pattern.type)) {
-						uniqueTypes.set(pattern.type, { icon: pattern.icon || '', label: pattern.label || pattern.type });
-					}
-				}
-
-				const customizationTypes = Array.from(uniqueTypes.entries()).map(([id, v]) => ({ id, icon: v.icon, label: v.label }));
-
-				const matrixRows: WorkspaceCustomizationRow[] = [];
-				let workspacesWithIssues = 0;
-
-				for (const [folderPath, sessionCount] of workspaceSessionCounts) {
-					const files = this._customizationFilesCache.get(folderPath) || [];
-					const typeStatuses: { [typeId: string]: CustomizationTypeStatus } = {};
-					for (const type of customizationTypes) {
-						const filesOfType = files.filter(f => f.type === type.id);
-						if (filesOfType.length === 0) {
-							typeStatuses[type.id] = '❌';
-						} else if (filesOfType.some(f => f.isStale)) {
-							typeStatuses[type.id] = '⚠️';
-						} else {
-							typeStatuses[type.id] = '✅';
-						}
-					}
-
-					// Count workspaces that have NO customization files present at all
-					const hasNoCustomizationFiles = customizationTypes.every(t => typeStatuses[t.id] === '❌');
-					if (hasNoCustomizationFiles) { workspacesWithIssues++; }
-
-					matrixRows.push({
-						workspacePath: folderPath,
-						workspaceName: path.basename(folderPath),
-						sessionCount,
-						interactionCount: workspaceInteractionCounts.get(folderPath) || 0,
-						typeStatuses
-					});
-				}
-
-				// Add unresolved workspaces as rows with all customization types marked as ❌
-				// This ensures they count toward total repos and are assumed to have NO customizations
-				for (const workspaceId of unresolvedWorkspaceIds) {
-					const typeStatuses: { [typeId: string]: CustomizationTypeStatus } = {};
-					for (const type of customizationTypes) {
-						typeStatuses[type.id] = '❌';
-					}
-					workspacesWithIssues++; // Unresolved workspaces are counted as having no customization
-					
-					// Generate display name with smart truncation
-					const displayId = workspaceId.length > CopilotTokenTracker.WORKSPACE_ID_DISPLAY_LENGTH
-						? `${workspaceId.substring(0, CopilotTokenTracker.WORKSPACE_ID_DISPLAY_LENGTH)}...`
-						: workspaceId;
-					
-					matrixRows.push({
-						workspacePath: `<unresolved:${workspaceId}>`,
-						workspaceName: `Unresolved (${displayId})`,
-						// Session count is 0 because we only track counts in workspaceSessionCounts for successfully resolved workspaces.
-						// The presence of this workspace in unresolvedWorkspaceIds means we encountered session files for it,
-						// but couldn't resolve its folder path, so we couldn't increment a count in workspaceSessionCounts.
-						sessionCount: 0,
-						interactionCount: unresolvedWorkspaceInteractionCounts.get(workspaceId) || 0,
-						typeStatuses
-					});
-				}
-
-				matrixRows.sort((a, b) => {
-					if (b.interactionCount !== a.interactionCount) {
-						return b.interactionCount - a.interactionCount;
-					}
-					return b.sessionCount - a.sessionCount;
-				});
-
-				const customizationMatrix: WorkspaceCustomizationMatrix = {
-					customizationTypes,
-					workspaces: matrixRows,
-					totalWorkspaces: matrixRows.length,
-					workspacesWithIssues
-				};
-
-				this._lastCustomizationMatrix = customizationMatrix;
-				
-				// Calculate missed potential (workspaces with non-Copilot instruction files but no Copilot files)
-				this._lastMissedPotential = this.detectMissedPotential(workspaceSessionCounts, workspaceInteractionCounts);
-			} catch (e) {
-				// ignore overall customization scanning errors
-			}
+			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
+			const periods = { todayStats, last30DaysStats, monthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey };
+			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
+			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
+			this.deduplicateWorkspacePaths(workspaceSessionCounts, workspaceInteractionCounts);
+			this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts);
 		} catch (error) {
 			this.error('Error calculating usage analysis stats:', error);
 		}
-
-		// Log cache statistics
 		this.log(`🔍 [Usage Analysis] Cache stats: ${this._cacheHits} hits, ${this._cacheMisses} misses`);
-
 		const stats: UsageAnalysisStats = {
 			today: todayStats,
 			last30Days: last30DaysStats,
@@ -2875,11 +2369,336 @@ class CopilotTokenTracker implements vscode.Disposable {
 			missedPotential: this._lastMissedPotential || [],
 			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions)
 		};
-
-		// Cache the result for future use
 		this.lastUsageAnalysisStats = stats;
-
 		return stats;
+	}
+
+	private createEmptyUsagePeriod(): UsageAnalysisPeriod {
+		return {
+			sessions: 0,
+			toolCalls: { total: 0, byTool: {} },
+			modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
+			contextReferences: {
+				file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0,
+				workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0,
+				clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0,
+				byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {}
+			},
+			mcpTools: { total: 0, byServer: {}, byTool: {} },
+			modelSwitching: {
+				modelsPerSession: [], totalSessions: 0, averageModelsPerSession: 0,
+				maxModelsPerSession: 0, minModelsPerSession: 0, switchingFrequency: 0,
+				standardModels: [], premiumModels: [], unknownModels: [], mixedTierSessions: 0,
+				standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0
+			},
+			repositories: [],
+			repositoriesWithCustomization: [],
+			editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0 },
+			applyUsage: { totalApplies: 0, totalCodeBlocks: 0, applyRate: 0 },
+			sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0 },
+			conversationPatterns: { multiTurnSessions: 0, singleTurnSessions: 0, avgTurnsPerSession: 0, maxTurnsInSession: 0 },
+			agentTypes: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 }
+		};
+	}
+
+	private buildDefaultSessionAnalysis(): SessionUsageAnalysis {
+		return {
+			toolCalls: { total: 0, byTool: {} },
+			modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
+			contextReferences: {
+				file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0,
+				workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0,
+				clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0,
+				byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {}
+			},
+			mcpTools: { total: 0, byServer: {}, byTool: {} },
+			modelSwitching: {
+				uniqueModels: [], modelCount: 0, switchCount: 0,
+				tiers: { standard: [], premium: [], unknown: [] }, hasMixedTiers: false,
+				standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0
+			}
+		};
+	}
+
+	private async loadUsageSessionFiles(
+		preloaded: SessionFilePreload[] | undefined,
+		cutoffMs: number
+	): Promise<{ results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]; totalFiles: number }> {
+		if (preloaded) {
+			this.log(`🔍 [Usage Analysis] Processing ${preloaded.length} preloaded session files`);
+			const results = preloaded.map(p => ({ sessionFile: p.sessionFile, sessionData: p.sessionData, mtime: p.mtime }));
+			return { results, totalFiles: preloaded.length };
+		}
+		const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+		this.log(`🔍 [Usage Analysis] Processing ${sessionFiles.length} session files`);
+		const results = await this.runWithConcurrency(sessionFiles, async (sessionFile) => {
+			const fileStats = await this.statSessionFile(sessionFile);
+			const mtime = fileStats.mtime.getTime();
+			const fileSize = fileStats.size;
+			if (mtime < cutoffMs) { return null; }
+			const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
+			return { sessionFile, sessionData, mtime };
+		});
+		return { results, totalFiles: sessionFiles.length };
+	}
+
+	private computeLastActivityKey(sessionData: SessionFileCache, mtime: number): string {
+		if (sessionData.dailyRollups && Object.keys(sessionData.dailyRollups).length > 0) {
+			return Object.keys(sessionData.dailyRollups).sort().pop()!;
+		}
+		const lastActivity = sessionData.lastInteraction ? new Date(sessionData.lastInteraction) : new Date(mtime);
+		return lastActivity.toISOString().slice(0, 10);
+	}
+
+	private collectTodaySessionInfo(
+		sessionData: SessionFileCache, sessionFile: string,
+		analysis: SessionUsageAnalysis, interactions: number, mtime: number
+	): TodaySessionSummary {
+		const modelUsage = sessionData.modelUsage || {};
+		let inputTok = 0, outputTok = 0, cachedTok = 0;
+		for (const usage of Object.values(modelUsage)) {
+			inputTok += usage.inputTokens || 0;
+			outputTok += usage.outputTokens || 0;
+			cachedTok += usage.cachedReadTokens || 0;
+		}
+		if (sessionData.debugLogInputTokens !== undefined) { inputTok = sessionData.debugLogInputTokens; }
+		if (sessionData.debugLogOutputTokens !== undefined) { outputTok = sessionData.debugLogOutputTokens; }
+		if (sessionData.cacheReadTokens !== undefined) { cachedTok = sessionData.cacheReadTokens; }
+		return {
+			title: sessionData.title || null, filePath: sessionFile, interactions,
+			toolCalls: analysis.toolCalls.total, inputTokens: inputTok, outputTokens: outputTok,
+			thinkingTokens: sessionData.thinkingTokens || 0, cachedTokens: cachedTok,
+			totalTokens: sessionData.actualTokens || sessionData.tokens || 0,
+			estimatedCost: this.calculateEstimatedCost(modelUsage),
+			editor: this.detectEditorSource(sessionFile), models: Object.keys(modelUsage),
+			lastActivity: sessionData.lastInteraction || new Date(mtime).toISOString(),
+		};
+	}
+
+	private ensureWorkspaceCustomizationCached(norm: string): void {
+		if (this._customizationFilesCache.has(norm)) { return; }
+		try {
+			const files = _scanWorkspaceCustomizationFiles(norm);
+			this._customizationFilesCache.set(norm, files);
+		} catch (e) { /* ignore scan errors per workspace */ }
+	}
+
+	private trackWorkspaceForSession(
+		sessionFile: string, interactions: number,
+		sessionCounts: Map<string, number>, interactionCounts: Map<string, number>,
+		unresolvedIds: Set<string>, unresolvedCounts: Map<string, number>
+	): void {
+		const workspaceId = _extractWorkspaceIdFromSessionPath(sessionFile);
+		try {
+			const workspaceFolder = _resolveWorkspaceFolderFromSessionPath(sessionFile, this._workspaceIdToFolderCache);
+			if (workspaceFolder) {
+				const norm = path.normalize(workspaceFolder);
+				sessionCounts.set(norm, (sessionCounts.get(norm) || 0) + 1);
+				interactionCounts.set(norm, (interactionCounts.get(norm) || 0) + interactions);
+				this.ensureWorkspaceCustomizationCached(norm);
+			} else if (workspaceId) {
+				unresolvedIds.add(workspaceId);
+				unresolvedCounts.set(workspaceId, (unresolvedCounts.get(workspaceId) || 0) + interactions);
+			}
+		} catch (e) {
+			if (workspaceId) {
+				unresolvedIds.add(workspaceId);
+				unresolvedCounts.set(workspaceId, (unresolvedCounts.get(workspaceId) || 0) + interactions);
+			}
+		}
+	}
+
+	private aggregateSessionFileIntoStats(
+		r: { sessionFile: string; sessionData: SessionFileCache; mtime: number },
+		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string },
+		wsMaps: { workspaceSessionCounts: Map<string, number>; workspaceInteractionCounts: Map<string, number>; unresolvedWorkspaceIds: Set<string>; unresolvedWorkspaceInteractionCounts: Map<string, number> },
+		todaySessionsList: TodaySessionSummary[]
+	): void {
+		const { sessionFile, sessionData, mtime } = r;
+		const interactions = sessionData.interactions;
+		if (interactions === 0) { return; }
+		const analysis = sessionData.usageAnalysis || this.buildDefaultSessionAnalysis();
+		const lastActivityUtcKey = this.computeLastActivityKey(sessionData, mtime);
+		if (lastActivityUtcKey < periods.last30DaysUtcStartKey) { return; }
+		periods.last30DaysStats.sessions++;
+		this.mergeUsageAnalysis(periods.last30DaysStats, analysis);
+		this.trackWorkspaceForSession(sessionFile, interactions,
+			wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
+			wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
+		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
+			periods.monthStats.sessions++;
+			this.mergeUsageAnalysis(periods.monthStats, analysis);
+		}
+		if (lastActivityUtcKey === periods.todayUtcKey) {
+			periods.todayStats.sessions++;
+			this.mergeUsageAnalysis(periods.todayStats, analysis);
+			todaySessionsList.push(this.collectTodaySessionInfo(sessionData, sessionFile, analysis, interactions, mtime));
+		}
+	}
+
+	private aggregateUsageFileResults(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string },
+		wsMaps: { workspaceSessionCounts: Map<string, number>; workspaceInteractionCounts: Map<string, number>; unresolvedWorkspaceIds: Set<string>; unresolvedWorkspaceInteractionCounts: Map<string, number> },
+		todaySessionsList: TodaySessionSummary[], totalFiles: number
+	): void {
+		let processed = 0;
+		const progressInterval = Math.max(1, Math.floor(totalFiles / 20));
+		for (const r of usageResults) {
+			try {
+				if (r) { this.aggregateSessionFileIntoStats(r, periods, wsMaps, todaySessionsList); }
+			} catch (fileError) {
+				this.warn(`Error processing session file for usage analysis: ${fileError}`);
+			}
+			processed++;
+			if (processed % progressInterval === 0) {
+				this.log(`🔍 [Usage Analysis] Progress: ${processed}/${totalFiles} files (${Math.round(processed / totalFiles * 100)}%)`);
+			}
+		}
+	}
+
+	private mergeWorkspaceInto(
+		winner: string, loser: string,
+		sessionCounts: Map<string, number>, interactionCounts: Map<string, number>
+	): void {
+		sessionCounts.set(winner, (sessionCounts.get(winner) || 0) + (sessionCounts.get(loser) || 0));
+		interactionCounts.set(winner, (interactionCounts.get(winner) || 0) + (interactionCounts.get(loser) || 0));
+		sessionCounts.delete(loser);
+		interactionCounts.delete(loser);
+		const winnerFiles = this._customizationFilesCache.get(winner) || [];
+		const loserFiles = this._customizationFilesCache.get(loser) || [];
+		if (winnerFiles.length === 0 && loserFiles.length > 0) {
+			this._customizationFilesCache.set(winner, loserFiles);
+		}
+		this._customizationFilesCache.delete(loser);
+	}
+
+	private deduplicateWorkspacesByCase(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
+		if (process.platform !== 'win32' && process.platform !== 'darwin') { return; }
+		const isRemotePath = (p: string) => process.platform === 'win32' && _normalizePath(p).startsWith('/');
+		const lowerToCanonical = new Map<string, string>();
+		for (const key of Array.from(sessionCounts.keys())) {
+			const lower = key.toLowerCase();
+			if (!lowerToCanonical.has(lower)) { lowerToCanonical.set(lower, key); continue; }
+			const canonical = lowerToCanonical.get(lower)!;
+			const keyIsRemote = isRemotePath(key);
+			const canonIsRemote = isRemotePath(canonical);
+			let winner: string;
+			if (!keyIsRemote && canonIsRemote) { winner = key; }
+			else if (!canonIsRemote && keyIsRemote) { winner = canonical; }
+			else { winner = (sessionCounts.get(key) || 0) >= (sessionCounts.get(canonical) || 0) ? key : canonical; }
+			this.mergeWorkspaceInto(winner, winner === key ? canonical : key, sessionCounts, interactionCounts);
+			lowerToCanonical.set(lower, winner);
+		}
+	}
+
+	private deduplicateRemoteWorkspacePaths(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
+		if (process.platform !== 'win32') { return; }
+		const isRemotePath = (p: string) => _normalizePath(p).startsWith('/');
+		const basenameToLocal = new Map<string, string>();
+		for (const key of Array.from(sessionCounts.keys())) {
+			if (!isRemotePath(key)) { basenameToLocal.set(path.basename(key).toLowerCase(), key); }
+		}
+		for (const key of Array.from(sessionCounts.keys())) {
+			if (!isRemotePath(key)) { continue; }
+			const localKey = basenameToLocal.get(path.basename(key).toLowerCase());
+			if (localKey && sessionCounts.has(key)) {
+				this.mergeWorkspaceInto(localKey, key, sessionCounts, interactionCounts);
+			}
+		}
+	}
+
+	private deduplicateCopilotWorktrees(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
+		const worktreeToCanonical = new Map<string, string>();
+		for (const key of Array.from(sessionCounts.keys())) {
+			const segments = key.split(path.sep);
+			const wtIdx = segments.map(s => s.toLowerCase()).lastIndexOf('copilot-worktrees');
+			if (wtIdx === -1 || wtIdx + 2 >= segments.length) { continue; }
+			const repoName = segments[wtIdx + 1];
+			const reposPath = path.normalize(segments.slice(0, wtIdx).concat('repos', repoName).join(path.sep));
+			const canonical = fs.existsSync(reposPath) ? reposPath : path.normalize(segments.slice(0, wtIdx + 2).join(path.sep));
+			worktreeToCanonical.set(key, canonical);
+		}
+		const canonicals = new Set(worktreeToCanonical.values());
+		for (const canonical of canonicals) {
+			if (!sessionCounts.has(canonical)) { sessionCounts.set(canonical, 0); interactionCounts.set(canonical, 0); }
+			for (const [worktree, canon] of worktreeToCanonical) {
+				if (canon === canonical && worktree !== canonical && sessionCounts.has(worktree)) {
+					this.mergeWorkspaceInto(canonical, worktree, sessionCounts, interactionCounts);
+				}
+			}
+			this.ensureWorkspaceCustomizationCached(canonical);
+		}
+	}
+
+	private deduplicateWorkspacePaths(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
+		this.deduplicateWorkspacesByCase(sessionCounts, interactionCounts);
+		this.deduplicateRemoteWorkspacePaths(sessionCounts, interactionCounts);
+		this.deduplicateCopilotWorktrees(sessionCounts, interactionCounts);
+	}
+
+	private buildResolvedWorkspaceMatrixRows(
+		sessionCounts: Map<string, number>, interactionCounts: Map<string, number>,
+		customizationTypes: { id: string; icon: string; label: string }[]
+	): { rows: WorkspaceCustomizationRow[]; issues: number } {
+		const rows: WorkspaceCustomizationRow[] = [];
+		let issues = 0;
+		for (const [folderPath, sessionCount] of sessionCounts) {
+			const files = this._customizationFilesCache.get(folderPath) || [];
+			const typeStatuses: { [typeId: string]: CustomizationTypeStatus } = {};
+			for (const type of customizationTypes) {
+				const filesOfType = files.filter(f => f.type === type.id);
+				if (filesOfType.length === 0) { typeStatuses[type.id] = '❌'; }
+				else if (filesOfType.some(f => f.isStale)) { typeStatuses[type.id] = '⚠️'; }
+				else { typeStatuses[type.id] = '✅'; }
+			}
+			if (customizationTypes.every(t => typeStatuses[t.id] === '❌')) { issues++; }
+			rows.push({ workspacePath: folderPath, workspaceName: path.basename(folderPath), sessionCount, interactionCount: interactionCounts.get(folderPath) || 0, typeStatuses });
+		}
+		return { rows, issues };
+	}
+
+	private buildUnresolvedWorkspaceMatrixRows(
+		unresolvedIds: Set<string>, unresolvedCounts: Map<string, number>,
+		customizationTypes: { id: string; icon: string; label: string }[]
+	): { rows: WorkspaceCustomizationRow[]; issues: number } {
+		const rows: WorkspaceCustomizationRow[] = [];
+		let issues = 0;
+		for (const workspaceId of unresolvedIds) {
+			const typeStatuses: { [typeId: string]: CustomizationTypeStatus } = {};
+			for (const type of customizationTypes) { typeStatuses[type.id] = '❌'; }
+			issues++;
+			const displayId = workspaceId.length > CopilotTokenTracker.WORKSPACE_ID_DISPLAY_LENGTH
+				? `${workspaceId.substring(0, CopilotTokenTracker.WORKSPACE_ID_DISPLAY_LENGTH)}...`
+				: workspaceId;
+			rows.push({
+				workspacePath: `<unresolved:${workspaceId}>`, workspaceName: `Unresolved (${displayId})`,
+				sessionCount: 0, interactionCount: unresolvedCounts.get(workspaceId) || 0, typeStatuses
+			});
+		}
+		return { rows, issues };
+	}
+
+	private buildUsageCustomizationMatrix(
+		sessionCounts: Map<string, number>, interactionCounts: Map<string, number>,
+		unresolvedIds: Set<string>, unresolvedCounts: Map<string, number>
+	): void {
+		try {
+			const uniqueTypes = new Map<string, { icon: string; label: string }>();
+			for (const pattern of (customizationPatternsData as any).patterns || []) {
+				if (pattern.category && pattern.category !== 'copilot') { continue; }
+				if (!uniqueTypes.has(pattern.type)) {
+					uniqueTypes.set(pattern.type, { icon: pattern.icon || '', label: pattern.label || pattern.type });
+				}
+			}
+			const customizationTypes = Array.from(uniqueTypes.entries()).map(([id, v]) => ({ id, icon: v.icon, label: v.label }));
+			const { rows: resolvedRows, issues: resolvedIssues } = this.buildResolvedWorkspaceMatrixRows(sessionCounts, interactionCounts, customizationTypes);
+			const { rows: unresolvedRows, issues: unresolvedIssues } = this.buildUnresolvedWorkspaceMatrixRows(unresolvedIds, unresolvedCounts, customizationTypes);
+			const matrixRows = [...resolvedRows, ...unresolvedRows];
+			matrixRows.sort((a, b) => b.interactionCount !== a.interactionCount ? b.interactionCount - a.interactionCount : b.sessionCount - a.sessionCount);
+			this._lastCustomizationMatrix = { customizationTypes, workspaces: matrixRows, totalWorkspaces: matrixRows.length, workspacesWithIssues: resolvedIssues + unresolvedIssues };
+			this._lastMissedPotential = this.detectMissedPotential(sessionCounts, interactionCounts);
+		} catch (e) { /* ignore overall customization scanning errors */ }
 	}
 
 	/**
