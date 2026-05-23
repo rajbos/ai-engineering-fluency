@@ -679,127 +679,61 @@ export class BackendFacade {
     }
     const config = vscode.workspace.getConfiguration("aiEngineeringFluency");
     await Promise.all([
-      config.update(
-        "backend.enabled",
-        next.enabled,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.authMode",
-        next.authMode,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.datasetId",
-        next.datasetId,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.sharingProfile",
-        next.sharingProfile,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareWithTeam",
-        next.shareWithTeam,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareWorkspaceMachineNames",
-        next.shareWorkspaceMachineNames,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareConsentAt",
-        next.shareConsentAt,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.userIdentityMode",
-        next.userIdentityMode,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.userId",
-        next.userId,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.userIdMode",
-        next.userIdMode,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.subscriptionId",
-        next.subscriptionId,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.resourceGroup",
-        next.resourceGroup,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.storageAccount",
-        next.storageAccount,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.aggTable",
-        next.aggTable,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.eventsTable",
-        next.eventsTable,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.lookbackDays",
-        next.lookbackDays,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.includeMachineBreakdown",
-        next.includeMachineBreakdown,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.blobUploadEnabled",
-        next.blobUploadEnabled,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.blobContainerName",
-        next.blobContainerName,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.blobUploadFrequencyHours",
-        next.blobUploadFrequencyHours,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.blobCompressFiles",
-        next.blobCompressFiles,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.backend",
-        next.backend,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.sharingServer.enabled",
-        next.sharingServerEnabled,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.sharingServer.endpointUrl",
-        next.sharingServerEndpointUrl,
-        vscode.ConfigurationTarget.Global,
-      ),
+      ...this.buildSharingConfigUpdates(config, next),
+      ...this.buildAzureConfigUpdates(config, next),
+      ...this.buildBlobAndServerConfigUpdates(config, next),
     ]);
+  }
+
+  private buildSharingConfigUpdates(
+    config: vscode.WorkspaceConfiguration,
+    next: BackendSettings,
+  ): Thenable<void>[] {
+    const T = vscode.ConfigurationTarget.Global;
+    return [
+      config.update("backend.enabled", next.enabled, T),
+      config.update("backend.authMode", next.authMode, T),
+      config.update("backend.datasetId", next.datasetId, T),
+      config.update("backend.sharingProfile", next.sharingProfile, T),
+      config.update("backend.shareWithTeam", next.shareWithTeam, T),
+      config.update("backend.shareWorkspaceMachineNames", next.shareWorkspaceMachineNames, T),
+      config.update("backend.shareConsentAt", next.shareConsentAt, T),
+      config.update("backend.userIdentityMode", next.userIdentityMode, T),
+      config.update("backend.userId", next.userId, T),
+      config.update("backend.userIdMode", next.userIdMode, T),
+    ];
+  }
+
+  private buildAzureConfigUpdates(
+    config: vscode.WorkspaceConfiguration,
+    next: BackendSettings,
+  ): Thenable<void>[] {
+    const T = vscode.ConfigurationTarget.Global;
+    return [
+      config.update("backend.subscriptionId", next.subscriptionId, T),
+      config.update("backend.resourceGroup", next.resourceGroup, T),
+      config.update("backend.storageAccount", next.storageAccount, T),
+      config.update("backend.aggTable", next.aggTable, T),
+      config.update("backend.eventsTable", next.eventsTable, T),
+      config.update("backend.lookbackDays", next.lookbackDays, T),
+      config.update("backend.includeMachineBreakdown", next.includeMachineBreakdown, T),
+    ];
+  }
+
+  private buildBlobAndServerConfigUpdates(
+    config: vscode.WorkspaceConfiguration,
+    next: BackendSettings,
+  ): Thenable<void>[] {
+    const T = vscode.ConfigurationTarget.Global;
+    return [
+      config.update("backend.blobUploadEnabled", next.blobUploadEnabled, T),
+      config.update("backend.blobContainerName", next.blobContainerName, T),
+      config.update("backend.blobUploadFrequencyHours", next.blobUploadFrequencyHours, T),
+      config.update("backend.blobCompressFiles", next.blobCompressFiles, T),
+      config.update("backend.backend", next.backend, T),
+      config.update("backend.sharingServer.enabled", next.sharingServerEnabled, T),
+      config.update("backend.sharingServer.endpointUrl", next.sharingServerEndpointUrl, T),
+    ];
   }
 
   private async showConfigPanel(): Promise<void> {
