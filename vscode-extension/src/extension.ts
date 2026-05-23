@@ -7399,382 +7399,214 @@ body {
 
   public async showDiagnosticReport(): Promise<void> {
     this.log("🔍 Opening Diagnostic Report");
-
-    // If panel already exists, just reveal it and trigger a refresh in the background
     if (this.diagnosticsPanel) {
       this.diagnosticsPanel.reveal();
       this.log("🔍 Diagnostic Report revealed (already exists)");
-      // Load data in background and update the webview
       this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
       return;
     }
-
-    // Create the panel immediately with loading state
     this.diagnosticsPanel = vscode.window.createWebviewPanel(
-      "copilotTokenDiagnostics",
-      "Diagnostic Report",
-      {
-        viewColumn: vscode.ViewColumn.One,
-        preserveFocus: false,
-      },
-      {
-        enableScripts: true,
-        retainContextWhenHidden: true, // Keep webview context to avoid reloading session files
-        localResourceRoots: [
-          vscode.Uri.joinPath(this.extensionUri, "dist", "webview"),
-        ],
-      },
+      "copilotTokenDiagnostics", "Diagnostic Report",
+      { viewColumn: vscode.ViewColumn.One, preserveFocus: false },
+      { enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, "dist", "webview")] },
     );
-
     this.log("✅ Diagnostic Report panel created");
-
-    // Handle messages from the webview
-    this.diagnosticsPanel.webview.onDidReceiveMessage(async (message) => {
-      if (this.handleLocalViewRegressionMessage(message)) { return; }
-      if (await this.dispatchSharedCommand(message)) { return; }
-      switch (message.command) {
-        case "copyReport":
-          await this.dispatch('copyReport:diagnostics', async () => {
-            await vscode.env.clipboard.writeText(this.lastDiagnosticReport);
-            vscode.window.showInformationMessage(
-              "Diagnostic report copied to clipboard",
-            );
-          });
-          break;
-        case "openIssue":
-          await this.dispatch('openIssue:diagnostics', async () => {
-            await vscode.env.clipboard.writeText(this.lastDiagnosticReport);
-            vscode.window.showInformationMessage(
-              "Diagnostic report copied to clipboard. Please paste it into the GitHub issue.",
-            );
-            const shortBody = encodeURIComponent(
-              "The diagnostic report has been copied to the clipboard. Please paste it below.",
-            );
-          const issueUrl = `${this.getRepositoryUrl()}/issues/new?body=${shortBody}`;
-            await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
-          });
-          break;
-        case "reportNewEditorPath":
-          if (message.path) {
-            await this.dispatch('reportNewEditorPath:diagnostics', async () => {
-              const rawPath: string = message.path;
-              const home = os.homedir();
-              const anonymizedPath = rawPath.startsWith(home) ? rawPath.replace(home, '~') : rawPath;
-              const title = encodeURIComponent('New editor support: unknown session path found');
-              const body = encodeURIComponent([
-                '## Unknown editor session path found',
-                '',
-                'The extension found a session file at a path it does not recognise:',
-                '',
-                '```',
-                anonymizedPath,
-                '```',
-                '',
-                '**Which editor or tool does this path belong to?**',
-                '',
-                'Please describe the editor/tool and how you installed it so we can add support for it.',
-              ].join('\n'));
-              const issueUrl = `${this.getRepositoryUrl()}/issues/new?title=${title}&body=${body}&labels=${encodeURIComponent('new-editor-support')}`;
-              await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
-            });
-          }
-          break;
-        case "openSessionFile":
-          if (message.file) {
-            await this.dispatch('openSessionFile:diagnostics', async () => {
-              try {
-                // Open the session file in the log viewer
-                await this.showLogViewer(message.file);
-              } catch (err) {
-                vscode.window.showErrorMessage(
-                  "Could not open log viewer: " + message.file,
-                );
-              }
-            });
-          }
-          break;
-
-        case "openFormattedJsonlFile":
-          if (message.file) {
-            await this.dispatch('openFormattedJsonlFile:diagnostics', async () => {
-              try {
-                await this.showFormattedJsonlFile(message.file);
-              } catch (err) {
-                const errorMsg = err instanceof Error ? err.message : String(err);
-                vscode.window.showErrorMessage(
-                  "Could not open formatted file: " +
-                    message.file +
-                    " (" +
-                    errorMsg +
-                    ")",
-                );
-              }
-            });
-          }
-          break;
-
-        case "revealPath":
-          if (message.path) {
-            await this.dispatch('revealPath:diagnostics', async () => {
-              try {
-                const fs = require("fs");
-                const pathModule = require("path");
-                const normalized = pathModule.normalize(message.path);
-
-                // If the path exists and is a directory, open it directly in the OS file manager.
-                // Using `vscode.env.openExternal` with a file URI reliably opens the folder itself.
-                try {
-                  const stat = await fs.promises.stat(normalized);
-                  if (stat.isDirectory()) {
-                    await vscode.env.openExternal(vscode.Uri.file(normalized));
-                  } else {
-                    // For files, reveal the file in OS (select it)
-                    await vscode.commands.executeCommand(
-                      "revealFileInOS",
-                      vscode.Uri.file(normalized),
-                    );
-                  }
-                } catch (err) {
-                  // If the stat fails, fallback to revealFileInOS which may still work
-                  await vscode.commands.executeCommand(
-                    "revealFileInOS",
-                    vscode.Uri.file(normalized),
-                  );
-                }
-              } catch (err) {
-                vscode.window.showErrorMessage(
-                  "Could not reveal: " + message.path,
-                );
-              }
-            });
-          }
-          break;
-        case "clearCache":
-          await this.dispatch('clearCache:diagnostics', async () => {
-            this.log("clearCache message received from diagnostics webview");
-            await this.clearCache();
-            // After clearing cache, refresh the diagnostic report if it's open
-            if (this.diagnosticsPanel) {
-              // Send completion message to webview before refreshing
-              this.diagnosticsPanel.webview.postMessage({
-                command: "cacheCleared",
-              });
-              // Wait a moment for the message to be processed
-              await new Promise((resolve) => setTimeout(resolve, 500));
-              // Simply refresh the diagnostic report by revealing it again
-              // This will trigger a rebuild with fresh data
-              await this.showDiagnosticReport();
-            }
-          });
-          break;
-        case "configureBackend":
-          await this.dispatch('configureBackend:diagnostics', async () => {
-            // Execute the configureBackend command if it exists
-            try {
-              await vscode.commands.executeCommand(
-                "aiEngineeringFluency.configureBackend",
-              );
-            } catch (err) {
-              // If command is not registered, show settings
-              void (async () => {
-                const choice = await vscode.window.showInformationMessage(
-                  'Backend configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.',
-                  "Open Settings",
-                );
-                if (choice === "Open Settings") {
-                  void vscode.commands.executeCommand(
-                    "workbench.action.openSettings",
-                    "aiEngineeringFluency.backend",
-                  );
-                }
-              })();
-            }
-          });
-          break;
-        case "configureTeamServer":
-          await this.dispatch('configureTeamServer:diagnostics', async () => {
-            try {
-              await vscode.commands.executeCommand(
-                "aiEngineeringFluency.configureTeamServer",
-              );
-            } catch (err) {
-              void (async () => {
-                const choice = await vscode.window.showInformationMessage(
-                  'Team Server configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.',
-                  "Open Settings",
-                );
-                if (choice === "Open Settings") {
-                  void vscode.commands.executeCommand(
-                    "workbench.action.openSettings",
-                    "aiEngineeringFluency.backend.sharingServer",
-                  );
-                }
-              })();
-            }
-          });
-          break;
-        case "openSettings":
-          await this.dispatch('openSettings:diagnostics', () =>
-            vscode.commands.executeCommand(
-              "workbench.action.openSettings",
-              "aiEngineeringFluency.backend",
-            )
-          );
-          break;
-        case "openDisplaySettings":
-          await this.dispatch('openDisplaySettings:diagnostics', () =>
-            vscode.commands.executeCommand(
-              "workbench.action.openSettings",
-              "aiEngineeringFluency.display",
-            )
-          );
-          break;
-        case "updateDisplaySetting":
-          if (typeof message.key === 'string' && message.value !== undefined) {
-            await this.dispatch('updateDisplaySetting:diagnostics', async () => {
-              // Map webview keys to fully-qualified setting names.
-              // Using getConfiguration() with no section + full key avoids VS Code rejecting
-              // multi-segment relative keys in update() as "not a registered configuration",
-              // which happens even when the key is declared in contributes.configuration.properties.
-              const fullKeyMap: Record<string, string> = {
-                'display.statusBar.showTokens': 'aiEngineeringFluency.display.statusBar.showTokens',
-                'display.statusBar.showCost': 'aiEngineeringFluency.display.statusBar.showCost',
-              };
-              const fullKey = fullKeyMap[message.key];
-              if (fullKey) {
-                await vscode.workspace.getConfiguration().update(fullKey, message.value, vscode.ConfigurationTarget.Global);
-              }
-            });
-          }
-          break;
-        case "resetDebugCounters":
-          await this.dispatch('resetDebugCounters:diagnostics', async () => {
-            await this.context.globalState.update('extension.openCount', 0);
-            await this.context.globalState.update('extension.unknownMcpOpenCount', 0);
-            await this.context.globalState.update('news.fluencyScoreBanner.v1.dismissed', false);
-            await this.context.globalState.update('news.unknownMcpTools.dismissedVersion', undefined);
-            vscode.window.showInformationMessage('Debug counters and dismissed flags have been reset.');
-            await this.showDiagnosticReport();
-          });
-          break;
-        case "setDebugCounter":
-          if (typeof message.key === 'string' && typeof message.value === 'number') {
-            await this.dispatch('setDebugCounter:diagnostics', async () => {
-              await this.context.globalState.update(message.key, message.value);
-              vscode.window.showInformationMessage(`Set ${message.key} = ${message.value}`);
-              await this.showDiagnosticReport();
-            });
-          }
-          break;
-        case "setDebugFlag":
-          if (typeof message.key === 'string' && typeof message.value === 'boolean') {
-            await this.dispatch('setDebugFlag:diagnostics', async () => {
-              await this.context.globalState.update(message.key, message.value);
-              vscode.window.showInformationMessage(`Set ${message.key} = ${message.value}`);
-              await this.showDiagnosticReport();
-            });
-          }
-          break;
-        case "authenticateGitHub":
-          await this.dispatch('authenticateGitHub:diagnostics', async () => {
-            await this.authenticateWithGitHub();
-            if (this.diagnosticsPanel) {
-              this.diagnosticsPanel.webview.postMessage({
-                command: 'githubAuthUpdated',
-                githubAuth: this.getGitHubAuthStatus(),
-              });
-            }
-          });
-          break;
-        case "signOutGitHub":
-          await this.dispatch('signOutGitHub:diagnostics', async () => {
-            await this.signOutFromGitHub();
-            if (this.diagnosticsPanel) {
-              this.diagnosticsPanel.webview.postMessage({
-                command: 'githubAuthUpdated',
-                githubAuth: this.getGitHubAuthStatus(),
-              });
-            }
-          });
-          break;
-        case "pickFolder":
-          await this.dispatch('pickFolder:diagnostics', async () => {
-            const uris = await vscode.window.showOpenDialog({
-              canSelectFiles: false,
-              canSelectFolders: true,
-              canSelectMany: false,
-              openLabel: "Select Folder to Analyze",
-            });
-            if (uris && uris.length > 0 && this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
-              this.diagnosticsPanel.webview.postMessage({
-                command: "folderPicked",
-                folderPath: uris[0].fsPath,
-              });
-            }
-          });
-          break;
-        case "analyzeFolder":
-          await this.dispatch('analyzeFolder:diagnostics', async () => {
-            const { folderPath, toolType } = message as { folderPath: string; toolType: string };            if (!folderPath) {
-              if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
-                this.diagnosticsPanel.webview.postMessage({
-                  command: "folderAnalysisResult",
-                  error: "No folder path provided.",
-                  files: [],
-                  totalScanned: 0,
-                  parseErrors: 0,
-                  truncated: false,
-                  folderPath: "",
-                  toolType: toolType ?? "auto",
-                });
-              }
-              return;
-            }
-            try {
-              await fs.promises.access(folderPath);
-            } catch {
-              if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
-                this.diagnosticsPanel.webview.postMessage({
-                  command: "folderAnalysisResult",
-                  error: `Folder not found or not accessible: ${folderPath}`,
-                  files: [],
-                  totalScanned: 0,
-                  parseErrors: 0,
-                  truncated: false,
-                  folderPath,
-                  toolType: toolType ?? "auto",
-                });
-              }
-              return;
-            }
-            if (this.diagnosticsPanel) {
-              await this.analyzeFolderPath(this.diagnosticsPanel, folderPath, toolType ?? "auto");
-            }
-          });
-          break;
-      }
-    });
-
-    // Set the HTML content immediately with loading state
-    // Note: "Loading..." is the agreed contract between backend and frontend
-    // The webview checks for this value to show a loading indicator
-    this.diagnosticsPanel.webview.html = this.getDiagnosticReportHtml(
-      this.diagnosticsPanel.webview,
-      "Loading...", // Placeholder report
-      [], // Empty session files
-      [], // Empty detailed session files
-      [], // Empty session folders
-      null, // No backend info yet
-    );
-
-    // Handle panel disposal
-    this.diagnosticsPanel.onDidDispose(() => {
-      this.log("🔍 Diagnostic Report closed");
-      this.diagnosticsPanel = undefined;
-    });
-
-    // Load data in background and update the webview when ready
+    this.diagnosticsPanel.webview.onDidReceiveMessage(async (message) => { await this.handleDiagnosticMessage(message); });
+    this.diagnosticsPanel.webview.html = this.getDiagnosticReportHtml(this.diagnosticsPanel.webview, "Loading...", [], [], [], null);
+    this.diagnosticsPanel.onDidDispose(() => { this.log("🔍 Diagnostic Report closed"); this.diagnosticsPanel = undefined; });
     this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
+  }
+
+  private async handleDiagnosticMessage(message: any): Promise<void> {
+    if (this.handleLocalViewRegressionMessage(message)) { return; }
+    if (await this.dispatchSharedCommand(message)) { return; }
+    const simpleCommands: Record<string, () => Promise<void>> = {
+      copyReport: () => this.dispatch('copyReport:diagnostics', () => this.diagHandleCopyReport()),
+      openIssue: () => this.dispatch('openIssue:diagnostics', () => this.diagHandleOpenIssue()),
+      clearCache: () => this.dispatch('clearCache:diagnostics', () => this.diagHandleClearCache()),
+      configureBackend: () => this.dispatch('configureBackend:diagnostics', () => this.diagHandleConfigureBackend()),
+      configureTeamServer: () => this.dispatch('configureTeamServer:diagnostics', () => this.diagHandleConfigureTeamServer()),
+      openSettings: () => this.dispatch('openSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend")),
+      openDisplaySettings: () => this.dispatch('openDisplaySettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.display")),
+      resetDebugCounters: () => this.dispatch('resetDebugCounters:diagnostics', () => this.diagHandleResetDebugCounters()),
+      authenticateGitHub: () => this.dispatch('authenticateGitHub:diagnostics', () => this.diagHandleGitHubAuth(true)),
+      signOutGitHub: () => this.dispatch('signOutGitHub:diagnostics', () => this.diagHandleGitHubAuth(false)),
+      pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
+      analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
+    };
+    if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
+    await this.handleDiagnosticConditionalCommand(message);
+  }
+
+  private async handleDiagnosticConditionalCommand(message: any): Promise<void> {
+    switch (message.command) {
+      case "reportNewEditorPath":
+        if (message.path) { await this.dispatch('reportNewEditorPath:diagnostics', () => this.diagHandleReportNewEditorPath(message.path)); } break;
+      case "openSessionFile":
+        if (message.file) { await this.dispatch('openSessionFile:diagnostics', async () => { try { await this.showLogViewer(message.file); } catch { vscode.window.showErrorMessage("Could not open log viewer: " + message.file); } }); } break;
+      case "openFormattedJsonlFile":
+        if (message.file) { await this.dispatch('openFormattedJsonlFile:diagnostics', () => this.diagHandleOpenFormattedJsonlFile(message.file)); } break;
+      case "revealPath":
+        if (message.path) { await this.dispatch('revealPath:diagnostics', () => this.diagHandleRevealPath(message.path)); } break;
+      default:
+        await this.handleDiagnosticTypedCommand(message); break;
+    }
+  }
+
+  private async handleDiagnosticTypedCommand(message: any): Promise<void> {
+    switch (message.command) {
+      case "updateDisplaySetting":
+        if (typeof message.key === 'string' && message.value !== undefined) { await this.dispatch('updateDisplaySetting:diagnostics', () => this.diagHandleUpdateDisplaySetting(message.key, message.value)); } break;
+      case "setDebugCounter":
+        if (typeof message.key === 'string' && typeof message.value === 'number') { await this.dispatch('setDebugCounter:diagnostics', () => this.diagHandleSetDebugCounter(message.key, message.value)); } break;
+      case "setDebugFlag":
+        if (typeof message.key === 'string' && typeof message.value === 'boolean') { await this.dispatch('setDebugFlag:diagnostics', () => this.diagHandleSetDebugFlag(message.key, message.value)); } break;
+    }
+  }
+
+  private async diagHandleCopyReport(): Promise<void> {
+    await vscode.env.clipboard.writeText(this.lastDiagnosticReport);
+    vscode.window.showInformationMessage("Diagnostic report copied to clipboard");
+  }
+
+  private async diagHandleOpenIssue(): Promise<void> {
+    await vscode.env.clipboard.writeText(this.lastDiagnosticReport);
+    vscode.window.showInformationMessage("Diagnostic report copied to clipboard. Please paste it into the GitHub issue.");
+    const shortBody = encodeURIComponent("The diagnostic report has been copied to the clipboard. Please paste it below.");
+    await vscode.env.openExternal(vscode.Uri.parse(`${this.getRepositoryUrl()}/issues/new?body=${shortBody}`));
+  }
+
+  private async diagHandleReportNewEditorPath(rawPath: string): Promise<void> {
+    const home = os.homedir();
+    const anonymizedPath = rawPath.startsWith(home) ? rawPath.replace(home, '~') : rawPath;
+    const title = encodeURIComponent('New editor support: unknown session path found');
+    const body = encodeURIComponent(['## Unknown editor session path found', '', 'The extension found a session file at a path it does not recognise:', '', '```', anonymizedPath, '```', '', '**Which editor or tool does this path belong to?**', '', 'Please describe the editor/tool and how you installed it so we can add support for it.'].join('\n'));
+    await vscode.env.openExternal(vscode.Uri.parse(`${this.getRepositoryUrl()}/issues/new?title=${title}&body=${body}&labels=${encodeURIComponent('new-editor-support')}`));
+  }
+
+  private async diagHandleOpenFormattedJsonlFile(file: string): Promise<void> {
+    try {
+      await this.showFormattedJsonlFile(file);
+    } catch (err) {
+      const errorMsg = err instanceof Error ? err.message : String(err);
+      vscode.window.showErrorMessage("Could not open formatted file: " + file + " (" + errorMsg + ")");
+    }
+  }
+
+  private async diagHandleRevealPath(pathToReveal: string): Promise<void> {
+    try {
+      const fsModule = require("fs");
+      const pathModule = require("path");
+      const normalized = pathModule.normalize(pathToReveal);
+      try {
+        const stat = await fsModule.promises.stat(normalized);
+        if (stat.isDirectory()) {
+          await vscode.env.openExternal(vscode.Uri.file(normalized));
+        } else {
+          await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(normalized));
+        }
+      } catch {
+        await vscode.commands.executeCommand("revealFileInOS", vscode.Uri.file(normalized));
+      }
+    } catch {
+      vscode.window.showErrorMessage("Could not reveal: " + pathToReveal);
+    }
+  }
+
+  private async diagHandleClearCache(): Promise<void> {
+    this.log("clearCache message received from diagnostics webview");
+    await this.clearCache();
+    if (this.diagnosticsPanel) {
+      this.diagnosticsPanel.webview.postMessage({ command: "cacheCleared" });
+      await new Promise((resolve) => setTimeout(resolve, 500));
+      await this.showDiagnosticReport();
+    }
+  }
+
+  private async diagHandleConfigureBackend(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand("aiEngineeringFluency.configureBackend");
+    } catch {
+      void (async () => {
+        const choice = await vscode.window.showInformationMessage('Backend configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.', "Open Settings");
+        if (choice === "Open Settings") { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend"); }
+      })();
+    }
+  }
+
+  private async diagHandleConfigureTeamServer(): Promise<void> {
+    try {
+      await vscode.commands.executeCommand("aiEngineeringFluency.configureTeamServer");
+    } catch {
+      void (async () => {
+        const choice = await vscode.window.showInformationMessage('Team Server configuration is available in settings. Search for "AI Engineering Fluency: Backend" in settings.', "Open Settings");
+        if (choice === "Open Settings") { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend.sharingServer"); }
+      })();
+    }
+  }
+
+  private async diagHandleUpdateDisplaySetting(key: string, value: any): Promise<void> {
+    const fullKeyMap: Record<string, string> = {
+      'display.statusBar.showTokens': 'aiEngineeringFluency.display.statusBar.showTokens',
+      'display.statusBar.showCost': 'aiEngineeringFluency.display.statusBar.showCost',
+    };
+    const fullKey = fullKeyMap[key];
+    if (fullKey) { await vscode.workspace.getConfiguration().update(fullKey, value, vscode.ConfigurationTarget.Global); }
+  }
+
+  private async diagHandleResetDebugCounters(): Promise<void> {
+    await this.context.globalState.update('extension.openCount', 0);
+    await this.context.globalState.update('extension.unknownMcpOpenCount', 0);
+    await this.context.globalState.update('news.fluencyScoreBanner.v1.dismissed', false);
+    await this.context.globalState.update('news.unknownMcpTools.dismissedVersion', undefined);
+    vscode.window.showInformationMessage('Debug counters and dismissed flags have been reset.');
+    await this.showDiagnosticReport();
+  }
+
+  private async diagHandleSetDebugCounter(key: string, value: number): Promise<void> {
+    await this.context.globalState.update(key, value);
+    vscode.window.showInformationMessage(`Set ${key} = ${value}`);
+    await this.showDiagnosticReport();
+  }
+
+  private async diagHandleSetDebugFlag(key: string, value: boolean): Promise<void> {
+    await this.context.globalState.update(key, value);
+    vscode.window.showInformationMessage(`Set ${key} = ${value}`);
+    await this.showDiagnosticReport();
+  }
+
+  private async diagHandleGitHubAuth(signIn: boolean): Promise<void> {
+    if (signIn) { await this.authenticateWithGitHub(); } else { await this.signOutFromGitHub(); }
+    if (this.diagnosticsPanel) {
+      this.diagnosticsPanel.webview.postMessage({ command: 'githubAuthUpdated', githubAuth: this.getGitHubAuthStatus() });
+    }
+  }
+
+  private async diagHandlePickFolder(): Promise<void> {
+    const uris = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: "Select Folder to Analyze" });
+    if (uris && uris.length > 0 && this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
+      this.diagnosticsPanel.webview.postMessage({ command: "folderPicked", folderPath: uris[0].fsPath });
+    }
+  }
+
+  private async diagHandleAnalyzeFolder(message: any): Promise<void> {
+    const { folderPath, toolType } = message as { folderPath: string; toolType: string };
+    const effectiveToolType = toolType ?? "auto";
+    if (!folderPath) {
+      if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
+        this.diagnosticsPanel.webview.postMessage({ command: "folderAnalysisResult", error: "No folder path provided.", files: [], totalScanned: 0, parseErrors: 0, truncated: false, folderPath: "", toolType: effectiveToolType });
+      }
+      return;
+    }
+    try {
+      await fs.promises.access(folderPath);
+    } catch {
+      if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
+        this.diagnosticsPanel.webview.postMessage({ command: "folderAnalysisResult", error: `Folder not found or not accessible: ${folderPath}`, files: [], totalScanned: 0, parseErrors: 0, truncated: false, folderPath, toolType: effectiveToolType });
+      }
+      return;
+    }
+    if (this.diagnosticsPanel) { await this.analyzeFolderPath(this.diagnosticsPanel, folderPath, effectiveToolType); }
   }
 
   /**
