@@ -196,121 +196,84 @@ function formatTokenCount(value: number | undefined | null): string {
  * Build a DOM element showing all candidate paths the extension considers,
  * with their existence status. Helps users understand why data may be missing.
  */
+type CandidatePath = { path: string; exists: boolean; source: string };
+
+function buildCandidatePathRow(cp: CandidatePath, tbody: HTMLElement): void {
+  const row = document.createElement("tr");
+  if (!cp.exists) { row.style.opacity = "0.5"; }
+  const statusCell = document.createElement("td");
+  statusCell.textContent = cp.exists ? "✅" : "❌";
+  statusCell.style.textAlign = "center";
+  const sourceCell = document.createElement("td");
+  const badge = document.createElement("span");
+  badge.className = getEditorBadgeClass(cp.source);
+  badge.textContent = `${getEditorIcon(cp.source)} ${cp.source}`;
+  sourceCell.appendChild(badge);
+  const pathCell = document.createElement("td");
+  pathCell.setAttribute("title", cp.path);
+  pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
+  pathCell.style.fontSize = "12px";
+  pathCell.textContent = cp.path;
+  row.append(statusCell, sourceCell, pathCell);
+  tbody.appendChild(row);
+}
+
+function buildCrushGroupRow(crushEntries: CandidatePath[], tbody: HTMLElement): void {
+  const anyExist = crushEntries.some((cp) => cp.exists);
+  const row = document.createElement("tr");
+  if (!anyExist) { row.style.opacity = "0.5"; }
+  const statusCell = document.createElement("td");
+  statusCell.textContent = anyExist ? "✅" : "❌";
+  statusCell.style.textAlign = "center";
+  const sourceCell = document.createElement("td");
+  const badge = document.createElement("span");
+  badge.className = getEditorBadgeClass("Crush");
+  badge.textContent = `${getEditorIcon("Crush")} Crush`;
+  sourceCell.appendChild(badge);
+  const pathCell = document.createElement("td");
+  pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
+  pathCell.style.fontSize = "12px";
+  pathCell.style.lineHeight = "1.6";
+  for (const cp of crushEntries) {
+    const line = document.createElement("div");
+    line.style.opacity = cp.exists ? "1" : "0.5";
+    line.title = cp.path;
+    line.textContent = `${cp.exists ? "✅" : "❌"} ${cp.path}`;
+    pathCell.appendChild(line);
+  }
+  row.append(statusCell, sourceCell, pathCell);
+  tbody.appendChild(row);
+}
+
 function buildCandidatePathsElement(
-  candidatePaths: { path: string; exists: boolean; source: string }[],
+  candidatePaths: CandidatePath[],
 ): HTMLElement {
   const container = document.createElement("div");
   container.className = "candidate-paths-table";
-
   const heading = document.createElement("h4");
   heading.textContent = "Scanned Paths (all candidate locations):";
   container.appendChild(heading);
-
   const description = document.createElement("p");
   description.style.cssText = "color: #999; font-size: 12px; margin: 4px 0 8px 0;";
   description.textContent = "These are all the paths the extension checks for session files. Paths marked with ✅ exist on this system.";
   container.appendChild(description);
-
   const table = document.createElement("table");
   table.className = "session-table";
   container.appendChild(table);
-
   const thead = document.createElement("thead");
-  table.appendChild(thead);
   const headerRow = document.createElement("tr");
-  thead.appendChild(headerRow);
   for (const text of ["Status", "Source", "Path"]) {
-    const th = document.createElement("th");
-    th.textContent = text;
-    headerRow.appendChild(th);
+    const th = document.createElement("th"); th.textContent = text; headerRow.appendChild(th);
   }
-
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
   const tbody = document.createElement("tbody");
   table.appendChild(tbody);
-
-  // Show found paths first, then missing paths
-  const sorted = [...candidatePaths].sort((a, b) => {
-    if (a.exists !== b.exists) {
-      return a.exists ? -1 : 1;
-    }
-    return a.source.localeCompare(b.source);
-  });
-
-  // Group all Crush entries into one row; render everything else individually
-  const crushEntries = sorted.filter((cp) =>
-    cp.source.toLowerCase().includes("crush"),
-  );
-  const otherEntries = sorted.filter(
-    (cp) => !cp.source.toLowerCase().includes("crush"),
-  );
-
-  const renderRow = (cp: { path: string; exists: boolean; source: string }) => {
-    const row = document.createElement("tr");
-    if (!cp.exists) {
-      row.style.opacity = "0.5";
-    }
-
-    const statusCell = document.createElement("td");
-    statusCell.textContent = cp.exists ? "✅" : "❌";
-    statusCell.style.textAlign = "center";
-    row.appendChild(statusCell);
-
-    const sourceCell = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = getEditorBadgeClass(cp.source);
-    badge.textContent = `${getEditorIcon(cp.source)} ${cp.source}`;
-    sourceCell.appendChild(badge);
-    row.appendChild(sourceCell);
-
-    const pathCell = document.createElement("td");
-    pathCell.setAttribute("title", cp.path);
-    pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
-    pathCell.style.fontSize = "12px";
-    pathCell.textContent = cp.path;
-    row.appendChild(pathCell);
-
-    tbody.appendChild(row);
-  };
-
-  for (const cp of otherEntries) {
-    renderRow(cp);
-  }
-
-  if (crushEntries.length > 0) {
-    const anyExist = crushEntries.some((cp) => cp.exists);
-    const row = document.createElement("tr");
-    if (!anyExist) {
-      row.style.opacity = "0.5";
-    }
-
-    const statusCell = document.createElement("td");
-    statusCell.textContent = anyExist ? "✅" : "❌";
-    statusCell.style.textAlign = "center";
-    row.appendChild(statusCell);
-
-    const sourceCell = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = getEditorBadgeClass("Crush");
-    badge.textContent = `${getEditorIcon("Crush")} Crush`;
-    sourceCell.appendChild(badge);
-    row.appendChild(sourceCell);
-
-    const pathCell = document.createElement("td");
-    pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
-    pathCell.style.fontSize = "12px";
-    pathCell.style.lineHeight = "1.6";
-    for (const cp of crushEntries) {
-      const line = document.createElement("div");
-      line.style.opacity = cp.exists ? "1" : "0.5";
-      line.title = cp.path;
-      line.textContent = `${cp.exists ? "✅" : "❌"} ${cp.path}`;
-      pathCell.appendChild(line);
-    }
-    row.appendChild(pathCell);
-
-    tbody.appendChild(row);
-  }
-
+  const sorted = [...candidatePaths].sort((a, b) => a.exists !== b.exists ? (a.exists ? -1 : 1) : a.source.localeCompare(b.source));
+  const crushEntries = sorted.filter((cp) => cp.source.toLowerCase().includes("crush"));
+  const otherEntries = sorted.filter((cp) => !cp.source.toLowerCase().includes("crush"));
+  for (const cp of otherEntries) { buildCandidatePathRow(cp, tbody); }
+  if (crushEntries.length > 0) { buildCrushGroupRow(crushEntries, tbody); }
   return container;
 }
 
@@ -391,44 +354,14 @@ function getEditorBadgeClass(editor: string): string {
 
 function getEditorIcon(editor: string): string {
   const lower = editor.toLowerCase();
-  if (lower.includes("jetbrains") || lower.includes("rider") || lower.includes("intellij")) {
-    return "🟣";
-  }
-  if (lower.includes("visual studio")) {
-    return "🪟";
-  }
-  if (lower.includes("mistral")) {
-    return "🔥";
-  }
-  // Antigravity: rocket emoji — evokes the anti-gravity concept and space theme
-  if (lower.includes("antigravity")) {
-    return "🚀";
-  }
-  if (lower.includes("gemini")) {
-    return "💎";
-  }
-  if (lower.includes("crush")) {
-    return "🩷";
-  }
-  if (lower.includes("opencode")) {
-    return "🟢";
-  }
-  if (lower.includes("cursor")) {
-    return "🖱️";
-  }
-  if (lower.includes("insiders")) {
-    return "💚";
-  }
-  if (lower.includes("vscodium")) {
-    return "🔵";
-  }
-  if (lower.includes("windsurf")) {
-    return "🏄";
-  }
-  if (lower.includes("vs code") || lower.includes("vscode")) {
-    return "💙";
-  }
-  return "📝";
+  const ICONS: [string, string][] = [
+    ['jetbrains', '🟣'], ['rider', '🟣'], ['intellij', '🟣'],
+    ['visual studio', '🪟'], ['mistral', '🔥'], ['antigravity', '🚀'],
+    ['gemini', '💎'], ['crush', '🩷'], ['opencode', '🟢'],
+    ['cursor', '🖱️'], ['insiders', '💚'], ['vscodium', '🔵'],
+    ['windsurf', '🏄'], ['vs code', '💙'], ['vscode', '💙'],
+  ];
+  return ICONS.find(([key]) => lower.includes(key))?.[1] ?? '📝';
 }
 
 function sortSessionFiles(files: SessionFileDetails[]): SessionFileDetails[] {
