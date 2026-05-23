@@ -926,82 +926,46 @@ export function analyzeContextReferences(text: string, refs: ContextReferenceUsa
  * Looks for kind: "reference" entries and tracks by kind, path patterns.
  * Also increments specific category counters like refs.file when appropriate.
  */
-export function analyzeContentReferences(contentReferences: unknown[], refs: ContextReferenceUsage): void {
-	if (!Array.isArray(contentReferences)) {
-		return;
+function _acrGetReference(contentRef: ContentRefItemRaw, kind: string): ContentRefObject | null {
+	if (kind === 'reference' && contentRef.reference) { return contentRef.reference; }
+	if (kind === 'inlineReference' && contentRef.inlineReference) { return contentRef.inlineReference; }
+	return null;
+}
+
+function _acrClassifyFilePath(normalizedPath: string, fsPath: string, refs: ContextReferenceUsage): void {
+	if (normalizedPath.endsWith('/.github/copilot-instructions.md') || normalizedPath.includes('.github/copilot-instructions.md')) {
+		refs.copilotInstructions++;
+	} else if (normalizedPath.endsWith('/agents.md') || normalizedPath.match(/\/agents\.md$/i)) {
+		refs.agentsMd++;
+	} else if (normalizedPath.endsWith('.instructions.md') || normalizedPath.includes('.instructions.md')) {
+		refs.copilotInstructions++;
+	} else {
+		refs.file++;
 	}
+	const pathKey = fsPath.length > 100 ? '...' + fsPath.substring(fsPath.length - 97) : fsPath;
+	refs.byPath[pathKey] = (refs.byPath[pathKey] || 0) + 1;
+}
 
+function _acrProcessReference(reference: ContentRefObject, kind: string, refs: ContextReferenceUsage): void {
+	const fsPath = reference.fsPath || reference.path;
+	if (typeof fsPath === 'string') { _acrClassifyFilePath(normalizePathForComparison(fsPath), fsPath, refs); }
+	if (typeof reference.name === 'string' && kind === 'reference') {
+		refs.symbol++;
+		const symbolKey = `#sym:${reference.name}`;
+		refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
+	}
+}
+
+export function analyzeContentReferences(contentReferences: unknown[], refs: ContextReferenceUsage): void {
+	if (!Array.isArray(contentReferences)) { return; }
 	for (const item of contentReferences) {
-		if (!item || typeof item !== 'object') {
-			continue;
-		}
+		if (!item || typeof item !== 'object') { continue; }
 		const contentRef = item as ContentRefItemRaw;
-
-		// Track by kind
 		const kind = contentRef.kind;
-		if (typeof kind === 'string') {
-			refs.byKind[kind] = (refs.byKind[kind] || 0) + 1;
-		}
-
-		// Extract reference object based on kind
-		let reference = null;
-
-		// Handle different reference structures
-		if (kind === 'reference' && contentRef.reference) {
-			reference = contentRef.reference;
-		} else if (kind === 'inlineReference' && contentRef.inlineReference) {
-			reference = contentRef.inlineReference;
-		}
-
-		// Pull request context references (Copilot PR chat, April 2026)
-		// These appear as contentRef.kind === 'pullRequest' with PR metadata inside
-		if (kind === 'pullRequest') {
-			refs.pullRequest++;
-			continue;
-		}
-
-		// Process the reference if found
-		if (reference) {
-			// Try to extract file path from various possible fields
-			const fsPath = reference.fsPath || reference.path;
-			if (typeof fsPath === 'string') {
-				// Normalize path separators for pattern matching
-				const normalizedPath = normalizePathForComparison(fsPath);
-
-				// Track specific patterns - these are auto-attached, not user-explicit #file refs
-				if (normalizedPath.endsWith('/.github/copilot-instructions.md') ||
-					normalizedPath.includes('.github/copilot-instructions.md')) {
-					refs.copilotInstructions++;
-				} else if (normalizedPath.endsWith('/agents.md') ||
-					normalizedPath.match(/\/agents\.md$/i)) {
-					refs.agentsMd++;
-				} else if (normalizedPath.endsWith('.instructions.md') ||
-					normalizedPath.includes('.instructions.md')) {
-					// Other instruction files (e.g., github-actions.instructions.md) are auto-attached
-					// Track as copilotInstructions since they're part of the instructions system
-					refs.copilotInstructions++;
-				} else {
-					// For other files, increment the general file counter
-					// This makes actual file attachments show up in context ref counts
-					refs.file++;
-				}
-
-				// Track by full path (limit to last 100 chars for display)
-				const pathKey = fsPath.length > 100 ? '...' + fsPath.substring(fsPath.length - 97) : fsPath;
-				refs.byPath[pathKey] = (refs.byPath[pathKey] || 0) + 1;
-			}
-
-			// Handle symbol references (e.g., #sym:functionName)
-			// Symbol references have a 'name' field instead of fsPath
-			const symbolName = reference.name;
-			if (typeof symbolName === 'string' && kind === 'reference') {
-				// This is a symbol reference, track it
-				refs.symbol++;
-				// Track symbol by name for display (use 'name' as path)
-				const symbolKey = `#sym:${symbolName}`;
-				refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
-			}
-		}
+		if (typeof kind === 'string') { refs.byKind[kind] = (refs.byKind[kind] || 0) + 1; }
+		if (kind === 'pullRequest') { refs.pullRequest++; continue; }
+		const reference = _acrGetReference(contentRef, kind ?? '');
+		if (reference) { _acrProcessReference(reference, kind ?? '', refs); }
 	}
 }
 
