@@ -811,6 +811,12 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	_muaMergeThinkingEffort(period, analysis);
 }
 
+/** Returns the number of times `pattern` matches in `text` (0 if no match). */
+function _countTextMatches(text: string, pattern: RegExp): number {
+	const m = text.match(pattern);
+	return m ? m.length : 0;
+}
+
 /**
  * Analyze text for context references like #file, #selection, @workspace
  */
@@ -834,10 +840,79 @@ const CONTEXT_REF_PATTERNS: Array<[RegExp, keyof Omit<ContextReferenceUsage, 'by
 ];
 
 export function analyzeContextReferences(text: string, refs: ContextReferenceUsage): void {
-	for (const [pattern, field] of CONTEXT_REF_PATTERNS) {
-		const matches = text.match(pattern);
-		if (matches) { (refs as unknown as Record<string, number>)[field] += matches.length; }
+	refs.file += _countTextMatches(text, /#file/gi);
+	refs.selection += _countTextMatches(text, /#selection/gi);
+	// #symbol and #sym are both aliases; #sym:name is handled via variableData
+	refs.symbol += _countTextMatches(text, /#symbol/gi);
+	refs.symbol += _countTextMatches(text, /#sym(?![:\w])/gi); // don't match #symbol or #sym:
+	refs.codebase += _countTextMatches(text, /#codebase/gi);
+	refs.terminalLastCommand += _countTextMatches(text, /#terminalLastCommand/gi);
+	refs.terminalSelection += _countTextMatches(text, /#terminalSelection/gi);
+	refs.clipboard += _countTextMatches(text, /#clipboard/gi);
+	refs.changes += _countTextMatches(text, /#changes/gi);
+	refs.outputPanel += _countTextMatches(text, /#outputPanel/gi);
+	refs.problemsPanel += _countTextMatches(text, /#problemsPanel\b/gi);
+	// #pr and #pullRequest (word boundaries to avoid matching #problemsPanel etc.)
+	refs.pullRequest += _countTextMatches(text, /#pr\b/gi);
+	refs.pullRequest += _countTextMatches(text, /#pullRequest\b/gi);
+	refs.workspace += _countTextMatches(text, /@workspace/gi);
+	refs.terminal += _countTextMatches(text, /@terminal/gi);
+	refs.vscode += _countTextMatches(text, /@vscode/gi);
+}
+
+/** Categorize a normalized file path into the right context reference bucket. */
+function _classifyContentRefPath(normalizedPath: string, refs: ContextReferenceUsage): void {
+	if (normalizedPath.endsWith('/.github/copilot-instructions.md') ||
+		normalizedPath.includes('.github/copilot-instructions.md')) {
+		refs.copilotInstructions++;
+	} else if (normalizedPath.endsWith('/agents.md') ||
+		normalizedPath.match(/\/agents\.md$/i)) {
+		refs.agentsMd++;
+	} else if (normalizedPath.endsWith('.instructions.md') ||
+		normalizedPath.includes('.instructions.md')) {
+		refs.copilotInstructions++;
+	} else {
+		refs.file++;
 	}
+}
+
+/** Process a single content reference's inner reference object. */
+function _processContentRefReference(
+	reference: { fsPath?: string; path?: string; name?: string },
+	kind: string | undefined,
+	refs: ContextReferenceUsage
+): void {
+	const fsPath = reference.fsPath || reference.path;
+	if (typeof fsPath === 'string') {
+		const normalizedPath = normalizePathForComparison(fsPath);
+		_classifyContentRefPath(normalizedPath, refs);
+		const pathKey = fsPath.length > 100 ? '...' + fsPath.substring(fsPath.length - 97) : fsPath;
+		refs.byPath[pathKey] = (refs.byPath[pathKey] || 0) + 1;
+	}
+	// Symbol references (#sym:functionName) have 'name' instead of fsPath
+	const symbolName = reference.name;
+	if (typeof symbolName === 'string' && kind === 'reference') {
+		refs.symbol++;
+		const symbolKey = `#sym:${symbolName}`;
+		refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
+	}
+}
+
+/** Process a single item from a contentReferences array. */
+function _processContentRefItem(contentRef: ContentRefItemRaw, refs: ContextReferenceUsage): void {
+	const kind = contentRef.kind;
+	if (typeof kind === 'string') {
+		refs.byKind[kind] = (refs.byKind[kind] || 0) + 1;
+	}
+	if (kind === 'pullRequest') { refs.pullRequest++; return; }
+
+	let reference = null;
+	if (kind === 'reference' && contentRef.reference) {
+		reference = contentRef.reference;
+	} else if (kind === 'inlineReference' && contentRef.inlineReference) {
+		reference = contentRef.inlineReference;
+	}
+	if (reference) { _processContentRefReference(reference, kind, refs); }
 }
 
 /**
@@ -845,47 +920,19 @@ export function analyzeContextReferences(text: string, refs: ContextReferenceUsa
  * Looks for kind: "reference" entries and tracks by kind, path patterns.
  * Also increments specific category counters like refs.file when appropriate.
  */
-function _acrGetReference(contentRef: ContentRefItemRaw, kind: string): ContentRefObject | null {
-	if (kind === 'reference' && contentRef.reference) { return contentRef.reference; }
-	if (kind === 'inlineReference' && contentRef.inlineReference) { return contentRef.inlineReference; }
-	return null;
-}
-
-function _acrClassifyFilePath(normalizedPath: string, fsPath: string, refs: ContextReferenceUsage): void {
-	if (normalizedPath.endsWith('/.github/copilot-instructions.md') || normalizedPath.includes('.github/copilot-instructions.md')) {
-		refs.copilotInstructions++;
-	} else if (normalizedPath.endsWith('/agents.md') || normalizedPath.match(/\/agents\.md$/i)) {
-		refs.agentsMd++;
-	} else if (normalizedPath.endsWith('.instructions.md') || normalizedPath.includes('.instructions.md')) {
-		refs.copilotInstructions++;
-	} else {
-		refs.file++;
-	}
-	const pathKey = fsPath.length > 100 ? '...' + fsPath.substring(fsPath.length - 97) : fsPath;
-	refs.byPath[pathKey] = (refs.byPath[pathKey] || 0) + 1;
-}
-
-function _acrProcessReference(reference: ContentRefObject, kind: string, refs: ContextReferenceUsage): void {
-	const fsPath = reference.fsPath || reference.path;
-	if (typeof fsPath === 'string') { _acrClassifyFilePath(normalizePathForComparison(fsPath), fsPath, refs); }
-	if (typeof reference.name === 'string' && kind === 'reference') {
-		refs.symbol++;
-		const symbolKey = `#sym:${reference.name}`;
-		refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
-	}
-}
-
 export function analyzeContentReferences(contentReferences: unknown[], refs: ContextReferenceUsage): void {
 	if (!Array.isArray(contentReferences)) { return; }
 	for (const item of contentReferences) {
 		if (!item || typeof item !== 'object') { continue; }
-		const contentRef = item as ContentRefItemRaw;
-		const kind = contentRef.kind;
-		if (typeof kind === 'string') { refs.byKind[kind] = (refs.byKind[kind] || 0) + 1; }
-		if (kind === 'pullRequest') { refs.pullRequest++; continue; }
-		const reference = _acrGetReference(contentRef, kind ?? '');
-		if (reference) { _acrProcessReference(reference, kind ?? '', refs); }
+		_processContentRefItem(item as ContentRefItemRaw, refs);
 	}
+}
+
+/** Process a single promptFile variable value. Currently a no-op for double-count avoidance. */
+function _processPromptFileVariable(value: { fsPath?: string; path?: string; external?: string }): void {
+	// copilot-instructions.md and agents.md are already tracked via contentReferences.
+	// promptFile entries are automatic attachments, not explicit user selections.
+	void value; // intentional no-op — preserved for future use
 }
 
 /**
@@ -916,11 +963,26 @@ export function analyzeVariableData(variableData: unknown, refs: ContextReferenc
 	const data = variableData as VariableDataRaw;
 	if (!Array.isArray(data.variables)) { return; }
 	for (const variable of data.variables) {
-		if (!variable || typeof variable !== 'object') { continue; }
+		if (!variable || typeof variable !== 'object') {
+			continue;
+		}
+
 		const kind = variable.kind;
-		if (typeof kind === 'string') { refs.byKind[kind] = (refs.byKind[kind] || 0) + 1; }
-		_avdProcessSymbol(variable, refs);
-		_avdProcessPromptFile(variable, refs);
+		if (typeof kind === 'string') {
+			refs.byKind[kind] = (refs.byKind[kind] || 0) + 1;
+		}
+
+		// Handle symbol references (e.g., #sym:functionName)
+		// These appear as kind="generic" with name starting with "sym:"
+		if (kind === 'generic' && typeof variable.name === 'string' && variable.name.startsWith('sym:')) {
+			refs.symbol++;
+			const symbolKey = `#${variable.name}`;
+			refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
+		}
+
+		if (kind === 'promptFile' && variable.value) {
+			_processPromptFileVariable(variable.value);
+		}
 	}
 }
 
