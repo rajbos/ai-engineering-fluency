@@ -604,10 +604,19 @@ function _pjsrProcessResponseItem(
 	}
 }
 
-/**
- * Process requests in a regular JSON session file.
- * Populates mode usage, context references, and tool/MCP invocations.
- */
+function _pjsrProcessRequest(deps: Pick<UsageAnalysisDeps, 'toolNameMap'>, request: SessionRequestRaw, sessionContent: ParsedSessionJson, analysis: SessionUsageAnalysis): void {
+	const requestMode = _pjsrGetRequestMode(request, sessionContent);
+	if (requestMode === 'agent') { analysis.modeUsage.agent++; }
+	else if (requestMode === 'edit') { analysis.modeUsage.edit++; }
+	else { analysis.modeUsage.ask++; }
+	analyzeRequestContext(request, analysis.contextReferences);
+	if (!request.response || !Array.isArray(request.response)) { return; }
+	for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+		if (!responseItemRaw) { continue; }
+		_pjsrProcessResponseItem(responseItemRaw, analysis, deps.toolNameMap);
+	}
+}
+
 function processJsonSessionRequests(
 	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
 	sessionContent: ParsedSessionJson,
@@ -615,22 +624,13 @@ function processJsonSessionRequests(
 ): void {
 	if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) { return; }
 	for (const requestRaw of sessionContent.requests) {
-		const request = requestRaw as SessionRequestRaw;
-		const requestMode = _pjsrGetRequestMode(request, sessionContent);
-		if (requestMode === 'agent') { analysis.modeUsage.agent++; }
-		else if (requestMode === 'edit') { analysis.modeUsage.edit++; }
-		else { analysis.modeUsage.ask++; }
-		analyzeRequestContext(request, analysis.contextReferences);
-		if (request.response && Array.isArray(request.response)) {
-			for (const responseItemRaw of request.response as ResponseItemRaw[]) {
-				if (!responseItemRaw) { continue; }
-				_pjsrProcessResponseItem(responseItemRaw, analysis, deps.toolNameMap);
-			}
-		}
+		_pjsrProcessRequest(deps, requestRaw as SessionRequestRaw, sessionContent, analysis);
 	}
 }
 
-/** Merge context reference field counts from analysis into period. */
+/**
+ * Merge usage analysis data into period stats
+ */
 function _muaMergeContextRefFields(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
 	const p = period.contextReferences;
 	const a = analysis.contextReferences;
