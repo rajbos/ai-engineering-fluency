@@ -1,4 +1,4 @@
-﻿/**
+/**
  * Usage analysis functions for session data processing.
  * Analysis and aggregation functions extracted from CopilotTokenTracker.
  */
@@ -1149,6 +1149,106 @@ export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'war
 	}
 }
 
+/** Merge language usage from src into dest (accumulate linesAdded/linesRemoved per extension). */
+function _temMergeLanguageUsage(src: LanguageUsage, dest: LanguageUsage): void {
+	for (const [ext, usage] of Object.entries(src)) {
+		if (!dest[ext]) { dest[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+		dest[ext].linesAdded += usage.linesAdded;
+		dest[ext].linesRemoved += usage.linesRemoved;
+	}
+}
+
+/** Build the editScope object from accumulated data. */
+function _temBuildEditScope(
+	editedFiles: Set<string>,
+	totalLinesAdded: number,
+	totalLinesRemoved: number,
+	allLanguageUsage: LanguageUsage
+) {
+	const editSessionCount = editedFiles.size > 0 ? 1 : 0;
+	return {
+		singleFileEdits: editedFiles.size === 1 ? 1 : 0,
+		multiFileEdits: editedFiles.size > 1 ? 1 : 0,
+		totalEditedFiles: editedFiles.size,
+		avgFilesPerSession: editSessionCount > 0 ? editedFiles.size / editSessionCount : 0,
+		linesAdded: totalLinesAdded,
+		linesRemoved: totalLinesRemoved,
+		...(Object.keys(allLanguageUsage).length > 0 ? { languageUsage: allLanguageUsage } : {}),
+	};
+}
+
+/** Build the sessionDuration object from timing data. */
+function _temBuildSessionDuration(
+	timestamps: number[],
+	timingsData: { firstProgress?: number; totalElapsed?: number }[],
+	waitTimes: number[]
+) {
+	const totalDurationMs = timestamps.length >= 2
+		? Math.max(...timestamps) - Math.min(...timestamps)
+		: 0;
+	const avgFirstProgressMs = timingsData.length > 0
+		? timingsData.reduce((sum, t) => sum + (t.firstProgress || 0), 0) / timingsData.length
+		: 0;
+	const avgTotalElapsedMs = timingsData.length > 0
+		? timingsData.reduce((sum, t) => sum + (t.totalElapsed || 0), 0) / timingsData.length
+		: 0;
+	const avgWaitTimeMs = waitTimes.length > 0
+		? waitTimes.reduce((sum, w) => sum + w, 0) / waitTimes.length
+		: 0;
+	return { totalDurationMs, avgDurationMs: totalDurationMs, avgFirstProgressMs, avgTotalElapsedMs, avgWaitTimeMs };
+}
+
+type AgentCounts = { editsAgent: number; defaultAgent: number; workspaceAgent: number; other: number };
+type TimingsEntry = { firstProgress?: number; totalElapsed?: number };
+type EnhancedMetricsAccum = ReturnType<typeof processRequestsForEnhancedMetrics>;
+
+/** Check if the first line of a JSONL file indicates delta-based format. */
+function _temIsDeltaBased(lines: string[]): boolean {
+	if (lines.length === 0) { return false; }
+	try {
+		const first = JSON.parse(lines[0]);
+		return first && typeof first.kind === 'number';
+	} catch { return false; }
+}
+
+/** Process a delta-based JSONL session into an EnhancedMetricsAccum. */
+function _temProcessDeltaJsonl(
+	lines: string[],
+	agentCounts: AgentCounts,
+	editedFiles: Set<string>,
+	timestamps: number[],
+	timingsData: TimingsEntry[],
+	waitTimes: number[]
+): EnhancedMetricsAccum {
+	let sessionState: DeltaSessionState = {};
+	for (const line of lines) {
+		try {
+			const delta = JSON.parse(line);
+			sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
+		} catch { /* skip invalid lines */ }
+	}
+	if (sessionState.creationDate !== undefined) { timestamps.push(sessionState.creationDate); }
+	if (sessionState.lastMessageDate !== undefined) { timestamps.push(sessionState.lastMessageDate); }
+	const requests = (sessionState.requests || []) as SessionRequestRaw[];
+	return processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes);
+}
+
+/** Process a plain-JSON session into an EnhancedMetricsAccum; returns null on parse error. */
+function _temProcessJsonContent(
+	parsed: unknown,
+	agentCounts: AgentCounts,
+	editedFiles: Set<string>,
+	timestamps: number[],
+	timingsData: TimingsEntry[],
+	waitTimes: number[]
+): EnhancedMetricsAccum | null {
+	if (!isParsedSessionJson(parsed)) { return null; }
+	if (parsed.creationDate) { timestamps.push(parsed.creationDate); }
+	if (parsed.lastMessageDate) { timestamps.push(parsed.lastMessageDate); }
+	const requests = (parsed.requests ?? []) as SessionRequestRaw[];
+	return processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes);
+}
+
 /**
  * Track enhanced metrics from session files:
  * - Edit scope (single vs multi-file edits)
@@ -1156,79 +1256,16 @@ export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'war
  * - Session duration data
  * - Conversation patterns (multi-turn sessions)
  * - Agent type usage
- */
-type TemMetrics = { totalApplies: number; totalCodeBlocks: number; totalLinesAdded: number; totalLinesRemoved: number };
-type TemTimings = { firstProgress?: number; totalElapsed?: number };
-
-function _temMergeLanguageUsage(processedLoc: LanguageUsage, allLanguageUsage: LanguageUsage): void {
-	for (const [ext, usage] of Object.entries(processedLoc)) {
-		if (!allLanguageUsage[ext]) { allLanguageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-		allLanguageUsage[ext].linesAdded += usage.linesAdded;
-		allLanguageUsage[ext].linesRemoved += usage.linesRemoved;
-	}
+/** Build the applyUsage object from the accumulated metrics (null-safe). */
+function _temBuildApplyUsage(accum: EnhancedMetricsAccum | null) {
+	const totalApplies = accum?.totalApplies ?? 0;
+	const totalCodeBlocks = accum?.totalCodeBlocks ?? 0;
+	return { totalApplies, totalCodeBlocks, applyRate: totalCodeBlocks > 0 ? (totalApplies / totalCodeBlocks) * 100 : 0 };
 }
 
-function _temIsDeltaBased(lines: string[]): boolean {
-	if (lines.length === 0) { return false; }
-	try {
-		const firstLine = JSON.parse(lines[0]);
-		return firstLine !== null && typeof firstLine === 'object' && typeof (firstLine as Record<string, unknown>).kind === 'number';
-	} catch { return false; }
-}
-
-function _temReconstructDeltaState(lines: string[]): DeltaSessionState {
-	let sessionState: DeltaSessionState = {};
-	for (const line of lines) {
-		try {
-			const delta = JSON.parse(line);
-			sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
-		} catch { /* skip */ }
-	}
-	return sessionState;
-}
-
-function _temProcessDeltaContent(lines: string[], editedFiles: Set<string>, agentCounts: AgentTypeUsage, timestamps: number[], timingsData: TemTimings[], waitTimes: number[], allLanguageUsage: LanguageUsage): TemMetrics {
-	const empty: TemMetrics = { totalApplies: 0, totalCodeBlocks: 0, totalLinesAdded: 0, totalLinesRemoved: 0 };
-	if (!_temIsDeltaBased(lines)) { return empty; }
-	const sessionState = _temReconstructDeltaState(lines);
-	if (sessionState.creationDate !== undefined) { timestamps.push(sessionState.creationDate); }
-	if (sessionState.lastMessageDate !== undefined) { timestamps.push(sessionState.lastMessageDate); }
-	const requests = (sessionState.requests || []) as SessionRequestRaw[];
-	const { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage } =
-		processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes);
-	_temMergeLanguageUsage(languageUsage, allLanguageUsage);
-	return { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved };
-}
-
-function _temProcessJsonContent(parsed: ParsedSessionJson, editedFiles: Set<string>, agentCounts: AgentTypeUsage, timestamps: number[], timingsData: TemTimings[], waitTimes: number[], allLanguageUsage: LanguageUsage): TemMetrics {
-	if (parsed.creationDate) { timestamps.push(parsed.creationDate); }
-	if (parsed.lastMessageDate) { timestamps.push(parsed.lastMessageDate); }
-	const requests = (parsed.requests ?? []) as SessionRequestRaw[];
-	const { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage } =
-		processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes);
-	_temMergeLanguageUsage(languageUsage, allLanguageUsage);
-	return { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved };
-}
-
-function _temBuildEditScope(editedFiles: Set<string>, metrics: TemMetrics, allLanguageUsage: LanguageUsage): EditScopeUsage {
-	const editSessionCount = editedFiles.size > 0 ? 1 : 0;
-	return {
-		singleFileEdits: editedFiles.size === 1 ? 1 : 0,
-		multiFileEdits: editedFiles.size > 1 ? 1 : 0,
-		totalEditedFiles: editedFiles.size,
-		avgFilesPerSession: editSessionCount > 0 ? editedFiles.size / editSessionCount : 0,
-		linesAdded: metrics.totalLinesAdded,
-		linesRemoved: metrics.totalLinesRemoved,
-		...(Object.keys(allLanguageUsage).length > 0 ? { languageUsage: allLanguageUsage } : {}),
-	};
-}
-
-function _temCalculateSessionDuration(timestamps: number[], timingsData: TemTimings[], waitTimes: number[]): { totalDurationMs: number; avgFirstProgressMs: number; avgTotalElapsedMs: number; avgWaitTimeMs: number } {
-	const totalDurationMs = timestamps.length >= 2 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
-	const avgFirstProgressMs = timingsData.length > 0 ? timingsData.reduce((sum, t) => sum + (t.firstProgress || 0), 0) / timingsData.length : 0;
-	const avgTotalElapsedMs = timingsData.length > 0 ? timingsData.reduce((sum, t) => sum + (t.totalElapsed || 0), 0) / timingsData.length : 0;
-	const avgWaitTimeMs = waitTimes.length > 0 ? waitTimes.reduce((sum, w) => sum + w, 0) / waitTimes.length : 0;
-	return { totalDurationMs, avgFirstProgressMs, avgTotalElapsedMs, avgWaitTimeMs };
+/** Build the editScope object using null-safe accum values. */
+function _temBuildEditScopeFromAccum(editedFiles: Set<string>, accum: EnhancedMetricsAccum | null, allLanguageUsage: LanguageUsage) {
+	return _temBuildEditScope(editedFiles, accum?.totalLinesAdded ?? 0, accum?.totalLinesRemoved ?? 0, allLanguageUsage);
 }
 
 /**
@@ -1243,32 +1280,35 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 	try {
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 		if (isUuidPointerFile(fileContent)) { return; }
+
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
 		const editedFiles = new Set<string>();
-		const allLanguageUsage: LanguageUsage = {};
+		const agentCounts: AgentCounts = { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 };
 		const timestamps: number[] = [];
-		const timingsData: TemTimings[] = [];
+		const timingsData: TimingsEntry[] = [];
 		const waitTimes: number[] = [];
-		const agentCounts: AgentTypeUsage = { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 };
-		let metrics: TemMetrics;
+		const allLanguageUsage: LanguageUsage = {};
+
+		let result: EnhancedMetricsAccum | null = null;
 		if (isJsonl) {
 			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
-			metrics = _temProcessDeltaContent(lines, editedFiles, agentCounts, timestamps, timingsData, waitTimes, allLanguageUsage);
+			if (_temIsDeltaBased(lines)) {
+				result = _temProcessDeltaJsonl(lines, agentCounts, editedFiles, timestamps, timingsData, waitTimes);
+			}
 		} else {
 			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return; }
-			metrics = _temProcessJsonContent(parsed, editedFiles, agentCounts, timestamps, timingsData, waitTimes, allLanguageUsage);
+			result = _temProcessJsonContent(parsed, agentCounts, editedFiles, timestamps, timingsData, waitTimes);
+			if (!result) { deps.warn(`Unexpected session format in ${sessionFile}`); return; }
 		}
-		analysis.editScope = _temBuildEditScope(editedFiles, metrics, allLanguageUsage);
-		analysis.applyUsage = {
-			totalApplies: metrics.totalApplies,
-			totalCodeBlocks: metrics.totalCodeBlocks,
-			applyRate: metrics.totalCodeBlocks > 0 ? (metrics.totalApplies / metrics.totalCodeBlocks) * 100 : 0
-		};
-		const timing = _temCalculateSessionDuration(timestamps, timingsData, waitTimes);
-		analysis.sessionDuration = { totalDurationMs: timing.totalDurationMs, avgDurationMs: timing.totalDurationMs, avgFirstProgressMs: timing.avgFirstProgressMs, avgTotalElapsedMs: timing.avgTotalElapsedMs, avgWaitTimeMs: timing.avgWaitTimeMs };
+
+		if (result) { _temMergeLanguageUsage(result.languageUsage, allLanguageUsage); }
+
+		analysis.editScope = _temBuildEditScopeFromAccum(editedFiles, result, allLanguageUsage);
+		analysis.applyUsage = _temBuildApplyUsage(result);
+		analysis.sessionDuration = _temBuildSessionDuration(timestamps, timingsData, waitTimes);
 		deriveConversationPatterns(analysis);
 		analysis.agentTypes = agentCounts;
+
 	} catch (error) {
 		deps.warn(`Error tracking enhanced metrics from ${sessionFile}: ${error}`);
 	}
