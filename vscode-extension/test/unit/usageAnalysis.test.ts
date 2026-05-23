@@ -967,6 +967,33 @@ test('analyzeSessionUsage: empty requests array returns empty analysis', async (
     assert.equal(result.toolCalls.total, 0);
 });
 
+test('analyzeSessionUsage: delta-based JSONL session extracts LOC data from textEditGroup', async () => {
+    // Delta-based JSONL format (VS Code Insiders / Feb 2026+):
+    // kind=0 sets initial state, kind=2 appends to arrays, kind=1 sets properties.
+    // The fix ensures trackEnhancedMetrics is called after processDeltaSessionAnalysis.
+    const request = {
+        requestId: 'req-1',
+        timestamp: 1700000000000,
+        response: [{
+            kind: 'textEditGroup',
+            uri: { path: '/src/foo.ts' },
+            edits: [[
+                { text: 'line1\nline2\n', range: { startLineNumber: 1, endLineNumber: 3 } }
+            ]]
+        }]
+    };
+    // Build delta-based JSONL: initial state with requests array, then append the request
+    const line0 = JSON.stringify({ kind: 0, v: { version: 3, creationDate: 1700000000000, requests: [] } });
+    const line1 = JSON.stringify({ kind: 2, k: ['requests'], v: request });
+    const content = [line0, line1].join('\n');
+    const FAKE_JSONL_PATH = '/tmp/test-session.jsonl';
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, FAKE_JSONL_PATH, content);
+    // linesAdded should be populated from the textEditGroup edits
+    assert.ok((result.editScope?.linesAdded ?? 0) > 0, 'expected linesAdded > 0 from delta JSONL textEditGroup');
+    assert.equal(result.editScope?.totalEditedFiles, 1);
+});
+
 // ---------------------------------------------------------------------------
 // isParsedSessionJson
 // ---------------------------------------------------------------------------
