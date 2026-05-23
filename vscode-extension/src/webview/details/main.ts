@@ -305,31 +305,45 @@ container.append(header, sections, footer);
 root.append(themeStyle, style, container);
 }
 
+type MetricRow = { label: string; labelTooltip?: string; icon: string; color?: string; today: string; last30Days: string; month: string; lastMonth: string; projected: string };
+
+function buildMetricsRows(stats: DetailedStats, projections: Projections): MetricRow[] {
+	const sumInput  = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.inputTokens, 0);
+	const sumOutput = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.outputTokens, 0);
+	const hasActual = (p: PeriodStats) => (p.actualTokens || 0) > 0;
+	const svcPct = (p: PeriodStats) => hasActual(p) ? formatPercent(((p.actualTokens - p.estimatedTokens) / p.actualTokens) * 100) : '—';
+	const rows: MetricRow[] = [
+		{ label: 'Tokens (input+output)', icon: '🟣', color: '#c37bff', today: formatCompact(stats.today.tokens), last30Days: formatCompact(stats.last30Days.tokens), month: formatCompact(stats.month.tokens), lastMonth: formatCompact(stats.lastMonth.tokens), projected: formatCompact(projections.projectedTokens) },
+		{ label: 'Input tokens', icon: '⬆️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumInput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumInput(stats.last30Days)) : '—', month: hasActual(stats.month) ? formatCompact(sumInput(stats.month)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumInput(stats.lastMonth)) : '—', projected: '—' },
+		{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumOutput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumOutput(stats.last30Days)) : '—', month: hasActual(stats.month) ? formatCompact(sumOutput(stats.month)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumOutput(stats.lastMonth)) : '—', projected: '—' },
+		...((stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)
+			? [{ label: 'Cached tokens', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }]
+			: []),
+		{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), month: formatCompact(stats.month.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },
+		{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: svcPct(stats.today), last30Days: svcPct(stats.last30Days), month: svcPct(stats.month), lastMonth: svcPct(stats.lastMonth), projected: '—' },
+		{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
+		{ label: 'Estimated cost (UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
+		...(stats.copilotPlan ? [{ label: `${stats.copilotPlan.planName} (${stats.copilotPlan.monthlyAiCreditsUsd > 0 ? `$${stats.copilotPlan.monthlyAiCreditsUsd} credits/month` : 'no credits'})`, labelTooltip: `Your active GitHub Copilot subscription plan (ID: ${stats.copilotPlan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`, icon: '🏷️', color: '#60a5fa', today: '—', last30Days: '—', month: '—', lastMonth: '—', projected: '—' }] : []),
+		{ label: 'Sessions', icon: '📂', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
+		{ label: 'Average interactions/session', icon: '💬', color: '#8ce0ff', today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: '—' },
+		{ label: 'Average tokens/session', icon: '🔢', color: '#7ce38b', today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: '—' },
+	];
+	return rows;
+}
+
 function buildMetricsSection(
 stats: DetailedStats,
 projections: Projections
 ): HTMLElement {
 const section = el('div', 'section');
-const heading = el('h3');
-heading.textContent = 'AI Engineering Fluency';
-section.append(heading);
-
+section.append(el('h3', '', 'AI Engineering Fluency'));
 const table = document.createElement('table');
 table.className = 'stats-table';
-
 const thead = document.createElement('thead');
 const headerRow = document.createElement('tr');
-const headers = [
-{ icon: '📊', text: 'Metric' },
-{ icon: '📅', text: 'Today' },
-{ icon: '📈', text: 'Last 30 Days' },
-{ icon: '🗓️', text: 'Current Month' },
-{ icon: '📆', text: 'Previous Month' },
-{ icon: '🌍', text: 'Projected Year' }
-];
-headers.forEach((h, idx) => {
+const HEADERS = [{ icon: '📊', text: 'Metric' }, { icon: '📅', text: 'Today' }, { icon: '📈', text: 'Last 30 Days' }, { icon: '🗓️', text: 'Current Month' }, { icon: '📆', text: 'Previous Month' }, { icon: '🌍', text: 'Projected Year' }];
+HEADERS.forEach((h, idx) => {
 const th = document.createElement('th');
-// Only the first column is left-aligned; others get 'align-right' for right alignment
 th.className = idx === 0 ? '' : 'align-right';
 const wrap = el('div', 'period-header');
 wrap.textContent = `${h.icon} ${h.text}`;
@@ -338,54 +352,12 @@ headerRow.append(th);
 });
 thead.append(headerRow);
 table.append(thead);
-
 const tbody = document.createElement('tbody');
-const sumInput  = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.inputTokens,  0);
-const sumOutput = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.outputTokens, 0);
-const hasActual = (p: PeriodStats) => (p.actualTokens || 0) > 0;
-const rows: Array<{ label: string; labelTooltip?: string; icon: string; color?: string; today: string; last30Days: string; month: string; lastMonth: string; projected: string }> = [
-{ label: 'Tokens (input+output)', icon: '🟣', color: '#c37bff', today: formatCompact(stats.today.tokens), last30Days: formatCompact(stats.last30Days.tokens), month: formatCompact(stats.month.tokens), lastMonth: formatCompact(stats.lastMonth.tokens), projected: formatCompact(projections.projectedTokens) },
-{ label: 'Input tokens', icon: '⬆️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumInput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumInput(stats.last30Days)) : '—', month: hasActual(stats.month) ? formatCompact(sumInput(stats.month)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumInput(stats.lastMonth)) : '—', projected: '—' },
-{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumOutput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumOutput(stats.last30Days)) : '—', month: hasActual(stats.month) ? formatCompact(sumOutput(stats.month)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumOutput(stats.lastMonth)) : '—', projected: '—' },
-...((stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)
-? [{ label: 'Cached tokens', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }]
-: []),
-{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), month: formatCompact(stats.month.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },
-{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: hasActual(stats.today) ? formatPercent(((stats.today.actualTokens - stats.today.estimatedTokens) / stats.today.actualTokens) * 100) : '—', last30Days: hasActual(stats.last30Days) ? formatPercent(((stats.last30Days.actualTokens - stats.last30Days.estimatedTokens) / stats.last30Days.actualTokens) * 100) : '—', month: hasActual(stats.month) ? formatPercent(((stats.month.actualTokens - stats.month.estimatedTokens) / stats.month.actualTokens) * 100) : '—', lastMonth: hasActual(stats.lastMonth) ? formatPercent(((stats.lastMonth.actualTokens - stats.lastMonth.estimatedTokens) / stats.lastMonth.actualTokens) * 100) : '—', projected: '—' },
-{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
-{
-label: 'Estimated cost (UBB)',
-labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.',
-icon: '🟢', color: '#7ce38b',
-today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0)
-},
-...(stats.copilotPlan ? (() => {
-const credits = stats.copilotPlan.monthlyAiCreditsUsd > 0 ? `$${stats.copilotPlan.monthlyAiCreditsUsd} credits/month` : 'no credits';
-return [{
-label: `${stats.copilotPlan.planName} (${credits})`,
-labelTooltip: `Your active GitHub Copilot subscription plan (ID: ${stats.copilotPlan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`,
-icon: '🏷️', color: '#60a5fa',
-today: '—', last30Days: '—', month: '—', lastMonth: '—', projected: '—'
-}];
-})() : []),
-{ label: 'Sessions', icon: '📂', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
-{ label: 'Average interactions/session', icon: '💬', color: '#8ce0ff', today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: '—' },
-{ label: 'Average tokens/session', icon: '🔢', color: '#7ce38b', today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: '—' }
-];
-
-rows.forEach(row => {
+buildMetricsRows(stats, projections).forEach(row => {
 const tr = document.createElement('tr');
-tr.append(
-buildMetricLabelCell(row.icon, row.label, row.color, row.labelTooltip),
-buildValueCell(row.today),
-buildValueCell(row.last30Days),
-buildValueCell(row.month),
-buildValueCell(row.lastMonth),
-buildValueCell(row.projected)
-);
+tr.append(buildMetricLabelCell(row.icon, row.label, row.color, row.labelTooltip), buildValueCell(row.today), buildValueCell(row.last30Days), buildValueCell(row.month), buildValueCell(row.lastMonth), buildValueCell(row.projected));
 tbody.append(tr);
 });
-
 table.append(tbody);
 section.append(table);
 return section;
