@@ -1581,23 +1581,27 @@ function _asuHandleKind2Event(event: any, analysis: SessionUsageAnalysis, modeSt
 	}
 }
 
+function _asuHandleSessionStartEvent(data: Record<string, unknown>, cliState: AsuCliState): void {
+	if (typeof data.selectedModel === 'string') { cliState.defaultModel = data.selectedModel; }
+	if (typeof data.reasoningEffort === 'string') { cliState.defaultEffort = data.reasoningEffort; }
+}
+
+function _asuHandleUserMessageMode(jetBrainsMode: JetBrainsMode | null, analysis: SessionUsageAnalysis): void {
+	if (jetBrainsMode === 'agent') { analysis.modeUsage.agent++; }
+	else if (jetBrainsMode === 'ask') { analysis.modeUsage.ask++; }
+	else { analysis.modeUsage.cli++; }
+}
+
 /** Handle Copilot CLI events (session.start, session.model_change, user.message). */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
-	if (event.type === 'session.start' && event.data) {
-		if (typeof event.data.selectedModel === 'string') { cliState.defaultModel = event.data.selectedModel; }
-		if (typeof event.data.reasoningEffort === 'string') { cliState.defaultEffort = event.data.reasoningEffort; }
-	}
-	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-		cliState.defaultModel = event.data.newModel;
-	}
+	if (event.type === 'session.start' && event.data) { _asuHandleSessionStartEvent(event.data as Record<string, unknown>, cliState); }
+	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { cliState.defaultModel = event.data.newModel; }
 	if (event.type === 'user.message') {
 		cliState.requestCount++;
 		const effort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliState.defaultEffort;
 		if (effort) { cliState.effortByRequest[effort] = (cliState.effortByRequest[effort] || 0) + 1; }
-		if (jetBrainsMode === 'agent') { analysis.modeUsage.agent++; }
-		else if (jetBrainsMode === 'ask') { analysis.modeUsage.ask++; }
-		else { analysis.modeUsage.cli++; }
+		_asuHandleUserMessageMode(jetBrainsMode, analysis);
 	}
 }
 
@@ -1778,21 +1782,24 @@ type GmusJsonlState = {
 
 type CliShutdownMetricsEntry = { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } };
 
+function _gmusApplyMetricEntry(modelName: string, usage: NonNullable<CliShutdownMetricsEntry['usage']>, dest: ModelUsage): void {
+	if (!dest[modelName]) { dest[modelName] = { inputTokens: 0, outputTokens: 0 }; }
+	dest[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
+	dest[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
+	const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
+	const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
+	if (cacheRead > 0) { dest[modelName].cachedReadTokens = (dest[modelName].cachedReadTokens ?? 0) + cacheRead; }
+	if (cacheWrite > 0) { dest[modelName].cacheCreationTokens = (dest[modelName].cacheCreationTokens ?? 0) + cacheWrite; }
+}
+
 /** Accumulate per-model token data from a session.shutdown modelMetrics block. */
 function _gmusProcessCliShutdownMetrics(
 	modelMetrics: Record<string, CliShutdownMetricsEntry>,
 	cliShutdownModelUsage: ModelUsage
 ): void {
 	for (const [modelName, metrics] of Object.entries(modelMetrics)) {
-		const usage = metrics?.usage;
-		if (!usage) { continue; }
-		if (!cliShutdownModelUsage[modelName]) { cliShutdownModelUsage[modelName] = { inputTokens: 0, outputTokens: 0 }; }
-		cliShutdownModelUsage[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
-		cliShutdownModelUsage[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
-		const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
-		const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
-		if (cacheRead > 0) { cliShutdownModelUsage[modelName].cachedReadTokens = (cliShutdownModelUsage[modelName].cachedReadTokens ?? 0) + cacheRead; }
-		if (cacheWrite > 0) { cliShutdownModelUsage[modelName].cacheCreationTokens = (cliShutdownModelUsage[modelName].cacheCreationTokens ?? 0) + cacheWrite; }
+		if (!metrics?.usage) { continue; }
+		_gmusApplyMetricEntry(modelName, metrics.usage, cliShutdownModelUsage);
 	}
 }
 
