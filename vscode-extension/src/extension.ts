@@ -962,6 +962,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// CRITICAL: Add output channel to context.subscriptions so VS Code doesn't dispose it
 		context.subscriptions.push(this.outputChannel);
 		this.log('Constructor called');
+		const version = context.extension.packageJSON?.version ?? 'unknown';
+		const mode = context.extensionMode === vscode.ExtensionMode.Development ? 'Development'
+			: context.extensionMode === vscode.ExtensionMode.Test ? 'Test' : 'Production';
+		let startupInfo = `🚀 AI Engineering Fluency v${version} [${mode}] (cache v${CopilotTokenTracker.CACHE_VERSION})`;
+		if (context.extensionMode === vscode.ExtensionMode.Development) {
+			try {
+				const sha = childProcess.execSync('git rev-parse --short HEAD', {
+					cwd: context.extensionUri.fsPath, encoding: 'utf8', timeout: 3000, stdio: ['pipe', 'pipe', 'pipe']
+				}).trim();
+				startupInfo += ` branch=${this._devBranch ?? 'unknown'} sha=${sha}`;
+			} catch { /* git unavailable */ }
+		}
+		this.log(startupInfo);
 
 		// Load persisted cache from storage
 		this.cacheManager.loadCacheFromStorage();
