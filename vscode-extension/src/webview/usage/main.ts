@@ -1191,212 +1191,286 @@ function updateAgentSessionsPanel(data: AgentSessionsResult): void {
 	`;
 }
 
-function renderLayout(stats: UsageAnalysisStats): void {
-	const root = document.getElementById('root');
-	if (!root) {
-		return;
-	}
-
-	// customizationMatrix is passed as an extra field on the stats object alongside the typed fields
-	type StatsWithMatrix = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null };
-	const matrix =
-		(stats as StatsWithMatrix).customizationMatrix ??
-		(initialData as StatsWithMatrix | undefined)?.customizationMatrix ?? null;
-	hygieneMatrixState = matrix ?? null;
-	if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
-		selectedRepoPath = null;
-	}
-	if (Array.isArray(stats.currentWorkspacePaths)) {
-		currentWorkspacePaths = stats.currentWorkspacePaths;
-	}
-	let customizationHtml = '';
+function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
 	if (!matrix || !matrix.workspaces || matrix.workspaces.length === 0) {
-		customizationHtml = `
+		return `
 			<div class="section">
 				<div class="section-title"><span>🛠️</span><span>Copilot Customization Files</span></div>
 				<div class="section-subtitle">Showing workspace customization status for active workspaces</div>
 				<div style="color: var(--text-muted); padding:12px;">No workspaces with customization files detected in the last 30 days.</div>
 			</div>`;
-	} else {
-		customizationHtml = `
-			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
-				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-					🛠️ Copilot Customization Files
-				</div>
-				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-					Showing ${matrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
-					${matrix.workspacesWithIssues > 0
-						? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
-						: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
-				</div>
-				<div class="customization-matrix-container">
-					<table class="customization-matrix">
-						<thead>
-							<tr>
-								<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>
-								<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>
-								${matrix.customizationTypes.map(type => `
-									<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);" title="${escapeHtml(type.label)}">
-										${escapeHtml(type.icon)}
-									</th>
-								`).join('')}
-							</tr>
-						</thead>
-						<tbody>
-							${matrix.workspaces.map(ws => {
-								const hasNoCustomization = Object.values(ws.typeStatuses).every(s => s === '❌');
-								return `
-								<tr>
-									<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
-						${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}
-									</td>
-									<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
-										${ws.sessionCount}
-									</td>
-									${matrix.customizationTypes.map(type => {
-										const status = ws.typeStatuses[type.id] || '❓';
-										const statusLabel =
-											status === '✅'
-												? 'Present and fresh'
-												: status === '⚠️'
-													? 'Present but stale'
-													: status === '❌'
-														? 'Missing'
-														: 'Status unknown';
-										return `
-										<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center;">
-											${statusBadgeHtml(status, statusLabel)}
-										</td>
-										`;
-									}).join('')}
-								</tr>
-							`; }).join('')}
-						</tbody>
-					</table>
-				</div>
-				<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
-					<div style="display: flex; gap: 16px; flex-wrap: wrap;">
-						${matrix.customizationTypes.map(type => `
-							<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
-						`).join('')}
-					</div>
-					<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>
-						<span style="color: var(--text-muted);">•</span>
-						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>
-						<span style="color: var(--text-muted);">•</span>
-						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>
-					</div>
-				</div>
-			</div>`;
 	}
-
-	// Compute union of keys across all periods so every column shows every known item
-	const allToolKeys = [...new Set([
-		...Object.keys(stats.today.toolCalls.byTool),
-		...Object.keys(stats.last30Days.toolCalls.byTool),
-		...Object.keys(stats.month.toolCalls.byTool),
-	])];
-	const allMcpToolKeys = [...new Set([
-		...Object.keys(stats.today.mcpTools.byTool),
-		...Object.keys(stats.last30Days.mcpTools.byTool),
-		...Object.keys(stats.month.mcpTools.byTool),
-	])];
-	const allMcpServerKeys = [...new Set([
-		...Object.keys(stats.today.mcpTools.byServer),
-		...Object.keys(stats.last30Days.mcpTools.byServer),
-		...Object.keys(stats.month.mcpTools.byServer),
-	])];
-	const allStandardModels = [...new Set([
-		...stats.today.modelSwitching.standardModels,
-		...stats.last30Days.modelSwitching.standardModels,
-		...stats.month.modelSwitching.standardModels,
-	])];
-	const allPremiumModels = [...new Set([
-		...stats.today.modelSwitching.premiumModels,
-		...stats.last30Days.modelSwitching.premiumModels,
-		...stats.month.modelSwitching.premiumModels,
-	])];
-	const allUnknownModels = [...new Set([
-		...stats.today.modelSwitching.unknownModels,
-		...stats.last30Days.modelSwitching.unknownModels,
-		...stats.month.modelSwitching.unknownModels,
-	])];
-
-	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
-	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
-
-	const multiModelHtml = `
-			<!-- Multi-Model Usage Section -->
-			<div class="section">
-				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
-				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
-				<div class="three-column">
-					${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
-					${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
-					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
-				</div>
-			</div>`;
-
-	// Build thinking effort section if we have data for any period
-	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.month.thinkingEffortUsage;
-	const thinkingEffortHtml = effortData ? (() => {
-		const EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'max', 'xhigh'];
-		const renderEffortPeriod = (teu: { byEffort: { [effort: string]: number }; sessionCount: number; switchCount: number } | undefined) => {
-			if (!teu || teu.sessionCount === 0) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
-			const total = Object.values(teu.byEffort).reduce((s, v) => s + v, 0);
-			const sorted = EFFORT_ORDER
-				.filter(k => teu.byEffort[k] > 0)
-				.concat(Object.keys(teu.byEffort).filter(k => !EFFORT_ORDER.includes(k) && teu.byEffort[k] > 0));
+	const workspaceRows = matrix.workspaces.map(ws => {
+		const hasNoCustomization = Object.values(ws.typeStatuses).every(s => s === '❌');
+		const typeCells = matrix.customizationTypes.map(type => {
+			const status = ws.typeStatuses[type.id] || '❓';
+			const statusLabel =
+				status === '✅' ? 'Present and fresh'
+				: status === '⚠️' ? 'Present but stale'
+				: status === '❌' ? 'Missing'
+				: 'Status unknown';
 			return `
-				${sorted.map(level => {
-					const count = teu.byEffort[level] || 0;
-					const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-					return `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-						<span style="width: 56px; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: capitalize;">${escapeHtml(getEffortDisplayName(level))}</span>
-						<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
-							<div style="width: ${pct}%; background: var(--link-color); height: 100%; border-radius: 4px;"></div>
-						</div>
-						<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${count} <span style="color: var(--text-secondary); font-weight: 400;">(${pct}%)</span></span>
-					</div>`;
-				}).join('')}
-				<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${teu.sessionCount} session${teu.sessionCount !== 1 ? 's' : ''} · ${teu.switchCount} effort switch${teu.switchCount !== 1 ? 'es' : ''}</div>
-			`;
-		};
+				<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center;">
+					${statusBadgeHtml(status, statusLabel)}
+				</td>`;
+		}).join('');
 		return `
-			<!-- Thinking Effort Section -->
-			<div class="section">
-				<div class="section-title"><span>💡</span><span>Thinking Effort (Reasoning)</span></div>
-				<div class="section-subtitle">How often each reasoning effort level was used (requests per level)</div>
-				<div class="three-column">
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-						${renderEffortPeriod(stats.today.thinkingEffortUsage)}
+			<tr>
+				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
+					${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}
+				</td>
+				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
+					${ws.sessionCount}
+				</td>
+				${typeCells}
+			</tr>`;
+	}).join('');
+	return `
+		<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
+				🛠️ Copilot Customization Files
+			</div>
+			<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+				Showing ${matrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
+				${matrix.workspacesWithIssues > 0
+					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
+					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
+			</div>
+			<div class="customization-matrix-container">
+				<table class="customization-matrix">
+					<thead>
+						<tr>
+							<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>
+							<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>
+							${matrix.customizationTypes.map(type => `
+								<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);" title="${escapeHtml(type.label)}">
+									${escapeHtml(type.icon)}
+								</th>
+							`).join('')}
+						</tr>
+					</thead>
+					<tbody>
+						${workspaceRows}
+					</tbody>
+				</table>
+			</div>
+			<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+				<div style="display: flex; gap: 16px; flex-wrap: wrap;">
+					${matrix.customizationTypes.map(type => `
+						<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
+					`).join('')}
+				</div>
+				<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>
+					<span style="color: var(--text-muted);">•</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>
+					<span style="color: var(--text-muted);">•</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>
+				</div>
+			</div>
+		</div>`;
+}
+
+function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
+	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.month.thinkingEffortUsage;
+	if (!effortData) { return ''; }
+	return `
+		<!-- Thinking Effort Section -->
+		<div class="section">
+			<div class="section-title"><span>💡</span><span>Thinking Effort (Reasoning)</span></div>
+			<div class="section-subtitle">How often each reasoning effort level was used (requests per level)</div>
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					${renderEffortPeriodHtml(stats.today.thinkingEffortUsage)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					${renderEffortPeriodHtml(stats.last30Days.thinkingEffortUsage)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					${renderEffortPeriodHtml(stats.month.thinkingEffortUsage)}
+				</div>
+			</div>
+		</div>`;
+}
+
+function renderEffortPeriodHtml(teu: { byEffort: { [effort: string]: number }; sessionCount: number; switchCount: number } | undefined): string {
+	const EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'max', 'xhigh'];
+	if (!teu || teu.sessionCount === 0) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	const total = Object.values(teu.byEffort).reduce((s, v) => s + v, 0);
+	const sorted = EFFORT_ORDER
+		.filter(k => teu.byEffort[k] > 0)
+		.concat(Object.keys(teu.byEffort).filter(k => !EFFORT_ORDER.includes(k) && teu.byEffort[k] > 0));
+	return `
+		${sorted.map(level => {
+			const count = teu.byEffort[level] || 0;
+			const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+			return `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+				<span style="width: 56px; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: capitalize;">${escapeHtml(getEffortDisplayName(level))}</span>
+				<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
+					<div style="width: ${pct}%; background: var(--link-color); height: 100%; border-radius: 4px;"></div>
+				</div>
+				<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${count} <span style="color: var(--text-secondary); font-weight: 400;">(${pct}%)</span></span>
+			</div>`;
+		}).join('')}
+		<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${teu.sessionCount} session${teu.sessionCount !== 1 ? 's' : ''} · ${teu.switchCount} effort switch${teu.switchCount !== 1 ? 'es' : ''}</div>
+	`;
+}
+
+function buildUsageAllKeysSets(stats: UsageAnalysisStats): {
+	allToolKeys: string[];
+	allMcpToolKeys: string[];
+	allMcpServerKeys: string[];
+	allStandardModels: string[];
+	allPremiumModels: string[];
+	allUnknownModels: string[];
+} {
+	return {
+		allToolKeys: [...new Set([...Object.keys(stats.today.toolCalls.byTool), ...Object.keys(stats.last30Days.toolCalls.byTool), ...Object.keys(stats.month.toolCalls.byTool)])],
+		allMcpToolKeys: [...new Set([...Object.keys(stats.today.mcpTools.byTool), ...Object.keys(stats.last30Days.mcpTools.byTool), ...Object.keys(stats.month.mcpTools.byTool)])],
+		allMcpServerKeys: [...new Set([...Object.keys(stats.today.mcpTools.byServer), ...Object.keys(stats.last30Days.mcpTools.byServer), ...Object.keys(stats.month.mcpTools.byServer)])],
+		allStandardModels: [...new Set([...stats.today.modelSwitching.standardModels, ...stats.last30Days.modelSwitching.standardModels, ...stats.month.modelSwitching.standardModels])],
+		allPremiumModels: [...new Set([...stats.today.modelSwitching.premiumModels, ...stats.last30Days.modelSwitching.premiumModels, ...stats.month.modelSwitching.premiumModels])],
+		allUnknownModels: [...new Set([...stats.today.modelSwitching.unknownModels, ...stats.last30Days.modelSwitching.unknownModels, ...stats.month.modelSwitching.unknownModels])],
+	};
+}
+
+function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysisStats): string {
+	return `
+		<div id="tab-panel-health" class="tab-panel"${activeTab !== 'health' ? ' style="display:none"' : ''}>
+			${customizationHtml}
+			${renderMissedPotential(stats)}
+
+			<!-- Repository Setup Section -->
+			<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
+					🏗️ Repository Hygiene Analysis
+				</div>
+				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+					Analyze repository hygiene and structure to identify missing configuration files and best practices.
+				</div>
+				${hygieneMatrixState && hygieneMatrixState.workspaces && hygieneMatrixState.workspaces.length > 0 ? `
+					<div style="margin-bottom: 12px;">
+						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${hygieneMatrixState.workspaces.length})</vscode-button>
 					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-						${renderEffortPeriod(stats.last30Days.thinkingEffortUsage)}
+					<div id="repo-list-pane-container" class="repo-hygiene-pane">
+						<div class="repo-hygiene-pane-header">📁 Repository List</div>
+						<div id="repo-list-pane" class="repo-hygiene-pane-body"></div>
 					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-						${renderEffortPeriod(stats.month.thinkingEffortUsage)}
+					<div id="repo-details-pane-container" class="repo-hygiene-pane repo-hygiene-pane-collapsed">
+						<div class="repo-hygiene-pane-header">📊 Repository Details</div>
+						<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
+					</div>
+				` : `
+					<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
+					<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
+				`}
+			</div>
+		</div>`;
+}
+
+function buildMcpToolsSectionHtml(
+	stats: UsageAnalysisStats,
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+): string {
+	return `
+		<!-- MCP Tools Section -->
+		<div class="section">
+			<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>
+			<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
+			${buildUnknownMcpToolsBannerHtml(stats)}
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.today.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
 					</div>
 				</div>
-			</div>`;
-	})() : '';
-
-	const sessionsSummaryHtml = `
-			<!-- Summary Section -->
-			<div class="section">
-				<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
-				<div class="stats-grid">
-					<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
-					<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
-					<div class="stat-card"><div class="stat-label">📅 Previous Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.last30Days.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
+					</div>
 				</div>
-			</div>`;
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.month.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
+					</div>
+				</div>
+			</div>
+			<div class="three-column" style="margin-top: 12px;">
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+			</div>
+		</div>`;
+}
 
-	root.innerHTML = `
+function buildReposAndAgentTabPanelsHtml(): string {
+	return `
+		<div id="tab-panel-repos" class="tab-panel"${activeTab !== 'repos' ? ' style="display:none"' : ''}>
+			<div class="section" id="repos-pr-content">
+				<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
+				<div class="section-subtitle">PRs from the last 30 days across your known repositories — authored or reviewed by AI agents.</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+			</div>
+		</div>
+		<div id="tab-panel-agent" class="tab-panel"${activeTab !== 'agent' ? ' style="display:none"' : ''}>
+			<div class="section" id="agent-sessions-content">
+				<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
+				<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+			</div>
+		</div>`;
+}
+
+function buildUsageRootHtml(
+	stats: UsageAnalysisStats,
+	customizationHtml: string,
+	multiModelHtml: string,
+	thinkingEffortHtml: string,
+	sessionsSummaryHtml: string,
+	todayTotalRefs: number,
+	last30DaysTotalRefs: number,
+	allToolKeys: string[],
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+	allStandardModels: string[],
+	allPremiumModels: string[],
+	allUnknownModels: string[],
+): string {
+	return `
 		<style>${themeStyles}</style>
 		<style>${styles}</style>
 		<div class="container">
@@ -1434,259 +1508,253 @@ function renderLayout(stats: UsageAnalysisStats): void {
 				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent">🤖 Cloud Agent</button>
 			</div>
 
-			<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
-				<div class="section">
-					<div class="section-title"><span>📋</span><span>Today's Sessions</span></div>
-					<div class="section-subtitle">Individual session breakdown for today — sorted by number of interactions (most active first).</div>
-					<div style="margin-top: 12px;">
-						${renderTodaySessionsTable(stats.todaySessions || [])}
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
-				${sessionsSummaryHtml}
-				<!-- Mode Usage Section -->
-				<div class="section">
-					<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
-					<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
-					<div class="two-column">
-						${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
-						${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
-					</div>
-				</div>
-
-				<!-- Context References Section -->
-				<div class="section">
-					<div class="section-title"><span>🔗</span><span>Context References</span></div>
-					<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>
-					<div class="stats-grid">
-						<div class="stat-card"><div class="stat-label">📄 #file</div><div class="stat-value">${stats.last30Days.contextReferences.file}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.file}</div></div>
-						<div class="stat-card"><div class="stat-label">✂️ #selection</div><div class="stat-value">${stats.last30Days.contextReferences.selection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.selection}</div></div>
-						<div class="stat-card" title="Text selected in your editor providing passive context to Copilot"><div class="stat-label">✨ Implicit Selection</div><div class="stat-value">${stats.last30Days.contextReferences.implicitSelection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.implicitSelection}</div></div>
-						<div class="stat-card"><div class="stat-label">🔤 #symbol</div><div class="stat-value">${stats.last30Days.contextReferences.symbol}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.symbol}</div></div>
-						<div class="stat-card"><div class="stat-label">🗂️ #codebase</div><div class="stat-value">${stats.last30Days.contextReferences.codebase}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.codebase}</div></div>
-						<div class="stat-card"><div class="stat-label">📁 @workspace</div><div class="stat-value">${stats.last30Days.contextReferences.workspace}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.workspace}</div></div>
-						<div class="stat-card"><div class="stat-label">💻 @terminal</div><div class="stat-value">${stats.last30Days.contextReferences.terminal}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminal}</div></div>
-						<div class="stat-card"><div class="stat-label">🔧 @vscode</div><div class="stat-value">${stats.last30Days.contextReferences.vscode}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.vscode}</div></div>
-						<div class="stat-card" title="Last command run in the terminal"><div class="stat-label">⌨️ #terminalLastCommand</div><div class="stat-value">${stats.last30Days.contextReferences.terminalLastCommand || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminalLastCommand || 0}</div></div>
-						<div class="stat-card" title="Selected terminal output"><div class="stat-label">🖱️ #terminalSelection</div><div class="stat-value">${stats.last30Days.contextReferences.terminalSelection || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminalSelection || 0}</div></div>
-						<div class="stat-card" title="Clipboard contents"><div class="stat-label">📋 #clipboard</div><div class="stat-value">${stats.last30Days.contextReferences.clipboard || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.clipboard || 0}</div></div>
-						<div class="stat-card" title="Uncommitted git changes"><div class="stat-label">📝 #changes</div><div class="stat-value">${stats.last30Days.contextReferences.changes || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.changes || 0}</div></div>
-						<div class="stat-card" title="Output panel contents"><div class="stat-label">📤 #outputPanel</div><div class="stat-value">${stats.last30Days.contextReferences.outputPanel || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.outputPanel || 0}</div></div>
-						<div class="stat-card" title="Problems panel contents"><div class="stat-label">⚠️ #problemsPanel</div><div class="stat-value">${stats.last30Days.contextReferences.problemsPanel || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.problemsPanel || 0}</div></div>
-						<div class="stat-card" title="Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary"><div class="stat-label">🔀 #pr</div><div class="stat-value">${stats.last30Days.contextReferences.pullRequest || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.pullRequest || 0}</div></div>
-						<div class="stat-card" title="copilot-instructions.md file references detected in session logs"><div class="stat-label">📋 Copilot Instructions</div><div class="stat-value">${stats.last30Days.contextReferences.copilotInstructions}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.copilotInstructions}</div></div>
-						<div class="stat-card" title="agents.md file references detected in session logs"><div class="stat-label">🤖 Agents.md</div><div class="stat-value">${stats.last30Days.contextReferences.agentsMd}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.agentsMd}</div></div>
-						<div class="stat-card" style="background: var(--list-active-bg); border: 2px solid var(--border-color); color: var(--list-active-fg);"><div class="stat-label" style="color: var(--list-active-fg); opacity: 0.85;">📊 Total References</div><div class="stat-value" style="color: var(--list-active-fg);">${last30DaysTotalRefs}</div><div style="font-size: 10px; color: var(--list-active-fg); opacity: 0.75; margin-top: 4px;">Today: ${todayTotalRefs}</div></div>
-					</div>
-					${Object.keys(stats.last30Days.contextReferences.byKind).length > 0 ? `
-						<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📎 Attached Files by Type (Last 30 Days)</div>
-							<div style="font-size: 12px; color: var(--text-primary);">
-								${Object.entries(stats.last30Days.contextReferences.byKind)
-									.sort(([, a], [, b]) => (b as number) - (a as number))
-									.slice(0, 5)
-									.map(([kind, count]) => `<div style="margin-bottom: 4px;"><span style="color: var(--link-color);">${escapeHtml(kind)}:</span> ${count}</div>`)
-									.join('')}
-							</div>
-						</div>
-					` : ''}
-					${Object.keys(stats.last30Days.contextReferences.byPath).length > 0 ? `
-						<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📁 Most Referenced Files (Last 30 Days)</div>
-							<div style="font-size: 11px; color: var(--text-primary);">
-								${Object.entries(stats.last30Days.contextReferences.byPath)
-									.sort(([, a], [, b]) => (b as number) - (a as number))
-									.slice(0, 10)
-									.map(([path, count]) => `<div style="margin-bottom: 4px; font-family: 'Courier New', monospace;"><span style="color: var(--link-color);">${count}×</span> ${escapeHtml(path)}</div>`)
-									.join('')}
-							</div>
-						</div>
-					` : ''}
-				</div>
-
-				${multiModelHtml}
-				${thinkingEffortHtml}
-			</div>
-
-			<div id="tab-panel-tools" class="tab-panel"${activeTab !== 'tools' ? ' style="display:none"' : ''}>
-				<!-- Tool Calls Section -->
-				<div class="section">
-					<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
-					<div class="section-subtitle">Functions and tools invoked by Copilot during interactions</div>
-					<div class="three-column">
-						<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</div>
-							${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10)}
-						</div>
-					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.total)}</div>
-								${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10)}
-							</div>
-						</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</div>
-								${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10)}
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- MCP Tools Section -->
-				<div class="section">
-					<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>
-					<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
-					${(() => {
-						const unknownTools = getUnknownMcpTools(stats);
-						if (unknownTools.length > 0) {
-							const issueUrl = createMcpToolIssueUrl(unknownTools);
-							const toolListHtml = unknownTools.map(tool => {
-								const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
-								const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
-								const monthCount = (stats.month.toolCalls.byTool[tool] || 0) + (stats.month.mcpTools.byTool[tool] || 0);
-								const countParts: string[] = [];
-								if (todayCount > 0) { countParts.push(`${todayCount} today`); }
-								if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
-								if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
-								const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${countParts.join(' | ')})</span>` : '';
-								const suppressBtn = `<button data-suppress-tool="${escapeHtml(tool)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${escapeHtml(tool)}">🔇</button>`;
-								return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${escapeHtml(tool)}${countHtml}${suppressBtn}</span>`;
-							}).join(' ');
-							return `
-								<div id="unknown-mcp-tools-section" style="margin-bottom: 12px; padding: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
-									<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
-										${toolListHtml}
-									</div>
-									<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500;">
-										<span>📝</span>
-										<span>Report Unknown Tools</span>
-									</a>
-								</div>
-							`;
-						}
-						return '';
-					})()}
-					<div class="three-column">
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.today.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.last30Days.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.month.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-					</div>
-					<div class="three-column" style="margin-top: 12px;">
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-panel-health" class="tab-panel"${activeTab !== 'health' ? ' style="display:none"' : ''}>
-				${customizationHtml}
-				${renderMissedPotential(stats)}
-
-				<!-- Repository Setup Section -->
-				<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
-					<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-						🏗️ Repository Hygiene Analysis
-					</div>
-					<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
-						Analyze repository hygiene and structure to identify missing configuration files and best practices.
-					</div>
-					${matrix && matrix.workspaces && matrix.workspaces.length > 0 ? `
-						<div style="margin-bottom: 12px;">
-							<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${matrix.workspaces.length})</vscode-button>
-						</div>
-						<div id="repo-list-pane-container" class="repo-hygiene-pane">
-							<div class="repo-hygiene-pane-header">📁 Repository List</div>
-							<div id="repo-list-pane" class="repo-hygiene-pane-body"></div>
-						</div>
-						<div id="repo-details-pane-container" class="repo-hygiene-pane repo-hygiene-pane-collapsed">
-							<div class="repo-hygiene-pane-header">📊 Repository Details</div>
-							<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
-						</div>
-					` : `
-						<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
-						<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
-					`}
-				</div>
-			</div>
-
-			<div id="tab-panel-repos" class="tab-panel"${activeTab !== 'repos' ? ' style="display:none"' : ''}>
-				<div class="section" id="repos-pr-content">
-					<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
-					<div class="section-subtitle">PRs from the last 30 days across your known repositories — authored or reviewed by AI agents.</div>
-					<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">
-						Loading… (sign in with GitHub to see data)
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-panel-agent" class="tab-panel"${activeTab !== 'agent' ? ' style="display:none"' : ''}>
-				<div class="section" id="agent-sessions-content">
-					<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
-					<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
-					<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">
-						Loading… (sign in with GitHub to see data)
-					</div>
-				</div>
-			</div>
-
+			${buildSessionsTabPanelHtml(stats)}
+			${buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs)}
+			${buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allStandardModels, allPremiumModels, allUnknownModels)}
+			${buildHealthTabPanelHtml(customizationHtml, stats)}
+			${buildReposAndAgentTabPanelsHtml()}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes
 			</div>
 		</div>
 	`;
+}
 
+function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
+	return `
+		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title"><span>📋</span><span>Today's Sessions</span></div>
+				<div class="section-subtitle">Individual session breakdown for today — sorted by number of interactions (most active first).</div>
+				<div style="margin-top: 12px;">
+					${renderTodaySessionsTable(stats.todaySessions || [])}
+				</div>
+			</div>
+		</div>`;
+}
 
+function buildActivityTabPanelHtml(
+	stats: UsageAnalysisStats,
+	multiModelHtml: string,
+	thinkingEffortHtml: string,
+	sessionsSummaryHtml: string,
+	todayTotalRefs: number,
+	last30DaysTotalRefs: number,
+): string {
+	return `
+		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
+			${sessionsSummaryHtml}
+			<!-- Mode Usage Section -->
+			<div class="section">
+				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
+				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
+				<div class="two-column">
+					${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
+					${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
+				</div>
+			</div>
+			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			${multiModelHtml}
+			${thinkingEffortHtml}
+		</div>`;
+}
+
+function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
+	const r = stats.last30Days.contextReferences;
+	const t = stats.today.contextReferences;
+	const c = (v: number | undefined): number => v || 0;
+	return `
+		<div class="stats-grid">
+			<div class="stat-card"><div class="stat-label">📄 #file</div><div class="stat-value">${r.file}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.file}</div></div>
+			<div class="stat-card"><div class="stat-label">✂️ #selection</div><div class="stat-value">${r.selection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.selection}</div></div>
+			<div class="stat-card" title="Text selected in your editor providing passive context to Copilot"><div class="stat-label">✨ Implicit Selection</div><div class="stat-value">${r.implicitSelection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.implicitSelection}</div></div>
+			<div class="stat-card"><div class="stat-label">🔤 #symbol</div><div class="stat-value">${r.symbol}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.symbol}</div></div>
+			<div class="stat-card"><div class="stat-label">🗂️ #codebase</div><div class="stat-value">${r.codebase}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.codebase}</div></div>
+			<div class="stat-card"><div class="stat-label">📁 @workspace</div><div class="stat-value">${r.workspace}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.workspace}</div></div>
+			<div class="stat-card"><div class="stat-label">💻 @terminal</div><div class="stat-value">${r.terminal}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.terminal}</div></div>
+			<div class="stat-card"><div class="stat-label">🔧 @vscode</div><div class="stat-value">${r.vscode}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.vscode}</div></div>
+			<div class="stat-card" title="Last command run in the terminal"><div class="stat-label">⌨️ #terminalLastCommand</div><div class="stat-value">${c(r.terminalLastCommand)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.terminalLastCommand)}</div></div>
+			<div class="stat-card" title="Selected terminal output"><div class="stat-label">🖱️ #terminalSelection</div><div class="stat-value">${c(r.terminalSelection)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.terminalSelection)}</div></div>
+			<div class="stat-card" title="Clipboard contents"><div class="stat-label">📋 #clipboard</div><div class="stat-value">${c(r.clipboard)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.clipboard)}</div></div>
+			<div class="stat-card" title="Uncommitted git changes"><div class="stat-label">📝 #changes</div><div class="stat-value">${c(r.changes)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.changes)}</div></div>
+			<div class="stat-card" title="Output panel contents"><div class="stat-label">📤 #outputPanel</div><div class="stat-value">${c(r.outputPanel)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.outputPanel)}</div></div>
+			<div class="stat-card" title="Problems panel contents"><div class="stat-label">⚠️ #problemsPanel</div><div class="stat-value">${c(r.problemsPanel)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.problemsPanel)}</div></div>
+			<div class="stat-card" title="Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary"><div class="stat-label">🔀 #pr</div><div class="stat-value">${c(r.pullRequest)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.pullRequest)}</div></div>
+			<div class="stat-card" title="copilot-instructions.md file references detected in session logs"><div class="stat-label">📋 Copilot Instructions</div><div class="stat-value">${r.copilotInstructions}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.copilotInstructions}</div></div>
+			<div class="stat-card" title="agents.md file references detected in session logs"><div class="stat-label">🤖 Agents.md</div><div class="stat-value">${r.agentsMd}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.agentsMd}</div></div>
+			<div class="stat-card" style="background: var(--list-active-bg); border: 2px solid var(--border-color); color: var(--list-active-fg);"><div class="stat-label" style="color: var(--list-active-fg); opacity: 0.85;">📊 Total References</div><div class="stat-value" style="color: var(--list-active-fg);">${last30DaysTotalRefs}</div><div style="font-size: 10px; color: var(--list-active-fg); opacity: 0.75; margin-top: 4px;">Today: ${todayTotalRefs}</div></div>
+		</div>`;
+}
+
+function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
+	const byKindHtml = Object.keys(stats.last30Days.contextReferences.byKind).length > 0 ? `
+		<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📎 Attached Files by Type (Last 30 Days)</div>
+			<div style="font-size: 12px; color: var(--text-primary);">
+				${Object.entries(stats.last30Days.contextReferences.byKind)
+					.sort(([, a], [, b]) => (b as number) - (a as number))
+					.slice(0, 5)
+					.map(([kind, count]) => `<div style="margin-bottom: 4px;"><span style="color: var(--link-color);">${escapeHtml(kind)}:</span> ${count}</div>`)
+					.join('')}
+			</div>
+		</div>
+	` : '';
+	const byPathHtml = Object.keys(stats.last30Days.contextReferences.byPath).length > 0 ? `
+		<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📁 Most Referenced Files (Last 30 Days)</div>
+			<div style="font-size: 11px; color: var(--text-primary);">
+				${Object.entries(stats.last30Days.contextReferences.byPath)
+					.sort(([, a], [, b]) => (b as number) - (a as number))
+					.slice(0, 10)
+					.map(([path, count]) => `<div style="margin-bottom: 4px; font-family: 'Courier New', monospace;"><span style="color: var(--link-color);">${count}×</span> ${escapeHtml(path)}</div>`)
+					.join('')}
+			</div>
+		</div>
+	` : '';
+	return `
+		<!-- Context References Section -->
+		<div class="section">
+			<div class="section-title"><span>🔗</span><span>Context References</span></div>
+			<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>
+			${buildContextRefCardsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			${byKindHtml}
+			${byPathHtml}
+		</div>`;
+}
+
+function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
+	const unknownTools = getUnknownMcpTools(stats);
+	if (unknownTools.length === 0) { return ''; }
+	const issueUrl = createMcpToolIssueUrl(unknownTools);
+	const toolListHtml = unknownTools.map(tool => {
+		const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
+		const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
+		const monthCount = (stats.month.toolCalls.byTool[tool] || 0) + (stats.month.mcpTools.byTool[tool] || 0);
+		const countParts: string[] = [];
+		if (todayCount > 0) { countParts.push(`${todayCount} today`); }
+		if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
+		if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
+		const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${countParts.join(' | ')})</span>` : '';
+		const suppressBtn = `<button data-suppress-tool="${escapeHtml(tool)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${escapeHtml(tool)}">🔇</button>`;
+		return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${escapeHtml(tool)}${countHtml}${suppressBtn}</span>`;
+	}).join(' ');
+	return `
+		<div id="unknown-mcp-tools-section" style="margin-bottom: 12px; padding: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
+			<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
+				${toolListHtml}
+			</div>
+			<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500;">
+				<span>📝</span>
+				<span>Report Unknown Tools</span>
+			</a>
+		</div>
+	`;
+}
+
+function buildToolsTabPanelHtml(
+	stats: UsageAnalysisStats,
+	allToolKeys: string[],
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+	allStandardModels: string[],
+	allPremiumModels: string[],
+	allUnknownModels: string[],
+): string {
+	return `
+		<div id="tab-panel-tools" class="tab-panel"${activeTab !== 'tools' ? ' style="display:none"' : ''}>
+			<!-- Tool Calls Section -->
+			<div class="section">
+				<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
+				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions</div>
+				<div class="three-column">
+					<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</div>
+						${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10)}
+					</div>
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.total)}</div>
+							${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10)}
+						</div>
+					</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</div>
+							${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10)}
+						</div>
+					</div>
+				</div>
+			</div>
+
+			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
+			<!-- Multi-Model Usage Section -->
+			<div class="section">
+				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
+				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
+				<div class="three-column">
+					${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+					${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+				</div>
+			</div>
+		</div>`;
+}
+
+function renderLayout(stats: UsageAnalysisStats): void {
+	const root = document.getElementById('root');
+	if (!root) {
+		return;
+	}
+
+	// customizationMatrix is passed as an extra field on the stats object alongside the typed fields
+	type StatsWithMatrix = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null };
+	const matrix =
+		(stats as StatsWithMatrix).customizationMatrix ??
+		(initialData as StatsWithMatrix | undefined)?.customizationMatrix ?? null;
+	hygieneMatrixState = matrix ?? null;
+	if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
+		selectedRepoPath = null;
+	}
+	if (Array.isArray(stats.currentWorkspacePaths)) {
+		currentWorkspacePaths = stats.currentWorkspacePaths;
+	}
+
+	const customizationHtml = buildCustomizationSectionHtml(matrix);
+	const allKeys = buildUsageAllKeysSets(stats);
+	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
+	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
+	const thinkingEffortHtml = buildThinkingEffortSectionHtml(stats);
+	const sessionsSummaryHtml = `
+		<!-- Summary Section -->
+		<div class="section">
+			<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
+			<div class="stats-grid">
+				<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📅 Previous Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+			</div>
+		</div>`;
+
+	root.innerHTML = buildUsageRootHtml(
+		stats,
+		customizationHtml,
+		'',
+		thinkingEffortHtml,
+		sessionsSummaryHtml,
+		todayTotalRefs,
+		last30DaysTotalRefs,
+		allKeys.allToolKeys,
+		allKeys.allMcpToolKeys,
+		allKeys.allMcpServerKeys,
+		allKeys.allStandardModels,
+		allKeys.allPremiumModels,
+		allKeys.allUnknownModels,
+	);
 
 	wireNavigationButtons();
 	wireRepositoryButtons();
