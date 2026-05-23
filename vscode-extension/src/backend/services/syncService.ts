@@ -1616,12 +1616,39 @@ return true;
 			onProgress
 		});
 
-		const dayKeys = new Set<string>();
-		for (const { key } of rollups.values()) { dayKeys.add(key.day); }
-		const sortedDays = Array.from(dayKeys).sort();
+		const sortedDays = this.getBackfillSortedDays(rollups);
 		this.deps.logger.log(`Backfill: found data for ${sortedDays.length} days: ${sortedDays.slice(0, 10).join(', ')}${sortedDays.length > 10 ? '…' : ''}`);
 
 		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
+		const entities = this.buildBackfillEntities(rollups, settings, sharingPolicy, resolvedIdentity, workspaceNamesById, machineNamesById);
+
+		// Signal upload phase to caller before the (potentially slow) upsert
+		onProgress?.(-1, entities.length, sortedDays.length);
+
+		await this.cleanBackfillStaleEntities(tableClient, resolvedIdentity, settings, sortedDays);
+
+		const { successCount, errors } = await this.dataPlaneService.upsertEntitiesBatch(tableClient, entities);
+		if (errors.length > 0) {
+			this.deps.logger.warn(`Backfill: ${successCount}/${entities.length} entities synced, ${errors.length} failed`);
+		} else {
+			this.deps.logger.log(`Backfill: ${successCount} entities synced successfully across ${sortedDays.length} days`);
+		}
+	}
+
+	private getBackfillSortedDays(rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>): string[] {
+		const dayKeys = new Set<string>();
+		for (const { key } of rollups.values()) { dayKeys.add(key.day); }
+		return Array.from(dayKeys).sort();
+	}
+
+	private buildBackfillEntities(
+		rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
+		settings: BackendSettings,
+		sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>,
+		resolvedIdentity: { userId?: string; userKeyType?: BackendUserIdentityMode },
+		workspaceNamesById: Record<string, string>,
+		machineNamesById: Record<string, string>
+	): BackendAggDailyEntityLike[] {
 		const entities: BackendAggDailyEntityLike[] = [];
 		for (const { key, value } of rollups.values()) {
 			const effectiveUserId = (key.userId ?? '').trim() || undefined;
@@ -1633,58 +1660,41 @@ return true;
 			const machineIdToStore = sharingPolicy.machineIdStrategy === 'hashed'
 				? hashMachineIdForTeam({ datasetId: settings.datasetId, machineId: key.machineId })
 				: key.machineId;
-			const workspaceName = includeNames ? workspaceNamesById[key.workspaceId] : undefined;
-			const machineName = includeNames ? machineNamesById[key.machineId] : undefined;
-			const entity = createDailyAggEntity({
-				datasetId: settings.datasetId,
-				day: key.day,
-				model: key.model,
-				workspaceId: workspaceIdToStore,
-				workspaceName,
-				machineId: machineIdToStore,
-				machineName,
-				userId: effectiveUserId,
-				userKeyType: resolvedIdentity.userKeyType,
+			entities.push(createDailyAggEntity({
+				datasetId: settings.datasetId, day: key.day, model: key.model,
+				workspaceId: workspaceIdToStore, workspaceName: includeNames ? workspaceNamesById[key.workspaceId] : undefined,
+				machineId: machineIdToStore, machineName: includeNames ? machineNamesById[key.machineId] : undefined,
+				userId: effectiveUserId, userKeyType: resolvedIdentity.userKeyType,
 				shareWithTeam: includeConsent ? true : undefined,
 				consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.logger.log),
-				inputTokens: value.inputTokens,
-				outputTokens: value.outputTokens,
-				interactions: value.interactions,
-				fluencyMetrics: value.fluencyMetrics
+				inputTokens: value.inputTokens, outputTokens: value.outputTokens,
+				interactions: value.interactions, fluencyMetrics: value.fluencyMetrics
+			}));
+		}
+		return entities;
+	}
+
+	private async cleanBackfillStaleEntities(
+		tableClient: any,
+		resolvedIdentity: { userId?: string; userKeyType?: BackendUserIdentityMode },
+		settings: BackendSettings,
+		sortedDays: string[]
+	): Promise<void> {
+		if (!resolvedIdentity.userId || sortedDays.length === 0) { return; }
+		const startDayKey = sortedDays[0];
+		const endDayKey = sortedDays[sortedDays.length - 1];
+		this.deps.logger.log(`Backfill: cleaning stale entities for user "${resolvedIdentity.userId}" in date range ${startDayKey} to ${endDayKey}`);
+		try {
+			const deleteResult = await this.dataPlaneService.deleteEntitiesForUserDataset({
+				tableClient,
+				userId: resolvedIdentity.userId,
+				datasetId: settings.datasetId,
+				startDayKey,
+				endDayKey,
 			});
-			entities.push(entity);
-		}
-
-		// Signal upload phase to caller before the (potentially slow) upsert
-		onProgress?.(-1, entities.length, sortedDays.length);
-
-		// Delete stale entities for this user before upserting.
-		// Previous syncs may have written rows with incorrect model names (e.g. 'gpt-4o' instead
-		// of the actual model). Since the model name is part of the RowKey, corrected data creates
-		// new rows while old ones persist, causing over-counting on the dashboard.
-		if (resolvedIdentity.userId && sortedDays.length > 0) {
-			const startDayKey = sortedDays[0];
-			const endDayKey = sortedDays[sortedDays.length - 1];
-			this.deps.logger.log(`Backfill: cleaning stale entities for user "${resolvedIdentity.userId}" in date range ${startDayKey} to ${endDayKey}`);
-			try {
-				const deleteResult = await this.dataPlaneService.deleteEntitiesForUserDataset({
-					tableClient,
-					userId: resolvedIdentity.userId,
-					datasetId: settings.datasetId,
-					startDayKey,
-					endDayKey,
-				});
-				this.deps.logger.log(`Backfill: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
-			} catch (e) {
-				this.deps.logger.warn(`Backfill: failed to clean stale entities (continuing with upsert): ${e}`);
-			}
-		}
-
-		const { successCount, errors } = await this.dataPlaneService.upsertEntitiesBatch(tableClient, entities);
-		if (errors.length > 0) {
-			this.deps.logger.warn(`Backfill: ${successCount}/${entities.length} entities synced, ${errors.length} failed`);
-		} else {
-			this.deps.logger.log(`Backfill: ${successCount} entities synced successfully across ${sortedDays.length} days`);
+			this.deps.logger.log(`Backfill: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
+		} catch (e) {
+			this.deps.logger.warn(`Backfill: failed to clean stale entities (continuing with upsert): ${e}`);
 		}
 	}
 }
