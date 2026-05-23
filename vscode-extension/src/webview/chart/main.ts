@@ -588,13 +588,27 @@ async function switchMetric(metric: typeof currentMetric, data: InitialChartData
 	chart = new Chart(ctx, createConfig(data));
 }
 
+function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
+	return (metric === 'cost' && split === 'total') ||
+		(metric === 'output' && split !== 'model') ||
+		(metric === 'tokens' && split !== 'language');
+}
+
+async function reinitChart(data: InitialChartData): Promise<void> {
+	if (!chart) { return; }
+	const canvas = chart.canvas as HTMLCanvasElement | null;
+	chart.destroy();
+	if (!canvas) { return; }
+	const ctx = canvas.getContext('2d');
+	if (!ctx) { return; }
+	await loadChartModule();
+	if (!Chart) { return; }
+	chart = new Chart(ctx, createConfig(data));
+}
+
 async function switchSplit(split: typeof currentSplit, data: InitialChartData): Promise<void> {
 	if (currentSplit === split) { return; }
-	// Check if this combo is supported
-	const supported = (currentMetric === 'cost' && split === 'total') ||
-		(currentMetric === 'output' && split !== 'model') ||
-		(currentMetric === 'tokens' && split !== 'language');
-	if (!supported) { return; }
+	if (!isSplitSupported(currentMetric, split)) { return; }
 	currentSplit = split;
 	const rollingApplicable = split === 'total' && currentMetric !== 'output';
 	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
@@ -607,15 +621,7 @@ async function switchSplit(split: typeof currentSplit, data: InitialChartData): 
 		rollingBtnEl.classList.toggle('active', rollingApplicable && currentDisplayMode === 'rolling');
 	}
 	updateSummaryCards(data);
-	if (!chart) { return; }
-	const canvas = chart.canvas as HTMLCanvasElement | null;
-	chart.destroy();
-	if (!canvas) { return; }
-	const ctx = canvas.getContext('2d');
-	if (!ctx) { return; }
-	await loadChartModule();
-	if (!Chart) { return; }
-	chart = new Chart(ctx, createConfig(data));
+	await reinitChart(data);
 }
 
 function setActivePeriod(period: ChartPeriod): void {
@@ -994,59 +1000,51 @@ function createConfig(data: InitialChartData): ChartConfig {
 }
 
 
+type MetricSplit = { metric: typeof currentMetric; split: typeof currentSplit };
+
+function migrateViewKey(view: string): MetricSplit {
+	const map: Record<string, MetricSplit> = {
+		total: { metric: 'tokens', split: 'total' }, model: { metric: 'tokens', split: 'model' },
+		editor: { metric: 'tokens', split: 'editor' }, repository: { metric: 'tokens', split: 'repository' },
+		cost: { metric: 'cost', split: 'total' },
+	};
+	return map[view] ?? { metric: 'tokens', split: 'total' };
+}
+
+function restoreChartState(initialData: InitialChartData): void {
+	const saved = chartState.restore();
+	if (!vscode.getState()) {
+		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
+		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
+		if (initialData.initialSplit) { currentSplit = initialData.initialSplit; }
+		else if (initialData.initialView) {
+			const m = migrateViewKey(initialData.initialView);
+			currentMetric = m.metric; currentSplit = m.split;
+		}
+		return;
+	}
+	currentPeriod = saved.period;
+	currentDisplayMode = saved.displayMode;
+	if (saved.view && !saved.metric) {
+		const m = migrateViewKey(saved.view);
+		currentMetric = m.metric; currentSplit = m.split;
+	} else {
+		currentMetric = saved.metric ?? 'tokens';
+		currentSplit = saved.split ?? 'total';
+	}
+}
+
 async function bootstrap(): Promise<void> {
 	const { provideVSCodeDesignSystem, vsCodeButton } = await import('@vscode/webview-ui-toolkit');
 	provideVSCodeDesignSystem().register(vsCodeButton());
 
 	if (!initialData) {
 		const root = document.getElementById('root');
-		if (root) {
-			root.textContent = 'No data available.';
-		}
+		if (root) { root.textContent = 'No data available.'; }
 		return;
 	}
 
-	// Restore view state — vscode.getState() survives context destruction (retainContextWhenHidden: false)
-	const saved = chartState.restore();
-	// chartState.restore() merges defaults, so only override if the saved value differs from default
-	const hasSaved = !!vscode.getState();
-	if (hasSaved) {
-		currentPeriod = saved.period;
-		currentDisplayMode = saved.displayMode;
-		// Migrate old saved state: 'view' → metric + split
-		if (saved.view && !saved.metric) {
-			const viewMigration: Record<string, { metric: typeof currentMetric; split: typeof currentSplit }> = {
-				total:      { metric: 'tokens', split: 'total'      },
-				model:      { metric: 'tokens', split: 'model'      },
-				editor:     { metric: 'tokens', split: 'editor'     },
-				repository: { metric: 'tokens', split: 'repository' },
-				cost:       { metric: 'cost',   split: 'total'      },
-			};
-			const migration = viewMigration[saved.view] ?? { metric: 'tokens', split: 'total' };
-			currentMetric = migration.metric;
-			currentSplit = migration.split;
-		} else {
-			currentMetric = saved.metric ?? 'tokens';
-			currentSplit = saved.split ?? 'total';
-		}
-	} else {
-		// Fall back to server-supplied initial values (e.g., panel closed and reopened)
-		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
-		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
-		if (initialData.initialSplit) { currentSplit = initialData.initialSplit; }
-		// Legacy fallback from old initialView
-		else if (initialData.initialView) {
-			const legacyMap: Record<string, { metric: typeof currentMetric; split: typeof currentSplit }> = {
-				total: { metric: 'tokens', split: 'total' }, model: { metric: 'tokens', split: 'model' },
-				editor: { metric: 'tokens', split: 'editor' }, repository: { metric: 'tokens', split: 'repository' },
-				cost: { metric: 'cost', split: 'total' },
-			};
-			const mapped = legacyMap[initialData.initialView] ?? { metric: 'tokens', split: 'total' };
-			currentMetric = mapped.metric;
-			currentSplit = mapped.split;
-		}
-	}
-
+	restoreChartState(initialData);
 	renderLayout(initialData);
 }
 
