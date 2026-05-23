@@ -4942,169 +4942,104 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	}
 
 	public async showLogViewer(sessionFilePath: string): Promise<void> {
-		// Close existing log viewer panel if open
-		if (this.logViewerPanel) {
-			this.logViewerPanel.dispose();
-			this.logViewerPanel = undefined;
-		}
-
-		// Get session log data with chat turns
+		if (this.logViewerPanel) { this.logViewerPanel.dispose(); this.logViewerPanel = undefined; }
 		const logData = await this.getSessionLogData(sessionFilePath);
-
-		// Create webview panel
 		this.logViewerPanel = vscode.window.createWebviewPanel(
-			'copilotLogViewer',
-			`Session: ${logData.title || path.basename(sessionFilePath)}`,
-			{
-				viewColumn: vscode.ViewColumn.One,
-				preserveFocus: false
-			},
-			{
-				enableScripts: true,
-				retainContextWhenHidden: false,
-				localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')]
-			}
+			'copilotLogViewer', `Session: ${logData.title || path.basename(sessionFilePath)}`,
+			{ viewColumn: vscode.ViewColumn.One, preserveFocus: false },
+			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
-
-		// Set the HTML content
 		this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, logData);
+		this.logViewerPanel.webview.onDidReceiveMessage(async (message) => { await this.handleLogViewerMessage(message, logData, sessionFilePath); });
+		this.logViewerPanel.onDidDispose(() => { this.logViewerPanel = undefined; });
+	}
 
-		// Handle messages from the webview
-		this.logViewerPanel.webview.onDidReceiveMessage(async (message) => {
-			if (await this.dispatchSharedCommand(message)) { return; }
-			switch (message.command) {
-					case 'openRawFile':
-						await this.dispatch('openRawFile:logviewer', async () => {
-							try {
-								const rawEco = this.findEcosystem(sessionFilePath);
-								const rawContent = rawEco?.getRawFileContent?.(sessionFilePath);
-								if (rawContent !== undefined) {
-									const doc = await vscode.workspace.openTextDocument({ content: rawContent, language: 'json' });
-									await vscode.window.showTextDocument(doc);
-								} else {
-									await vscode.window.showTextDocument(vscode.Uri.file(sessionFilePath));
-								}
-							} catch (err) {
-								vscode.window.showErrorMessage('Could not open raw file: ' + sessionFilePath);
-							}
-						});
-					break;
-				case 'showToolCallPretty': {
-					const { turnNumber, toolCallIdx } = message as { turnNumber: number; toolCallIdx: number };
-					this.log(`showToolCallPretty: turn=${turnNumber}, toolCallIdx=${toolCallIdx}, file=${sessionFilePath}`);
-					try {
-						const turn = logData.turns.find(t => t.turnNumber === turnNumber);
-						const turnIndex = logData.turns.findIndex(t => t.turnNumber === turnNumber);
-						const toolCall = turn?.toolCalls?.[toolCallIdx];
-						if (!toolCall) {
-							this.log('showToolCallPretty: tool call not found in session data');
-							vscode.window.showInformationMessage('Tool call not found in session data.');
-							break;
-						}
-
-						const safeParse = (text?: string) => {
-							if (!text) { return text; }
-							try { return JSON.parse(text); } catch { return text; }
-						};
-
-						const mapTurnForContext = (t?: ChatTurn) => t ? {
-							turnNumber: t.turnNumber,
-							timestamp: t.timestamp,
-							mode: t.mode,
-							model: t.model,
-							userMessage: t.userMessage,
-							assistantResponse: t.assistantResponse,
-							inputTokensEstimate: t.inputTokensEstimate,
-							outputTokensEstimate: t.outputTokensEstimate,
-							toolCalls: t.toolCalls?.map((tc, idx) => ({ index: idx, toolName: tc.toolName, arguments: tc.arguments, result: tc.result }))
-						} : undefined;
-
-						const mapToolCallForContext = (tc: { toolName: string; arguments?: string; result?: string }, idx: number, parentTurn?: ChatTurn) => ({
-							turn: parentTurn?.turnNumber ?? turnNumber,
-							toolCallIdx: idx,
-							toolName: tc.toolName,
-							model: parentTurn?.model,
-							mode: parentTurn?.mode,
-							timestamp: parentTurn?.timestamp,
-							userMessage: parentTurn?.userMessage,
-							assistantResponse: parentTurn?.assistantResponse,
-							inputTokensEstimate: parentTurn?.inputTokensEstimate,
-							outputTokensEstimate: parentTurn?.outputTokensEstimate,
-							argumentsRaw: tc.arguments ?? null,
-							argumentsParsed: safeParse(tc.arguments),
-							resultRaw: tc.result ?? null,
-							resultParsed: safeParse(tc.result)
-						});
-
-						const sanitize = (name: string) => name.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 60) || 'toolcall';
-						const prettyName = sanitize(`${toolCall.toolName || 'tool'}-turn-${turnNumber}-call-${toolCallIdx}`);
-
-						const prettyPayload = {
-							turnBefore: turnIndex > 0 ? mapTurnForContext(logData.turns[turnIndex - 1]) : undefined,
-							toolCall: mapToolCallForContext(toolCall, toolCallIdx, turn),
-							turnAfter: turnIndex >= 0 && turnIndex < logData.turns.length - 1 ? mapTurnForContext(logData.turns[turnIndex + 1]) : undefined
-						};
-
-						const prettyUri = vscode.Uri.parse(`untitled:${prettyName}.json`);
-						const openDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === prettyUri.toString());
-						if (openDoc) {
-							await vscode.window.showTextDocument(openDoc, { preview: true });
-							break;
-						}
-
-						const doc = await vscode.workspace.openTextDocument(prettyUri);
-						const editor = await vscode.window.showTextDocument(doc, { preview: true });
-						const jsonText = JSON.stringify(prettyPayload, null, 2);
-						await editor.edit((editBuilder) => {
-							editBuilder.insert(new vscode.Position(0, 0), jsonText);
-						});
-						await vscode.languages.setTextDocumentLanguage(doc, 'json');
-					} catch (err) {
-						this.error('showToolCallPretty: error', err);
-						vscode.window.showErrorMessage('Could not open formatted tool call.');
-					}
-					break;
-				}
-				case 'revealToolCallSource': {
-					const { turnNumber, toolCallIdx } = message as { turnNumber: number; toolCallIdx: number };
-					this.log(`revealToolCallSource: turn=${turnNumber}, toolCallIdx=${toolCallIdx}, file=${sessionFilePath}`);
-					try {
-						const turn = logData.turns.find(t => t.turnNumber === turnNumber);
-						const toolCall = turn?.toolCalls?.[toolCallIdx];
-						if (!toolCall) {
-							this.log('revealToolCallSource: tool call not found in session data');
-							vscode.window.showInformationMessage('Tool call not found in session data.');
-							break;
-						}
-
-						const fileContent = await fs.promises.readFile(sessionFilePath, 'utf8');
-						const searchTerm = toolCall.toolName || '';
-						const matchIdx = searchTerm ? fileContent.indexOf(searchTerm) : -1;
-						this.log(`revealToolCallSource: searchTerm='${searchTerm}', matchIdx=${matchIdx}`);
-
-						const doc = await vscode.workspace.openTextDocument(sessionFilePath);
-						const editor = await vscode.window.showTextDocument(doc);
-
-						if (matchIdx >= 0) {
-							const pos = doc.positionAt(matchIdx);
-							editor.selection = new vscode.Selection(pos, pos);
-							editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
-						} else {
-							vscode.window.showInformationMessage('Opened session file, but could not locate this tool call text.');
-						}
-					} catch (err) {
-						this.error('revealToolCallSource: error', err);
-						vscode.window.showErrorMessage('Could not reveal tool call in file.');
-					}
-					break;
-				}
+	private async handleLogViewerMessage(message: any, logData: SessionLogData, sessionFilePath: string): Promise<void> {
+		if (await this.dispatchSharedCommand(message)) { return; }
+		switch (message.command) {
+			case 'openRawFile':
+				await this.dispatch('openRawFile:logviewer', () => this.logViewerHandleOpenRawFile(sessionFilePath)); break;
+			case 'showToolCallPretty': {
+				const { turnNumber, toolCallIdx } = message as { turnNumber: number; toolCallIdx: number };
+				try { await this.logViewerShowToolCallPretty(turnNumber, toolCallIdx, logData); }
+				catch (err) { this.error('showToolCallPretty: error', err); vscode.window.showErrorMessage('Could not open formatted tool call.'); }
+				break;
 			}
-		});
+			case 'revealToolCallSource': {
+				const { turnNumber, toolCallIdx } = message as { turnNumber: number; toolCallIdx: number };
+				try { await this.logViewerRevealToolCallSource(turnNumber, toolCallIdx, logData, sessionFilePath); }
+				catch (err) { this.error('revealToolCallSource: error', err); vscode.window.showErrorMessage('Could not reveal tool call in file.'); }
+				break;
+			}
+		}
+	}
 
-		// Handle panel disposal
-		this.logViewerPanel.onDidDispose(() => {
-			this.logViewerPanel = undefined;
-		});
+	private async logViewerHandleOpenRawFile(sessionFilePath: string): Promise<void> {
+		try {
+			const rawEco = this.findEcosystem(sessionFilePath);
+			const rawContent = rawEco?.getRawFileContent?.(sessionFilePath);
+			if (rawContent !== undefined) {
+				const doc = await vscode.workspace.openTextDocument({ content: rawContent, language: 'json' });
+				await vscode.window.showTextDocument(doc);
+			} else {
+				await vscode.window.showTextDocument(vscode.Uri.file(sessionFilePath));
+			}
+		} catch { vscode.window.showErrorMessage('Could not open raw file: ' + sessionFilePath); }
+	}
+
+	private logViewerSafeParse(text?: string): any {
+		if (!text) { return text; }
+		try { return JSON.parse(text); } catch { return text; }
+	}
+
+	private logViewerMapTurnForContext(t?: ChatTurn): any {
+		if (!t) { return undefined; }
+		return { turnNumber: t.turnNumber, timestamp: t.timestamp, mode: t.mode, model: t.model, userMessage: t.userMessage, assistantResponse: t.assistantResponse, inputTokensEstimate: t.inputTokensEstimate, outputTokensEstimate: t.outputTokensEstimate, toolCalls: t.toolCalls?.map((tc, idx) => ({ index: idx, toolName: tc.toolName, arguments: tc.arguments, result: tc.result })) };
+	}
+
+	private logViewerMapToolCallForContext(tc: { toolName: string; arguments?: string; result?: string }, idx: number, parentTurn?: ChatTurn, fallbackTurnNumber?: number): any {
+		return { turn: parentTurn?.turnNumber ?? fallbackTurnNumber, toolCallIdx: idx, toolName: tc.toolName, model: parentTurn?.model, mode: parentTurn?.mode, timestamp: parentTurn?.timestamp, userMessage: parentTurn?.userMessage, assistantResponse: parentTurn?.assistantResponse, inputTokensEstimate: parentTurn?.inputTokensEstimate, outputTokensEstimate: parentTurn?.outputTokensEstimate, argumentsRaw: tc.arguments ?? null, argumentsParsed: this.logViewerSafeParse(tc.arguments), resultRaw: tc.result ?? null, resultParsed: this.logViewerSafeParse(tc.result) };
+	}
+
+	private async logViewerShowToolCallPretty(turnNumber: number, toolCallIdx: number, logData: SessionLogData): Promise<void> {
+		const turn = logData.turns.find(t => t.turnNumber === turnNumber);
+		const turnIndex = logData.turns.findIndex(t => t.turnNumber === turnNumber);
+		const toolCall = turn?.toolCalls?.[toolCallIdx];
+		if (!toolCall) { this.log('showToolCallPretty: tool call not found in session data'); vscode.window.showInformationMessage('Tool call not found in session data.'); return; }
+		const sanitize = (name: string) => name.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 60) || 'toolcall';
+		const prettyName = sanitize(`${toolCall.toolName || 'tool'}-turn-${turnNumber}-call-${toolCallIdx}`);
+		const prettyPayload = {
+			turnBefore: turnIndex > 0 ? this.logViewerMapTurnForContext(logData.turns[turnIndex - 1]) : undefined,
+			toolCall: this.logViewerMapToolCallForContext(toolCall, toolCallIdx, turn, turnNumber),
+			turnAfter: turnIndex >= 0 && turnIndex < logData.turns.length - 1 ? this.logViewerMapTurnForContext(logData.turns[turnIndex + 1]) : undefined
+		};
+		const prettyUri = vscode.Uri.parse(`untitled:${prettyName}.json`);
+		const openDoc = vscode.workspace.textDocuments.find(d => d.uri.toString() === prettyUri.toString());
+		if (openDoc) { await vscode.window.showTextDocument(openDoc, { preview: true }); return; }
+		const doc = await vscode.workspace.openTextDocument(prettyUri);
+		const editor = await vscode.window.showTextDocument(doc, { preview: true });
+		await editor.edit((eb) => { eb.insert(new vscode.Position(0, 0), JSON.stringify(prettyPayload, null, 2)); });
+		await vscode.languages.setTextDocumentLanguage(doc, 'json');
+	}
+
+	private async logViewerRevealToolCallSource(turnNumber: number, toolCallIdx: number, logData: SessionLogData, sessionFilePath: string): Promise<void> {
+		this.log(`revealToolCallSource: turn=${turnNumber}, toolCallIdx=${toolCallIdx}, file=${sessionFilePath}`);
+		const turn = logData.turns.find(t => t.turnNumber === turnNumber);
+		const toolCall = turn?.toolCalls?.[toolCallIdx];
+		if (!toolCall) { this.log('revealToolCallSource: tool call not found in session data'); vscode.window.showInformationMessage('Tool call not found in session data.'); return; }
+		const fileContent = await fs.promises.readFile(sessionFilePath, 'utf8');
+		const searchTerm = toolCall.toolName || '';
+		const matchIdx = searchTerm ? fileContent.indexOf(searchTerm) : -1;
+		this.log(`revealToolCallSource: searchTerm='${searchTerm}', matchIdx=${matchIdx}`);
+		const doc = await vscode.workspace.openTextDocument(sessionFilePath);
+		const editor = await vscode.window.showTextDocument(doc);
+		if (matchIdx >= 0) {
+			const pos = doc.positionAt(matchIdx);
+			editor.selection = new vscode.Selection(pos, pos);
+			editor.revealRange(new vscode.Range(pos, pos), vscode.TextEditorRevealType.InCenter);
+		} else {
+			vscode.window.showInformationMessage('Opened session file, but could not locate this tool call text.');
+		}
 	}
 
 	/**
@@ -5259,107 +5194,57 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	public async showMaturity(): Promise<void> {
 		this.log('🎯 Opening Copilot Fluency Score dashboard');
 		await this.context.globalState.update('fluencyScore.everOpened', true);
-
-		// If panel already exists, dispose and recreate with fresh data
-		if (this.maturityPanel) {
-			this.maturityPanel.dispose();
-			this.maturityPanel = undefined;
-		}
-
-		const maturityData = await this.calculateMaturityScores(true); // Use cached data for fast loading
+		if (this.maturityPanel) { this.maturityPanel.dispose(); this.maturityPanel = undefined; }
+		const maturityData = await this.calculateMaturityScores(true);
 		const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
-
 		this.maturityPanel = vscode.window.createWebviewPanel(
-			'copilotMaturity',
-			'AI Engineering Fluency Score',
+			'copilotMaturity', 'AI Engineering Fluency Score',
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
-			{
-				enableScripts: true,
-				retainContextWhenHidden: false,
-				localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')]
-			}
+			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
-
 		const dismissedTips = await this.getDismissedFluencyTips();
 		const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
-		this.maturityPanel.webview.onDidReceiveMessage(async (message) => {
-			if (this.handleLocalViewRegressionMessage(message)) { return; }
-			if (await this.dispatchSharedCommand(message)) { return; }
-			switch (message.command) {
-				case 'refresh':
-					await this.dispatch('refresh:maturity', () => this.refreshMaturityPanel());
-					break;
-				case 'searchMcpExtensions':
-					await this.dispatch('searchMcpExtensions', () =>
-						vscode.commands.executeCommand('workbench.extensions.search', '@tag:mcp')
-					);
-					break;
-				case 'shareToIssue': {
-					await this.dispatch('shareToIssue', async () => {
-						const scores = await this.calculateMaturityScores();
-						const categorySections = scores.categories.map(c => {
-							const evidenceList = c.evidence.length > 0
-								? c.evidence.map(e => `- ✅ ${e}`).join('\n')
-								: '- No significant activity detected';
-							return `<h2>${c.icon} ${c.category} — Stage ${c.stage}</h2>\n\n${evidenceList}`;
-						}).join('\n\n');
-						const body = `<h2>AI Engineering Fluency Score Feedback</h2>\n\n**Overall Stage:** ${scores.overallLabel}\n\n${categorySections}\n\n<h2>Feedback</h2>\n<!-- Describe your feedback or suggestion here -->\n`;
-						const issueUrl = `https://github.com/rajbos/ai-engineering-fluency/issues/new?title=${encodeURIComponent('Fluency Score Feedback')}&body=${encodeURIComponent(body)}&labels=${encodeURIComponent('fluency-score')}`;
-						await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
-					});
-					break;
-				}
-				case 'dismissTips':
-					if (message.category) {
-						await this.dispatch('dismissTips', async () => {
-							await this.dismissFluencyTips(message.category);
-							await this.refreshMaturityPanel();
-						});
-					}
-					break;
-				case 'resetDismissedTips':
-					await this.dispatch('resetDismissedTips', async () => {
-						await this.resetDismissedFluencyTips();
-						await this.refreshMaturityPanel();
-					});
-					break;
-				case 'shareToLinkedIn':
-					await this.dispatch('shareToLinkedIn', () => this.shareToSocialMedia('linkedin'));
-					break;
-				case 'shareToBluesky':
-					await this.dispatch('shareToBluesky', () => this.shareToSocialMedia('bluesky'));
-					break;
-				case 'shareToMastodon':
-					await this.dispatch('shareToMastodon', () => this.shareToSocialMedia('mastodon'));
-					break;
-				case 'downloadChartImage':
-					await this.dispatch('downloadChartImage', () => this.downloadChartImage());
-					break;
-				case 'saveChartImage':
-					if (message.data) {
-						await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data));
-					}
-					break;
-				case 'exportPdf':
-					if (message.data) {
-						await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data));
-					}
-					break;
-				case 'exportPptx':
-					if (message.data) {
-						await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data));
-					}
-					break;
-			}
-		});
-
+		this.maturityPanel.webview.onDidReceiveMessage(async (message) => { await this.handleMaturityMessage(message); });
 		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels });
+		this.maturityPanel.onDidDispose(() => { this.log('🎯 Copilot Fluency Score dashboard closed'); this.maturityPanel = undefined; });
+	}
 
-	this.maturityPanel.onDidDispose(() => {
-		this.log('🎯 Copilot Fluency Score dashboard closed');
-		this.maturityPanel = undefined;
-	});
-}
+	private async handleMaturityMessage(message: any): Promise<void> {
+		if (this.handleLocalViewRegressionMessage(message)) { return; }
+		if (await this.dispatchSharedCommand(message)) { return; }
+		const simpleCommands: Record<string, () => Promise<void>> = {
+			refresh: () => this.dispatch('refresh:maturity', () => this.refreshMaturityPanel()),
+			searchMcpExtensions: () => this.dispatch('searchMcpExtensions', () => vscode.commands.executeCommand('workbench.extensions.search', '@tag:mcp')),
+			shareToIssue: () => this.dispatch('shareToIssue', () => this.maturityHandleShareToIssue()),
+			resetDismissedTips: () => this.dispatch('resetDismissedTips', async () => { await this.resetDismissedFluencyTips(); await this.refreshMaturityPanel(); }),
+			shareToLinkedIn: () => this.dispatch('shareToLinkedIn', () => this.shareToSocialMedia('linkedin')),
+			shareToBluesky: () => this.dispatch('shareToBluesky', () => this.shareToSocialMedia('bluesky')),
+			shareToMastodon: () => this.dispatch('shareToMastodon', () => this.shareToSocialMedia('mastodon')),
+			downloadChartImage: () => this.dispatch('downloadChartImage', () => this.downloadChartImage()),
+		};
+		if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
+		await this.handleMaturityConditionalMessage(message);
+	}
+
+	private async handleMaturityConditionalMessage(message: any): Promise<void> {
+		switch (message.command) {
+			case 'dismissTips': if (message.category) { await this.dispatch('dismissTips', async () => { await this.dismissFluencyTips(message.category); await this.refreshMaturityPanel(); }); } break;
+			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data)); } break;
+			case 'exportPdf': if (message.data) { await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data)); } break;
+			case 'exportPptx': if (message.data) { await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data)); } break;
+		}
+	}
+
+	private async maturityHandleShareToIssue(): Promise<void> {
+		const scores = await this.calculateMaturityScores();
+		const categorySections = scores.categories.map(c => {
+			const evidenceList = c.evidence.length > 0 ? c.evidence.map(e => `- ✅ ${e}`).join('\n') : '- No significant activity detected';
+			return `<h2>${c.icon} ${c.category} — Stage ${c.stage}</h2>\n\n${evidenceList}`;
+		}).join('\n\n');
+		const body = `<h2>AI Engineering Fluency Score Feedback</h2>\n\n**Overall Stage:** ${scores.overallLabel}\n\n${categorySections}\n\n<h2>Feedback</h2>\n<!-- Describe your feedback or suggestion here -->\n`;
+		const issueUrl = `https://github.com/rajbos/ai-engineering-fluency/issues/new?title=${encodeURIComponent('Fluency Score Feedback')}&body=${encodeURIComponent(body)}&labels=${encodeURIComponent('fluency-score')}`;
+		await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
+	}
 
 private async refreshMaturityPanel(): Promise<void> {
 	if (!this.maturityPanel) {
