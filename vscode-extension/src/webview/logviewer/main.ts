@@ -216,82 +216,61 @@ function getContextRefBadges(refs: ContextReferenceUsage): string {
 		.join('');
 }
 
+function buildContextRefRows(refs: ContextReferenceUsage): { category: string; name: string; count: number; type: 'implicit' | 'explicit' }[] {
+	const rows: { category: string; name: string; count: number; type: 'implicit' | 'explicit' }[] = [];
+	if (refs.implicitSelection > 0) {
+		rows.push({ category: '📝 Selection', name: 'editor selection', count: refs.implicitSelection, type: 'implicit' });
+	}
+	if (refs.byPath && Object.keys(refs.byPath).length > 0) {
+		Object.entries(refs.byPath).forEach(([path, count]) => {
+			if (path.startsWith('#sym:')) {
+				rows.push({ category: '🔣 Symbol', name: path.substring(5), count, type: 'explicit' });
+			} else {
+				const normalizedPath = path.replace(/\\/g, '/').toLowerCase();
+				const isInstructionFile = normalizedPath.includes('copilot-instructions.md') ||
+				                          normalizedPath.endsWith('.instructions.md') ||
+				                          normalizedPath.endsWith('/agents.md');
+				if (isInstructionFile) {
+					rows.push({ category: '📋 Instructions', name: getFileName(path), count, type: 'implicit' });
+				} else {
+					rows.push({ category: '📁 File', name: getFileName(path), count, type: 'explicit' });
+				}
+			}
+		});
+	}
+	const hasInstructionFiles = rows.some(r => r.category === '📋 Instructions');
+	if (!hasInstructionFiles) {
+		if (refs.copilotInstructions > 0) {
+			rows.push({ category: '📋 Instructions', name: 'copilot-instructions', count: refs.copilotInstructions, type: 'implicit' });
+		}
+		if (refs.agentsMd > 0) {
+			rows.push({ category: '🤖 Agents', name: 'agents.md', count: refs.agentsMd, type: 'implicit' });
+		}
+	}
+	if (refs.workspace > 0) { rows.push({ category: '🌐 Workspace', name: '@workspace', count: refs.workspace, type: 'explicit' }); }
+	if (refs.terminal > 0) { rows.push({ category: '💻 Terminal', name: '@terminal', count: refs.terminal, type: 'explicit' }); }
+	if (refs.vscode > 0) { rows.push({ category: '⚙️ VS Code', name: '@vscode', count: refs.vscode, type: 'explicit' }); }
+	if (refs.codebase > 0) { rows.push({ category: '📚 Codebase', name: '#codebase', count: refs.codebase, type: 'explicit' }); }
+	if (refs.selection > 0) { rows.push({ category: '✂️ Selection', name: '#selection', count: refs.selection, type: 'explicit' }); }
+	return rows;
+}
+
 function renderContextReferencesDetailed(refs: ContextReferenceUsage): string {
-const rows: { category: string; name: string; count: number; type: 'implicit' | 'explicit' }[] = [];
-
-// Implicit selections (implicit)
-if (refs.implicitSelection > 0) {
-rows.push({ category: '📝 Selection', name: 'editor selection', count: refs.implicitSelection, type: 'implicit' });
-}
-
-// File paths and symbols from byPath
-if (refs.byPath && Object.keys(refs.byPath).length > 0) {
-Object.entries(refs.byPath).forEach(([path, count]) => {
-if (path.startsWith('#sym:')) {
-// Symbols are explicit user references
-rows.push({ category: '🔣 Symbol', name: path.substring(5), count, type: 'explicit' });
-} else {
-// Check if this is an instruction file (implicit) or regular file (explicit)
-const normalizedPath = path.replace(/\\/g, '/').toLowerCase();
-const isInstructionFile = normalizedPath.includes('copilot-instructions.md') || 
-                          normalizedPath.endsWith('.instructions.md') ||
-                          normalizedPath.endsWith('/agents.md');
-if (isInstructionFile) {
-rows.push({ category: '📋 Instructions', name: getFileName(path), count, type: 'implicit' });
-} else {
-// Regular file references are explicit
-rows.push({ category: '📁 File', name: getFileName(path), count, type: 'explicit' });
-}
-}
-});
-}
-
-// Instruction counters that aren't in byPath (fallback)
-// Only show if we haven't already added instruction files from byPath
-const hasInstructionFiles = rows.some(r => r.category === '📋 Instructions');
-if (!hasInstructionFiles) {
-if (refs.copilotInstructions > 0) {
-rows.push({ category: '📋 Instructions', name: 'copilot-instructions', count: refs.copilotInstructions, type: 'implicit' });
-}
-if (refs.agentsMd > 0) {
-rows.push({ category: '🤖 Agents', name: 'agents.md', count: refs.agentsMd, type: 'implicit' });
-}
-}
-
-// Explicit @ references
-if (refs.workspace > 0) {
-rows.push({ category: '🌐 Workspace', name: '@workspace', count: refs.workspace, type: 'explicit' });
-}
-if (refs.terminal > 0) {
-rows.push({ category: '💻 Terminal', name: '@terminal', count: refs.terminal, type: 'explicit' });
-}
-if (refs.vscode > 0) {
-rows.push({ category: '⚙️ VS Code', name: '@vscode', count: refs.vscode, type: 'explicit' });
-}
-if (refs.codebase > 0) {
-rows.push({ category: '📚 Codebase', name: '#codebase', count: refs.codebase, type: 'explicit' });
-}
-if (refs.selection > 0) {
-rows.push({ category: '✂️ Selection', name: '#selection', count: refs.selection, type: 'explicit' });
-}
-
-if (rows.length === 0) {
-return '<div class="context-section">No context references</div>';
-}
-
-// Build table
-const tableRows = rows.map(row => {
-const typeClass = row.type === 'implicit' ? 'context-type-implicit' : 'context-type-explicit';
-const typeLabel = row.type === 'implicit' ? '🔒 implicit' : '👤 explicit';
-return `<tr>
+	const rows = buildContextRefRows(refs);
+	if (rows.length === 0) {
+		return '<div class="context-section">No context references</div>';
+	}
+	const tableRows = rows.map(row => {
+		const typeClass = row.type === 'implicit' ? 'context-type-implicit' : 'context-type-explicit';
+		const typeLabel = row.type === 'implicit' ? '🔒 implicit' : '👤 explicit';
+		return `<tr>
 <td>${row.category}</td>
 <td>${escapeHtml(row.name)}</td>
 <td class="count-cell">${row.count}</td>
 <td class="${typeClass}">${typeLabel}</td>
 </tr>`;
-}).join('');
-
-return `
+	}).join('');
+	return `
 <table class="context-refs-table">
 <thead>
 <tr>
@@ -505,40 +484,25 @@ return badges.join('');
  * Renders the "📊 ACTUAL LLM USAGE" `<details>` block for a single turn.
  * Returns an empty string when the turn has no actual usage data.
  */
-function renderActualUsageSummary(turn: ChatTurn): string {
-if (!turn.actualUsage) { return ''; }
-
-const au = turn.actualUsage;
-const totalTokens    = turn.inputTokensEstimate + turn.outputTokensEstimate + turn.thinkingTokensEstimate;
-const actualTotal    = au.promptTokens + au.completionTokens;
-const estimatedTotal = totalTokens;
-const dInput  = au.promptTokens      - turn.inputTokensEstimate;
-const dOutput = au.completionTokens  - turn.outputTokensEstimate;
-const dTotal  = actualTotal          - estimatedTotal;
-
-// Build prompt breakdown rows
-let promptBreakdownHtml = '';
-if (au.promptTokenDetails && au.promptTokenDetails.length > 0) {
-const breakdownRows = au.promptTokenDetails.map(detail => {
-const deducedTokens = Math.round(au.promptTokens * detail.percentageOfPrompt / 100);
-const barWidth = Math.min(detail.percentageOfPrompt, 100);
-const categoryClass = detail.category === 'System' ? 'category-system' : 'category-user';
-return `<tr>
+function buildPromptBreakdownHtml(au: ChatTurn['actualUsage'] & {}): string {
+	if (!au.promptTokenDetails || au.promptTokenDetails.length === 0) { return ''; }
+	const breakdownRows = au.promptTokenDetails.map(detail => {
+		const deducedTokens = Math.round(au.promptTokens * detail.percentageOfPrompt / 100);
+		const barWidth = Math.min(detail.percentageOfPrompt, 100);
+		const categoryClass = detail.category === 'System' ? 'category-system' : 'category-user';
+		return `<tr>
 <td><span class="${categoryClass}">${escapeHtml(detail.category)}</span></td>
 <td>${escapeHtml(detail.label)}</td>
 <td class="count-cell">${detail.percentageOfPrompt}%</td>
 <td class="count-cell">${formatCompact(deducedTokens)}</td>
 <td><div class="bar-cell"><div class="bar-fill ${categoryClass}-bar" style="width: ${barWidth}%"></div></div></td>
 </tr>`;
-}).join('');
-
-// Calculate system vs user totals
-const systemPct = au.promptTokenDetails.filter(d => d.category === 'System').reduce((s, d) => s + d.percentageOfPrompt, 0);
-const userPct   = au.promptTokenDetails.filter(d => d.category !== 'System').reduce((s, d) => s + d.percentageOfPrompt, 0);
-const systemTokens = Math.round(au.promptTokens * systemPct / 100);
-const userTokens   = Math.round(au.promptTokens * userPct / 100);
-
-promptBreakdownHtml = `
+	}).join('');
+	const systemPct = au.promptTokenDetails.filter(d => d.category === 'System').reduce((s, d) => s + d.percentageOfPrompt, 0);
+	const userPct   = au.promptTokenDetails.filter(d => d.category !== 'System').reduce((s, d) => s + d.percentageOfPrompt, 0);
+	const systemTokens = Math.round(au.promptTokens * systemPct / 100);
+	const userTokens   = Math.round(au.promptTokens * userPct / 100);
+	return `
 <div class="prompt-breakdown">
 <div class="breakdown-summary">
 <span class="category-system">System: ${systemPct}% (~${formatCompact(systemTokens)} tokens)</span>
@@ -561,6 +525,19 @@ ${breakdownRows}
 </div>
 `;
 }
+
+function renderActualUsageSummary(turn: ChatTurn): string {
+if (!turn.actualUsage) { return ''; }
+
+const au = turn.actualUsage;
+const totalTokens    = turn.inputTokensEstimate + turn.outputTokensEstimate + turn.thinkingTokensEstimate;
+const actualTotal    = au.promptTokens + au.completionTokens;
+const estimatedTotal = totalTokens;
+const dInput  = au.promptTokens      - turn.inputTokensEstimate;
+const dOutput = au.completionTokens  - turn.outputTokensEstimate;
+const dTotal  = actualTotal          - estimatedTotal;
+
+const promptBreakdownHtml = buildPromptBreakdownHtml(au);
 
 const comparisonRows: ComparisonRow[] = [
 { label: '↑ Prompt / Input',      estimated: turn.inputTokensEstimate,  actual: au.promptTokens,     delta: dInput  },
@@ -1129,6 +1106,15 @@ type TokenStats = {
 	effortSummary: string;
 };
 
+function resolveSessionEffort(sessionEffort: any): { effortDefaultLabel: string; effortSummary: string } {
+	const effortDefault = sessionEffort?.defaultEffort ?? (sessionEffort ? Object.keys(sessionEffort.byEffort)[0] : undefined);
+	const effortDefaultLabel = effortDefault ? getEffortDisplayName(effortDefault) : '—';
+	const effortSummary = sessionEffort
+		? Object.entries(sessionEffort.byEffort).map(([k, v]) => `${getEffortDisplayName(k)}: ${v}`).join(', ')
+		: '';
+	return { effortDefaultLabel, effortSummary };
+}
+
 function aggregateTokenStats(data: SessionLogData): TokenStats {
 	const totalTokens = data.turns.reduce((sum, t) => sum + t.inputTokensEstimate + t.outputTokensEstimate + t.thinkingTokensEstimate, 0);
 	const totalThinkingTokens = data.turns.reduce((sum, t) => sum + t.thinkingTokensEstimate, 0);
@@ -1146,11 +1132,7 @@ function aggregateTokenStats(data: SessionLogData): TokenStats {
 	const usageContextTotal = getTotalContextRefs(usageContextRefs);
 	const usageContextImplicit = getImplicitContextRefs(usageContextRefs);
 	const usageContextExplicit = getExplicitContextRefs(usageContextRefs);
-	const effortDefault = sessionEffort?.defaultEffort ?? (sessionEffort ? Object.keys(sessionEffort.byEffort)[0] : undefined);
-	const effortDefaultLabel = effortDefault ? getEffortDisplayName(effortDefault) : '—';
-	const effortSummary = sessionEffort
-		? Object.entries(sessionEffort.byEffort).map(([k, v]) => `${getEffortDisplayName(k)}: ${v}`).join(', ')
-		: '';
+	const { effortDefaultLabel, effortSummary } = resolveSessionEffort(sessionEffort);
 	return {
 		totalTokens, totalThinkingTokens, totalSubAgentCalls, turnsWithThinking,
 		usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools,
