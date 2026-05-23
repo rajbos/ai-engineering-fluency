@@ -1079,41 +1079,24 @@ export function deriveConversationPatterns(analysis: SessionUsageAnalysis): void
  * Analyze a request object for all context references.
  * This is the unified method that processes text, contentReferences, and variableData.
  */
+function _arcAnalyzeMessageText(message: Record<string, unknown>, refs: ContextReferenceUsage): void {
+	if (typeof message['text'] === 'string') { analyzeContextReferences(message['text'], refs); }
+	const parts = message['parts'];
+	if (!Array.isArray(parts)) { return; }
+	for (const part of parts) {
+		if (part && typeof part === 'object' && typeof (part as Record<string, unknown>)['text'] === 'string') {
+			analyzeContextReferences((part as Record<string, unknown>)['text'] as string, refs);
+		}
+	}
+}
+
 export function analyzeRequestContext(request: unknown, refs: ContextReferenceUsage): void {
 	if (!request || typeof request !== 'object') { return; }
 	const req = request as Record<string, unknown>;
-
-	// Analyze user message text for context references
 	const message = req['message'];
-	if (message && typeof message === 'object') {
-		const msg = message as Record<string, unknown>;
-		if (typeof msg['text'] === 'string') {
-			analyzeContextReferences(msg['text'], refs);
-		}
-		const parts = msg['parts'];
-		if (Array.isArray(parts)) {
-			for (const part of parts) {
-				if (part && typeof part === 'object') {
-					const p = part as Record<string, unknown>;
-					if (typeof p['text'] === 'string') {
-						analyzeContextReferences(p['text'], refs);
-					}
-				}
-			}
-		}
-	}
-
-	// Analyze contentReferences if present
-	const contentRefs = req['contentReferences'];
-	if (Array.isArray(contentRefs)) {
-		analyzeContentReferences(contentRefs, refs);
-	}
-
-	// Analyze variableData if present
-	const variableData = req['variableData'];
-	if (variableData !== undefined) {
-		analyzeVariableData(variableData, refs);
-	}
+	if (message && typeof message === 'object') { _arcAnalyzeMessageText(message as Record<string, unknown>, refs); }
+	if (Array.isArray(req['contentReferences'])) { analyzeContentReferences(req['contentReferences'], refs); }
+	if (req['variableData'] !== undefined) { analyzeVariableData(req['variableData'], refs); }
 }
 
 /**
