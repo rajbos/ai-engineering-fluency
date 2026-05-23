@@ -1949,33 +1949,34 @@ function toFiniteNumber(value: unknown): number {
 	return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: string): HTMLElement {
-	const summary = data?.summary || {};
-	const checks = Array.isArray(data?.checks) ? data.checks : [];
-	const recommendations = Array.isArray(data?.recommendations) ? [...data.recommendations] : [];
+const REPO_DOCS_LINKS: { [key: string]: string } = {
+	'git-repo': 'https://docs.github.com/en/get-started/using-git/about-git',
+	'gitignore': 'https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files',
+	'env-example': 'https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions',
+	'editorconfig': 'https://editorconfig.org/',
+	'linter': 'https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning',
+	'formatter': 'https://docs.github.com/en/contributing/style-guide-and-content-model/style-guide',
+	'type-safety': 'https://docs.github.com/en/code-security/code-scanning/reference/code-ql-built-in-queries/javascript-typescript-built-in-queries',
+	'commit-messages': 'https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits',
+	'conventional-commits': 'https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets',
+	'ci-config': 'https://docs.github.com/en/actions/about-github-actions/understanding-github-actions',
+	'scripts': 'https://docs.github.com/en/actions/tutorials/build-and-test-code/nodejs',
+	'task-runner': 'https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/add-scripts',
+	'devcontainer': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration',
+	'dockerfile': 'https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry',
+	'version-pinning': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/setting-up-your-nodejs-project-for-codespaces',
+	'license': 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository'
+};
 
-	// Documentation links for each check ID
-	const docsLinks: { [key: string]: string } = {
-		'git-repo': 'https://docs.github.com/en/get-started/using-git/about-git',
-		'gitignore': 'https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files',
-		'env-example': 'https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions',
-		'editorconfig': 'https://editorconfig.org/',
-		'linter': 'https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning',
-		'formatter': 'https://docs.github.com/en/contributing/style-guide-and-content-model/style-guide',
-		'type-safety': 'https://docs.github.com/en/code-security/code-scanning/reference/code-ql-built-in-queries/javascript-typescript-built-in-queries',
-		'commit-messages': 'https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits',
-		'conventional-commits': 'https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets',
-		'ci-config': 'https://docs.github.com/en/actions/about-github-actions/understanding-github-actions',
-		'scripts': 'https://docs.github.com/en/actions/tutorials/build-and-test-code/nodejs',
-		'task-runner': 'https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/add-scripts',
-		'devcontainer': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration',
-		'dockerfile': 'https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry',
-		'version-pinning': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/setting-up-your-nodejs-project-for-codespaces',
-		'license': 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository'
-	};
+const REPO_CATEGORY_LABELS: { [key: string]: string } = {
+	versionControl: '🔄 Version Control',
+	codeQuality: '✨ Code Quality',
+	cicd: '🚀 CI/CD',
+	environment: '🔧 Environment',
+	documentation: '📚 Documentation'
+};
 
-	const container = el('div');
-
+function buildScoreHeaderElement(summary: any): HTMLElement {
 	const header = el('div');
 	header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;');
 	const title = el('div');
@@ -1985,32 +1986,17 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 	score.setAttribute('style', 'font-size: 24px; font-weight: 700; color: var(--link-color);');
 	score.textContent = `${Math.round(toFiniteNumber(summary.percentage))}%`;
 	header.append(title, score);
-	container.appendChild(header);
+	return header;
+}
 
+function buildStatsGridElement(summary: any): HTMLElement {
 	const statsGrid = el('div');
 	statsGrid.setAttribute('style', 'display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;');
-
-	const statCards: Array<{ count: unknown; label: string; cardStyle: string; countStyle: string }> = [
-		{
-			count: summary.passedChecks,
-			label: 'Passed',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: var(--success-fg);'
-		},
-		{
-			count: summary.warningChecks,
-			label: 'Warnings',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: var(--warning-fg);'
-		},
-		{
-			count: summary.failedChecks,
-			label: 'Failed',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: #ef4444;'
-		}
+	const statCards = [
+		{ count: summary.passedChecks, label: 'Passed', cardStyle: 'text-align: center; padding: 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: var(--success-fg);' },
+		{ count: summary.warningChecks, label: 'Warnings', cardStyle: 'text-align: center; padding: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: var(--warning-fg);' },
+		{ count: summary.failedChecks, label: 'Failed', cardStyle: 'text-align: center; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: #ef4444;' }
 	];
-
 	for (const statCard of statCards) {
 		const card = el('div');
 		card.setAttribute('style', statCard.cardStyle);
@@ -2023,8 +2009,163 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 		card.append(count, label);
 		statsGrid.appendChild(card);
 	}
+	return statsGrid;
+}
 
-	container.appendChild(statsGrid);
+function resolveCheckStatus(check: RepoHygieneCheck): { status: string; emoji: CustomizationTypeStatus; color: string } {
+	const status = check?.status === 'pass' || check?.status === 'warning' ? check.status : 'fail';
+	const emoji: CustomizationTypeStatus = status === 'pass' ? '✅' : status === 'warning' ? '⚠️' : '❌';
+	const color = status === 'pass' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#ef4444';
+	return { status, emoji, color };
+}
+
+function buildCheckContentElement(check: RepoHygieneCheck, statusColor: string): HTMLElement {
+	const content = el('div');
+	content.setAttribute('style', 'flex: 1;');
+	const checkLabel = el('div');
+	checkLabel.setAttribute('style', `font-size: 12px; font-weight: 600; color: ${statusColor};`);
+	checkLabel.textContent = typeof check?.label === 'string' ? check.label : '';
+	const checkDetail = el('div');
+	checkDetail.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); margin-top: 2px;');
+	checkDetail.textContent = typeof check?.detail === 'string' ? check.detail : '';
+	content.append(checkLabel, checkDetail);
+	if (typeof check?.hint === 'string' && check.hint.length > 0) {
+		const hint = el('div');
+		hint.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; font-style: italic;');
+		hint.textContent = `💡 ${check.hint}`;
+		content.appendChild(hint);
+	}
+	const docUrl = REPO_DOCS_LINKS[typeof check?.id === 'string' ? check.id : ''];
+	if (docUrl) {
+		const docLink = el('a');
+		docLink.setAttribute('href', docUrl);
+		docLink.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; display: inline-block;');
+		docLink.setAttribute('title', 'View official documentation');
+		docLink.textContent = '📖 View documentation';
+		content.appendChild(docLink);
+	}
+	return content;
+}
+
+function buildCheckRowElement(check: RepoHygieneCheck): HTMLElement {
+	const { emoji, color } = resolveCheckStatus(check);
+	const checkRow = el('div');
+	checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
+	const icon = el('span');
+	icon.setAttribute('style', 'flex-shrink: 0; padding-top: 1px;');
+	icon.innerHTML = statusBadgeHtml(emoji);
+	const weight = el('span');
+	weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
+	weight.textContent = `+${toFiniteNumber(check?.weight)}`;
+	checkRow.append(icon, buildCheckContentElement(check, color), weight);
+	return checkRow;
+}
+
+function buildCategorySectionElement(categoryId: string, categoryChecks: RepoHygieneCheck[], summary: any): HTMLElement {
+	const section = el('div');
+	section.setAttribute('style', 'margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
+	const sectionHeader = el('div');
+	sectionHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;');
+	const categoryName = el('span');
+	categoryName.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
+	categoryName.textContent = REPO_CATEGORY_LABELS[categoryId] || categoryId;
+	const categorySummary = summary?.categories?.[categoryId];
+	const categoryPct = el('span');
+	categoryPct.setAttribute('style', 'font-size: 11px; color: var(--link-color); font-weight: 600;');
+	categoryPct.textContent = `${Math.round(toFiniteNumber(categorySummary?.percentage))}%`;
+	sectionHeader.append(categoryName, categoryPct);
+	section.appendChild(sectionHeader);
+	for (const check of categoryChecks) {
+		section.appendChild(buildCheckRowElement(check));
+	}
+	return section;
+}
+
+function buildRecommendationsSectionElement(recommendations: RepoHygieneRecommendation[]): HTMLElement {
+	const section = el('div');
+	section.setAttribute('style', 'margin-top: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
+	const hdr = el('div');
+	hdr.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color);');
+	const hdrTitle = el('span');
+	hdrTitle.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
+	hdrTitle.textContent = '💡 Top Recommendations';
+	hdr.appendChild(hdrTitle);
+	section.appendChild(hdr);
+	for (const rec of recommendations.slice(0, 5)) {
+		const priority = rec?.priority === 'high' || rec?.priority === 'medium' ? rec.priority : 'low';
+		const priorityColor = priority === 'high' ? '#ef4444' : priority === 'medium' ? '#f59e0b' : '#60a5fa';
+		const row = el('div');
+		row.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px;');
+		const priorityLabel = el('span');
+		priorityLabel.setAttribute('style', `font-size: 10px; font-weight: 600; color: ${priorityColor}; min-width: 50px;`);
+		priorityLabel.textContent = String(priority).toUpperCase();
+		const content = el('div');
+		content.setAttribute('style', 'flex: 1;');
+		const action = el('div');
+		action.setAttribute('style', 'font-size: 11px; color: var(--text-primary);');
+		action.textContent = typeof rec?.action === 'string' ? rec.action : '';
+		const impact = el('div');
+		impact.setAttribute('style', 'font-size: 10px; color: var(--text-muted); margin-top: 2px;');
+		impact.textContent = typeof rec?.impact === 'string' ? rec.impact : '';
+		content.append(action, impact);
+		const weight = el('span');
+		weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
+		weight.textContent = `+${toFiniteNumber(rec?.weight)}`;
+		row.append(priorityLabel, content, weight);
+		section.appendChild(row);
+	}
+	return section;
+}
+
+function buildCopilotSectionElement(failedChecks: RepoHygieneCheck[], workspacePath?: string): HTMLElement {
+	const copilotSection = el('div');
+	copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;');
+	const copilotText = el('div');
+	copilotText.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); flex: 1;');
+	copilotText.textContent = 'Let Copilot help you fix the identified issues in this repository.';
+	const copilotBtn = document.createElement('vscode-button');
+	copilotBtn.setAttribute('style', 'min-width: 180px;');
+	copilotBtn.textContent = '🤖 Ask Copilot to Improve';
+	copilotBtn.addEventListener('click', () => {
+		const failedLines = failedChecks.map((c: RepoHygieneCheck) => `- ${c.label}: ${c.detail || ''}${c.hint ? ` (${c.hint})` : ''}`).join('\n');
+		const prompt = `Please help me improve this repository by addressing the following best practice issues:\n\n${failedLines}\n\nFor each issue, please provide specific steps or code changes to fix it.`;
+		const isRepoOpen = !workspacePath || currentWorkspacePaths.some(p => p.toLowerCase() === workspacePath.toLowerCase());
+		if (isRepoOpen) {
+			vscode.postMessage({ command: 'openCopilotChatWithPrompt', prompt });
+		} else {
+			const repoFolderName = workspacePath.split(/[/\\]/).filter(Boolean).pop() ?? workspacePath;
+			copilotSection.replaceChildren();
+			copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 4px; display: flex; flex-direction: column; gap: 8px;');
+			const instructions = el('div');
+			instructions.setAttribute('style', 'font-size: 11px; color: var(--warning-fg);');
+			instructions.textContent = `⚠️ Open "${repoFolderName}" in VS Code first, then paste this prompt into Copilot Chat:`;
+			const promptBox = el('pre');
+			promptBox.setAttribute('style', 'font-size: 10px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; font-family: monospace; margin: 0;');
+			promptBox.textContent = prompt;
+			const copyBtn = document.createElement('vscode-button');
+			copyBtn.setAttribute('appearance', 'secondary');
+			copyBtn.textContent = '📋 Copy prompt';
+			copyBtn.addEventListener('click', () => {
+				navigator.clipboard.writeText(prompt).then(() => {
+					copyBtn.textContent = '✅ Copied!';
+					setTimeout(() => { copyBtn.textContent = '📋 Copy prompt'; }, 2000);
+				});
+			});
+			copilotSection.append(instructions, promptBox, copyBtn);
+		}
+	});
+	copilotSection.append(copilotText, copilotBtn);
+	return copilotSection;
+}
+
+function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: string): HTMLElement {
+	const summary = data?.summary || {};
+	const checks = Array.isArray(data?.checks) ? data.checks : [];
+	const recommendations = Array.isArray(data?.recommendations) ? [...data.recommendations] : [];
+
+	const container = el('div');
+	container.appendChild(buildScoreHeaderElement(summary));
+	container.appendChild(buildStatsGridElement(summary));
 
 	const scoreSummary = el('div');
 	scoreSummary.setAttribute('style', 'font-size: 11px; color: var(--text-muted); text-align: center; margin-bottom: 16px;');
@@ -2037,193 +2178,20 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 	const categories: Record<string, RepoHygieneCheck[]> = {};
 	for (const check of checks) {
 		const categoryId = typeof check?.category === 'string' && check.category.length > 0 ? check.category : 'other';
-		if (!categories[categoryId]) {
-			categories[categoryId] = [];
-		}
+		if (!categories[categoryId]) { categories[categoryId] = []; }
 		categories[categoryId].push(check);
 	}
-
-	const categoryLabels: { [key: string]: string } = {
-		versionControl: '🔄 Version Control',
-		codeQuality: '✨ Code Quality',
-		cicd: '🚀 CI/CD',
-		environment: '🔧 Environment',
-		documentation: '📚 Documentation'
-	};
-
 	for (const [categoryId, categoryChecks] of Object.entries(categories)) {
-		const section = el('div');
-		section.setAttribute('style', 'margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
-
-		const sectionHeader = el('div');
-		sectionHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;');
-
-		const categoryName = el('span');
-		categoryName.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
-		categoryName.textContent = categoryLabels[categoryId] || categoryId;
-
-		const categorySummary = summary?.categories?.[categoryId];
-		const categoryPct = el('span');
-		categoryPct.setAttribute('style', 'font-size: 11px; color: var(--link-color); font-weight: 600;');
-		categoryPct.textContent = `${Math.round(toFiniteNumber(categorySummary?.percentage))}%`;
-
-		sectionHeader.append(categoryName, categoryPct);
-		section.appendChild(sectionHeader);
-
-		for (const check of categoryChecks) {
-			const status = check?.status === 'pass' || check?.status === 'warning' ? check.status : 'fail';
-			const statusEmoji: CustomizationTypeStatus = status === 'pass' ? '✅' : status === 'warning' ? '⚠️' : '❌';
-			const statusColor = status === 'pass' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#ef4444';
-
-			const checkRow = el('div');
-			checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
-
-			const icon = el('span');
-			icon.setAttribute('style', 'flex-shrink: 0; padding-top: 1px;');
-			icon.innerHTML = statusBadgeHtml(statusEmoji);
-
-			const content = el('div');
-			content.setAttribute('style', 'flex: 1;');
-
-			const checkLabel = el('div');
-			checkLabel.setAttribute('style', `font-size: 12px; font-weight: 600; color: ${statusColor};`);
-			checkLabel.textContent = typeof check?.label === 'string' ? check.label : '';
-
-			const checkDetail = el('div');
-			checkDetail.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); margin-top: 2px;');
-			checkDetail.textContent = typeof check?.detail === 'string' ? check.detail : '';
-
-			content.append(checkLabel, checkDetail);
-
-			if (typeof check?.hint === 'string' && check.hint.length > 0) {
-				const hint = el('div');
-				hint.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; font-style: italic;');
-				hint.textContent = `💡 ${check.hint}`;
-				content.appendChild(hint);
-			}
-
-			const checkId = typeof check?.id === 'string' ? check.id : '';
-			const docUrl = docsLinks[checkId];
-			if (docUrl) {
-				const docLink = el('a');
-				docLink.setAttribute('href', docUrl);
-				docLink.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; display: inline-block;');
-				docLink.setAttribute('title', 'View official documentation');
-				docLink.textContent = '📖 View documentation';
-				content.appendChild(docLink);
-			}
-
-			const weight = el('span');
-			weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
-			weight.textContent = `+${toFiniteNumber(check?.weight)}`;
-
-			checkRow.append(icon, content, weight);
-			section.appendChild(checkRow);
-		}
-
-		container.appendChild(section);
+		container.appendChild(buildCategorySectionElement(categoryId, categoryChecks, summary));
 	}
 
 	if (recommendations.length > 0) {
-		const recommendationsSection = el('div');
-		recommendationsSection.setAttribute('style', 'margin-top: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
-
-		const recommendationsHeader = el('div');
-		recommendationsHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color);');
-		const recommendationsTitle = el('span');
-		recommendationsTitle.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
-		recommendationsTitle.textContent = '💡 Top Recommendations';
-		recommendationsHeader.appendChild(recommendationsTitle);
-		recommendationsSection.appendChild(recommendationsHeader);
-
-		for (const recommendation of recommendations.slice(0, 5)) {
-			const priority = recommendation?.priority === 'high' || recommendation?.priority === 'medium' ? recommendation.priority : 'low';
-			const priorityColor = priority === 'high' ? '#ef4444' : priority === 'medium' ? '#f59e0b' : '#60a5fa';
-
-			const row = el('div');
-			row.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px;');
-
-			const priorityLabel = el('span');
-			priorityLabel.setAttribute('style', `font-size: 10px; font-weight: 600; color: ${priorityColor}; min-width: 50px;`);
-			priorityLabel.textContent = String(priority).toUpperCase();
-
-			const content = el('div');
-			content.setAttribute('style', 'flex: 1;');
-
-			const action = el('div');
-			action.setAttribute('style', 'font-size: 11px; color: var(--text-primary);');
-			action.textContent = typeof recommendation?.action === 'string' ? recommendation.action : '';
-
-			const impact = el('div');
-			impact.setAttribute('style', 'font-size: 10px; color: var(--text-muted); margin-top: 2px;');
-			impact.textContent = typeof recommendation?.impact === 'string' ? recommendation.impact : '';
-
-			content.append(action, impact);
-
-			const weight = el('span');
-			weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
-			weight.textContent = `+${toFiniteNumber(recommendation?.weight)}`;
-
-			row.append(priorityLabel, content, weight);
-			recommendationsSection.appendChild(row);
-		}
-
-		container.appendChild(recommendationsSection);
+		container.appendChild(buildRecommendationsSectionElement(recommendations));
 	}
 
-	// Build a prompt summarizing the failed/warning checks for Copilot
 	const failedChecks = checks.filter((c: RepoHygieneCheck) => c?.status === 'fail' || c?.status === 'warning');
 	if (failedChecks.length > 0) {
-		const copilotSection = el('div');
-		copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;');
-
-		const copilotText = el('div');
-		copilotText.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); flex: 1;');
-		copilotText.textContent = 'Let Copilot help you fix the identified issues in this repository.';
-
-		const copilotBtn = document.createElement('vscode-button');
-		copilotBtn.setAttribute('style', 'min-width: 180px;');
-		copilotBtn.textContent = '🤖 Ask Copilot to Improve';
-		copilotBtn.addEventListener('click', () => {
-			const failedLines = failedChecks.map((c: RepoHygieneCheck) => `- ${c.label}: ${c.detail || ''}${c.hint ? ` (${c.hint})` : ''}`).join('\n');
-			const prompt = `Please help me improve this repository by addressing the following best practice issues:\n\n${failedLines}\n\nFor each issue, please provide specific steps or code changes to fix it.`;
-
-			const isRepoOpen = !workspacePath || currentWorkspacePaths.some(
-				p => p.toLowerCase() === workspacePath.toLowerCase()
-			);
-
-			if (isRepoOpen) {
-				vscode.postMessage({ command: 'openCopilotChatWithPrompt', prompt });
-			} else {
-				// Repo is not currently open — show instructions + prompt + copy button
-				const repoFolderName = workspacePath.split(/[/\\]/).filter(Boolean).pop() ?? workspacePath;
-				copilotSection.replaceChildren();
-				copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 4px; display: flex; flex-direction: column; gap: 8px;');
-
-				const instructions = el('div');
-				instructions.setAttribute('style', 'font-size: 11px; color: var(--warning-fg);');
-				instructions.textContent = `⚠️ Open "${repoFolderName}" in VS Code first, then paste this prompt into Copilot Chat:`;
-
-				const promptBox = el('pre');
-				promptBox.setAttribute('style', 'font-size: 10px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; font-family: monospace; margin: 0;');
-				promptBox.textContent = prompt;
-
-				const copyBtn = document.createElement('vscode-button');
-				copyBtn.setAttribute('appearance', 'secondary');
-				copyBtn.textContent = '📋 Copy prompt';
-				copyBtn.addEventListener('click', () => {
-					navigator.clipboard.writeText(prompt).then(() => {
-						copyBtn.textContent = '✅ Copied!';
-						setTimeout(() => { copyBtn.textContent = '📋 Copy prompt'; }, 2000);
-					});
-				});
-
-				copilotSection.append(instructions, promptBox, copyBtn);
-			}
-		});
-
-		copilotSection.append(copilotText, copilotBtn);
-		container.appendChild(copilotSection);
+		container.appendChild(buildCopilotSectionElement(failedChecks, workspacePath));
 	}
 
 	return container;
