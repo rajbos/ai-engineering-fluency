@@ -40,6 +40,64 @@ interface ProcessableRequest {
   result?: RequestResult;
 }
 
+function traverseDeltaPath(
+  root: JsonObject | unknown[],
+  path: string[],
+  ensureChild: (parent: JsonObject, key: string, nextSeg: string) => JsonObject | unknown[]
+): { root: JsonObject | unknown[]; current: JsonObject | unknown[] } | null {
+  let current: JsonObject | unknown[] = root;
+  for (let i = 0; i < path.length - 1; i++) {
+    const seg = path[i];
+    const nextSeg = path[i + 1];
+    if (Array.isArray(current) && isArrayIndexSegment(seg)) {
+      const idx = Number(seg);
+      const rawExisting = current[idx];
+      let nextNode: JsonObject | unknown[];
+      if (!isObject(rawExisting)) {
+        nextNode = isArrayIndexSegment(nextSeg) ? [] : Object.create(null);
+        current[idx] = nextNode;
+      } else {
+        nextNode = rawExisting;
+      }
+      current = nextNode;
+      continue;
+    }
+    if (!isObject(current)) { return null; }
+    current = ensureChild(current, seg, nextSeg);
+  }
+  return { root, current };
+}
+
+function applyDeltaKind1(root: JsonObject | unknown[], current: JsonObject | unknown[], lastSeg: string, v: unknown): unknown {
+  if (Array.isArray(current) && isArrayIndexSegment(lastSeg)) {
+    current[Number(lastSeg)] = v;
+    return root;
+  }
+  if (isObject(current)) {
+    Object.defineProperty(current, lastSeg, { value: v, writable: true, enumerable: true, configurable: true });
+  }
+  return root;
+}
+
+function applyDeltaKind2(root: JsonObject | unknown[], current: JsonObject | unknown[], lastSeg: string, v: unknown): unknown {
+  let target: unknown[] | undefined;
+  if (Array.isArray(current) && isArrayIndexSegment(lastSeg)) {
+    const idx = Number(lastSeg);
+    if (!Array.isArray(current[idx])) { current[idx] = []; }
+    target = current[idx] as unknown[];
+  } else if (isObject(current)) {
+    if (!Array.isArray(current[lastSeg])) {
+      Object.defineProperty(current, lastSeg, { value: [], writable: true, enumerable: true, configurable: true });
+    }
+    target = current[lastSeg] as unknown[];
+  }
+  if (Array.isArray(target)) {
+    if (Array.isArray(v)) { target.push(...v); }
+    else { target.push(v); }
+  }
+  return root;
+}
+
 /**
  * Apply a delta to reconstruct session state from delta-based JSONL
  * VS Code Insiders uses this format where:
@@ -50,121 +108,39 @@ interface ProcessableRequest {
  * - v = value
  */
 function applyDelta(state: unknown, delta: unknown): unknown {
-if (!isObject(delta)) {
-return state;
-}
+  if (!isObject(delta)) { return state; }
 
-const kind = delta['kind'];
-const k = delta['k'];
-const v = delta['v'];
+  const kind = delta['kind'];
+  const k = delta['k'];
+  const v = delta['v'];
 
-if (kind === 0) {
-// Initial state - full replacement
-return v;
-}
+  if (kind === 0) { return v; }
+  if (!Array.isArray(k) || k.length === 0) { return state; }
 
-if (!Array.isArray(k) || k.length === 0) {
-return state;
-}
+  const path = k.map(String);
+  for (const seg of path) {
+    if (!isSafePathSegment(seg)) { return state; }
+  }
 
-const path = k.map(String);
-for (const seg of path) {
-if (!isSafePathSegment(seg)) {
-return state;
-}
-}
+  const root: JsonObject | unknown[] = isObject(state) ? state : Object.create(null);
+  const ensureChildContainer = (parent: JsonObject, key: string, nextSeg: string): JsonObject | unknown[] => {
+    const existing = parent[key];
+    if (!isObject(existing)) {
+      const newNode: JsonObject | unknown[] = isArrayIndexSegment(nextSeg) ? [] : Object.create(null);
+      parent[key] = newNode;
+      return newNode;
+    }
+    return existing;
+  };
 
-let root: JsonObject | unknown[] = isObject(state) ? state : Object.create(null);
-let current: JsonObject | unknown[] = root;
+  const traverseResult = traverseDeltaPath(root, path, ensureChildContainer);
+  if (!traverseResult) { return root; }
+  const { root: r, current } = traverseResult;
 
-const ensureChildContainer = (parent: JsonObject, key: string, nextSeg: string): JsonObject | unknown[] => {
-const wantsArray = isArrayIndexSegment(nextSeg);
-const existing = parent[key];
-if (!isObject(existing)) {
-const newNode: JsonObject | unknown[] = wantsArray ? [] : Object.create(null);
-parent[key] = newNode;
-return newNode;
-}
-return existing;
-};
-
-// Traverse to the parent of the target location
-for (let i = 0; i < path.length - 1; i++) {
-const seg = path[i];
-const nextSeg = path[i + 1];
-
-if (Array.isArray(current) && isArrayIndexSegment(seg)) {
-const idx = Number(seg);
-const rawExisting = current[idx];
-let nextNode: JsonObject | unknown[];
-if (!isObject(rawExisting)) {
-nextNode = isArrayIndexSegment(nextSeg) ? [] : Object.create(null);
-current[idx] = nextNode;
-} else {
-nextNode = rawExisting;
-}
-current = nextNode;
-continue;
-}
-
-if (!isObject(current)) {
-return root;
-}
-current = ensureChildContainer(current, seg, nextSeg);
-}
-
-const lastSeg = path[path.length - 1];
-if (kind === 1) {
-// Set value at key path
-if (Array.isArray(current) && isArrayIndexSegment(lastSeg)) {
-current[Number(lastSeg)] = v;
-return root;
-}
-if (isObject(current)) {
-// Use Object.defineProperty for safe assignment, preventing prototype pollution
-Object.defineProperty(current, lastSeg, {
-value: v,
-writable: true,
-enumerable: true,
-configurable: true
-});
-}
-return root;
-}
-
-if (kind === 2) {
-// Append value(s) to array at key path
-let target: unknown[] | undefined;
-if (Array.isArray(current) && isArrayIndexSegment(lastSeg)) {
-const idx = Number(lastSeg);
-if (!Array.isArray(current[idx])) {
-current[idx] = [];
-}
-target = current[idx] as unknown[];
-} else if (isObject(current)) {
-if (!Array.isArray(current[lastSeg])) {
-// Use Object.defineProperty for safe assignment
-Object.defineProperty(current, lastSeg, {
-value: [],
-writable: true,
-enumerable: true,
-configurable: true
-});
-}
-target = current[lastSeg] as unknown[];
-}
-
-if (Array.isArray(target)) {
-if (Array.isArray(v)) {
-target.push(...v);
-} else {
-target.push(v);
-}
-}
-return root;
-}
-
-return root;
+  const lastSeg = path[path.length - 1];
+  if (kind === 1) { return applyDeltaKind1(r, current, lastSeg, v); }
+  if (kind === 2) { return applyDeltaKind2(r, current, lastSeg, v); }
+  return r;
 }
 
 /**
