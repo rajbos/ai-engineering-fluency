@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Usage analysis functions for session data processing.
  * Analysis and aggregation functions extracted from CopilotTokenTracker.
  */
@@ -557,12 +557,9 @@ function processDeltaSessionAnalysis(
 	lines: string[],
 	analysis: SessionUsageAnalysis
 ): void {
-	const sessionModeType = sessionState.inputState?.mode
-		? getModeType(sessionState.inputState.mode)
-		: 'ask';
-	const requests = (sessionState.requests ?? []) as SessionRequestRaw[];
-
+	const sessionModeType = sessionState.inputState?.mode ? getModeType(sessionState.inputState.mode) : 'ask';
 	_pdsaDetectImplicitSelection(sessionState, analysis);
+	const requests = (sessionState.requests ?? []) as SessionRequestRaw[];
 	_pdsaProcessRequests(deps, sessionModeType, requests, analysis);
 	_pdsaComputeModelSwitching(deps, requests, sessionState, analysis);
 	_pdsaExtractThinkingEffort(lines, requests, analysis);
