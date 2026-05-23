@@ -473,28 +473,34 @@ function _ejtsHandleShutdown(event: Record<string, unknown>, state: EjtsState): 
 	}
 }
 
+function _ejtsAccumulateThinkingTokens(data: Record<string, unknown> | undefined, state: EjtsState): void {
+	const reasoningText = data?.reasoningText;
+	if (typeof reasoningText === 'string' && reasoningText) { state.totalThinkingTokens += estimateTokensFromText(reasoningText); }
+	const thinkingText = (data?.thinking as Record<string, unknown> | undefined)?.text;
+	if (typeof thinkingText === 'string' && thinkingText) { state.totalThinkingTokens += estimateTokensFromText(thinkingText); }
+}
+
+function _ejtsAccumulateRealOutput(data: Record<string, unknown>, realOut: number, state: EjtsState): void {
+	if (!state.cliRealOutputByModel) { state.cliRealOutputByModel = {}; }
+	const m = String(data?.model ?? 'unknown');
+	state.cliRealOutputByModel[m] = (state.cliRealOutputByModel[m] ?? 0) + realOut;
+}
+
 /** Handle assistant.message event — accumulate real or estimated output tokens and thinking tokens. */
 function _ejtsHandleAssistantMessage(event: Record<string, unknown>, state: EjtsState): void {
 	const data = event.data as Record<string, unknown> | undefined;
 	const realOut = typeof data?.outputTokens === 'number' ? data.outputTokens as number : 0;
-	if (realOut > 0) {
-		// Real API-reported output tokens — accumulate for ratio-based total estimation
-		if (!state.cliRealOutputByModel) { state.cliRealOutputByModel = {}; }
-		const m = String(data?.model ?? 'unknown');
-		state.cliRealOutputByModel[m] = (state.cliRealOutputByModel[m] ?? 0) + realOut;
-	} else if (data?.content) {
-		state.totalTokens += estimateTokensFromText(String(data.content));
-	}
-	// Thinking tokens (Copilot CLI format)
-	const reasoningText = data?.reasoningText;
-	if (typeof reasoningText === 'string' && reasoningText) {
-		state.totalThinkingTokens += estimateTokensFromText(reasoningText);
-	}
-	// JetBrains format uses event.data.thinking.text
-	const thinkingText = (data?.thinking as Record<string, unknown> | undefined)?.text;
-	if (typeof thinkingText === 'string' && thinkingText) {
-		state.totalThinkingTokens += estimateTokensFromText(thinkingText);
-	}
+	if (realOut > 0) { _ejtsAccumulateRealOutput(data!, realOut, state); }
+	else if (data?.content) { state.totalTokens += estimateTokensFromText(String(data.content)); }
+	_ejtsAccumulateThinkingTokens(data, state);
+}
+
+function _ejtsHandleToolComplete(data: Record<string, unknown> | undefined, state: EjtsState): void {
+	if (!data?.result) { return; }
+	const result = data.result as Record<string, unknown>;
+	const text = typeof result.detailedContent === 'string' ? result.detailedContent
+		: typeof result.content === 'string' ? result.content : '';
+	if (text) { state.totalTokens += estimateTokensFromText(text); }
 }
 
 /** Dispatch an event to the appropriate handler based on its type field. */
@@ -503,22 +509,14 @@ function _ejtsHandleEventType(event: Record<string, unknown>, state: EjtsState):
 	if (event.type === 'user.message' && data?.content) {
 		state.totalTokens += estimateTokensFromText(String(data.content));
 	} else if (event.type === 'user.message_rendered' && data?.renderedMessage) {
-		// JetBrains IDE: rendered message includes injected file context alongside the
-		// user question. Count it in place of user.message so the context tokens are
-		// captured.
 		state.totalTokens += estimateTokensFromText(String(data.renderedMessage));
 	} else if (event.type === 'assistant.message') {
 		_ejtsHandleAssistantMessage(event, state);
 	} else if (event.type === 'tool.execution_start') {
 		state.totalEstToolCalls++;
-	} else if (event.type === 'tool.execution_complete' && data?.result) {
-		const result = data.result as Record<string, unknown>;
-		// Prefer detailedContent (captures full subagent prompt for task launches)
-		const text = typeof result.detailedContent === 'string' ? result.detailedContent
-			: typeof result.content === 'string' ? result.content : '';
-		if (text) { state.totalTokens += estimateTokensFromText(text); }
+	} else if (event.type === 'tool.execution_complete') {
+		_ejtsHandleToolComplete(data, state);
 	} else if (event.content) {
-		// Fallback for other formats that might have content
 		state.totalTokens += estimateTokensFromText(String(event.content));
 	}
 }
