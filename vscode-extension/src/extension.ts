@@ -3139,88 +3139,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// Cached versions of session file reading methods
 	public async getSessionFileDataCached(sessionFilePath: string, mtime: number, fileSize: number): Promise<SessionFileCache> {
-		// Check if we have valid cached data
 		const cached = this.getCachedSessionData(sessionFilePath);
 		if (cached && cached.mtime === mtime && cached.size === fileSize) {
-			// The cache entry may have been created by updateCacheWithSessionDetails (a "partial"
-			// entry that only has interactions/title/timestamps but no debug-log token data).
-			// If debug-log data is missing, try to supplement the entry with it now — this is
-			// fast (one file read) and avoids a full recomputation just to get the token totals.
 			if (cached.debugLogInputTokens === undefined) {
-				const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
-				if (debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0) {
-					// Build corrected modelUsage and dailyRollups from debug-log per-model breakdown
-					let supplementModelUsage = cached.modelUsage;
-					let supplementDailyRollups = cached.dailyRollups;
-					if (Object.keys(debugLogTokens.modelBreakdown).length > 0) {
-						supplementModelUsage = {};
-						for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-							supplementModelUsage[model] = {
-								inputTokens: bd.inputTokens,
-								outputTokens: bd.outputTokens,
-								...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}),
-							};
-						}
-						if (cached.dailyRollups) {
-							const totalDayInteractions = Object.values(cached.dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
-							if (totalDayInteractions > 0) {
-								supplementDailyRollups = {};
-								for (const [dayKey, dayRollup] of Object.entries(cached.dailyRollups)) {
-									const fraction = dayRollup.interactions / totalDayInteractions;
-									const dayModelUsage: ModelUsage = {};
-									for (const [model, usage] of Object.entries(supplementModelUsage)) {
-										dayModelUsage[model] = {
-											inputTokens: Math.round(usage.inputTokens * fraction),
-											outputTokens: Math.round(usage.outputTokens * fraction),
-											...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}),
-										};
-									}
-									supplementDailyRollups[dayKey] = { ...dayRollup, modelUsage: dayModelUsage };
-								}
-							}
-						}
-					}
-					const supplemented: SessionFileCache = {
-						...cached,
-						modelUsage: supplementModelUsage,
-						dailyRollups: supplementDailyRollups,
-						actualTokens: debugLogTokens.inputTokens + debugLogTokens.outputTokens,
-						...(debugLogTokens.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
-						debugLogInputTokens: debugLogTokens.inputTokens,
-						debugLogOutputTokens: debugLogTokens.outputTokens,
-					};
-					this.setCachedSessionData(sessionFilePath, supplemented, fileSize);
-					this._cacheHits++;
-					return supplemented;
-				}
+				const supplemented = await this.supplementCacheWithDebugLog(cached, sessionFilePath, fileSize);
+				if (supplemented) { return supplemented; }
 			}
 			this._cacheHits++;
 			return cached;
 		}
 
 		this._cacheMisses++;
+		const { preloadedContent, preloadedParsedJson } = await this.preloadSessionFileContent(sessionFilePath);
 
-		// Pre-read file content once for regular Copilot Chat files to avoid redundant reads
-		let preloadedContent: string | undefined;
-		const isSpecialSession = this.findEcosystem(sessionFilePath) !== null;
-		if (!isSpecialSession) {
-			preloadedContent = await fs.promises.readFile(sessionFilePath, 'utf8');
-		}
-
-		// Pre-parse JSON content once for non-JSONL files to avoid multiple redundant JSON.parse calls.
-		// Each analysis function independently parses the same content; sharing the parsed object
-		// eliminates up to 7 redundant JSON.parse operations per cache miss for large session files.
-		let preloadedParsedJson: any | undefined;
-		if (preloadedContent
-			&& !sessionFilePath.endsWith('.jsonl')
-			&& !_isJsonlContent(preloadedContent)
-			&& !_isUuidPointerFile(preloadedContent)
-		) {
-			try { preloadedParsedJson = JSON.parse(preloadedContent); } catch { /* each function handles parse errors individually */ }
-		}
-
-		// Cache miss - process the file using pre-read content and pre-parsed JSON when available.
-		// Use Promise.all so ecosystem-session I/O (eco.getTokens etc.) can overlap across calls.
 		const [tokenResult, interactions, modelUsage, usageAnalysis, sessionMeta] = await Promise.all([
 			this.estimateTokensFromSession(sessionFilePath, preloadedContent, preloadedParsedJson),
 			this.countInteractionsInSession(sessionFilePath, preloadedContent, preloadedParsedJson),
@@ -3229,169 +3160,190 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.extractSessionMetadata(sessionFilePath, preloadedContent, preloadedParsedJson),
 		]);
 
-		// Compute per-UTC-day rollups by distributing cached totals proportionally across days
-		// (same approach as syncService.processCachedSessionFile)
+		const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, modelUsage, interactions);
+		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
+		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, modelUsage, dailyRollups, totalInteractions);
+
+		const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups);
+		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
+		return sessionData;
+	}
+
+	private async preloadSessionFileContent(sessionFilePath: string): Promise<{ preloadedContent: string | undefined; preloadedParsedJson: any | undefined }> {
+		const isSpecialSession = this.findEcosystem(sessionFilePath) !== null;
+		if (isSpecialSession) { return { preloadedContent: undefined, preloadedParsedJson: undefined }; }
+		const preloadedContent = await fs.promises.readFile(sessionFilePath, 'utf8');
+		let preloadedParsedJson: any | undefined;
+		const isPlainJson = !sessionFilePath.endsWith('.jsonl') && !_isJsonlContent(preloadedContent) && !_isUuidPointerFile(preloadedContent);
+		if (isPlainJson) {
+			try { preloadedParsedJson = JSON.parse(preloadedContent); } catch { /* handled individually */ }
+		}
+		return { preloadedContent, preloadedParsedJson };
+	}
+
+	private buildSessionDataObject(
+		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; cacheReadTokens?: number },
+		interactions: number,
+		resolvedModelUsage: ModelUsage,
+		mtime: number,
+		fileSize: number,
+		usageAnalysis: SessionUsageAnalysis,
+		sessionMeta: { title?: string; firstInteraction: string | null; lastInteraction: string | null },
+		resolvedActualTokens: number | undefined,
+		finalCacheReadTokens: number | undefined,
+		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number } | null | undefined,
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
+	): SessionFileCache {
+		const hasDebugLog = debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0;
+		const hasEditScope = usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0;
+		return {
+			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
+			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
+			lastInteraction: sessionMeta.lastInteraction, thinkingTokens: tokenResult.thinkingTokens,
+			actualTokens: resolvedActualTokens,
+			...(finalCacheReadTokens ? { cacheReadTokens: finalCacheReadTokens } : {}),
+			...(debugLogTokens?.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
+			...(hasDebugLog ? { debugLogInputTokens: debugLogTokens!.inputTokens, debugLogOutputTokens: debugLogTokens!.outputTokens } : {}),
+			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
+			...(hasEditScope ? {
+				linesAdded: usageAnalysis!.editScope!.linesAdded,
+				linesRemoved: usageAnalysis!.editScope!.linesRemoved ?? 0,
+				...(usageAnalysis!.editScope!.languageUsage ? { languageUsage: usageAnalysis!.editScope!.languageUsage } : {}),
+			} : {}),
+		};
+	}
+
+	private async supplementCacheWithDebugLog(cached: SessionFileCache, sessionFilePath: string, fileSize: number): Promise<SessionFileCache | null> {
+		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
+		if (!debugLogTokens || (debugLogTokens.inputTokens + debugLogTokens.outputTokens) === 0) {
+			this._cacheHits++;
+			return null;
+		}
+		let supplementModelUsage = cached.modelUsage;
+		let supplementDailyRollups = cached.dailyRollups;
+		if (Object.keys(debugLogTokens.modelBreakdown).length > 0) {
+			supplementModelUsage = {};
+			for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
+				supplementModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+			}
+			if (cached.dailyRollups) {
+				const totalDayInteractions = Object.values(cached.dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
+				if (totalDayInteractions > 0) {
+					supplementDailyRollups = {};
+					for (const [dayKey, dayRollup] of Object.entries(cached.dailyRollups)) {
+						const fraction = dayRollup.interactions / totalDayInteractions;
+						const dayModelUsage: ModelUsage = {};
+						for (const [model, usage] of Object.entries(supplementModelUsage)) {
+							dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}) };
+						}
+						supplementDailyRollups[dayKey] = { ...dayRollup, modelUsage: dayModelUsage };
+					}
+				}
+			}
+		}
+		const supplemented: SessionFileCache = {
+			...cached, modelUsage: supplementModelUsage, dailyRollups: supplementDailyRollups,
+			actualTokens: debugLogTokens.inputTokens + debugLogTokens.outputTokens,
+			...(debugLogTokens.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
+			debugLogInputTokens: debugLogTokens.inputTokens,
+			debugLogOutputTokens: debugLogTokens.outputTokens,
+		};
+		this.setCachedSessionData(sessionFilePath, supplemented, fileSize);
+		this._cacheHits++;
+		return supplemented;
+	}
+
+	private computeDailyRollups(
+		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [utcDayKey: string]: number } },
+		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
+		modelUsage: ModelUsage,
+		interactions: number
+	): { dailyRollups: { [utcDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
 		const dailyRollups: { [utcDayKey: string]: DailyRollupEntry } = {};
 		const dailyInteractionMap = sessionMeta.dailyInteractions;
 		const totalInteractions = Object.values(dailyInteractionMap).reduce((a, b) => a + b, 0);
+
 		if (totalInteractions > 0) {
 			for (const [dayKey, dayInteractionCount] of Object.entries(dailyInteractionMap)) {
 				const fraction = dayInteractionCount / totalInteractions;
-				const dayModelUsage: ModelUsage = {};
-				for (const [model, usage] of Object.entries(modelUsage)) {
-					dayModelUsage[model] = {
-						inputTokens: Math.round(usage.inputTokens * fraction),
-						outputTokens: Math.round(usage.outputTokens * fraction),
-						...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}),
-						...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}),
-					};
-				}
-				dailyRollups[dayKey] = {
-					tokens: Math.round(tokenResult.tokens * fraction),
-					actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction),
-					thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction),
-					cachedReadTokens: 0, // filled in below after resolvedCacheReadTokens is known
-					interactions: dayInteractionCount,
-					modelUsage: dayModelUsage,
-				};
+				const dayModelUsage = this.scaledModelUsage(modelUsage, fraction);
+				dailyRollups[dayKey] = { tokens: Math.round(tokenResult.tokens * fraction), actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction), thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction), cachedReadTokens: 0, interactions: dayInteractionCount, modelUsage: dayModelUsage };
 			}
+		} else {
+			this.computeFallbackDailyRollup(dailyRollups, sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
 		}
+		return { dailyRollups, totalInteractions };
+	}
 
-		// Fallback for ecosystem sessions (Mistral Vibe, Claude Desktop Cowork, etc.):
-		// extractSessionMetadata always returns dailyInteractions: {} for these formats since
-		// their raw files (meta.json, .jsonl) aren't standard Copilot Chat JSONL/JSON.
-		// Use firstInteraction to attribute all tokens to the single day of the session so that
-		// processCachedSessionFile's fast path can use dailyRollups and does not fall through to
-		// the raw-file slow path which cannot parse these non-standard formats.
-		if (Object.keys(dailyRollups).length === 0 && tokenResult.tokens > 0 && sessionMeta.firstInteraction) {
-			try {
-				const interactionDate = new Date(sessionMeta.firstInteraction);
-				if (!isNaN(interactionDate.getTime())) {
-					const dayKey = interactionDate.toISOString().slice(0, 10);
-					const dayModelUsage: ModelUsage = {};
-					for (const [model, usage] of Object.entries(modelUsage)) {
-						dayModelUsage[model] = {
-							inputTokens: usage.inputTokens,
-							outputTokens: usage.outputTokens,
-							...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: usage.cachedReadTokens } : {}),
-							...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: usage.cacheCreationTokens } : {}),
-						};
-					}
-					dailyRollups[dayKey] = {
-						tokens: tokenResult.tokens,
-						actualTokens: tokenResult.actualTokens || 0,
-						thinkingTokens: tokenResult.thinkingTokens || 0,
-						cachedReadTokens: 0, // filled in below after resolvedCacheReadTokens is known
-						interactions: Math.max(1, interactions),
-						modelUsage: dayModelUsage,
-					};
-				}
-			} catch { /* ignore date parsing errors */ }
+	private computeFallbackDailyRollup(dailyRollups: { [utcDayKey: string]: DailyRollupEntry }, firstInteraction: string | null, tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number }, modelUsage: ModelUsage, interactions: number): void {
+		if (!tokenResult.tokens || !firstInteraction) { return; }
+		try {
+			const interactionDate = new Date(firstInteraction);
+			if (isNaN(interactionDate.getTime())) { return; }
+			const dayKey = interactionDate.toISOString().slice(0, 10);
+			const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
+			dailyRollups[dayKey] = { tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens || 0, thinkingTokens: tokenResult.thinkingTokens || 0, cachedReadTokens: 0, interactions: Math.max(1, interactions), modelUsage: dayModelUsage };
+		} catch { /* ignore */ }
+	}
+
+	private scaledModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
+		const dayModelUsage: ModelUsage = {};
+		for (const [model, usage] of Object.entries(modelUsage)) {
+			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}), ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}) };
 		}
+		return dayModelUsage;
+	}
 
-		// For VS Code Copilot Chat sessions, the debug log companion file records every
-		// LLM API call made during the session. Agent-mode sessions make multiple calls
-		// per user turn; the chat session file only retains the last call's token counts.
-		// Reading the debug log and summing all `llm_request` events gives the true totals.
-		// We always attempt to read the debug log so we can correct actualTokens even when
-		// cached-token data is already present in the session file.
-		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
-
-		// Prefer debug-log actualTokens when the log contains at least one llm_request event.
+	private resolveAndApplyDebugLog(
+		tokenResult: { tokens: number; actualTokens?: number; cacheReadTokens?: number },
+		debugLogTokens: { inputTokens: number; outputTokens: number; cachedTokens?: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined,
+		modelUsage: ModelUsage,
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
+		totalInteractions: number
+	): { resolvedActualTokens: number | undefined; finalCacheReadTokens: number | undefined; resolvedModelUsage: ModelUsage } {
 		const resolvedActualTokens = (debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0)
 			? debugLogTokens.inputTokens + debugLogTokens.outputTokens
 			: tokenResult.actualTokens;
 
-		// Use debug-log cached tokens only when the session parser found none (avoids double-counting).
 		const debugLogCached = !tokenResult.cacheReadTokens ? (debugLogTokens?.cachedTokens ?? 0) : 0;
 		const resolvedCacheReadTokens = tokenResult.cacheReadTokens || debugLogCached || undefined;
-
-		// For ecosystem adapters (Claude Code, Claude Desktop, OpenCode, Gemini CLI),
-		// cached tokens are tracked per-model in modelUsage.cachedReadTokens.
-		// Sum them up as a session-level total when no other source provided the total.
-		const modelCachedTotal = !resolvedCacheReadTokens
-			? Object.values(modelUsage).reduce((sum, u) => sum + (u.cachedReadTokens ?? 0), 0)
-			: 0;
+		const modelCachedTotal = !resolvedCacheReadTokens ? Object.values(modelUsage).reduce((sum, u) => sum + (u.cachedReadTokens ?? 0), 0) : 0;
 		const finalCacheReadTokens = resolvedCacheReadTokens || (modelCachedTotal > 0 ? modelCachedTotal : undefined);
 
-		// Backfill cachedReadTokens into daily rollups now that we have the session total.
-		// Distribute proportionally so stats accumulation works correctly.
-		if (finalCacheReadTokens && Object.keys(dailyRollups).length > 0) {
-			const dayKeys = Object.keys(dailyRollups);
-			if (dayKeys.length === 1) {
-				dailyRollups[dayKeys[0]].cachedReadTokens = finalCacheReadTokens;
-			} else {
-				// Distribute proportionally based on the interactions share of each day.
-				const totalInteractionsForCache = dayKeys.reduce((s, k) => s + dailyRollups[k].interactions, 0);
-				let remaining = finalCacheReadTokens;
-				dayKeys.slice(0, -1).forEach(k => {
-					const allocated = totalInteractionsForCache > 0
-						? Math.round(finalCacheReadTokens * dailyRollups[k].interactions / totalInteractionsForCache)
-						: 0;
-					dailyRollups[k].cachedReadTokens = allocated;
-					remaining -= allocated;
-				});
-				dailyRollups[dayKeys[dayKeys.length - 1]].cachedReadTokens = Math.max(0, remaining);
-			}
+		this.backfillDailyRollupCacheTokens(dailyRollups, finalCacheReadTokens);
+
+		const resolvedModelUsage = this.applyDebugLogModelBreakdown(modelUsage, debugLogTokens, dailyRollups, totalInteractions);
+		return { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage };
+	}
+
+	private backfillDailyRollupCacheTokens(dailyRollups: { [utcDayKey: string]: DailyRollupEntry }, finalCacheReadTokens: number | undefined): void {
+		if (!finalCacheReadTokens || Object.keys(dailyRollups).length === 0) { return; }
+		const dayKeys = Object.keys(dailyRollups);
+		if (dayKeys.length === 1) {
+			dailyRollups[dayKeys[0]].cachedReadTokens = finalCacheReadTokens;
+		} else {
+			const totalForCache = dayKeys.reduce((s, k) => s + dailyRollups[k].interactions, 0);
+			let remaining = finalCacheReadTokens;
+			dayKeys.slice(0, -1).forEach(k => {
+				const allocated = totalForCache > 0 ? Math.round(finalCacheReadTokens * dailyRollups[k].interactions / totalForCache) : 0;
+				dailyRollups[k].cachedReadTokens = allocated;
+				remaining -= allocated;
+			});
+			dailyRollups[dayKeys[dayKeys.length - 1]].cachedReadTokens = Math.max(0, remaining);
 		}
+	}
 
-		// Replace modelUsage with debug-log per-model breakdown when available.
-		// Agent-mode sessions make multiple LLM API calls per user turn; the session file only
-		// records the last call's tokens, severely under-counting input/output and therefore cost.
-		// The debug log records every API call with the model and exact token counts.
-		let resolvedModelUsage = modelUsage;
-		if (debugLogTokens && Object.keys(debugLogTokens.modelBreakdown).length > 0) {
-			resolvedModelUsage = {};
-			for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-				resolvedModelUsage[model] = {
-					inputTokens: bd.inputTokens,
-					outputTokens: bd.outputTokens,
-					...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}),
-				};
-			}
-			// Update per-day rollup model usage with proportionally distributed debug-log values
-			for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
-				const fraction = totalInteractions > 0 ? dayRollup.interactions / totalInteractions : 1;
-				const dayModelUsage: ModelUsage = {};
-				for (const [model, usage] of Object.entries(resolvedModelUsage)) {
-					dayModelUsage[model] = {
-						inputTokens: Math.round(usage.inputTokens * fraction),
-						outputTokens: Math.round(usage.outputTokens * fraction),
-						...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}),
-					};
-				}
-				dailyRollups[dayKey].modelUsage = dayModelUsage;
-			}
+	private applyDebugLogModelBreakdown(modelUsage: ModelUsage, debugLogTokens: { inputTokens: number; outputTokens: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined, dailyRollups: { [utcDayKey: string]: DailyRollupEntry }, totalInteractions: number): ModelUsage {
+		if (!debugLogTokens || Object.keys(debugLogTokens.modelBreakdown).length === 0) { return modelUsage; }
+		const resolvedModelUsage: ModelUsage = {};
+		for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
+			resolvedModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
 		}
-
-		const sessionData: SessionFileCache = {
-			tokens: tokenResult.tokens,
-			interactions,
-			modelUsage: resolvedModelUsage,
-			mtime,
-			size: fileSize,
-			usageAnalysis,
-			title: sessionMeta.title,
-			firstInteraction: sessionMeta.firstInteraction,
-			lastInteraction: sessionMeta.lastInteraction,
-			thinkingTokens: tokenResult.thinkingTokens,
-			actualTokens: resolvedActualTokens,
-			...(finalCacheReadTokens ? { cacheReadTokens: finalCacheReadTokens } : {}),
-			...(debugLogTokens?.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
-			...(debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0 ? {
-				debugLogInputTokens: debugLogTokens.inputTokens,
-				debugLogOutputTokens: debugLogTokens.outputTokens,
-			} : {}),
-			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
-			...(usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0 ? {
-				linesAdded: usageAnalysis.editScope.linesAdded,
-				linesRemoved: usageAnalysis.editScope.linesRemoved ?? 0,
-				...(usageAnalysis.editScope.languageUsage ? { languageUsage: usageAnalysis.editScope.languageUsage } : {}),
-			} : {}),
-		};
-
-		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
-		return sessionData;
+		for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
+			const fraction = totalInteractions > 0 ? dayRollup.interactions / totalInteractions : 1;
+			dailyRollups[dayKey].modelUsage = this.scaledModelUsage(resolvedModelUsage, fraction);
+		}
+		return resolvedModelUsage;
 	}
 
 
