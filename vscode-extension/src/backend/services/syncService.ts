@@ -278,30 +278,40 @@ let processedLines = 0;
 for (const line of lines) {
 lineCount++;
 if (!line.trim()) { continue; }
+processedLines = this.processCliJsonlLine(line, fileMtimeMs, startMs, todayKey, sessionFile, lineCount, processedLines, dayModelInteractions);
+}
+return dayModelInteractions;
+}
+
+private processCliJsonlLine(
+line: string,
+fileMtimeMs: number,
+startMs: number,
+todayKey: string,
+sessionFile: string,
+lineCount: number,
+processedLines: number,
+dayModelInteractions: Map<string, Map<string, number>>
+): number {
 try {
 const event = JSON.parse(line);
-if (!event || typeof event !== 'object') { continue; }
+if (!event || typeof event !== 'object') { return processedLines; }
 const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-if (!eventMs || eventMs < startMs) { continue; }
+if (!eventMs || eventMs < startMs) { return processedLines; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
 const model = (event.model || 'gpt-4o').toString();
-const isFileFromToday = dayKey === todayKey;
-if (isFileFromToday && processedLines < 3) {
+if (dayKey === todayKey && processedLines < 3) {
 this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} line ${lineCount}: eventMs=${new Date(eventMs).toISOString()}, dayKey=${dayKey}, type=${event.type}`);
 processedLines++;
 }
-// Track interaction for this day+model (count all events, not just user.message)
-if (!dayModelInteractions.has(dayKey)) {
-dayModelInteractions.set(dayKey, new Map());
-}
+if (!dayModelInteractions.has(dayKey)) { dayModelInteractions.set(dayKey, new Map()); }
 const dayMap = dayModelInteractions.get(dayKey)!;
 dayMap.set(model, (dayMap.get(model) || 0) + 1);
 } catch {
 // skip malformed line
 }
-}
-return dayModelInteractions;
+return processedLines;
 }
 
 /**
