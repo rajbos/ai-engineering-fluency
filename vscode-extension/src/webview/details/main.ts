@@ -307,23 +307,55 @@ root.append(themeStyle, style, container);
 
 type MetricRow = { label: string; labelTooltip?: string; icon: string; color?: string; today: string; last30Days: string; month: string; lastMonth: string; projected: string };
 
+function sumInputTokens(p: PeriodStats): number {
+	return Object.values(p.modelUsage).reduce((s, m) => s + m.inputTokens, 0);
+}
+
+function sumOutputTokens(p: PeriodStats): number {
+	return Object.values(p.modelUsage).reduce((s, m) => s + m.outputTokens, 0);
+}
+
+function hasActualTokens(p: PeriodStats): boolean {
+	return (p.actualTokens || 0) > 0;
+}
+
+function serviceOverheadPct(p: PeriodStats): string {
+	return hasActualTokens(p) ? formatPercent(((p.actualTokens - p.estimatedTokens) / p.actualTokens) * 100) : '—';
+}
+
+function inputTokenCell(p: PeriodStats): string {
+	return hasActualTokens(p) ? formatCompact(sumInputTokens(p)) : '—';
+}
+
+function outputTokenCell(p: PeriodStats): string {
+	return hasActualTokens(p) ? formatCompact(sumOutputTokens(p)) : '—';
+}
+
+function buildCachedTokenRow(stats: DetailedStats): MetricRow[] {
+	if (!(stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)) {
+		return [];
+	}
+	return [{ label: 'Cached tokens', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }];
+}
+
+function buildCopilotPlanRow(stats: DetailedStats): MetricRow[] {
+	if (!stats.copilotPlan) { return []; }
+	const plan = stats.copilotPlan;
+	const credits = plan.monthlyAiCreditsUsd > 0 ? `$${plan.monthlyAiCreditsUsd} credits/month` : 'no credits';
+	return [{ label: `${plan.planName} (${credits})`, labelTooltip: `Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`, icon: '🏷️', color: '#60a5fa', today: '—', last30Days: '—', month: '—', lastMonth: '—', projected: '—' }];
+}
+
 function buildMetricsRows(stats: DetailedStats, projections: Projections): MetricRow[] {
-	const sumInput  = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.inputTokens, 0);
-	const sumOutput = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.outputTokens, 0);
-	const hasActual = (p: PeriodStats) => (p.actualTokens || 0) > 0;
-	const svcPct = (p: PeriodStats) => hasActual(p) ? formatPercent(((p.actualTokens - p.estimatedTokens) / p.actualTokens) * 100) : '—';
 	const rows: MetricRow[] = [
 		{ label: 'Tokens (input+output)', icon: '🟣', color: '#c37bff', today: formatCompact(stats.today.tokens), last30Days: formatCompact(stats.last30Days.tokens), month: formatCompact(stats.month.tokens), lastMonth: formatCompact(stats.lastMonth.tokens), projected: formatCompact(projections.projectedTokens) },
-		{ label: 'Input tokens', icon: '⬆️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumInput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumInput(stats.last30Days)) : '—', month: hasActual(stats.month) ? formatCompact(sumInput(stats.month)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumInput(stats.lastMonth)) : '—', projected: '—' },
-		{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumOutput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumOutput(stats.last30Days)) : '—', month: hasActual(stats.month) ? formatCompact(sumOutput(stats.month)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumOutput(stats.lastMonth)) : '—', projected: '—' },
-		...((stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)
-			? [{ label: 'Cached tokens', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }]
-			: []),
+		{ label: 'Input tokens', icon: '⬆️', color: '#c37bff', today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: '—' },
+		{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: outputTokenCell(stats.today), last30Days: outputTokenCell(stats.last30Days), month: outputTokenCell(stats.month), lastMonth: outputTokenCell(stats.lastMonth), projected: '—' },
+		...buildCachedTokenRow(stats),
 		{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), month: formatCompact(stats.month.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },
-		{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: svcPct(stats.today), last30Days: svcPct(stats.last30Days), month: svcPct(stats.month), lastMonth: svcPct(stats.lastMonth), projected: '—' },
+		{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: serviceOverheadPct(stats.today), last30Days: serviceOverheadPct(stats.last30Days), month: serviceOverheadPct(stats.month), lastMonth: serviceOverheadPct(stats.lastMonth), projected: '—' },
 		{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
 		{ label: 'Estimated cost (UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
-		...(stats.copilotPlan ? [{ label: `${stats.copilotPlan.planName} (${stats.copilotPlan.monthlyAiCreditsUsd > 0 ? `$${stats.copilotPlan.monthlyAiCreditsUsd} credits/month` : 'no credits'})`, labelTooltip: `Your active GitHub Copilot subscription plan (ID: ${stats.copilotPlan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`, icon: '🏷️', color: '#60a5fa', today: '—', last30Days: '—', month: '—', lastMonth: '—', projected: '—' }] : []),
+		...buildCopilotPlanRow(stats),
 		{ label: 'Sessions', icon: '📂', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
 		{ label: 'Average interactions/session', icon: '💬', color: '#8ce0ff', today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: '—' },
 		{ label: 'Average tokens/session', icon: '🔢', color: '#7ce38b', today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: '—' },
