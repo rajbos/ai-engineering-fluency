@@ -147,55 +147,12 @@ export class BlobUploadService {
 				};
 			}
 
-			const containerClient = await this.getContainerClient(
-				storageAccount,
-				settings.containerName,
-				credential
-			);
+			const containerClient = await this.getContainerClient(storageAccount, settings.containerName, credential);
+			const result = await this.uploadAllFiles(containerClient, sessionFiles, machineId, datasetId, settings.compressFiles, credential);
 
-			let filesUploaded = 0;
-			const errors: string[] = [];
+			if (result.earlyReturn) { return result.earlyReturn; }
 
-			// Upload each session file
-			for (const sessionFile of sessionFiles) {
-				try {
-					await this.uploadFile(
-						containerClient,
-						sessionFile,
-						machineId,
-						datasetId,
-						settings.compressFiles
-					);
-					filesUploaded++;
-				} catch (error: unknown) {
-					const fileName = path.basename(sessionFile);
-					const errorMsg = safeStringifyError(error);
-
-					// Stop immediately on authorization errors — retrying other files won't help.
-					if (isAuthError(error)) {
-						const isEntraId = !('accountName' in credential);
-						const hint = isEntraId
-							? 'Your Entra ID identity needs the "Storage Blob Data Contributor" role on this storage account. '
-							  + 'Note: the Portal Storage Browser may use Access Keys, which bypass RBAC — '
-							  + 'that is different from the data plane Entra ID access the extension uses. '
-							  + 'Assign the role via: az role assignment create --assignee <your-id> --role "Storage Blob Data Contributor" --scope <storage-account-resource-id>'
-							: 'The storage shared key may not have blob write permission. Check that shared key access (allowSharedKeyAccess) is enabled on the storage account.';
-						this.warn(`Blob upload: authorization failed for ${fileName}. ${hint}`);
-						return {
-							success: false,
-							filesUploaded,
-							message: `Authorization failed: ${hint}`
-						};
-					}
-
-					errors.push(`${fileName}: ${errorMsg}`);
-					this.warn(`Blob upload: failed to upload ${fileName}: ${errorMsg}`);
-				}
-			}
-
-			// Only update lastUploadTime when files were actually uploaded successfully.
-			// On failure (0 files uploaded), preserve the previous timestamp so the next
-			// sync cycle retries instead of waiting for the full frequency interval.
+			const { filesUploaded, errors } = result;
 			if (filesUploaded > 0) {
 				this.uploadStatus.set(machineId, {
 					lastUploadTime: Date.now(),
@@ -211,13 +168,46 @@ export class BlobUploadService {
 
 			this.log(`Blob upload: ${message}`);
 			return { success: errors.length === 0, filesUploaded, message };
-
 		} catch (error: unknown) {
 			const errorMsg = safeStringifyError(error);
 			this.warn(`Blob upload: failed: ${errorMsg}`);
-			// Do not update lastUploadTime on failure — allow the next sync cycle to retry.
 			return { success: false, filesUploaded: 0, message: `Upload failed: ${errorMsg}` };
 		}
+	}
+
+	private async uploadAllFiles(
+		containerClient: ContainerClient,
+		sessionFiles: string[],
+		machineId: string,
+		datasetId: string,
+		compress: boolean,
+		credential: TokenCredential | StorageSharedKeyCredential
+	): Promise<{ filesUploaded: number; errors: string[]; earlyReturn?: { success: boolean; filesUploaded: number; message: string } }> {
+		let filesUploaded = 0;
+		const errors: string[] = [];
+		for (const sessionFile of sessionFiles) {
+			try {
+				await this.uploadFile(containerClient, sessionFile, machineId, datasetId, compress);
+				filesUploaded++;
+			} catch (error: unknown) {
+				const fileName = path.basename(sessionFile);
+				const errorMsg = safeStringifyError(error);
+				if (isAuthError(error)) {
+					const isEntraId = !('accountName' in credential);
+					const hint = isEntraId
+						? 'Your Entra ID identity needs the "Storage Blob Data Contributor" role on this storage account. '
+						  + 'Note: the Portal Storage Browser may use Access Keys, which bypass RBAC — '
+						  + 'that is different from the data plane Entra ID access the extension uses. '
+						  + 'Assign the role via: az role assignment create --assignee <your-id> --role "Storage Blob Data Contributor" --scope <storage-account-resource-id>'
+						: 'The storage shared key may not have blob write permission. Check that shared key access (allowSharedKeyAccess) is enabled on the storage account.';
+					this.warn(`Blob upload: authorization failed for ${fileName}. ${hint}`);
+					return { filesUploaded, errors, earlyReturn: { success: false, filesUploaded, message: `Authorization failed: ${hint}` } };
+				}
+				errors.push(`${fileName}: ${errorMsg}`);
+				this.warn(`Blob upload: failed to upload ${fileName}: ${errorMsg}`);
+			}
+		}
+		return { filesUploaded, errors };
 	}
 
 	/**
