@@ -6377,499 +6377,271 @@ ${hashtag}`;
    * Fetches and aggregates data for the Team Dashboard.
    */
   private async getDashboardData(): Promise<any> {
-    if (!this.backend) {
-      throw new Error("Backend not configured");
-    }
-
-    const { BackendUtility } =
-      await import("./backend/services/utilityService.js");
-    const { computeBackendSharingPolicy, hashMachineIdForTeam } =
-      await import("./backend/sharingProfile.js");
+    if (!this.backend) { throw new Error("Backend not configured"); }
+    const { BackendUtility } = await import("./backend/services/utilityService.js");
+    const { computeBackendSharingPolicy, hashMachineIdForTeam } = await import("./backend/sharingProfile.js");
     const settings = this.backend.getSettings();
-
-    // Log backend settings for debugging
-    this.log(
-      `[Dashboard] Backend settings - userIdentityMode: ${settings.userIdentityMode}, configured userId: "${settings.userId}", datasetId: "${settings.datasetId}"`,
-    );
-
-    // Compute the effective sharing policy so we know how entities were stored
-    const sharingPolicy = computeBackendSharingPolicy({
-      enabled: settings.enabled ?? true,
-      profile: settings.sharingProfile ?? 'off',
-      shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames ?? false,
-    });
-
-    // Resolve the effective userId for the current user based on backend config
+    this.log(`[Dashboard] Backend settings - userIdentityMode: ${settings.userIdentityMode}, configured userId: "${settings.userId}", datasetId: "${settings.datasetId}"`);
+    const sharingPolicy = computeBackendSharingPolicy({ enabled: settings.enabled ?? true, profile: settings.sharingProfile ?? 'off', shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames ?? false });
     const currentUserId = await this.backend.resolveEffectiveUserId(settings);
-
-    // When includeUserDimension is false (soloFull / teamAnonymized), entities are stored
-    // without a userId. In that case, fall back to matching personal data by machineId.
-    const rawMachineId = vscode.env.machineId;
-    const currentMachineId = sharingPolicy.includeUserDimension
-      ? "" // not needed — we match by userId
-      : sharingPolicy.machineIdStrategy === "hashed"
-        ? hashMachineIdForTeam({ datasetId: settings.datasetId ?? "", machineId: rawMachineId })
-        : rawMachineId; // 'raw' strategy (soloFull)
-
+    const currentMachineId = this.resolveCurrentMachineId(settings, sharingPolicy, hashMachineIdForTeam);
     if (!currentUserId && !currentMachineId) {
-      this.warn(
-        "[Dashboard] No user identity available. Ensure sharing profile includes user dimension.",
-      );
-      this.warn(
-        `[Dashboard] Settings: mode=${settings.userIdentityMode}, userId="${settings.userId}"`,
-      );
+      this.warn("[Dashboard] No user identity available. Ensure sharing profile includes user dimension.");
+      this.warn(`[Dashboard] Settings: mode=${settings.userIdentityMode}, userId="${settings.userId}"`);
     }
-
-    // Query backend for the configured lookback window
     const now = new Date();
     const todayKey = BackendUtility.toUtcDayKey(now);
     const startKey = BackendUtility.addDaysUtc(todayKey, -(settings.lookbackDays - 1));
-
-    // Fetch ALL entities across all datasets using the facade's public API
-    const allEntities = await this.backend.getAllAggEntitiesForRange(
-      settings,
-      startKey,
-      todayKey,
-    );
-
-    // Log all unique userIds and datasets in the data for debugging
-    const uniqueUserIds = new Set(
-      allEntities
-        .map((e) => (e.userId ?? "").toString())
-        .filter((id) => id.trim()),
-    );
-    const uniqueDatasets = new Set(
-      allEntities
-        .map((e) => (e.datasetId ?? "").toString())
-        .filter((id) => id.trim()),
-    );
-    this.log(
-      `[Dashboard] Fetched ${allEntities.length} entities for date range ${startKey} to ${todayKey}`,
-    );
-    this.log(
-      `[Dashboard] Current user ID resolved as: ${currentUserId || "(none)"}`,
-    );
-    this.log(
-      `[Dashboard] Datasets found: [${Array.from(uniqueDatasets)
-        .map((id) => `"${id}"`)
-        .join(", ")}]`,
-    );
-    this.log(
-      `[Dashboard] UserIds in data: [${Array.from(uniqueUserIds)
-        .map((id) => `"${id}"`)
-        .join(", ")}]`,
-    );
-
-    // Aggregate personal data (all machines and workspaces for current user)
-    const personalDevices = new Set<string>();
-    const personalWorkspaces = new Set<string>();
-    const personalModelUsage: {
-      [model: string]: { inputTokens: number; outputTokens: number };
-    } = {};
-    let personalTotalTokens = 0;
-    let personalTotalInteractions = 0;
-
-    // Aggregate team data (all users across all datasets)
-    const userMap = new Map<
-      string,
-      {
-        tokens: number;
-        interactions: number;
-        cost: number;
-        datasetId: string;
-        sessions: Set<string>; // Track unique day+workspace+machine as session proxy
-        models: Set<string>; // Track unique models used
-        workspaces: Set<string>; // Track unique workspaces
-        days: Set<string>; // Track unique days active
-      }
-    >();
-
-    // Aggregate fluency data per user (schema version 4+ entities only)
-    const userFluencyMap = new Map<string, {
-      askModeCount: number; editModeCount: number; agentModeCount: number;
-      planModeCount: number; customAgentModeCount: number; cliModeCount: number;
-      toolCallsTotal: number; toolCallsByTool: Record<string, number>;
-      ctxFile: number; ctxSelection: number; ctxSymbol: number;
-      ctxCodebase: number; ctxWorkspace: number; ctxTerminal: number;
-      ctxVscode: number; ctxClipboard: number; ctxChanges: number;
-      ctxProblemsPanel: number; ctxOutputPanel: number;
-      ctxTerminalLastCommand: number; ctxTerminalSelection: number;
-      ctxByKind: Record<string, number>;
-      mcpTotal: number; mcpByServer: Record<string, number>;
-      mixedTierSessions: number; switchingFreqSum: number; switchingFreqCount: number;
-      standardModels: Set<string>; premiumModels: Set<string>;
-      multiFileEdits: number; filesPerEditSum: number; filesPerEditCount: number;
-      editsAgentCount: number; workspaceAgentCount: number;
-      repositories: Set<string>; repositoriesWithCustomization: Set<string>;
-      applyRateSum: number; applyRateCount: number;
-      multiTurnSessions: number; turnsPerSessionSum: number; turnsPerSessionCount: number;
-      sessionCount: number; durationMsSum: number; durationMsCount: number;
-    }>();
-
-    // Track first and last data points for reference
-    let firstDate: string | null = null;
-    let lastDate: string | null = null;
-
-    for (const entity of allEntities) {
-      const userId = (entity.userId ?? "").toString().replace(/^u:/, ""); // Strip u: prefix
-      const datasetId = (entity.datasetId ?? "").toString().replace(/^ds:/, ""); // Strip ds: prefix
-      const machineId = (entity.machineId ?? "").toString().replace(/^mc:/, ""); // Strip mc: prefix
-      const workspaceId = (entity.workspaceId ?? "").toString().replace(/^w:/, ""); // Strip w: prefix
-      const model = (entity.model ?? "").toString().replace(/^m:/, ""); // Strip m: prefix
-      const inputTokens = Number.isFinite(Number(entity.inputTokens))
-        ? Number(entity.inputTokens)
-        : 0;
-      const outputTokens = Number.isFinite(Number(entity.outputTokens))
-        ? Number(entity.outputTokens)
-        : 0;
-      const interactions = Number.isFinite(Number(entity.interactions))
-        ? Number(entity.interactions)
-        : 0;
-      const tokens = inputTokens + outputTokens;
-      const dayKey = (entity.day ?? "").toString().replace(/^d:/, ""); // Strip d: prefix
-
-      // Track date range
-      if (dayKey) {
-        if (!firstDate || dayKey < firstDate) {
-          firstDate = dayKey;
-        }
-        if (!lastDate || dayKey > lastDate) {
-          lastDate = dayKey;
-        }
-      }
-
-      // Personal data aggregation - match against resolved userId (or machineId when
-      // includeUserDimension is false, i.e. soloFull / teamAnonymized profiles).
-      const isCurrentUser = sharingPolicy.includeUserDimension
-        ? (currentUserId !== "" && userId === currentUserId)
-        : (currentMachineId !== "" && machineId === currentMachineId);
-      if (isCurrentUser) {
-        personalTotalTokens += tokens;
-        personalTotalInteractions += interactions;
-        personalDevices.add(machineId);
-        personalWorkspaces.add(workspaceId);
-
-        addModelUsage(personalModelUsage, { [model]: { inputTokens, outputTokens } });
-      }
-
-      // Team data aggregation - use userId|datasetId as key to track users across datasets.
-      // When includeUserDimension is false, use machineId as the team member key so that
-      // each machine appears as a distinct entry even though no userId was stored.
-      const teamMemberKey = (userId && userId.trim()) ? userId : (machineId ? `machine:${machineId}` : "");
-      if (teamMemberKey) {
-        const userKey = `${teamMemberKey}|${datasetId}`;
-        if (!userMap.has(userKey)) {
-          userMap.set(userKey, {
-            tokens: 0,
-            interactions: 0,
-            cost: 0,
-            datasetId,
-            sessions: new Set<string>(),
-            models: new Set<string>(),
-            workspaces: new Set<string>(),
-            days: new Set<string>(),
-          });
-        }
-        const userData = userMap.get(userKey)!;
-        userData.tokens += tokens;
-        userData.interactions += interactions;
-        // Track unique sessions as day+workspace+machine combinations
-        const sessionKey = `${dayKey}|${workspaceId}|${machineId}`;
-        userData.sessions.add(sessionKey);
-        // Track unique models, workspaces, and days
-        if (model) {
-          userData.models.add(model);
-        }
-        if (workspaceId) {
-          userData.workspaces.add(workspaceId);
-        }
-        if (dayKey) {
-          userData.days.add(dayKey);
-        }
-
-        // Fluency data accumulation (schema version 4+)
-        if ((entity.schemaVersion ?? 0) >= 4) {
-          if (!userFluencyMap.has(userKey)) {
-            userFluencyMap.set(userKey, {
-              askModeCount: 0, editModeCount: 0, agentModeCount: 0,
-              planModeCount: 0, customAgentModeCount: 0, cliModeCount: 0,
-              toolCallsTotal: 0, toolCallsByTool: {},
-              ctxFile: 0, ctxSelection: 0, ctxSymbol: 0,
-              ctxCodebase: 0, ctxWorkspace: 0, ctxTerminal: 0,
-              ctxVscode: 0, ctxClipboard: 0, ctxChanges: 0,
-              ctxProblemsPanel: 0, ctxOutputPanel: 0,
-              ctxTerminalLastCommand: 0, ctxTerminalSelection: 0,
-              ctxByKind: {},
-              mcpTotal: 0, mcpByServer: {},
-              mixedTierSessions: 0, switchingFreqSum: 0, switchingFreqCount: 0,
-              standardModels: new Set(), premiumModels: new Set(),
-              multiFileEdits: 0, filesPerEditSum: 0, filesPerEditCount: 0,
-              editsAgentCount: 0, workspaceAgentCount: 0,
-              repositories: new Set(), repositoriesWithCustomization: new Set(),
-              applyRateSum: 0, applyRateCount: 0,
-              multiTurnSessions: 0, turnsPerSessionSum: 0, turnsPerSessionCount: 0,
-              sessionCount: 0, durationMsSum: 0, durationMsCount: 0,
-            });
-          }
-          const fd = userFluencyMap.get(userKey)!;
-          fd.askModeCount += typeof entity.askModeCount === "number" ? entity.askModeCount : 0;
-          fd.editModeCount += typeof entity.editModeCount === "number" ? entity.editModeCount : 0;
-          fd.agentModeCount += typeof entity.agentModeCount === "number" ? entity.agentModeCount : 0;
-          fd.planModeCount += typeof entity.planModeCount === "number" ? entity.planModeCount : 0;
-          fd.customAgentModeCount += typeof entity.customAgentModeCount === "number" ? entity.customAgentModeCount : 0;
-          fd.cliModeCount += typeof entity.cliModeCount === "number" ? entity.cliModeCount : 0;
-          if (entity.toolCallsJson) {
-            try {
-              const tc = JSON.parse(entity.toolCallsJson);
-              fd.toolCallsTotal += tc.total ?? 0;
-              for (const [tool, count] of Object.entries(tc.byTool ?? {})) {
-                fd.toolCallsByTool[tool] = (fd.toolCallsByTool[tool] ?? 0) + Number(count);
-              }
-            } catch { /* ignore malformed JSON */ }
-          }
-          if (entity.contextRefsJson) {
-            try {
-              const cr = JSON.parse(entity.contextRefsJson);
-              fd.ctxFile += cr.file ?? 0;
-              fd.ctxSelection += cr.selection ?? 0;
-              fd.ctxSymbol += cr.symbol ?? 0;
-              fd.ctxCodebase += cr.codebase ?? 0;
-              fd.ctxWorkspace += cr.workspace ?? 0;
-              fd.ctxTerminal += cr.terminal ?? 0;
-              fd.ctxVscode += cr.vscode ?? 0;
-              fd.ctxClipboard += cr.clipboard ?? 0;
-              fd.ctxChanges += cr.changes ?? 0;
-              fd.ctxProblemsPanel += cr.problemsPanel ?? 0;
-              fd.ctxOutputPanel += cr.outputPanel ?? 0;
-              fd.ctxTerminalLastCommand += cr.terminalLastCommand ?? 0;
-              fd.ctxTerminalSelection += cr.terminalSelection ?? 0;
-              for (const [kind, count] of Object.entries(cr.byKind ?? {})) {
-                fd.ctxByKind[kind] = (fd.ctxByKind[kind] ?? 0) + Number(count);
-              }
-            } catch { /* ignore malformed JSON */ }
-          }
-          if (entity.mcpToolsJson) {
-            try {
-              const mcp = JSON.parse(entity.mcpToolsJson);
-              fd.mcpTotal += mcp.total ?? 0;
-              for (const [server, data] of Object.entries(mcp.byServer ?? {})) {
-                fd.mcpByServer[server] = (fd.mcpByServer[server] ?? 0) + Number((data as { total?: number })?.total ?? data ?? 0);
-              }
-            } catch { /* ignore malformed JSON */ }
-          }
-          if (entity.modelSwitchingJson) {
-            try {
-              const ms = JSON.parse(entity.modelSwitchingJson);
-              fd.mixedTierSessions += ms.mixedTierSessions ?? 0;
-              if (typeof ms.switchingFrequency === "number") {
-                fd.switchingFreqSum += ms.switchingFrequency;
-                fd.switchingFreqCount++;
-              }
-              for (const m of ms.standardModels ?? []) { fd.standardModels.add(m as string); }
-              for (const m of ms.premiumModels ?? []) { fd.premiumModels.add(m as string); }
-            } catch { /* ignore malformed JSON */ }
-          }
-          if (entity.editScopeJson) {
-            try {
-              const es = JSON.parse(entity.editScopeJson);
-              fd.multiFileEdits += es.multiFileEdits ?? 0;
-              if (typeof es.avgFilesPerSession === "number" && es.avgFilesPerSession > 0) {
-                fd.filesPerEditSum += es.avgFilesPerSession;
-                fd.filesPerEditCount++;
-              }
-            } catch { /* ignore malformed JSON */ }
-          }
-          if (entity.agentTypesJson) {
-            try {
-              const at = JSON.parse(entity.agentTypesJson);
-              fd.editsAgentCount += at.editsAgent ?? 0;
-              fd.workspaceAgentCount += at.workspaceAgent ?? 0;
-            } catch { /* ignore malformed JSON */ }
-          }
-          if (entity.repositoriesJson) {
-            try {
-              const rj = JSON.parse(entity.repositoriesJson);
-              for (const r of rj.repositories ?? []) { fd.repositories.add(r as string); }
-              for (const r of rj.repositoriesWithCustomization ?? []) { fd.repositoriesWithCustomization.add(r as string); }
-            } catch { /* ignore malformed JSON */ }
-          }
-          if (entity.applyUsageJson) {
-            try {
-              const au = JSON.parse(entity.applyUsageJson);
-              if (typeof au.applyRate === "number") {
-                fd.applyRateSum += au.applyRate;
-                fd.applyRateCount++;
-              }
-            } catch { /* ignore malformed JSON */ }
-          }
-          if (typeof entity.multiTurnSessions === "number") { fd.multiTurnSessions += entity.multiTurnSessions; }
-          if (typeof entity.avgTurnsPerSession === "number" && entity.avgTurnsPerSession > 0) {
-            fd.turnsPerSessionSum += entity.avgTurnsPerSession;
-            fd.turnsPerSessionCount++;
-          }
-          if (typeof entity.sessionCount === "number") { fd.sessionCount += entity.sessionCount; }
-          if (entity.sessionDurationJson) {
-            try {
-              const sd = JSON.parse(entity.sessionDurationJson);
-              if (typeof sd.avgDurationMs === "number" && sd.avgDurationMs > 0) {
-                fd.durationMsSum += sd.avgDurationMs;
-                fd.durationMsCount++;
-              }
-            } catch { /* ignore malformed JSON */ }
-          }
-        }
-      }
-    }
-
-    // Calculate costs
-    const personalCost = this.calculateEstimatedCost(personalModelUsage);
-
-    // For team members, use a simplified cost estimate since we don't track
-    // per-user model usage in aggregated data yet.
-    // The personal cost uses the accurate model-aware calculation.
-    for (const [userId, userData] of userMap.entries()) {
-      userData.cost = (userData.tokens / 1000000) * 0.05;
-    }
-
-    // Build team leaderboard grouped by dataset
-    const teamMembers = Array.from(userMap.entries())
-      .map(([userKey, data]) => {
-        const [userId, datasetId] = userKey.split("|");
-        const sessionCount = data.sessions.size;
-        const avgTurnsPerSession =
-          sessionCount > 0 ? Math.round(data.interactions / sessionCount) : 0;
-        const avgTokensPerTurn =
-          data.interactions > 0
-            ? Math.round(data.tokens / data.interactions)
-            : 0;
-        const fluencyData = userFluencyMap.get(userKey);
-        const fluencyScore = fluencyData ? _calculateFluencyScoreForTeamMember(fluencyData, sessionCount) : undefined;
-        return {
-          userId,
-          datasetId,
-          totalTokens: data.tokens,
-          totalInteractions: data.interactions,
-          totalCost: data.cost,
-          sessions: sessionCount,
-          avgTurnsPerSession,
-          uniqueModels: data.models.size,
-          uniqueWorkspaces: data.workspaces.size,
-          daysActive: data.days.size,
-          avgTokensPerTurn,
-          rank: 0,
-          ...(fluencyScore ? {
-            fluencyStage: fluencyScore.stage,
-            fluencyLabel: fluencyScore.label,
-            fluencyCategories: fluencyScore.categories,
-          } : {}),
-        };
-      })
-      .sort((a, b) => b.totalTokens - a.totalTokens)
-      .map((member, index) => ({
-        ...member,
-        rank: index + 1,
-      }));
-
-    const teamTotalTokens = Array.from(userMap.values()).reduce(
-      (sum, u) => sum + u.tokens,
-      0,
-    );
-    const teamTotalInteractions = Array.from(userMap.values()).reduce(
-      (sum, u) => sum + u.interactions,
-      0,
-    );
-    const averageTokensPerUser =
-      userMap.size > 0 ? teamTotalTokens / userMap.size : 0;
-
-    this.log(
-      `[Dashboard] Date range: ${firstDate} to ${lastDate} (${teamMembers.length} team members)`,
-    );
-    this.log(
-      `[Dashboard] Personal stats: ${personalTotalTokens} tokens, ${personalTotalInteractions} interactions, ${personalDevices.size} devices, ${personalWorkspaces.size} workspaces`,
-    );
-
-    // Log each user's aggregated data for debugging
+    const allEntities = await this.backend.getAllAggEntitiesForRange(settings, startKey, todayKey);
+    this.logDashboardDebugInfo(allEntities, currentUserId, todayKey, startKey);
+    const { personalData, userMap, userFluencyMap, firstDate, lastDate } = this.aggregateDashboardEntities(allEntities, currentUserId, currentMachineId, sharingPolicy);
+    const personalCost = this.calculateEstimatedCost(personalData.modelUsage);
+    for (const userData of userMap.values()) { userData.cost = (userData.tokens / 1000000) * 0.05; }
+    const teamMembers = this.buildTeamLeaderboard(userMap, userFluencyMap);
+    this.log(`[Dashboard] Date range: ${firstDate} to ${lastDate} (${teamMembers.length} team members)`);
+    this.log(`[Dashboard] Personal stats: ${personalData.totalTokens} tokens, ${personalData.totalInteractions} interactions, ${personalData.devices.size} devices, ${personalData.workspaces.size} workspaces`);
     for (const [userKey, data] of userMap.entries()) {
-      const [userId, datasetId] = userKey.split("|");
-      this.log(
-        `[Dashboard] User "${userId}" (dataset: ${datasetId}): ${data.tokens} tokens, ${data.interactions} interactions`,
-      );
+      const [uId, dsId] = userKey.split("|");
+      this.log(`[Dashboard] User "${uId}" (dataset: ${dsId}): ${data.tokens} tokens, ${data.interactions} interactions`);
     }
-
-    // For the current user, override the fluency score with the locally-computed one.
-    // Azure Table Storage only contains recently-synced schema-v4 entities (a small window),
-    // while calculateMaturityScores() uses the full local session log history.
-    // When includeUserDimension is false, the team member key is "machine:<machineId>".
-    const currentTeamMemberKey = currentUserId
-      ? currentUserId
-      : currentMachineId ? `machine:${currentMachineId}` : "";
-    if (currentTeamMemberKey) {
-      try {
-        const localMaturity = await this.calculateMaturityScores(true);
-        for (const member of teamMembers) {
-          if (member.userId === currentTeamMemberKey) {
-            member.fluencyStage = localMaturity.overallStage;
-            member.fluencyLabel = localMaturity.overallLabel;
-            member.fluencyCategories = localMaturity.categories.map(c => ({
-              category: c.category,
-              icon: c.icon,
-              stage: c.stage,
-              tips: c.tips,
-            }));
-            break;
-          }
-        }
-      } catch {
-        // Non-critical: leave whatever fluency score was already computed
-      }
-    }
-
-    // Fetch local stats to surface the sync coverage gap in the dashboard.
-    // Use the same lookback window as the backend so the comparison is apples-to-apples.
-    let localTokens: number | undefined;
-    let localInteractions: number | undefined;
-    try {
-      const { dailyStats: freshDailyStats } = await this.calculateDetailedStats(undefined); // ensures lastDailyStats is fresh
-      this.lastDailyStats = freshDailyStats;
-      const lookback = settings.lookbackDays ?? 30;
-      // Always derive exact counts from daily stats so we avoid the rounding loss introduced
-      // by avgInteractionsPerSession = Math.round(interactions / sessions).
-      // lastDailyStats covers the last 30 days; for longer windows it is the best available data.
-      const cutoffDate = new Date();
-      cutoffDate.setDate(cutoffDate.getDate() - lookback);
-      const cutoffStr = cutoffDate.toISOString().slice(0, 10);
-      const dailyStats = this.lastDailyStats ?? [];
-      const inWindow = dailyStats.filter(d => d.date >= cutoffStr);
-      localTokens = inWindow.reduce((sum, d) => sum + d.tokens, 0);
-      localInteractions = inWindow.reduce((sum, d) => sum + d.interactions, 0);
-    } catch {
-      // Non-critical: leave undefined
-    }
-
+    const currentTeamMemberKey = currentUserId ? currentUserId : currentMachineId ? `machine:${currentMachineId}` : "";
+    if (currentTeamMemberKey) { await this.overrideCurrentUserFluency(teamMembers, currentTeamMemberKey); }
+    const { localTokens, localInteractions } = await this.getLocalStatsForWindow(settings.lookbackDays ?? 30);
+    const teamTotalTokens = Array.from(userMap.values()).reduce((sum, u) => sum + u.tokens, 0);
+    const teamTotalInteractions = Array.from(userMap.values()).reduce((sum, u) => sum + u.interactions, 0);
     return {
-      personal: {
-        userId: currentUserId || "",
-        totalTokens: personalTotalTokens,
-        totalInteractions: personalTotalInteractions,
-        totalCost: personalCost,
-        devices: Array.from(personalDevices),
-        workspaces: Array.from(personalWorkspaces),
-        modelUsage: personalModelUsage,
-        localTokens,
-        localInteractions,
-      },
-      team: {
-        members: teamMembers,
-        totalTokens: teamTotalTokens,
-        totalInteractions: teamTotalInteractions,
-        averageTokensPerUser,
-        firstDate,
-        lastDate,
-      },
-      lookbackDays: settings.lookbackDays,
-      lastUpdated: new Date().toISOString(),
+      personal: { userId: currentUserId || "", totalTokens: personalData.totalTokens, totalInteractions: personalData.totalInteractions, totalCost: personalCost, devices: Array.from(personalData.devices), workspaces: Array.from(personalData.workspaces), modelUsage: personalData.modelUsage, localTokens, localInteractions },
+      team: { members: teamMembers, totalTokens: teamTotalTokens, totalInteractions: teamTotalInteractions, averageTokensPerUser: userMap.size > 0 ? teamTotalTokens / userMap.size : 0, firstDate, lastDate },
+      lookbackDays: settings.lookbackDays, lastUpdated: new Date().toISOString(),
     };
   }
+
+  private resolveCurrentMachineId(settings: any, sharingPolicy: any, hashFn: (opts: any) => string): string {
+    if (sharingPolicy.includeUserDimension) { return ""; }
+    const rawMachineId = vscode.env.machineId;
+    return sharingPolicy.machineIdStrategy === "hashed" ? hashFn({ datasetId: settings.datasetId ?? "", machineId: rawMachineId }) : rawMachineId;
+  }
+
+  private logDashboardDebugInfo(allEntities: any[], currentUserId: string | undefined, todayKey: string, startKey: string): void {
+    const uniqueUserIds = new Set(allEntities.map((e) => (e.userId ?? "").toString()).filter((id) => id.trim()));
+    const uniqueDatasets = new Set(allEntities.map((e) => (e.datasetId ?? "").toString()).filter((id) => id.trim()));
+    this.log(`[Dashboard] Fetched ${allEntities.length} entities for date range ${startKey} to ${todayKey}`);
+    this.log(`[Dashboard] Current user ID resolved as: ${currentUserId || "(none)"}`);
+    this.log(`[Dashboard] Datasets found: [${Array.from(uniqueDatasets).map((id) => `"${id}"`).join(", ")}]`);
+    this.log(`[Dashboard] UserIds in data: [${Array.from(uniqueUserIds).map((id) => `"${id}"`).join(", ")}]`);
+  }
+
+  private aggregateDashboardEntities(allEntities: any[], currentUserId: string | undefined, currentMachineId: string, sharingPolicy: any): { personalData: any; userMap: Map<string, any>; userFluencyMap: Map<string, any>; firstDate: string | null; lastDate: string | null } {
+    const personalData = { totalTokens: 0, totalInteractions: 0, devices: new Set<string>(), workspaces: new Set<string>(), modelUsage: {} as any };
+    const userMap = new Map<string, any>();
+    const userFluencyMap = new Map<string, any>();
+    let firstDate: string | null = null;
+    let lastDate: string | null = null;
+    for (const entity of allEntities) {
+      const ids = this.extractEntityIds(entity);
+      if (ids.dayKey) {
+        if (!firstDate || ids.dayKey < firstDate) { firstDate = ids.dayKey; }
+        if (!lastDate || ids.dayKey > lastDate) { lastDate = ids.dayKey; }
+      }
+      const isCurrentUser = sharingPolicy.includeUserDimension ? (currentUserId !== "" && ids.userId === currentUserId) : (currentMachineId !== "" && ids.machineId === currentMachineId);
+      if (isCurrentUser) { this.updatePersonalData(entity, ids, personalData); }
+      const teamMemberKey = (ids.userId && ids.userId.trim()) ? ids.userId : (ids.machineId ? `machine:${ids.machineId}` : "");
+      if (teamMemberKey) { this.updateTeamData(entity, ids, teamMemberKey, userMap, userFluencyMap); }
+    }
+    return { personalData, userMap, userFluencyMap, firstDate, lastDate };
+  }
+
+  private extractEntityIds(entity: any): { userId: string; datasetId: string; machineId: string; workspaceId: string; model: string; inputTokens: number; outputTokens: number; interactions: number; tokens: number; dayKey: string } {
+    const userId = (entity.userId ?? "").toString().replace(/^u:/, "");
+    const datasetId = (entity.datasetId ?? "").toString().replace(/^ds:/, "");
+    const machineId = (entity.machineId ?? "").toString().replace(/^mc:/, "");
+    const workspaceId = (entity.workspaceId ?? "").toString().replace(/^w:/, "");
+    const model = (entity.model ?? "").toString().replace(/^m:/, "");
+    const inputTokens = Number.isFinite(Number(entity.inputTokens)) ? Number(entity.inputTokens) : 0;
+    const outputTokens = Number.isFinite(Number(entity.outputTokens)) ? Number(entity.outputTokens) : 0;
+    const interactions = Number.isFinite(Number(entity.interactions)) ? Number(entity.interactions) : 0;
+    const dayKey = (entity.day ?? "").toString().replace(/^d:/, "");
+    return { userId, datasetId, machineId, workspaceId, model, inputTokens, outputTokens, interactions, tokens: inputTokens + outputTokens, dayKey };
+  }
+
+  private updatePersonalData(entity: any, ids: any, personalData: any): void {
+    personalData.totalTokens += ids.tokens;
+    personalData.totalInteractions += ids.interactions;
+    personalData.devices.add(ids.machineId);
+    personalData.workspaces.add(ids.workspaceId);
+    addModelUsage(personalData.modelUsage, { [ids.model]: { inputTokens: ids.inputTokens, outputTokens: ids.outputTokens } });
+  }
+
+  private updateTeamData(entity: any, ids: any, teamMemberKey: string, userMap: Map<string, any>, userFluencyMap: Map<string, any>): void {
+    const userKey = `${teamMemberKey}|${ids.datasetId}`;
+    if (!userMap.has(userKey)) {
+      userMap.set(userKey, { tokens: 0, interactions: 0, cost: 0, datasetId: ids.datasetId, sessions: new Set<string>(), models: new Set<string>(), workspaces: new Set<string>(), days: new Set<string>() });
+    }
+    const userData = userMap.get(userKey)!;
+    userData.tokens += ids.tokens; userData.interactions += ids.interactions;
+    userData.sessions.add(`${ids.dayKey}|${ids.workspaceId}|${ids.machineId}`);
+    if (ids.model) { userData.models.add(ids.model); }
+    if (ids.workspaceId) { userData.workspaces.add(ids.workspaceId); }
+    if (ids.dayKey) { userData.days.add(ids.dayKey); }
+    if ((entity.schemaVersion ?? 0) >= 4) { this.accumulateEntityFluency(entity, userKey, userFluencyMap); }
+  }
+
+  private accumulateEntityFluency(entity: any, userKey: string, userFluencyMap: Map<string, any>): void {
+    if (!userFluencyMap.has(userKey)) { userFluencyMap.set(userKey, this.createUserFluencyAccumulator()); }
+    const fd = userFluencyMap.get(userKey)!;
+    fd.askModeCount += typeof entity.askModeCount === "number" ? entity.askModeCount : 0;
+    fd.editModeCount += typeof entity.editModeCount === "number" ? entity.editModeCount : 0;
+    fd.agentModeCount += typeof entity.agentModeCount === "number" ? entity.agentModeCount : 0;
+    fd.planModeCount += typeof entity.planModeCount === "number" ? entity.planModeCount : 0;
+    fd.customAgentModeCount += typeof entity.customAgentModeCount === "number" ? entity.customAgentModeCount : 0;
+    fd.cliModeCount += typeof entity.cliModeCount === "number" ? entity.cliModeCount : 0;
+    if (typeof entity.multiTurnSessions === "number") { fd.multiTurnSessions += entity.multiTurnSessions; }
+    if (typeof entity.sessionCount === "number") { fd.sessionCount += entity.sessionCount; }
+    if (typeof entity.avgTurnsPerSession === "number" && entity.avgTurnsPerSession > 0) { fd.turnsPerSessionSum += entity.avgTurnsPerSession; fd.turnsPerSessionCount++; }
+    this.accumulateEntityJsonFields(entity, fd);
+  }
+
+  private createUserFluencyAccumulator(): any {
+    return { askModeCount: 0, editModeCount: 0, agentModeCount: 0, planModeCount: 0, customAgentModeCount: 0, cliModeCount: 0, toolCallsTotal: 0, toolCallsByTool: {}, ctxFile: 0, ctxSelection: 0, ctxSymbol: 0, ctxCodebase: 0, ctxWorkspace: 0, ctxTerminal: 0, ctxVscode: 0, ctxClipboard: 0, ctxChanges: 0, ctxProblemsPanel: 0, ctxOutputPanel: 0, ctxTerminalLastCommand: 0, ctxTerminalSelection: 0, ctxByKind: {}, mcpTotal: 0, mcpByServer: {}, mixedTierSessions: 0, switchingFreqSum: 0, switchingFreqCount: 0, standardModels: new Set(), premiumModels: new Set(), multiFileEdits: 0, filesPerEditSum: 0, filesPerEditCount: 0, editsAgentCount: 0, workspaceAgentCount: 0, repositories: new Set(), repositoriesWithCustomization: new Set(), applyRateSum: 0, applyRateCount: 0, multiTurnSessions: 0, turnsPerSessionSum: 0, turnsPerSessionCount: 0, sessionCount: 0, durationMsSum: 0, durationMsCount: 0 };
+  }
+
+  private accumulateEntityJsonFields(entity: any, fd: any): void {
+    this.accumulateToolCallsJson(entity, fd);
+    this.accumulateContextRefsJson(entity, fd);
+    this.accumulateMcpToolsJson(entity, fd);
+    this.accumulateModelSwitchingJson(entity, fd);
+    this.accumulateEditScopeJson(entity, fd);
+    this.accumulateAgentTypesJson(entity, fd);
+    this.accumulateRepositoriesJson(entity, fd);
+    this.accumulateApplyUsageJson(entity, fd);
+    this.accumulateSessionDurationJson(entity, fd);
+  }
+
+  private accumulateToolCallsJson(entity: any, fd: any): void {
+    if (!entity.toolCallsJson) { return; }
+    try {
+      const tc = JSON.parse(entity.toolCallsJson);
+      fd.toolCallsTotal += tc.total ?? 0;
+      for (const [tool, count] of Object.entries(tc.byTool ?? {})) { fd.toolCallsByTool[tool] = (fd.toolCallsByTool[tool] ?? 0) + Number(count); }
+    } catch { /* ignore */ }
+  }
+
+  private accumulateContextRefsJson(entity: any, fd: any): void {
+    if (!entity.contextRefsJson) { return; }
+    try {
+      const cr = JSON.parse(entity.contextRefsJson);
+      fd.ctxFile += cr.file ?? 0; fd.ctxSelection += cr.selection ?? 0; fd.ctxSymbol += cr.symbol ?? 0;
+      fd.ctxCodebase += cr.codebase ?? 0; fd.ctxWorkspace += cr.workspace ?? 0; fd.ctxTerminal += cr.terminal ?? 0;
+      fd.ctxVscode += cr.vscode ?? 0; fd.ctxClipboard += cr.clipboard ?? 0; fd.ctxChanges += cr.changes ?? 0;
+      fd.ctxProblemsPanel += cr.problemsPanel ?? 0; fd.ctxOutputPanel += cr.outputPanel ?? 0;
+      fd.ctxTerminalLastCommand += cr.terminalLastCommand ?? 0; fd.ctxTerminalSelection += cr.terminalSelection ?? 0;
+      for (const [kind, count] of Object.entries(cr.byKind ?? {})) { fd.ctxByKind[kind] = (fd.ctxByKind[kind] ?? 0) + Number(count); }
+    } catch { /* ignore */ }
+  }
+
+  private accumulateMcpToolsJson(entity: any, fd: any): void {
+    if (!entity.mcpToolsJson) { return; }
+    try {
+      const mcp = JSON.parse(entity.mcpToolsJson);
+      fd.mcpTotal += mcp.total ?? 0;
+      for (const [server, data] of Object.entries(mcp.byServer ?? {})) { fd.mcpByServer[server] = (fd.mcpByServer[server] ?? 0) + Number((data as any)?.total ?? data ?? 0); }
+    } catch { /* ignore */ }
+  }
+
+  private accumulateModelSwitchingJson(entity: any, fd: any): void {
+    if (!entity.modelSwitchingJson) { return; }
+    try {
+      const ms = JSON.parse(entity.modelSwitchingJson);
+      fd.mixedTierSessions += ms.mixedTierSessions ?? 0;
+      if (typeof ms.switchingFrequency === "number") { fd.switchingFreqSum += ms.switchingFrequency; fd.switchingFreqCount++; }
+      for (const m of ms.standardModels ?? []) { fd.standardModels.add(m as string); }
+      for (const m of ms.premiumModels ?? []) { fd.premiumModels.add(m as string); }
+    } catch { /* ignore */ }
+  }
+
+  private accumulateEditScopeJson(entity: any, fd: any): void {
+    if (!entity.editScopeJson) { return; }
+    try {
+      const es = JSON.parse(entity.editScopeJson);
+      fd.multiFileEdits += es.multiFileEdits ?? 0;
+      if (typeof es.avgFilesPerSession === "number" && es.avgFilesPerSession > 0) { fd.filesPerEditSum += es.avgFilesPerSession; fd.filesPerEditCount++; }
+    } catch { /* ignore */ }
+  }
+
+  private accumulateAgentTypesJson(entity: any, fd: any): void {
+    if (!entity.agentTypesJson) { return; }
+    try {
+      const at = JSON.parse(entity.agentTypesJson);
+      fd.editsAgentCount += at.editsAgent ?? 0; fd.workspaceAgentCount += at.workspaceAgent ?? 0;
+    } catch { /* ignore */ }
+  }
+
+  private accumulateRepositoriesJson(entity: any, fd: any): void {
+    if (!entity.repositoriesJson) { return; }
+    try {
+      const rj = JSON.parse(entity.repositoriesJson);
+      for (const r of rj.repositories ?? []) { fd.repositories.add(r as string); }
+      for (const r of rj.repositoriesWithCustomization ?? []) { fd.repositoriesWithCustomization.add(r as string); }
+    } catch { /* ignore */ }
+  }
+
+  private accumulateApplyUsageJson(entity: any, fd: any): void {
+    if (!entity.applyUsageJson) { return; }
+    try {
+      const au = JSON.parse(entity.applyUsageJson);
+      if (typeof au.applyRate === "number") { fd.applyRateSum += au.applyRate; fd.applyRateCount++; }
+    } catch { /* ignore */ }
+  }
+
+  private accumulateSessionDurationJson(entity: any, fd: any): void {
+    if (!entity.sessionDurationJson) { return; }
+    try {
+      const sd = JSON.parse(entity.sessionDurationJson);
+      if (typeof sd.avgDurationMs === "number" && sd.avgDurationMs > 0) { fd.durationMsSum += sd.avgDurationMs; fd.durationMsCount++; }
+    } catch { /* ignore */ }
+  }
+
+  private buildTeamLeaderboard(userMap: Map<string, any>, userFluencyMap: Map<string, any>): any[] {
+    return Array.from(userMap.entries()).map(([userKey, data]) => {
+      const [userId, datasetId] = userKey.split("|");
+      const sessionCount = data.sessions.size;
+      const fluencyData = userFluencyMap.get(userKey);
+      const fluencyScore = fluencyData ? _calculateFluencyScoreForTeamMember(fluencyData, sessionCount) : undefined;
+      return {
+        userId, datasetId, totalTokens: data.tokens, totalInteractions: data.interactions, totalCost: data.cost, sessions: sessionCount,
+        avgTurnsPerSession: sessionCount > 0 ? Math.round(data.interactions / sessionCount) : 0,
+        uniqueModels: data.models.size, uniqueWorkspaces: data.workspaces.size, daysActive: data.days.size,
+        avgTokensPerTurn: data.interactions > 0 ? Math.round(data.tokens / data.interactions) : 0,
+        rank: 0, ...(fluencyScore ? { fluencyStage: fluencyScore.stage, fluencyLabel: fluencyScore.label, fluencyCategories: fluencyScore.categories } : {}),
+      };
+    }).sort((a, b) => b.totalTokens - a.totalTokens).map((member, index) => ({ ...member, rank: index + 1 }));
+  }
+
+  private async overrideCurrentUserFluency(teamMembers: any[], currentTeamMemberKey: string): Promise<void> {
+    try {
+      const localMaturity = await this.calculateMaturityScores(true);
+      for (const member of teamMembers) {
+        if (member.userId === currentTeamMemberKey) {
+          member.fluencyStage = localMaturity.overallStage; member.fluencyLabel = localMaturity.overallLabel;
+          member.fluencyCategories = localMaturity.categories.map((c: any) => ({ category: c.category, icon: c.icon, stage: c.stage, tips: c.tips }));
+          break;
+        }
+      }
+    } catch { /* non-critical */ }
+  }
+
+  private async getLocalStatsForWindow(lookbackDays: number): Promise<{ localTokens: number | undefined; localInteractions: number | undefined }> {
+    try {
+      const { dailyStats: freshDailyStats } = await this.calculateDetailedStats(undefined);
+      this.lastDailyStats = freshDailyStats;
+      const cutoffDate = new Date();
+      cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
+      const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+      const inWindow = (this.lastDailyStats ?? []).filter(d => d.date >= cutoffStr);
+      return { localTokens: inWindow.reduce((sum, d) => sum + d.tokens, 0), localInteractions: inWindow.reduce((sum, d) => sum + d.interactions, 0) };
+    } catch { return { localTokens: undefined, localInteractions: undefined }; }
+  }
+
   private getDashboardHtml(
     webview: vscode.Webview,
     data: any | undefined,
