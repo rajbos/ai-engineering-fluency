@@ -456,11 +456,17 @@ const tr = document.createElement('tr');
 if (editor === 'JetBrains') {
 tr.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.';
 }
+if (editor === 'Antigravity') {
+tr.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.';
+}
 const labelTd = document.createElement('td');
 const labelWrapper = document.createElement('span');
 labelWrapper.className = 'metric-label';
 labelWrapper.textContent = `${getEditorIcon(editor)} ${editor}`;
 if (editor === 'JetBrains') {
+labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`;
+}
+if (editor === 'Antigravity') {
 labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`;
 }
 labelTd.append(labelWrapper);

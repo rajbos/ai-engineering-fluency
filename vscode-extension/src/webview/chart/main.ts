@@ -307,6 +307,11 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 			const labelEl = card.querySelector('.card-label');
 			if (labelEl) { labelEl.textContent = `${editor} ⓘ`; }
 		}
+		if (editor === 'Antigravity') {
+			card.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.';
+			const labelEl = card.querySelector('.card-label');
+			if (labelEl) { labelEl.textContent = `${editor} ⓘ`; }
+		}
 		wrap.append(card);
 	});
 	return wrap;
@@ -750,9 +755,14 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 						footer: (items: any[]) => {
 							if (view !== 'editor') { return ''; }
 							const hasJetBrains = items.some(i => i?.dataset?.label === 'JetBrains');
-							return hasJetBrains
-								? 'JetBrains: estimates from user messages + assistant text only.\nActual API counts and thinking tokens are not available.'
-								: '';
+							const hasAntigravity = items.some(i => i?.dataset?.label === 'Antigravity');
+							if (hasJetBrains) {
+								return 'JetBrains: estimates from user messages + assistant text only.\nActual API counts and thinking tokens are not available.';
+							}
+							if (hasAntigravity) {
+								return 'Antigravity: estimates from transcript content.\nActual API counts are not stored locally.';
+							}
+							return '';
 						}
 					}
 				}
