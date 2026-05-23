@@ -362,31 +362,39 @@ function _cfstmScoreToolUsage(fd: CfstmFd, d: CfstmDerived): { stage: Stage; tip
 	return { stage: tuStage, tips: tuTips };
 }
 
+function _cfstmComputeCustomStage(reposWithCustomization: number, customizationRate: number, uniqueModels: Set<string>): Stage {
+	const T = STAGE_THRESHOLDS.customization;
+	let stage: Stage = reposWithCustomization > 0 ? 2 : 1;
+	if (customizationRate >= T.stage3MinCustomizationRate && reposWithCustomization >= T.stage3MinCustomizedRepos) { stage = 3; }
+	if (customizationRate >= T.stage4MinCustomizationRate && reposWithCustomization >= T.stage4MinCustomizedRepos) { stage = 4; }
+	if (uniqueModels.size >= T.stage3MinUniqueModels) { stage = promoteStage(stage, 3); }
+	if (uniqueModels.size >= T.stage4MinUniqueModels && reposWithCustomization >= T.stage4MinCustomizedRepos) { stage = 4; }
+	return stage;
+}
+
+function _cfstmBuildCustomTips(cuStage: Stage, reposWithCustomization: number, totalRepos: number): string[] {
+	const tips: string[] = [];
+	const uncustomized = totalRepos - reposWithCustomization;
+	if (cuStage < 2) { tips.push('Create a .github/copilot-instructions.md or CLAUDE.md file with project-specific guidelines'); }
+	if (cuStage < 3) { tips.push('Add custom instructions to more repositories to standardize your Copilot experience'); }
+	if (cuStage < 4) {
+		if (uncustomized > 0) { tips.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized — add instructions to the remaining ${fmt(uncustomized)} for Stage 4`); }
+		else { tips.push('Aim for consistent customization across all projects with instructions and agents.md'); }
+	} else if (uncustomized > 0) {
+		tips.push(`${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} still missing customization — add instructions, agents.md, or MCP configs for full coverage`);
+	} else {
+		tips.push('All repos customized! Keep instructions up to date and add skill files or MCP server configs for deeper integration');
+	}
+	return tips;
+}
+
 function _cfstmScoreCustomization(fd: CfstmFd): { stage: Stage; tips: string[] } {
 	const totalRepos = fd.repositories.size;
 	const reposWithCustomization = fd.repositoriesWithCustomization.size;
 	const customizationRate = totalRepos > 0 ? reposWithCustomization / totalRepos : 0;
-	let cuStage: Stage = 1;
-	if (reposWithCustomization > 0) { cuStage = 2; }
-	if (customizationRate >= STAGE_THRESHOLDS.customization.stage3MinCustomizationRate && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage3MinCustomizedRepos) { cuStage = 3; }
-	if (customizationRate >= STAGE_THRESHOLDS.customization.stage4MinCustomizationRate && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage4MinCustomizedRepos) { cuStage = 4; }
 	const uniqueModels = new Set([...fd.standardModels, ...fd.premiumModels]);
-	if (uniqueModels.size >= STAGE_THRESHOLDS.customization.stage3MinUniqueModels) { cuStage = promoteStage(cuStage, 3); }
-	if (uniqueModels.size >= STAGE_THRESHOLDS.customization.stage4MinUniqueModels && reposWithCustomization >= STAGE_THRESHOLDS.customization.stage4MinCustomizedRepos) { cuStage = 4; }
-	const cuTips: string[] = [];
-	if (cuStage < 2) { cuTips.push('Create a .github/copilot-instructions.md or CLAUDE.md file with project-specific guidelines'); }
-	if (cuStage < 3) { cuTips.push('Add custom instructions to more repositories to standardize your Copilot experience'); }
-	const uncustomized = totalRepos - reposWithCustomization;
-	if (cuStage < 4) {
-		if (uncustomized > 0) { cuTips.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized — add instructions to the remaining ${fmt(uncustomized)} for Stage 4`); }
-		else { cuTips.push('Aim for consistent customization across all projects with instructions and agents.md'); }
-	}
-	if (cuStage >= 4 && uncustomized > 0) {
-		cuTips.push(`${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} still missing customization — add instructions, agents.md, or MCP configs for full coverage`);
-	} else if (cuStage >= 4) {
-		cuTips.push('All repos customized! Keep instructions up to date and add skill files or MCP server configs for deeper integration');
-	}
-	return { stage: cuStage, tips: cuTips };
+	const cuStage = _cfstmComputeCustomStage(reposWithCustomization, customizationRate, uniqueModels);
+	return { stage: cuStage, tips: _cfstmBuildCustomTips(cuStage, reposWithCustomization, totalRepos) };
 }
 
 function _cfstmScoreWorkflowInt(fd: CfstmFd, d: CfstmDerived): { stage: Stage; tips: string[] } {
