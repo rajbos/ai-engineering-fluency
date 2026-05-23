@@ -1662,9 +1662,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
 			if (!parsingStepNotified) {
 				parsingStepNotified = true;
-				const editors = getEditors?.();
-				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total };
-				if (editors && editors.length > 0) { msg.editors = editors; }
+				const editors = getEditors?.() ?? [];
+				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
 				this.sendLoadingPanelMessage(msg);
 			}
 			const now = Date.now();
@@ -6063,12 +6062,7 @@ ${this.getLoadingHtmlScript()}
   private getLoadingHtmlScript(): string {
     return `(function () {
     var t0 = Date.now();
-    var EDITORS = [
-        { icon: '💙', name: 'VS Code' }, { icon: '🤖', name: 'Copilot CLI' }, { icon: '⚡', name: 'Cursor' },
-        { icon: '🟠', name: 'Claude Code' }, { icon: '🟢', name: 'OpenCode' }, { icon: '🔥', name: 'Mistral Vibe' },
-        { icon: '💎', name: 'Gemini CLI' }, { icon: '🪟', name: 'Visual Studio' }, { icon: '🔷', name: 'VSCodium' },
-        { icon: '💚', name: 'VS Code Insiders' },
-    ];
+    var EDITORS = [];
     var editorsSeen = 0;
     setInterval(function () {
         var s = Math.floor((Date.now() - t0) / 1000);
@@ -6093,7 +6087,7 @@ ${this.getLoadingHtmlScript()}
             if (m.step === 'discovering') { setActive('s-discover');
             } else if (m.step === 'parsing') {
                 var total = m.total || 0; setDone('s-discover');
-                if (m.editors && m.editors.length > 0) { EDITORS = m.editors; editorsSeen = 0; }
+                if (m.editors !== undefined) { EDITORS = m.editors; editorsSeen = 0; }
                 var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)';
                 setDone('s-cache'); setActive('s-parse');
                 var sub = document.getElementById('subtitle'); if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
