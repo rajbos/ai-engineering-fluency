@@ -362,6 +362,25 @@ export class CopilotChatAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 		const candidatePaths = this.getCandidatePaths();
 		const sessionFiles: string[] = [];
 
+		const allVSCodePaths = await this.resolveAllVSCodePaths(log);
+		log(`📂 Considering ${allVSCodePaths.length} candidate VS Code paths`);
+
+		const existence = await Promise.all(allVSCodePaths.map(p => pathExists(p).catch(() => false)));
+		const foundPaths = allVSCodePaths.filter((_, i) => existence[i]);
+		log(`✅ Found ${foundPaths.length} of ${allVSCodePaths.length} VS Code paths exist on disk`);
+
+		await runWithConcurrency(foundPaths, async (codeUserPath) => {
+			const pathName = path.basename(path.dirname(codeUserPath));
+			await this.scanWorkspaceStorage(codeUserPath, pathName, sessionFiles, log);
+			await this.scanGlobalStorage(codeUserPath, pathName, sessionFiles, log);
+		}, 4, (item, _i, err) => {
+			log(`Failed to scan VS Code user path ${item}: ${err instanceof Error ? err.message : String(err)}`);
+		});
+
+		return { sessionFiles, candidatePaths };
+	}
+
+	private async resolveAllVSCodePaths(log: (msg: string) => void): Promise<string[]> {
 		const allVSCodePaths = getVSCodeUserPaths();
 		if (isWSL()) {
 			log(`🪟 WSL environment detected — probing Windows-side VS Code paths`);
@@ -373,85 +392,72 @@ export class CopilotChatAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 				log(`🪟 No Windows-side paths found (Windows drive may not be mounted)`);
 			}
 		}
+		return allVSCodePaths;
+	}
 
-		log(`📂 Considering ${allVSCodePaths.length} candidate VS Code paths`);
-
-		const existence = await Promise.all(
-			allVSCodePaths.map(p => pathExists(p).catch(() => false)),
-		);
-		const foundPaths = allVSCodePaths.filter((_, i) => existence[i]);
-		log(`✅ Found ${foundPaths.length} of ${allVSCodePaths.length} VS Code paths exist on disk`);
-
-		await runWithConcurrency(foundPaths, async (codeUserPath) => {
-			const pathName = path.basename(path.dirname(codeUserPath));
-
-			// workspaceStorage/<hash>/{,GitHub.copilot-chat/,github.copilot-chat/,GitHub.copilot/,github.copilot/}{chatSessions/,debug-logs/}
-			const workspaceStoragePath = path.join(codeUserPath, 'workspaceStorage');
-			try {
-				if (await pathExists(workspaceStoragePath)) {
-					const workspaceDirs = await fs.promises.readdir(workspaceStoragePath);
-					await runWithConcurrency(workspaceDirs, async (workspaceDir) => {
-						const candidates = [
-							path.join(workspaceStoragePath, workspaceDir, 'chatSessions'),
-							path.join(workspaceStoragePath, workspaceDir, 'GitHub.copilot-chat', 'chatSessions'),
-							path.join(workspaceStoragePath, workspaceDir, 'github.copilot-chat', 'chatSessions'),
-							path.join(workspaceStoragePath, workspaceDir, 'GitHub.copilot', 'chatSessions'),
-							path.join(workspaceStoragePath, workspaceDir, 'github.copilot', 'chatSessions'),
-							path.join(workspaceStoragePath, workspaceDir, 'GitHub.copilot-chat', 'debug-logs'),
-							path.join(workspaceStoragePath, workspaceDir, 'github.copilot-chat', 'debug-logs'),
-							path.join(workspaceStoragePath, workspaceDir, 'GitHub.copilot', 'debug-logs'),
-							path.join(workspaceStoragePath, workspaceDir, 'github.copilot', 'debug-logs'),
-						];
-						for (const chatSessionsPath of candidates) {
-							try {
-								if (!(await pathExists(chatSessionsPath))) { continue; }
-								const files = (await fs.promises.readdir(chatSessionsPath))
-									.filter(f => f.endsWith('.json') || f.endsWith('.jsonl'))
-									.map(f => path.join(chatSessionsPath, f));
-								if (files.length > 0) {
-									log(`📄 Found ${files.length} session files in ${pathName}/workspaceStorage/${workspaceDir}`);
-									sessionFiles.push(...files);
-								}
-							} catch { /* ignore individual workspace dir errors */ }
+	private async scanWorkspaceStorage(codeUserPath: string, pathName: string, sessionFiles: string[], log: (msg: string) => void): Promise<void> {
+		const workspaceStoragePath = path.join(codeUserPath, 'workspaceStorage');
+		try {
+			if (!(await pathExists(workspaceStoragePath))) { return; }
+			const workspaceDirs = await fs.promises.readdir(workspaceStoragePath);
+			await runWithConcurrency(workspaceDirs, async (workspaceDir) => {
+				const candidates = [
+					path.join(workspaceStoragePath, workspaceDir, 'chatSessions'),
+					path.join(workspaceStoragePath, workspaceDir, 'GitHub.copilot-chat', 'chatSessions'),
+					path.join(workspaceStoragePath, workspaceDir, 'github.copilot-chat', 'chatSessions'),
+					path.join(workspaceStoragePath, workspaceDir, 'GitHub.copilot', 'chatSessions'),
+					path.join(workspaceStoragePath, workspaceDir, 'github.copilot', 'chatSessions'),
+					path.join(workspaceStoragePath, workspaceDir, 'GitHub.copilot-chat', 'debug-logs'),
+					path.join(workspaceStoragePath, workspaceDir, 'github.copilot-chat', 'debug-logs'),
+					path.join(workspaceStoragePath, workspaceDir, 'GitHub.copilot', 'debug-logs'),
+					path.join(workspaceStoragePath, workspaceDir, 'github.copilot', 'debug-logs'),
+				];
+				for (const chatSessionsPath of candidates) {
+					try {
+						if (!(await pathExists(chatSessionsPath))) { continue; }
+						const files = (await fs.promises.readdir(chatSessionsPath))
+							.filter(f => f.endsWith('.json') || f.endsWith('.jsonl'))
+							.map(f => path.join(chatSessionsPath, f));
+						if (files.length > 0) {
+							log(`📄 Found ${files.length} session files in ${pathName}/workspaceStorage/${workspaceDir}`);
+							sessionFiles.push(...files);
 						}
-					}, 6);
+					} catch { /* ignore individual workspace dir errors */ }
 				}
-			} catch (e) {
-				log(`Could not check workspace storage path ${workspaceStoragePath}: ${e}`);
-			}
+			}, 6);
+		} catch (e) {
+			log(`Could not check workspace storage path ${workspaceStoragePath}: ${e}`);
+		}
+	}
 
-			// globalStorage/emptyWindowChatSessions/
-			const globalStoragePath = path.join(codeUserPath, 'globalStorage', 'emptyWindowChatSessions');
+	private async scanGlobalStorage(codeUserPath: string, pathName: string, sessionFiles: string[], log: (msg: string) => void): Promise<void> {
+		// globalStorage/emptyWindowChatSessions/
+		const globalStoragePath = path.join(codeUserPath, 'globalStorage', 'emptyWindowChatSessions');
+		try {
+			if (await pathExists(globalStoragePath)) {
+				const files = (await fs.promises.readdir(globalStoragePath))
+					.filter(f => f.endsWith('.json') || f.endsWith('.jsonl'))
+					.map(f => path.join(globalStoragePath, f));
+				if (files.length > 0) {
+					log(`📄 Found ${files.length} session files in ${pathName}/globalStorage/emptyWindowChatSessions`);
+					sessionFiles.push(...files);
+				}
+			}
+		} catch (e) {
+			log(`Could not check global storage path ${globalStoragePath}: ${e}`);
+		}
+
+		// globalStorage/{GitHub,github}.copilot-chat/** and {GitHub,github}.copilot/** (recursive)
+		for (const extFolderName of ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot']) {
+			const copilotChatGlobalPath = path.join(codeUserPath, 'globalStorage', extFolderName);
 			try {
-				if (await pathExists(globalStoragePath)) {
-					const files = (await fs.promises.readdir(globalStoragePath))
-						.filter(f => f.endsWith('.json') || f.endsWith('.jsonl'))
-						.map(f => path.join(globalStoragePath, f));
-					if (files.length > 0) {
-						log(`📄 Found ${files.length} session files in ${pathName}/globalStorage/emptyWindowChatSessions`);
-						sessionFiles.push(...files);
-					}
+				if (await pathExists(copilotChatGlobalPath)) {
+					log(`📄 Scanning ${pathName}/globalStorage/${extFolderName}`);
+					await scanGlobalStorageRecursively(copilotChatGlobalPath, sessionFiles, log);
 				}
 			} catch (e) {
-				log(`Could not check global storage path ${globalStoragePath}: ${e}`);
+				log(`Could not check Copilot Chat global storage path ${copilotChatGlobalPath}: ${e}`);
 			}
-
-			// globalStorage/{GitHub,github}.copilot-chat/** and {GitHub,github}.copilot/** (recursive)
-			for (const extFolderName of ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot']) {
-				const copilotChatGlobalPath = path.join(codeUserPath, 'globalStorage', extFolderName);
-				try {
-					if (await pathExists(copilotChatGlobalPath)) {
-						log(`📄 Scanning ${pathName}/globalStorage/${extFolderName}`);
-						await scanGlobalStorageRecursively(copilotChatGlobalPath, sessionFiles, log);
-					}
-				} catch (e) {
-					log(`Could not check Copilot Chat global storage path ${copilotChatGlobalPath}: ${e}`);
-				}
-			}
-		}, 4, (item, _i, err) => {
-			log(`Failed to scan VS Code user path ${item}: ${err instanceof Error ? err.message : String(err)}`);
-		});
-
-		return { sessionFiles, candidatePaths };
+		}
 	}
 }
