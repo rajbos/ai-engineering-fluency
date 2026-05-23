@@ -37,33 +37,26 @@ export function addLanguageUsage(target: LanguageUsage, source: LanguageUsage): 
 	}
 }
 
+function updateLocUsage(usage: { linesAdded?: number; linesRemoved?: number }, linesAdded: number, linesRemoved: number): void {
+	usage.linesAdded = (usage.linesAdded ?? 0) + linesAdded;
+	usage.linesRemoved = (usage.linesRemoved ?? 0) + linesRemoved;
+}
+
 /**
  * Attributes session-level LOC data to the given daily stats entry.
  * Updates totals, editorUsage LOC fields, repositoryUsage LOC fields, and languageUsage.
  */
-function attributeLocToDay(
-	dailyEntry: DailyTokenStats,
-	sessionData: SessionFileCache,
-	editorType: string,
-	repository: string,
-): void {
+function attributeLocToDay(dailyEntry: DailyTokenStats, sessionData: SessionFileCache, editorType: string, repository: string): void {
 	const linesAdded = sessionData.linesAdded ?? 0;
 	const linesRemoved = sessionData.linesRemoved ?? 0;
 	if (linesAdded === 0 && linesRemoved === 0) { return; }
-
-	dailyEntry.linesAdded = (dailyEntry.linesAdded ?? 0) + linesAdded;
-	dailyEntry.linesRemoved = (dailyEntry.linesRemoved ?? 0) + linesRemoved;
-
+	updateLocUsage(dailyEntry, linesAdded, linesRemoved);
 	if (!dailyEntry.editorUsage[editorType]) { dailyEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
-	dailyEntry.editorUsage[editorType].linesAdded = (dailyEntry.editorUsage[editorType].linesAdded ?? 0) + linesAdded;
-	dailyEntry.editorUsage[editorType].linesRemoved = (dailyEntry.editorUsage[editorType].linesRemoved ?? 0) + linesRemoved;
-
+	updateLocUsage(dailyEntry.editorUsage[editorType], linesAdded, linesRemoved);
 	if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
-	dailyEntry.repositoryUsage[repository].linesAdded = (dailyEntry.repositoryUsage[repository].linesAdded ?? 0) + linesAdded;
-	dailyEntry.repositoryUsage[repository].linesRemoved = (dailyEntry.repositoryUsage[repository].linesRemoved ?? 0) + linesRemoved;
-
-	if (sessionData.languageUsage && !dailyEntry.languageUsage) { dailyEntry.languageUsage = {}; }
-	if (sessionData.languageUsage && dailyEntry.languageUsage) {
+	updateLocUsage(dailyEntry.repositoryUsage[repository], linesAdded, linesRemoved);
+	if (sessionData.languageUsage) {
+		if (!dailyEntry.languageUsage) { dailyEntry.languageUsage = {}; }
 		addLanguageUsage(dailyEntry.languageUsage, sessionData.languageUsage);
 	}
 }
@@ -244,43 +237,6 @@ function _apsProcessFallbackSession(sessionInput: SessionAggregateInput, ranges:
 	return false;
 }
 
-/**
- * Accumulates per-session token data into period buckets and a per-day map.
- *
- * Both the daily-rollup path (sessions with `dailyRollups`) and the
- * session-level fallback path (no rollups) are handled here.  All date
- * comparisons use UTC day keys (YYYY-MM-DD) so the results are identical
- * regardless of the host timezone.
- *
- * @param sessionResults  Non-null session inputs pre-filtered so that each
- *                        session's mtime is within the last-30-days window.
- *                        Null/skipped entries should be excluded before calling.
- * @param utcDateRanges   UTC day-key boundaries for the period windows.
- */
-export function aggregatePeriodStats(
-	sessionResults: SessionAggregateInput[],
-	utcDateRanges: UtcDateRanges,
-): AggregateResult {
-	const todayStats = makePeriodAccumulator();
-	const monthStats = makePeriodAccumulator();
-	const lastMonthStats = makePeriodAccumulator();
-	const last30DaysStats = makePeriodAccumulator();
-	const dailyStatsMap = new Map<string, DailyTokenStats>();
-	const accs: ApsRollupAccs = { todayStats, monthStats, lastMonthStats, last30DaysStats, dailyStatsMap };
-	let skippedCount = 0;
-
-	for (const session of sessionResults) {
-		if (session.sessionData.dailyRollups && Object.keys(session.sessionData.dailyRollups).length > 0) {
-			const { addedToLast30Days, addedToLastMonth } = _apsProcessRollupSession(session, utcDateRanges, accs);
-			if (!addedToLast30Days && !addedToLastMonth) { skippedCount++; }
-		} else {
-			if (_apsProcessFallbackSession(session, utcDateRanges, accs)) { skippedCount++; }
-		}
-	}
-
-	return { todayStats, monthStats, lastMonthStats, last30DaysStats, dailyStatsMap, skippedCount };
-}
-
 export interface SessionAggregateInput {
 editorType: string;
 sessionData: SessionFileCache;
@@ -331,5 +287,138 @@ editorUsage: {},
 };
 }
 
+interface PeriodAccumulators {
+	todayStats: PeriodAccumulator;
+	monthStats: PeriodAccumulator;
+	lastMonthStats: PeriodAccumulator;
+	last30DaysStats: PeriodAccumulator;
+}
 
+function getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dayKey: string): DailyTokenStats {
+	if (!dailyStatsMap.has(dayKey)) {
+		dailyStatsMap.set(dayKey, { date: dayKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
+	}
+	return dailyStatsMap.get(dayKey)!;
+}
 
+function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: ModelUsage): void {
+	entry.tokens += tokens; entry.sessions += 1; entry.interactions += interactions;
+	if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
+	entry.editorUsage[editorType].tokens += tokens; entry.editorUsage[editorType].sessions += 1;
+	if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
+	entry.repositoryUsage[repository].tokens += tokens; entry.repositoryUsage[repository].sessions += 1;
+	addModelUsage(entry.modelUsage, modelUsage);
+}
+
+function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: number, actual: number, thinking: number, cached: number, interactions: number, countSession: boolean, editorType: string, modelUsage: ModelUsage): void {
+	acc.tokens += tokens; acc.estimatedTokens += estimated; acc.actualTokens += actual;
+	acc.thinkingTokens += thinking; acc.cachedTokens += cached; acc.interactions += interactions;
+	if (countSession) { acc.sessions += 1; }
+	addEditorUsage(acc.editorUsage, editorType, tokens);
+	addModelUsage(acc.modelUsage, modelUsage);
+}
+
+function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string): void {
+	const inLast30Days = dayKey >= dates.last30DaysUtcStartKey;
+	const inLastMonth = dayKey >= dates.lastMonthUtcStartKey && dayKey <= dates.lastMonthUtcEndKey;
+	if (!inLast30Days && !inLastMonth) { return; }
+	const dayTokens = dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens;
+	const dayInteractions = dayRollup.interactions;
+	const cached = dayRollup.cachedReadTokens ?? 0;
+	if (inLast30Days) {
+		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
+		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage);
+		accumulatePeriod(acc.last30DaysStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLast30Days, editorType, dayRollup.modelUsage);
+		flags.addedToLast30Days = true;
+	}
+	if (dayKey >= dates.monthUtcStartKey) {
+		accumulatePeriod(acc.monthStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToMonth, editorType, dayRollup.modelUsage);
+		flags.addedToMonth = true;
+		if (dayKey === dates.todayUtcKey) {
+			accumulatePeriod(acc.todayStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToToday, editorType, dayRollup.modelUsage);
+			flags.addedToToday = true;
+		}
+	} else if (inLastMonth) {
+		accumulatePeriod(acc.lastMonthStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLastMonth, editorType, dayRollup.modelUsage);
+		flags.addedToLastMonth = true;
+	}
+}
+
+function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
+	const { editorType, sessionData } = input;
+	const repository = sessionData.repository || 'Unknown';
+	const flags = { addedToLast30Days: false, addedToMonth: false, addedToLastMonth: false, addedToToday: false };
+	for (const [dayKey, dayRollup] of Object.entries(sessionData.dailyRollups!)) {
+		processOneRollupDay(dayKey, dayRollup, flags, acc, dates, editorType, dailyStatsMap, repository);
+	}
+	if (flags.addedToLast30Days && sessionData.linesAdded !== undefined) {
+		const dayKeys = Object.keys(sessionData.dailyRollups!).sort();
+		const locDay = dayKeys.filter(k => k >= dates.last30DaysUtcStartKey).pop();
+		if (locDay) { const locEntry = dailyStatsMap.get(locDay); if (locEntry) { attributeLocToDay(locEntry, sessionData, editorType, repository); } }
+	}
+	return !flags.addedToLast30Days && !flags.addedToLastMonth;
+}
+
+function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
+	const { editorType, sessionData, mtime, lastInteraction } = input;
+	const repository = sessionData.repository || 'Unknown';
+	const estimatedTokens = sessionData.tokens;
+	const actualTokens = sessionData.actualTokens || 0;
+	const tokens = actualTokens > 0 ? actualTokens : estimatedTokens;
+	const thinking = sessionData.thinkingTokens || 0;
+	const cached = sessionData.cacheReadTokens || 0;
+	const lastActivity = lastInteraction ? new Date(lastInteraction) : new Date(mtime);
+	const lastActivityUtcKey = lastActivity.toISOString().slice(0, 10);
+	const inLast30Days = lastActivityUtcKey >= dates.last30DaysUtcStartKey;
+	const inLastMonth = lastActivityUtcKey >= dates.lastMonthUtcStartKey && lastActivityUtcKey <= dates.lastMonthUtcEndKey;
+	if (!inLast30Days && !inLastMonth) { return true; }
+	if (inLast30Days) {
+		const dailyEntry = getOrCreateDailyEntry(dailyStatsMap, lastActivityUtcKey);
+		addToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage);
+		if (sessionData.linesAdded !== undefined) { attributeLocToDay(dailyEntry, sessionData, editorType, repository); }
+		accumulatePeriod(acc.last30DaysStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage);
+	}
+	if (lastActivityUtcKey >= dates.monthUtcStartKey) {
+		accumulatePeriod(acc.monthStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage);
+		if (lastActivityUtcKey === dates.todayUtcKey) {
+			accumulatePeriod(acc.todayStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage);
+		}
+	} else if (inLastMonth) {
+		accumulatePeriod(acc.lastMonthStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage);
+	}
+	return false;
+}
+
+/**
+ * Accumulates per-session token data into period buckets and a per-day map.
+ *
+ * Both the daily-rollup path (sessions with `dailyRollups`) and the
+ * session-level fallback path (no rollups) are handled here.  All date
+ * comparisons use UTC day keys (YYYY-MM-DD) so the results are identical
+ * regardless of the host timezone.
+ *
+ * @param sessionResults  Non-null session inputs pre-filtered so that each
+ *                        session's mtime is within the last-30-days window.
+ *                        Null/skipped entries should be excluded before calling.
+ * @param utcDateRanges   UTC day-key boundaries for the period windows.
+ */
+export function aggregatePeriodStats(
+sessionResults: SessionAggregateInput[],
+utcDateRanges: UtcDateRanges,
+): AggregateResult {
+const todayStats = makePeriodAccumulator();
+const monthStats = makePeriodAccumulator();
+const lastMonthStats = makePeriodAccumulator();
+const last30DaysStats = makePeriodAccumulator();
+const dailyStatsMap = new Map<string, DailyTokenStats>();
+let skippedCount = 0;
+const acc = { todayStats, monthStats, lastMonthStats, last30DaysStats };
+for (const input of sessionResults) {
+const hasRollups = input.sessionData.dailyRollups && Object.keys(input.sessionData.dailyRollups).length > 0;
+const skipped = hasRollups
+? processRollupPath(input, acc, utcDateRanges, dailyStatsMap)
+: processFallbackPath(input, acc, utcDateRanges, dailyStatsMap);
+if (skipped) { skippedCount++; }
+}
+return { todayStats, monthStats, lastMonthStats, last30DaysStats, dailyStatsMap, skippedCount };
+}
