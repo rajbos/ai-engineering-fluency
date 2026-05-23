@@ -2559,6 +2559,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.deduplicateWorkspacesByCase(sessionCounts, interactionCounts);
 		this.deduplicateRemoteWorkspacePaths(sessionCounts, interactionCounts);
 		this.deduplicateCopilotWorktrees(sessionCounts, interactionCounts);
+		this.deduplicateByBasename(sessionCounts, interactionCounts);
+	}
+
+	/**
+	 * Pass 4 — same-basename dedup for local paths.
+	 * A repo cloned at two different locations (e.g. ~/.copilot/repos/my-repo AND
+	 * ~/source/my-repo) will have the same basename but different absolute paths.
+	 * Merge them into one entry; the path with more interactions wins so the richer
+	 * customization file scan is kept.
+	 */
+	private deduplicateByBasename(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
+		const isRemotePath = (p: string) => process.platform === 'win32' && _normalizePath(p).startsWith('/');
+		// Group all non-remote, non-unresolved paths by lower-case basename
+		const basenameToKeys = new Map<string, string[]>();
+		for (const key of Array.from(sessionCounts.keys())) {
+			if (isRemotePath(key) || key.startsWith('<unresolved:')) { continue; }
+			const base = path.basename(key).toLowerCase();
+			const group = basenameToKeys.get(base) || [];
+			group.push(key);
+			basenameToKeys.set(base, group);
+		}
+		for (const [, group] of basenameToKeys) {
+			if (group.length < 2) { continue; }
+			// Pick winner: most interactions; on tie, most sessions; on tie, first entry
+			const winner = group.reduce((best, key) => {
+				const bestScore = (interactionCounts.get(best) || 0) * 10000 + (sessionCounts.get(best) || 0);
+				const keyScore = (interactionCounts.get(key) || 0) * 10000 + (sessionCounts.get(key) || 0);
+				return keyScore > bestScore ? key : best;
+			});
+			for (const key of group) {
+				if (key !== winner && sessionCounts.has(key)) {
+					this.mergeWorkspaceInto(winner, key, sessionCounts, interactionCounts);
+				}
+			}
+		}
 	}
 
 	private buildResolvedWorkspaceMatrixRows(
