@@ -811,6 +811,12 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	_muaMergeThinkingEffort(period, analysis);
 }
 
+/** Returns the number of times `pattern` matches in `text` (0 if no match). */
+function _countTextMatches(text: string, pattern: RegExp): number {
+	const m = text.match(pattern);
+	return m ? m.length : 0;
+}
+
 /**
  * Analyze text for context references like #file, #selection, @workspace
  */
@@ -834,10 +840,79 @@ const CONTEXT_REF_PATTERNS: Array<[RegExp, keyof Omit<ContextReferenceUsage, 'by
 ];
 
 export function analyzeContextReferences(text: string, refs: ContextReferenceUsage): void {
-	for (const [pattern, field] of CONTEXT_REF_PATTERNS) {
-		const matches = text.match(pattern);
-		if (matches) { (refs as unknown as Record<string, number>)[field] += matches.length; }
+	refs.file += _countTextMatches(text, /#file/gi);
+	refs.selection += _countTextMatches(text, /#selection/gi);
+	// #symbol and #sym are both aliases; #sym:name is handled via variableData
+	refs.symbol += _countTextMatches(text, /#symbol/gi);
+	refs.symbol += _countTextMatches(text, /#sym(?![:\w])/gi); // don't match #symbol or #sym:
+	refs.codebase += _countTextMatches(text, /#codebase/gi);
+	refs.terminalLastCommand += _countTextMatches(text, /#terminalLastCommand/gi);
+	refs.terminalSelection += _countTextMatches(text, /#terminalSelection/gi);
+	refs.clipboard += _countTextMatches(text, /#clipboard/gi);
+	refs.changes += _countTextMatches(text, /#changes/gi);
+	refs.outputPanel += _countTextMatches(text, /#outputPanel/gi);
+	refs.problemsPanel += _countTextMatches(text, /#problemsPanel\b/gi);
+	// #pr and #pullRequest (word boundaries to avoid matching #problemsPanel etc.)
+	refs.pullRequest += _countTextMatches(text, /#pr\b/gi);
+	refs.pullRequest += _countTextMatches(text, /#pullRequest\b/gi);
+	refs.workspace += _countTextMatches(text, /@workspace/gi);
+	refs.terminal += _countTextMatches(text, /@terminal/gi);
+	refs.vscode += _countTextMatches(text, /@vscode/gi);
+}
+
+/** Categorize a normalized file path into the right context reference bucket. */
+function _classifyContentRefPath(normalizedPath: string, refs: ContextReferenceUsage): void {
+	if (normalizedPath.endsWith('/.github/copilot-instructions.md') ||
+		normalizedPath.includes('.github/copilot-instructions.md')) {
+		refs.copilotInstructions++;
+	} else if (normalizedPath.endsWith('/agents.md') ||
+		normalizedPath.match(/\/agents\.md$/i)) {
+		refs.agentsMd++;
+	} else if (normalizedPath.endsWith('.instructions.md') ||
+		normalizedPath.includes('.instructions.md')) {
+		refs.copilotInstructions++;
+	} else {
+		refs.file++;
 	}
+}
+
+/** Process a single content reference's inner reference object. */
+function _processContentRefReference(
+	reference: { fsPath?: string; path?: string; name?: string },
+	kind: string | undefined,
+	refs: ContextReferenceUsage
+): void {
+	const fsPath = reference.fsPath || reference.path;
+	if (typeof fsPath === 'string') {
+		const normalizedPath = normalizePathForComparison(fsPath);
+		_classifyContentRefPath(normalizedPath, refs);
+		const pathKey = fsPath.length > 100 ? '...' + fsPath.substring(fsPath.length - 97) : fsPath;
+		refs.byPath[pathKey] = (refs.byPath[pathKey] || 0) + 1;
+	}
+	// Symbol references (#sym:functionName) have 'name' instead of fsPath
+	const symbolName = reference.name;
+	if (typeof symbolName === 'string' && kind === 'reference') {
+		refs.symbol++;
+		const symbolKey = `#sym:${symbolName}`;
+		refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
+	}
+}
+
+/** Process a single item from a contentReferences array. */
+function _processContentRefItem(contentRef: ContentRefItemRaw, refs: ContextReferenceUsage): void {
+	const kind = contentRef.kind;
+	if (typeof kind === 'string') {
+		refs.byKind[kind] = (refs.byKind[kind] || 0) + 1;
+	}
+	if (kind === 'pullRequest') { refs.pullRequest++; return; }
+
+	let reference = null;
+	if (kind === 'reference' && contentRef.reference) {
+		reference = contentRef.reference;
+	} else if (kind === 'inlineReference' && contentRef.inlineReference) {
+		reference = contentRef.inlineReference;
+	}
+	if (reference) { _processContentRefReference(reference, kind, refs); }
 }
 
 /**
@@ -845,47 +920,19 @@ export function analyzeContextReferences(text: string, refs: ContextReferenceUsa
  * Looks for kind: "reference" entries and tracks by kind, path patterns.
  * Also increments specific category counters like refs.file when appropriate.
  */
-function _acrGetReference(contentRef: ContentRefItemRaw, kind: string): ContentRefObject | null {
-	if (kind === 'reference' && contentRef.reference) { return contentRef.reference; }
-	if (kind === 'inlineReference' && contentRef.inlineReference) { return contentRef.inlineReference; }
-	return null;
-}
-
-function _acrClassifyFilePath(normalizedPath: string, fsPath: string, refs: ContextReferenceUsage): void {
-	if (normalizedPath.endsWith('/.github/copilot-instructions.md') || normalizedPath.includes('.github/copilot-instructions.md')) {
-		refs.copilotInstructions++;
-	} else if (normalizedPath.endsWith('/agents.md') || normalizedPath.match(/\/agents\.md$/i)) {
-		refs.agentsMd++;
-	} else if (normalizedPath.endsWith('.instructions.md') || normalizedPath.includes('.instructions.md')) {
-		refs.copilotInstructions++;
-	} else {
-		refs.file++;
-	}
-	const pathKey = fsPath.length > 100 ? '...' + fsPath.substring(fsPath.length - 97) : fsPath;
-	refs.byPath[pathKey] = (refs.byPath[pathKey] || 0) + 1;
-}
-
-function _acrProcessReference(reference: ContentRefObject, kind: string, refs: ContextReferenceUsage): void {
-	const fsPath = reference.fsPath || reference.path;
-	if (typeof fsPath === 'string') { _acrClassifyFilePath(normalizePathForComparison(fsPath), fsPath, refs); }
-	if (typeof reference.name === 'string' && kind === 'reference') {
-		refs.symbol++;
-		const symbolKey = `#sym:${reference.name}`;
-		refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
-	}
-}
-
 export function analyzeContentReferences(contentReferences: unknown[], refs: ContextReferenceUsage): void {
 	if (!Array.isArray(contentReferences)) { return; }
 	for (const item of contentReferences) {
 		if (!item || typeof item !== 'object') { continue; }
-		const contentRef = item as ContentRefItemRaw;
-		const kind = contentRef.kind;
-		if (typeof kind === 'string') { refs.byKind[kind] = (refs.byKind[kind] || 0) + 1; }
-		if (kind === 'pullRequest') { refs.pullRequest++; continue; }
-		const reference = _acrGetReference(contentRef, kind ?? '');
-		if (reference) { _acrProcessReference(reference, kind ?? '', refs); }
+		_processContentRefItem(item as ContentRefItemRaw, refs);
 	}
+}
+
+/** Process a single promptFile variable value. Currently a no-op for double-count avoidance. */
+function _processPromptFileVariable(value: { fsPath?: string; path?: string; external?: string }): void {
+	// copilot-instructions.md and agents.md are already tracked via contentReferences.
+	// promptFile entries are automatic attachments, not explicit user selections.
+	void value; // intentional no-op — preserved for future use
 }
 
 /**
@@ -916,11 +963,26 @@ export function analyzeVariableData(variableData: unknown, refs: ContextReferenc
 	const data = variableData as VariableDataRaw;
 	if (!Array.isArray(data.variables)) { return; }
 	for (const variable of data.variables) {
-		if (!variable || typeof variable !== 'object') { continue; }
+		if (!variable || typeof variable !== 'object') {
+			continue;
+		}
+
 		const kind = variable.kind;
-		if (typeof kind === 'string') { refs.byKind[kind] = (refs.byKind[kind] || 0) + 1; }
-		_avdProcessSymbol(variable, refs);
-		_avdProcessPromptFile(variable, refs);
+		if (typeof kind === 'string') {
+			refs.byKind[kind] = (refs.byKind[kind] || 0) + 1;
+		}
+
+		// Handle symbol references (e.g., #sym:functionName)
+		// These appear as kind="generic" with name starting with "sym:"
+		if (kind === 'generic' && typeof variable.name === 'string' && variable.name.startsWith('sym:')) {
+			refs.symbol++;
+			const symbolKey = `#${variable.name}`;
+			refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
+		}
+
+		if (kind === 'promptFile' && variable.value) {
+			_processPromptFileVariable(variable.value);
+		}
 	}
 }
 
@@ -1018,21 +1080,24 @@ export function applyModelTierClassification(
 
 type TierCounts = { standard: number; premium: number; unknown: number };
 
-function _cmsIncrementTierCount(model: string, tierCounts: TierCounts, modelPricing: { [key: string]: ModelPricing }): void {
-	const tier = getModelTier(model, modelPricing);
-	if (tier === 'standard') { tierCounts.standard++; }
-	else if (tier === 'premium') { tierCounts.premium++; }
-	else { tierCounts.unknown++; }
+function _incrementTierCount(tier: string, counts: TierCounts): void {
+	if (tier === 'standard') { counts.standard++; }
+	else if (tier === 'premium') { counts.premium++; }
+	else { counts.unknown++; }
 }
 
-function _cmsApplyTierCounts(tierCounts: TierCounts, analysis: SessionUsageAnalysis): void {
-	analysis.modelSwitching.standardRequests = tierCounts.standard;
-	analysis.modelSwitching.premiumRequests = tierCounts.premium;
-	analysis.modelSwitching.unknownRequests = tierCounts.unknown;
-	analysis.modelSwitching.totalRequests = tierCounts.standard + tierCounts.premium + tierCounts.unknown;
+function _applyTierCounts(counts: TierCounts, analysis: SessionUsageAnalysis): void {
+	analysis.modelSwitching.standardRequests = counts.standard;
+	analysis.modelSwitching.premiumRequests = counts.premium;
+	analysis.modelSwitching.unknownRequests = counts.unknown;
+	analysis.modelSwitching.totalRequests = counts.standard + counts.premium + counts.unknown;
 }
 
-function _cmsClassifyModels(uniqueModels: string[], modelPricing: { [key: string]: ModelPricing }): { standard: string[]; premium: string[]; unknown: string[] } {
+function _cmsClassifyModelTiers(
+	uniqueModels: string[],
+	modelPricing: { [key: string]: ModelPricing },
+	analysis: SessionUsageAnalysis
+): void {
 	const standard: string[] = [], premium: string[] = [], unknown: string[] = [];
 	for (const model of uniqueModels) {
 		const tier = getModelTier(model, modelPricing);
@@ -1040,83 +1105,106 @@ function _cmsClassifyModels(uniqueModels: string[], modelPricing: { [key: string
 		else if (tier === 'premium') { premium.push(model); }
 		else { unknown.push(model); }
 	}
-	return { standard, premium, unknown };
+	analysis.modelSwitching.tiers = { standard, premium, unknown };
+	analysis.modelSwitching.hasMixedTiers = standard.length > 0 && premium.length > 0;
 }
 
-function _cmsCountJsonRequests(sessionContent: ParsedSessionJson, analysis: SessionUsageAnalysis, modelPricing: { [key: string]: ModelPricing }): void {
-	if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) { return; }
+function _cmsProcessJsonRequests(
+	deps: Pick<UsageAnalysisDeps, 'modelPricing'>,
+	requests: unknown[],
+	analysis: SessionUsageAnalysis
+): void {
 	let previousModel: string | null = null;
 	let switchCount = 0;
-	const tierCounts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
-	for (const requestRaw of sessionContent.requests) {
-		const currentModel = getModelFromRequest(requestRaw as SessionRequestRaw, modelPricing);
+	const counts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
+	for (const requestRaw of requests) {
+		const request = requestRaw as SessionRequestRaw;
+		const currentModel = getModelFromRequest(request, deps.modelPricing);
 		if (previousModel && currentModel !== previousModel) { switchCount++; }
 		previousModel = currentModel;
-		_cmsIncrementTierCount(currentModel, tierCounts, modelPricing);
+		_incrementTierCount(getModelTier(currentModel, deps.modelPricing), counts);
 	}
 	analysis.modelSwitching.switchCount = switchCount;
-	_cmsApplyTierCounts(tierCounts, analysis);
+	_applyTierCounts(counts, analysis);
 }
 
-type CmsEvent = JsonlEventRaw & { type?: string; data?: { selectedModel?: string; newModel?: string }; model?: string };
-
-function _cmsGetKind0ModelId(event: CmsEvent): string | null {
-	if (event.kind !== 0) { return null; }
-	const v = event.v as { selectedModel?: { identifier?: string; metadata?: { id?: string } }; inputState?: { selectedModel?: { metadata?: { id?: string } } } } | undefined;
-	const id = v?.selectedModel?.identifier || v?.selectedModel?.metadata?.id || v?.inputState?.selectedModel?.metadata?.id;
-	if (!id) { return null; }
-	return id.replace(/^copilot\//, '');
+function _cmsExtractKind0Model(event: Record<string, unknown>): string | undefined {
+	if (event.kind !== 0) { return undefined; }
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const v = event.v as any;
+	const modelId = v?.selectedModel?.identifier || v?.selectedModel?.metadata?.id || v?.inputState?.selectedModel?.metadata?.id;
+	return modelId ? String(modelId).replace(/^copilot\//, '') : undefined;
 }
 
-function _cmsGetKind2ModelId(event: CmsEvent): string | null {
-	if (event.kind !== 2 || event.k?.[0] !== 'selectedModel') { return null; }
-	const v = event.v as { identifier?: string; metadata?: { id?: string } } | undefined;
-	const id = v?.identifier || v?.metadata?.id;
-	if (!id) { return null; }
-	return id.replace(/^copilot\//, '');
+function _cmsExtractKind2Model(event: Record<string, unknown>): string | undefined {
+	if (event.kind !== 2 || !Array.isArray(event.k) || event.k[0] !== 'selectedModel') { return undefined; }
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const v = event.v as any;
+	const modelId = v?.identifier || v?.metadata?.id;
+	return modelId ? String(modelId).replace(/^copilot\//, '') : undefined;
 }
 
-function _cmsExtractDefaultModel(event: CmsEvent, currentDefault: string): string {
-	const id0 = _cmsGetKind0ModelId(event);
-	if (id0) { return id0; }
-	const id2 = _cmsGetKind2ModelId(event);
-	if (id2) { return id2; }
-	if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') { return event.data.selectedModel; }
-	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { return event.data.newModel; }
-	return currentDefault;
+function _cmsExtractCliEventModel(event: Record<string, unknown>): string | undefined {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const data = event.data as any;
+	if (event.type === 'session.start' && typeof data?.selectedModel === 'string') { return data.selectedModel; }
+	if (event.type === 'session.model_change' && typeof data?.newModel === 'string') { return data.newModel; }
+	return undefined;
 }
 
-function _cmsGetJsonlRequestModel(request: unknown, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
-	const r = request as { modelId?: string; result?: { metadata?: { modelId?: string }; details?: unknown } };
-	if (r.modelId) { return r.modelId.replace(/^copilot\//, ''); }
-	if (r.result?.metadata?.modelId) { return r.result.metadata.modelId.replace(/^copilot\//, ''); }
-	if (r.result?.details) { return getModelFromRequest(request as SessionRequestRaw, modelPricing); }
-	return defaultModel;
+function _cmsUpdateDefaultModel(event: Record<string, unknown>, currentDefault: string): string {
+	const kind0 = _cmsExtractKind0Model(event);
+	if (kind0) { return kind0; }
+	const kind2 = _cmsExtractKind2Model(event);
+	if (kind2) { return kind2; }
+	const cli = _cmsExtractCliEventModel(event);
+	return cli ?? currentDefault;
 }
 
-function _cmsCountEventRequests(event: CmsEvent, tierCounts: TierCounts, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): void {
-	if (event.type === 'user.message') {
-		_cmsIncrementTierCount(event.model || defaultModel, tierCounts, modelPricing);
-		return;
+function _cmsProcessJsonlRequestBlock(
+	requests: unknown[],
+	defaultModel: string,
+	modelPricing: { [key: string]: ModelPricing },
+	counts: TierCounts
+): void {
+	for (const request of requests) {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const req = request as any;
+		let requestModel = defaultModel;
+		if (req.modelId) {
+			requestModel = String(req.modelId).replace(/^copilot\//, '');
+		} else if (req.result?.metadata?.modelId) {
+			requestModel = String(req.result.metadata.modelId).replace(/^copilot\//, '');
+		} else if (req.result?.details) {
+			requestModel = getModelFromRequest(request as SessionRequestRaw, modelPricing);
+		}
+		_incrementTierCount(getModelTier(requestModel, modelPricing), counts);
 	}
-	if (event.kind !== 2 || event.k?.[0] !== 'requests' || !Array.isArray(event.v)) { return; }
-	for (const request of event.v as unknown[]) {
-		_cmsIncrementTierCount(_cmsGetJsonlRequestModel(request, defaultModel, modelPricing), tierCounts, modelPricing);
-	}
 }
 
-function _cmsCountJsonlRequests(lines: string[], analysis: SessionUsageAnalysis, modelPricing: { [key: string]: ModelPricing }): void {
-	const tierCounts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
+async function _cmsProcessJsonlLines(
+	deps: Pick<UsageAnalysisDeps, 'modelPricing'>,
+	fileContent: string,
+	analysis: SessionUsageAnalysis
+): Promise<void> {
+	const lines = fileContent.trim().split('\n');
+	const counts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
 	let defaultModel = 'unknown';
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
 		try {
-			const event = JSON.parse(line) as CmsEvent;
-			defaultModel = _cmsExtractDefaultModel(event, defaultModel);
-			_cmsCountEventRequests(event, tierCounts, defaultModel, modelPricing);
+			const event = JSON.parse(line) as Record<string, unknown>;
+			defaultModel = _cmsUpdateDefaultModel(event, defaultModel);
+			if (event.type === 'user.message') {
+				const model = (event.model as string | undefined) || defaultModel;
+				_incrementTierCount(getModelTier(model, deps.modelPricing), counts);
+			}
+			if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
+				_cmsProcessJsonlRequestBlock(event.v, defaultModel, deps.modelPricing, counts);
+			}
 		} catch { /* skip malformed lines */ }
 	}
-	_cmsApplyTierCounts(tierCounts, analysis);
+	_applyTierCounts(counts, analysis);
 }
 
 /**
@@ -1126,23 +1214,28 @@ function _cmsCountJsonlRequests(lines: string[], analysis: SessionUsageAnalysis,
 export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'warn' | 'modelPricing' | 'tokenEstimators' | 'ecosystems'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<void> {
 	try {
 		const modelUsage = await getModelUsageFromSession(deps, sessionFile, preloadedContent, preloadedParsedJson);
-		const modelCount = modelUsage ? Object.keys(modelUsage).length : 0;
-		if (!modelUsage || modelCount === 0) { return; }
+		if (!modelUsage || Object.keys(modelUsage).length === 0) { return; }
+
 		const uniqueModels = Object.keys(modelUsage);
 		analysis.modelSwitching.uniqueModels = uniqueModels;
 		analysis.modelSwitching.modelCount = uniqueModels.length;
-		const tiers = _cmsClassifyModels(uniqueModels, deps.modelPricing);
-		analysis.modelSwitching.tiers = tiers;
-		analysis.modelSwitching.hasMixedTiers = tiers.standard.length > 0 && tiers.premium.length > 0;
+		_cmsClassifyModelTiers(uniqueModels, deps.modelPricing, analysis);
+
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 		if (isUuidPointerFile(fileContent)) { return; }
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
+
 		if (!isJsonl) {
 			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return; }
-			_cmsCountJsonRequests(parsed, analysis, deps.modelPricing);
+			if (!isParsedSessionJson(parsed)) {
+				deps.warn(`Unexpected session format in ${sessionFile}`);
+				return;
+			}
+			if (parsed.requests && Array.isArray(parsed.requests)) {
+				_cmsProcessJsonRequests(deps, parsed.requests, analysis);
+			}
 		} else {
-			_cmsCountJsonlRequests(fileContent.trim().split('\n'), analysis, deps.modelPricing);
+			await _cmsProcessJsonlLines(deps, fileContent, analysis);
 		}
 	} catch (error) {
 		deps.warn(`Error calculating model switching for ${sessionFile}: ${error}`);
