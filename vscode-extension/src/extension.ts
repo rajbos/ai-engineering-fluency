@@ -8194,15 +8194,10 @@ body {
     try {
       this.log("🔄 Loading diagnostic data in background...");
 
-      // Ensure the startup GitHub session restore has completed before reading auth state
       if (this._sessionRestorePromise) {
         await this._sessionRestorePromise;
       }
 
-      // CRITICAL: Ensure stats have been calculated at least once to populate cache
-      // If this is the first diagnostic panel open and no stats exist yet,
-      // force an update now so the cache is populated before we load session files.
-      // This dramatically improves performance on first load (near 100% cache hit rate).
       if (!this.lastDetailedStats) {
         this.log(
           "⚡ No cached stats found - forcing initial stats calculation to populate cache...",
@@ -8211,99 +8206,25 @@ body {
         this.log("✅ Cache populated, proceeding with diagnostics load");
       }
 
-      // Load the diagnostic report
       const report = await this.generateDiagnosticReport();
       this.lastDiagnosticReport = report;
 
-      // Get session files
       const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-
-      // Get first 20 session files with stats (quick preview)
-      const sessionFileData: {
-        file: string;
-        size: number;
-        modified: string;
-      }[] = [];
-      for (const file of sessionFiles.slice(0, 20)) {
-        try {
-          const stat = await this.statSessionFile(file);
-          sessionFileData.push({
-            file,
-            size: stat.size,
-            modified: stat.mtime.toISOString(),
-          });
-        } catch {
-          // Skip inaccessible files
-        }
-      }
-
-      // Build folder counts grouped by top-level VS Code user folder (editor roots)
-      const dirCounts = new Map<string, number>();
-      // Tracks friendly display names for eco-adapter directories so the directory
-      // table shows "Claude Desktop Cowork" etc. instead of "Unknown".
-      const dirEditorNames = new Map<string, string>();
-      const pathModule = require("path");
-      const copilotSessionStateDir = pathModule.join(
-        os.homedir(),
-        ".copilot",
-        "session-state",
-      );
-      for (const file of sessionFiles) {
-        // Handle virtual/adapter-owned paths (e.g. opencode.db#ses_<id>, crush.db#<uuid>)
-        const eco = this.findEcosystem(file);
-        if (eco) {
-          const editorRoot = eco.getEditorRoot(file);
-          dirCounts.set(editorRoot, (dirCounts.get(editorRoot) || 0) + 1);
-          dirEditorNames.set(editorRoot, getEcosystemDisplayName(eco, file));
-          continue;
-        }
-        const parts = file.split(/[\\\/]/);
-        const userIdx = parts.findIndex(
-          (p: string) => p.toLowerCase() === "user",
-        );
-        let editorRoot = "";
-        if (userIdx > 0) {
-          const rootParts = parts.slice(0, Math.min(parts.length, userIdx + 2));
-          editorRoot = pathModule.join(...rootParts);
-        } else {
-          editorRoot = pathModule.dirname(file);
-        }
-        // Group all CLI session-state subdirectories under the common parent
-        if (
-          editorRoot.startsWith(copilotSessionStateDir) &&
-          editorRoot !== copilotSessionStateDir
-        ) {
-          editorRoot = copilotSessionStateDir;
-        }
-        dirCounts.set(editorRoot, (dirCounts.get(editorRoot) || 0) + 1);
-      }
-      const sessionFolders = Array.from(dirCounts.entries()).map(
-        ([dir, count]) => ({
-          dir,
-          count,
-          editorName: dirEditorNames.get(dir) || this.getEditorNameFromRoot(dir),
-        }),
-      );
-
-      // Build candidate paths list for diagnostics
+      const sessionFileData = await this.getSessionFilePreviewData(sessionFiles);
+      const sessionFolders = this.buildSessionFolderData(sessionFiles);
       const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
-
-      // Get backend storage info
       const backendStorageInfo = await this.getBackendStorageInfo();
       this.log(
         `Backend storage info retrieved: azure.enabled=${backendStorageInfo.azure?.enabled}, azure.configured=${backendStorageInfo.azure?.isConfigured}, teamServer.enabled=${backendStorageInfo.teamServer?.enabled}, teamServer.configured=${backendStorageInfo.teamServer?.isConfigured}`,
       );
 
-      // Get GitHub authentication status
       const githubAuthStatus = this.getGitHubAuthStatus();
 
-      // Check if panel is still open before updating
       if (!this.isPanelOpen(panel)) {
         this.log("Diagnostic panel closed during data load, aborting update");
         return;
       }
 
-      // Send the loaded data to the webview
       this.log(
         `Sending backend info to webview: ${backendStorageInfo ? "present" : "missing"}`,
       );
@@ -8319,11 +8240,9 @@ body {
 
       this.log("✅ Diagnostic data loaded and sent to webview");
 
-      // Now load detailed session files in the background
       this.loadSessionFilesInBackground(panel, sessionFiles);
     } catch (error) {
       this.error(`Failed to load diagnostic data: ${error}`);
-      // Send error to webview if panel is still open
       if (this.isPanelOpen(panel)) {
         panel.webview.postMessage({
           command: "diagnosticDataError",
@@ -8331,6 +8250,50 @@ body {
         });
       }
     }
+  }
+
+  private async getSessionFilePreviewData(sessionFiles: string[]): Promise<{ file: string; size: number; modified: string }[]> {
+    const sessionFileData: { file: string; size: number; modified: string }[] = [];
+    for (const file of sessionFiles.slice(0, 20)) {
+      try {
+        const stat = await this.statSessionFile(file);
+        sessionFileData.push({ file, size: stat.size, modified: stat.mtime.toISOString() });
+      } catch {
+        // Skip inaccessible files
+      }
+    }
+    return sessionFileData;
+  }
+
+  private buildSessionFolderData(sessionFiles: string[]): { dir: string; count: number; editorName: string }[] {
+    const dirCounts = new Map<string, number>();
+    const dirEditorNames = new Map<string, string>();
+    const pathModule = require("path");
+    const copilotSessionStateDir = pathModule.join(os.homedir(), ".copilot", "session-state");
+    for (const file of sessionFiles) {
+      const eco = this.findEcosystem(file);
+      if (eco) {
+        const editorRoot = eco.getEditorRoot(file);
+        dirCounts.set(editorRoot, (dirCounts.get(editorRoot) || 0) + 1);
+        dirEditorNames.set(editorRoot, getEcosystemDisplayName(eco, file));
+        continue;
+      }
+      const parts = file.split(/[\\\/]/);
+      const userIdx = parts.findIndex((p: string) => p.toLowerCase() === "user");
+      let editorRoot = "";
+      if (userIdx > 0) {
+        editorRoot = pathModule.join(...parts.slice(0, Math.min(parts.length, userIdx + 2)));
+      } else {
+        editorRoot = pathModule.dirname(file);
+      }
+      if (editorRoot.startsWith(copilotSessionStateDir) && editorRoot !== copilotSessionStateDir) {
+        editorRoot = copilotSessionStateDir;
+      }
+      dirCounts.set(editorRoot, (dirCounts.get(editorRoot) || 0) + 1);
+    }
+    return Array.from(dirCounts.entries()).map(([dir, count]) => ({
+      dir, count, editorName: dirEditorNames.get(dir) || this.getEditorNameFromRoot(dir),
+    }));
   }
 
   /**
@@ -8640,78 +8603,16 @@ body {
   ): string {
     const nonce = getNonce();
     const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(
-        this.extensionUri,
-        "dist",
-        "webview",
-        "diagnostics.js",
-      ),
+      vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "diagnostics.js"),
     );
-
-    // Get cache information
-    let cacheSizeInMB = 0;
-    try {
-      // Estimate cache size by serializing to JSON
-      const cacheData = Object.fromEntries(this.cacheManager.cache);
-      const jsonString = JSON.stringify(cacheData);
-      cacheSizeInMB = (jsonString.length * 2) / (1024 * 1024); // UTF-16 encoding (2 bytes per char)
-    } catch {
-      cacheSizeInMB = 0;
-    }
-
-    // Try to read the persisted cache from VS Code global state to show its actual storage status
-    let persistedCacheSummary = "Not found in VS Code Global State";
-    try {
-      const persisted =
-        this.context.globalState.get<Record<string, SessionFileCache>>(
-          "sessionFileCache",
-        );
-      if (persisted && typeof persisted === "object") {
-        const count = Object.keys(persisted).length;
-        persistedCacheSummary = `VS Code Global State - sessionFileCache (${count} entr${count === 1 ? "y" : "ies"})`;
-      }
-    } catch (e) {
-      persistedCacheSummary = "Error reading VS Code Global State";
-    }
-
-    // Try to locate the actual storage file (state DB) for the extension global state
-    let storageFilePath: string | null = null;
-    try {
-      // Check both IDs so the diagnostic works whether the user installed the new or legacy extension ID
-      const extensionIds = ["RobBos.ai-engineering-fluency", "RobBos.copilot-token-tracker"];
-      const userPaths = getVSCodeUserPaths();
-      outer: for (const userPath of userPaths) {
-        for (const extId of extensionIds) {
-          try {
-            const candidate = path.join(userPath, "globalStorage", extId);
-            if (fs.existsSync(candidate)) {
-              const files = fs.readdirSync(candidate);
-              // Look for likely state files
-              const match = files.find(
-                (f) =>
-                  f.includes("state") ||
-                  f.endsWith(".vscdb") ||
-                  f.endsWith(".json"),
-              );
-              if (match) {
-                storageFilePath = path.join(candidate, match);
-                break outer;
-              }
-            }
-          } catch (e) {
-            // ignore path access errors
-          }
-        }
-      }
-    } catch (e) {
-      // ignore
-    }
+    const cacheSizeInMB = this.resolveCacheSizeInMB();
+    const persistedCacheSummary = this.resolvePersistedCacheSummary();
+    const storageFilePath = this.findGlobalStateStoragePath();
 
     const cacheInfo = {
       size: this.cacheManager.cache.size,
       sizeInMB: cacheSizeInMB,
-      lastUpdated:
-        this.cacheManager.cache.size > 0 ? new Date().toISOString() : null,
+      lastUpdated: this.cacheManager.cache.size > 0 ? new Date().toISOString() : null,
       location: persistedCacheSummary,
       storagePath: storageFilePath,
     };
@@ -8726,19 +8627,10 @@ body {
     };
 
     const initialData = JSON.stringify({
-      report,
-      sessionFiles,
-      detailedSessionFiles,
-      sessionFolders,
-      cacheInfo,
-      backendStorageInfo,
-      backendConfigured: this.isBackendConfigured(),
-      isDebugMode,
-      globalStateCounters,
-      displaySettings: {
-        showTokens: this.getStatusBarShowTokensSetting(),
-        showCost: this.getStatusBarShowCostSetting(),
-      },
+      report, sessionFiles, detailedSessionFiles, sessionFolders,
+      cacheInfo, backendStorageInfo,
+      backendConfigured: this.isBackendConfigured(), isDebugMode, globalStateCounters,
+      displaySettings: { showTokens: this.getStatusBarShowTokensSetting(), showCost: this.getStatusBarShowCostSetting() },
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
@@ -8757,6 +8649,49 @@ body {
 			<script nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
 		</html>`;
+  }
+
+  private resolveCacheSizeInMB(): number {
+    try {
+      const cacheData = Object.fromEntries(this.cacheManager.cache);
+      const jsonString = JSON.stringify(cacheData);
+      return (jsonString.length * 2) / (1024 * 1024);
+    } catch {
+      return 0;
+    }
+  }
+
+  private resolvePersistedCacheSummary(): string {
+    try {
+      const persisted = this.context.globalState.get<Record<string, SessionFileCache>>("sessionFileCache");
+      if (persisted && typeof persisted === "object") {
+        const count = Object.keys(persisted).length;
+        return `VS Code Global State - sessionFileCache (${count} entr${count === 1 ? "y" : "ies"})`;
+      }
+    } catch {
+      return "Error reading VS Code Global State";
+    }
+    return "Not found in VS Code Global State";
+  }
+
+  private findGlobalStateStoragePath(): string | null {
+    try {
+      const extensionIds = ["RobBos.ai-engineering-fluency", "RobBos.copilot-token-tracker"];
+      const userPaths = getVSCodeUserPaths();
+      for (const userPath of userPaths) {
+        for (const extId of extensionIds) {
+          try {
+            const candidate = path.join(userPath, "globalStorage", extId);
+            if (fs.existsSync(candidate)) {
+              const files = fs.readdirSync(candidate);
+              const match = files.find((f) => f.includes("state") || f.endsWith(".vscdb") || f.endsWith(".json"));
+              if (match) { return path.join(candidate, match); }
+            }
+          } catch { /* ignore path access errors */ }
+        }
+      }
+    } catch { /* ignore */ }
+    return null;
   }
 
   private buildChartData(fullDailyStats: DailyTokenStats[]): ChartDataPayload {
