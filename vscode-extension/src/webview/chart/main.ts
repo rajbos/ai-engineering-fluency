@@ -192,171 +192,123 @@ const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countL
 	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month' },
 };
 
-function renderLayout(data: InitialChartData): void {
-	setCompactNumbers(data.compactNumbers !== false);
-	const root = document.getElementById('root');
-	if (!root) {
-		return;
-	}
+function isComboSupported(metric: string, split: string): boolean {
+	if (metric === 'cost') { return split === 'total'; }
+	if (metric === 'output') { return split !== 'model'; }
+	return split !== 'language';
+}
 
-	root.replaceChildren();
-
-	const themeStyle = document.createElement('style');
-	themeStyle.textContent = themeStyles;
-	const style = document.createElement('style');
-	style.textContent = styles;
-
-	const container = el('div', 'container');
+function buildChartHeader(data: InitialChartData): HTMLElement {
 	const header = el('div', 'header');
 	const headerLeft = el('div', 'header-left');
-	const icon = el('span', 'header-icon', '📈');
 	const title = el('span', 'header-title', getChartTitle());
 	title.id = 'chart-title';
-	headerLeft.append(icon, title);
+	headerLeft.append(el('span', 'header-icon', '📈'), title);
 	const buttons = el('div', 'button-row');
 	buttons.append(
-		createButton(BUTTONS['btn-refresh']),
-		createButton(BUTTONS['btn-details']),
-		createButton(BUTTONS['btn-usage']),
-		createButton(BUTTONS['btn-environmental']),
-		createButton(BUTTONS['btn-diagnostics']),
-		createButton(BUTTONS['btn-maturity']),
+		createButton(BUTTONS['btn-refresh']), createButton(BUTTONS['btn-details']),
+		createButton(BUTTONS['btn-usage']), createButton(BUTTONS['btn-environmental']),
+		createButton(BUTTONS['btn-diagnostics']), createButton(BUTTONS['btn-maturity']),
 	);
-	if (data.backendConfigured) {
-		buttons.append(createButton(BUTTONS['btn-dashboard']));
-	}
+	if (data.backendConfigured) { buttons.append(createButton(BUTTONS['btn-dashboard'])); }
 	header.append(headerLeft, buttons);
+	return header;
+}
 
-	const periodData = getActivePeriodData(data);
-	const periodMeta = PERIOD_LABELS[currentPeriod];
-
-	const summarySection = el('div', 'section');
-	summarySection.append(el('h3', '', '📊 Summary'));
+function buildSummaryCards(periodData: ChartPeriodData, periodMeta: typeof PERIOD_LABELS[ChartPeriod]): HTMLElement {
+	const totalLabel = currentMetric === 'cost' ? 'Total Cost (est.)' : currentMetric === 'output' ? 'Total Lines (AI)' : 'Total Tokens';
+	const totalValue = currentMetric === 'cost' ? `$${periodData.totalCost.toFixed(2)}`
+		: currentMetric === 'output' ? ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString()
+		: formatCompact(periodData.totalTokens);
+	const avgLabel = currentMetric === 'cost' ? periodMeta.avgCostLabel : currentMetric === 'output' ? periodMeta.avgLocLabel : periodMeta.avgLabel;
+	const avgValue = currentMetric === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}`
+		: currentMetric === 'output' ? Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString()
+		: formatCompact(periodData.avgPerPeriod);
 	const cards = el('div', 'cards');
 	cards.id = 'summary-cards';
 	cards.append(
-		buildCard('card-period-count',  periodMeta.countLabel,   periodData.periodCount.toLocaleString()),
-		buildCard('card-total-tokens',
-			currentMetric === 'cost' ? 'Total Cost (est.)' :
-			currentMetric === 'output' ? 'Total Lines (AI)' : 'Total Tokens',
-			currentMetric === 'cost' ? `$${periodData.totalCost.toFixed(2)}` :
-			currentMetric === 'output' ? ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString() :
-			formatCompact(periodData.totalTokens)),
-		buildCard('card-avg-tokens',
-			currentMetric === 'cost' ? periodMeta.avgCostLabel :
-			currentMetric === 'output' ? periodMeta.avgLocLabel :
-			periodMeta.avgLabel,
-			currentMetric === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}` :
-			currentMetric === 'output' ? Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString() :
-			formatCompact(periodData.avgPerPeriod)),
-		buildCard('card-total-sessions','Total Sessions',         periodData.totalSessions.toLocaleString())
+		buildCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString()),
+		buildCard('card-total-tokens', totalLabel, totalValue),
+		buildCard('card-avg-tokens', avgLabel, avgValue),
+		buildCard('card-total-sessions', 'Total Sessions', periodData.totalSessions.toLocaleString()),
 	);
-	summarySection.append(cards);
+	return cards;
+}
 
-	const editorCards = buildEditorCards(data.editorTotalsMap);
-	if (editorCards) {
-		summarySection.append(editorCards);
-	}
-
-	const chartSection = el('div', 'section');
-	// Chart section header: title left, period toggles right
-	const chartSectionHeader = el('div', 'chart-section-header');
-	chartSectionHeader.append(el('h3', '', '📊 Charts'));
-
-	// Period toggles (compact, inline with section heading)
+function buildPeriodToggles(periodsReady: boolean): HTMLElement {
 	const periodToggles = el('div', 'period-controls');
-	const periodsReady = data.periodsReady !== false;
 	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, '📅 Day');
 	dayBtn.id = 'period-day';
 	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, periodsReady ? '🗓️ Week' : '🗓️ Week ⌛');
 	weekBtn.id = 'period-week';
-	if (!periodsReady) {
-		(weekBtn as HTMLButtonElement).disabled = true;
-		weekBtn.title = 'Loading historical data…';
-	}
 	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, periodsReady ? '📆 Month' : '📆 Month ⌛');
 	monthBtn.id = 'period-month';
 	if (!periodsReady) {
-		(monthBtn as HTMLButtonElement).disabled = true;
-		monthBtn.title = 'Loading historical data…';
+		(weekBtn as HTMLButtonElement).disabled = true; weekBtn.title = 'Loading historical data…';
+		(monthBtn as HTMLButtonElement).disabled = true; monthBtn.title = 'Loading historical data…';
 	}
 	periodToggles.append(dayBtn, weekBtn, monthBtn);
-	chartSectionHeader.append(periodToggles);
-	chartSection.append(chartSectionHeader);
+	return periodToggles;
+}
 
-	const chartShell = el('div', 'chart-shell');
-
-	// Supported metric/split combos
-	const isComboSupported = (metric: string, split: string): boolean => {
-		if (metric === 'cost') { return split === 'total'; }
-		if (metric === 'output') { return split !== 'model'; }
-		return split !== 'language'; // tokens
-	};
-
-	// Chart controls: [Metric group] | [Split group] | [Rolling avg]
+function buildChartControls(data: InitialChartData): HTMLElement {
 	const toggles = el('div', 'chart-controls');
-
-	// Metric group
 	const metricGroup = el('div', 'control-group');
 	const tokensBtn = el('button', `toggle${currentMetric === 'tokens' ? ' active' : ''}`, 'Tokens');
 	tokensBtn.id = 'metric-tokens';
 	const outputBtn = el('button', `toggle${currentMetric === 'output' ? ' active' : ''}${!data.hasLocData ? ' dim' : ''}`, '✏️ Output');
 	outputBtn.id = 'metric-output';
-	if (!data.hasLocData) {
-		outputBtn.title = 'No edit data available yet (VS Code edit/agent sessions only)';
-	}
+	if (!data.hasLocData) { outputBtn.title = 'No edit data available yet (VS Code edit/agent sessions only)'; }
 	const costBtn = el('button', `toggle${currentMetric === 'cost' ? ' active' : ''}`, '💰 Cost');
 	costBtn.id = 'metric-cost';
 	metricGroup.append(tokensBtn, outputBtn, costBtn);
-
-	const sep1 = el('div', 'control-group-separator');
-
-	// Split group
 	const splitGroup = el('div', 'control-group');
-	const makeSplitBtn = (id: string, split: string, label: string) => {
+	const mkSplit = (id: string, split: string, label: string) => {
 		const supported = isComboSupported(currentMetric, split);
 		const btn = el('button', `toggle${currentSplit === split ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
 		btn.id = id;
-		if (!supported) {
-			(btn as HTMLButtonElement).disabled = true;
-			btn.title = `Not available for ${currentMetric} metric`;
-		}
+		if (!supported) { (btn as HTMLButtonElement).disabled = true; btn.title = `Not available for ${currentMetric} metric`; }
 		return btn;
 	};
-	const totalSplitBtn = makeSplitBtn('split-total', 'total', 'Total');
-	const modelSplitBtn = makeSplitBtn('split-model', 'model', 'By Model');
-	const editorSplitBtn = makeSplitBtn('split-editor', 'editor', 'By Editor');
-	const repoSplitBtn = makeSplitBtn('split-repository', 'repository', 'By Repository');
-	const langSplitBtn = makeSplitBtn('split-language', 'language', 'By Language');
-	splitGroup.append(totalSplitBtn, modelSplitBtn, editorSplitBtn, repoSplitBtn, langSplitBtn);
-
-	const sep2 = el('div', 'control-group-separator');
-
-	// Rolling avg group (only visible for total split with tokens/cost)
-	const rollingGroup = el('div', 'control-group');
-	const rollingApplicableNow = currentSplit === 'total' && currentMetric !== 'output';
-	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicableNow ? '' : ' hidden'}`, '📈 Rolling Avg');
+	splitGroup.append(mkSplit('split-total', 'total', 'Total'), mkSplit('split-model', 'model', 'By Model'),
+		mkSplit('split-editor', 'editor', 'By Editor'), mkSplit('split-repository', 'repository', 'By Repository'),
+		mkSplit('split-language', 'language', 'By Language'));
+	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output';
+	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicable ? '' : ' hidden'}`, '📈 Rolling Avg');
 	rollingBtn.id = 'view-rolling';
+	const rollingGroup = el('div', 'control-group');
 	rollingGroup.append(rollingBtn);
+	toggles.append(metricGroup, el('div', 'control-group-separator'), splitGroup, el('div', 'control-group-separator'), rollingGroup);
+	return toggles;
+}
 
-	toggles.append(metricGroup, sep1, splitGroup, sep2, rollingGroup);
-
+function renderLayout(data: InitialChartData): void {
+	setCompactNumbers(data.compactNumbers !== false);
+	const root = document.getElementById('root');
+	if (!root) { return; }
+	root.replaceChildren();
+	const themeStyle = document.createElement('style'); themeStyle.textContent = themeStyles;
+	const style = document.createElement('style'); style.textContent = styles;
+	const periodData = getActivePeriodData(data);
+	const periodMeta = PERIOD_LABELS[currentPeriod];
+	const summarySection = el('div', 'section');
+	summarySection.append(el('h3', '', '📊 Summary'), buildSummaryCards(periodData, periodMeta));
+	const editorCards = buildEditorCards(data.editorTotalsMap);
+	if (editorCards) { summarySection.append(editorCards); }
+	const chartSectionHeader = el('div', 'chart-section-header');
+	chartSectionHeader.append(el('h3', '', '📊 Charts'), buildPeriodToggles(data.periodsReady !== false));
 	const canvasWrap = el('div', 'canvas-wrap');
-	const canvas = document.createElement('canvas');
-	canvas.id = 'token-chart';
-	canvasWrap.append(canvas);
-
-	chartShell.append(toggles, canvasWrap);
-	chartSection.append(chartShell);
-
+	const canvas = document.createElement('canvas'); canvas.id = 'token-chart'; canvasWrap.append(canvas);
+	const chartShell = el('div', 'chart-shell');
+	chartShell.append(buildChartControls(data), canvasWrap);
+	const chartSection = el('div', 'section');
+	chartSection.append(chartSectionHeader, chartShell);
 	const footer = el('div', 'footer',
-		`${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`
-	);
+		`${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`);
 	footer.id = 'chart-footer';
-
-	container.append(header, summarySection, chartSection, footer);
+	const container = el('div', 'container');
+	container.append(buildChartHeader(data), summarySection, chartSection, footer);
 	root.append(themeStyle, style, container);
-
 	wireInteractions(data);
 	void setupChart(canvas, data);
 }
