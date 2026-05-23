@@ -1449,235 +1449,267 @@ function setupButtonHandlers(): void {
   wireNavButtons();
 }
 
-function setupMessageHandlers(): void {
-  window.addEventListener("message", (event) => {
-    const message = event.data;
-    if (message.command === "diagnosticDataLoaded") {
-      if (message.report) {
-        const reportTabContent = document.getElementById("tab-report");
-        if (reportTabContent) {
-          const processedReport = removeSessionFilesSection(message.report);
-          const reportPre = reportTabContent.querySelector(".report-content");
-          if (reportPre) {
-            reportPre.textContent = processedReport;
-          }
-        }
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+type DiagMessage = Record<string, any>;
+
+function handleDiagnosticDataLoaded(message: DiagMessage): void {
+  if (message.report) {
+    const reportTabContent = document.getElementById("tab-report");
+    if (reportTabContent) {
+      const processedReport = removeSessionFilesSection(message.report);
+      const reportPre = reportTabContent.querySelector(".report-content");
+      if (reportPre) {
+        reportPre.textContent = processedReport;
       }
+    }
+  }
 
-      if (message.backendStorageInfo) {
-        currentBackendInfo = message.backendStorageInfo;
-        if (message.githubAuth !== undefined) {
-          currentGithubAuth = message.githubAuth;
-        }
-        const backendTabContent = document.getElementById("tab-backend");
-        if (backendTabContent) {
-          const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
-          const previousSubtab = activeSubtabEl?.getAttribute("data-subtab")
-            ?? diagState.restore().activeSubtab;
-
-          backendTabContent.innerHTML = renderBackendStoragePanel(
-            currentBackendInfo,
-            currentGithubAuth,
-          );
-          setupBackendButtonHandlers();
-          setupSubtabHandlers();
-
-          if (previousSubtab) {
-            activateSubtab(previousSubtab);
-            diagState.patch({ activeSubtab: previousSubtab });
-          }
-        }
-      } else {
-        console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");
-      }
-
-      if (message.sessionFolders && message.sessionFolders.length > 0) {
-        const reportTabContent = document.getElementById("tab-report");
-        if (reportTabContent) {
-          const grouped = groupSessionFolders(message.sessionFolders as SessionFolder[]);
-          const foldersEl = buildSessionFoldersElement(grouped);
-
-          const existing = reportTabContent.querySelector(".session-folders-table");
-          if (existing) {
-            existing.replaceWith(foldersEl);
-          } else {
-            const reportContent = reportTabContent.querySelector(".report-content");
-            if (reportContent) {
-              reportContent.insertAdjacentElement("afterend", foldersEl);
-            } else {
-              reportTabContent.appendChild(foldersEl);
-            }
-          }
-          setupStorageLinkHandlers();
-        }
-      }
-
-      if (message.candidatePaths && message.candidatePaths.length > 0) {
-        const reportTabContent = document.getElementById("tab-report");
-        if (reportTabContent) {
-          const existing = reportTabContent.querySelector(".candidate-paths-table");
-          if (existing) {
-            existing.remove();
-          }
-
-          const candidateEl = buildCandidatePathsElement(message.candidatePaths);
-
-          const foldersTable = reportTabContent.querySelector(".session-folders-table");
-          if (foldersTable) {
-            foldersTable.insertAdjacentElement("afterend", candidateEl);
-          } else {
-            const reportContent = reportTabContent.querySelector(".report-content");
-            if (reportContent) {
-              reportContent.insertAdjacentElement("afterend", candidateEl);
-            } else {
-              reportTabContent.appendChild(candidateEl);
-            }
-          }
-        }
-      }
-
-      if (message.githubAuth !== undefined) {
-        const githubTabContent = document.getElementById("tab-github");
-        if (githubTabContent) {
-          githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
-          setupGitHubAuthHandlers();
-        }
-      }
-    } else if (message.command === "githubAuthUpdated") {
+  if (message.backendStorageInfo) {
+    currentBackendInfo = message.backendStorageInfo;
+    if (message.githubAuth !== undefined) {
       currentGithubAuth = message.githubAuth;
-      const githubTabContent = document.getElementById("tab-github");
-      if (githubTabContent) {
-        githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
-        setupGitHubAuthHandlers();
+    }
+    const backendTabContent = document.getElementById("tab-backend");
+    if (backendTabContent) {
+      const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
+      const previousSubtab = activeSubtabEl?.getAttribute("data-subtab")
+        ?? diagState.restore().activeSubtab;
+
+      backendTabContent.innerHTML = renderBackendStoragePanel(
+        currentBackendInfo,
+        currentGithubAuth,
+      );
+      setupBackendButtonHandlers();
+      setupSubtabHandlers();
+
+      if (previousSubtab) {
+        activateSubtab(previousSubtab);
+        diagState.patch({ activeSubtab: previousSubtab });
       }
-      const backendTabContent = document.getElementById("tab-backend");
-      if (backendTabContent && currentBackendInfo) {
-        const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
-        const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
-        backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
-        setupBackendButtonHandlers();
-        setupSubtabHandlers();
-        if (previousSubtab) {
-          activateSubtab(previousSubtab);
+    }
+  } else {
+    console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");
+  }
+
+  if (message.sessionFolders && message.sessionFolders.length > 0) {
+    const reportTabContent = document.getElementById("tab-report");
+    if (reportTabContent) {
+      const grouped = groupSessionFolders(message.sessionFolders as SessionFolder[]);
+      const foldersEl = buildSessionFoldersElement(grouped);
+
+      const existing = reportTabContent.querySelector(".session-folders-table");
+      if (existing) {
+        existing.replaceWith(foldersEl);
+      } else {
+        const reportContent = reportTabContent.querySelector(".report-content");
+        if (reportContent) {
+          reportContent.insertAdjacentElement("afterend", foldersEl);
+        } else {
+          reportTabContent.appendChild(foldersEl);
         }
       }
-    } else if (message.command === "diagnosticDataError") {
-      console.error("Error loading diagnostic data:", message.error);
-      const rootEl = document.getElementById("root");
-      if (rootEl) {
-        const errorDiv = document.createElement("div");
-        errorDiv.style.cssText =
-          "color: #ff6b6b; padding: 20px; text-align: center;";
-        errorDiv.innerHTML = `
+      setupStorageLinkHandlers();
+    }
+  }
+
+  if (message.candidatePaths && message.candidatePaths.length > 0) {
+    const reportTabContent = document.getElementById("tab-report");
+    if (reportTabContent) {
+      const existing = reportTabContent.querySelector(".candidate-paths-table");
+      if (existing) {
+        existing.remove();
+      }
+
+      const candidateEl = buildCandidatePathsElement(message.candidatePaths);
+
+      const foldersTable = reportTabContent.querySelector(".session-folders-table");
+      if (foldersTable) {
+        foldersTable.insertAdjacentElement("afterend", candidateEl);
+      } else {
+        const reportContent = reportTabContent.querySelector(".report-content");
+        if (reportContent) {
+          reportContent.insertAdjacentElement("afterend", candidateEl);
+        } else {
+          reportTabContent.appendChild(candidateEl);
+        }
+      }
+    }
+  }
+
+  if (message.githubAuth !== undefined) {
+    const githubTabContent = document.getElementById("tab-github");
+    if (githubTabContent) {
+      githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
+      setupGitHubAuthHandlers();
+    }
+  }
+}
+
+function handleGithubAuthUpdated(message: DiagMessage): void {
+  currentGithubAuth = message.githubAuth;
+  const githubTabContent = document.getElementById("tab-github");
+  if (githubTabContent) {
+    githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
+    setupGitHubAuthHandlers();
+  }
+  const backendTabContent = document.getElementById("tab-backend");
+  if (backendTabContent && currentBackendInfo) {
+    const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
+    const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
+    backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+    setupBackendButtonHandlers();
+    setupSubtabHandlers();
+    if (previousSubtab) {
+      activateSubtab(previousSubtab);
+    }
+  }
+}
+
+function handleDiagnosticDataError(message: DiagMessage): void {
+  console.error("Error loading diagnostic data:", message.error);
+  const rootEl = document.getElementById("root");
+  if (rootEl) {
+    const errorDiv = document.createElement("div");
+    errorDiv.style.cssText =
+      "color: #ff6b6b; padding: 20px; text-align: center;";
+    errorDiv.innerHTML = `
 <h3>⚠️ Error Loading Diagnostic Data</h3>
 <p>${escapeHtml(message.error || "Unknown error")}</p>
 `;
-        rootEl.insertBefore(errorDiv, rootEl.firstChild);
-      }
-    } else if (
-      message.command === "sessionFilesLoaded" &&
-      message.detailedSessionFiles
-    ) {
-      storedDetailedFiles = message.detailedSessionFiles;
-      isLoading = false;
+    rootEl.insertBefore(errorDiv, rootEl.firstChild);
+  }
+}
 
-      const sessionsTab = document.querySelector('.tab[data-tab="sessions"]');
-      if (sessionsTab) {
-        sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
-      }
+function handleSessionFilesLoaded(message: DiagMessage): void {
+  storedDetailedFiles = message.detailedSessionFiles;
+  isLoading = false;
 
-      reRenderTable();
+  const sessionsTab = document.querySelector('.tab[data-tab="sessions"]');
+  if (sessionsTab) {
+    sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
+  }
+
+  reRenderTable();
+}
+
+function handleCacheCleared(): void {
+  const btnReport = document.getElementById(
+    "btn-clear-cache",
+  ) as HTMLButtonElement | null;
+  const btnTab = document.getElementById(
+    "btn-clear-cache-tab",
+  ) as HTMLButtonElement | null;
+  if (btnReport) {
+    btnReport.style.background = "#2d6a4f";
+    btnReport.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
+    btnReport.disabled = false;
+  }
+  if (btnTab) {
+    btnTab.style.background = "#2d6a4f";
+    btnTab.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
+    btnTab.disabled = false;
+  }
+
+  setTimeout(() => {
+    if (btnReport) {
+      btnReport.style.background = "";
+      btnReport.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
+    }
+    if (btnTab) {
+      btnTab.style.background = "";
+      btnTab.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
+    }
+  }, 2000);
+}
+
+function handleCacheRefreshed(message: DiagMessage): void {
+  if (message.cacheInfo) {
+    const cacheInfo = message.cacheInfo;
+    const cacheTabContent = document.getElementById("tab-cache");
+    if (cacheTabContent) {
+      const summaryCards =
+        cacheTabContent.querySelectorAll(".summary-card");
+      if (summaryCards.length >= 4) {
+        const entriesValue =
+          summaryCards[0]?.querySelector(".summary-value");
+        if (entriesValue) {
+          entriesValue.textContent = String(cacheInfo.size);
+        }
+
+        const sizeValue = summaryCards[1]?.querySelector(".summary-value");
+        if (sizeValue) {
+          sizeValue.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`;
+        }
+
+        const lastUpdatedValue =
+          summaryCards[2]?.querySelector(".summary-value");
+        if (lastUpdatedValue) {
+          const date = new Date(cacheInfo.lastUpdated);
+          lastUpdatedValue.textContent = date.toLocaleString();
+        }
+
+        const ageValue = summaryCards[3]?.querySelector(".summary-value");
+        if (ageValue) {
+          ageValue.textContent = "0 seconds ago";
+        }
+      }
+    }
+  }
+}
+
+function handleFolderPicked(message: DiagMessage): void {
+  const input = document.getElementById("folder-path-input") as HTMLInputElement | null;
+  if (input && message.folderPath) {
+    input.value = message.folderPath;
+    input.style.borderColor = "";
+  }
+}
+
+function handleFolderAnalysisResult(message: DiagMessage): void {
+  const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = "<span>🔍</span><span>Analyze</span>";
+  }
+  const resultsDiv = document.getElementById("folder-analysis-results");
+  if (resultsDiv) {
+    if (message.error) {
+      resultsDiv.innerHTML = `
+        <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
+          <div class="info-box-title">⚠️ Analysis Error</div>
+          <div>${escapeHtml(message.error)}</div>
+        </div>`;
+    } else {
+      resultsDiv.innerHTML = renderFolderAnalysisResults(
+        message.files || [],
+        message.totalScanned || 0,
+        message.parseErrors || 0,
+        message.truncated || false,
+        escapeHtml(String(message.folderPath || "")),
+      );
+    }
+  }
+}
+
+function setupMessageHandlers(): void {
+  window.addEventListener("message", (event) => {
+    const message = event.data as DiagMessage;
+    if (message.command === "diagnosticDataLoaded") {
+      handleDiagnosticDataLoaded(message);
+    } else if (message.command === "githubAuthUpdated") {
+      handleGithubAuthUpdated(message);
+    } else if (message.command === "diagnosticDataError") {
+      handleDiagnosticDataError(message);
+    } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
+      handleSessionFilesLoaded(message);
     } else if (message.command === "cacheCleared") {
-      const btnReport = document.getElementById(
-        "btn-clear-cache",
-      ) as HTMLButtonElement | null;
-      const btnTab = document.getElementById(
-        "btn-clear-cache-tab",
-      ) as HTMLButtonElement | null;
-      if (btnReport) {
-        btnReport.style.background = "#2d6a4f";
-        btnReport.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
-        btnReport.disabled = false;
-      }
-      if (btnTab) {
-        btnTab.style.background = "#2d6a4f";
-        btnTab.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
-        btnTab.disabled = false;
-      }
-
-      setTimeout(() => {
-        if (btnReport) {
-          btnReport.style.background = "";
-          btnReport.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
-        }
-        if (btnTab) {
-          btnTab.style.background = "";
-          btnTab.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
-        }
-      }, 2000);
+      handleCacheCleared();
     } else if (message.command === "cacheRefreshed") {
-      if (message.cacheInfo) {
-        const cacheInfo = message.cacheInfo;
-        const cacheTabContent = document.getElementById("tab-cache");
-        if (cacheTabContent) {
-          const summaryCards =
-            cacheTabContent.querySelectorAll(".summary-card");
-          if (summaryCards.length >= 4) {
-            const entriesValue =
-              summaryCards[0]?.querySelector(".summary-value");
-            if (entriesValue) {
-              entriesValue.textContent = String(cacheInfo.size);
-            }
-
-            const sizeValue = summaryCards[1]?.querySelector(".summary-value");
-            if (sizeValue) {
-              sizeValue.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`;
-            }
-
-            const lastUpdatedValue =
-              summaryCards[2]?.querySelector(".summary-value");
-            if (lastUpdatedValue) {
-              const date = new Date(cacheInfo.lastUpdated);
-              lastUpdatedValue.textContent = date.toLocaleString();
-            }
-
-            const ageValue = summaryCards[3]?.querySelector(".summary-value");
-            if (ageValue) {
-              ageValue.textContent = "0 seconds ago";
-            }
-          }
-        }
-      }
+      handleCacheRefreshed(message);
     } else if (message.command === "folderPicked") {
-      const input = document.getElementById("folder-path-input") as HTMLInputElement | null;
-      if (input && message.folderPath) {
-        input.value = message.folderPath;
-        input.style.borderColor = "";
-      }
+      handleFolderPicked(message);
     } else if (message.command === "folderAnalysisResult") {
-      const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = "<span>🔍</span><span>Analyze</span>";
-      }
-      const resultsDiv = document.getElementById("folder-analysis-results");
-      if (resultsDiv) {
-        if (message.error) {
-          resultsDiv.innerHTML = `
-            <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
-              <div class="info-box-title">⚠️ Analysis Error</div>
-              <div>${escapeHtml(message.error)}</div>
-            </div>`;
-        } else {
-          resultsDiv.innerHTML = renderFolderAnalysisResults(
-            message.files || [],
-            message.totalScanned || 0,
-            message.parseErrors || 0,
-            message.truncated || false,
-            escapeHtml(String(message.folderPath || "")),
-          );
-        }
-      }
+      handleFolderAnalysisResult(message);
     }
   });
 }
