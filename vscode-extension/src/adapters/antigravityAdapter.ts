@@ -64,9 +64,12 @@ return Promise.resolve(this.antigravity.buildAntigravityTurns(sessionFile));
 async discover(log: (msg: string) => void): Promise<DiscoveryResult> {
 const candidatePaths = this.getCandidatePaths();
 const sessionFiles: string[] = [];
+const brainDir = this.antigravity.getAntigravityBrainDir();
 
+log(`🔍 [Antigravity] Checking brain dir: ${brainDir}`);
 try {
 const files = this.antigravity.getAntigravitySessionFiles();
+log(`🔍 [Antigravity] Found ${files.length} transcript(s)`);
 if (files.length > 0) {
 log(`📄 Found ${files.length} session file(s) in Antigravity (~/.gemini/antigravity/brain/*/)`);
 sessionFiles.push(...files);
