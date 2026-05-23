@@ -47,17 +47,7 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 		let title: string | undefined;
 		let workspacePath: string | undefined;
 
-		const sessionId = this.openCode.getOpenCodeSessionId(sessionFile);
-		let session: any = null;
-		if (this.openCode.isOpenCodeDbSession(sessionFile) && sessionId) {
-			session = await this.openCode.readOpenCodeDbSession(sessionId);
-		} else {
-			session = await withErrorRecovery(
-				async () => JSON.parse(await fs.promises.readFile(sessionFile, 'utf8')),
-				null,
-				`openCodeAdapter getMeta readFile(${sessionFile})`
-			);
-		}
+		const session = await this.readOpenCodeSessionData(sessionFile);
 		if (session) {
 			title = session.title || session.slug;
 			workspacePath = session.directory || undefined;
@@ -78,6 +68,18 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 			lastInteraction: timestamps.length > 0 ? new Date(timestamps[timestamps.length - 1]).toISOString() : null,
 			workspacePath,
 		};
+	}
+
+	private async readOpenCodeSessionData(sessionFile: string): Promise<any> {
+		const sessionId = this.openCode.getOpenCodeSessionId(sessionFile);
+		if (this.openCode.isOpenCodeDbSession(sessionFile) && sessionId) {
+			return this.openCode.readOpenCodeDbSession(sessionId);
+		}
+		return withErrorRecovery(
+			async () => JSON.parse(await fs.promises.readFile(sessionFile, 'utf8')),
+			null,
+			`openCodeAdapter getMeta readFile(${sessionFile})`
+		);
 	}
 
 	getEditorRoot(_sessionFile: string): string {
@@ -164,65 +166,66 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const turns: ChatTurn[] = [];
 		const messages = await this.openCode.getOpenCodeMessagesForSession(sessionFile);
-		if (messages.length > 0) {
-			let turnNumber = 0;
-			let prevCumulativeTotal = 0;
-			for (let i = 0; i < messages.length; i++) {
-				const msg = messages[i];
-				if (msg.role !== 'user') { continue; }
-				turnNumber++;
-				const turnAssistantMsgs = messages.filter((m, idx) => idx > i && m.role === 'assistant' && m.parentID === msg.id);
-				const userParts = await this.openCode.getOpenCodePartsForMessage(msg.id);
-				const userText = userParts.filter(p => p.type === 'text').map(p => p.text || '').join('\n');
-				let assistantText = '';
-				const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
-				let model: string | null = null;
-				let thinkingTokens = 0;
-
-				let turnCumulativeTotal = prevCumulativeTotal;
-				for (const assistantMsg of turnAssistantMsgs) {
-					if (!model) { model = assistantMsg.modelID || null; }
-					thinkingTokens += assistantMsg.tokens?.reasoning || 0;
-					if (typeof assistantMsg.tokens?.total === 'number') {
-						turnCumulativeTotal = Math.max(turnCumulativeTotal, assistantMsg.tokens.total);
-					}
-					const assistantParts = await this.openCode.getOpenCodePartsForMessage(assistantMsg.id);
-					for (const part of assistantParts) {
-						if (part.type === 'text' && part.text) {
-							assistantText += part.text;
-						} else if (part.type === 'tool' && part.tool) {
-							toolCalls.push({
-								toolName: part.tool,
-								arguments: part.state?.input ? JSON.stringify(part.state.input) : undefined,
-								result: part.state?.output || undefined
-							});
-						}
-					}
-				}
-
-				const turnTokens = turnCumulativeTotal - prevCumulativeTotal;
-				const turnOutputAndThinking = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.output || 0) + (m.tokens?.reasoning || 0), 0);
-				const turnInputTokens = Math.max(0, turnTokens - turnOutputAndThinking);
-
-				turns.push({
-					turnNumber,
-					timestamp: msg.time?.created ? new Date(msg.time.created).toISOString() : null,
-					mode: 'cli',
-					userMessage: userText,
-					assistantResponse: assistantText,
-					model,
-					toolCalls,
-					contextReferences: createEmptyContextRefs(),
-					mcpTools: [],
-					inputTokensEstimate: turnInputTokens,
-					outputTokensEstimate: turnOutputAndThinking - thinkingTokens,
-					thinkingTokensEstimate: thinkingTokens
-				});
-
-				prevCumulativeTotal = turnCumulativeTotal;
-			}
+		let prevCumulativeTotal = 0;
+		let turnNumber = 0;
+		for (let i = 0; i < messages.length; i++) {
+			const msg = messages[i];
+			if (msg.role !== 'user') { continue; }
+			turnNumber++;
+			const turnAssistantMsgs = messages.filter((m, idx) => idx > i && m.role === 'assistant' && m.parentID === msg.id);
+			const userParts = await this.openCode.getOpenCodePartsForMessage(msg.id);
+			const userText = userParts.filter(p => p.type === 'text').map(p => p.text || '').join('\n');
+			const turnData = await this.processOpenCodeAssistantMessages(turnAssistantMsgs, prevCumulativeTotal);
+			const turnInputTokens = Math.max(0, (turnData.turnCumulativeTotal - prevCumulativeTotal) - turnData.turnOutputAndThinking);
+			turns.push({
+				turnNumber,
+				timestamp: msg.time?.created ? new Date(msg.time.created).toISOString() : null,
+				mode: 'cli',
+				userMessage: userText,
+				assistantResponse: turnData.assistantText,
+				model: turnData.model,
+				toolCalls: turnData.toolCalls,
+				contextReferences: createEmptyContextRefs(),
+				mcpTools: [],
+				inputTokensEstimate: turnInputTokens,
+				outputTokensEstimate: turnData.turnOutputAndThinking - turnData.thinkingTokens,
+				thinkingTokensEstimate: turnData.thinkingTokens
+			});
+			prevCumulativeTotal = turnData.turnCumulativeTotal;
 		}
 		return { turns };
+	}
+
+	private async processOpenCodeAssistantMessages(turnAssistantMsgs: any[], prevCumulativeTotal: number): Promise<{
+		assistantText: string; toolCalls: { toolName: string; arguments?: string; result?: string }[];
+		model: string | null; thinkingTokens: number; turnCumulativeTotal: number; turnOutputAndThinking: number;
+	}> {
+		let assistantText = '';
+		const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
+		let model: string | null = null;
+		let thinkingTokens = 0;
+		let turnCumulativeTotal = prevCumulativeTotal;
+		for (const assistantMsg of turnAssistantMsgs) {
+			if (!model) { model = assistantMsg.modelID || null; }
+			thinkingTokens += assistantMsg.tokens?.reasoning || 0;
+			if (typeof assistantMsg.tokens?.total === 'number') {
+				turnCumulativeTotal = Math.max(turnCumulativeTotal, assistantMsg.tokens.total);
+			}
+			const assistantParts = await this.openCode.getOpenCodePartsForMessage(assistantMsg.id);
+			for (const part of assistantParts) {
+				if (part.type === 'text' && part.text) {
+					assistantText += part.text;
+				} else if (part.type === 'tool' && part.tool) {
+					toolCalls.push({
+						toolName: part.tool,
+						arguments: part.state?.input ? JSON.stringify(part.state.input) : undefined,
+						result: part.state?.output || undefined
+					});
+				}
+			}
+		}
+		const turnOutputAndThinking = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.output || 0) + (m.tokens?.reasoning || 0), 0);
+		return { assistantText, toolCalls, model, thinkingTokens, turnCumulativeTotal, turnOutputAndThinking };
 	}
 
 	async getSyncData(sessionFile: string): Promise<{ tokens: number; interactions: number; modelUsage: ModelUsage; timestamp: number }> {
@@ -232,25 +235,14 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
 		const analysis = createEmptySessionUsageAnalysis();
 		const messages = await this.openCode.getOpenCodeMessagesForSession(sessionFile);
-		if (messages.length > 0) {
-			const models: string[] = [];
-			for (const msg of messages) {
-				if (msg.role === 'user') {
-					analysis.modeUsage.cli++;
-				}
-				if (msg.role === 'assistant') {
-					const model = msg.modelID || 'unknown';
-					models.push(model);
-					const parts = await this.openCode.getOpenCodePartsForMessage(msg.id);
-					for (const part of parts) {
-						if (part.type === 'tool' && part.tool) {
-							analysis.toolCalls.total++;
-							const toolName = part.tool;
-							analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-						}
-					}
-				}
+		const models: string[] = [];
+		for (const msg of messages) {
+			if (msg.role === 'user') { analysis.modeUsage.cli++; }
+			if (msg.role === 'assistant') {
+				await this.processOpenCodeAssistantMessage(msg, analysis, models);
 			}
+		}
+		if (models.length > 0) {
 			const uniqueModels = [...new Set(models)];
 			analysis.modelSwitching.uniqueModels = uniqueModels;
 			analysis.modelSwitching.modelCount = uniqueModels.length;
@@ -260,7 +252,18 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 				if (models[i] !== models[i - 1]) { switchCount++; }
 			}
 			analysis.modelSwitching.switchCount = switchCount;
+			applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
 		}
 		return analysis;
+	}
+
+	private async processOpenCodeAssistantMessage(msg: any, analysis: import('../types').SessionUsageAnalysis, models: string[]): Promise<void> {
+		models.push(msg.modelID || 'unknown');
+		const parts = await this.openCode.getOpenCodePartsForMessage(msg.id);
+		for (const part of parts) {
+			if (part.type !== 'tool' || !part.tool) { continue; }
+			analysis.toolCalls.total++;
+			analysis.toolCalls.byTool[part.tool] = (analysis.toolCalls.byTool[part.tool] || 0) + 1;
+		}
 	}
 }
