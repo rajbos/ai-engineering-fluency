@@ -1829,283 +1829,268 @@ function accumulateSubAgentTokenUsage(
 	}
 }
 
+type GmusDeps = Pick<UsageAnalysisDeps, 'warn' | 'tokenEstimators' | 'modelPricing'>;
+
+type GmusJsonlState = {
+	defaultModel: string;
+	isDeltaBased: boolean;
+	sessionState: DeltaSessionState;
+	cliShutdownModelUsage: ModelUsage | null;
+	cliRealOutputByModel: { [model: string]: number } | null;
+	totalCliToolCalls: number;
+};
+
+type CliShutdownMetricsEntry = { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } };
+
+/** Accumulate per-model token data from a session.shutdown modelMetrics block. */
+function _gmusProcessCliShutdownMetrics(
+	modelMetrics: Record<string, CliShutdownMetricsEntry>,
+	cliShutdownModelUsage: ModelUsage
+): void {
+	for (const [modelName, metrics] of Object.entries(modelMetrics)) {
+		const usage = metrics?.usage;
+		if (!usage) { continue; }
+		if (!cliShutdownModelUsage[modelName]) { cliShutdownModelUsage[modelName] = { inputTokens: 0, outputTokens: 0 }; }
+		cliShutdownModelUsage[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
+		cliShutdownModelUsage[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
+		const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
+		const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
+		if (cacheRead > 0) { cliShutdownModelUsage[modelName].cachedReadTokens = (cliShutdownModelUsage[modelName].cachedReadTokens ?? 0) + cacheRead; }
+		if (cacheWrite > 0) { cliShutdownModelUsage[modelName].cacheCreationTokens = (cliShutdownModelUsage[modelName].cacheCreationTokens ?? 0) + cacheWrite; }
+	}
+}
+
+/** Handle an assistant.message event, recording real or estimated output tokens. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _gmusHandleAssistantMessage(event: any, model: string, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
+	const realOutput = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
+	if (realOutput > 0) {
+		if (!state.cliRealOutputByModel) { state.cliRealOutputByModel = {}; }
+		state.cliRealOutputByModel[model] = (state.cliRealOutputByModel[model] ?? 0) + realOutput;
+	} else if (event.data?.content) {
+		modelUsage[model].outputTokens += estimateTokensFromText(event.data.content, model, deps.tokenEstimators);
+	}
+}
+
+/** Handle a session.shutdown event, accumulating CLI shutdown model metrics into state. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _gmusHandleShutdownEvent(event: any, state: GmusJsonlState): void {
+	if (!event.data?.modelMetrics) { return; }
+	if (!state.cliShutdownModelUsage) { state.cliShutdownModelUsage = {}; }
+	_gmusProcessCliShutdownMetrics(event.data.modelMetrics as Record<string, CliShutdownMetricsEntry>, state.cliShutdownModelUsage);
+}
+
+/** Dispatch a CLI-format JSONL event to the appropriate token accumulation handler. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _gmusProcessCliEventLine(event: any, model: string, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
+	if (event.type === 'session.shutdown') {
+		_gmusHandleShutdownEvent(event, state);
+	} else if (event.type === 'user.message' && event.data?.content) {
+		modelUsage[model].inputTokens += estimateTokensFromText(event.data.content, model, deps.tokenEstimators);
+	} else if (event.type === 'assistant.message') {
+		_gmusHandleAssistantMessage(event, model, state, modelUsage, deps);
+	} else if (event.type === 'tool.execution_start') {
+		state.totalCliToolCalls++;
+	} else if (event.type === 'tool.execution_complete') {
+		const toolContent = event.data?.result?.content || event.data?.result?.detailedContent;
+		if (toolContent) { modelUsage[model].inputTokens += estimateTokensFromText(String(toolContent), model, deps.tokenEstimators); }
+	}
+}
+
+/** Extract the model identifier from a kind-0 (session header) delta event, or null if absent. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _gmusExtractKind0Model(event: any): string | null {
+	if (event.kind !== 0) { return null; }
+	return event.v?.selectedModel?.identifier || event.v?.selectedModel?.metadata?.id || event.v?.inputState?.selectedModel?.metadata?.id || null;
+}
+
+/** Extract the model identifier from a kind-2 selectedModel update event, or null if absent. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _gmusExtractKind2Model(event: any): string | null {
+	if (event.kind !== 2 || event.k?.[0] !== 'selectedModel') { return null; }
+	return event.v?.identifier || event.v?.metadata?.id || null;
+}
+
+/** Update the default model tracked in state based on model-selection events. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _gmusUpdateDefaultModelFromEvent(event: any, state: GmusJsonlState): void {
+	if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') {
+		state.defaultModel = event.data.selectedModel;
+		return;
+	}
+	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
+		state.defaultModel = event.data.newModel;
+		return;
+	}
+	const kind0Model = _gmusExtractKind0Model(event);
+	if (kind0Model) { state.defaultModel = kind0Model.replace(/^copilot\//, ''); }
+	const kind2Model = _gmusExtractKind2Model(event);
+	if (kind2Model) { state.defaultModel = kind2Model.replace(/^copilot\//, ''); }
+}
+
+/** Process a single parsed JSONL event, updating state and model usage. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _gmusProcessJsonlLine(event: any, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
+	if (typeof event.kind === 'number') {
+		state.isDeltaBased = true;
+		state.sessionState = applyDelta(state.sessionState, event) as DeltaSessionState;
+	}
+	_gmusUpdateDefaultModelFromEvent(event, state);
+	const model = event.data?.model || event.model || state.defaultModel;
+	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+	if (!state.isDeltaBased) { _gmusProcessCliEventLine(event, model, state, modelUsage, deps); }
+}
+
+/** Parse all JSONL lines into accumulated state and model usage. Returns the session state. */
+function _gmusParseJsonlLines(lines: string[], modelUsage: ModelUsage, deps: GmusDeps): GmusJsonlState {
+	const state: GmusJsonlState = {
+		defaultModel: 'unknown', isDeltaBased: false, sessionState: {},
+		cliShutdownModelUsage: null, cliRealOutputByModel: null, totalCliToolCalls: 0
+	};
+	for (const line of lines) {
+		if (!line.trim()) { continue; }
+		try {
+			// eslint-disable-next-line @typescript-eslint/no-explicit-any
+			const event: any = JSON.parse(line);
+			_gmusProcessJsonlLine(event, state, modelUsage, deps);
+		} catch { /* skip malformed lines */ }
+	}
+	return state;
+}
+
+/** Estimate token counts for a delta request by parsing message text and response content. */
+function _gmusEstimateDeltaRequestTokens(request: SessionRequestRaw, requestModel: string, modelUsage: ModelUsage, deps: GmusDeps): void {
+	if (request.message?.text) {
+		modelUsage[requestModel].inputTokens += estimateTokensFromText(request.message.text, requestModel, deps.tokenEstimators);
+	}
+	if (request.response && Array.isArray(request.response)) {
+		for (const responseItem of request.response as ResponseItemRaw[]) {
+			const { text } = extractResponseItemText(responseItem);
+			if (text) { modelUsage[requestModel].outputTokens += estimateTokensFromText(text, requestModel, deps.tokenEstimators); }
+		}
+	}
+}
+
+/** Process a single delta-format request, extracting or estimating token usage. */
+function _gmusProcessDeltaRequest(request: SessionRequestRaw, defaultModel: string, modelUsage: ModelUsage, deps: GmusDeps): void {
+	if (!request.requestId) { return; }
+	let requestModel = defaultModel;
+	if (request.modelId) {
+		requestModel = request.modelId.replace(/^copilot\//, '');
+	} else if (request.result?.metadata?.modelId) {
+		requestModel = request.result.metadata.modelId.replace(/^copilot\//, '');
+	} else if (request.result?.details) {
+		requestModel = getModelFromRequest(request, deps.modelPricing);
+	}
+	if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0 }; }
+	if (!tryExtractExactTokenUsage(request, requestModel, modelUsage)) {
+		_gmusEstimateDeltaRequestTokens(request, requestModel, modelUsage, deps);
+	}
+	if (request.response && Array.isArray(request.response)) {
+		accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], requestModel, modelUsage, deps.tokenEstimators);
+	}
+}
+
+/** Iterate and process all delta-based requests from reconstructed session state. */
+function _gmusProcessDeltaRequests(state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
+	if (!state.isDeltaBased || !state.sessionState.requests || !Array.isArray(state.sessionState.requests)) { return; }
+	for (const requestRaw of state.sessionState.requests) {
+		if (!requestRaw) { continue; }
+		_gmusProcessDeltaRequest(requestRaw as SessionRequestRaw, state.defaultModel, modelUsage, deps);
+	}
+}
+
+/** Apply regex-based fallback extraction to fill in any requests that reconstruction missed. */
+function _gmusDeltaFallbackExtraction(lines: string[], state: GmusJsonlState, modelUsage: ModelUsage): void {
+	const rawModelUsage = extractPerRequestUsageFromRawLines(lines);
+	for (const [reqIdx, extracted] of rawModelUsage) {
+		const request = state.sessionState.requests?.[reqIdx] as SessionRequestRaw | undefined;
+		if (!request) { continue; }
+		if (request.result?.usage || (typeof request.result?.promptTokens === 'number') || (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number')) { continue; }
+		let requestModel = state.defaultModel;
+		if (request.modelId) { requestModel = request.modelId.replace(/^copilot\//, ''); }
+		if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0 }; }
+		modelUsage[requestModel].inputTokens += extracted.promptTokens;
+		modelUsage[requestModel].outputTokens += extracted.outputTokens;
+	}
+}
+
+/** Build estimated model usage for sessions using per-turn real output without a shutdown event. */
+function _gmusBuildEstimatedCliUsage(state: GmusJsonlState, modelUsage: ModelUsage): ModelUsage {
+	const numTurns = Math.max(1, Math.round(state.totalCliToolCalls / 2));
+	const contextFactor = Math.max(1, (numTurns + 1) / 2);
+	const estimatedUsage: ModelUsage = {};
+	for (const [m, realOutput] of Object.entries(state.cliRealOutputByModel!)) {
+		const accumulatedInput = modelUsage[m]?.inputTokens ?? 0;
+		estimatedUsage[m] = { inputTokens: Math.round(accumulatedInput * contextFactor), outputTokens: realOutput };
+	}
+	return estimatedUsage;
+}
+
+/** Process all JSONL lines and return resolved model usage, or null to use accumulated modelUsage. */
+function _gmusProcessJsonlContent(lines: string[], modelUsage: ModelUsage, deps: GmusDeps): ModelUsage | null {
+	const state = _gmusParseJsonlLines(lines, modelUsage, deps);
+	if (!state.isDeltaBased && state.cliShutdownModelUsage) { return state.cliShutdownModelUsage; }
+	if (!state.isDeltaBased && state.cliRealOutputByModel) { return _gmusBuildEstimatedCliUsage(state, modelUsage); }
+	_gmusProcessDeltaRequests(state, modelUsage, deps);
+	_gmusDeltaFallbackExtraction(lines, state, modelUsage);
+	return null;
+}
+
+/** Estimate input/output tokens for a JSON-format request from message text and response content. */
+function _gmusProcessJsonRequestEstimate(request: SessionRequestRaw, model: string, modelUsage: ModelUsage, deps: GmusDeps): void {
+	if (request.message?.parts) {
+		for (const part of request.message.parts) {
+			if (part.text) { modelUsage[model].inputTokens += estimateTokensFromText(part.text, model, deps.tokenEstimators); }
+		}
+	}
+	if (request.response && Array.isArray(request.response)) {
+		for (const responseItem of request.response as ResponseItemRaw[]) {
+			const { text } = extractResponseItemText(responseItem);
+			if (text) { modelUsage[model].outputTokens += estimateTokensFromText(text, model, deps.tokenEstimators); }
+		}
+	}
+}
+
+/** Process a single JSON-format session request, accumulating its token usage. */
+function _gmusProcessJsonRequest(request: SessionRequestRaw, modelUsage: ModelUsage, deps: GmusDeps): void {
+	const model = getModelFromRequest(request, deps.modelPricing);
+	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+	if (!tryExtractExactTokenUsage(request, model, modelUsage)) { _gmusProcessJsonRequestEstimate(request, model, modelUsage, deps); }
+	if (request.response && Array.isArray(request.response)) {
+		accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], model, modelUsage, deps.tokenEstimators);
+	}
+}
+
+/** Iterate and process all requests from a parsed JSON session file. */
+function _gmusProcessJsonRequests(sessionContent: ParsedSessionJson, modelUsage: ModelUsage, deps: GmusDeps): void {
+	if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) { return; }
+	for (const requestRaw of sessionContent.requests) {
+		_gmusProcessJsonRequest(requestRaw as SessionRequestRaw, modelUsage, deps);
+	}
+}
+
 export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'warn' | 'tokenEstimators' | 'modelPricing' | 'ecosystems'>, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<ModelUsage> {
 	const modelUsage: ModelUsage = {};
-
-	// Dispatch to ecosystem adapter when available
 	if (deps.ecosystems) {
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco) { return eco.getModelUsage(sessionFile); }
 	}
-
-	const fileName = sessionFile.split(/[/\\]/).pop() || sessionFile;
-
 	try {
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-
-		// Check if this is a UUID-only file (new Copilot CLI format)
-		if (isUuidPointerFile(fileContent)) {
-			return modelUsage; // Empty model usage for pointer files
-		}
-
-		// Detect JSONL content: either by extension or by content analysis
+		if (isUuidPointerFile(fileContent)) { return modelUsage; }
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
-
-		// Handle .jsonl files OR .json files with JSONL content (Copilot CLI format and VS Code incremental format)
 		if (isJsonl) {
 			const lines = fileContent.trim().split('\n');
-			// Default model for CLI sessions - 'unknown' when we can't determine the model
-			let defaultModel = 'unknown';
-
-			// For delta-based formats, reconstruct state to extract actual usage
-			let sessionState: DeltaSessionState = {};
-			let isDeltaBased = false;
-			// For CLI (non-delta) sessions: capture exact per-model usage from session.shutdown
-			let cliShutdownModelUsage: ModelUsage | null = null;
-			// Real outputTokens from assistant.message events (used when session.shutdown is absent)
-			let cliRealOutputByModel: { [model: string]: number } | null = null;
-			let totalCliToolCalls = 0;
-
-			for (const line of lines) {
-				if (!line.trim()) { continue; }
-				try {
-					const event = JSON.parse(line);
-
-					// Detect and reconstruct delta-based format
-					if (typeof event.kind === 'number') {
-						isDeltaBased = true;
-						sessionState = applyDelta(sessionState, event) as DeltaSessionState;
-					}
-
-					// Copilot CLI session.start carries the selected model
-					if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') {
-						defaultModel = event.data.selectedModel;
-					}
-
-					// Copilot CLI: session.model_change carries the currently active model
-					if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-						defaultModel = event.data.newModel;
-					}
-
-					// Handle VS Code incremental format - extract model from session header (kind: 0)
-					// The schema has v.selectedModel.identifier or v.selectedModel.metadata.id
-					if (event.kind === 0) {
-						const modelId = event.v?.selectedModel?.identifier ||
-							event.v?.selectedModel?.metadata?.id ||
-							// Legacy fallback: older Copilot Chat session logs stored selectedModel under v.inputState.
-							// This is kept for backward compatibility so we can still read existing logs from those versions.
-							event.v?.inputState?.selectedModel?.metadata?.id;
-						if (modelId) {
-							defaultModel = modelId.replace(/^copilot\//, '');
-						}
-					}
-
-					// Handle model changes (kind: 2 with selectedModel update, NOT kind: 1 which is delete)
-					if (event.kind === 2 && event.k?.[0] === 'selectedModel') {
-						const modelId = event.v?.identifier || event.v?.metadata?.id;
-						if (modelId) {
-							defaultModel = modelId.replace(/^copilot\//, '');
-						}
-					}
-
-					// Resolve per-event model: assistant.message carries model in data.model
-					const model = event.data?.model || event.model || defaultModel;
-
-					if (!modelUsage[model]) {
-						modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
-					}
-
-					// For non-delta formats, estimate from event text (CLI format)
-					if (!isDeltaBased) {
-						// Copilot CLI: session.shutdown has exact per-model token totals.
-						// A single events.jsonl can contain multiple session segments (e.g. resumed
-						// sessions), each ending with its own shutdown event. Accumulate across all
-						// shutdown events so no segment's tokens are lost.
-						if (event.type === 'session.shutdown' && event.data?.modelMetrics) {
-							if (!cliShutdownModelUsage) { cliShutdownModelUsage = {}; }
-							for (const [modelName, metrics] of Object.entries(event.data.modelMetrics as Record<string, { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } }>)) {
-								const usage = metrics?.usage;
-								if (usage) {
-									if (!cliShutdownModelUsage[modelName]) {
-										cliShutdownModelUsage[modelName] = { inputTokens: 0, outputTokens: 0 };
-									}
-									cliShutdownModelUsage[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
-									cliShutdownModelUsage[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
-									// Cache breakdown — inputTokens is the total (uncached + reads + writes).
-									// Populate these so calculateEstimatedCost can apply the correct discount rates.
-									const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
-									const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
-									if (cacheRead > 0) {
-										cliShutdownModelUsage[modelName].cachedReadTokens = (cliShutdownModelUsage[modelName].cachedReadTokens ?? 0) + cacheRead;
-									}
-									if (cacheWrite > 0) {
-										cliShutdownModelUsage[modelName].cacheCreationTokens = (cliShutdownModelUsage[modelName].cacheCreationTokens ?? 0) + cacheWrite;
-									}
-								}
-							}
-						} else if (event.type === 'user.message' && event.data?.content) {
-							modelUsage[model].inputTokens += estimateTokensFromText(event.data.content, model, deps.tokenEstimators);
-						} else if (event.type === 'assistant.message') {
-							const realOutput = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
-							if (realOutput > 0) {
-								if (!cliRealOutputByModel) { cliRealOutputByModel = {}; }
-								cliRealOutputByModel[model] = (cliRealOutputByModel[model] ?? 0) + realOutput;
-							} else if (event.data?.content) {
-								modelUsage[model].outputTokens += estimateTokensFromText(event.data.content, model, deps.tokenEstimators);
-							}
-						} else if (event.type === 'tool.execution_start') {
-							totalCliToolCalls++;
-						} else if (event.type === 'tool.execution_complete' && (event.data?.result?.content || event.data?.result?.detailedContent)) {
-							// Tool outputs are fed back as input context in the next turn
-							const toolContent = event.data.result.content || event.data.result.detailedContent;
-							modelUsage[model].inputTokens += estimateTokensFromText(String(toolContent), model, deps.tokenEstimators);
-						}
-					}
-				} catch (e) {
-					// Skip malformed lines
-				}
-			}
-
-			// If CLI session.shutdown provided exact per-model data, use it instead of estimates
-			if (!isDeltaBased && cliShutdownModelUsage) {
-				return cliShutdownModelUsage;
-			}
-
-			// No session.shutdown: estimate input from the content already accumulated (user
-			// messages + tool outputs), scaled by a context-growth factor that accounts for
-			// the full conversation history being re-sent on every API call.
-			// Each call sends ≈ all previous content, so average input per call grows as
-			// (numTurns+1)/2 × per-turn content. Tool-call count ÷ 2 approximates turn count
-			// for typical agentic sessions (~2 tool calls per turn on average).
-			// This avoids the massive overcount of the old output-ratio approach (up to 130×)
-			// while still reflecting that context accumulates across turns.
-			if (!isDeltaBased && cliRealOutputByModel) {
-				const numTurns = Math.max(1, Math.round(totalCliToolCalls / 2));
-				const contextFactor = Math.max(1, (numTurns + 1) / 2);
-				const estimatedUsage: ModelUsage = {};
-				for (const [m, realOutput] of Object.entries(cliRealOutputByModel)) {
-					const accumulatedInput = modelUsage[m]?.inputTokens ?? 0;
-					estimatedUsage[m] = {
-						inputTokens: Math.round(accumulatedInput * contextFactor),
-						outputTokens: realOutput,
-						// cachedReadTokens intentionally omitted: cannot estimate reliably without shutdown data
-					};
-				}
-				return estimatedUsage;
-			}
-
-			// For delta-based formats, extract actual usage from reconstructed state
-			if (isDeltaBased && sessionState.requests && Array.isArray(sessionState.requests)) {
-				for (const requestRaw of sessionState.requests) {
-					if (!requestRaw) { continue; }
-					const request = requestRaw as SessionRequestRaw;
-					if (!request.requestId) { continue; }
-
-					// Extract request-level modelId
-					let requestModel = defaultModel;
-					if (request.modelId) {
-						requestModel = request.modelId.replace(/^copilot\//, '');
-					} else if (request.result?.metadata?.modelId) {
-						requestModel = request.result.metadata.modelId.replace(/^copilot\//, '');
-					} else if (request.result?.details) {
-						requestModel = getModelFromRequest(request, deps.modelPricing);
-					}
-
-					if (!modelUsage[requestModel]) {
-						modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0 };
-					}
-
-					// Use actual usage if available, otherwise estimate from text
-					if (!tryExtractExactTokenUsage(request, requestModel, modelUsage)) {
-						// Fallback: estimate from message text and response content
-						if (request.message?.text) {
-							modelUsage[requestModel].inputTokens += estimateTokensFromText(request.message.text, requestModel, deps.tokenEstimators);
-						}
-						if (request.response && Array.isArray(request.response)) {
-							for (const responseItem of request.response as ResponseItemRaw[]) {
-								// Thinking counts as output for model usage; ignore isThinking flag
-								const { text } = extractResponseItemText(responseItem);
-								if (text) {
-									modelUsage[requestModel].outputTokens += estimateTokensFromText(text, requestModel, deps.tokenEstimators);
-								}
-							}
-						}
-					}
-
-					// Sub-agent invocations are additive: not included in parent actual token counts
-					if (request.response && Array.isArray(request.response)) {
-						accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], requestModel, modelUsage, deps.tokenEstimators);
-					}
-				}
-			}
-
-			// FALLBACK: If reconstruction missed result data, use regex extraction from raw lines
-			const rawModelUsage = extractPerRequestUsageFromRawLines(lines);
-			for (const [reqIdx, extracted] of rawModelUsage) {
-				const request = sessionState.requests?.[reqIdx] as SessionRequestRaw | undefined;
-				if (!request) { continue; }
-				// Only use regex fallback if reconstruction didn't already provide usage
-				if (request.result?.usage || (typeof request.result?.promptTokens === 'number') || (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number')) { continue; }
-				let requestModel = defaultModel;
-				if (request.modelId) { requestModel = request.modelId.replace(/^copilot\//, ''); }
-				if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0 }; }
-				modelUsage[requestModel].inputTokens += extracted.promptTokens;
-				modelUsage[requestModel].outputTokens += extracted.outputTokens;
-			}
-
-			return modelUsage;
+			const result = _gmusProcessJsonlContent(lines, modelUsage, deps);
+			return result ?? modelUsage;
 		}
-
-		// Handle regular .json files
 		const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-		if (!isParsedSessionJson(parsed)) {
-			deps.warn(`Unexpected session format in ${sessionFile}`);
-			return modelUsage;
-		}
-		const sessionContent = parsed;
-
-		if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-			for (const requestRaw of sessionContent.requests) {
-				const request = requestRaw as SessionRequestRaw;
-				// Get model for this request
-				const model = getModelFromRequest(request, deps.modelPricing);
-
-				// Initialize model if not exists
-				if (!modelUsage[model]) {
-					modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
-				}
-
-				// Use actual usage if available, otherwise estimate from text
-				if (!tryExtractExactTokenUsage(request, model, modelUsage)) {
-					// Fallback: estimate from message parts and response content
-					if (request.message && request.message.parts) {
-						for (const part of request.message.parts) {
-							if (part.text) {
-								modelUsage[model].inputTokens += estimateTokensFromText(part.text, model, deps.tokenEstimators);
-							}
-						}
-					}
-					if (request.response && Array.isArray(request.response)) {
-						for (const responseItem of request.response as ResponseItemRaw[]) {
-							// Thinking counts as output for model usage; ignore isThinking flag
-							const { text } = extractResponseItemText(responseItem);
-							if (text) {
-								modelUsage[model].outputTokens += estimateTokensFromText(text, model, deps.tokenEstimators);
-							}
-						}
-					}
-				}
-
-				// Sub-agent invocations are additive: not included in parent actual token counts
-				if (request.response && Array.isArray(request.response)) {
-					accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], model, modelUsage, deps.tokenEstimators);
-				}
-			}
-		}
+		if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return modelUsage; }
+		_gmusProcessJsonRequests(parsed, modelUsage, deps);
 	} catch (error) {
 		deps.warn(`Error getting model usage from ${sessionFile}: ${error}`);
 	}
-
 	return modelUsage;
 }
 
