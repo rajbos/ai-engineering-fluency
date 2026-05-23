@@ -108,6 +108,42 @@ export class CacheManager {
 		return path.join(this.context.globalStorageUri.fsPath, `cache_${cacheId}.lock`);
 	}
 
+	private async writeLockFile(lockPath: string): Promise<boolean> {
+		try {
+			const fd = await fs.promises.open(lockPath, 'wx');
+			await fd.writeFile(JSON.stringify({ sessionId: vscode.env.sessionId, pid: process.pid, timestamp: Date.now() }));
+			await fd.close();
+			return true;
+		} catch {
+			return false;
+		}
+	}
+
+	private isLockOwnerAlive(pid: number): boolean {
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch (killErr: unknown) {
+			if (killErr instanceof Error && (killErr as NodeJS.ErrnoException).code === 'ESRCH') { return false; }
+			return true; // EPERM means process exists but is owned by another user
+		}
+	}
+
+	private async handleExistingLock(lockPath: string, staleThreshold: number): Promise<boolean> {
+		try {
+			const content = await fs.promises.readFile(lockPath, 'utf-8');
+			const lock = JSON.parse(content);
+			const ownerAlive = typeof lock.pid === 'number' ? this.isLockOwnerAlive(lock.pid) : true;
+			const isTimestampStale = Date.now() - lock.timestamp > staleThreshold;
+			if (!ownerAlive || isTimestampStale) {
+				this.deps.log(ownerAlive ? 'Breaking stale cache lock' : 'Breaking stale cache lock (owner process no longer running)');
+				await fs.promises.unlink(lockPath);
+				return await this.writeLockFile(lockPath);
+			}
+		} catch { /* lock file deleted or unreadable */ }
+		return false;
+	}
+
 	/**
 	 * Acquire an exclusive file lock for cache writes.
 	 * Uses atomic file creation (O_EXCL / CREATE_NEW) to prevent concurrent writes
@@ -117,73 +153,18 @@ export class CacheManager {
 	async acquireCacheLock(): Promise<boolean> {
 		const lockPath = this.getCacheLockPath();
 		try {
-			// Ensure the directory exists
 			await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
-
-			// Atomic exclusive create — fails if lock file already exists
 			const fd = await fs.promises.open(lockPath, 'wx');
-			await fd.writeFile(JSON.stringify({
-				sessionId: vscode.env.sessionId,
-				pid: process.pid,
-				timestamp: Date.now()
-			}));
+			await fd.writeFile(JSON.stringify({ sessionId: vscode.env.sessionId, pid: process.pid, timestamp: Date.now() }));
 			await fd.close();
 			return true;
 		} catch (err: unknown) {
 			const errCode = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
 			if (errCode !== 'EEXIST') {
-				// Unexpected error (permissions, disk full, etc.)
-				const message = err instanceof Error ? err.message : String(err);
-				this.deps.warn(`Unexpected error acquiring cache lock: ${message}`);
+				this.deps.warn(`Unexpected error acquiring cache lock: ${err instanceof Error ? err.message : String(err)}`);
 				return false;
 			}
-
-			// Lock file exists — check if the owning process is still alive or if the lock is stale
-			try {
-				const content = await fs.promises.readFile(lockPath, 'utf-8');
-				const lock = JSON.parse(content);
-				const staleThreshold = 5 * 60 * 1000; // 5 minutes (matches update interval)
-
-				// PID-based liveness check: if the owning process is gone, break immediately
-				let ownerAlive = true;
-				if (typeof lock.pid === 'number') {
-					try {
-						process.kill(lock.pid, 0); // Signal 0 checks existence without signalling
-					} catch (killErr: unknown) {
-						if (killErr instanceof Error && (killErr as NodeJS.ErrnoException).code === 'ESRCH') {
-							ownerAlive = false; // Process no longer exists
-						}
-						// EPERM means process exists but is owned by another user — treat as alive
-					}
-				}
-
-				const isTimestampStale = Date.now() - lock.timestamp > staleThreshold;
-
-				if (!ownerAlive || isTimestampStale) {
-					// Lock owner is dead or lock is old — break it and retry once
-					this.deps.log(
-						ownerAlive
-							? 'Breaking stale cache lock'
-							: 'Breaking stale cache lock (owner process no longer running)'
-					);
-					await fs.promises.unlink(lockPath);
-					try {
-						const fd = await fs.promises.open(lockPath, 'wx');
-						await fd.writeFile(JSON.stringify({
-							sessionId: vscode.env.sessionId,
-							pid: process.pid,
-							timestamp: Date.now()
-						}));
-						await fd.close();
-						return true;
-					} catch {
-						return false; // Another instance beat us to it
-					}
-				}
-			} catch {
-				// Can't read lock file — might have been deleted by the owner already
-			}
-			return false;
+			return await this.handleExistingLock(lockPath, 5 * 60 * 1000);
 		}
 	}
 
@@ -237,6 +218,14 @@ export class CacheManager {
 		}
 	}
 
+	private removeScopedKeyIfOld(key: string, prefix: string, currentKey: string): boolean {
+		if (!key.startsWith(prefix) || key === currentKey) { return false; }
+		const suffix = key.replace(prefix, '');
+		if (suffix === 'dev' || suffix === 'prod') { return false; }
+		this.context.globalState.update(key, undefined);
+		return true;
+	}
+
 	/**
 	 * One-time migration: remove old per-session cache keys that were created by
 	 * earlier versions of the extension (keys containing sessionId or timestamp).
@@ -247,38 +236,20 @@ export class CacheManager {
 			const allKeys = this.context.globalState.keys();
 			const currentCacheKey = `sessionFileCache_${currentCacheId}`;
 			const currentVersionKey = `sessionFileCacheVersion_${currentCacheId}`;
-			
 			let removedCount = 0;
 			for (const key of allKeys) {
-				// Remove old timestamp keys (no longer used)
 				if (key.startsWith('sessionFileCacheTimestamp_')) {
 					this.context.globalState.update(key, undefined);
 					removedCount++;
 					continue;
 				}
-				// Remove old per-session cache keys that have session IDs embedded
-				// (they contain more than one underscore-separated segment after the prefix)
-				if (key.startsWith('sessionFileCache_') && key !== currentCacheKey) {
-					const suffix = key.replace('sessionFileCache_', '');
-					if (suffix !== 'dev' && suffix !== 'prod') {
-						this.context.globalState.update(key, undefined);
-						removedCount++;
-					}
-				}
-				if (key.startsWith('sessionFileCacheVersion_') && key !== currentVersionKey) {
-					const suffix = key.replace('sessionFileCacheVersion_', '');
-					if (suffix !== 'dev' && suffix !== 'prod') {
-						this.context.globalState.update(key, undefined);
-						removedCount++;
-					}
-				}
-				// Remove legacy unscoped keys from the original code
+				if (this.removeScopedKeyIfOld(key, 'sessionFileCache_', currentCacheKey)) { removedCount++; }
+				if (this.removeScopedKeyIfOld(key, 'sessionFileCacheVersion_', currentVersionKey)) { removedCount++; }
 				if (key === 'sessionFileCache' || key === 'sessionFileCacheVersion') {
 					this.context.globalState.update(key, undefined);
 					removedCount++;
 				}
 			}
-			
 			if (removedCount > 0) {
 				this.deps.log(`Migrated: removed ${removedCount} old cache keys from globalState`);
 			}
