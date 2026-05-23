@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Usage analysis functions for session data processing.
  * Analysis and aggregation functions extracted from CopilotTokenTracker.
  */
@@ -1508,168 +1508,109 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 	};
 }
 
-/** Mutable mode state passed through JSONL event handlers. */
-type AsuModeState = { sessionMode: string };
-/** Mutable CLI tracking state passed through JSONL event handlers. */
 type AsuCliState = {
-	defaultModel: string;
-	defaultEffort: string | null;
-	requestCount: number;
-	effortByRequest: { [effort: string]: number };
+	cliDefaultModel: string;
+	cliDefaultEffort: string | null;
+	cliRequestCount: number;
+	cliEffortByRequest: { [effort: string]: number };
 };
 
-/** Check if the first JSONL line indicates a delta-based VS Code incremental format. */
 function _asuIsDeltaBased(lines: string[]): boolean {
 	if (lines.length === 0) { return false; }
 	try {
 		const first = JSON.parse(lines[0]);
-		return first && typeof first.kind === 'number';
+		return first !== null && typeof first === 'object' && typeof (first as Record<string, unknown>).kind === 'number';
 	} catch { return false; }
 }
 
-/** Reconstruct delta state from all lines and dispatch to processDeltaSessionAnalysis. */
-function _asuReconstructAndProcessDeltaState(
-	deps: UsageAnalysisDeps,
-	lines: string[],
-	analysis: SessionUsageAnalysis
-): void {
+function _asuReconstructDeltaState(lines: string[]): DeltaSessionState {
 	let sessionState: DeltaSessionState = {};
 	for (const line of lines) {
-		try {
-			const delta = JSON.parse(line);
-			sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
-		} catch { /* skip invalid lines */ }
+		try { sessionState = applyDelta(sessionState, JSON.parse(line)) as DeltaSessionState; } catch { /* skip */ }
 	}
-	processDeltaSessionAnalysis(deps, sessionState, lines, analysis);
+	return sessionState;
 }
 
-/** Check if a selection range represents an actual selection (not just cursor position). */
-function _asuCheckImplicitSelection(selections: unknown[], refs: ContextReferenceUsage): void {
+function _asuProcessSelectionsUpdate(selections: unknown[], analysis: SessionUsageAnalysis): void {
 	for (const sel of selections) {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const s = sel as any;
+		const s = sel as { startLineNumber?: number; endLineNumber?: number; startColumn?: number; endColumn?: number } | null | undefined;
 		if (s && (s.startLineNumber !== s.endLineNumber || s.startColumn !== s.endColumn)) {
-			refs.implicitSelection++;
+			analysis.contextReferences.implicitSelection++;
 			break;
 		}
 	}
 }
 
-/** Handle VS Code incremental format kind=0 (session header) events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuHandleKind0Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
-	if (event.kind !== 0 || !event.v?.inputState?.mode) { return; }
-	modeState.sessionMode = getModeType(event.v.inputState.mode);
-	if (!Array.isArray(event.v?.inputState?.selections)) { return; }
-	_asuCheckImplicitSelection(event.v.inputState.selections, analysis.contextReferences);
+function _asuProcessKind0Event(event: JsonlEventRaw, analysis: SessionUsageAnalysis, sessionMode: string): string {
+	if (!event.v || typeof event.v !== 'object') { return sessionMode; }
+	const v = event.v as { inputState?: { mode?: unknown; selections?: unknown[] } };
+	if (!v.inputState?.mode) { return sessionMode; }
+	sessionMode = getModeType(v.inputState.mode);
+	if (Array.isArray(v.inputState.selections)) { _asuProcessSelectionsUpdate(v.inputState.selections, analysis); }
+	return sessionMode;
 }
 
-/** Handle VS Code incremental format kind=1 (incremental update) events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuHandleKind1Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
-	if (event.kind !== 1) { return; }
-	if (event.k?.includes('mode') && event.v) { modeState.sessionMode = getModeType(event.v); }
-	if (event.k?.includes('selections') && Array.isArray(event.v)) {
-		_asuCheckImplicitSelection(event.v, analysis.contextReferences);
-	}
-	if (event.k?.includes('contentReferences') && Array.isArray(event.v)) {
-		analyzeContentReferences(event.v, analysis.contextReferences);
-	}
-	if (event.k?.includes('variableData') && event.v) {
-		analyzeVariableData(event.v, analysis.contextReferences);
-	}
+function _asuProcessKind1Events(event: JsonlEventRaw, analysis: SessionUsageAnalysis, sessionMode: string): string {
+	if (event.k?.includes('mode') && event.v) { sessionMode = getModeType(event.v); }
+	if (event.k?.includes('selections') && Array.isArray(event.v)) { _asuProcessSelectionsUpdate(event.v as unknown[], analysis); }
+	if (event.k?.includes('contentReferences') && Array.isArray(event.v)) { analyzeContentReferences(event.v as unknown[], analysis.contextReferences); }
+	if (event.k?.includes('variableData') && event.v) { analyzeVariableData(event.v, analysis.contextReferences); }
+	return sessionMode;
 }
 
-/** Extract the tool name from a response item. */
-function _asuExtractToolName(item: ResponseItemRaw): string {
-	return item.toolId || item.toolName || item.invocationMessage?.toolName || item.toolSpecificData?.kind || 'unknown';
-}
-
-/** Record tool invocations from a full response array (kind=2 with requests). */
-function _asuProcessResponseItems(items: ResponseItemRaw[], analysis: SessionUsageAnalysis): void {
-	for (const item of items) {
+function _asuProcessResponseItems(response: ResponseItemRaw[], analysis: SessionUsageAnalysis): void {
+	for (const item of response) {
 		if (!item) { continue; }
 		if (item.kind === 'toolInvocationSerialized' || item.kind === 'prepareToolInvocation') {
 			analysis.toolCalls.total++;
-			const toolName = _asuExtractToolName(item);
+			const toolName = item.toolId || item.toolName || item.invocationMessage?.toolName || item.toolSpecificData?.kind || 'unknown';
 			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
 		}
 	}
 }
 
-/** Record tool invocations from a response update array (kind=2 with response). */
-function _asuProcessResponseUpdates(items: unknown[], analysis: SessionUsageAnalysis): void {
-	for (const responseItem of items) {
-		const item = responseItem as ResponseItemRaw;
-		if (!item) { continue; }
-		if (item.kind === 'toolInvocationSerialized') {
+function _asuProcessKind2Requests(requests: unknown[], analysis: SessionUsageAnalysis, sessionMode: string): void {
+	for (const request of requests) {
+		const req = request as { requestId?: unknown; agent?: { id?: string }; response?: unknown[] };
+		if (req.requestId) { incrementModeUsage(sessionMode, analysis.modeUsage); }
+		if (req.agent?.id) {
 			analysis.toolCalls.total++;
-			const toolName = _asuExtractToolName(item);
+			analysis.toolCalls.byTool[req.agent.id] = (analysis.toolCalls.byTool[req.agent.id] || 0) + 1;
+		}
+		analyzeRequestContext(request, analysis.contextReferences);
+		if (req.response && Array.isArray(req.response)) { _asuProcessResponseItems(req.response as ResponseItemRaw[], analysis); }
+	}
+}
+
+function _asuProcessKind2Response(v: unknown[], analysis: SessionUsageAnalysis): void {
+	for (const item of v) {
+		if (!item) { continue; }
+		const ri = item as ResponseItemRaw;
+		if (ri.kind === 'toolInvocationSerialized') {
+			analysis.toolCalls.total++;
+			const toolName = ri.toolId || ri.toolName || ri.invocationMessage?.toolName || ri.toolSpecificData?.kind || 'unknown';
 			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
 		}
 	}
 }
 
-/** Process a single request from a kind=2 requests array. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuProcessRequest(request: any, analysis: SessionUsageAnalysis, sessionMode: string): void {
-	if (request.requestId) { incrementModeUsage(sessionMode, analysis.modeUsage); }
-	if (request.agent?.id) {
-		analysis.toolCalls.total++;
-		analysis.toolCalls.byTool[request.agent.id] = (analysis.toolCalls.byTool[request.agent.id] || 0) + 1;
-	}
-	analyzeRequestContext(request, analysis.contextReferences);
-	if (request.response && Array.isArray(request.response)) {
-		_asuProcessResponseItems(request.response, analysis);
-	}
+function _asuProcessKind2Event(event: JsonlEventRaw, analysis: SessionUsageAnalysis, sessionMode: string): void {
+	if (event.k?.[0] === 'requests' && Array.isArray(event.v)) { _asuProcessKind2Requests(event.v as unknown[], analysis, sessionMode); }
+	if (event.k?.includes('response') && Array.isArray(event.v)) { _asuProcessKind2Response(event.v as unknown[], analysis); }
 }
 
-/** Handle VS Code incremental format kind=2 (batch add) events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuHandleKind2Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, toolNameMap: { [key: string]: string }): void {
-	if (event.kind !== 2) { return; }
-	if (event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-		for (const request of event.v) {
-			_asuProcessRequest(request, analysis, modeState.sessionMode);
-		}
-	}
-	if (event.k?.includes('response') && Array.isArray(event.v)) {
-		_asuProcessResponseUpdates(event.v, analysis);
-	}
+function _asuProcessCliUserMessage(analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
+	if (jetBrainsMode === 'agent') { analysis.modeUsage.agent++; }
+	else if (jetBrainsMode === 'ask') { analysis.modeUsage.ask++; }
+	else { analysis.modeUsage.cli++; }
 }
 
-/** Handle Copilot CLI events (session.start, session.model_change, user.message). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
-	if (event.type === 'session.start' && event.data) {
-		if (typeof event.data.selectedModel === 'string') { cliState.defaultModel = event.data.selectedModel; }
-		if (typeof event.data.reasoningEffort === 'string') { cliState.defaultEffort = event.data.reasoningEffort; }
-	}
-	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-		cliState.defaultModel = event.data.newModel;
-	}
-	if (event.type === 'user.message') {
-		cliState.requestCount++;
-		const effort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliState.defaultEffort;
-		if (effort) { cliState.effortByRequest[effort] = (cliState.effortByRequest[effort] || 0) + 1; }
-		if (jetBrainsMode === 'agent') { analysis.modeUsage.agent++; }
-		else if (jetBrainsMode === 'ask') { analysis.modeUsage.ask++; }
-		else { analysis.modeUsage.cli++; }
-	}
-}
-
-/** Handle tool.call / tool.result / tool.execution_start events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
-	if (event.type !== 'tool.call' && event.type !== 'tool.result' && event.type !== 'tool.execution_start') { return; }
+function _asuProcessToolCall(event: JsonlEventRaw, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	const toolName = event.data?.toolName || event.toolName || 'unknown';
 	recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
 }
 
-/** Handle mcp.tool.call events and events with data.mcpServer set. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): void {
-	if (event.type !== 'mcp.tool.call' && !event.data?.mcpServer) { return; }
+function _asuProcessMcpToolCall(event: JsonlEventRaw, analysis: SessionUsageAnalysis): void {
 	analysis.mcpTools.total++;
 	const serverName = event.data?.mcpServer || 'unknown';
 	const mcpToolName = event.data?.toolName || event.toolName || 'unknown';
@@ -1678,54 +1619,63 @@ function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): voi
 	analysis.mcpTools.byTool[normalizedMcpTool] = (analysis.mcpTools.byTool[normalizedMcpTool] || 0) + 1;
 }
 
-/** Handle tool.call / tool.result / mcp.tool.call events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuHandleToolAndMcpEvents(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
-	_asuHandleToolCallEvent(event, analysis, toolNameMap);
-	_asuHandleMcpToolEvent(event, analysis);
+function _asuCountUserMessage(event: JsonlEventRaw, cliState: AsuCliState): void {
+	cliState.cliRequestCount++;
+	const effort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliState.cliDefaultEffort;
+	if (effort) { cliState.cliEffortByRequest[effort] = (cliState.cliEffortByRequest[effort] || 0) + 1; }
 }
 
-/** Dispatch a single JSONL event to the appropriate event handlers. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function _asuProcessJsonlEvent(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, cliState: AsuCliState, jetBrainsMode: JetBrainsMode | null, toolNameMap: { [key: string]: string }): void {
-	_asuHandleKind0Event(event, analysis, modeState);
-	_asuHandleKind1Event(event, analysis, modeState);
-	_asuHandleKind2Event(event, analysis, modeState, toolNameMap);
-	_asuProcessCliEvents(event, cliState, analysis, jetBrainsMode);
-	_asuHandleToolAndMcpEvents(event, analysis, toolNameMap);
+function _asuProcessSessionStart(event: JsonlEventRaw, cliState: AsuCliState): void {
+	if (typeof event.data?.selectedModel === 'string') { cliState.cliDefaultModel = event.data.selectedModel; }
+	if (typeof event.data?.reasoningEffort === 'string') { cliState.cliDefaultEffort = event.data.reasoningEffort; }
 }
 
-/** Store CLI thinking effort data from the accumulated CLI state. */
-function _asuApplyCliThinkingEffort(cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
-	if (cliState.defaultEffort === null && Object.keys(cliState.effortByRequest).length === 0) { return; }
-	const byEffort = Object.keys(cliState.effortByRequest).length > 0
-		? cliState.effortByRequest
-		: (cliState.defaultEffort !== null ? { [cliState.defaultEffort]: cliState.requestCount } : {});
-	analysis.thinkingEffort = { byEffort, switchCount: 0, defaultEffort: cliState.defaultEffort };
+function _asuStoreCliThinkingEffort(analysis: SessionUsageAnalysis, cliState: AsuCliState): void {
+	if (cliState.cliDefaultEffort === null && Object.keys(cliState.cliEffortByRequest).length === 0) { return; }
+	const byEffort = Object.keys(cliState.cliEffortByRequest).length > 0
+		? cliState.cliEffortByRequest
+		: (cliState.cliDefaultEffort !== null ? { [cliState.cliDefaultEffort]: cliState.cliRequestCount } : {});
+	analysis.thinkingEffort = { byEffort, switchCount: 0, defaultEffort: cliState.cliDefaultEffort };
 }
 
-/** Process a non-delta JSONL session file (Copilot CLI or VS Code incremental). */
-async function _asuProcessNonDeltaJsonl(
-	deps: UsageAnalysisDeps,
-	sessionFile: string,
-	lines: string[],
-	fileContent: string,
-	analysis: SessionUsageAnalysis
-): Promise<void> {
-	const modeState: AsuModeState = { sessionMode: 'ask' };
-	const cliState: AsuCliState = { defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {} };
-	const isJetBrains = isJetBrainsSessionPath(sessionFile);
-	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
+function _asuHandleUserMessage(event: JsonlEventRaw, analysis: SessionUsageAnalysis, cliState: AsuCliState, jetBrainsMode: JetBrainsMode | null): void {
+	_asuCountUserMessage(event, cliState);
+	_asuProcessCliUserMessage(analysis, jetBrainsMode);
+}
 
+function _asuHandleCliSession(event: JsonlEventRaw, cliState: AsuCliState): void {
+	if (event.type === 'session.start' && event.data) { _asuProcessSessionStart(event, cliState); return; }
+	if (typeof event.data?.newModel === 'string') { cliState.cliDefaultModel = event.data.newModel; }
+}
+
+function _asuProcessJsonlLine(event: JsonlEventRaw, analysis: SessionUsageAnalysis, cliState: AsuCliState, jetBrainsMode: JetBrainsMode | null, sessionMode: string, toolNameMap: { [key: string]: string }): string {
+	const t = event.type;
+	if (t === 'session.start' || t === 'session.model_change') { _asuHandleCliSession(event, cliState); }
+	if (t === 'user.message') { _asuHandleUserMessage(event, analysis, cliState, jetBrainsMode); }
+	if (event.kind === 0) { sessionMode = _asuProcessKind0Event(event, analysis, sessionMode); }
+	if (event.kind === 1) { sessionMode = _asuProcessKind1Events(event, analysis, sessionMode); }
+	if (event.kind === 2) { _asuProcessKind2Event(event, analysis, sessionMode); }
+	if (t === 'tool.call' || t === 'tool.result' || t === 'tool.execution_start') { _asuProcessToolCall(event, analysis, toolNameMap); }
+	if (t === 'mcp.tool.call' || event.data?.mcpServer) { _asuProcessMcpToolCall(event, analysis); }
+	return sessionMode;
+}
+
+async function _asuProcessJsonlContent(deps: UsageAnalysisDeps, sessionFile: string, fileContent: string, lines: string[], analysis: SessionUsageAnalysis): Promise<void> {
+	if (_asuIsDeltaBased(lines)) {
+		processDeltaSessionAnalysis(deps, _asuReconstructDeltaState(lines), lines, analysis);
+		return;
+	}
+	let sessionMode = 'ask';
+	const cliState: AsuCliState = { cliDefaultModel: 'unknown', cliDefaultEffort: null, cliRequestCount: 0, cliEffortByRequest: {} };
+	const jetBrainsMode = isJetBrainsSessionPath(sessionFile) ? detectJetBrainsModeFromContent(fileContent) : null;
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
 		try {
-			const event = JSON.parse(line);
-			_asuProcessJsonlEvent(event, analysis, modeState, cliState, jetBrainsMode, deps.toolNameMap);
+			const event = JSON.parse(line) as JsonlEventRaw;
+			sessionMode = _asuProcessJsonlLine(event, analysis, cliState, jetBrainsMode, sessionMode, deps.toolNameMap);
 		} catch { /* skip malformed lines */ }
 	}
-
-	_asuApplyCliThinkingEffort(cliState, analysis);
+	_asuStoreCliThinkingEffort(analysis, cliState);
 	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
 	deriveConversationPatterns(analysis);
 }
@@ -1735,37 +1685,27 @@ async function _asuProcessNonDeltaJsonl(
  */
 export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<SessionUsageAnalysis> {
 	const analysis: SessionUsageAnalysis = createEmptySessionUsageAnalysis();
-
 	try {
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco && isAnalyzable(eco)) {
 			return eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
 		}
-
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
 
 		if (isJsonl) {
 			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
-			if (_asuIsDeltaBased(lines)) {
-				_asuReconstructAndProcessDeltaState(deps, lines, analysis);
-				return analysis;
-			}
-			await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
-		} else {
-			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (!isParsedSessionJson(parsed)) {
-				deps.warn(`Unexpected session format in ${sessionFile}`);
-				return analysis;
-			}
-			processJsonSessionRequests(deps, parsed, analysis);
-			await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
-			await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
+			await _asuProcessJsonlContent(deps, sessionFile, fileContent, lines, analysis);
+			return analysis;
 		}
+		const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+		if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return analysis; }
+		processJsonSessionRequests(deps, parsed, analysis);
+		await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
+		await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
 	} catch (error) {
 		deps.warn(`Error analyzing session usage from ${sessionFile}: ${error}`);
 	}
-
 	return analysis;
 }
 
