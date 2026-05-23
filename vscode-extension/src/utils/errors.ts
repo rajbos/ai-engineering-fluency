@@ -60,7 +60,7 @@ function _sseFromErrorInstance(error: Error, secretsToRedact?: string[]): string
 }
 
 function _sseFromObject(error: object): string {
-	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	 
 	const errorObj = error as any;
 	try {
 		return errorObj.message || errorObj.error || JSON.stringify(error);

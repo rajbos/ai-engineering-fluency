@@ -323,7 +323,7 @@ parts.push(inner.Content);
 return parts.join('\n');
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 private _decodeVcRaw(vcRaw: any, parts: string[]): void {
 const keys = Object.keys(vcRaw);
 if (keys.length === 0) { return; }
@@ -331,7 +331,7 @@ if (!isNaN(Number(keys[0]))) {
 try {
 const numKeys = keys.map(Number).sort((a, b) => a - b);
 const bytes = Buffer.from(numKeys.map(k => (vcRaw as Record<number, number>)[k]));
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 const inner = decode(bytes) as any;
 const innerData = Array.isArray(inner) ? inner[1] : inner;
 if (innerData?.Content && typeof innerData.Content === 'string') { parts.push(innerData.Content); }
@@ -346,7 +346,7 @@ parts.push(vcRaw.Content);
  * Each context item carries a ValueContainer whose second element is a
  * nested MessagePack-encoded byte array; decoded inner object has a Content field.
  */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
+ 
 extractContextText(contextArr: any): string {
 if (!Array.isArray(contextArr)) { return ''; }
 const parts: string[] = [];

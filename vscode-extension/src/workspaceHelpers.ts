@@ -369,52 +369,28 @@ export function getRepositoryUrl(): string {
 	return repoUrl || 'https://github.com/rajbos/ai-engineering-fluency';
 }
 
+function getModeFromAgentKind(id: string | undefined): 'agent' | 'plan' | 'customAgent' {
+	if (!id || id === 'agent') { return 'agent'; }
+	if (id.includes('plan-agent/Plan.agent.md')) { return 'plan'; }
+	if (id.includes('.agent.md')) { return 'customAgent'; }
+	return 'agent';
+}
+
 /**
  * Detect the actual mode type from inputState.mode object.
  * Returns 'ask', 'edit', 'agent', 'plan', or 'customAgent'.
  */
 export function getModeType(mode: ModeObject | string | null | undefined): 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' {
-	if (!mode) {
-		return 'ask';
-	}
-
-	// When mode arrives as a raw string kind (e.g. incremental state-update events)
+	if (!mode) { return 'ask'; }
 	if (typeof mode === 'string') {
 		if (mode === 'edit') { return 'edit'; }
 		if (mode === 'agent') { return 'agent'; }
 		return 'ask';
 	}
-
-	if (!mode.kind) {
-		return 'ask';
-	}
-
-	// Check kind first - edit and ask are straightforward
+	if (!mode.kind) { return 'ask'; }
 	if (mode.kind === 'edit') { return 'edit'; }
 	if (mode.kind === 'ask') { return 'ask'; }
-
-	// For agent kind, check the mode.id to differentiate
-	if (mode.kind === 'agent') {
-		if (!mode.id || mode.id === 'agent') {
-			// Standard agent mode (no special id or id='agent')
-			return 'agent';
-		}
-
-		// Check for plan mode (vscode-userdata:/.../plan-agent/Plan.agent.md)
-		if (typeof mode.id === 'string' && mode.id.includes('plan-agent/Plan.agent.md')) {
-			return 'plan';
-		}
-
-		// Check for custom agent (file:// URI to .agent.md)
-		if (typeof mode.id === 'string' && mode.id.includes('.agent.md')) {
-			return 'customAgent';
-		}
-
-		// Fallback to standard agent for any other agent kind
-		return 'agent';
-	}
-
-	// Default to ask for unknown modes
+	if (mode.kind === 'agent') { return getModeFromAgentKind(mode.id as string | undefined); }
 	return 'ask';
 }
 
