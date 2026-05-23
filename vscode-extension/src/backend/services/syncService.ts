@@ -922,82 +922,147 @@ userId: string | undefined,
 editorForFile: string | undefined,
 rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>
 ): void {
-let defaultModel = 'unknown';
-let isVsCodeFormat = false;
+const isVsCodeFormat = this.detectFallbackFormat(content);
+const lines = content.trim().split('\n');
+const ctx = { workspaceId, machineId, userId, editorForFile, rollups };
+if (isVsCodeFormat) {
+this.runVsCodeDeltaFallback(lines, fileMtimeMs, startMs, ctx);
+} else {
+this.runCliJsonlFallback(lines, fileMtimeMs, startMs, ctx);
+}
+}
+
+private detectFallbackFormat(content: string): boolean {
 const firstLine = content.trim().split('\n')[0]?.trim();
-if (firstLine) {
+if (!firstLine) { return false; }
 try {
 const firstEv = JSON.parse(firstLine);
-isVsCodeFormat = typeof firstEv.kind === 'number';
-} catch { /* leave as false */ }
+return typeof firstEv.kind === 'number';
+} catch { return false; }
 }
+
+private runVsCodeDeltaFallback(
+lines: string[],
+fileMtimeMs: number,
+startMs: number,
+ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
+): void {
+let defaultModel = 'unknown';
 const seenReqIds = new Set<string>();
-const lines = content.trim().split('\n');
 for (const line of lines) {
 if (!line.trim()) { continue; }
 try {
 const event = JSON.parse(line);
 if (!event || typeof event !== 'object') { continue; }
-// VS Code delta-based format
-if (isVsCodeFormat) {
+defaultModel = this.updateFallbackVsCodeModel(event, defaultModel);
+this.upsertVsCodeFallbackRequests(event, defaultModel, seenReqIds, fileMtimeMs, startMs, ctx);
+} catch { /* skip */ }
+}
+}
+
+private updateFallbackVsCodeModel(event: any, defaultModel: string): string {
 if (event.kind === 0) {
-const mId = event.v?.selectedModel?.identifier || event.v?.selectedModel?.metadata?.id || event.v?.inputState?.selectedModel?.metadata?.id;
-if (mId) { defaultModel = mId.replace(/^copilot\//, ''); }
+const mId = this.getFallbackKind0ModelId(event);
+if (mId) { return mId.replace(/^copilot\//, ''); }
 }
 if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'selectedModel') {
 const mId = event.v?.identifier || event.v?.metadata?.id;
-if (mId) { defaultModel = mId.replace(/^copilot\//, ''); }
+if (mId) { return mId.replace(/^copilot\//, ''); }
 }
-if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
+return defaultModel;
+}
+
+private getFallbackKind0ModelId(event: any): string | undefined {
+return event.v?.selectedModel?.identifier ||
+event.v?.selectedModel?.metadata?.id ||
+event.v?.inputState?.selectedModel?.metadata?.id;
+}
+
+private upsertVsCodeFallbackRequests(
+event: any,
+defaultModel: string,
+seenReqIds: Set<string>,
+fileMtimeMs: number,
+startMs: number,
+ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
+): void {
+if (event.kind !== 2 || !Array.isArray(event.k) || event.k[0] !== 'requests' || !Array.isArray(event.v)) { return; }
 for (const request of event.v) {
+this.upsertVsCodeFallbackSingleRequest(request, defaultModel, seenReqIds, fileMtimeMs, startMs, ctx);
+}
+}
+
+private upsertVsCodeFallbackSingleRequest(
+request: any,
+defaultModel: string,
+seenReqIds: Set<string>,
+fileMtimeMs: number,
+startMs: number,
+ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
+): void {
 const req = request as ChatRequest;
 const reqId = (req as any).requestId as string | undefined;
-if (reqId && seenReqIds.has(reqId)) { continue; }
+if (reqId && seenReqIds.has(reqId)) { return; }
 if (reqId) { seenReqIds.add(reqId); }
 const normalizedTs = this.utility.normalizeTimestampToMs(typeof req.timestamp !== 'undefined' ? req.timestamp : undefined);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
-if (!eventMs || eventMs < startMs) { continue; }
+if (!eventMs || eventMs < startMs) { return; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
 const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
 const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
 const { inputTokens, outputTokens } = this.extractTokenCountsFromRequest(req, model);
-if (inputTokens === 0 && outputTokens === 0) { continue; }
-const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
-upsertDailyRollup(rollups, key, { inputTokens, outputTokens, interactions: 1 });
+if (inputTokens === 0 && outputTokens === 0) { return; }
+const key: DailyRollupKey = { day: dayKey, model, workspaceId: ctx.workspaceId, machineId: ctx.machineId, userId: ctx.userId, editor: ctx.editorForFile };
+upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions: 1 });
 }
-}
-continue; // processed as VS Code delta event; skip CLI logic below
-}
-// Copilot CLI non-delta format
-if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') {
-defaultModel = event.data.selectedModel;
-}
-if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-defaultModel = event.data.newModel;
-}
+
+private runCliJsonlFallback(
+lines: string[],
+fileMtimeMs: number,
+startMs: number,
+ctx: { workspaceId: string; machineId: string; userId: string | undefined; editorForFile: string | undefined; rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }> }
+): void {
+let defaultModel = 'unknown';
+for (const line of lines) {
+if (!line.trim()) { continue; }
+try {
+const event = JSON.parse(line);
+if (!event || typeof event !== 'object') { continue; }
+defaultModel = this.updateCliDefaultModel(event, defaultModel);
 const normalizedTs = this.utility.normalizeTimestampToMs(event.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { continue; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-const model = (event.data?.model || event.model || defaultModel).toString();
-let inputTokens = 0;
-let outputTokens = 0;
-let interactions = 0;
-if (event.type === 'user.message' && event.data?.content) {
-inputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model);
-interactions = 1;
-} else if (event.type === 'assistant.message' && event.data?.content) {
-outputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model);
-} else if (event.type === 'tool.result' && event.data?.output) {
-inputTokens = this.deps.sessionHandlers.estimateTokensFromText(event.data.output, model);
-}
+const model = this.getCliEventModel(event, defaultModel);
+const { inputTokens, outputTokens, interactions } = this.getCliEventTokenCounts(event, model);
 if (inputTokens === 0 && outputTokens === 0 && interactions === 0) { continue; }
-const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor: editorForFile };
-upsertDailyRollup(rollups, key, { inputTokens, outputTokens, interactions });
-} catch {
-// skip malformed line
+const key: DailyRollupKey = { day: dayKey, model, workspaceId: ctx.workspaceId, machineId: ctx.machineId, userId: ctx.userId, editor: ctx.editorForFile };
+upsertDailyRollup(ctx.rollups, key, { inputTokens, outputTokens, interactions });
+} catch { /* skip */ }
 }
 }
+
+private updateCliDefaultModel(event: any, defaultModel: string): string {
+if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') { return event.data.selectedModel; }
+if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { return event.data.newModel; }
+return defaultModel;
+}
+
+private getCliEventModel(event: any, defaultModel: string): string {
+return (event.data?.model || event.model || defaultModel).toString();
+}
+
+private getCliEventTokenCounts(event: any, model: string): { inputTokens: number; outputTokens: number; interactions: number } {
+if (event.type === 'user.message' && event.data?.content) {
+return { inputTokens: this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model), outputTokens: 0, interactions: 1 };
+}
+if (event.type === 'assistant.message' && event.data?.content) {
+return { inputTokens: 0, outputTokens: this.deps.sessionHandlers.estimateTokensFromText(event.data.content, model), interactions: 0 };
+}
+if (event.type === 'tool.result' && event.data?.output) {
+return { inputTokens: this.deps.sessionHandlers.estimateTokensFromText(event.data.output, model), outputTokens: 0, interactions: 0 };
+}
+return { inputTokens: 0, outputTokens: 0, interactions: 0 };
 }
 
 /**
