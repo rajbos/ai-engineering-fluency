@@ -587,8 +587,25 @@ editor?: string
 ): Promise<boolean> {
 try {
 const cachedData = await this.deps.sessionHandlers.getSessionFileDataCached!(sessionFile, fileMtimeMs, fileSize);
+if (!this.validateCachedData(cachedData, sessionFile)) { return false; }
+if (cachedData.dailyRollups && Object.keys(cachedData.dailyRollups).length > 0) {
+return this.processDailyRollupsFastPath(cachedData, workspaceId, machineId, userId, rollups, editor, startMs);
+}
+const content = await fs.promises.readFile(sessionFile, 'utf8');
+const dayModelInteractions = this.buildDayModelInteractionMap(content, sessionFile, fileMtimeMs, startMs, now);
+if (dayModelInteractions === null) { return false; }
+this.remapUnmappedModels(dayModelInteractions, cachedData.modelUsage);
+this.buildRollupsFromDayModelInteractions(dayModelInteractions, cachedData, sessionFile, workspaceId, machineId, userId, rollups, editor);
+return true;
+} catch (e) {
+const errorMessage = e instanceof Error ? e.message : String(e);
+if (errorMessage.includes('ENOENT') || errorMessage.includes('not found')) { return false; }
+this.deps.logger.warn(`Backend sync: cache error for ${sessionFile}: ${errorMessage}`);
+return false;
+}
+}
 
-// Validate cached data structure to prevent injection/corruption
+private validateCachedData(cachedData: any, sessionFile: string): boolean {
 if (!cachedData || typeof cachedData !== 'object') {
 this.deps.logger.warn(`Backend sync: invalid cached data structure for ${sessionFile}`);
 return false;
@@ -601,27 +618,50 @@ if (!Number.isFinite(cachedData.interactions) || cachedData.interactions < 0) {
 this.deps.logger.warn(`Backend sync: invalid interactions count in cached data for ${sessionFile}`);
 return false;
 }
+return true;
+}
 
-// Fast path: use pre-computed dailyRollups (same data as extension stats — avoids re-parsing the file).
-if (cachedData.dailyRollups && Object.keys(cachedData.dailyRollups).length > 0) {
+private processDailyRollupsFastPath(
+cachedData: any,
+workspaceId: string,
+machineId: string,
+userId: string | undefined,
+rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
+editor: string | undefined,
+startMs: number
+): boolean {
 const totalSessionInteractions = cachedData.interactions || 1;
 const dayKeys = Object.keys(cachedData.dailyRollups).sort();
-
 for (const dayKey of dayKeys) {
 const dayEntry = cachedData.dailyRollups[dayKey];
 const dayStartMs = new Date(dayKey + 'T00:00:00Z').getTime();
 if (dayStartMs < startMs) { continue; }
+this.processDailyRollupsDayEntry(dayKey, dayEntry, totalSessionInteractions, cachedData, workspaceId, machineId, userId, rollups, editor);
+}
+if (dayKeys.length > 1) {
+this.deps.logger.log(`Backend sync: file spans ${dayKeys.length} days (dailyRollups fast path): ${dayKeys.join(', ')}`);
+}
+return true;
+}
 
-const modelEntries = Object.entries(dayEntry.modelUsage).filter(([, mu]) =>
+private processDailyRollupsDayEntry(
+dayKey: string,
+dayEntry: any,
+totalSessionInteractions: number,
+cachedData: any,
+workspaceId: string,
+machineId: string,
+userId: string | undefined,
+rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
+editor: string | undefined
+): void {
+const modelEntries = Object.entries<any>(dayEntry.modelUsage).filter(([, mu]) =>
 mu && ((mu.inputTokens || 0) > 0 || (mu.outputTokens || 0) > 0)
 );
-if (modelEntries.length === 0) { continue; }
-
-// Distribute this day's interactions across models proportionally by output token share.
+if (modelEntries.length === 0) { return; }
 const totalDayOutput = modelEntries.reduce((s, [, mu]) => s + (mu.outputTokens || 0), 0);
 const dayFraction = totalSessionInteractions > 0 ? dayEntry.interactions / totalSessionInteractions : 1;
 const fluencyMetrics = this.extractFluencyMetricsFromCache(cachedData, dayFraction);
-
 let remainingInteractions = dayEntry.interactions;
 for (let i = 0; i < modelEntries.length; i++) {
 const [model, mu] = modelEntries[i];
@@ -631,7 +671,6 @@ const modelInteractions = isLast
 ? remainingInteractions
 : Math.min(Math.round(dayEntry.interactions * share), remainingInteractions);
 remainingInteractions -= modelInteractions;
-
 const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor };
 upsertDailyRollup(rollups, key, {
 inputTokens: mu.inputTokens || 0,
@@ -642,17 +681,13 @@ fluencyMetrics,
 }
 }
 
-if (dayKeys.length > 1) {
-this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${dayKeys.length} days (dailyRollups fast path): ${dayKeys.join(', ')}`);
-}
-return true;
-}
-
-// Slow path: parse the session file to get actual request timestamps and create per-day rollups.
-// Used when dailyRollups is absent (old cache entries before CACHE_VERSION bump).
-const content = await fs.promises.readFile(sessionFile, 'utf8');
-
-// Detect whether this is a delta-based (VS Code Insiders) JSONL file or a CLI JSONL file.
+private buildDayModelInteractionMap(
+content: string,
+sessionFile: string,
+fileMtimeMs: number,
+startMs: number,
+now: Date
+): Map<string, Map<string, number>> | null {
 let isDeltaBasedJsonl = false;
 if (isJsonlContent(content)) {
 const firstLine = content.trim().split('\n')[0]?.trim();
@@ -663,42 +698,12 @@ isDeltaBasedJsonl = typeof firstEvent.kind === 'number';
 } catch { /* not valid JSON, leave as false */ }
 }
 }
-
-// Build the day→model interaction count map using the appropriate format handler.
-let dayModelInteractions: Map<string, Map<string, number>>;
 if (sessionFile.endsWith('.jsonl') && !isDeltaBasedJsonl) {
-// Copilot CLI non-delta JSONL format
-dayModelInteractions = this.buildDayModelInteractionsFromCliJsonl(content, sessionFile, fileMtimeMs, startMs, now);
+return this.buildDayModelInteractionsFromCliJsonl(content, sessionFile, fileMtimeMs, startMs, now);
 } else if (isDeltaBasedJsonl) {
-// VS Code delta-based JSONL format (kind:0/1/2 events)
-dayModelInteractions = this.buildDayModelInteractionsFromDeltaJsonl(content, fileMtimeMs, startMs);
+return this.buildDayModelInteractionsFromDeltaJsonl(content, fileMtimeMs, startMs);
 } else {
-// Regular JSON format (VS Code Copilot Chat legacy / OpenCode JSON)
-const result = this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, sessionFile);
-if (result === null) {
-return false;
-}
-dayModelInteractions = result;
-}
-
-// Remap event model names to cached model names when there is a mismatch.
-this.remapUnmappedModels(dayModelInteractions, cachedData.modelUsage);
-
-// Build rollups from the day/model interaction map using cached token counts.
-this.buildRollupsFromDayModelInteractions(dayModelInteractions, cachedData, sessionFile, workspaceId, machineId, userId, rollups, editor);
-
-return true;
-} catch (e) {
-// Differentiate between cache miss (expected) and errors (unexpected)
-const errorMessage = e instanceof Error ? e.message : String(e);
-if (errorMessage.includes('ENOENT') || errorMessage.includes('not found')) {
-// Expected cache miss - file doesn't exist or not cached yet
-return false;
-} else {
-// Unexpected error - log as warning
-this.deps.logger.warn(`Backend sync: cache error for ${sessionFile}: ${errorMessage}`);
-return false;
-}
+return this.buildDayModelInteractionsFromJson(content, fileMtimeMs, startMs, sessionFile);
 }
 }
 	/**
