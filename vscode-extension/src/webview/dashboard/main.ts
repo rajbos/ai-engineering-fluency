@@ -349,169 +349,82 @@ function buildModelBreakdown(modelUsage: ModelUsage): HTMLElement {
   return container;
 }
 
+const LEADERBOARD_HEADERS = [
+	{ text: "#", class: "rank-header" }, { text: "User", class: "" }, { text: "Dataset", class: "" },
+	{ text: "Fluency", class: "" }, { text: "Tokens", class: "number-header" }, { text: "Days", class: "number-header" },
+	{ text: "Sessions", class: "number-header" }, { text: "Avg Turns", class: "number-header" },
+	{ text: "Models", class: "number-header" }, { text: "Projects", class: "number-header" },
+	{ text: "Tok/Turn", class: "number-header" }, { text: "Cost", class: "number-header" }, { text: "", class: "action-header" },
+];
+
+function buildLeaderboardFluencyCell(member: TeamMemberStats): HTMLElement {
+	const fluencyCell = el("td", "fluency-cell");
+	if (member.fluencyStage && member.fluencyLabel) {
+		const badge = el("span", `fluency-badge stage-${member.fluencyStage}`);
+		badge.textContent = `${getFluencyStageIcon(member.fluencyStage)} ${member.fluencyLabel}`;
+		fluencyCell.append(badge);
+	}
+	return fluencyCell;
+}
+
+function buildLeaderboardMemberRow(member: TeamMemberStats, stats: DashboardStats, colSpan: number): [HTMLElement, HTMLElement] {
+	const displayUserId = member.userId.replace(/^u:/, "");
+	const displayDatasetId = (member.datasetId || "").replace(/^ds:/, "");
+	const isCurrentUser = member.userId === stats.personal.userId;
+	const hasCategories = !!member.fluencyCategories?.length;
+	const row = el("tr", "leaderboard-row");
+	if (isCurrentUser) { row.classList.add("current-user"); }
+	if (hasCategories) { row.classList.add("expandable"); row.setAttribute("aria-expanded", "false"); }
+	const rankCell = el("td", "rank-cell", `${member.rank}`);
+	if (hasCategories) { rankCell.prepend(el("span", "expand-toggle", "▶")); }
+	const deleteBtn = document.createElement("button");
+	deleteBtn.className = "delete-row-btn";
+	deleteBtn.title = `Delete data for ${displayUserId} in dataset ${displayDatasetId}`;
+	deleteBtn.textContent = "🗑️";
+	deleteBtn.addEventListener("click", (e) => {
+		e.stopPropagation();
+		vscode.postMessage({ command: "deleteUserDataset", userId: member.userId, datasetId: member.datasetId });
+	});
+	const actionCell = el("td", "action-cell");
+	actionCell.append(deleteBtn);
+	row.append(rankCell, el("td", "", isCurrentUser ? `${displayUserId} 👈` : displayUserId), el("td", "dataset-cell", displayDatasetId),
+		buildLeaderboardFluencyCell(member), el("td", "number-cell", formatCompact(member.totalTokens)),
+		el("td", "number-cell", formatNumber(member.daysActive)), el("td", "number-cell", formatNumber(member.sessions)),
+		el("td", "number-cell", formatNumber(member.avgTurnsPerSession)), el("td", "number-cell", formatNumber(member.uniqueModels)),
+		el("td", "number-cell", formatNumber(member.uniqueWorkspaces)), el("td", "number-cell", formatNumber(member.avgTokensPerTurn)),
+		el("td", "number-cell", formatCost(member.totalCost)), actionCell);
+	const detailRow = el("tr", "detail-row hidden");
+	const detailCell = document.createElement("td");
+	detailCell.colSpan = colSpan; detailCell.className = "detail-cell";
+	if (hasCategories) {
+		detailCell.append(buildFluencyDetailPanel(member));
+		row.addEventListener("click", () => {
+			const expanded = row.getAttribute("aria-expanded") === "true";
+			row.setAttribute("aria-expanded", expanded ? "false" : "true");
+			const toggle = row.querySelector(".expand-toggle");
+			if (toggle) { toggle.textContent = expanded ? "▶" : "▼"; }
+			detailRow.classList.toggle("hidden", expanded);
+		});
+	}
+	detailRow.append(detailCell);
+	return [row, detailRow];
+}
+
 function buildLeaderboard(stats: DashboardStats): HTMLElement {
-  const container = el("div", "leaderboard");
-  const title = el("h3", "", "Leaderboard");
-
-  const table = el("table", "leaderboard-table");
-  const thead = el("thead", "");
-  const headerRow = el("tr", "");
-
-  const headers = [
-    { text: "#", class: "rank-header" },
-    { text: "User", class: "" },
-    { text: "Dataset", class: "" },
-    { text: "Fluency", class: "" },
-    { text: "Tokens", class: "number-header" },
-    { text: "Days", class: "number-header" },
-    { text: "Sessions", class: "number-header" },
-    { text: "Avg Turns", class: "number-header" },
-    { text: "Models", class: "number-header" },
-    { text: "Projects", class: "number-header" },
-    { text: "Tok/Turn", class: "number-header" },
-    { text: "Cost", class: "number-header" },
-    { text: "", class: "action-header" },
-  ];
-
-  headers.forEach((header) => {
-    const th = el("th", header.class, header.text);
-    headerRow.append(th);
-  });
-  thead.append(headerRow);
-
-  const tbody = el("tbody", "");
-  const colSpan = headers.length;
-
-  for (const member of stats.team.members) {
-    const row = el("tr", "leaderboard-row");
-
-    // Strip prefixes for display (u:, ds:)
-    const displayUserId = member.userId.replace(/^u:/, "");
-    const displayDatasetId = (member.datasetId || "").replace(/^ds:/, "");
-
-    // Highlight current user
-    const isCurrentUser = member.userId === stats.personal.userId;
-    if (isCurrentUser) {
-      row.classList.add("current-user");
-    }
-
-    // Mark as expandable if fluency categories are available
-    const hasCategories = !!member.fluencyCategories?.length;
-    if (hasCategories) {
-      row.classList.add("expandable");
-      row.setAttribute("aria-expanded", "false");
-    }
-
-    const rankCell = el("td", "rank-cell", `${member.rank}`);
-    // Expand toggle indicator in rank cell
-    if (hasCategories) {
-      const toggle = el("span", "expand-toggle", "▶");
-      rankCell.prepend(toggle);
-    }
-
-    const userCell = el(
-      "td",
-      "",
-      isCurrentUser ? `${displayUserId} 👈` : displayUserId,
-    );
-    const datasetCell = el("td", "dataset-cell", displayDatasetId);
-
-    // Fluency cell with stage indicator (or empty if no data)
-    const fluencyCell = el("td", "fluency-cell");
-    if (member.fluencyStage && member.fluencyLabel) {
-      const stageIcon = getFluencyStageIcon(member.fluencyStage);
-      const fluencyBadge = el("span", `fluency-badge stage-${member.fluencyStage}`);
-      fluencyBadge.textContent = `${stageIcon} ${member.fluencyLabel}`;
-      fluencyCell.append(fluencyBadge);
-    } else {
-      fluencyCell.textContent = "";
-    }
-
-    const tokensCell = el(
-      "td",
-      "number-cell",
-      formatCompact(member.totalTokens),
-    );
-    const daysCell = el("td", "number-cell", formatNumber(member.daysActive));
-    const sessionsCell = el("td", "number-cell", formatNumber(member.sessions));
-    const avgTurnsCell = el(
-      "td",
-      "number-cell",
-      formatNumber(member.avgTurnsPerSession),
-    );
-    const modelsCell = el(
-      "td",
-      "number-cell",
-      formatNumber(member.uniqueModels),
-    );
-    const projectsCell = el(
-      "td",
-      "number-cell",
-      formatNumber(member.uniqueWorkspaces),
-    );
-    const tokPerTurnCell = el(
-      "td",
-      "number-cell",
-      formatNumber(member.avgTokensPerTurn),
-    );
-    const costCell = el("td", "number-cell", formatCost(member.totalCost));
-
-    const actionCell = el("td", "action-cell");
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "delete-row-btn";
-    deleteBtn.title = `Delete data for ${displayUserId} in dataset ${displayDatasetId}`;
-    deleteBtn.textContent = "🗑️";
-    deleteBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      vscode.postMessage({
-        command: "deleteUserDataset",
-        userId: member.userId,
-        datasetId: member.datasetId,
-      });
-    });
-    actionCell.append(deleteBtn);
-
-    row.append(
-      rankCell,
-      userCell,
-      datasetCell,
-      fluencyCell,
-      tokensCell,
-      daysCell,
-      sessionsCell,
-      avgTurnsCell,
-      modelsCell,
-      projectsCell,
-      tokPerTurnCell,
-      costCell,
-      actionCell,
-    );
-
-    // Detail expand row (hidden by default)
-    const detailRow = el("tr", "detail-row hidden");
-    const detailCell = document.createElement("td");
-    detailCell.colSpan = colSpan;
-    detailCell.className = "detail-cell";
-
-    if (hasCategories) {
-      detailCell.append(buildFluencyDetailPanel(member));
-      // Toggle on row click
-      row.addEventListener("click", () => {
-        const expanded = row.getAttribute("aria-expanded") === "true";
-        row.setAttribute("aria-expanded", expanded ? "false" : "true");
-        const toggle = row.querySelector(".expand-toggle");
-        if (toggle) { toggle.textContent = expanded ? "▶" : "▼"; }
-        detailRow.classList.toggle("hidden", expanded);
-      });
-    }
-
-    detailRow.append(detailCell);
-    tbody.append(row, detailRow);
-  }
-
-  table.append(thead, tbody);
-  container.append(title, table);
-  return container;
+	const thead = el("thead", "");
+	const headerRow = el("tr", "");
+	LEADERBOARD_HEADERS.forEach((h) => headerRow.append(el("th", h.class, h.text)));
+	thead.append(headerRow);
+	const tbody = el("tbody", "");
+	for (const member of stats.team.members) {
+		const [row, detailRow] = buildLeaderboardMemberRow(member, stats, LEADERBOARD_HEADERS.length);
+		tbody.append(row, detailRow);
+	}
+	const table = el("table", "leaderboard-table");
+	table.append(thead, tbody);
+	const container = el("div", "leaderboard");
+	container.append(el("h3", "", "Leaderboard"), table);
+	return container;
 }
 
 function buildFluencyDetailPanel(member: TeamMemberStats): HTMLElement {
