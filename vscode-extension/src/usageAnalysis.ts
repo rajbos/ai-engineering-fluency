@@ -471,6 +471,17 @@ function processRequestsForEnhancedMetrics(
 // --- processDeltaSessionAnalysis helpers ---
 
 /** Process a single reconstructed request for mode/tool/context analysis. */
+function _pdsaProcessResponses(request: SessionRequestRaw, analysis: SessionUsageAnalysis, toolNameMap: Record<string, string>): void {
+	if (!request.response || !Array.isArray(request.response)) { return; }
+	for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+		if (!responseItemRaw) { continue; }
+		if (responseItemRaw.kind === 'toolInvocationSerialized' || responseItemRaw.kind === 'prepareToolInvocation') {
+			const toolName = responseItemRaw.toolId || responseItemRaw.toolName || responseItemRaw.invocationMessage?.toolName || responseItemRaw.toolSpecificData?.kind || 'unknown';
+			recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
+		}
+	}
+}
+
 function _pdsaProcessRequest(
 	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
 	request: SessionRequestRaw,
@@ -480,20 +491,24 @@ function _pdsaProcessRequest(
 	if (!request.requestId) { return; }
 	incrementModeUsage(sessionModeType, analysis.modeUsage);
 	if (request.agent?.id) {
-		const toolName = request.agent.id;
 		analysis.toolCalls.total++;
-		analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+		analysis.toolCalls.byTool[request.agent.id] = (analysis.toolCalls.byTool[request.agent.id] || 0) + 1;
 	}
 	analyzeRequestContext(request, analysis.contextReferences);
-	if (request.response && Array.isArray(request.response)) {
-		for (const responseItemRaw of request.response as ResponseItemRaw[]) {
-			if (!responseItemRaw) { continue; }
-			if (responseItemRaw.kind === 'toolInvocationSerialized' || responseItemRaw.kind === 'prepareToolInvocation') {
-				const toolName = responseItemRaw.toolId || responseItemRaw.toolName || responseItemRaw.invocationMessage?.toolName || responseItemRaw.toolSpecificData?.kind || 'unknown';
-				recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
-			}
-		}
-	}
+	_pdsaProcessResponses(request, analysis, deps.toolNameMap);
+}
+
+function _pdsaGetReqModel(req: SessionRequestRaw, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
+	if (req.modelId) { return req.modelId.replace(/^copilot\//, ''); }
+	if (req.result?.metadata?.modelId) { return req.result.metadata.modelId.replace(/^copilot\//, ''); }
+	if (req.result?.details) { return getModelFromRequest(req, modelPricing); }
+	return defaultModel;
+}
+
+function _pdsaCountModelSwitches(models: string[]): number {
+	let count = 0;
+	for (let i = 1; i < models.length; i++) { if (models[i] !== models[i - 1]) { count++; } }
+	return count;
 }
 
 /** Extract model switching statistics from a reconstructed delta session state. */
@@ -513,21 +528,13 @@ function _pdsaExtractModelSwitching(
 	const models: string[] = [];
 	for (const req of requests) {
 		if (!req || !req.requestId) { continue; }
-		let reqModel = sessionDefaultModel;
-		if (req.modelId) { reqModel = req.modelId.replace(/^copilot\//, ''); }
-		else if (req.result?.metadata?.modelId) { reqModel = req.result.metadata.modelId.replace(/^copilot\//, ''); }
-		else if (req.result?.details) { reqModel = getModelFromRequest(req, deps.modelPricing); }
-		models.push(reqModel);
+		models.push(_pdsaGetReqModel(req, sessionDefaultModel, deps.modelPricing));
 	}
 	const uniqueModels = [...new Set(models)];
 	analysis.modelSwitching.uniqueModels = uniqueModels;
 	analysis.modelSwitching.modelCount = uniqueModels.length;
 	analysis.modelSwitching.totalRequests = models.length;
-	let switchCount = 0;
-	for (let mi = 1; mi < models.length; mi++) {
-		if (models[mi] !== models[mi - 1]) { switchCount++; }
-	}
-	analysis.modelSwitching.switchCount = switchCount;
+	analysis.modelSwitching.switchCount = _pdsaCountModelSwitches(models);
 	applyModelTierClassification(deps.modelPricing, uniqueModels, models, analysis);
 }
 
