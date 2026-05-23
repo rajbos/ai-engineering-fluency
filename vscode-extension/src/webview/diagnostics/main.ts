@@ -364,34 +364,30 @@ function getEditorIcon(editor: string): string {
   return ICONS.find(([key]) => lower.includes(key))?.[1] ?? '📝';
 }
 
-function compareSessionFiles(a: SessionFileDetails, b: SessionFileDetails): number {
-  let aNum: number;
-  let bNum: number;
+function getSortValue(file: SessionFileDetails, column: typeof currentSortColumn): number {
+  switch (column) {
+    case 'size': return file.size || 0;
+    case 'tokens': return file.tokens || 0;
+    case 'interactions': return file.interactions || 0;
+    case 'contextRefs': return getTotalContextRefs(file.contextReferences);
+    default: return 0;
+  }
+}
 
+function compareSessionFiles(a: SessionFileDetails, b: SessionFileDetails): number {
   if (currentSortColumn === "lastInteraction") {
     const aVal = a.lastInteraction;
     const bVal = b.lastInteraction;
     if (!aVal && !bVal) { return 0; }
     if (!aVal) { return 1; }
     if (!bVal) { return -1; }
-    aNum = new Date(aVal).getTime();
-    bNum = new Date(bVal).getTime();
-  } else if (currentSortColumn === "size") {
-    aNum = a.size || 0;
-    bNum = b.size || 0;
-  } else if (currentSortColumn === "tokens") {
-    aNum = a.tokens || 0;
-    bNum = b.tokens || 0;
-  } else if (currentSortColumn === "interactions") {
-    aNum = a.interactions || 0;
-    bNum = b.interactions || 0;
-  } else if (currentSortColumn === "contextRefs") {
-    aNum = getTotalContextRefs(a.contextReferences);
-    bNum = getTotalContextRefs(b.contextReferences);
-  } else {
-    return 0;
+    const aNum = new Date(aVal).getTime();
+    const bNum = new Date(bVal).getTime();
+    return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
   }
-
+  const aNum = getSortValue(a, currentSortColumn);
+  const bNum = getSortValue(b, currentSortColumn);
+  if (aNum === 0 && bNum === 0) { return 0; }
   return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
 }
 
@@ -1322,44 +1318,51 @@ function setupTabHandlers(): void {
   });
 }
 
+function handleClearCacheClick(target: HTMLElement): void {
+  target.style.background = "#d97706";
+  target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+  if (target instanceof HTMLButtonElement) {
+    target.disabled = true;
+  }
+  updateCacheNumbers();
+  vscode.postMessage({ command: "clearCache" });
+}
+
+function handleDebugCounterSetClick(target: HTMLElement): void {
+  const key = target.getAttribute("data-key");
+  const row = target.closest("tr");
+  const input = row?.querySelector(".debug-counter-input") as HTMLInputElement | null;
+  if (key && input) {
+    const value = parseInt(input.value, 10);
+    if (!isNaN(value)) {
+      vscode.postMessage({ command: "setDebugCounter", key, value });
+    }
+  }
+}
+
+function handleDebugFlagSetClick(target: HTMLElement): void {
+  const key = target.getAttribute("data-key");
+  const row = target.closest("tr");
+  const input = row?.querySelector(".debug-flag-input") as HTMLInputElement | null;
+  if (key && input) {
+    vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
+  }
+}
+
 function handleGlobalClickEvent(event: MouseEvent): void {
   const target = event.target as HTMLElement;
-  if (!target) {
-    return;
-  }
-  if (
-    target.id === "btn-clear-cache" ||
-    target.id === "btn-clear-cache-tab"
-  ) {
-    target.style.background = "#d97706";
-    target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-    if (target instanceof HTMLButtonElement) {
-      target.disabled = true;
-    }
-    updateCacheNumbers();
-    vscode.postMessage({ command: "clearCache" });
+  if (!target) { return; }
+  if (target.id === "btn-clear-cache" || target.id === "btn-clear-cache-tab") {
+    handleClearCacheClick(target);
   }
   if (target.id === "btn-reset-debug-counters") {
     vscode.postMessage({ command: "resetDebugCounters" });
   }
   if (target.classList.contains("debug-counter-set")) {
-    const key = target.getAttribute("data-key");
-    const row = target.closest("tr");
-    const input = row?.querySelector(".debug-counter-input") as HTMLInputElement | null;
-    if (key && input) {
-      const value = parseInt(input.value, 10);
-      if (!isNaN(value)) {
-        vscode.postMessage({ command: "setDebugCounter", key, value });
-      }
-    }
+    handleDebugCounterSetClick(target);
   }
   if (target.classList.contains("debug-flag-set")) {
-    const key = target.getAttribute("data-key");
-    const row = target.closest("tr");
-    const input = row?.querySelector(".debug-flag-input") as HTMLInputElement | null;
-    if (key && input) {
-      vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
-    }
+    handleDebugFlagSetClick(target);
   }
 }
 
@@ -1449,93 +1452,75 @@ function setupButtonHandlers(): void {
   wireNavButtons();
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 type DiagMessage = Record<string, any>;
 
-function handleDiagnosticDataLoaded(message: DiagMessage): void {
-  if (message.report) {
-    const reportTabContent = document.getElementById("tab-report");
-    if (reportTabContent) {
-      const processedReport = removeSessionFilesSection(message.report);
-      const reportPre = reportTabContent.querySelector(".report-content");
-      if (reportPre) {
-        reportPre.textContent = processedReport;
-      }
-    }
-  }
+function handleDiagnosticReport(message: DiagMessage): void {
+  if (!message.report) { return; }
+  const reportTabContent = document.getElementById("tab-report");
+  if (!reportTabContent) { return; }
+  const processedReport = removeSessionFilesSection(message.report);
+  const reportPre = reportTabContent.querySelector(".report-content");
+  if (reportPre) { reportPre.textContent = processedReport; }
+}
 
-  if (message.backendStorageInfo) {
-    currentBackendInfo = message.backendStorageInfo;
-    if (message.githubAuth !== undefined) {
-      currentGithubAuth = message.githubAuth;
-    }
-    const backendTabContent = document.getElementById("tab-backend");
-    if (backendTabContent) {
-      const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
-      const previousSubtab = activeSubtabEl?.getAttribute("data-subtab")
-        ?? diagState.restore().activeSubtab;
-
-      backendTabContent.innerHTML = renderBackendStoragePanel(
-        currentBackendInfo,
-        currentGithubAuth,
-      );
-      setupBackendButtonHandlers();
-      setupSubtabHandlers();
-
-      if (previousSubtab) {
-        activateSubtab(previousSubtab);
-        diagState.patch({ activeSubtab: previousSubtab });
-      }
-    }
-  } else {
+function handleBackendStorageSection(message: DiagMessage): void {
+  if (!message.backendStorageInfo) {
     console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");
+    return;
   }
-
-  if (message.sessionFolders && message.sessionFolders.length > 0) {
-    const reportTabContent = document.getElementById("tab-report");
-    if (reportTabContent) {
-      const grouped = groupSessionFolders(message.sessionFolders as SessionFolder[]);
-      const foldersEl = buildSessionFoldersElement(grouped);
-
-      const existing = reportTabContent.querySelector(".session-folders-table");
-      if (existing) {
-        existing.replaceWith(foldersEl);
-      } else {
-        const reportContent = reportTabContent.querySelector(".report-content");
-        if (reportContent) {
-          reportContent.insertAdjacentElement("afterend", foldersEl);
-        } else {
-          reportTabContent.appendChild(foldersEl);
-        }
-      }
-      setupStorageLinkHandlers();
-    }
+  currentBackendInfo = message.backendStorageInfo;
+  if (message.githubAuth !== undefined) { currentGithubAuth = message.githubAuth; }
+  const backendTabContent = document.getElementById("tab-backend");
+  if (!backendTabContent) { return; }
+  const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
+  const previousSubtab = activeSubtabEl?.getAttribute("data-subtab") ?? diagState.restore().activeSubtab;
+  backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+  setupBackendButtonHandlers();
+  setupSubtabHandlers();
+  if (previousSubtab) {
+    activateSubtab(previousSubtab);
+    diagState.patch({ activeSubtab: previousSubtab });
   }
+}
 
-  if (message.candidatePaths && message.candidatePaths.length > 0) {
-    const reportTabContent = document.getElementById("tab-report");
-    if (reportTabContent) {
-      const existing = reportTabContent.querySelector(".candidate-paths-table");
-      if (existing) {
-        existing.remove();
-      }
-
-      const candidateEl = buildCandidatePathsElement(message.candidatePaths);
-
-      const foldersTable = reportTabContent.querySelector(".session-folders-table");
-      if (foldersTable) {
-        foldersTable.insertAdjacentElement("afterend", candidateEl);
-      } else {
-        const reportContent = reportTabContent.querySelector(".report-content");
-        if (reportContent) {
-          reportContent.insertAdjacentElement("afterend", candidateEl);
-        } else {
-          reportTabContent.appendChild(candidateEl);
-        }
-      }
-    }
+function handleSessionFoldersSection(message: DiagMessage): void {
+  if (!message.sessionFolders || message.sessionFolders.length === 0) { return; }
+  const reportTabContent = document.getElementById("tab-report");
+  if (!reportTabContent) { return; }
+  const grouped = groupSessionFolders(message.sessionFolders as SessionFolder[]);
+  const foldersEl = buildSessionFoldersElement(grouped);
+  const existing = reportTabContent.querySelector(".session-folders-table");
+  if (existing) {
+    existing.replaceWith(foldersEl);
+  } else {
+    const reportContent = reportTabContent.querySelector(".report-content");
+    if (reportContent) { reportContent.insertAdjacentElement("afterend", foldersEl); }
+    else { reportTabContent.appendChild(foldersEl); }
   }
+  setupStorageLinkHandlers();
+}
 
+function handleCandidatePathsSection(message: DiagMessage): void {
+  if (!message.candidatePaths || message.candidatePaths.length === 0) { return; }
+  const reportTabContent = document.getElementById("tab-report");
+  if (!reportTabContent) { return; }
+  reportTabContent.querySelector(".candidate-paths-table")?.remove();
+  const candidateEl = buildCandidatePathsElement(message.candidatePaths);
+  const foldersTable = reportTabContent.querySelector(".session-folders-table");
+  if (foldersTable) {
+    foldersTable.insertAdjacentElement("afterend", candidateEl);
+  } else {
+    const reportContent = reportTabContent.querySelector(".report-content");
+    if (reportContent) { reportContent.insertAdjacentElement("afterend", candidateEl); }
+    else { reportTabContent.appendChild(candidateEl); }
+  }
+}
+
+function handleDiagnosticDataLoaded(message: DiagMessage): void {
+  handleDiagnosticReport(message);
+  handleBackendStorageSection(message);
+  handleSessionFoldersSection(message);
+  handleCandidatePathsSection(message);
   if (message.githubAuth !== undefined) {
     const githubTabContent = document.getElementById("tab-github");
     if (githubTabContent) {
@@ -1622,39 +1607,23 @@ function handleCacheCleared(): void {
   }, 2000);
 }
 
+function updateCacheSummaryCards(cacheInfo: any, summaryCards: NodeListOf<Element>): void {
+  if (summaryCards.length < 4) { return; }
+  const entriesValue = summaryCards[0]?.querySelector(".summary-value");
+  if (entriesValue) { entriesValue.textContent = String(cacheInfo.size); }
+  const sizeValue = summaryCards[1]?.querySelector(".summary-value");
+  if (sizeValue) { sizeValue.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`; }
+  const lastUpdatedValue = summaryCards[2]?.querySelector(".summary-value");
+  if (lastUpdatedValue) { lastUpdatedValue.textContent = new Date(cacheInfo.lastUpdated).toLocaleString(); }
+  const ageValue = summaryCards[3]?.querySelector(".summary-value");
+  if (ageValue) { ageValue.textContent = "0 seconds ago"; }
+}
+
 function handleCacheRefreshed(message: DiagMessage): void {
-  if (message.cacheInfo) {
-    const cacheInfo = message.cacheInfo;
-    const cacheTabContent = document.getElementById("tab-cache");
-    if (cacheTabContent) {
-      const summaryCards =
-        cacheTabContent.querySelectorAll(".summary-card");
-      if (summaryCards.length >= 4) {
-        const entriesValue =
-          summaryCards[0]?.querySelector(".summary-value");
-        if (entriesValue) {
-          entriesValue.textContent = String(cacheInfo.size);
-        }
-
-        const sizeValue = summaryCards[1]?.querySelector(".summary-value");
-        if (sizeValue) {
-          sizeValue.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`;
-        }
-
-        const lastUpdatedValue =
-          summaryCards[2]?.querySelector(".summary-value");
-        if (lastUpdatedValue) {
-          const date = new Date(cacheInfo.lastUpdated);
-          lastUpdatedValue.textContent = date.toLocaleString();
-        }
-
-        const ageValue = summaryCards[3]?.querySelector(".summary-value");
-        if (ageValue) {
-          ageValue.textContent = "0 seconds ago";
-        }
-      }
-    }
-  }
+  if (!message.cacheInfo) { return; }
+  const cacheTabContent = document.getElementById("tab-cache");
+  if (!cacheTabContent) { return; }
+  updateCacheSummaryCards(message.cacheInfo, cacheTabContent.querySelectorAll(".summary-card"));
 }
 
 function handleFolderPicked(message: DiagMessage): void {
