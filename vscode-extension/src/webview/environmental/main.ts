@@ -167,6 +167,38 @@ function render(stats: EnvironmentalStats): void {
 	wireButtons();
 }
 
+function buildAnalogyColumn(periodLabel: string, primaryValue: string, analogies: AnalogyItem[] | null): HTMLElement {
+	const col = el('div', 'analogy-col');
+	col.append(el('div', 'analogy-col-header', periodLabel));
+	col.append(el('div', 'metric-primary-value', primaryValue));
+	if (analogies) {
+		for (const item of analogies) {
+			const itemEl = el('div', 'analogy-item');
+			itemEl.append(el('span', 'analogy-icon', item.icon));
+			const itemText = document.createElement('span');
+			itemText.textContent = item.text;
+			itemEl.append(itemText);
+			col.append(itemEl);
+		}
+	}
+	return col;
+}
+
+function buildMetricCard(periodCols: Array<[string, string, AnalogyItem[] | null]>, header: { icon: string; label: string; color: string }): HTMLElement {
+	const card = el('div', 'metric-card');
+	const cardHeader = el('div', 'metric-card-header');
+	const iconEl = el('span', 'metric-card-icon', header.icon);
+	iconEl.style.color = header.color;
+	cardHeader.append(iconEl, el('span', 'metric-card-label', header.label));
+	card.append(cardHeader);
+	const grid = el('div', 'analogy-grid');
+	for (const [periodLabel, primaryValue, analogies] of periodCols) {
+		grid.append(buildAnalogyColumn(periodLabel, primaryValue, analogies));
+	}
+	card.append(grid);
+	return card;
+}
+
 function buildImpactCards(
 	stats: EnvironmentalStats,
 	projectedTokens: number,
@@ -184,28 +216,24 @@ function buildImpactCards(
 	section.append(intro);
 
 	const periods: Array<[string, string, AnalogyItem[] | null]>[] = [
-		// Tokens card: 4 periods, no analogies
 		[
 			['📅 Today', formatCompact(stats.today.tokens), null],
 			['📈 Last 30 Days', formatCompact(stats.last30Days.tokens), null],
 			['📆 Previous Month', formatCompact(stats.lastMonth.tokens), null],
 			['🌍 Projected Year', formatCompact(projectedTokens), null],
 		],
-		// CO₂ card
 		[
 			['📅 Today', formatCo2Grams(stats.today.co2), co2AnalogyItems(stats.today.co2)],
 			['📈 Last 30 Days', formatCo2Grams(stats.last30Days.co2), co2AnalogyItems(stats.last30Days.co2)],
 			['📆 Previous Month', formatCo2Grams(stats.lastMonth.co2), co2AnalogyItems(stats.lastMonth.co2)],
 			['🌍 Projected Year', formatCo2Grams(projectedCo2), co2AnalogyItems(projectedCo2)],
 		],
-		// Water card
 		[
 			['📅 Today', `${smartFixed(stats.today.waterUsage)} L`, waterAnalogyItems(stats.today.waterUsage)],
 			['📈 Last 30 Days', `${smartFixed(stats.last30Days.waterUsage)} L`, waterAnalogyItems(stats.last30Days.waterUsage)],
 			['📆 Previous Month', `${smartFixed(stats.lastMonth.waterUsage)} L`, waterAnalogyItems(stats.lastMonth.waterUsage)],
 			['🌍 Projected Year', `${smartFixed(projectedWater)} L`, waterAnalogyItems(projectedWater)],
 		],
-		// Trees card
 		[
 			['📅 Today', `${smartFixed(stats.today.treesEquivalent)} 🌳`, treeAnalogyItems(stats.today.treesEquivalent)],
 			['📈 Last 30 Days', `${smartFixed(stats.last30Days.treesEquivalent)} 🌳`, treeAnalogyItems(stats.last30Days.treesEquivalent)],
@@ -222,38 +250,7 @@ function buildImpactCards(
 	];
 
 	const cards = el('div', 'metric-cards');
-
-	periods.forEach((periodCols, i) => {
-		const card = el('div', 'metric-card');
-
-		const cardHeader = el('div', 'metric-card-header');
-		const iconEl = el('span', 'metric-card-icon', metricHeaders[i].icon);
-		iconEl.style.color = metricHeaders[i].color;
-		const labelEl = el('span', 'metric-card-label', metricHeaders[i].label);
-		cardHeader.append(iconEl, labelEl);
-		card.append(cardHeader);
-
-		const grid = el('div', 'analogy-grid');
-		periodCols.forEach(([periodLabel, primaryValue, analogies]) => {
-			const col = el('div', 'analogy-col');
-			col.append(el('div', 'analogy-col-header', periodLabel));
-			col.append(el('div', 'metric-primary-value', primaryValue));
-			if (analogies) {
-				analogies.forEach(item => {
-					const itemEl = el('div', 'analogy-item');
-					const itemIcon = el('span', 'analogy-icon', item.icon);
-					const itemText = document.createElement('span');
-					itemText.textContent = item.text;
-					itemEl.append(itemIcon, itemText);
-					col.append(itemEl);
-				});
-			}
-			grid.append(col);
-		});
-		card.append(grid);
-		cards.append(card);
-	});
-
+	periods.forEach((periodCols, i) => cards.append(buildMetricCard(periodCols, metricHeaders[i])));
 	section.append(cards);
 	return section;
 }
