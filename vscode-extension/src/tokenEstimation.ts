@@ -574,6 +574,29 @@ export async function reconstructJsonlStateAsync(lines: string[], yieldInterval 
  * Returns null when no `llm_request` events are found (debug logging disabled,
  * or file is empty / does not exist).
  */
+type EatdlState = { inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> };
+
+function _eatdlProcessEvent(event: unknown, state: EatdlState): void {
+	const ev = event as Record<string, unknown>;
+	if (ev['type'] !== 'llm_request') { return; }
+	state.modelTurns++;
+	const attrs = ev['attrs'] as Record<string, unknown> | undefined;
+	const inp = typeof attrs?.['inputTokens'] === 'number' ? attrs['inputTokens'] as number : 0;
+	const out = typeof attrs?.['outputTokens'] === 'number' ? attrs['outputTokens'] as number : 0;
+	const cached = typeof attrs?.['cachedTokens'] === 'number' ? attrs['cachedTokens'] as number : 0;
+	state.inputTokens += inp;
+	state.outputTokens += out;
+	state.cachedTokens += cached;
+	const model = typeof attrs?.['model'] === 'string' && attrs['model'] ? attrs['model'] as string : '';
+	if (model) {
+		const entry = state.modelBreakdown[model] ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+		entry.inputTokens += inp;
+		entry.outputTokens += out;
+		entry.cachedTokens += cached;
+		state.modelBreakdown[model] = entry;
+	}
+}
+
 export function extractAllTokensFromDebugLog(content: string): {
 	inputTokens: number;
 	outputTokens: number;
@@ -581,35 +604,12 @@ export function extractAllTokensFromDebugLog(content: string): {
 	modelTurns: number;
 	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
 } | null {
-	let inputTokens = 0;
-	let outputTokens = 0;
-	let cachedTokens = 0;
-	let modelTurns = 0;
-	const modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> = {};
+	const state: EatdlState = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, modelTurns: 0, modelBreakdown: {} };
 	for (const line of content.split(/\r?\n/)) {
 		if (!line.trim()) { continue; }
-		try {
-			const event = JSON.parse(line);
-			if (event.type === 'llm_request') {
-				modelTurns++;
-				const inp = typeof event?.attrs?.inputTokens === 'number' ? event.attrs.inputTokens : 0;
-				const out = typeof event?.attrs?.outputTokens === 'number' ? event.attrs.outputTokens : 0;
-				const cached = typeof event?.attrs?.cachedTokens === 'number' ? event.attrs.cachedTokens : 0;
-				inputTokens += inp;
-				outputTokens += out;
-				cachedTokens += cached;
-				// Accumulate per-model breakdown using attrs.model when present
-				const model = typeof event?.attrs?.model === 'string' && event.attrs.model ? event.attrs.model : '';
-				if (model) {
-					const entry = modelBreakdown[model] ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
-					entry.inputTokens += inp;
-					entry.outputTokens += out;
-					entry.cachedTokens += cached;
-					modelBreakdown[model] = entry;
-				}
-			}
-		} catch { /* skip invalid lines */ }
+		try { _eatdlProcessEvent(JSON.parse(line), state); } catch { /* skip invalid lines */ }
 	}
+	const { inputTokens, outputTokens, cachedTokens, modelTurns, modelBreakdown } = state;
 	return modelTurns > 0 ? { inputTokens, outputTokens, cachedTokens, modelTurns, modelBreakdown } : null;
 }
 
@@ -636,77 +636,69 @@ export function extractCachedTokensFromDebugLog(content: string): number {
  *
  * Returns: Map<requestId, effort> plus the default effort at session start.
  */
+type BretState = { effortByRequestId: Map<string, string>; currentEffort: string | null; defaultEffort: string | null; switchCount: number };
+
+function _bretExtractEffortFromModel(model: unknown): string | null {
+	if (!model || typeof model !== 'object') { return null; }
+	const m = model as Record<string, unknown>;
+	const metadata = m['metadata'];
+	if (!metadata || typeof metadata !== 'object') { return null; }
+	const meta = metadata as Record<string, unknown>;
+	const schema = meta['configurationSchema'];
+	if (!schema || typeof schema !== 'object') { return null; }
+	const s = schema as Record<string, unknown>;
+	const props = s['properties'];
+	if (!props || typeof props !== 'object') { return null; }
+	const p = props as Record<string, unknown>;
+	const re = p['reasoningEffort'];
+	if (!re || typeof re !== 'object') { return null; }
+	const r = re as Record<string, unknown>;
+	return typeof r['default'] === 'string' ? r['default'] : null;
+}
+
+function _bretHandleKind0(delta: DeltaEvent, state: BretState): void {
+	const v = delta.v as Record<string, unknown> | undefined;
+	const inputState = v?.['inputState'] as Record<string, unknown> | undefined;
+	const effort = _bretExtractEffortFromModel(inputState?.['selectedModel']);
+	if (effort !== null) { state.currentEffort = effort; state.defaultEffort = effort; }
+}
+
+function _bretHandleKind1(delta: DeltaEvent, state: BretState): void {
+	const k = delta.k;
+	if (!Array.isArray(k) || k[0] !== 'inputState' || k[1] !== 'selectedModel') { return; }
+	const effort = _bretExtractEffortFromModel(delta.v);
+	if (effort !== null && effort !== state.currentEffort) {
+		if (state.currentEffort !== null) { state.switchCount++; }
+		state.currentEffort = effort;
+	}
+}
+
+function _bretHandleKind2(delta: DeltaEvent, state: BretState): void {
+	const k = delta.k;
+	if (!Array.isArray(k) || k[0] !== 'requests' || typeof k[1] !== 'number' || state.currentEffort === null) { return; }
+	const req = delta.v;
+	if (!req || typeof req !== 'object') { return; }
+	const r = req as Record<string, unknown>;
+	const requestId = typeof r['requestId'] === 'string' ? r['requestId'] : null;
+	if (requestId) { state.effortByRequestId.set(requestId, state.currentEffort); }
+}
+
 export function buildReasoningEffortTimeline(lines: string[]): {
   effortByRequestId: Map<string, string>;
   defaultEffort: string | null;
   switchCount: number;
 } {
-  const effortByRequestId = new Map<string, string>();
-  let currentEffort: string | null = null;
-  let defaultEffort: string | null = null;
-  let switchCount = 0;
-
-  function extractEffortFromModel(model: unknown): string | null {
-    if (!model || typeof model !== 'object') { return null; }
-    const m = model as Record<string, unknown>;
-    const metadata = m['metadata'];
-    if (!metadata || typeof metadata !== 'object') { return null; }
-    const meta = metadata as Record<string, unknown>;
-    const schema = meta['configurationSchema'];
-    if (!schema || typeof schema !== 'object') { return null; }
-    const s = schema as Record<string, unknown>;
-    const props = s['properties'];
-    if (!props || typeof props !== 'object') { return null; }
-    const p = props as Record<string, unknown>;
-    const re = p['reasoningEffort'];
-    if (!re || typeof re !== 'object') { return null; }
-    const r = re as Record<string, unknown>;
-    return typeof r['default'] === 'string' ? r['default'] : null;
-  }
-
-  for (const line of lines) {
-    if (!line.trim()) { continue; }
-    let delta: DeltaEvent;
-    try { delta = JSON.parse(line) as DeltaEvent; } catch { continue; }
-    if (typeof delta.kind !== 'number') { continue; }
-
-    if (delta.kind === 0) {
-      // Initial state: extract model from inputState.selectedModel
-      const v = delta.v as Record<string, unknown> | undefined;
-      const inputState = v?.['inputState'] as Record<string, unknown> | undefined;
-      const model = inputState?.['selectedModel'];
-      const effort = extractEffortFromModel(model);
-      if (effort !== null) {
-        currentEffort = effort;
-        defaultEffort = effort;
-      }
-    } else if (delta.kind === 1) {
-      const k = delta.k;
-      // Update to inputState.selectedModel — two-element path
-      if (Array.isArray(k) && k[0] === 'inputState' && k[1] === 'selectedModel') {
-        const effort = extractEffortFromModel(delta.v);
-        if (effort !== null && effort !== currentEffort) {
-          if (currentEffort !== null) { switchCount++; }
-          currentEffort = effort;
-        }
-      }
-    } else if (delta.kind === 2) {
-      const k = delta.k;
-      // New request being added: k = ["requests", <index>]
-      if (Array.isArray(k) && k[0] === 'requests' && typeof k[1] === 'number' && currentEffort !== null) {
-        const req = delta.v;
-        if (req && typeof req === 'object') {
-          const r = req as Record<string, unknown>;
-          const requestId = typeof r['requestId'] === 'string' ? r['requestId'] : null;
-          if (requestId) {
-            effortByRequestId.set(requestId, currentEffort);
-          }
-        }
-      }
-    }
-  }
-
-  return { effortByRequestId, defaultEffort, switchCount };
+	const state: BretState = { effortByRequestId: new Map(), currentEffort: null, defaultEffort: null, switchCount: 0 };
+	for (const line of lines) {
+		if (!line.trim()) { continue; }
+		let delta: DeltaEvent;
+		try { delta = JSON.parse(line) as DeltaEvent; } catch { continue; }
+		if (typeof delta.kind !== 'number') { continue; }
+		if (delta.kind === 0) { _bretHandleKind0(delta, state); }
+		else if (delta.kind === 1) { _bretHandleKind1(delta, state); }
+		else if (delta.kind === 2) { _bretHandleKind2(delta, state); }
+	}
+	return { effortByRequestId: state.effortByRequestId, defaultEffort: state.defaultEffort, switchCount: state.switchCount };
 }
 
 /**
@@ -734,41 +726,32 @@ export function extractPerRequestUsageFromRawLines(lines: string[]): Map<number,
 	return usage;
 }
 
+function _gmrBuildDisplayNameLookup(modelPricing: { [key: string]: ModelPricing }): { [displayName: string]: string } {
+	const map: { [displayName: string]: string } = {};
+	for (const [modelId, pricing] of Object.entries(modelPricing)) {
+		if (pricing.displayNames) {
+			for (const displayName of pricing.displayNames) { map[displayName] = modelId; }
+		}
+	}
+	return map;
+}
+
+function _gmrMatchDisplayName(details: string, displayNameMap: { [dn: string]: string }): string | null {
+	const sorted = Object.keys(displayNameMap).sort((a, b) => b.length - a.length);
+	for (const displayName of sorted) {
+		if (details.includes(displayName)) { return displayNameMap[displayName]; }
+	}
+	return null;
+}
+
 export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}): string {
-	// Try to determine model from request metadata (most reliable source)
-	// First check the top-level modelId field (VS Code format)
-	if (request.modelId) {
-		// Remove "copilot/" prefix if present
-		return request.modelId.replace(/^copilot\//, '');
+	if (request.modelId) { return request.modelId.replace(/^copilot\//, ''); }
+	if (request.result?.metadata?.modelId) { return request.result.metadata.modelId.replace(/^copilot\//, ''); }
+	if (request.result?.details) {
+		const matched = _gmrMatchDisplayName(request.result.details, _gmrBuildDisplayNameLookup(modelPricing));
+		if (matched) { return matched; }
 	}
-
-	if (request.result && request.result.metadata && request.result.metadata.modelId) {
-		return request.result.metadata.modelId.replace(/^copilot\//, '');
-	}
-
-	// Build a lookup map from display names to model IDs from modelPricing.json
-	if (request.result && request.result.details) {
-		// Create reverse lookup: displayName -> modelId
-		const displayNameToModelId: { [displayName: string]: string } = {};
-		for (const [modelId, pricing] of Object.entries(modelPricing)) {
-			if (pricing.displayNames) {
-				for (const displayName of pricing.displayNames) {
-					displayNameToModelId[displayName] = modelId;
-				}
-			}
-		}
-
-		// Check which display name appears in the details
-		// Sort by length descending to match longer names first (e.g., "Gemini 3 Pro (Preview)" before "Gemini 3 Pro")
-		const sortedDisplayNames = Object.keys(displayNameToModelId).sort((a, b) => b.length - a.length);
-		for (const displayName of sortedDisplayNames) {
-			if (request.result.details.includes(displayName)) {
-				return displayNameToModelId[displayName];
-			}
-		}
-	}
-
-	return 'gpt-4'; // default
+	return 'gpt-4';
 }
 
 /**
@@ -812,83 +795,58 @@ export function isUuidPointerFile(content: string): boolean {
  * - k = key path (array of strings)
  * - v = value
  */
-export function applyDelta(state: unknown, delta: unknown): unknown {
-	if (typeof delta !== 'object' || delta === null) {
-		return state;
-	}
+type AdNode = Record<string, unknown> | unknown[];
 
+function _adTraverseStep(current: AdNode, seg: string, wantsArray: boolean): AdNode {
+	if (Array.isArray(current)) {
+		const idx = Number(seg);
+		if (!current[idx] || typeof current[idx] !== 'object') { current[idx] = wantsArray ? [] : {}; }
+		return current[idx] as AdNode;
+	}
+	if (!current[seg] || typeof current[seg] !== 'object') { current[seg] = wantsArray ? [] : {}; }
+	return current[seg] as AdNode;
+}
+
+function _adTraverseToParent(state: unknown, pathArr: string[]): { root: AdNode; current: AdNode } {
+	const root: AdNode = typeof state === 'object' && state !== null ? state as AdNode : {};
+	let current: AdNode = root;
+	for (let i = 0; i < pathArr.length - 1; i++) {
+		current = _adTraverseStep(current, pathArr[i], /^\d+$/.test(pathArr[i + 1]));
+	}
+	return { root, current };
+}
+
+function _adApplyKind1(current: AdNode, lastSeg: string, v: unknown, root: AdNode): unknown {
+	if (Array.isArray(current)) { current[Number(lastSeg)] = v; }
+	else { current[lastSeg] = v; }
+	return root;
+}
+
+function _adApplyKind2(current: AdNode, lastSeg: string, v: unknown, root: AdNode): unknown {
+	let target: unknown[];
+	if (Array.isArray(current)) {
+		const idx = Number(lastSeg);
+		if (!Array.isArray(current[idx])) { current[idx] = []; }
+		target = current[idx] as unknown[];
+	} else {
+		if (!Array.isArray(current[lastSeg])) { current[lastSeg] = []; }
+		target = current[lastSeg] as unknown[];
+	}
+	if (Array.isArray(v)) { target.push(...(v as unknown[])); } else { target.push(v); }
+	return root;
+}
+
+export function applyDelta(state: unknown, delta: unknown): unknown {
+	if (typeof delta !== 'object' || delta === null) { return state; }
 	const d = delta as Record<string, unknown>;
 	const { kind, k, v } = d;
-
-	if (kind === 0) {
-		// Initial state - full replacement
-		return v;
-	}
-
-	if (!Array.isArray(k) || k.length === 0) {
-		return state;
-	}
-
+	if (kind === 0) { return v; }
+	if (!Array.isArray(k) || k.length === 0) { return state; }
 	const pathArr = k.map(String);
-	let root: Record<string, unknown> | unknown[] = typeof state === 'object' && state !== null ? state as Record<string, unknown> | unknown[] : {};
-	let current: Record<string, unknown> | unknown[] = root;
-
-	// Traverse to the parent of the target location
-	for (let i = 0; i < pathArr.length - 1; i++) {
-		const seg = pathArr[i];
-		const nextSeg = pathArr[i + 1];
-		const wantsArray = /^\d+$/.test(nextSeg);
-
-		if (Array.isArray(current)) {
-			const idx = Number(seg);
-			if (!current[idx] || typeof current[idx] !== 'object') {
-				current[idx] = wantsArray ? [] : {};
-			}
-			current = current[idx] as Record<string, unknown> | unknown[];
-		} else {
-			if (!current[seg] || typeof current[seg] !== 'object') {
-				current[seg] = wantsArray ? [] : {};
-			}
-			current = current[seg] as Record<string, unknown> | unknown[];
-		}
-	}
-
+	const { root, current } = _adTraverseToParent(state, pathArr);
 	const lastSeg = pathArr[pathArr.length - 1];
-
-	if (kind === 1) {
-		// Set value at key path
-		if (Array.isArray(current)) {
-			current[Number(lastSeg)] = v;
-		} else {
-			current[lastSeg] = v;
-		}
-		return root;
-	}
-
-	if (kind === 2) {
-		// Append value(s) to array at key path
-		let target: unknown[];
-		if (Array.isArray(current)) {
-			const idx = Number(lastSeg);
-			if (!Array.isArray(current[idx])) {
-				current[idx] = [];
-			}
-			target = current[idx] as unknown[];
-		} else {
-			if (!Array.isArray(current[lastSeg])) {
-				current[lastSeg] = [];
-			}
-			target = current[lastSeg] as unknown[];
-		}
-
-		if (Array.isArray(v)) {
-			target.push(...(v as unknown[]));
-		} else {
-			target.push(v);
-		}
-		return root;
-	}
-
+	if (kind === 1) { return _adApplyKind1(current, lastSeg, v, root); }
+	if (kind === 2) { return _adApplyKind2(current, lastSeg, v, root); }
 	return root;
 }
 
