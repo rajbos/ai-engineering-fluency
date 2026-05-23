@@ -169,17 +169,24 @@ export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, 
 		for (const assistantMsg of turnAssistantMsgs) {
 			if (!model) { model = assistantMsg.model || null; }
 			for (const part of (Array.isArray(assistantMsg.parts) ? assistantMsg.parts : [])) {
-				if (part?.type === 'text' && part?.text) {
-					assistantText += part.text;
-				} else if (part?.type === 'tool_call' && part?.data?.name) {
-					toolCalls.push({
-						toolName: part.data.name,
-						arguments: part.data.arguments ? JSON.stringify(part.data.arguments) : undefined
-					});
-				}
+				assistantText += this.processCrushMessagePart(part, toolCalls);
 			}
 		}
 		return { assistantText, toolCalls, model };
+	}
+
+	private processCrushMessagePart(
+		part: any,
+		toolCalls: { toolName: string; arguments?: string; result?: string }[]
+	): string {
+		if (part?.type === 'text' && part?.text) { return part.text as string; }
+		if (part?.type === 'tool_call' && part?.data?.name) {
+			toolCalls.push({
+				toolName: part.data.name,
+				arguments: part.data.arguments ? JSON.stringify(part.data.arguments) : undefined
+			});
+		}
+		return '';
 	}
 
 	async getSyncData(sessionFile: string): Promise<{ tokens: number; interactions: number; modelUsage: ModelUsage; timestamp: number }> {

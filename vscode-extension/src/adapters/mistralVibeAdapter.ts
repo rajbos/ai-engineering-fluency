@@ -123,19 +123,28 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 		for (let j = userIdx + 1; j < nextUserIdx; j++) {
 			const msg = messages[j];
 			if (msg.role === 'assistant') {
-				if (typeof msg.content === 'string') { assistantText += msg.content; }
-				for (const tc of (Array.isArray(msg.tool_calls) ? msg.tool_calls : [])) {
-					toolCalls.push({
-						toolName: tc.function?.name || tc.name || 'unknown',
-						arguments: tc.function?.arguments ? JSON.stringify(tc.function.arguments) : undefined
-					});
-				}
+				assistantText += this.processMistralAssistantMsg(msg, toolCalls);
 			} else if (msg.role === 'tool') {
 				const last = toolCalls[toolCalls.length - 1];
 				if (last) { last.result = typeof msg.content === 'string' ? msg.content : undefined; }
 			}
 		}
 		return { assistantText, toolCalls };
+	}
+
+	private processMistralAssistantMsg(
+		msg: any,
+		toolCalls: { toolName: string; arguments?: string; result?: string }[]
+	): string {
+		let text = '';
+		if (typeof msg.content === 'string') { text = msg.content; }
+		for (const tc of (Array.isArray(msg.tool_calls) ? msg.tool_calls : [])) {
+			toolCalls.push({
+				toolName: tc.function?.name || tc.name || 'unknown',
+				arguments: tc.function?.arguments ? JSON.stringify(tc.function.arguments) : undefined
+			});
+		}
+		return text;
 	}
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {

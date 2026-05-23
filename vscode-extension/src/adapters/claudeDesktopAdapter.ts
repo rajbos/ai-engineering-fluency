@@ -161,22 +161,39 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 			if (reqId) { seenRequestIds.add(reqId); }
 			const usage = msg?.usage;
 			if (usage && isFirstOccurrence) {
-				actualInputTokens += (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0);
-				actualOutputTokens += usage.output_tokens || 0;
+				const tokens = this.extractUsageTokens(usage);
+				actualInputTokens += tokens.input;
+				actualOutputTokens += tokens.output;
 			}
 			for (const block of (Array.isArray(msg?.content) ? msg.content : [])) {
-				if (block.type === 'text') { assistantText += block.text || ''; }
-				else if (block.type === 'tool_use') {
-					const toolName: string = block.name || 'unknown';
-					if (this.isMcpToolFn(toolName)) {
-						mcpTools.push({ server: this.extractMcpServerNameFn(toolName), tool: toolName });
-					} else {
-						toolCalls.push({ toolName, arguments: block.input ? JSON.stringify(block.input) : undefined });
-					}
-				}
+				assistantText += this.processEventContentBlock(block, toolCalls, mcpTools);
 			}
 		}
 		return { assistantText, model, actualInputTokens, actualOutputTokens, toolCalls, mcpTools };
+	}
+
+	private extractUsageTokens(usage: any): { input: number; output: number } {
+		return {
+			input: (usage.input_tokens || 0) + (usage.cache_creation_input_tokens || 0) + (usage.cache_read_input_tokens || 0),
+			output: usage.output_tokens || 0
+		};
+	}
+
+	private processEventContentBlock(
+		block: any,
+		toolCalls: { toolName: string; arguments?: string }[],
+		mcpTools: { server: string; tool: string }[]
+	): string {
+		if (block.type === 'text') { return block.text || ''; }
+		if (block.type === 'tool_use') {
+			const toolName: string = block.name || 'unknown';
+			if (this.isMcpToolFn(toolName)) {
+				mcpTools.push({ server: this.extractMcpServerNameFn(toolName), tool: toolName });
+			} else {
+				toolCalls.push({ toolName, arguments: block.input ? JSON.stringify(block.input) : undefined });
+			}
+		}
+		return '';
 	}
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {

@@ -213,19 +213,26 @@ export class OpenCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 			}
 			const assistantParts = await this.openCode.getOpenCodePartsForMessage(assistantMsg.id);
 			for (const part of assistantParts) {
-				if (part.type === 'text' && part.text) {
-					assistantText += part.text;
-				} else if (part.type === 'tool' && part.tool) {
-					toolCalls.push({
-						toolName: part.tool,
-						arguments: part.state?.input ? JSON.stringify(part.state.input) : undefined,
-						result: part.state?.output || undefined
-					});
-				}
+				assistantText += this.processOpenCodePart(part, toolCalls);
 			}
 		}
 		const turnOutputAndThinking = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.output || 0) + (m.tokens?.reasoning || 0), 0);
 		return { assistantText, toolCalls, model, thinkingTokens, turnCumulativeTotal, turnOutputAndThinking };
+	}
+
+	private processOpenCodePart(
+		part: any,
+		toolCalls: { toolName: string; arguments?: string; result?: string }[]
+	): string {
+		if (part.type === 'text' && part.text) { return part.text as string; }
+		if (part.type === 'tool' && part.tool) {
+			toolCalls.push({
+				toolName: part.tool,
+				arguments: part.state?.input ? JSON.stringify(part.state.input) : undefined,
+				result: part.state?.output || undefined
+			});
+		}
+		return '';
 	}
 
 	async getSyncData(sessionFile: string): Promise<{ tokens: number; interactions: number; modelUsage: ModelUsage; timestamp: number }> {
