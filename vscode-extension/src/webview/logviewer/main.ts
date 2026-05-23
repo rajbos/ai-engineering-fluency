@@ -189,24 +189,31 @@ return isoString;
 }
 }
 
+type ContextRefBadgeEntry = { key: keyof ContextReferenceUsage; label: string; implicit?: boolean };
+
+const CONTEXT_REF_BADGE_ENTRIES: ContextRefBadgeEntry[] = [
+	{ key: 'selection', label: '#selection' },
+	{ key: 'file', label: '#file' },
+	{ key: 'symbol', label: '#symbol' },
+	{ key: 'codebase', label: '#codebase' },
+	{ key: 'workspace', label: '@workspace' },
+	{ key: 'terminal', label: '@terminal' },
+	{ key: 'vscode', label: '@vscode' },
+	{ key: 'terminalLastCommand', label: '#terminalLastCommand' },
+	{ key: 'terminalSelection', label: '#terminalSelection' },
+	{ key: 'clipboard', label: '#clipboard' },
+	{ key: 'changes', label: '#changes' },
+	{ key: 'outputPanel', label: '#outputPanel' },
+	{ key: 'problemsPanel', label: '#problemsPanel' },
+	{ key: 'pullRequest', label: '#pr' },
+	{ key: 'implicitSelection', label: 'implicit', implicit: true },
+];
+
 function getContextRefBadges(refs: ContextReferenceUsage): string {
-const badges: string[] = [];
-if (refs.selection > 0) { badges.push(`<span class="context-ref-item">#selection: <strong>${refs.selection}</strong></span>`); }
-if (refs.file > 0) { badges.push(`<span class="context-ref-item">#file: <strong>${refs.file}</strong></span>`); }
-if (refs.symbol > 0) { badges.push(`<span class="context-ref-item">#symbol: <strong>${refs.symbol}</strong></span>`); }
-if (refs.codebase > 0) { badges.push(`<span class="context-ref-item">#codebase: <strong>${refs.codebase}</strong></span>`); }
-if (refs.workspace > 0) { badges.push(`<span class="context-ref-item">@workspace: <strong>${refs.workspace}</strong></span>`); }
-if (refs.terminal > 0) { badges.push(`<span class="context-ref-item">@terminal: <strong>${refs.terminal}</strong></span>`); }
-if (refs.vscode > 0) { badges.push(`<span class="context-ref-item">@vscode: <strong>${refs.vscode}</strong></span>`); }
-if ((refs.terminalLastCommand || 0) > 0) { badges.push(`<span class="context-ref-item">#terminalLastCommand: <strong>${refs.terminalLastCommand}</strong></span>`); }
-if ((refs.terminalSelection || 0) > 0) { badges.push(`<span class="context-ref-item">#terminalSelection: <strong>${refs.terminalSelection}</strong></span>`); }
-if ((refs.clipboard || 0) > 0) { badges.push(`<span class="context-ref-item">#clipboard: <strong>${refs.clipboard}</strong></span>`); }
-if ((refs.changes || 0) > 0) { badges.push(`<span class="context-ref-item">#changes: <strong>${refs.changes}</strong></span>`); }
-if ((refs.outputPanel || 0) > 0) { badges.push(`<span class="context-ref-item">#outputPanel: <strong>${refs.outputPanel}</strong></span>`); }
-if ((refs.problemsPanel || 0) > 0) { badges.push(`<span class="context-ref-item">#problemsPanel: <strong>${refs.problemsPanel}</strong></span>`); }
-if ((refs.pullRequest || 0) > 0) { badges.push(`<span class="context-ref-item">#pr: <strong>${refs.pullRequest}</strong></span>`); }
-if (refs.implicitSelection > 0) { badges.push(`<span class="context-ref-item context-ref-implicit">implicit: <strong>${refs.implicitSelection}</strong></span>`); }
-return badges.join('');
+	return CONTEXT_REF_BADGE_ENTRIES
+		.filter(e => ((refs[e.key] as number) || 0) > 0)
+		.map(e => `<span class="context-ref-item${e.implicit ? ' context-ref-implicit' : ''}">${e.label}: <strong>${refs[e.key]}</strong></span>`)
+		.join('');
 }
 
 function renderContextReferencesDetailed(refs: ContextReferenceUsage): string {
@@ -685,65 +692,75 @@ ${renderContextReferencesDetailed(turn.contextReferences)}
 
 // ── Layout section renderers ─────────────────────────────────────────────────
 
-/**
- * Renders the grid of summary cards at the top of the log-viewer layout.
- * @security All user-controlled strings (editorName, file path) are escaped via `escapeHtml`.
- */
-function renderSummaryCards(data: SessionLogData, stats: SummaryStats): string {
-const {
-totalTokens, totalThinkingTokens, totalSubAgentCalls, turnsWithThinking,
-hasAnyActualUsage, hasSessionActualOnly, actualTotal, actualPromptTotal,
-actualCompletionTotal, sessionActualTokens, usageToolTotal, usageTopTools,
-usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit,
-usageContextExplicit, sessionEffort, effortDefaultLabel, effortSummary,
-modeEntries, totalModeTurns, primaryModeLabel, modeSubLabel,
-} = stats;
-
-return `
-<div class="summary-cards">
-<div class="summary-card">
-<div class="summary-label">📝 Interactions</div>
-<div class="summary-value">${data.interactions}</div>
-<div class="summary-sub">Total chat turns in this session</div>
-</div>
-${totalModeTurns > 0 ? `<div class="summary-card" title="${escapeHtml(modeEntries.map(([m, n]) => `${getModeIcon(m)} ${MODE_LABELS[m]} (${n})`).join(' · '))}">
+function buildEditorModeCard(data: SessionLogData, stats: SummaryStats): string {
+	if (stats.totalModeTurns <= 0) { return ''; }
+	const { modeEntries, primaryModeLabel, modeSubLabel } = stats;
+	const title = modeEntries.map(([m, n]) => `${getModeIcon(m)} ${MODE_LABELS[m]} (${n})`).join(' · ');
+	const extraModes = modeEntries.length > 1 ? ` · ${modeEntries.slice(1).map(([m, n]) => `${MODE_LABELS[m]} ${n}`).join(', ')}` : '';
+	return `<div class="summary-card" title="${escapeHtml(title)}">
 <div class="summary-label">🎛️ Editor Mode</div>
 <div class="summary-value" style="font-size: 1.1em;">${primaryModeLabel}</div>
-<div class="summary-sub">${escapeHtml(modeSubLabel)}${modeEntries.length > 1 ? ` · ${modeEntries.slice(1).map(([m, n]) => `${MODE_LABELS[m]} ${n}`).join(', ')}` : ''}</div>
-</div>` : ''}
-<div class="summary-card"${data.editorName === 'JetBrains' ? ` title="JetBrains: only user messages + assistant text are persisted in the session log, so this is an estimate of those alone. Actual API token counts and thinking tokens are not available."` : data.editorName === 'Antigravity' ? ` title="Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally."` : ''}>
-<div class="summary-label">📊 Estimated Tokens${(data.editorName === 'JetBrains' || data.editorName === 'Antigravity') ? ' ⓘ' : ''}</div>
-<div class="summary-value">${formatCompact(totalTokens)}</div>
-<div class="summary-sub">${data.editorName === 'JetBrains' ? 'User + assistant text only (no API counts, no thinking)' : data.editorName === 'Antigravity' ? 'Estimated from transcript content' : 'Input + Output estimated from text'}</div>
-</div>
-${hasAnyActualUsage && !data.debugLogInputTokens ? `
-<div class="summary-card">
+<div class="summary-sub">${escapeHtml(modeSubLabel)}${extraModes}</div>
+</div>`;
+}
+
+function buildEstimatedTokensCard(data: SessionLogData, stats: SummaryStats): string {
+	const isJetBrains = data.editorName === 'JetBrains';
+	const isAntigravity = data.editorName === 'Antigravity';
+	const titleAttr = isJetBrains
+		? ` title="JetBrains: only user messages + assistant text are persisted in the session log, so this is an estimate of those alone. Actual API token counts and thinking tokens are not available."`
+		: isAntigravity ? ` title="Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally."` : '';
+	const suffix = (isJetBrains || isAntigravity) ? ' ⓘ' : '';
+	const sub = isJetBrains ? 'User + assistant text only (no API counts, no thinking)'
+		: isAntigravity ? 'Estimated from transcript content' : 'Input + Output estimated from text';
+	return `<div class="summary-card"${titleAttr}>
+<div class="summary-label">📊 Estimated Tokens${suffix}</div>
+<div class="summary-value">${formatCompact(stats.totalTokens)}</div>
+<div class="summary-sub">${sub}</div>
+</div>`;
+}
+
+function buildActualTokensCard(data: SessionLogData, stats: SummaryStats): string {
+	const { hasAnyActualUsage, hasSessionActualOnly, actualTotal, actualPromptTotal, actualCompletionTotal, sessionActualTokens } = stats;
+	if (hasAnyActualUsage && !data.debugLogInputTokens) {
+		return `<div class="summary-card">
 <div class="summary-label">✅ Actual Tokens</div>
 <div class="summary-value">${formatCompact(actualTotal)}</div>
 <div class="summary-sub">↑${formatCompact(actualPromptTotal)} prompt, ↓${formatCompact(actualCompletionTotal)} completion</div>
-</div>
-` : data.debugLogInputTokens !== undefined ? `
-<div class="summary-card" title="Token counts from the Copilot Chat debug log, summed across every LLM API call in this session. Agent-mode sessions make multiple calls per user turn; the debug log captures all of them.">
+</div>`;
+	}
+	if (data.debugLogInputTokens !== undefined) {
+		return `<div class="summary-card" title="Token counts from the Copilot Chat debug log, summed across every LLM API call in this session. Agent-mode sessions make multiple calls per user turn; the debug log captures all of them.">
 <div class="summary-label">✅ Actual Tokens</div>
 <div class="summary-value">${formatCompact((data.debugLogInputTokens ?? 0) + (data.debugLogOutputTokens ?? 0))}</div>
 <div class="summary-sub">↑${formatCompact(data.debugLogInputTokens)} input, ↓${formatCompact(data.debugLogOutputTokens ?? 0)} output</div>
-</div>
-` : hasSessionActualOnly ? `
-<div class="summary-card">
+</div>`;
+	}
+	if (hasSessionActualOnly) {
+		return `<div class="summary-card">
 <div class="summary-label">✅ Actual Tokens</div>
 <div class="summary-value">${formatCompact(sessionActualTokens)}</div>
 <div class="summary-sub">${data.editorName === 'Mistral Vibe' ? 'From session data' : 'Total from session shutdown event'}</div>
-</div>
-` : ''}
-${(data.modelTurns ?? 0) > 0 ? `
-<div class="summary-card" title="Number of LLM API calls made during this session, as recorded in the Copilot Chat debug log. Agent-mode sessions make multiple calls per user turn (tool call → re-prompt → final answer).">
+</div>`;
+	}
+	return '';
+}
+
+function buildModelTurnsCard(data: SessionLogData): string {
+	if ((data.modelTurns ?? 0) <= 0) { return ''; }
+	const subText = (data.modelTurns ?? 0) > data.turns.length
+		? `${data.modelTurns} API calls for ${data.turns.length} user turn${data.turns.length !== 1 ? 's' : ''}`
+		: 'LLM API calls in this session';
+	return `<div class="summary-card" title="Number of LLM API calls made during this session, as recorded in the Copilot Chat debug log. Agent-mode sessions make multiple calls per user turn (tool call → re-prompt → final answer).">
 <div class="summary-label">🔄 Model Turns</div>
 <div class="summary-value">${data.modelTurns}</div>
-<div class="summary-sub">${(data.modelTurns ?? 0) > data.turns.length ? `${data.modelTurns} API calls for ${data.turns.length} user turn${data.turns.length !== 1 ? 's' : ''}` : 'LLM API calls in this session'}</div>
-</div>
-` : ''}
-${data.debugLogInputTokens !== undefined ? `
-<div class="summary-card" title="Total input tokens sent to the LLM across all API calls in this session, from the Copilot Chat debug log.">
+<div class="summary-sub">${subText}</div>
+</div>`;
+}
+
+function buildDebugTokenCards(data: SessionLogData): string {
+	if (data.debugLogInputTokens === undefined) { return ''; }
+	return `<div class="summary-card" title="Total input tokens sent to the LLM across all API calls in this session, from the Copilot Chat debug log.">
 <div class="summary-label">📥 Input Tokens</div>
 <div class="summary-value">${formatCompact(data.debugLogInputTokens)}</div>
 <div class="summary-sub">Prompt tokens across all model calls</div>
@@ -752,32 +769,88 @@ ${data.debugLogInputTokens !== undefined ? `
 <div class="summary-label">📤 Output Tokens</div>
 <div class="summary-value">${formatCompact(data.debugLogOutputTokens ?? 0)}</div>
 <div class="summary-sub">Completion tokens across all model calls</div>
-</div>
-` : ''}
-${(data.cachedTokens ?? 0) > 0 ? `
-<div class="summary-card" title="Tokens served from the provider's prompt cache. Cached tokens are billed at a lower rate and reduce latency. Source: session.shutdown modelMetrics.">
+</div>`;
+}
+
+function buildCachedTokensCard(data: SessionLogData): string {
+	if ((data.cachedTokens ?? 0) <= 0) { return ''; }
+	return `<div class="summary-card" title="Tokens served from the provider's prompt cache. Cached tokens are billed at a lower rate and reduce latency. Source: session.shutdown modelMetrics.">
 <div class="summary-label">💾 Cached Input</div>
 <div class="summary-value">${formatCompact(data.cachedTokens!)}</div>
 <div class="summary-sub">Prompt tokens served from cache</div>
-</div>
-` : ''}
-${totalThinkingTokens > 0 ? `<div class="summary-card">
+</div>`;
+}
+
+function buildThinkingTokensCard(data: SessionLogData, stats: SummaryStats): string {
+	if (stats.totalThinkingTokens <= 0) { return ''; }
+	return `<div class="summary-card">
 <div class="summary-label">🧠 Thinking Tokens</div>
-<div class="summary-value">${formatCompact(totalThinkingTokens)}</div>
-<div class="summary-sub">${turnsWithThinking} of ${data.turns.length} turns used thinking</div>
-</div>` : ''}
-${sessionEffort ? `<div class="summary-card">
+<div class="summary-value">${formatCompact(stats.totalThinkingTokens)}</div>
+<div class="summary-sub">${stats.turnsWithThinking} of ${data.turns.length} turns used thinking</div>
+</div>`;
+}
+
+function buildEffortCard(stats: SummaryStats): string {
+	if (!stats.sessionEffort) { return ''; }
+	const { effortDefaultLabel, effortSummary, sessionEffort } = stats;
+	const switchText = sessionEffort.switchCount > 0 ? ` · ${sessionEffort.switchCount} switch${sessionEffort.switchCount !== 1 ? 'es' : ''}` : '';
+	return `<div class="summary-card">
 <div class="summary-label">💡 Thinking Effort</div>
 <div class="summary-value">${effortDefaultLabel}</div>
-<div class="summary-sub">${effortSummary}${sessionEffort.switchCount > 0 ? ` · ${sessionEffort.switchCount} switch${sessionEffort.switchCount !== 1 ? 'es' : ''}` : ''}</div>
-</div>` : ''}
-${(totalSubAgentCalls > 0 || (data.subAgentsStarted ?? 0) > 0) ? `<div class="summary-card">
+<div class="summary-sub">${effortSummary}${switchText}</div>
+</div>`;
+}
+
+function buildSubAgentsCard(data: SessionLogData, stats: SummaryStats): string {
+	if (stats.totalSubAgentCalls <= 0 && (data.subAgentsStarted ?? 0) <= 0) { return ''; }
+	const count = data.subAgentsStarted ?? stats.totalSubAgentCalls;
+	const sub = data.subAgentsStarted !== undefined
+		? `${data.subAgentsStarted} started · ${stats.totalSubAgentCalls} tool calls`
+		: 'Agent mode sub-agent invocations';
+	return `<div class="summary-card">
 <div class="summary-label">🤖 Sub-Agents</div>
-<div class="summary-value">${data.subAgentsStarted ?? totalSubAgentCalls}</div>
-<div class="summary-sub">${data.subAgentsStarted !== undefined
-? `${data.subAgentsStarted} started · ${totalSubAgentCalls} tool calls`
-: 'Agent mode sub-agent invocations'}</div>
-</div>` : ''}
+<div class="summary-value">${count}</div>
+<div class="summary-sub">${sub}</div>
+</div>`;
+}
+
+function buildFileNameCard(data: SessionLogData): string {
+	const isOpenCode = data.file.includes('opencode.db#ses_');
+	const displayName = escapeHtml(truncateText(getFileName(data.file), 30));
+	const title = escapeHtml(getFileName(data.file));
+	const valueHtml = isOpenCode
+		? `<span title="${title}">${displayName}</span>`
+		: `<span class="filename-link" id="open-file-link" title="${title}">${displayName}</span>`;
+	const sub = isOpenCode ? 'Stored in SQLite database' : 'Click to open in editor';
+	return `<div class="summary-card">
+<div class="summary-label">📁 File Name</div>
+<div class="summary-value" style="font-size: 16px;">${valueHtml}</div>
+<div class="summary-sub">${sub}</div>
+</div>`;
+}
+
+/**
+ * Renders the grid of summary cards at the top of the log-viewer layout.
+ * @security All user-controlled strings (editorName, file path) are escaped via `escapeHtml`.
+ */
+function renderSummaryCards(data: SessionLogData, stats: SummaryStats): string {
+	const { usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit, usageContextExplicit } = stats;
+	return `
+<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">📝 Interactions</div>
+<div class="summary-value">${data.interactions}</div>
+<div class="summary-sub">Total chat turns in this session</div>
+</div>
+${buildEditorModeCard(data, stats)}
+${buildEstimatedTokensCard(data, stats)}
+${buildActualTokensCard(data, stats)}
+${buildModelTurnsCard(data)}
+${buildDebugTokenCards(data)}
+${buildCachedTokensCard(data)}
+${buildThinkingTokensCard(data, stats)}
+${buildEffortCard(stats)}
+${buildSubAgentsCard(data, stats)}
 <div class="summary-card">
 <div class="summary-label">🔧 Tool Calls</div>
 <div class="summary-value">${usageToolTotal}</div>
@@ -795,14 +868,7 @@ ${(totalSubAgentCalls > 0 || (data.subAgentsStarted ?? 0) > 0) ? `<div class="su
 ${usageContextTotal === 0 ? 'None' : `implicit ${usageContextImplicit}, explicit ${usageContextExplicit}`}
 </div>
 </div>
-<div class="summary-card">
-<div class="summary-label">📁 File Name</div>
-<div class="summary-value" style="font-size: 16px;">${data.file.includes('opencode.db#ses_') 
-? `<span title="${escapeHtml(getFileName(data.file))}">${escapeHtml(truncateText(getFileName(data.file), 30))}</span>`
-: `<span class="filename-link" id="open-file-link" title="${escapeHtml(getFileName(data.file))}">${escapeHtml(truncateText(getFileName(data.file), 30))}</span>`
-}</div>
-<div class="summary-sub">${data.file.includes('opencode.db#ses_') ? 'Stored in SQLite database' : 'Click to open in editor'}</div>
-</div>
+${buildFileNameCard(data)}
 <div class="summary-card">
 <div class="summary-label">💻 Editor</div>
 <div class="summary-value" style="font-size: 20px; word-break: keep-all;">${escapeHtml(data.editorName)}</div>
@@ -1046,96 +1112,151 @@ ${actualUsageHtml}
 `;
 }
 
-function renderLayout(data: SessionLogData): void {
-setCompactNumbers(data.compactNumbers !== false);
-const root = document.getElementById('root');
-if (!root) { return; }
-
-// ── Aggregate session-level statistics ──────────────────────────────────
-const totalTokens         = data.turns.reduce((sum, t) => sum + t.inputTokensEstimate + t.outputTokensEstimate + t.thinkingTokensEstimate, 0);
-const totalThinkingTokens = data.turns.reduce((sum, t) => sum + t.thinkingTokensEstimate, 0);
-const totalToolCalls      = data.turns.reduce((sum, t) => sum + t.toolCalls.filter(tc => !tc.isSubAgent).length, 0);
-const totalSubAgentCalls  = data.turns.reduce((sum, t) => sum + t.toolCalls.filter(tc => tc.isSubAgent).length, 0);
-const totalMcpTools       = data.turns.reduce((sum, t) => sum + t.mcpTools.length, 0);
-const turnsWithThinking   = data.turns.filter(t => t.thinkingTokensEstimate > 0).length;
-
-const usage               = data.usageAnalysis;
-const sessionEffort       = usage?.thinkingEffort;
-const usageToolTotal      = usage?.toolCalls?.total ?? totalToolCalls;
-const usageTopTools       = usage ? getTopEntries(usage.toolCalls.byTool, 3) : [];
-const usageMcpTotal       = usage?.mcpTools?.total ?? totalMcpTools;
-const usageTopMcpTools    = usage ? getTopEntries(usage.mcpTools.byTool, 3) : [];
-const usageContextRefs    = usage?.contextReferences || data.contextReferences;
-const usageContextTotal   = getTotalContextRefs(usageContextRefs);
-const usageContextImplicit = getImplicitContextRefs(usageContextRefs);
-const usageContextExplicit = getExplicitContextRefs(usageContextRefs);
-const effortDefault       = sessionEffort?.defaultEffort ?? (sessionEffort ? Object.keys(sessionEffort.byEffort)[0] : undefined);
-const effortDefaultLabel  = effortDefault ? getEffortDisplayName(effortDefault) : '—';
-const effortSummary       = sessionEffort
-? Object.entries(sessionEffort.byEffort).map(([k, v]) => `${getEffortDisplayName(k)}: ${v}`).join(', ')
-: '';
-
-// ── Actual-usage roll-up across turns ───────────────────────────────────
-const turnsWithActual       = data.turns.filter(t => t.actualUsage);
-const hasAnyActualUsage     = turnsWithActual.length > 0;
-const actualPromptTotal     = turnsWithActual.reduce((s, t) => s + (t.actualUsage?.promptTokens || 0), 0);
-const actualCompletionTotal = turnsWithActual.reduce((s, t) => s + (t.actualUsage?.completionTokens || 0), 0);
-const actualTotal           = actualPromptTotal + actualCompletionTotal;
-
-// Session-level actual tokens (from session.shutdown in CLI sessions) when no per-turn data
-const sessionActualTokens = data.actualTokens || 0;
-const hasSessionActualOnly = !hasAnyActualUsage && sessionActualTokens > 0;
-
-// Aggregate prompt breakdown across all turns
-const aggregatedBreakdown: { [key: string]: BreakdownEntry } = {};
-for (const turn of turnsWithActual) {
-if (turn.actualUsage?.promptTokenDetails) {
-for (const detail of turn.actualUsage.promptTokenDetails) {
-const key = `${detail.category}|${detail.label}`;
-if (!aggregatedBreakdown[key]) {
-aggregatedBreakdown[key] = { category: detail.category, label: detail.label, totalTokens: 0, totalPct: 0, count: 0 };
-}
-const deducedTokens = Math.round((turn.actualUsage?.promptTokens || 0) * detail.percentageOfPrompt / 100);
-aggregatedBreakdown[key].totalTokens += deducedTokens;
-aggregatedBreakdown[key].totalPct    += detail.percentageOfPrompt;
-aggregatedBreakdown[key].count++;
-}
-}
-}
-
-// ── Mode usage summary ───────────────────────────────────────────────────
-const modeUsage: ModeUsage = { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 };
-const modelUsage: { [model: string]: number } = {};
-for (const turn of data.turns) {
-modeUsage[turn.mode]++;
-if (turn.model) {
-modelUsage[turn.model] = (modelUsage[turn.model] || 0) + 1;
-}
-}
-
-const modeEntries = (Object.entries(modeUsage) as [keyof typeof modeUsage, number][])
-.filter(([, n]) => n > 0)
-.sort((a, b) => b[1] - a[1]);
-const totalModeTurns = modeEntries.reduce((s, [, n]) => s + n, 0);
-const primaryMode = modeEntries[0];
-const primaryModeLabel = primaryMode
-? `${getModeIcon(primaryMode[0])} ${MODE_LABELS[primaryMode[0]]}`
-: '—';
-const modeSubLabel = modeEntries.length <= 1
-? (totalModeTurns === 1 ? '1 turn' : `${totalModeTurns} turns`)
-: `mixed across ${totalModeTurns} turns`;
-
-// ── Compose layout HTML ──────────────────────────────────────────────────
-const summaryStats: SummaryStats = {
-totalTokens, totalThinkingTokens, totalSubAgentCalls, turnsWithThinking,
-hasAnyActualUsage, hasSessionActualOnly, actualTotal, actualPromptTotal,
-actualCompletionTotal, sessionActualTokens, usageToolTotal, usageTopTools,
-usageMcpTotal, usageTopMcpTools, usageContextTotal, usageContextImplicit,
-usageContextExplicit, sessionEffort, effortDefaultLabel, effortSummary,
-modeEntries, totalModeTurns, primaryModeLabel, modeSubLabel,
+type TokenStats = {
+	totalTokens: number;
+	totalThinkingTokens: number;
+	totalSubAgentCalls: number;
+	turnsWithThinking: number;
+	usageToolTotal: number;
+	usageTopTools: { key: string; value: number }[];
+	usageMcpTotal: number;
+	usageTopMcpTools: { key: string; value: number }[];
+	usageContextTotal: number;
+	usageContextImplicit: number;
+	usageContextExplicit: number;
+	sessionEffort: ThinkingEffortUsage | undefined;
+	effortDefaultLabel: string;
+	effortSummary: string;
 };
 
-root.innerHTML = `
+function aggregateTokenStats(data: SessionLogData): TokenStats {
+	const totalTokens = data.turns.reduce((sum, t) => sum + t.inputTokensEstimate + t.outputTokensEstimate + t.thinkingTokensEstimate, 0);
+	const totalThinkingTokens = data.turns.reduce((sum, t) => sum + t.thinkingTokensEstimate, 0);
+	const totalToolCalls = data.turns.reduce((sum, t) => sum + t.toolCalls.filter(tc => !tc.isSubAgent).length, 0);
+	const totalSubAgentCalls = data.turns.reduce((sum, t) => sum + t.toolCalls.filter(tc => tc.isSubAgent).length, 0);
+	const totalMcpTools = data.turns.reduce((sum, t) => sum + t.mcpTools.length, 0);
+	const turnsWithThinking = data.turns.filter(t => t.thinkingTokensEstimate > 0).length;
+	const usage = data.usageAnalysis;
+	const sessionEffort = usage?.thinkingEffort;
+	const usageToolTotal = usage?.toolCalls?.total ?? totalToolCalls;
+	const usageTopTools = usage ? getTopEntries(usage.toolCalls.byTool, 3) : [];
+	const usageMcpTotal = usage?.mcpTools?.total ?? totalMcpTools;
+	const usageTopMcpTools = usage ? getTopEntries(usage.mcpTools.byTool, 3) : [];
+	const usageContextRefs = usage?.contextReferences || data.contextReferences;
+	const usageContextTotal = getTotalContextRefs(usageContextRefs);
+	const usageContextImplicit = getImplicitContextRefs(usageContextRefs);
+	const usageContextExplicit = getExplicitContextRefs(usageContextRefs);
+	const effortDefault = sessionEffort?.defaultEffort ?? (sessionEffort ? Object.keys(sessionEffort.byEffort)[0] : undefined);
+	const effortDefaultLabel = effortDefault ? getEffortDisplayName(effortDefault) : '—';
+	const effortSummary = sessionEffort
+		? Object.entries(sessionEffort.byEffort).map(([k, v]) => `${getEffortDisplayName(k)}: ${v}`).join(', ')
+		: '';
+	return {
+		totalTokens, totalThinkingTokens, totalSubAgentCalls, turnsWithThinking,
+		usageToolTotal, usageTopTools, usageMcpTotal, usageTopMcpTools,
+		usageContextTotal, usageContextImplicit, usageContextExplicit,
+		sessionEffort, effortDefaultLabel, effortSummary,
+	};
+}
+
+type ActualUsageStats = {
+	turnsWithActual: ChatTurn[];
+	hasAnyActualUsage: boolean;
+	actualPromptTotal: number;
+	actualCompletionTotal: number;
+	actualTotal: number;
+	sessionActualTokens: number;
+	hasSessionActualOnly: boolean;
+	aggregatedBreakdown: { [key: string]: BreakdownEntry };
+};
+
+function aggregateActualUsageStats(data: SessionLogData): ActualUsageStats {
+	const turnsWithActual = data.turns.filter(t => t.actualUsage);
+	const hasAnyActualUsage = turnsWithActual.length > 0;
+	const actualPromptTotal = turnsWithActual.reduce((s, t) => s + (t.actualUsage?.promptTokens || 0), 0);
+	const actualCompletionTotal = turnsWithActual.reduce((s, t) => s + (t.actualUsage?.completionTokens || 0), 0);
+	const actualTotal = actualPromptTotal + actualCompletionTotal;
+	const sessionActualTokens = data.actualTokens || 0;
+	const hasSessionActualOnly = !hasAnyActualUsage && sessionActualTokens > 0;
+	const aggregatedBreakdown: { [key: string]: BreakdownEntry } = {};
+	for (const turn of turnsWithActual) {
+		if (turn.actualUsage?.promptTokenDetails) {
+			for (const detail of turn.actualUsage.promptTokenDetails) {
+				const key = `${detail.category}|${detail.label}`;
+				if (!aggregatedBreakdown[key]) {
+					aggregatedBreakdown[key] = { category: detail.category, label: detail.label, totalTokens: 0, totalPct: 0, count: 0 };
+				}
+				const deducedTokens = Math.round((turn.actualUsage?.promptTokens || 0) * detail.percentageOfPrompt / 100);
+				aggregatedBreakdown[key].totalTokens += deducedTokens;
+				aggregatedBreakdown[key].totalPct += detail.percentageOfPrompt;
+				aggregatedBreakdown[key].count++;
+			}
+		}
+	}
+	return { turnsWithActual, hasAnyActualUsage, actualPromptTotal, actualCompletionTotal, actualTotal, sessionActualTokens, hasSessionActualOnly, aggregatedBreakdown };
+}
+
+type ModeStats = {
+	modeEntries: [keyof ModeUsage, number][];
+	totalModeTurns: number;
+	primaryModeLabel: string;
+	modeSubLabel: string;
+};
+
+function aggregateModeStats(data: SessionLogData): ModeStats {
+	const modeUsage: ModeUsage = { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 };
+	for (const turn of data.turns) {
+		modeUsage[turn.mode]++;
+	}
+	const modeEntries = (Object.entries(modeUsage) as [keyof typeof modeUsage, number][])
+		.filter(([, n]) => n > 0)
+		.sort((a, b) => b[1] - a[1]);
+	const totalModeTurns = modeEntries.reduce((s, [, n]) => s + n, 0);
+	const primaryMode = modeEntries[0];
+	const primaryModeLabel = primaryMode ? `${getModeIcon(primaryMode[0])} ${MODE_LABELS[primaryMode[0]]}` : '—';
+	const modeSubLabel = modeEntries.length <= 1
+		? (totalModeTurns === 1 ? '1 turn' : `${totalModeTurns} turns`)
+		: `mixed across ${totalModeTurns} turns`;
+	return { modeEntries, totalModeTurns, primaryModeLabel, modeSubLabel };
+}
+
+function renderLayout(data: SessionLogData): void {
+	setCompactNumbers(data.compactNumbers !== false);
+	const root = document.getElementById('root');
+	if (!root) { return; }
+
+	const tokenStats = aggregateTokenStats(data);
+	const actualStats = aggregateActualUsageStats(data);
+	const modeStats = aggregateModeStats(data);
+
+	const summaryStats: SummaryStats = {
+		totalTokens: tokenStats.totalTokens,
+		totalThinkingTokens: tokenStats.totalThinkingTokens,
+		totalSubAgentCalls: tokenStats.totalSubAgentCalls,
+		turnsWithThinking: tokenStats.turnsWithThinking,
+		usageToolTotal: tokenStats.usageToolTotal,
+		usageTopTools: tokenStats.usageTopTools,
+		usageMcpTotal: tokenStats.usageMcpTotal,
+		usageTopMcpTools: tokenStats.usageTopMcpTools,
+		usageContextTotal: tokenStats.usageContextTotal,
+		usageContextImplicit: tokenStats.usageContextImplicit,
+		usageContextExplicit: tokenStats.usageContextExplicit,
+		sessionEffort: tokenStats.sessionEffort,
+		effortDefaultLabel: tokenStats.effortDefaultLabel,
+		effortSummary: tokenStats.effortSummary,
+		hasAnyActualUsage: actualStats.hasAnyActualUsage,
+		hasSessionActualOnly: actualStats.hasSessionActualOnly,
+		actualTotal: actualStats.actualTotal,
+		actualPromptTotal: actualStats.actualPromptTotal,
+		actualCompletionTotal: actualStats.actualCompletionTotal,
+		sessionActualTokens: actualStats.sessionActualTokens,
+		modeEntries: modeStats.modeEntries,
+		totalModeTurns: modeStats.totalModeTurns,
+		primaryModeLabel: modeStats.primaryModeLabel,
+		modeSubLabel: modeStats.modeSubLabel,
+	};
+
+	root.innerHTML = `
 <style>${themeStyles}</style>
 <style>${styles}</style>
 
@@ -1143,9 +1264,9 @@ root.innerHTML = `
 ${renderSummaryCards(data, summaryStats)}
 
 ${renderSessionActualUsage(
-data, totalTokens, turnsWithActual,
-actualPromptTotal, actualCompletionTotal, actualTotal,
-aggregatedBreakdown,
+	data, tokenStats.totalTokens, actualStats.turnsWithActual,
+	actualStats.actualPromptTotal, actualStats.actualCompletionTotal, actualStats.actualTotal,
+	actualStats.aggregatedBreakdown,
 )}
 
 <div class="turns-header">
@@ -1164,7 +1285,7 @@ ${data.turns.length > 0
 </div>
 `;
 
-wireUpEventHandlers();
+	wireUpEventHandlers();
 }
 
 async function bootstrap(): Promise<void> {
