@@ -1601,30 +1601,72 @@ class CopilotTokenTracker implements vscode.Disposable {
 		progressCallback?: (completed: number, total: number) => void
 	): Promise<{ sessionFiles: string[]; preloaded: SessionFilePreload[] }> {
 		this.cacheManager.clearExpiredCache();
-		const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-		this.log(`📊 Analyzing ${sessionFiles.length} session file(s)...`);
+
+		// --- Streaming pipeline: overlap discovery with parsing ---
+		// Discovery pushes file batches into a shared queue as each adapter completes.
+		// Worker pool drains the queue immediately, starting parsing while discovery continues.
+		const queue: string[] = [];
+		let readIndex = 0;
+		let discoveryDone = false;
+		let totalDiscovered = 0;
+		const preloaded: SessionFilePreload[] = [];
+		let processed = 0;
+		const CONCURRENCY = 20;
+
+		const analyzeStartMs = Date.now();
+
+		// Discovery fills the queue via onBatch callback
+		const discoveryPromise = (async () => {
+			try {
+				return await this.sessionDiscovery.getCopilotSessionFilesStreaming((batch) => {
+					queue.push(...batch);
+					totalDiscovered += batch.length;
+				});
+			} finally {
+				discoveryDone = true;
+			}
+		})();
+
+		// Worker: consumes from queue, parses each file
+		const worker = async () => {
+			while (true) {
+				if (readIndex >= queue.length) {
+					if (discoveryDone) { break; }
+					// Briefly yield to allow discovery batches to arrive
+					await new Promise(r => setTimeout(r, 20));
+					continue;
+				}
+				const i = readIndex++;
+				const sessionFile = queue[i];
+				try {
+					const fileStats = await this.statSessionFile(sessionFile);
+					const mtime = fileStats.mtime.getTime();
+					const fileSize = fileStats.size;
+					if (mtime >= cutoffMs) {
+						const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
+						const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile) : undefined;
+						const cachedData = this.getCachedSessionData(sessionFile);
+						const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+						preloaded.push({ sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload);
+					}
+				} catch { /* skip files that fail to stat/parse */ }
+				processed++;
+				if (progressCallback) { progressCallback(processed, totalDiscovered); }
+			}
+		};
+
+		// Run discovery and workers concurrently
+		const [sessionFiles] = await Promise.all([
+			discoveryPromise,
+			...Array.from({ length: CONCURRENCY }, () => worker()),
+		]);
 
 		if (sessionFiles.length === 0) {
 			this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
 			return { sessionFiles, preloaded: [] };
 		}
 
-		const analyzeStartMs = Date.now();
-		const results = await this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
-			if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
-			const fileStats = await this.statSessionFile(sessionFile);
-			const mtime = fileStats.mtime.getTime();
-			const fileSize = fileStats.size;
-			if (mtime < cutoffMs) { return null; }
-			const cachedData = this.getCachedSessionData(sessionFile);
-			const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
-			const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-			// Fetch details (lastInteraction etc.) only for non-empty sessions — avoids extra I/O for empty files.
-			const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile) : undefined;
-			return { sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload;
-		});
-
-		const preloaded = results.filter((r): r is SessionFilePreload => r !== null && r !== undefined);
+		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
 		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
 		return { sessionFiles, preloaded };
 	}
@@ -1638,6 +1680,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
 
+			// Streaming pipeline: discovery and parsing run concurrently.
+			// Workers start processing files as each adapter batch arrives.
 			const progressCallback = this.buildProgressCallback(silent);
 			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback);
 
@@ -7072,20 +7116,7 @@ body {
     100% { transform: scale(1);   opacity: 1; }
 }
 .pop { animation: pop-in 0.35s ease both; }
-.log-box {
-    background: var(--bg-primary);
-    border: 1px solid var(--border);
-    border-radius: 8px;
-    padding: 8px 12px;
-    height: 110px;
-    overflow-y: auto;
-    font-family: 'Consolas', 'Courier New', monospace;
-    font-size: 11px;
-}
-.log-line { line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.log-ts  { color: var(--accent); margin-right: 4px; }
-.log-txt { color: var(--text-muted); }
-.log-line.log-cur .log-txt { color: var(--text-primary); font-weight: 600; }
+
 </style>
 </head>
 <body>
@@ -7145,7 +7176,7 @@ body {
         </div>
     </div>
 
-    <div class="log-box" id="log"></div>
+
 </div>
 <script nonce="${nonce}">
 (function () {
@@ -7173,25 +7204,6 @@ body {
         else { el.textContent = Math.floor(s / 60) + 'm ' + (s % 60) + 's'; }
     }, 1000);
 
-    function ts() {
-        var d = new Date();
-        return '[' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ']';
-    }
-    function pad(n) { return n < 10 ? '0' + n : '' + n; }
-
-    function log(msg, isCurrent) {
-        var box = document.getElementById('log');
-        if (!box) return;
-        var prev = box.querySelector('.log-cur');
-        if (prev) prev.classList.remove('log-cur');
-        var div = document.createElement('div');
-        div.className = 'log-line' + (isCurrent ? ' log-cur' : '');
-        div.innerHTML = '<span class="log-ts">' + ts() + '</span><span class="log-txt">' + esc(msg) + '</span>';
-        box.appendChild(div);
-        while (box.children.length > 60) box.removeChild(box.firstChild);
-        box.scrollTop = box.scrollHeight;
-    }
-
     function esc(s) {
         return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
     }
@@ -7214,8 +7226,6 @@ body {
         if (ico) { ico.className = 'step-ico'; ico.innerHTML = '<span class="spin-ico">↻</span>'; }
     }
 
-    log('Starting AI session analysis...', true);
-
     window.addEventListener('message', function (ev) {
         var m = ev.data;
         if (!m) return;
@@ -7223,7 +7233,6 @@ body {
         if (m.command === 'loadingStep') {
             if (m.step === 'discovering') {
                 setActive('s-discover');
-                log('Scanning for AI session files...', true);
 
             } else if (m.step === 'parsing') {
                 var total = m.total || 0;
@@ -7241,7 +7250,6 @@ body {
                 if (chips) chips.style.display = 'flex';
                 var ct = document.getElementById('chip-total');
                 if (ct) ct.textContent = total.toLocaleString();
-                log('Found ' + total + ' session files \u2014 parsing...', true);
 
             } else if (m.step === 'computing') {
                 setDone('s-parse');
@@ -7252,7 +7260,6 @@ body {
                 if (pct) pct.textContent = '96%';
                 var sub2 = document.getElementById('subtitle');
                 if (sub2) sub2.textContent = 'Computing statistics...';
-                log('Computing aggregated statistics...', true);
             }
 
         } else if (m.command === 'loadingProgress') {
@@ -7268,9 +7275,6 @@ body {
             if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
             var sub3 = document.getElementById('subtitle');
             if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\u202f/\u202f' + m.total + '\u2026';
-
-            // Log each throttled update (extension already limits to ~500 ms intervals)
-            log('Parsing session ' + m.completed + '/' + m.total, true);
 
             // Whimsical: pop in a new editor pill at each ~10% milestone
             if (m.completed % Math.max(1, Math.floor(m.total / 10)) === 0 && editorsSeen < EDITORS.length) {
