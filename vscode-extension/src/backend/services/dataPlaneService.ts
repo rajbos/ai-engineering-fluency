@@ -21,52 +21,43 @@ import type {
 } from "../storageTables";
 import { BackendUtility } from "./utilityService";
 
+/** Conditionally include a numeric property from a raw entity. */
+function pickNum(entity: any, key: string): Record<string, number> {
+  return typeof entity[key] === 'number' ? { [key]: entity[key] as number } : {};
+}
+
+/** Conditionally include a string property from a raw entity (calls toString). */
+function pickStr(entity: any, key: string): Record<string, string> {
+  return entity[key] ? { [key]: entity[key].toString() as string } : {};
+}
+
 /** Map a raw Azure Table entity to a typed BackendAggDailyEntityLike. */
 function mapEntityToAggDailyEntity(entity: any): BackendAggDailyEntityLike {
   const pk = entity.partitionKey;
   const rk = entity.rowKey;
-  // Extract day from partition key (format: datasetId|day)
   const pkParts = (pk ?? "").toString().split("|");
   const day = pkParts.length === 2 ? pkParts[1] : "";
   const datasetId = pkParts[0] ?? "";
-  // Parse RowKey: model|workspaceId|machineId|userId
   const rkParts = (rk ?? "").toString().split("|");
   return {
-    partitionKey: (pk ?? "").toString(),
-    rowKey: (rk ?? "").toString(),
-    datasetId,
-    day,
-    model: rkParts[0] ?? "",
-    workspaceId: rkParts[1] ?? "",
-    machineId: rkParts[2] ?? "",
-    userId: rkParts[3] ?? "",
-    inputTokens: entity.inputTokens,
-    outputTokens: entity.outputTokens,
-    interactions: entity.interactions,
-    workspaceName: entity.workspaceName,
+    partitionKey: (pk ?? "").toString(), rowKey: (rk ?? "").toString(),
+    datasetId, day, model: rkParts[0] ?? "", workspaceId: rkParts[1] ?? "",
+    machineId: rkParts[2] ?? "", userId: rkParts[3] ?? "",
+    inputTokens: entity.inputTokens, outputTokens: entity.outputTokens,
+    interactions: entity.interactions, workspaceName: entity.workspaceName,
     machineName: entity.machineName,
     schemaVersion: typeof entity.schemaVersion === "number" ? entity.schemaVersion : undefined,
-    ...(typeof entity.askModeCount === "number" ? { askModeCount: entity.askModeCount } : {}),
-    ...(typeof entity.editModeCount === "number" ? { editModeCount: entity.editModeCount } : {}),
-    ...(typeof entity.agentModeCount === "number" ? { agentModeCount: entity.agentModeCount } : {}),
-    ...(typeof entity.planModeCount === "number" ? { planModeCount: entity.planModeCount } : {}),
-    ...(typeof entity.customAgentModeCount === "number" ? { customAgentModeCount: entity.customAgentModeCount } : {}),
-    ...(entity.toolCallsJson ? { toolCallsJson: entity.toolCallsJson.toString() } : {}),
-    ...(entity.contextRefsJson ? { contextRefsJson: entity.contextRefsJson.toString() } : {}),
-    ...(entity.mcpToolsJson ? { mcpToolsJson: entity.mcpToolsJson.toString() } : {}),
-    ...(entity.modelSwitchingJson ? { modelSwitchingJson: entity.modelSwitchingJson.toString() } : {}),
-    ...(entity.editScopeJson ? { editScopeJson: entity.editScopeJson.toString() } : {}),
-    ...(entity.agentTypesJson ? { agentTypesJson: entity.agentTypesJson.toString() } : {}),
-    ...(entity.repositoriesJson ? { repositoriesJson: entity.repositoriesJson.toString() } : {}),
-    ...(entity.applyUsageJson ? { applyUsageJson: entity.applyUsageJson.toString() } : {}),
-    ...(entity.sessionDurationJson ? { sessionDurationJson: entity.sessionDurationJson.toString() } : {}),
-    ...(typeof entity.repoCustomizationRate === "number" ? { repoCustomizationRate: entity.repoCustomizationRate } : {}),
-    ...(typeof entity.multiTurnSessions === "number" ? { multiTurnSessions: entity.multiTurnSessions } : {}),
-    ...(typeof entity.avgTurnsPerSession === "number" ? { avgTurnsPerSession: entity.avgTurnsPerSession } : {}),
-    ...(typeof entity.multiFileEdits === "number" ? { multiFileEdits: entity.multiFileEdits } : {}),
-    ...(typeof entity.avgFilesPerEdit === "number" ? { avgFilesPerEdit: entity.avgFilesPerEdit } : {}),
-    ...(typeof entity.codeBlockApplyRate === "number" ? { codeBlockApplyRate: entity.codeBlockApplyRate } : {}),
-    ...(typeof entity.sessionCount === "number" ? { sessionCount: entity.sessionCount } : {}),
+    ...pickNum(entity, 'askModeCount'), ...pickNum(entity, 'editModeCount'),
+    ...pickNum(entity, 'agentModeCount'), ...pickNum(entity, 'planModeCount'),
+    ...pickNum(entity, 'customAgentModeCount'), ...pickStr(entity, 'toolCallsJson'),
+    ...pickStr(entity, 'contextRefsJson'), ...pickStr(entity, 'mcpToolsJson'),
+    ...pickStr(entity, 'modelSwitchingJson'), ...pickStr(entity, 'editScopeJson'),
+    ...pickStr(entity, 'agentTypesJson'), ...pickStr(entity, 'repositoriesJson'),
+    ...pickStr(entity, 'applyUsageJson'), ...pickStr(entity, 'sessionDurationJson'),
+    ...pickNum(entity, 'repoCustomizationRate'), ...pickNum(entity, 'multiTurnSessions'),
+    ...pickNum(entity, 'avgTurnsPerSession'), ...pickNum(entity, 'multiFileEdits'),
+    ...pickNum(entity, 'avgFilesPerEdit'), ...pickNum(entity, 'codeBlockApplyRate'),
+    ...pickNum(entity, 'sessionCount'),
   };
 }
 

@@ -43,31 +43,28 @@ function emptyEntry(date: string): DailyTokenStats {
 	return { date, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} };
 }
 
+function mergeUsageGroup(
+	target: Record<string, { tokens: number; sessions: number; linesAdded?: number; linesRemoved?: number }>,
+	src: Record<string, { tokens: number; sessions: number; linesAdded?: number; linesRemoved?: number }>
+): void {
+	for (const [k, u] of Object.entries(src)) {
+		if (!target[k]) { target[k] = { tokens: 0, sessions: 0 }; }
+		target[k].tokens += u.tokens;
+		target[k].sessions += u.sessions;
+		if (u.linesAdded !== undefined) { target[k].linesAdded = (target[k].linesAdded ?? 0) + u.linesAdded; }
+		if (u.linesRemoved !== undefined) { target[k].linesRemoved = (target[k].linesRemoved ?? 0) + u.linesRemoved; }
+	}
+}
+
 function mergeInto(target: DailyTokenStats, src: DailyTokenStats): void {
 	target.tokens += src.tokens;
 	target.sessions += src.sessions;
 	target.interactions += src.interactions;
 	addModelUsage(target.modelUsage, src.modelUsage);
-	for (const [e, u] of Object.entries(src.editorUsage)) {
-		if (!target.editorUsage[e]) { target.editorUsage[e] = { tokens: 0, sessions: 0 }; }
-		target.editorUsage[e].tokens += u.tokens;
-		target.editorUsage[e].sessions += u.sessions;
-		if (u.linesAdded !== undefined) { target.editorUsage[e].linesAdded = (target.editorUsage[e].linesAdded ?? 0) + u.linesAdded; }
-		if (u.linesRemoved !== undefined) { target.editorUsage[e].linesRemoved = (target.editorUsage[e].linesRemoved ?? 0) + u.linesRemoved; }
-	}
-	for (const [r, u] of Object.entries(src.repositoryUsage)) {
-		if (!target.repositoryUsage[r]) { target.repositoryUsage[r] = { tokens: 0, sessions: 0 }; }
-		target.repositoryUsage[r].tokens += u.tokens;
-		target.repositoryUsage[r].sessions += u.sessions;
-		if (u.linesAdded !== undefined) { target.repositoryUsage[r].linesAdded = (target.repositoryUsage[r].linesAdded ?? 0) + u.linesAdded; }
-		if (u.linesRemoved !== undefined) { target.repositoryUsage[r].linesRemoved = (target.repositoryUsage[r].linesRemoved ?? 0) + u.linesRemoved; }
-	}
-	if (src.linesAdded !== undefined) {
-		target.linesAdded = (target.linesAdded ?? 0) + src.linesAdded;
-	}
-	if (src.linesRemoved !== undefined) {
-		target.linesRemoved = (target.linesRemoved ?? 0) + src.linesRemoved;
-	}
+	mergeUsageGroup(target.editorUsage, src.editorUsage);
+	mergeUsageGroup(target.repositoryUsage, src.repositoryUsage);
+	if (src.linesAdded !== undefined) { target.linesAdded = (target.linesAdded ?? 0) + src.linesAdded; }
+	if (src.linesRemoved !== undefined) { target.linesRemoved = (target.linesRemoved ?? 0) + src.linesRemoved; }
 	if (src.languageUsage) {
 		if (!target.languageUsage) { target.languageUsage = {}; }
 		for (const [ext, usage] of Object.entries(src.languageUsage)) {

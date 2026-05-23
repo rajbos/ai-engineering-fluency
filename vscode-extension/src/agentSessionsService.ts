@@ -196,6 +196,29 @@ export async function fetchAgentSessionsForRepo(
 	return { owner, repo, totalTasks, totalSessions, totalCredits, tasksScanned: tasksToDetail.length, tasksTotal, partial };
 }
 
+function buildTaskFetchError(owner: string, repo: string, statusCode: number | undefined): AgentRepoSummary {
+	const msg = statusCode === 404
+		? 'Copilot cloud agent not enabled or not accessible for this repo'
+		: statusCode === 403
+		? 'Access denied — check that your GitHub token has repo scope'
+		: `API error (HTTP ${statusCode ?? 'unknown'})`;
+	return { owner, repo, totalTasks: 0, totalSessions: 0, totalCredits: 0, tasksScanned: 0, tasksTotal: 0, partial: false, error: msg };
+}
+
+async function fetchTasksForArchivedBatch(
+	owner: string, repo: string, token: string, sinceStr: string, archived: boolean,
+	fetchTaskPage: FetchTaskPageFn, seen: Set<string>, allTasks: any[],
+): Promise<AgentRepoSummary | undefined> {
+	for (let page = 1; page <= 5; page++) {
+		const { tasks, statusCode, error } = await fetchTaskPage({ owner, repo, token, page, archived, since: sinceStr });
+		if (error && page === 1 && !archived) { return buildTaskFetchError(owner, repo, statusCode); }
+		if (tasks.length === 0 || error) { break; }
+		for (const t of tasks) { if (!seen.has(t.id)) { seen.add(t.id); allTasks.push(t); } }
+		if (tasks.length < 100) { break; }
+	}
+	return undefined;
+}
+
 async function fetchAllTasksForRepo(
 	owner: string,
 	repo: string,
@@ -206,26 +229,17 @@ async function fetchAllTasksForRepo(
 	const allTasks: any[] = [];
 	const seen = new Set<string>();
 	for (const archived of [false, true]) {
-		for (let page = 1; page <= 5; page++) {
-			const { tasks, statusCode, error } = await fetchTaskPage({ owner, repo, token, page, archived, since: sinceStr });
-			if (tasks.length === 0 || error) {
-				if (page === 1 && !archived && error) {
-					const msg = statusCode === 404
-						? 'Copilot cloud agent not enabled or not accessible for this repo'
-						: statusCode === 403
-						? 'Access denied — check that your GitHub token has repo scope'
-						: `API error (HTTP ${statusCode ?? 'unknown'})`;
-					return { allTasks: [], error: { owner, repo, totalTasks: 0, totalSessions: 0, totalCredits: 0, tasksScanned: 0, tasksTotal: 0, partial: false, error: msg } };
-				}
-				break;
-			}
-			for (const t of tasks) {
-				if (!seen.has(t.id)) { seen.add(t.id); allTasks.push(t); }
-			}
-			if (tasks.length < 100) { break; }
-		}
+		const err = await fetchTasksForArchivedBatch(owner, repo, token, sinceStr, archived, fetchTaskPage, seen, allTasks);
+		if (err) { return { allTasks: [], error: err }; }
 	}
 	return { allTasks };
+}
+
+function sumCloudSessionCredits(sessions: any[]): { tasks: number; sessions: number; credits: number } {
+	const cloudSessions = sessions.filter(s => detectSessionSource(s) === 'cloud-agent');
+	if (cloudSessions.length === 0) { return { tasks: 0, sessions: 0, credits: 0 }; }
+	const credits = cloudSessions.reduce((sum, s) => sum + (s.usage && typeof s.usage.credits === 'number' ? s.usage.credits : 0), 0);
+	return { tasks: 1, sessions: cloudSessions.length, credits };
 }
 
 async function aggregateTaskDetails(
@@ -244,14 +258,10 @@ async function aggregateTaskDetails(
 		const results = await Promise.all(batch.map(task => fetchTaskDetail(owner, repo, task.id, token)));
 		for (const { sessions } of results) {
 			if (!sessions || sessions.length === 0) { continue; }
-			const cloudSessions = sessions.filter(s => detectSessionSource(s) === 'cloud-agent');
-			if (cloudSessions.length > 0) {
-				totalTasks++;
-				totalSessions += cloudSessions.length;
-				for (const s of cloudSessions) {
-					if (s.usage && typeof s.usage.credits === 'number') { totalCredits += s.usage.credits; }
-				}
-			}
+			const { tasks, sessions: s, credits } = sumCloudSessionCredits(sessions);
+			totalTasks += tasks;
+			totalSessions += s;
+			totalCredits += credits;
 		}
 	}
 	return { totalTasks, totalSessions, totalCredits };

@@ -461,54 +461,37 @@ export class OpenCodeDataAccess {
 		return this.getOpenCodeModelUsageFromMessages(messages);
 	}
 
+	private computeTurnCumTotal(turnAssistantMsgs: any[], prevTotal: number): number {
+		let cumTotal = prevTotal;
+		for (const am of turnAssistantMsgs) {
+			if (typeof am.tokens?.total === 'number') { cumTotal = Math.max(cumTotal, am.tokens.total); }
+		}
+		return cumTotal;
+	}
+
 	private getOpenCodeModelUsageFromMessages(messages: any[]): ModelUsage {
 		const modelUsage: ModelUsage = {};
 		const assistantMessagesByParent = this.getAssistantMessagesByParent(messages);
-
-		// OpenCode messages have a cumulative `total` field. To get per-turn tokens,
-		// compute deltas between consecutive user turns using the last assistant message's total.
 		let prevTotal = 0;
 		for (let i = 0; i < messages.length; i++) {
 			const msg = messages[i];
 			if (msg.role !== 'user') { continue; }
-			// Find all assistant messages for this turn
 			const turnAssistantMsgs = assistantMessagesByParent.get(msg.id) ?? [];
 			if (turnAssistantMsgs.length === 0) { continue; }
-
-			// Get cumulative total from the last assistant message in this turn
-			let turnCumTotal = prevTotal;
-			for (const am of turnAssistantMsgs) {
-				if (typeof am.tokens?.total === 'number') {
-					turnCumTotal = Math.max(turnCumTotal, am.tokens.total);
-				}
-			}
+			const turnCumTotal = this.computeTurnCumTotal(turnAssistantMsgs, prevTotal);
 			const turnTokens = turnCumTotal - prevTotal;
 			if (turnTokens <= 0) { prevTotal = turnCumTotal; continue; }
-
-			// Attribute to the model used in this turn (from first assistant message)
 			const model = turnAssistantMsgs[0].modelID || turnAssistantMsgs[0].model?.modelID || 'unknown';
-			if (!modelUsage[model]) {
-				modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
-			}
-			// Output tokens are the sum of actual output+reasoning across the turn's API calls
+			if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
 			const turnOutput = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.output || 0) + (m.tokens?.reasoning || 0), 0);
-			const turnInput = Math.max(0, turnTokens - turnOutput);
-			modelUsage[model].inputTokens += turnInput;
+			modelUsage[model].inputTokens += Math.max(0, turnTokens - turnOutput);
 			modelUsage[model].outputTokens += turnOutput;
-
-			// Track cache tokens if available (tokens.cache.read / tokens.cache.write)
 			const turnCachedRead = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.cache?.read || 0), 0);
 			const turnCacheCreation = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.cache?.write || 0), 0);
-			if (turnCachedRead > 0) {
-				modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + turnCachedRead;
-			}
-			if (turnCacheCreation > 0) {
-				modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + turnCacheCreation;
-			}
-
+			if (turnCachedRead > 0) { modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + turnCachedRead; }
+			if (turnCacheCreation > 0) { modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + turnCacheCreation; }
 			prevTotal = turnCumTotal;
 		}
-
 		return modelUsage;
 	}
 
