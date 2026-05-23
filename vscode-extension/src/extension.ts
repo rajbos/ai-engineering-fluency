@@ -2229,7 +2229,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const cutoffUtcStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysBack));
 		const cutoffUtcStartKey = cutoffUtcStart.toISOString().slice(0, 10);
 		const cutoffMs = cutoffUtcStart.getTime();
-
 		const dailyStatsMap = new Map<string, DailyTokenStats>();
 
 		try {
@@ -2251,56 +2250,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				try {
 					const editorType = this.getEditorTypeFromPath(sessionFile);
 					const repository = sessionData.repository || 'Unknown';
-
 					if (sessionData.dailyRollups && Object.keys(sessionData.dailyRollups).length > 0) {
-						// Per-UTC-day rollup path
-						for (const [dayKey, dayRollup] of Object.entries(sessionData.dailyRollups)) {
-							if (dayKey < cutoffUtcStartKey) { continue; }
-							const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
-
-							if (!dailyStatsMap.has(dayKey)) {
-								dailyStatsMap.set(dayKey, { date: dayKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
-							}
-							const dailyEntry = dailyStatsMap.get(dayKey)!;
-							dailyEntry.tokens += dayTokens;
-							dailyEntry.sessions += 1;
-							dailyEntry.interactions += dayRollup.interactions;
-							if (!dailyEntry.editorUsage[editorType]) { dailyEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
-							dailyEntry.editorUsage[editorType].tokens += dayTokens;
-							dailyEntry.editorUsage[editorType].sessions += 1;
-							if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
-							dailyEntry.repositoryUsage[repository].tokens += dayTokens;
-							dailyEntry.repositoryUsage[repository].sessions += 1;
-							addModelUsage(dailyEntry.modelUsage, dayRollup.modelUsage);
-						}
+						this.accumulateDailyRollups(dailyStatsMap, sessionData.dailyRollups, editorType, repository, cutoffUtcStartKey);
 					} else {
-						// Fallback: session-level attribution
-						const estimatedTokens = sessionData.tokens;
-						const actualTokens = sessionData.actualTokens || 0;
-						const tokens = (actualTokens > 0 ? actualTokens : estimatedTokens);
-						const interactions = sessionData.interactions;
-						const modelUsage = sessionData.modelUsage;
-
-						const lastActivity = sessionData.lastInteraction
-							? new Date(sessionData.lastInteraction)
-							: new Date(mtime);
-						const dateKey = lastActivity.toISOString().slice(0, 10);
-						if (dateKey < cutoffUtcStartKey) { continue; }
-
-						if (!dailyStatsMap.has(dateKey)) {
-							dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
-						}
-						const dailyEntry = dailyStatsMap.get(dateKey)!;
-						dailyEntry.tokens += tokens;
-						dailyEntry.sessions += 1;
-						dailyEntry.interactions += interactions;
-						if (!dailyEntry.editorUsage[editorType]) { dailyEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
-						dailyEntry.editorUsage[editorType].tokens += tokens;
-						dailyEntry.editorUsage[editorType].sessions += 1;
-						if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
-						dailyEntry.repositoryUsage[repository].tokens += tokens;
-						dailyEntry.repositoryUsage[repository].sessions += 1;
-						addModelUsage(dailyEntry.modelUsage, modelUsage);
+						this.accumulateSessionFallback(dailyStatsMap, sessionData, mtime, editorType, repository, cutoffUtcStartKey);
 					}
 				} catch (fileError) {
 					this.warn(`Error processing session file ${sessionFile} for daily stats: ${fileError}`);
@@ -2313,6 +2266,50 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const result = Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 		this.lastFullDailyStats = result;
 		return result;
+	}
+
+	private accumulateDailyRollups(dailyStatsMap: Map<string, DailyTokenStats>, dailyRollups: Record<string, DailyRollupEntry>, editorType: string, repository: string, cutoffUtcStartKey: string): void {
+		for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
+			if (dayKey < cutoffUtcStartKey) { continue; }
+			const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
+			if (!dailyStatsMap.has(dayKey)) {
+				dailyStatsMap.set(dayKey, { date: dayKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
+			}
+			const dailyEntry = dailyStatsMap.get(dayKey)!;
+			dailyEntry.tokens += dayTokens;
+			dailyEntry.sessions += 1;
+			dailyEntry.interactions += dayRollup.interactions;
+			if (!dailyEntry.editorUsage[editorType]) { dailyEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
+			dailyEntry.editorUsage[editorType].tokens += dayTokens;
+			dailyEntry.editorUsage[editorType].sessions += 1;
+			if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
+			dailyEntry.repositoryUsage[repository].tokens += dayTokens;
+			dailyEntry.repositoryUsage[repository].sessions += 1;
+			addModelUsage(dailyEntry.modelUsage, dayRollup.modelUsage);
+		}
+	}
+
+	private accumulateSessionFallback(dailyStatsMap: Map<string, DailyTokenStats>, sessionData: SessionFileCache, mtime: number, editorType: string, repository: string, cutoffUtcStartKey: string): void {
+		const estimatedTokens = sessionData.tokens;
+		const actualTokens = sessionData.actualTokens || 0;
+		const tokens = (actualTokens > 0 ? actualTokens : estimatedTokens);
+		const lastActivity = sessionData.lastInteraction ? new Date(sessionData.lastInteraction) : new Date(mtime);
+		const dateKey = lastActivity.toISOString().slice(0, 10);
+		if (dateKey < cutoffUtcStartKey) { return; }
+		if (!dailyStatsMap.has(dateKey)) {
+			dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
+		}
+		const dailyEntry = dailyStatsMap.get(dateKey)!;
+		dailyEntry.tokens += tokens;
+		dailyEntry.sessions += 1;
+		dailyEntry.interactions += sessionData.interactions;
+		if (!dailyEntry.editorUsage[editorType]) { dailyEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
+		dailyEntry.editorUsage[editorType].tokens += tokens;
+		dailyEntry.editorUsage[editorType].sessions += 1;
+		if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
+		dailyEntry.repositoryUsage[repository].tokens += tokens;
+		dailyEntry.repositoryUsage[repository].sessions += 1;
+		addModelUsage(dailyEntry.modelUsage, sessionData.modelUsage);
 	}
 
 	private detectMissedPotential(
@@ -2872,54 +2869,39 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (eco) { return eco.countInteractions(sessionFile); }
 
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
+			if (this.isUuidPointerFile(fileContent)) { return 0; }
 
-			// Check if this is a UUID-only file (new Copilot CLI format)
-			if (this.isUuidPointerFile(fileContent)) {
-				return 0; // No interactions to count in pointer files
-			}
-
-			// Handle .jsonl files OR .json files with JSONL content (Copilot CLI format and VS Code incremental format)
 			const isJsonlContent = sessionFile.endsWith('.jsonl') || this.isJsonlContent(fileContent);
 			if (isJsonlContent) {
-				const lines = fileContent.trim().split('\n');
-				let interactions = 0;
-				for (const line of lines) {
-					if (!line.trim()) { continue; }
-					try {
-						const event = JSON.parse(line);
-						// Handle Copilot CLI format
-						if (event.type === 'user.message') {
-							interactions++;
-						}
-						// Handle VS Code incremental format (kind: 2 with requests array)
-						if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-							for (const request of event.v) {
-								if (request.requestId) {
-									interactions++;
-								}
-							}
-						}
-					} catch (e) {
-						// Skip malformed lines
-					}
-				}
-				return interactions;
+				return this.countInteractionsFromJsonlLines(fileContent.trim().split('\n'));
 			}
 
-			// Handle regular .json files
 			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-
-			// Count the number of requests as interactions
 			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-				// Each request in the array represents one user interaction
 				return sessionContent.requests.length;
 			}
-
 			return 0;
 		} catch (error) {
 			this.warn(`Error counting interactions in ${sessionFile}: ${error}`);
 			return 0;
 		}
+	}
+
+	private countInteractionsFromJsonlLines(lines: string[]): number {
+		let interactions = 0;
+		for (const line of lines) {
+			if (!line.trim()) { continue; }
+			try {
+				const event = JSON.parse(line);
+				if (event.type === 'user.message') { interactions++; }
+				if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
+					for (const request of event.v) {
+						if (request.requestId) { interactions++; }
+					}
+				}
+			} catch (e) { /* skip malformed */ }
+		}
+		return interactions;
 	}
 
 
