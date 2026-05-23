@@ -2737,6 +2737,54 @@ class CopilotTokenTracker implements vscode.Disposable {
 						}
 					}
 				}
+
+				// Pass 3 — Copilot CLI worktree dedup.
+				// The Copilot CLI creates per-branch worktrees at:
+				//   <home>/.copilot/copilot-worktrees/<repo-name>/<branch-name>
+				// Each branch shows up as a separate workspace with the branch name as basename,
+				// skewing the repo list. Merge all worktrees for the same repo into one entry,
+				// preferring the main checkout at <home>/.copilot/repos/<repo-name> when it exists.
+				{
+					const worktreeToCanonical = new Map<string, string>();
+
+					for (const key of Array.from(workspaceSessionCounts.keys())) {
+						const segments = key.split(path.sep);
+						const lowerSegments = segments.map(s => s.toLowerCase());
+						const wtIdx = lowerSegments.lastIndexOf('copilot-worktrees');
+						// Need at least <repo> and <branch> after copilot-worktrees
+						if (wtIdx === -1 || wtIdx + 2 >= segments.length) { continue; }
+
+						const repoName = segments[wtIdx + 1];
+						const reposPath = path.normalize(
+							segments.slice(0, wtIdx).concat('repos', repoName).join(path.sep)
+						);
+						const canonical = fs.existsSync(reposPath)
+							? reposPath
+							: path.normalize(segments.slice(0, wtIdx + 2).join(path.sep));
+						worktreeToCanonical.set(key, canonical);
+					}
+
+					const canonicals = new Set(worktreeToCanonical.values());
+					for (const canonical of canonicals) {
+						if (!workspaceSessionCounts.has(canonical)) {
+							workspaceSessionCounts.set(canonical, 0);
+							workspaceInteractionCounts.set(canonical, 0);
+						}
+						for (const [worktree, canon] of worktreeToCanonical) {
+							if (canon === canonical && worktree !== canonical && workspaceSessionCounts.has(worktree)) {
+								mergeInto(canonical, worktree);
+							}
+						}
+						if (!this._customizationFilesCache.has(canonical)) {
+							try {
+								const files = _scanWorkspaceCustomizationFiles(canonical);
+								this._customizationFilesCache.set(canonical, files);
+							} catch (e) {
+								// ignore scan errors per workspace
+							}
+						}
+					}
+				}
 			}
 
 			// Build the customization matrix using scanned workspace data and session counts

@@ -2212,24 +2212,40 @@ function renderRepositoryHygienePanels(): void {
 	listContainer.classList.remove('repo-hygiene-pane-collapsed');
 	detailsContainer.classList.toggle('repo-hygiene-pane-collapsed', !hasSelectedRepository);
 
-	listPane.innerHTML = visibleWorkspaces.map((ws, idx) => {
+	const colStyles = {
+		sessions: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
+		interactions: 'width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
+		score: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
+	};
+	const headerHtml = `
+		<div style="padding: 4px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary);">
+			<div style="flex: 1; min-width: 0; font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Repository</div>
+			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
+			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
+			<div style="${colStyles.score} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
+			<div style="width: 80px; flex-shrink: 0;"></div>
+		</div>
+	`;
+	listPane.innerHTML = headerHtml + visibleWorkspaces.map((ws, idx) => {
 		const record = repoAnalysisState.get(ws.workspacePath);
 		const hasResult = !!record?.data?.summary;
 		const scoreLabel = getScoreLabel(ws.workspacePath);
 		const buttonLabel = hasResult ? 'Details' : 'Analyze';
 		const buttonAction = hasResult ? 'details' : 'analyze';
 		const isCurrentSelection = selectedRepoPath === ws.workspacePath && hasSelectedRepository;
+		const sessions = Number(ws.sessionCount) || 0;
+		const interactions = Number(ws.interactionCount) || 0;
 		return `
-			<div class="repo-item" style="padding: 8px 12px; border-bottom: ${idx < visibleWorkspaces.length - 1 ? '1px solid var(--border-subtle)' : 'none'}; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
+			<div class="repo-item" style="padding: 6px 12px; border-bottom: ${idx < visibleWorkspaces.length - 1 ? '1px solid var(--border-subtle)' : 'none'}; display: flex; align-items: center; gap: 10px;">
 				<div style="flex: 1; min-width: 0;">
 					<div class="repo-name" style="font-size: 12px; font-weight: 600; color: var(--text-primary); font-family: 'Courier New', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(ws.workspacePath)}">
 						${escapeHtml(ws.workspaceName)}
 					</div>
-					<div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
-						${Number(ws.sessionCount) || 0} ${ws.sessionCount === 1 ? 'session' : 'sessions'} · ${Number(ws.interactionCount) || 0} ${ws.interactionCount === 1 ? 'interaction' : 'interactions'} · Score: ${escapeHtml(scoreLabel)}
-					</div>
 				</div>
-				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${isCurrentSelection ? 'disabled="true"' : ''} style="min-width: 80px;">
+				<div style="${colStyles.sessions}">${sessions}</div>
+				<div style="${colStyles.interactions}">${interactions}</div>
+				<div style="${colStyles.score}">${escapeHtml(scoreLabel)}</div>
+				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${isCurrentSelection ? 'disabled="true"' : ''} style="min-width: 80px; flex-shrink: 0;">
 					${buttonLabel}
 				</vscode-button>
 			</div>
