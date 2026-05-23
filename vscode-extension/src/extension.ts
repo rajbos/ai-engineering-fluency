@@ -4420,128 +4420,93 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	public async showUsageAnalysis(): Promise<void> {
 		this.log('📊 Opening Usage Analysis dashboard');
-
-		// If panel already exists, dispose it and recreate with fresh data
 		if (this.analysisPanel) {
 			this.log('📊 Closing existing panel to refresh data...');
 			this.analysisPanel.dispose();
 			this.analysisPanel = undefined;
 		}
-
-		// Create webview panel immediately so the user sees something right away
 		this.analysisPanel = vscode.window.createWebviewPanel(
-			'copilotUsageAnalysis',
-			'AI Usage Analysis',
-			{
-				viewColumn: vscode.ViewColumn.One,
-				preserveFocus: true
-			},
-			{
-				enableScripts: true,
-				retainContextWhenHidden: true, // Keep webview context to preserve analysis results when switching tabs
-				localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')]
-			}
+			'copilotUsageAnalysis', 'AI Usage Analysis',
+			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
+			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
-
 		this.log('✅ Usage Analysis dashboard created successfully');
-
-		// Handle messages from the webview
 		this.analysisPanel.webview.onDidReceiveMessage(async (message) => {
 			if (this.handleLocalViewRegressionMessage(message)) { return; }
 			if (await this.dispatchSharedCommand(message)) { return; }
-			switch (message.command) {
-				case 'refresh':
-					await this.dispatch('refresh:analysis', () => this.refreshAnalysisPanel());
-					break;
-				case 'analyseRepository':
-					await this.dispatch('analyseRepository', () => this.handleAnalyseRepository(message.workspacePath));
-					break;
-				case 'analyseAllRepositories':
-					await this.dispatch('analyseAllRepositories', () => this.handleAnalyseAllRepositories());
-					break;
-				case 'openCopilotChatWithPrompt':
-					await this.dispatch('openCopilotChatWithPrompt', () =>
-						vscode.commands.executeCommand('workbench.action.chat.open', { query: message.prompt, isNewChat: true })
-					);
-					break;
-				case 'suppressUnknownTool': {
-					const toolName = message.toolName as string;
-					if (toolName) {
-						const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
-						const current = config.get<string[]>('suppressedUnknownTools', []);
-						if (!current.includes(toolName)) {
-							await config.update('suppressedUnknownTools', [...current, toolName], vscode.ConfigurationTarget.Global);
-							this.log(`🔇 Suppressed unknown tool: ${toolName}`);
-						}
-						// Immediately update the webview UI without waiting for a full stats recalculation.
-						// The webview removes the tool chip directly from the DOM.
-						this.analysisPanel?.webview.postMessage({ command: 'toolSuppressed', toolName });
-					}
-					break;
-				}
-				case 'loadRepoPrStats':
-					await this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats());
-					break;
-				case 'loadAgentSessions':
-					await this.dispatch('loadAgentSessions', () => this.loadAgentSessions());
-					break;
-				case 'openSessionFile':
-					if (message.file) {
-						await this.dispatch('openSessionFile:analysis', async () => {
-							try {
-								await this.showLogViewer(message.file);
-							} catch (err) {
-								vscode.window.showErrorMessage('Could not open log viewer: ' + message.file);
-							}
-						});
-					}
-					break;
-			}
+			await this.handleAnalysisMessage(message);
 		});
-
-		// Set HTML immediately — use cached stats if available, else show loading spinner
 		this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, this.lastUsageAnalysisStats ?? null);
+		if (!this.lastUsageAnalysisStats) { void this.loadAnalysisStatsInBackground(this.analysisPanel); }
+		this.analysisPanel.onDidDispose(() => { this.log('📊 Usage Analysis dashboard closed'); this.analysisPanel = undefined; });
+	}
 
-		// If no cached stats, compute in the background and push via updateStats
-		if (!this.lastUsageAnalysisStats) {
-			// Capture panel reference to guard against stale async results
-			// (user could close and reopen the panel while calculation is in flight)
-			const panel = this.analysisPanel;
-			void (async () => {
-				try {
-					const analysisStats = await this.calculateUsageAnalysisStats(true);
-					if (!this.analysisPanel || this.analysisPanel !== panel) { return; }
-					void this.analysisPanel.webview.postMessage({
-						command: 'updateStats',
-						data: {
-							today: analysisStats.today,
-							last30Days: analysisStats.last30Days,
-							month: analysisStats.month,
-							locale: analysisStats.locale,
-							customizationMatrix: analysisStats.customizationMatrix || null,
-							missedPotential: analysisStats.missedPotential || [],
-							lastUpdated: analysisStats.lastUpdated.toISOString(),
-							backendConfigured: this.isBackendConfigured(),
-							currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
-						},
-					});
-				} catch (err) {
-					this.error(`Failed to load usage analysis stats: ${err}`);
-					if (this.analysisPanel && this.analysisPanel === panel) {
-						void this.analysisPanel.webview.postMessage({
-							command: 'updateStatsError',
-							error: String(err),
-						});
+	private async handleAnalysisMessage(message: any): Promise<void> {
+		switch (message.command) {
+			case 'refresh':
+				await this.dispatch('refresh:analysis', () => this.refreshAnalysisPanel());
+				break;
+			case 'analyseRepository':
+				await this.dispatch('analyseRepository', () => this.handleAnalyseRepository(message.workspacePath));
+				break;
+			case 'analyseAllRepositories':
+				await this.dispatch('analyseAllRepositories', () => this.handleAnalyseAllRepositories());
+				break;
+			case 'openCopilotChatWithPrompt':
+				await this.dispatch('openCopilotChatWithPrompt', () =>
+					vscode.commands.executeCommand('workbench.action.chat.open', { query: message.prompt, isNewChat: true })
+				);
+				break;
+			case 'suppressUnknownTool': {
+				const toolName = message.toolName as string;
+				if (toolName) {
+					const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
+					const current = config.get<string[]>('suppressedUnknownTools', []);
+					if (!current.includes(toolName)) {
+						await config.update('suppressedUnknownTools', [...current, toolName], vscode.ConfigurationTarget.Global);
+						this.log(`🔇 Suppressed unknown tool: ${toolName}`);
 					}
+					this.analysisPanel?.webview.postMessage({ command: 'toolSuppressed', toolName });
 				}
-			})();
+				break;
+			}
+			case 'loadRepoPrStats':
+				await this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats());
+				break;
+			case 'loadAgentSessions':
+				await this.dispatch('loadAgentSessions', () => this.loadAgentSessions());
+				break;
+			case 'openSessionFile':
+				if (message.file) {
+					await this.dispatch('openSessionFile:analysis', async () => {
+						try { await this.showLogViewer(message.file); }
+						catch { vscode.window.showErrorMessage('Could not open log viewer: ' + message.file); }
+					});
+				}
+				break;
 		}
+	}
 
-		// Handle panel disposal
-		this.analysisPanel.onDidDispose(() => {
-			this.log('📊 Usage Analysis dashboard closed');
-			this.analysisPanel = undefined;
-		});
+	private async loadAnalysisStatsInBackground(panel: vscode.WebviewPanel): Promise<void> {
+		try {
+			const analysisStats = await this.calculateUsageAnalysisStats(true);
+			if (!this.analysisPanel || this.analysisPanel !== panel) { return; }
+			void this.analysisPanel.webview.postMessage({
+				command: 'updateStats',
+				data: {
+					today: analysisStats.today, last30Days: analysisStats.last30Days, month: analysisStats.month,
+					locale: analysisStats.locale, customizationMatrix: analysisStats.customizationMatrix || null,
+					missedPotential: analysisStats.missedPotential || [], lastUpdated: analysisStats.lastUpdated.toISOString(),
+					backendConfigured: this.isBackendConfigured(),
+					currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
+				},
+			});
+		} catch (err) {
+			this.error(`Failed to load usage analysis stats: ${err}`);
+			if (this.analysisPanel && this.analysisPanel === panel) {
+				void this.analysisPanel.webview.postMessage({ command: 'updateStatsError', error: String(err) });
+			}
+		}
 	}
 
 	private async handleAnalyseRepository(workspacePath?: string): Promise<void> {
@@ -5792,12 +5757,21 @@ ${hashtag}`;
         if (!firstDate || ids.dayKey < firstDate) { firstDate = ids.dayKey; }
         if (!lastDate || ids.dayKey > lastDate) { lastDate = ids.dayKey; }
       }
-      const isCurrentUser = sharingPolicy.includeUserDimension ? (currentUserId !== "" && ids.userId === currentUserId) : (currentMachineId !== "" && ids.machineId === currentMachineId);
-      if (isCurrentUser) { this.updatePersonalData(entity, ids, personalData); }
-      const teamMemberKey = (ids.userId && ids.userId.trim()) ? ids.userId : (ids.machineId ? `machine:${ids.machineId}` : "");
+      if (this.isCurrentUserEntity(ids, currentUserId, currentMachineId, sharingPolicy)) { this.updatePersonalData(entity, ids, personalData); }
+      const teamMemberKey = this.resolveTeamMemberKey(ids);
       if (teamMemberKey) { this.updateTeamData(entity, ids, teamMemberKey, userMap, userFluencyMap); }
     }
     return { personalData, userMap, userFluencyMap, firstDate, lastDate };
+  }
+
+  private isCurrentUserEntity(ids: any, currentUserId: string | undefined, currentMachineId: string, sharingPolicy: any): boolean {
+    if (sharingPolicy.includeUserDimension) { return currentUserId !== "" && ids.userId === currentUserId; }
+    return currentMachineId !== "" && ids.machineId === currentMachineId;
+  }
+
+  private resolveTeamMemberKey(ids: any): string {
+    if (ids.userId && ids.userId.trim()) { return ids.userId; }
+    return ids.machineId ? `machine:${ids.machineId}` : "";
   }
 
   private extractEntityIds(entity: any): { userId: string; datasetId: string; machineId: string; workspaceId: string; model: string; inputTokens: number; outputTokens: number; interactions: number; tokens: number; dayKey: string } {
@@ -6315,28 +6289,32 @@ ${this.getLoadingHtmlScript()}
 
   private buildDiagReportCopilotStatus(report: string[]): void {
     report.push("## GitHub Copilot Extension Status");
-    const copilotExtension = vscode.extensions.getExtension("GitHub.copilot");
-    const copilotChatExtension = vscode.extensions.getExtension("GitHub.copilot-chat");
-    if (copilotExtension) {
-      report.push(`GitHub Copilot Extension:`);
-      report.push(`  - Installed: Yes`);
-      report.push(`  - Version: ${copilotExtension.packageJSON.version}`);
-      report.push(`  - Active: ${copilotExtension.isActive ? "Yes" : "No"}`);
-      try {
-        const copilotApi = copilotExtension.exports;
-        if (copilotApi?.status) {
-          const status = copilotApi.status;
-          if (typeof status === "object") { Object.keys(status).forEach((key) => { const value = status[key]; if (value !== undefined && value !== null) { report.push(`  - ${key}: ${value}`); } }); }
-          else { report.push(`  - Status: ${status}`); }
-        }
-      } catch (error) { this.log(`Could not retrieve Copilot tier information: ${error}`); }
-    } else { report.push(`GitHub Copilot Extension: Not Installed`); }
-    if (copilotChatExtension) {
-      report.push(`GitHub Copilot Chat Extension:`); report.push(`  - Installed: Yes`);
-      report.push(`  - Version: ${copilotChatExtension.packageJSON.version}`);
-      report.push(`  - Active: ${copilotChatExtension.isActive ? "Yes" : "No"}`);
-    } else { report.push(`GitHub Copilot Chat Extension: Not Installed`); }
+    this.addCopilotExtensionInfo(report, vscode.extensions.getExtension("GitHub.copilot"));
+    this.addCopilotChatExtensionInfo(report, vscode.extensions.getExtension("GitHub.copilot-chat"));
     report.push("");
+  }
+
+  private addCopilotExtensionInfo(report: string[], copilotExtension: vscode.Extension<any> | undefined): void {
+    if (!copilotExtension) { report.push(`GitHub Copilot Extension: Not Installed`); return; }
+    report.push(`GitHub Copilot Extension:`);
+    report.push(`  - Installed: Yes`);
+    report.push(`  - Version: ${copilotExtension.packageJSON.version}`);
+    report.push(`  - Active: ${copilotExtension.isActive ? "Yes" : "No"}`);
+    try {
+      const copilotApi = copilotExtension.exports;
+      if (copilotApi?.status) {
+        const status = copilotApi.status;
+        if (typeof status === "object") { Object.keys(status).forEach((key) => { const value = status[key]; if (value !== undefined && value !== null) { report.push(`  - ${key}: ${value}`); } }); }
+        else { report.push(`  - Status: ${status}`); }
+      }
+    } catch (error) { this.log(`Could not retrieve Copilot tier information: ${error}`); }
+  }
+
+  private addCopilotChatExtensionInfo(report: string[], copilotChatExtension: vscode.Extension<any> | undefined): void {
+    if (!copilotChatExtension) { report.push(`GitHub Copilot Chat Extension: Not Installed`); return; }
+    report.push(`GitHub Copilot Chat Extension:`); report.push(`  - Installed: Yes`);
+    report.push(`  - Version: ${copilotChatExtension.packageJSON.version}`);
+    report.push(`  - Active: ${copilotChatExtension.isActive ? "Yes" : "No"}`);
   }
 
   private buildDiagReportBackendConfig(report: string[]): void {
@@ -6985,17 +6963,22 @@ ${this.getLoadingHtmlScript()}
       const userPaths = getVSCodeUserPaths();
       for (const userPath of userPaths) {
         for (const extId of extensionIds) {
-          try {
-            const candidate = path.join(userPath, "globalStorage", extId);
-            if (fs.existsSync(candidate)) {
-              const files = fs.readdirSync(candidate);
-              const match = files.find((f) => f.includes("state") || f.endsWith(".vscdb") || f.endsWith(".json"));
-              if (match) { return path.join(candidate, match); }
-            }
-          } catch { /* ignore path access errors */ }
+          const result = this.tryFindGlobalStateFile(userPath, extId);
+          if (result) { return result; }
         }
       }
     } catch { /* ignore */ }
+    return null;
+  }
+
+  private tryFindGlobalStateFile(userPath: string, extId: string): string | null {
+    try {
+      const candidate = path.join(userPath, "globalStorage", extId);
+      if (fs.existsSync(candidate)) {
+        const match = fs.readdirSync(candidate).find((f) => f.includes("state") || f.endsWith(".vscdb") || f.endsWith(".json"));
+        if (match) { return path.join(candidate, match); }
+      }
+    } catch { /* ignore path access errors */ }
     return null;
   }
 
