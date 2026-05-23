@@ -1668,25 +1668,130 @@ function setupMessageHandlers(): void {
   });
 }
 
-function renderLayout(data: DiagnosticsData): void {
-  const root = document.getElementById("root");
-  if (!root) {
-    return;
-  }
+function renderDiagCacheTabHtml(data: DiagnosticsData): string {
+  return `
+<div id="tab-cache" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">💾 Cache Information</div>
+<div>
+The extension caches session file data to improve performance and reduce file system operations.
+Cache is stored in VS Code's global state and persists across sessions.
+</div>
+</div>
+<div class="cache-details">
+<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">📦 Cache Entries</div>
+<div class="summary-value">${data.cacheInfo?.size || 0}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">💾 Cache Size</div>
+<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">🕒 Last Updated</div>
+<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">⏱️ Cache Age</div>
+<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? getTimeSince(data.cacheInfo.lastUpdated) : "N/A"}</div>
+</div>
+</div>
+<div class="cache-location">
+<h4>Storage Location</h4>
+<div class="location-box">
+<code>${escapeHtml(data.cacheInfo?.location || "VS Code Global State")}</code>
+${data.cacheInfo?.storagePath ? ` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(data.cacheInfo.storagePath)}">Open storage location</a>` : ""}
+</div>
+<p style="color: #999; font-size: 12px; margin-top: 8px;">
+Cache is stored in VS Code's global state (extension storage) and includes:
+<ul style="margin: 8px 0 0 20px;">
+<li>Token counts per session file</li>
+<li>Interaction counts</li>
+<li>Model usage statistics</li>
+<li>File modification timestamps for validation</li>
+<li>Usage analysis data (tool calls, modes, context references)</li>
+</ul>
+</p>
+</div>
+<div class="cache-actions">
+<h4>Cache Management</h4>
+<p style="color: #999; font-size: 12px; margin-bottom: 12px;">
+Clearing the cache will force the extension to re-read and re-analyze all session files on the next update.
+This can help resolve issues with stale or incorrect data.
+</p>
+<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
+</div>
+</div>
+</div>`;
+}
 
-  // Initialise module-level render state
-  const detailedFiles = data.detailedSessionFiles || [];
-  storedDetailedFiles = detailedFiles;
-  isLoading = detailedFiles.length === 0;
-  currentBackendInfo = data.backendStorageInfo;
-  currentGithubAuth = data.githubAuth;
+function sel(current: string, value: string): string {
+  return current === value ? 'selected' : '';
+}
 
-  const reportIsLoading = data.report === LOADING_PLACEHOLDER;
-  const escapedReport = reportIsLoading
-    ? LOADING_MESSAGE.trim()
-    : removeSessionFilesSection(escapeHtml(data.report));
+function renderDiagDisplayTabHtml(data: DiagnosticsData): string {
+  const showTokens = data.displaySettings?.showTokens ?? 'both';
+  const showCost = data.displaySettings?.showCost ?? 'none';
+  return `
+<div id="tab-display" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">⚙️ Display Settings</div>
+<div>Configure what is shown in the status bar at the bottom of VS Code. Changes take effect immediately — no data refresh needed.</div>
+</div>
+<div class="backend-card">
+<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Status Bar Display</h4>
+<p style="color: #ccc; margin-bottom: 16px;">
+Choose what to show in the VS Code status bar toolbar. You can show token counts, estimated costs, both, or neither for each period.
+</p>
+<div style="display: grid; gap: 16px;">
+<div style="display: flex; align-items: center; gap: 12px;">
+  <label style="color: #ccc; min-width: 160px; font-size: 13px;">🔢 Token counts:</label>
+  <select id="select-show-tokens" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
+    <option value="none" ${sel(showTokens, 'none')}>None</option>
+    <option value="today" ${sel(showTokens, 'today')}>Today only</option>
+    <option value="last30days" ${sel(showTokens, 'last30days')}>Last 30 days only</option>
+    <option value="currentMonth" ${sel(showTokens, 'currentMonth')}>Current calendar month only</option>
+    <option value="both" ${sel(showTokens, 'both')}>Today + last 30 days (default)</option>
+    <option value="todayAndCurrentMonth" ${sel(showTokens, 'todayAndCurrentMonth')}>Today + current calendar month</option>
+  </select>
+</div>
+<div style="display: flex; align-items: center; gap: 12px;">
+  <label style="color: #ccc; min-width: 160px; font-size: 13px;">💰 Estimated cost (USD):</label>
+  <select id="select-show-cost" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
+    <option value="none" ${sel(showCost, 'none')}>None (hidden)</option>
+    <option value="today" ${sel(showCost, 'today')}>Today only</option>
+    <option value="last30days" ${sel(showCost, 'last30days')}>Last 30 days only</option>
+    <option value="currentMonth" ${sel(showCost, 'currentMonth')}>Current calendar month only</option>
+    <option value="both" ${sel(showCost, 'both')}>Today + last 30 days</option>
+    <option value="todayAndCurrentMonth" ${sel(showCost, 'todayAndCurrentMonth')}>Today + current calendar month</option>
+  </select>
+</div>
+</div>
+<p style="color: #888; font-size: 11px; margin-top: 12px;">Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing). Changes apply to the status bar immediately.</p>
+</div>
+<div class="backend-card">
+<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🔢 Number Formatting</h4>
+<p style="color: #ccc; margin-bottom: 12px;">
+Token counts can be shown in compact format using K/M suffixes (e.g. <strong>1.5K</strong>, <strong>1.2M</strong>)
+for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,200,000</strong>) for precision.
+</p>
+<div class="button-group">
+<button class="button" id="btn-open-display-settings">
+<span>⚙️</span>
+<span>Open Display Settings</span>
+</button>
+</div>
+</div>
+</div>`;
+}
 
-  root.innerHTML = `
+function buildDiagRootHtml(
+  data: DiagnosticsData,
+  detailedFiles: SessionFileDetails[],
+  escapedReport: string,
+): string {
+  return `
 <style>${themeStyles}</style>
 <style>${styles}</style>
 <div class="container">
@@ -1745,61 +1850,7 @@ Click on an editor panel to filter, click column headers to sort, and click a fi
 <div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
 </div>
 
-<div id="tab-cache" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">💾 Cache Information</div>
-<div>
-The extension caches session file data to improve performance and reduce file system operations.
-Cache is stored in VS Code's global state and persists across sessions.
-</div>
-</div>
-<div class="cache-details">
-<div class="summary-cards">
-<div class="summary-card">
-<div class="summary-label">📦 Cache Entries</div>
-<div class="summary-value">${data.cacheInfo?.size || 0}</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">💾 Cache Size</div>
-<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">🕒 Last Updated</div>
-<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>
-</div>
-<div class="summary-card">
-<div class="summary-label">⏱️ Cache Age</div>
-<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? getTimeSince(data.cacheInfo.lastUpdated) : "N/A"}</div>
-</div>
-</div>
-<div class="cache-location">
-<h4>Storage Location</h4>
-<div class="location-box">
-<code>${escapeHtml(data.cacheInfo?.location || "VS Code Global State")}</code>
-${data.cacheInfo?.storagePath ? ` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(data.cacheInfo.storagePath)}">Open storage location</a>` : ""}
-</div>
-<p style="color: #999; font-size: 12px; margin-top: 8px;">
-Cache is stored in VS Code's global state (extension storage) and includes:
-<ul style="margin: 8px 0 0 20px;">
-<li>Token counts per session file</li>
-<li>Interaction counts</li>
-<li>Model usage statistics</li>
-<li>File modification timestamps for validation</li>
-<li>Usage analysis data (tool calls, modes, context references)</li>
-</ul>
-</p>
-</div>
-<div class="cache-actions">
-<h4>Cache Management</h4>
-<p style="color: #999; font-size: 12px; margin-bottom: 12px;">
-Clearing the cache will force the extension to re-read and re-analyze all session files on the next update.
-This can help resolve issues with stale or incorrect data.
-</p>
-<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
-</div>
-</div>
-</div>
-
+${renderDiagCacheTabHtml(data)}
 <div id="tab-backend" class="tab-content">
 ${renderBackendStoragePanel(data.backendStorageInfo, data.githubAuth)}
 </div>
@@ -1807,62 +1858,34 @@ ${renderBackendStoragePanel(data.backendStorageInfo, data.githubAuth)}
 <div id="tab-github" class="tab-content">
 ${renderGitHubAuthPanel(data.githubAuth)}
 </div>
-<div id="tab-display" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">⚙️ Display Settings</div>
-<div>Configure what is shown in the status bar at the bottom of VS Code. Changes take effect immediately — no data refresh needed.</div>
-</div>
-<div class="backend-card">
-<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Status Bar Display</h4>
-<p style="color: #ccc; margin-bottom: 16px;">
-Choose what to show in the VS Code status bar toolbar. You can show token counts, estimated costs, both, or neither for each period.
-</p>
-<div style="display: grid; gap: 16px;">
-<div style="display: flex; align-items: center; gap: 12px;">
-  <label style="color: #ccc; min-width: 160px; font-size: 13px;">🔢 Token counts:</label>
-  <select id="select-show-tokens" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
-    <option value="none" ${(data.displaySettings?.showTokens ?? 'both') === 'none' ? 'selected' : ''}>None</option>
-    <option value="today" ${(data.displaySettings?.showTokens ?? 'both') === 'today' ? 'selected' : ''}>Today only</option>
-    <option value="last30days" ${(data.displaySettings?.showTokens ?? 'both') === 'last30days' ? 'selected' : ''}>Last 30 days only</option>
-    <option value="currentMonth" ${(data.displaySettings?.showTokens ?? 'both') === 'currentMonth' ? 'selected' : ''}>Current calendar month only</option>
-    <option value="both" ${(data.displaySettings?.showTokens ?? 'both') === 'both' ? 'selected' : ''}>Today + last 30 days (default)</option>
-    <option value="todayAndCurrentMonth" ${(data.displaySettings?.showTokens ?? 'both') === 'todayAndCurrentMonth' ? 'selected' : ''}>Today + current calendar month</option>
-  </select>
-</div>
-<div style="display: flex; align-items: center; gap: 12px;">
-  <label style="color: #ccc; min-width: 160px; font-size: 13px;">💰 Estimated cost (USD):</label>
-  <select id="select-show-cost" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
-    <option value="none" ${(data.displaySettings?.showCost ?? 'none') === 'none' ? 'selected' : ''}>None (hidden)</option>
-    <option value="today" ${(data.displaySettings?.showCost ?? 'none') === 'today' ? 'selected' : ''}>Today only</option>
-    <option value="last30days" ${(data.displaySettings?.showCost ?? 'none') === 'last30days' ? 'selected' : ''}>Last 30 days only</option>
-    <option value="currentMonth" ${(data.displaySettings?.showCost ?? 'none') === 'currentMonth' ? 'selected' : ''}>Current calendar month only</option>
-    <option value="both" ${(data.displaySettings?.showCost ?? 'none') === 'both' ? 'selected' : ''}>Today + last 30 days</option>
-    <option value="todayAndCurrentMonth" ${(data.displaySettings?.showCost ?? 'none') === 'todayAndCurrentMonth' ? 'selected' : ''}>Today + current calendar month</option>
-  </select>
-</div>
-</div>
-<p style="color: #888; font-size: 11px; margin-top: 12px;">Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing). Changes apply to the status bar immediately.</p>
-</div>
-<div class="backend-card">
-<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🔢 Number Formatting</h4>
-<p style="color: #ccc; margin-bottom: 12px;">
-Token counts can be shown in compact format using K/M suffixes (e.g. <strong>1.5K</strong>, <strong>1.2M</strong>)
-for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,200,000</strong>) for precision.
-</p>
-<div class="button-group">
-<button class="button" id="btn-open-display-settings">
-<span>⚙️</span>
-<span>Open Display Settings</span>
-</button>
-</div>
-</div>
-</div>
+${renderDiagDisplayTabHtml(data)}
 ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 <div id="tab-path-analyzer" class="tab-content">
 ${renderFolderAnalyzerTab()}
 </div>
 </div>
 `;
+}
+
+function renderLayout(data: DiagnosticsData): void {
+  const root = document.getElementById("root");
+  if (!root) {
+    return;
+  }
+
+  // Initialise module-level render state
+  const detailedFiles = data.detailedSessionFiles || [];
+  storedDetailedFiles = detailedFiles;
+  isLoading = detailedFiles.length === 0;
+  currentBackendInfo = data.backendStorageInfo;
+  currentGithubAuth = data.githubAuth;
+
+  const reportIsLoading = data.report === LOADING_PLACEHOLDER;
+  const escapedReport = reportIsLoading
+    ? LOADING_MESSAGE.trim()
+    : removeSessionFilesSection(escapeHtml(data.report));
+
+  root.innerHTML = buildDiagRootHtml(data, detailedFiles, escapedReport);
 
   // Render session folders via DOM API (XSS-safe, no innerHTML)
   const sessionFolders = groupSessionFolders(data.sessionFolders || []);
