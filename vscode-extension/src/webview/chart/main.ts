@@ -684,313 +684,119 @@ async function switchDisplayMode(data: InitialChartData): Promise<void> {
 	chart = new Chart(ctx, createConfig(data));
 }
 
-function createConfig(data: InitialChartData): ChartConfig {
-	const period = getActivePeriodData(data);
-	const view = currentMetric === 'tokens' ? (currentSplit === 'model' ? 'model' : currentSplit === 'editor' ? 'editor' : currentSplit === 'repository' ? 'repository' : 'total')
-		: currentMetric === 'cost' ? 'cost'
-		: `output-${currentSplit}`;
+const PROJECTION_LABELS: Record<ChartPeriod, string> = {
+	day: '📈 Projected (today)', week: '📈 Projected (this week)', month: '📈 Projected (this month)',
+};
 
-	// Get CSS variables for theme-aware colors
-	const styles = getComputedStyle(document.body);
-	const textColor = styles.getPropertyValue('--text-primary') || '#e0e0e0';
-	const mutedColor = styles.getPropertyValue('--text-muted') || '#999999';
-	const borderColor = styles.getPropertyValue('--border-subtle') || '#3a3a40';
-	const bgColor = styles.getPropertyValue('--bg-tertiary') || '#1e1e1e';
+type ChartColors = { textColor: string; gridColor: string; borderColor: string; bgColor: string };
 
-	// Make grid lines very subtle with low opacity
-	const gridColor = 'rgba(128, 128, 128, 0.15)';
-
-	// Projection labels per period
-	const PROJECTION_LABELS: Record<ChartPeriod, string> = {
-		day:   '📈 Projected (today)',
-		week:  '📈 Projected (this week)',
-		month: '📈 Projected (this month)',
+function getChartColors(): ChartColors {
+	const s = getComputedStyle(document.body);
+	return {
+		textColor: s.getPropertyValue('--text-primary') || '#e0e0e0',
+		gridColor: 'rgba(128, 128, 128, 0.15)',
+		borderColor: s.getPropertyValue('--border-subtle') || '#3a3a40',
+		bgColor: s.getPropertyValue('--bg-tertiary') || '#1e1e1e',
 	};
+}
 
-	const baseOptions = {
-		responsive: true,
-		maintainAspectRatio: false,
+function buildBaseOptions(c: ChartColors) {
+	return {
+		responsive: true, maintainAspectRatio: false,
 		interaction: { mode: 'index' as const, intersect: false },
 		plugins: {
-			legend: { position: 'top' as const, labels: { color: textColor, font: { size: 12 } } },
-			tooltip: {
-				backgroundColor: bgColor,
-				titleColor: textColor,
-				bodyColor: textColor,
-				borderColor: borderColor,
-				borderWidth: 1,
-				padding: 10,
-				displayColors: true
-			}
+			legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } },
+			tooltip: { backgroundColor: c.bgColor, titleColor: c.textColor, bodyColor: c.textColor, borderColor: c.borderColor, borderWidth: 1, padding: 10, displayColors: true }
 		},
-		scales: {
-			x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } }
-		} as const
+		scales: { x: { grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } } } as const
 	};
+}
 
-	if (view === 'total') {
-		const isRolling = currentDisplayMode === 'rolling';
-		const rollingLabel = getRollingLabel();
-		const tokenData = isRolling ? computeRollingAverage(period.tokensData, ROLLING_WINDOW[currentPeriod]) : period.tokensData;
-
-		// Projection: only in actual (non-rolling) mode, for the last bar (current period)
-		const lastIdx = period.tokensData.length - 1;
-		const fraction = getCurrentPeriodFraction(currentPeriod);
-		const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], fraction) : null;
-		const projDataset = projExtra !== null ? [{
-			label: PROJECTION_LABELS[currentPeriod],
-			data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0),
-			backgroundColor: 'rgba(54, 162, 235, 0.2)',
-			borderColor: 'rgba(54, 162, 235, 0.5)',
-			borderWidth: 1,
-			yAxisID: 'y'
-		}] : [];
-
-		return {
-			type: 'bar' as const,
-			data: {
-				labels: period.labels,
-				datasets: [
-					{
-						label: isRolling ? rollingLabel : 'Tokens',
-						data: tokenData,
-						backgroundColor: isRolling ? 'rgba(54, 162, 235, 0.15)' : 'rgba(54, 162, 235, 0.6)',
-						borderColor: 'rgba(54, 162, 235, 1)',
-						borderWidth: isRolling ? 2 : 1,
-						type: isRolling ? 'line' as const : undefined,
-						tension: isRolling ? 0.4 : undefined,
-						fill: isRolling ? false : undefined,
-						yAxisID: 'y'
-					},
-					...projDataset,
-					{
-						label: 'Sessions',
-						data: period.sessionsData,
-						backgroundColor: 'rgba(255, 99, 132, 0.6)',
-						borderColor: 'rgba(255, 99, 132, 1)',
-						borderWidth: 1,
-						type: 'line' as const,
-						yAxisID: 'y1'
-					}
-				]
-			},
-			options: {
-				...baseOptions,
-				scales: {
-					x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-					y: {
-						stacked: true,
-						type: 'linear' as const,
-						display: true,
-						position: 'left' as const,
-						grid: { color: gridColor },
-						ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() },
-						title: { display: true, text: 'Tokens', color: textColor, font: { size: 12, weight: 'bold' } }
-					},
-					y1: {
-						type: 'linear' as const,
-						display: true,
-						position: 'right' as const,
-						grid: { drawOnChartArea: false },
-						ticks: { color: textColor, font: { size: 11 } },
-						title: { display: true, text: 'Sessions', color: textColor, font: { size: 12, weight: 'bold' } }
-					}
-				}
-			}
-		};
-	}
-
-	const datasets = view === 'model' ? period.modelDatasets : view === 'repository' ? period.repositoryDatasets : period.editorDatasets;
-
-	if (view === 'cost') {
-		const isRolling = currentDisplayMode === 'rolling';
-		const rollingLabel = getRollingLabel();
-		const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
-
-		// Projection for cost: only in actual (non-rolling) mode
-		const lastIdx = period.costData.length - 1;
-		const fraction = getCurrentPeriodFraction(currentPeriod);
-		const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.costData[lastIdx], fraction) : null;
-		const projDataset = projExtra !== null ? [{
-			label: PROJECTION_LABELS[currentPeriod],
-			data: period.costData.map((_: number, i: number) => i === lastIdx ? projExtra : 0),
-			backgroundColor: 'rgba(34, 197, 94, 0.2)',
-			borderColor: 'rgba(34, 197, 94, 0.5)',
-			borderWidth: 1,
-			yAxisID: 'y'
-		}] : [];
-
-		return {
-			type: 'bar' as const,
-			data: {
-				labels: period.labels,
-				datasets: [
-					{
-						label: isRolling ? `${rollingLabel} (UBB)` : 'Est. Cost (UBB)',
-						data: costData,
-						backgroundColor: isRolling ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.6)',
-						borderColor: 'rgba(34, 197, 94, 1)',
-						borderWidth: isRolling ? 2 : 1,
-						type: isRolling ? 'line' as const : undefined,
-						tension: isRolling ? 0.4 : undefined,
-						fill: isRolling ? false : undefined,
-						yAxisID: 'y'
-					},
-					...projDataset
-				]
-			},
-			options: {
-				...baseOptions,
-				plugins: {
-					...baseOptions.plugins,
-					tooltip: {
-						...baseOptions.plugins.tooltip,
-						callbacks: {
-							label: (ctx: any) => ` $${Number(ctx.parsed.y).toFixed(4)}`
-						}
-					}
-				},
-				scales: {
-					x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-					y: {
-						stacked: true,
-						type: 'linear' as const,
-						display: true,
-						position: 'left' as const,
-						grid: { color: gridColor },
-						ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` },
-						title: { display: true, text: 'Estimated Cost (UBB)', color: textColor, font: { size: 12, weight: 'bold' as const } }
-					}
-				}
-			}
-		};
-	}
-
-	// Output metric (lines of code)
-	if (view.startsWith('output-')) {
-		const locDatasets = view === 'output-language' ? (period.languageDatasets ?? []) :
-			view === 'output-editor' ? (period.locEditorDatasets ?? []) :
-			view === 'output-repository' ? (period.locRepositoryDatasets ?? []) :
-			// output-total: stacked added/removed
-			[
-				{
-					label: 'Lines Added',
-					data: period.linesAddedData ?? [],
-					backgroundColor: 'rgba(75, 192, 192, 0.6)',
-					borderColor: 'rgba(75, 192, 192, 1)',
-					borderWidth: 1,
-				},
-				{
-					label: 'Lines Removed',
-					data: (period.linesRemovedData ?? []).map((v: number) => -v),
-					backgroundColor: 'rgba(255, 99, 132, 0.6)',
-					borderColor: 'rgba(255, 99, 132, 1)',
-					borderWidth: 1,
-				},
-			];
-
-		return {
-			type: 'bar' as const,
-			data: { labels: period.labels, datasets: locDatasets as any },
-			options: {
-				...baseOptions,
-				plugins: {
-					...baseOptions.plugins,
-					legend: { position: 'top' as const, labels: { color: textColor, font: { size: 11 } } },
-					tooltip: {
-						...baseOptions.plugins.tooltip,
-						callbacks: {
-							label: (ctx: any) => ` ${Math.abs(Number(ctx.parsed.y)).toLocaleString()} lines`
-						}
-					}
-				},
-				scales: {
-					x: { stacked: view === 'output-total', grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-					y: {
-						stacked: view === 'output-total',
-						grid: { color: gridColor },
-						ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Math.abs(Number(value)).toLocaleString() },
-						title: { display: true, text: 'Lines of Code', color: textColor, font: { size: 12, weight: 'bold' } }
-					}
-				}
-			}
-		};
-	}
-
-	// Stacked views: model / editor / repository (tokens metric)
-	// Compute total-token projection for the last bar and add a single "Projected" segment on top.
+function buildTotalViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const isRolling = currentDisplayMode === 'rolling';
+	const tokenData = isRolling ? computeRollingAverage(period.tokensData, ROLLING_WINDOW[currentPeriod]) : period.tokensData;
 	const lastIdx = period.tokensData.length - 1;
-	const fraction = getCurrentPeriodFraction(currentPeriod);
-	const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], fraction) : null;
-	const projDataset = projExtra !== null ? [{
-		label: PROJECTION_LABELS[currentPeriod],
-		data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0),
-		backgroundColor: 'rgba(200, 200, 200, 0.25)',
-		borderColor: 'rgba(200, 200, 200, 0.5)',
-		borderWidth: 1,
-	}] : [];
-
-	// Add sessions line as an overlay on all stacked views
-	const sessionsDataset = {
-		label: 'Sessions',
-		data: period.sessionsData,
-		backgroundColor: 'rgba(255, 99, 132, 0.6)',
-		borderColor: 'rgba(255, 99, 132, 1)',
-		borderWidth: 2,
-		type: 'line' as const,
-		yAxisID: 'y1',
-		stack: undefined // Don't stack the line
-	};
-
+	const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0), backgroundColor: 'rgba(54, 162, 235, 0.2)', borderColor: 'rgba(54, 162, 235, 0.5)', borderWidth: 1, yAxisID: 'y' }] : [];
+	const rollingLabel = getRollingLabel();
 	return {
 		type: 'bar' as const,
-		data: { labels: period.labels, datasets: [...datasets, ...projDataset, sessionsDataset] },
-		options: {
-			...baseOptions,
-			plugins: {
-				...baseOptions.plugins,
-				legend: { position: 'top' as const, labels: { color: textColor, font: { size: 11 } } },
-				tooltip: {
-					...baseOptions.plugins.tooltip,
-					callbacks: {
-						// JetBrains JSONL only persists user messages + assistant text
-						// (no API counts, no thinking tokens). Flag this in the chart
-						// tooltip whenever a JetBrains dataset is present in the hover.
-						footer: (items: any[]) => {
-							if (currentSplit !== 'editor') { return ''; }
-							const hasJetBrains = items.some(i => i?.dataset?.label === 'JetBrains');
-							const hasAntigravity = items.some(i => i?.dataset?.label === 'Antigravity');
-							if (hasJetBrains) {
-								return 'JetBrains: estimates from user messages + assistant text only.\nActual API counts and thinking tokens are not available.';
-							}
-							if (hasAntigravity) {
-								return 'Antigravity: estimates from transcript content.\nActual API counts are not stored locally.';
-							}
-							return '';
-						}
-					}
-				}
-			},
-			scales: {
-				...baseOptions.scales,
-				y: {
-					stacked: true,
-					grid: { color: gridColor },
-					ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() },
-					title: { display: true, text: 'Tokens', color: textColor, font: { size: 12, weight: 'bold' } }
-				},
-				x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-				y1: {
-					type: 'linear' as const,
-					display: true,
-					position: 'right' as const,
-					grid: { drawOnChartArea: false },
-					ticks: { color: textColor, font: { size: 11 } },
-					title: { display: true, text: 'Sessions', color: textColor, font: { size: 12, weight: 'bold' } }
-				}
-			}
+		data: { labels: period.labels, datasets: [
+			{ label: isRolling ? rollingLabel : 'Tokens', data: tokenData, backgroundColor: isRolling ? 'rgba(54, 162, 235, 0.15)' : 'rgba(54, 162, 235, 0.6)', borderColor: 'rgba(54, 162, 235, 1)', borderWidth: isRolling ? 2 : 1, type: isRolling ? 'line' as const : undefined, tension: isRolling ? 0.4 : undefined, fill: isRolling ? false : undefined, yAxisID: 'y' },
+			...projDs,
+			{ label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 1, type: 'line' as const, yAxisID: 'y1' }
+		] },
+		options: { ...baseOptions, scales: {
+			x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+			y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Tokens', color: c.textColor, font: { size: 12, weight: 'bold' } } },
+			y1: { type: 'linear' as const, display: true, position: 'right' as const, grid: { drawOnChartArea: false }, ticks: { color: c.textColor, font: { size: 11 } }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
+		} }
+	};
+}
+
+function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const isRolling = currentDisplayMode === 'rolling';
+	const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
+	const lastIdx = period.costData.length - 1;
+	const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.costData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.costData.map((_: number, i: number) => i === lastIdx ? projExtra : 0), backgroundColor: 'rgba(34, 197, 94, 0.2)', borderColor: 'rgba(34, 197, 94, 0.5)', borderWidth: 1, yAxisID: 'y' }] : [];
+	const rollingLabel = getRollingLabel();
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: [
+			{ label: isRolling ? `${rollingLabel} (UBB)` : 'Est. Cost (UBB)', data: costData, backgroundColor: isRolling ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.6)', borderColor: 'rgba(34, 197, 94, 1)', borderWidth: isRolling ? 2 : 1, type: isRolling ? 'line' as const : undefined, tension: isRolling ? 0.4 : undefined, fill: isRolling ? false : undefined, yAxisID: 'y' },
+			...projDs
+		] },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` $${Number(ctx.parsed.y).toFixed(4)}` } } },
+			scales: { x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (UBB)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } } }
 		}
 	};
+}
+
+function buildOutputViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const locDatasets = view === 'output-language' ? (period.languageDatasets ?? []) : view === 'output-editor' ? (period.locEditorDatasets ?? []) : view === 'output-repository' ? (period.locRepositoryDatasets ?? []) :
+		[{ label: 'Lines Added', data: period.linesAddedData ?? [], backgroundColor: 'rgba(75, 192, 192, 0.6)', borderColor: 'rgba(75, 192, 192, 1)', borderWidth: 1 },
+		 { label: 'Lines Removed', data: (period.linesRemovedData ?? []).map((v: number) => -v), backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 1 }];
+	const stacked = view === 'output-total';
+	return {
+		type: 'bar' as const, data: { labels: period.labels, datasets: locDatasets as any },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } }, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` ${Math.abs(Number(ctx.parsed.y)).toLocaleString()} lines` } } },
+			scales: { x: { stacked, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y: { stacked, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Math.abs(Number(value)).toLocaleString() }, title: { display: true, text: 'Lines of Code', color: c.textColor, font: { size: 12, weight: 'bold' } } } }
+		}
+	};
+}
+
+function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = view === 'model' ? period.modelDatasets : view === 'repository' ? period.repositoryDatasets : period.editorDatasets;
+	const lastIdx = period.tokensData.length - 1;
+	const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0), backgroundColor: 'rgba(200, 200, 200, 0.25)', borderColor: 'rgba(200, 200, 200, 0.5)', borderWidth: 1 }] : [];
+	const sessionsDs = { label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 2, type: 'line' as const, yAxisID: 'y1', stack: undefined };
+	return {
+		type: 'bar' as const, data: { labels: period.labels, datasets: [...datasets, ...projDs, sessionsDs] },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
+			tooltip: { ...baseOptions.plugins.tooltip, callbacks: { footer: (items: any[]) => {
+				if (currentSplit !== 'editor') { return ''; }
+				if (items.some(i => i?.dataset?.label === 'JetBrains')) { return 'JetBrains: estimates from user messages + assistant text only.\nActual API counts and thinking tokens are not available.'; }
+				if (items.some(i => i?.dataset?.label === 'Antigravity')) { return 'Antigravity: estimates from transcript content.\nActual API counts are not stored locally.'; }
+				return '';
+			} } } },
+			scales: { ...baseOptions.scales, y: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Tokens', color: c.textColor, font: { size: 12, weight: 'bold' } } }, x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y1: { type: 'linear' as const, display: true, position: 'right' as const, grid: { drawOnChartArea: false }, ticks: { color: c.textColor, font: { size: 11 } }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } } }
+		}
+	};
+}
+
+function createConfig(data: InitialChartData): ChartConfig {
+	const period = getActivePeriodData(data);
+	const view = currentMetric === 'tokens'
+		? (currentSplit === 'model' ? 'model' : currentSplit === 'editor' ? 'editor' : currentSplit === 'repository' ? 'repository' : 'total')
+		: currentMetric === 'cost' ? 'cost' : `output-${currentSplit}`;
+	const c = getChartColors();
+	const baseOptions = buildBaseOptions(c);
+	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
+	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c); }
+	if (view.startsWith('output-')) { return buildOutputViewConfig(view, period, baseOptions, c); }
+	return buildStackedViewConfig(view, period, baseOptions, c);
 }
 
 
