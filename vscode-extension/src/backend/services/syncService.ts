@@ -322,20 +322,48 @@ if (!line.trim()) { continue; }
 try {
 const event = JSON.parse(line);
 if (!event || typeof event !== 'object') { continue; }
-// Extract session-level default model (same logic as getModelUsageFromSession)
+defaultModel = this.updateDeltaDefaultModel(event, defaultModel);
+if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
+this.processDeltaRequests(event.v, defaultModel, seenRequestIds, fileMtimeMs, startMs, dayModelInteractions);
+}
+} catch {
+// skip malformed lines
+}
+}
+return dayModelInteractions;
+}
+
+private updateDeltaDefaultModel(event: any, defaultModel: string): string {
 if (event.kind === 0) {
-const modelId = event.v?.selectedModel?.identifier ||
-event.v?.selectedModel?.metadata?.id ||
-event.v?.inputState?.selectedModel?.metadata?.id;
-if (modelId) { defaultModel = modelId.replace(/^copilot\//, ''); }
+const modelId = this.extractModelIdFromKind0Event(event);
+if (modelId) { return (modelId as string).replace(/^copilot\//, ''); }
 }
 if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'selectedModel') {
-const modelId = event.v?.identifier || event.v?.metadata?.id;
-if (modelId) { defaultModel = modelId.replace(/^copilot\//, ''); }
+const modelId = this.extractModelIdFromSelectedModelEvent(event);
+if (modelId) { return (modelId as string).replace(/^copilot\//, ''); }
 }
-// kind:2, k[0]==='requests' events append new request(s)
-if (event.kind === 2 && Array.isArray(event.k) && event.k[0] === 'requests' && Array.isArray(event.v)) {
-for (const request of event.v) {
+return defaultModel;
+}
+
+private extractModelIdFromKind0Event(event: any): string | undefined {
+return event.v?.selectedModel?.identifier ||
+event.v?.selectedModel?.metadata?.id ||
+event.v?.inputState?.selectedModel?.metadata?.id;
+}
+
+private extractModelIdFromSelectedModelEvent(event: any): string | undefined {
+return event.v?.identifier || event.v?.metadata?.id;
+}
+
+private processDeltaRequests(
+requests: any[],
+defaultModel: string,
+seenRequestIds: Set<string>,
+fileMtimeMs: number,
+startMs: number,
+dayModelInteractions: Map<string, Map<string, number>>
+): void {
+for (const request of requests) {
 const req = request as ChatRequest;
 const reqId = (req as any).requestId as string | undefined;
 if (reqId && seenRequestIds.has(reqId)) { continue; }
@@ -346,21 +374,12 @@ typeof req.timestamp !== 'undefined' ? req.timestamp : undefined
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { continue; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
-// Use per-request modelId if present, otherwise fall back to session default
 const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
 const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
-if (!dayModelInteractions.has(dayKey)) {
-dayModelInteractions.set(dayKey, new Map());
-}
+if (!dayModelInteractions.has(dayKey)) { dayModelInteractions.set(dayKey, new Map()); }
 const dayMap = dayModelInteractions.get(dayKey)!;
 dayMap.set(model, (dayMap.get(model) || 0) + 1);
 }
-}
-} catch {
-// skip malformed lines
-}
-}
-return dayModelInteractions;
 }
 
 /**
