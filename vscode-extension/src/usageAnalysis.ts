@@ -1170,175 +1170,133 @@ export function applyModelTierClassification(
 	analysis.modelSwitching.unknownRequests = unkReq;
 }
 
+type TierCounts = { standard: number; premium: number; unknown: number };
+
+function _cmsIncrementTierCount(model: string, tierCounts: TierCounts, modelPricing: { [key: string]: ModelPricing }): void {
+	const tier = getModelTier(model, modelPricing);
+	if (tier === 'standard') { tierCounts.standard++; }
+	else if (tier === 'premium') { tierCounts.premium++; }
+	else { tierCounts.unknown++; }
+}
+
+function _cmsApplyTierCounts(tierCounts: TierCounts, analysis: SessionUsageAnalysis): void {
+	analysis.modelSwitching.standardRequests = tierCounts.standard;
+	analysis.modelSwitching.premiumRequests = tierCounts.premium;
+	analysis.modelSwitching.unknownRequests = tierCounts.unknown;
+	analysis.modelSwitching.totalRequests = tierCounts.standard + tierCounts.premium + tierCounts.unknown;
+}
+
+function _cmsClassifyModels(uniqueModels: string[], modelPricing: { [key: string]: ModelPricing }): { standard: string[]; premium: string[]; unknown: string[] } {
+	const standard: string[] = [], premium: string[] = [], unknown: string[] = [];
+	for (const model of uniqueModels) {
+		const tier = getModelTier(model, modelPricing);
+		if (tier === 'standard') { standard.push(model); }
+		else if (tier === 'premium') { premium.push(model); }
+		else { unknown.push(model); }
+	}
+	return { standard, premium, unknown };
+}
+
+function _cmsCountJsonRequests(sessionContent: ParsedSessionJson, analysis: SessionUsageAnalysis, modelPricing: { [key: string]: ModelPricing }): void {
+	if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) { return; }
+	let previousModel: string | null = null;
+	let switchCount = 0;
+	const tierCounts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
+	for (const requestRaw of sessionContent.requests) {
+		const currentModel = getModelFromRequest(requestRaw as SessionRequestRaw, modelPricing);
+		if (previousModel && currentModel !== previousModel) { switchCount++; }
+		previousModel = currentModel;
+		_cmsIncrementTierCount(currentModel, tierCounts, modelPricing);
+	}
+	analysis.modelSwitching.switchCount = switchCount;
+	_cmsApplyTierCounts(tierCounts, analysis);
+}
+
+type CmsEvent = JsonlEventRaw & { type?: string; data?: { selectedModel?: string; newModel?: string }; model?: string };
+
+function _cmsGetKind0ModelId(event: CmsEvent): string | null {
+	if (event.kind !== 0) { return null; }
+	const v = event.v as { selectedModel?: { identifier?: string; metadata?: { id?: string } }; inputState?: { selectedModel?: { metadata?: { id?: string } } } } | undefined;
+	const id = v?.selectedModel?.identifier || v?.selectedModel?.metadata?.id || v?.inputState?.selectedModel?.metadata?.id;
+	if (!id) { return null; }
+	return id.replace(/^copilot\//, '');
+}
+
+function _cmsGetKind2ModelId(event: CmsEvent): string | null {
+	if (event.kind !== 2 || event.k?.[0] !== 'selectedModel') { return null; }
+	const v = event.v as { identifier?: string; metadata?: { id?: string } } | undefined;
+	const id = v?.identifier || v?.metadata?.id;
+	if (!id) { return null; }
+	return id.replace(/^copilot\//, '');
+}
+
+function _cmsExtractDefaultModel(event: CmsEvent, currentDefault: string): string {
+	const id0 = _cmsGetKind0ModelId(event);
+	if (id0) { return id0; }
+	const id2 = _cmsGetKind2ModelId(event);
+	if (id2) { return id2; }
+	if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') { return event.data.selectedModel; }
+	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { return event.data.newModel; }
+	return currentDefault;
+}
+
+function _cmsGetJsonlRequestModel(request: unknown, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
+	const r = request as { modelId?: string; result?: { metadata?: { modelId?: string }; details?: unknown } };
+	if (r.modelId) { return r.modelId.replace(/^copilot\//, ''); }
+	if (r.result?.metadata?.modelId) { return r.result.metadata.modelId.replace(/^copilot\//, ''); }
+	if (r.result?.details) { return getModelFromRequest(request as SessionRequestRaw, modelPricing); }
+	return defaultModel;
+}
+
+function _cmsCountEventRequests(event: CmsEvent, tierCounts: TierCounts, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): void {
+	if (event.type === 'user.message') {
+		_cmsIncrementTierCount(event.model || defaultModel, tierCounts, modelPricing);
+		return;
+	}
+	if (event.kind !== 2 || event.k?.[0] !== 'requests' || !Array.isArray(event.v)) { return; }
+	for (const request of event.v as unknown[]) {
+		_cmsIncrementTierCount(_cmsGetJsonlRequestModel(request, defaultModel, modelPricing), tierCounts, modelPricing);
+	}
+}
+
+function _cmsCountJsonlRequests(lines: string[], analysis: SessionUsageAnalysis, modelPricing: { [key: string]: ModelPricing }): void {
+	const tierCounts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
+	let defaultModel = 'unknown';
+	for (const line of lines) {
+		if (!line.trim()) { continue; }
+		try {
+			const event = JSON.parse(line) as CmsEvent;
+			defaultModel = _cmsExtractDefaultModel(event, defaultModel);
+			_cmsCountEventRequests(event, tierCounts, defaultModel, modelPricing);
+		} catch { /* skip malformed lines */ }
+	}
+	_cmsApplyTierCounts(tierCounts, analysis);
+}
+
 /**
  * Calculate model switching statistics for a session file.
  * This method updates the analysis.modelSwitching field in place.
  */
 export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'warn' | 'modelPricing' | 'tokenEstimators' | 'ecosystems'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<void> {
 	try {
-		// Use non-cached method to avoid circular dependency
-		// (getSessionFileDataCached -> analyzeSessionUsage -> getModelUsageFromSessionCached -> getSessionFileDataCached)
 		const modelUsage = await getModelUsageFromSession(deps, sessionFile, preloadedContent, preloadedParsedJson);
 		const modelCount = modelUsage ? Object.keys(modelUsage).length : 0;
-
-		// Skip if modelUsage is undefined or empty (not a valid session file)
-		if (!modelUsage || modelCount === 0) {
-			return;
-		}
-
-		// Get unique models from this session
+		if (!modelUsage || modelCount === 0) { return; }
 		const uniqueModels = Object.keys(modelUsage);
 		analysis.modelSwitching.uniqueModels = uniqueModels;
 		analysis.modelSwitching.modelCount = uniqueModels.length;
-
-		// Classify models by tier
-		const standardModels: string[] = [];
-		const premiumModels: string[] = [];
-		const unknownModels: string[] = [];
-
-		for (const model of uniqueModels) {
-			const tier = getModelTier(model, deps.modelPricing);
-			if (tier === 'standard') {
-				standardModels.push(model);
-			} else if (tier === 'premium') {
-				premiumModels.push(model);
-			} else {
-				unknownModels.push(model);
-			}
-		}
-
-		analysis.modelSwitching.tiers = { standard: standardModels, premium: premiumModels, unknown: unknownModels };
-		analysis.modelSwitching.hasMixedTiers = standardModels.length > 0 && premiumModels.length > 0;
-
-		// Count requests per tier and model switches by examining request sequence
+		const tiers = _cmsClassifyModels(uniqueModels, deps.modelPricing);
+		analysis.modelSwitching.tiers = tiers;
+		analysis.modelSwitching.hasMixedTiers = tiers.standard.length > 0 && tiers.premium.length > 0;
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-		// Check if this is a UUID-only file (new Copilot CLI format)
-		if (isUuidPointerFile(fileContent)) {
-			return;
-		}
+		if (isUuidPointerFile(fileContent)) { return; }
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
 		if (!isJsonl) {
 			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (!isParsedSessionJson(parsed)) {
-				deps.warn(`Unexpected session format in ${sessionFile}`);
-				return;
-			}
-			const sessionContent = parsed;
-			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-				let previousModel: string | null = null;
-				let switchCount = 0;
-				const tierCounts = { standard: 0, premium: 0, unknown: 0 };
-
-				for (const requestRaw of sessionContent.requests) {
-					const request = requestRaw as SessionRequestRaw;
-					const currentModel = getModelFromRequest(request, deps.modelPricing);
-					
-					// Count model switches
-					if (previousModel && currentModel !== previousModel) {
-						switchCount++;
-					}
-					previousModel = currentModel;
-
-					// Count requests per tier
-					const tier = getModelTier(currentModel, deps.modelPricing);
-					if (tier === 'standard') {
-						tierCounts.standard++;
-					} else if (tier === 'premium') {
-						tierCounts.premium++;
-					} else {
-						tierCounts.unknown++;
-					}
-				}
-
-				analysis.modelSwitching.switchCount = switchCount;
-				analysis.modelSwitching.standardRequests = tierCounts.standard;
-				analysis.modelSwitching.premiumRequests = tierCounts.premium;
-				analysis.modelSwitching.unknownRequests = tierCounts.unknown;
-				analysis.modelSwitching.totalRequests = tierCounts.standard + tierCounts.premium + tierCounts.unknown;
-			}
+			if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return; }
+			_cmsCountJsonRequests(parsed, analysis, deps.modelPricing);
 		} else {
-			// For JSONL files, we need to count requests differently
-			// Count user messages as requests (type === 'user.message' or kind: 2 with requests)
-			const lines = fileContent.trim().split('\n');
-			const tierCounts = { standard: 0, premium: 0, unknown: 0 };
-			let defaultModel = 'unknown';
-
-			for (const line of lines) {
-				if (!line.trim()) { continue; }
-				try {
-					const event = JSON.parse(line);
-
-					// Track model changes
-					if (event.kind === 0) {
-						const modelId = event.v?.selectedModel?.identifier ||
-							event.v?.selectedModel?.metadata?.id ||
-							event.v?.inputState?.selectedModel?.metadata?.id;
-						if (modelId) {
-							defaultModel = modelId.replace(/^copilot\//, '');
-						}
-					}
-
-					if (event.kind === 2 && event.k?.[0] === 'selectedModel') {
-						const modelId = event.v?.identifier || event.v?.metadata?.id;
-						if (modelId) {
-							defaultModel = modelId.replace(/^copilot\//, '');
-						}
-					}
-
-					// Copilot CLI: session.start carries the selected model
-					if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') {
-						defaultModel = event.data.selectedModel;
-					}
-
-					// Copilot CLI: session.model_change carries the currently active model
-					if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-						defaultModel = event.data.newModel;
-					}
-
-					// Count user messages (requests)
-					if (event.type === 'user.message') {
-						const model = event.model || defaultModel;
-						const tier = getModelTier(model, deps.modelPricing);
-						if (tier === 'standard') {
-							tierCounts.standard++;
-						} else if (tier === 'premium') {
-							tierCounts.premium++;
-						} else {
-							tierCounts.unknown++;
-						}
-					}
-
-					// Count VS Code incremental format requests (kind: 2 with requests array)
-					if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-						for (const request of event.v) {
-							let requestModel = defaultModel;
-							if (request.modelId) {
-								requestModel = request.modelId.replace(/^copilot\//, '');
-							} else if (request.result?.metadata?.modelId) {
-								requestModel = request.result.metadata.modelId.replace(/^copilot\//, '');
-							} else if (request.result?.details) {
-								requestModel = getModelFromRequest(request, deps.modelPricing);
-							}
-
-							const tier = getModelTier(requestModel, deps.modelPricing);
-							if (tier === 'standard') {
-								tierCounts.standard++;
-							} else if (tier === 'premium') {
-								tierCounts.premium++;
-							} else {
-								tierCounts.unknown++;
-							}
-						}
-					}
-				} catch (e) {
-					// Skip malformed lines
-				}
-			}
-
-			analysis.modelSwitching.standardRequests = tierCounts.standard;
-			analysis.modelSwitching.premiumRequests = tierCounts.premium;
-			analysis.modelSwitching.unknownRequests = tierCounts.unknown;
-			analysis.modelSwitching.totalRequests = tierCounts.standard + tierCounts.premium + tierCounts.unknown;
+			_cmsCountJsonlRequests(fileContent.trim().split('\n'), analysis, deps.modelPricing);
 		}
 	} catch (error) {
 		deps.warn(`Error calculating model switching for ${sessionFile}: ${error}`);
