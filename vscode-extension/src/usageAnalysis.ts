@@ -1489,8 +1489,7 @@ function _asuReconstructAndProcessDeltaState(
 /** Check if a selection range represents an actual selection (not just cursor position). */
 function _asuCheckImplicitSelection(selections: unknown[], refs: ContextReferenceUsage): void {
 	for (const sel of selections) {
-		// eslint-disable-next-line @typescript-eslint/no-explicit-any
-		const s = sel as any;
+			const s = sel as any;
 		if (s && (s.startLineNumber !== s.endLineNumber || s.startColumn !== s.endColumn)) {
 			refs.implicitSelection++;
 			break;
@@ -1499,7 +1498,6 @@ function _asuCheckImplicitSelection(selections: unknown[], refs: ContextReferenc
 }
 
 /** Handle VS Code incremental format kind=0 (session header) events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuHandleKind0Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
 	if (event.kind !== 0 || !event.v?.inputState?.mode) { return; }
 	modeState.sessionMode = getModeType(event.v.inputState.mode);
@@ -1508,7 +1506,6 @@ function _asuHandleKind0Event(event: any, analysis: SessionUsageAnalysis, modeSt
 }
 
 /** Handle VS Code incremental format kind=1 (incremental update) events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuHandleKind1Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
 	if (event.kind !== 1) { return; }
 	if (event.k?.includes('mode') && event.v) { modeState.sessionMode = getModeType(event.v); }
@@ -1554,7 +1551,6 @@ function _asuProcessResponseUpdates(items: unknown[], analysis: SessionUsageAnal
 }
 
 /** Process a single request from a kind=2 requests array. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuProcessRequest(request: any, analysis: SessionUsageAnalysis, sessionMode: string): void {
 	if (request.requestId) { incrementModeUsage(sessionMode, analysis.modeUsage); }
 	if (request.agent?.id) {
@@ -1568,7 +1564,6 @@ function _asuProcessRequest(request: any, analysis: SessionUsageAnalysis, sessio
 }
 
 /** Handle VS Code incremental format kind=2 (batch add) events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuHandleKind2Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, toolNameMap: { [key: string]: string }): void {
 	if (event.kind !== 2) { return; }
 	if (event.k?.[0] === 'requests' && Array.isArray(event.v)) {
@@ -1582,7 +1577,6 @@ function _asuHandleKind2Event(event: any, analysis: SessionUsageAnalysis, modeSt
 }
 
 /** Handle Copilot CLI events (session.start, session.model_change, user.message). */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
 	if (event.type === 'session.start' && event.data) {
 		if (typeof event.data.selectedModel === 'string') { cliState.defaultModel = event.data.selectedModel; }
@@ -1602,7 +1596,6 @@ function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: Sessi
 }
 
 /** Handle tool.call / tool.result / tool.execution_start events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	if (event.type !== 'tool.call' && event.type !== 'tool.result' && event.type !== 'tool.execution_start') { return; }
 	const toolName = event.data?.toolName || event.toolName || 'unknown';
@@ -1610,7 +1603,6 @@ function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, too
 }
 
 /** Handle mcp.tool.call events and events with data.mcpServer set. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): void {
 	if (event.type !== 'mcp.tool.call' && !event.data?.mcpServer) { return; }
 	analysis.mcpTools.total++;
@@ -1622,14 +1614,12 @@ function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): voi
 }
 
 /** Handle tool.call / tool.result / mcp.tool.call events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuHandleToolAndMcpEvents(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	_asuHandleToolCallEvent(event, analysis, toolNameMap);
 	_asuHandleMcpToolEvent(event, analysis);
 }
 
 /** Dispatch a single JSONL event to the appropriate event handlers. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _asuProcessJsonlEvent(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, cliState: AsuCliState, jetBrainsMode: JetBrainsMode | null, toolNameMap: { [key: string]: string }): void {
 	_asuHandleKind0Event(event, analysis, modeState);
 	_asuHandleKind1Event(event, analysis, modeState);
@@ -1797,7 +1787,6 @@ function _gmusProcessCliShutdownMetrics(
 }
 
 /** Handle an assistant.message event, recording real or estimated output tokens. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _gmusHandleAssistantMessage(event: any, model: string, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
 	const realOutput = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
 	if (realOutput > 0) {
@@ -1809,7 +1798,6 @@ function _gmusHandleAssistantMessage(event: any, model: string, state: GmusJsonl
 }
 
 /** Handle a session.shutdown event, accumulating CLI shutdown model metrics into state. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _gmusHandleShutdownEvent(event: any, state: GmusJsonlState): void {
 	if (!event.data?.modelMetrics) { return; }
 	if (!state.cliShutdownModelUsage) { state.cliShutdownModelUsage = {}; }
@@ -1817,7 +1805,6 @@ function _gmusHandleShutdownEvent(event: any, state: GmusJsonlState): void {
 }
 
 /** Dispatch a CLI-format JSONL event to the appropriate token accumulation handler. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _gmusProcessCliEventLine(event: any, model: string, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
 	if (event.type === 'session.shutdown') {
 		_gmusHandleShutdownEvent(event, state);
@@ -1834,21 +1821,18 @@ function _gmusProcessCliEventLine(event: any, model: string, state: GmusJsonlSta
 }
 
 /** Extract the model identifier from a kind-0 (session header) delta event, or null if absent. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _gmusExtractKind0Model(event: any): string | null {
 	if (event.kind !== 0) { return null; }
 	return event.v?.selectedModel?.identifier || event.v?.selectedModel?.metadata?.id || event.v?.inputState?.selectedModel?.metadata?.id || null;
 }
 
 /** Extract the model identifier from a kind-2 selectedModel update event, or null if absent. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _gmusExtractKind2Model(event: any): string | null {
 	if (event.kind !== 2 || event.k?.[0] !== 'selectedModel') { return null; }
 	return event.v?.identifier || event.v?.metadata?.id || null;
 }
 
 /** Update the default model tracked in state based on model-selection events. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _gmusUpdateDefaultModelFromEvent(event: any, state: GmusJsonlState): void {
 	if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') {
 		state.defaultModel = event.data.selectedModel;
@@ -1865,7 +1849,6 @@ function _gmusUpdateDefaultModelFromEvent(event: any, state: GmusJsonlState): vo
 }
 
 /** Process a single parsed JSONL event, updating state and model usage. */
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
 function _gmusProcessJsonlLine(event: any, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
 	if (typeof event.kind === 'number') {
 		state.isDeltaBased = true;
@@ -1886,8 +1869,7 @@ function _gmusParseJsonlLines(lines: string[], modelUsage: ModelUsage, deps: Gmu
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
 		try {
-			// eslint-disable-next-line @typescript-eslint/no-explicit-any
-			const event: any = JSON.parse(line);
+					const event: any = JSON.parse(line);
 			_gmusProcessJsonlLine(event, state, modelUsage, deps);
 		} catch { /* skip malformed lines */ }
 	}
