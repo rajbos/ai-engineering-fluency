@@ -1353,144 +1353,118 @@ export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'war
  * - Conversation patterns (multi-turn sessions)
  * - Agent type usage
  */
+type TemMetrics = { totalApplies: number; totalCodeBlocks: number; totalLinesAdded: number; totalLinesRemoved: number };
+type TemTimings = { firstProgress?: number; totalElapsed?: number };
+
+function _temMergeLanguageUsage(processedLoc: LanguageUsage, allLanguageUsage: LanguageUsage): void {
+	for (const [ext, usage] of Object.entries(processedLoc)) {
+		if (!allLanguageUsage[ext]) { allLanguageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+		allLanguageUsage[ext].linesAdded += usage.linesAdded;
+		allLanguageUsage[ext].linesRemoved += usage.linesRemoved;
+	}
+}
+
+function _temIsDeltaBased(lines: string[]): boolean {
+	if (lines.length === 0) { return false; }
+	try {
+		const firstLine = JSON.parse(lines[0]);
+		return firstLine !== null && typeof firstLine === 'object' && typeof (firstLine as Record<string, unknown>).kind === 'number';
+	} catch { return false; }
+}
+
+function _temReconstructDeltaState(lines: string[]): DeltaSessionState {
+	let sessionState: DeltaSessionState = {};
+	for (const line of lines) {
+		try {
+			const delta = JSON.parse(line);
+			sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
+		} catch { /* skip */ }
+	}
+	return sessionState;
+}
+
+function _temProcessDeltaContent(lines: string[], editedFiles: Set<string>, agentCounts: AgentTypeUsage, timestamps: number[], timingsData: TemTimings[], waitTimes: number[], allLanguageUsage: LanguageUsage): TemMetrics {
+	const empty: TemMetrics = { totalApplies: 0, totalCodeBlocks: 0, totalLinesAdded: 0, totalLinesRemoved: 0 };
+	if (!_temIsDeltaBased(lines)) { return empty; }
+	const sessionState = _temReconstructDeltaState(lines);
+	if (sessionState.creationDate !== undefined) { timestamps.push(sessionState.creationDate); }
+	if (sessionState.lastMessageDate !== undefined) { timestamps.push(sessionState.lastMessageDate); }
+	const requests = (sessionState.requests || []) as SessionRequestRaw[];
+	const { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage } =
+		processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes);
+	_temMergeLanguageUsage(languageUsage, allLanguageUsage);
+	return { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved };
+}
+
+function _temProcessJsonContent(parsed: ParsedSessionJson, editedFiles: Set<string>, agentCounts: AgentTypeUsage, timestamps: number[], timingsData: TemTimings[], waitTimes: number[], allLanguageUsage: LanguageUsage): TemMetrics {
+	if (parsed.creationDate) { timestamps.push(parsed.creationDate); }
+	if (parsed.lastMessageDate) { timestamps.push(parsed.lastMessageDate); }
+	const requests = (parsed.requests ?? []) as SessionRequestRaw[];
+	const { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage } =
+		processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes);
+	_temMergeLanguageUsage(languageUsage, allLanguageUsage);
+	return { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved };
+}
+
+function _temBuildEditScope(editedFiles: Set<string>, metrics: TemMetrics, allLanguageUsage: LanguageUsage): EditScopeUsage {
+	const editSessionCount = editedFiles.size > 0 ? 1 : 0;
+	return {
+		singleFileEdits: editedFiles.size === 1 ? 1 : 0,
+		multiFileEdits: editedFiles.size > 1 ? 1 : 0,
+		totalEditedFiles: editedFiles.size,
+		avgFilesPerSession: editSessionCount > 0 ? editedFiles.size / editSessionCount : 0,
+		linesAdded: metrics.totalLinesAdded,
+		linesRemoved: metrics.totalLinesRemoved,
+		...(Object.keys(allLanguageUsage).length > 0 ? { languageUsage: allLanguageUsage } : {}),
+	};
+}
+
+function _temCalculateSessionDuration(timestamps: number[], timingsData: TemTimings[], waitTimes: number[]): { totalDurationMs: number; avgFirstProgressMs: number; avgTotalElapsedMs: number; avgWaitTimeMs: number } {
+	const totalDurationMs = timestamps.length >= 2 ? Math.max(...timestamps) - Math.min(...timestamps) : 0;
+	const avgFirstProgressMs = timingsData.length > 0 ? timingsData.reduce((sum, t) => sum + (t.firstProgress || 0), 0) / timingsData.length : 0;
+	const avgTotalElapsedMs = timingsData.length > 0 ? timingsData.reduce((sum, t) => sum + (t.totalElapsed || 0), 0) / timingsData.length : 0;
+	const avgWaitTimeMs = waitTimes.length > 0 ? waitTimes.reduce((sum, w) => sum + w, 0) / waitTimes.length : 0;
+	return { totalDurationMs, avgFirstProgressMs, avgTotalElapsedMs, avgWaitTimeMs };
+}
+
+/**
+ * Track enhanced metrics from session files:
+ * - Edit scope (single vs multi-file edits)
+ * - Apply button usage (codeblockUri with isEdit flag)
+ * - Session duration data
+ * - Conversation patterns (multi-turn sessions)
+ * - Agent type usage
+ */
 export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<void> {
 	try {
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-
-		// Check if this is a UUID-only file (new Copilot CLI format)
-		if (isUuidPointerFile(fileContent)) {
-			return; // No metrics to track in pointer files
-		}
-
+		if (isUuidPointerFile(fileContent)) { return; }
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
-		
-		// Initialize tracking structures
 		const editedFiles = new Set<string>();
-		let totalApplies = 0;
-		let totalCodeBlocks = 0;
-		let totalLinesAdded = 0;
-		let totalLinesRemoved = 0;
 		const allLanguageUsage: LanguageUsage = {};
 		const timestamps: number[] = [];
-		const timingsData: { firstProgress?: number; totalElapsed?: number; }[] = [];
+		const timingsData: TemTimings[] = [];
 		const waitTimes: number[] = [];
-		const agentCounts = {
-			editsAgent: 0,
-			defaultAgent: 0,
-			workspaceAgent: 0,
-			other: 0
-		};
-		
+		const agentCounts: AgentTypeUsage = { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 };
+		let metrics: TemMetrics;
 		if (isJsonl) {
-			// Handle delta-based JSONL format
 			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
-			let isDeltaBased = false;
-			if (lines.length > 0) {
-				try {
-					const firstLine = JSON.parse(lines[0]);
-					if (firstLine && typeof firstLine.kind === 'number') {
-						isDeltaBased = true;
-					}
-				} catch {
-					// Not delta format
-				}
-			}
-			
-			if (isDeltaBased) {
-				// Reconstruct full state
-				let sessionState: DeltaSessionState = {};
-				for (const line of lines) {
-					try {
-						const delta = JSON.parse(line);
-						sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
-					} catch {
-						// Skip invalid lines
-					}
-				}
-				if (sessionState.creationDate !== undefined) { timestamps.push(sessionState.creationDate); }
-				if (sessionState.lastMessageDate !== undefined) { timestamps.push(sessionState.lastMessageDate); }
-				
-				// Process requests
-				const requests = (sessionState.requests || []) as SessionRequestRaw[];
-				let processedLoc: LanguageUsage;
-				({ totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage: processedLoc } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
-				for (const [ext, usage] of Object.entries(processedLoc)) {
-					if (!allLanguageUsage[ext]) { allLanguageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-					allLanguageUsage[ext].linesAdded += usage.linesAdded;
-					allLanguageUsage[ext].linesRemoved += usage.linesRemoved;
-				}
-			}
+			metrics = _temProcessDeltaContent(lines, editedFiles, agentCounts, timestamps, timingsData, waitTimes, allLanguageUsage);
 		} else {
-			// Handle regular JSON files
 			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (!isParsedSessionJson(parsed)) {
-				deps.warn(`Unexpected session format in ${sessionFile}`);
-				return;
-			}
-			const sessionContent = parsed;
-			
-			// Extract timestamps
-			if (sessionContent.creationDate) { timestamps.push(sessionContent.creationDate); }
-			if (sessionContent.lastMessageDate) { timestamps.push(sessionContent.lastMessageDate); }
-			
-			// Process requests
-			const requests = (sessionContent.requests ?? []) as SessionRequestRaw[];
-			let processedLoc2: LanguageUsage;
-			({ totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage: processedLoc2 } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
-			for (const [ext, usage] of Object.entries(processedLoc2)) {
-				if (!allLanguageUsage[ext]) { allLanguageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-				allLanguageUsage[ext].linesAdded += usage.linesAdded;
-				allLanguageUsage[ext].linesRemoved += usage.linesRemoved;
-			}
+			if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return; }
+			metrics = _temProcessJsonContent(parsed, editedFiles, agentCounts, timestamps, timingsData, waitTimes, allLanguageUsage);
 		}
-		
-		// Store edit scope data
-		const editSessionCount = editedFiles.size > 0 ? 1 : 0;
-		analysis.editScope = {
-			singleFileEdits: editedFiles.size === 1 ? 1 : 0,
-			multiFileEdits: editedFiles.size > 1 ? 1 : 0,
-			totalEditedFiles: editedFiles.size,
-			avgFilesPerSession: editSessionCount > 0 ? editedFiles.size / editSessionCount : 0,
-			linesAdded: totalLinesAdded,
-			linesRemoved: totalLinesRemoved,
-			...(Object.keys(allLanguageUsage).length > 0 ? { languageUsage: allLanguageUsage } : {}),
-		};
-		
-		// Store apply button usage
+		analysis.editScope = _temBuildEditScope(editedFiles, metrics, allLanguageUsage);
 		analysis.applyUsage = {
-			totalApplies,
-			totalCodeBlocks,
-			applyRate: totalCodeBlocks > 0 ? (totalApplies / totalCodeBlocks) * 100 : 0
+			totalApplies: metrics.totalApplies,
+			totalCodeBlocks: metrics.totalCodeBlocks,
+			applyRate: metrics.totalCodeBlocks > 0 ? (metrics.totalApplies / metrics.totalCodeBlocks) * 100 : 0
 		};
-		
-		// Calculate session duration
-		const totalDurationMs = timestamps.length >= 2 
-			? Math.max(...timestamps) - Math.min(...timestamps)
-			: 0;
-		const avgFirstProgressMs = timingsData.length > 0
-			? timingsData.reduce((sum, t) => sum + (t.firstProgress || 0), 0) / timingsData.length
-			: 0;
-		const avgTotalElapsedMs = timingsData.length > 0
-			? timingsData.reduce((sum, t) => sum + (t.totalElapsed || 0), 0) / timingsData.length
-			: 0;
-		const avgWaitTimeMs = waitTimes.length > 0
-			? waitTimes.reduce((sum, w) => sum + w, 0) / waitTimes.length
-			: 0;
-		
-		analysis.sessionDuration = {
-			totalDurationMs,
-			avgDurationMs: totalDurationMs,
-			avgFirstProgressMs,
-			avgTotalElapsedMs,
-			avgWaitTimeMs
-		};
-		
-		// Store conversation patterns
+		const timing = _temCalculateSessionDuration(timestamps, timingsData, waitTimes);
+		analysis.sessionDuration = { totalDurationMs: timing.totalDurationMs, avgDurationMs: timing.totalDurationMs, avgFirstProgressMs: timing.avgFirstProgressMs, avgTotalElapsedMs: timing.avgTotalElapsedMs, avgWaitTimeMs: timing.avgWaitTimeMs };
 		deriveConversationPatterns(analysis);
-		
-		// Store agent type usage
 		analysis.agentTypes = agentCounts;
-		
 	} catch (error) {
 		deps.warn(`Error tracking enhanced metrics from ${sessionFile}: ${error}`);
 	}
