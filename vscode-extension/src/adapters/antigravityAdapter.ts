@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
+import * as inspector from 'inspector';
 import type { ModelUsage, ChatTurn } from '../types';
 import type {
 IEcosystemAdapter,
@@ -66,10 +67,14 @@ const candidatePaths = this.getCandidatePaths();
 const sessionFiles: string[] = [];
 const brainDir = this.antigravity.getAntigravityBrainDir();
 
+if (inspector.url()) {
 log(`🔍 [Antigravity] Checking brain dir: ${brainDir}`);
+}
 try {
 const files = this.antigravity.getAntigravitySessionFiles();
+if (inspector.url()) {
 log(`🔍 [Antigravity] Found ${files.length} transcript(s)`);
+}
 if (files.length > 0) {
 log(`📄 Found ${files.length} session file(s) in Antigravity (~/.gemini/antigravity/brain/*/)`);
 sessionFiles.push(...files);
