@@ -109,7 +109,7 @@ new MistralVibeAdapter(deps.mistralVibe),
 // Antigravity must come before GeminiCliAdapter because both live under ~/.gemini/
 // and the Gemini CLI path check would not match Antigravity paths, but we place
 // it here explicitly to make the ordering intention clear.
-new AntigravityAdapter(deps.antigravity),
+new AntigravityAdapter(deps.antigravity, deps.estimateTokens),
 new GeminiCliAdapter(deps.geminiCli),
 // Copilot Chat / CLI adapters: discovery-only. Their handles() returns
 // false so processSessionFile() falls through to the shared parser path

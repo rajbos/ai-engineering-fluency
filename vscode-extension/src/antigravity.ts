@@ -194,11 +194,30 @@ return { sessionId, userEntries, modelEntries, allEntries };
 }
 
 /**
- * Get token counts for an Antigravity session.
- * Antigravity transcripts contain no token data — always returns zeros.
+ * Estimate token counts from transcript content.
+ * Uses user message text for input and model response text for output.
+ * Since Antigravity doesn't persist token counts, this is a best-effort estimate.
  */
-getTokensFromAntigravitySession(_filePath: string): { tokens: number; thinkingTokens: number } {
-return { tokens: 0, thinkingTokens: 0 };
+estimateTokensFromAntigravitySession(
+filePath: string,
+estimateTokens: (text: string, model?: string) => number
+): { tokens: number; thinkingTokens: number } {
+const session = this.readAntigravitySession(filePath);
+let inputTokens = 0;
+let outputTokens = 0;
+let thinkingTokens = 0;
+
+for (const entry of session.userEntries) {
+inputTokens += estimateTokens(extractUserRequestText(entry.content ?? ''));
+}
+for (const entry of session.modelEntries) {
+if (entry.type === 'PLANNER_RESPONSE') {
+if (entry.content) { outputTokens += estimateTokens(entry.content); }
+if (entry.thinking) { thinkingTokens += estimateTokens(entry.thinking); }
+}
+}
+
+return { tokens: inputTokens + outputTokens + thinkingTokens, thinkingTokens };
 }
 
 /**

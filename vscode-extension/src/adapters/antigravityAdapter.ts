@@ -18,7 +18,10 @@ export class AntigravityAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 readonly id = 'antigravity';
 readonly displayName = 'Antigravity';
 
-constructor(private readonly antigravity: AntigravityDataAccess) {}
+constructor(
+private readonly antigravity: AntigravityDataAccess,
+private readonly estimateTokens: (text: string, model?: string) => number = () => 0
+) {}
 
 handles(sessionFile: string): boolean {
 return this.antigravity.isAntigravitySessionFile(sessionFile);
@@ -32,9 +35,9 @@ async stat(sessionFile: string): Promise<fs.Stats> {
 return fs.promises.stat(sessionFile);
 }
 
-async getTokens(_sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-// Antigravity transcripts contain no token data.
-return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
+async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
+const result = this.antigravity.estimateTokensFromAntigravitySession(sessionFile, this.estimateTokens);
+return { ...result, actualTokens: 0 }; // actualTokens stays 0 — these are estimates, not API counts
 }
 
 async countInteractions(sessionFile: string): Promise<number> {
