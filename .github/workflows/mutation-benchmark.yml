@@ -37,7 +37,8 @@ jobs:
 
     - name: Setup pnpm
       uses: pnpm/action-setup@v4
-
+      with:
+        version: '11.2.2'
     - name: Determine whether to run
       id: gate
       shell: bash
