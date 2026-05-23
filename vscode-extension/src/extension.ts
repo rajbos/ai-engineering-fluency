@@ -7291,8 +7291,8 @@ body {
     <div class="stats-chips" id="chips" style="display:none">
         <div class="chip">📂 <span class="chip-value" id="chip-total">–</span> session files</div>
         <div class="chip">✅ <span class="chip-value" id="chip-done">–</span> processed</div>
-        <div class="chip" id="chip-editors" style="display:none">🧩 <span class="chip-value" id="chip-editors-val">–</span> editors detected</div>
     </div>
+    <div id="editors-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;"></div>
 
     <div class="steps-box">
         <div class="step step-active" id="s-discover">
@@ -7327,7 +7327,18 @@ body {
 <script nonce="${nonce}">
 (function () {
     var t0 = Date.now();
-    var editorIcons = ['💙','💚','🤖','⚡','🟢','🟠','🔥','💎','🪟','🔷'];
+    var EDITORS = [
+        { icon: '💙', name: 'VS Code' },
+        { icon: '🤖', name: 'Copilot CLI' },
+        { icon: '⚡', name: 'Cursor' },
+        { icon: '🟠', name: 'Claude Code' },
+        { icon: '🟢', name: 'OpenCode' },
+        { icon: '🔥', name: 'Mistral Vibe' },
+        { icon: '💎', name: 'Gemini CLI' },
+        { icon: '🪟', name: 'Visual Studio' },
+        { icon: '🔷', name: 'VSCodium' },
+        { icon: '💚', name: 'VS Code Insiders' },
+    ];
     var editorsSeen = 0;
 
     // Elapsed ticker
@@ -7439,14 +7450,17 @@ body {
                 log('Parsing session ' + m.completed + '/' + m.total, true);
             }
 
-            // Whimsical: randomly pop an editor icon
-            if (m.completed % Math.max(1, Math.floor(m.total / 10)) === 0) {
+            // Whimsical: pop in a new editor pill at each ~10% milestone
+            if (m.completed % Math.max(1, Math.floor(m.total / 10)) === 0 && editorsSeen < EDITORS.length) {
+                var editor = EDITORS[editorsSeen];
                 editorsSeen++;
-                var ec = document.getElementById('chip-editors');
-                var ev2 = document.getElementById('chip-editors-val');
-                if (ec && ev2) {
-                    ec.style.display = 'flex';
-                    ev2.textContent = editorIcons.slice(0, Math.min(editorsSeen, editorIcons.length)).join(' ');
+                var row = document.getElementById('editors-row');
+                if (row) {
+                    var pill = document.createElement('div');
+                    pill.className = 'chip';
+                    pill.style.animation = 'pop-in 0.35s ease both';
+                    pill.innerHTML = '<span>' + editor.icon + '</span>\u00a0<span class="chip-value">' + esc(editor.name) + '</span>';
+                    row.appendChild(pill);
                 }
             }
         }
