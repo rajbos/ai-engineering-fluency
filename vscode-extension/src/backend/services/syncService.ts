@@ -872,23 +872,30 @@ private extractTokenCountsFromRequest(
 req: ChatRequest,
 model: string
 ): { inputTokens: number; outputTokens: number } {
+const apiTokens = this.extractApiReportedTokens((req as any).result);
+if (apiTokens) { return apiTokens; }
+return this.estimateTokenCountsFromMessage(req, model);
+}
+
+private extractApiReportedTokens(result: any): { inputTokens: number; outputTokens: number } | null {
+if (result?.usage) {
+return {
+inputTokens: typeof result.usage.promptTokens === 'number' ? result.usage.promptTokens : 0,
+outputTokens: typeof result.usage.completionTokens === 'number' ? result.usage.completionTokens : 0
+};
+}
+if (typeof result?.promptTokens === 'number' && typeof result?.outputTokens === 'number') {
+return { inputTokens: result.promptTokens, outputTokens: result.outputTokens };
+}
+if (result?.metadata && typeof result.metadata.promptTokens === 'number' && typeof result.metadata.outputTokens === 'number') {
+return { inputTokens: result.metadata.promptTokens, outputTokens: result.metadata.outputTokens };
+}
+return null;
+}
+
+private estimateTokenCountsFromMessage(req: ChatRequest, model: string): { inputTokens: number; outputTokens: number } {
 let inputTokens = 0;
 let outputTokens = 0;
-const result = (req as any).result;
-if (result?.usage) {
-// OLD FORMAT (pre-Feb 2026)
-inputTokens = typeof result.usage.promptTokens === 'number' ? result.usage.promptTokens : 0;
-outputTokens = typeof result.usage.completionTokens === 'number' ? result.usage.completionTokens : 0;
-} else if (typeof result?.promptTokens === 'number' && typeof result?.outputTokens === 'number') {
-// NEW FORMAT (Feb 2026+)
-inputTokens = result.promptTokens;
-outputTokens = result.outputTokens;
-} else if (result?.metadata && typeof result.metadata.promptTokens === 'number' && typeof result.metadata.outputTokens === 'number') {
-// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
-inputTokens = result.metadata.promptTokens;
-outputTokens = result.metadata.outputTokens;
-} else {
-// Fallback: text-based estimation — handles both flat text (delta format) and parts array (JSON format)
 const msgText = (req as any).message?.text;
 if (msgText) {
 inputTokens = this.deps.sessionHandlers.estimateTokensFromText(msgText, model);
@@ -901,7 +908,6 @@ const response = (req as any).response ?? req.response;
 if (Array.isArray(response)) {
 for (const r of response) {
 if (typeof r?.value === 'string') { outputTokens += this.deps.sessionHandlers.estimateTokensFromText(r.value, model); }
-}
 }
 }
 return { inputTokens, outputTokens };
