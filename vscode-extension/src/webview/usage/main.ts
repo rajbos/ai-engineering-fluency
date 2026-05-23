@@ -1089,6 +1089,28 @@ function updateReposPrPanel(data: RepoPrStatsResult): void {
 // Cloud Agent Sessions tab
 // ---------------------------------------------------------------------------
 
+function buildAgentSessionRows(data: AgentSessionsResult, cell: string, cellCenter: string): string {
+  return data.repos.map((r) => {
+    // r.owner, r.repo, r.repoUrl and r.error are pre-sanitized by sanitizeAgentSessionsData
+    const repoLink = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r.owner}/${r.repo}</a>`;
+    if (r.error) {
+      return `<tr>
+        <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+        <td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r.error}</td>
+      </tr>`;
+    }
+    const partialNote = r.partial
+      ? ` <span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}/${r.tasksTotal} tasks scanned)</span>`
+      : '';
+    return `<tr>
+      <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
+      <td style="${cellCenter} font-weight:600;">${r.totalTasks}</td>
+      <td style="${cellCenter} font-weight:600;">${r.totalSessions}</td>
+      <td style="${cellCenter}">${r.totalCredits > 0 ? r.totalCredits.toFixed(1) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
 function renderAgentSessionsContent(data: AgentSessionsResult): string {
 	if (!data.authenticated) {
 		return `
@@ -1119,25 +1141,7 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 
 	const hasPartial = data.repos.some(r => r.partial && !r.error);
 
-	const rows = data.repos.map((r) => {
-		// r.owner, r.repo, r.repoUrl and r.error are pre-sanitized by sanitizeAgentSessionsData
-		const repoLink = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r.owner}/${r.repo}</a>`;
-		if (r.error) {
-			return `<tr>
-				<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
-				<td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r.error}</td>
-			</tr>`;
-		}
-		const partialNote = r.partial
-			? ` <span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}/${r.tasksTotal} tasks scanned)</span>`
-			: '';
-		return `<tr>
-			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
-			<td style="${cellCenter} font-weight:600;">${r.totalTasks}</td>
-			<td style="${cellCenter} font-weight:600;">${r.totalSessions}</td>
-			<td style="${cellCenter}">${r.totalCredits > 0 ? r.totalCredits.toFixed(1) : '—'}</td>
-		</tr>`;
-	}).join('');
+	const rows = buildAgentSessionRows(data, cell, cellCenter);
 
 	return `
 		<div style="margin-bottom:12px; display:flex; gap:24px; flex-wrap:wrap;">
