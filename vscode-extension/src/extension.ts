@@ -228,22 +228,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Cache of the last diagnostic report text for copy/issue operations
 	private lastDiagnosticReport: string = '';
 	private logViewerPanel?: vscode.WebviewPanel;
-	public openCode: OpenCodeDataAccess;
-	public crush: CrushDataAccess;
-	public visualStudio: VisualStudioDataAccess;
-	private continue_: ContinueDataAccess;
-	private claudeCode: ClaudeCodeDataAccess;
-	private claudeDesktopCowork: ClaudeDesktopCoworkDataAccess;
-	private mistralVibe: MistralVibeDataAccess;
-	private geminiCli: GeminiCliDataAccess;
-	private readonly ecosystems: IEcosystemAdapter[];
-	private cacheManager: CacheManager;
+	public openCode!: OpenCodeDataAccess;
+	public crush!: CrushDataAccess;
+	public visualStudio!: VisualStudioDataAccess;
+	private continue_!: ContinueDataAccess;
+	private claudeCode!: ClaudeCodeDataAccess;
+	private claudeDesktopCowork!: ClaudeDesktopCoworkDataAccess;
+	private mistralVibe!: MistralVibeDataAccess;
+	private geminiCli!: GeminiCliDataAccess;
+	private ecosystems!: IEcosystemAdapter[];
+	private cacheManager!: CacheManager;
 
 	private get usageAnalysisDeps(): UsageAnalysisDeps {
 		return { warn: (m: string) => this.warn(m), tokenEstimators: this.tokenEstimators, modelPricing: this.modelPricing, toolNameMap: this.toolNameMap, ecosystems: this.ecosystems };
 	}
-	public sessionDiscovery: SessionDiscovery;
-	private statusBarItem: vscode.StatusBarItem;
+	public sessionDiscovery!: SessionDiscovery;
+	private statusBarItem!: vscode.StatusBarItem;
 	private readonly extensionUri: vscode.Uri;
 	private readonly context: vscode.ExtensionContext;
 	private _devBranch: string | undefined;
@@ -290,7 +290,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private dashboardPanel: vscode.WebviewPanel | undefined;
 	private fluencyLevelViewerPanel: vscode.WebviewPanel | undefined;
 	private environmentalPanel: vscode.WebviewPanel | undefined;
-	private outputChannel: vscode.OutputChannel;
+	private outputChannel!: vscode.OutputChannel;
 	private lastDetailedStats: DetailedStats | undefined;
 	private lastDailyStats: DailyTokenStats[] | undefined;
 	/** Full-year daily stats (up to 365 days) for the chart Week/Month period views. */
@@ -640,196 +640,86 @@ class CopilotTokenTracker implements vscode.Disposable {
 			await vscode.window.showWarningMessage('Local view regression is only available in the Extension Development Host.');
 			return;
 		}
-
 		this.outputChannel.show(true);
-
 		const previousSampleDir = this.localRegressionSampleDataDir;
 		this.localRegressionSampleDataDir = '';
 		this.sessionDiscovery.clearCache();
-		this.lastDetailedStats = undefined;
-		this.lastDailyStats = undefined;
-		this.lastFullDailyStats = undefined;
-		this.lastUsageAnalysisStats = undefined;
-
+		this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = undefined;
 		const results: LocalViewRegressionResult[] = [];
 		let dataSourceLabel = 'local session data';
-
 		try {
-			let sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-			if (sessionFiles.length === 0) {
-				let sampleDir: string;
-				try {
-					sampleDir = await this.ensureLocalViewRegressionSampleDir();
-				} catch {
-					await vscode.window.showErrorMessage('Bundled sample session data was not found. Expected test fixtures under vscode-extension\\test\\fixtures\\sample-session-data\\chatSessions.');
-					return;
-				}
-				this.localRegressionSampleDataDir = sampleDir;
-				this.sessionDiscovery.clearCache();
-				sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-				dataSourceLabel = `bundled sample data (${sampleDir})`;
-			}
-
-			this.log(`🧪 Starting local view regression using ${dataSourceLabel}. Found ${sessionFiles.length} session file(s).`);
-
-			const detailedStats = await this.updateTokenStats(true);
-			if (!detailedStats) {
-				throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`);
-			}
-
-			const dailyStats = this.lastDailyStats ?? await this.calculateDailyStats();
-			const usageStats = await this.calculateUsageAnalysisStats(false);
-			const maturityData = await this.calculateMaturityScores(false);
-			const diagnosticReport = await this.generateDiagnosticReport();
-			const fluencyLevelData = this.getFluencyLevelData(true);
-			const totalFluencyLevels = fluencyLevelData.categories.reduce((sum, category) => sum + category.levels.length, 0);
-			const categoriesWithEvidence = maturityData.categories.filter((category) => category.evidence.length > 0).length;
-			const chartTotals = this.buildChartData(dailyStats);
-
-			const cases: LocalViewRegressionCase[] = [
-				{
-					id: 'details',
-					title: 'Details',
-					timeoutMs: 25000,
-					expectations: { minRootChildren: 1, minBodyTextLength: 120, minRootTextLength: 80 },
-					dataPoints: [
-						{ label: 'today tokens', value: detailedStats.today.tokens },
-						{ label: '30d tokens', value: detailedStats.last30Days.tokens },
-						{ label: '30d sessions', value: detailedStats.last30Days.sessions },
-					],
-					reset: () => this.detailsPanel?.dispose(),
-					open: () => this.showDetails(),
-				},
-				{
-					id: 'chart',
-					title: 'Chart',
-					timeoutMs: 25000,
-					expectations: { minRootChildren: 1, minBodyTextLength: 20, minCanvasOrSvg: 1 },
-					dataPoints: [
-						{ label: 'days', value: chartTotals.dailyCount },
-						{ label: 'tokens', value: chartTotals.totalTokens },
-						{ label: 'sessions', value: chartTotals.totalSessions },
-					],
-					reset: () => this.chartPanel?.dispose(),
-					open: () => this.showChart(),
-				},
-				{
-					id: 'usage',
-					title: 'Usage Analysis',
-					timeoutMs: 25000,
-					expectations: { minRootChildren: 1, minBodyTextLength: 140, minRootTextLength: 80 },
-					dataPoints: [
-						{ label: '30d sessions', value: usageStats.last30Days.sessions },
-						{ label: 'repos', value: usageStats.last30Days.repositories.length },
-						{ label: 'tool calls', value: usageStats.last30Days.toolCalls.total },
-					],
-					reset: () => this.analysisPanel?.dispose(),
-					open: () => this.showUsageAnalysis(),
-				},
-				{
-					id: 'maturity',
-					title: 'Fluency Score',
-					timeoutMs: 25000,
-					expectations: { minRootChildren: 1, minBodyTextLength: 120, minRootTextLength: 80 },
-					dataPoints: [
-						{ label: 'overall', value: maturityData.overallLabel },
-						{ label: 'categories', value: maturityData.categories.length },
-						{ label: 'with evidence', value: categoriesWithEvidence },
-					],
-					reset: () => this.maturityPanel?.dispose(),
-					open: () => this.showMaturity(),
-				},
-				{
-					id: 'environmental',
-					title: 'Environmental Impact',
-					timeoutMs: 25000,
-					expectations: { minRootChildren: 1, minBodyTextLength: 100, minRootTextLength: 70 },
-					dataPoints: [
-						{ label: '30d tokens', value: detailedStats.last30Days.tokens },
-						{ label: 'CO2 g', value: detailedStats.last30Days.co2.toFixed(2) },
-						{ label: 'water L', value: detailedStats.last30Days.waterUsage.toFixed(2) },
-					],
-					reset: () => this.environmentalPanel?.dispose(),
-					open: () => this.showEnvironmental(),
-				},
-				{
-					id: 'diagnostics',
-					title: 'Diagnostics',
-					timeoutMs: 30000,
-					expectations: {
-						minRootChildren: 1,
-						minBodyTextLength: 140,
-						minRootTextLength: 80,
-						disallowTextPatterns: ['loading...'],
-					},
-					dataPoints: [
-						{ label: 'session files', value: sessionFiles.length },
-						{ label: 'report lines', value: diagnosticReport.split(/\r?\n/).length },
-					],
-					reset: () => this.diagnosticsPanel?.dispose(),
-					open: () => this.showDiagnosticReport(),
-				},
-				{
-					id: 'fluency-level-viewer',
-					title: 'Fluency Level Viewer',
-					timeoutMs: 25000,
-					expectations: { minRootChildren: 1, minBodyTextLength: 120, minRootTextLength: 80 },
-					dataPoints: [
-						{ label: 'categories', value: fluencyLevelData.categories.length },
-						{ label: 'levels', value: totalFluencyLevels },
-					],
-					reset: () => this.fluencyLevelViewerPanel?.dispose(),
-					open: () => this.showFluencyLevelViewer(),
-				},
-			];
-
-			for (const viewCase of cases) {
-				results.push(await this.runLocalViewRegressionCase(viewCase));
-			}
-
-			results.push({
-				id: 'dashboard',
-				title: 'Team Dashboard',
-				status: 'skip',
-				detail: 'Skipped because this view requires a configured backend.',
-			});
+			const setup = await this.setupRegressionSessionFiles(dataSourceLabel);
+			dataSourceLabel = setup.dataSourceLabel;
+			this.log(`🧪 Starting local view regression using ${dataSourceLabel}. Found ${setup.sessionFiles.length} session file(s).`);
+			const stats = await this.computeRegressionStats(dataSourceLabel, setup.sessionFiles);
+			const cases = this.buildLocalViewRegressionCases(stats, setup.sessionFiles);
+			for (const viewCase of cases) { results.push(await this.runLocalViewRegressionCase(viewCase)); }
+			results.push({ id: 'dashboard', title: 'Team Dashboard', status: 'skip', detail: 'Skipped because this view requires a configured backend.' });
 		} catch (error) {
-			results.push({
-				id: 'regression-runner',
-				title: 'Local regression runner',
-				status: 'fail',
-				detail: error instanceof Error ? error.message : String(error),
-			});
+			results.push({ id: 'regression-runner', title: 'Local regression runner', status: 'fail', detail: error instanceof Error ? error.message : String(error) });
 		} finally {
 			this.pendingLocalViewRegressionProbe = undefined;
 			this.localRegressionSampleDataDir = previousSampleDir;
 			this.sessionDiscovery.clearCache();
-			this.lastDetailedStats = undefined;
-			this.lastDailyStats = undefined;
-			this.lastFullDailyStats = undefined;
-			this.lastUsageAnalysisStats = undefined;
-			this.lastDashboardData = undefined;
+			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
 		}
+		await this.reportLocalViewRegressionResults(results, dataSourceLabel);
+	}
 
+	private async setupRegressionSessionFiles(defaultLabel: string): Promise<{ sessionFiles: string[]; dataSourceLabel: string }> {
+		let sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+		if (sessionFiles.length > 0) { return { sessionFiles, dataSourceLabel: defaultLabel }; }
+		let sampleDir: string;
+		try { sampleDir = await this.ensureLocalViewRegressionSampleDir(); }
+		catch { throw new Error('Bundled sample session data was not found. Expected test fixtures under vscode-extension\\test\\fixtures\\sample-session-data\\chatSessions.'); }
+		this.localRegressionSampleDataDir = sampleDir;
+		this.sessionDiscovery.clearCache();
+		sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+		return { sessionFiles, dataSourceLabel: `bundled sample data (${sampleDir})` };
+	}
+
+	private async computeRegressionStats(dataSourceLabel: string, sessionFiles: string[]): Promise<{ detailedStats: any; dailyStats: any; usageStats: any; maturityData: any; diagnosticReport: string; fluencyLevelData: any; chartTotals: any }> {
+		const detailedStats = await this.updateTokenStats(true);
+		if (!detailedStats) { throw new Error(`Failed to calculate detailed stats from ${dataSourceLabel}.`); }
+		const dailyStats = this.lastDailyStats ?? await this.calculateDailyStats();
+		const usageStats = await this.calculateUsageAnalysisStats(false);
+		const maturityData = await this.calculateMaturityScores(false);
+		const diagnosticReport = await this.generateDiagnosticReport();
+		const fluencyLevelData = this.getFluencyLevelData(true);
+		const chartTotals = this.buildChartData(dailyStats);
+		return { detailedStats, dailyStats, usageStats, maturityData, diagnosticReport, fluencyLevelData, chartTotals };
+	}
+
+	private buildLocalViewRegressionCases(stats: any, sessionFiles: string[]): LocalViewRegressionCase[] {
+		const { detailedStats, usageStats, maturityData, diagnosticReport, fluencyLevelData, chartTotals } = stats;
+		const totalFluencyLevels = fluencyLevelData.categories.reduce((sum: number, c: any) => sum + c.levels.length, 0);
+		const categoriesWithEvidence = maturityData.categories.filter((c: any) => c.evidence.length > 0).length;
+		return [
+			{ id: 'details', title: 'Details', timeoutMs: 25000, expectations: { minRootChildren: 1, minBodyTextLength: 120, minRootTextLength: 80 }, dataPoints: [{ label: 'today tokens', value: detailedStats.today.tokens }, { label: '30d tokens', value: detailedStats.last30Days.tokens }, { label: '30d sessions', value: detailedStats.last30Days.sessions }], reset: () => this.detailsPanel?.dispose(), open: () => this.showDetails() },
+			{ id: 'chart', title: 'Chart', timeoutMs: 25000, expectations: { minRootChildren: 1, minBodyTextLength: 20, minCanvasOrSvg: 1 }, dataPoints: [{ label: 'days', value: chartTotals.dailyCount }, { label: 'tokens', value: chartTotals.totalTokens }, { label: 'sessions', value: chartTotals.totalSessions }], reset: () => this.chartPanel?.dispose(), open: () => this.showChart() },
+			{ id: 'usage', title: 'Usage Analysis', timeoutMs: 25000, expectations: { minRootChildren: 1, minBodyTextLength: 140, minRootTextLength: 80 }, dataPoints: [{ label: '30d sessions', value: usageStats.last30Days.sessions }, { label: 'repos', value: usageStats.last30Days.repositories.length }, { label: 'tool calls', value: usageStats.last30Days.toolCalls.total }], reset: () => this.analysisPanel?.dispose(), open: () => this.showUsageAnalysis() },
+			{ id: 'maturity', title: 'Fluency Score', timeoutMs: 25000, expectations: { minRootChildren: 1, minBodyTextLength: 120, minRootTextLength: 80 }, dataPoints: [{ label: 'overall', value: maturityData.overallLabel }, { label: 'categories', value: maturityData.categories.length }, { label: 'with evidence', value: categoriesWithEvidence }], reset: () => this.maturityPanel?.dispose(), open: () => this.showMaturity() },
+			{ id: 'environmental', title: 'Environmental Impact', timeoutMs: 25000, expectations: { minRootChildren: 1, minBodyTextLength: 100, minRootTextLength: 70 }, dataPoints: [{ label: '30d tokens', value: detailedStats.last30Days.tokens }, { label: 'CO2 g', value: detailedStats.last30Days.co2.toFixed(2) }, { label: 'water L', value: detailedStats.last30Days.waterUsage.toFixed(2) }], reset: () => this.environmentalPanel?.dispose(), open: () => this.showEnvironmental() },
+			{ id: 'diagnostics', title: 'Diagnostics', timeoutMs: 30000, expectations: { minRootChildren: 1, minBodyTextLength: 140, minRootTextLength: 80, disallowTextPatterns: ['loading...'] }, dataPoints: [{ label: 'session files', value: sessionFiles.length }, { label: 'report lines', value: diagnosticReport.split(/\r?\n/).length }], reset: () => this.diagnosticsPanel?.dispose(), open: () => this.showDiagnosticReport() },
+			{ id: 'fluency-level-viewer', title: 'Fluency Level Viewer', timeoutMs: 25000, expectations: { minRootChildren: 1, minBodyTextLength: 120, minRootTextLength: 80 }, dataPoints: [{ label: 'categories', value: fluencyLevelData.categories.length }, { label: 'levels', value: totalFluencyLevels }], reset: () => this.fluencyLevelViewerPanel?.dispose(), open: () => this.showFluencyLevelViewer() },
+		];
+	}
+
+	private async reportLocalViewRegressionResults(results: LocalViewRegressionResult[], dataSourceLabel: string): Promise<void> {
 		const report = formatLocalViewRegressionReport(results);
 		this.outputChannel.appendLine('');
-		for (const line of report.split(/\r?\n/)) {
-			this.outputChannel.appendLine(line);
-		}
+		for (const line of report.split(/\r?\n/)) { this.outputChannel.appendLine(line); }
 		this.outputChannel.appendLine('');
-
-		const failures = results.filter((result) => result.status === 'fail').length;
-		const passed = results.filter((result) => result.status === 'pass').length;
-		const skipped = results.filter((result) => result.status === 'skip').length;
+		const failures = results.filter((r) => r.status === 'fail').length;
+		const passed = results.filter((r) => r.status === 'pass').length;
+		const skipped = results.filter((r) => r.status === 'skip').length;
 		const summary = failures === 0
 			? `Local view regression passed: ${passed} view(s), ${skipped} skipped. Data source: ${dataSourceLabel}.`
 			: `Local view regression found ${failures} failing view(s). Data source: ${dataSourceLabel}. See the output channel for details.`;
 		const choice = failures === 0
 			? await vscode.window.showInformationMessage(summary, 'Show Output')
 			: await vscode.window.showWarningMessage(summary, 'Show Output');
-		if (choice === 'Show Output') {
-			this.outputChannel.show(true);
-		}
+		if (choice === 'Show Output') { this.outputChannel.show(true); }
 	}
 
 	// Cache management methods
@@ -926,6 +816,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	constructor(extensionUri: vscode.Uri, context: vscode.ExtensionContext) {
 		this.extensionUri = extensionUri;
+		this.context = context;
+		this.initializeAdapters(extensionUri, context);
+		this.initializeOutputChannel(context);
+		this.cacheManager.loadCacheFromStorage();
+		this._sessionRestorePromise = this.restoreGitHubSession();
+		this.setupGitHubAuthListener(context);
+		this.sessionDiscovery.checkCopilotExtension();
+		this.initializeStatusBar();
+		this.setupConfigurationListener(context);
+		this.scheduleInitialUpdate();
+		this.updateInterval = setInterval(() => {
+			this.updateTokenStats(true, true);
+		}, 5 * 60 * 1000);
+	}
+
+	private initializeAdapters(extensionUri: vscode.Uri, context: vscode.ExtensionContext): void {
 		const dataAccess = createDataAccessInstances(extensionUri);
 		this.openCode = dataAccess.openCode;
 		this.crush = dataAccess.crush;
@@ -949,28 +855,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 			ecosystems: this.ecosystems,
 			sampleDataDirectoryOverride: () => this.localRegressionSampleDataDir,
 		});
-		this.context = context;
+	}
+
+	private initializeOutputChannel(context: vscode.ExtensionContext): void {
 		if (context.extensionMode === vscode.ExtensionMode.Development) {
 			try {
 				this._devBranch = childProcess.execSync('git rev-parse --abbrev-ref HEAD', {
-					cwd: context.extensionUri.fsPath,
-					encoding: 'utf8',
-					timeout: 5000,
-					stdio: ['pipe', 'pipe', 'pipe']
+					cwd: context.extensionUri.fsPath, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
 				}).trim();
-			} catch {
-				// Ignore git errors in dev mode branch detection
-			}
+			} catch { /* Ignore git errors in dev mode */ }
 		}
-		// Create output channel for extension logs
 		this.outputChannel = vscode.window.createOutputChannel('AI Engineering Fluency');
-		// CRITICAL: Add output channel to context.subscriptions so VS Code doesn't dispose it
 		context.subscriptions.push(this.outputChannel);
 		this.log('Constructor called');
 		const version = context.extension.packageJSON?.version ?? 'unknown';
 		const mode = context.extensionMode === vscode.ExtensionMode.Development ? 'Development'
 			: context.extensionMode === vscode.ExtensionMode.Test ? 'Test' : 'Production';
-		let startupInfo = `🚀 AI Engineering Fluency v${version} [${mode}] (cache v${CopilotTokenTracker.CACHE_VERSION})`;
+		let startupInfo = `\uD83D\uDE80 AI Engineering Fluency v${version} [${mode}] (cache v${CopilotTokenTracker.CACHE_VERSION})`;
 		if (context.extensionMode === vscode.ExtensionMode.Development) {
 			try {
 				const sha = childProcess.execSync('git rev-parse --short HEAD', {
@@ -980,19 +881,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			} catch { /* git unavailable */ }
 		}
 		this.log(startupInfo);
+	}
 
-		// Load persisted cache from storage
-		this.cacheManager.loadCacheFromStorage();
-
-		// Restore GitHub authentication session if previously authenticated
-		this._sessionRestorePromise = this.restoreGitHubSession();
-
-		// Keep in-memory session in sync if the underlying VS Code auth session changes
-		// (e.g. user signs out of GitHub from the Accounts menu or token expires)
+	private setupGitHubAuthListener(context: vscode.ExtensionContext): void {
 		context.subscriptions.push(
 			vscode.authentication.onDidChangeSessions(async (e) => {
 				if (e.provider.id !== 'github') { return; }
-				if (this._githubSignedOutByUser) { return; } // user explicitly disconnected; don't auto-reconnect
+				if (this._githubSignedOutByUser) { return; }
 				const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
 				if (session) {
 					this.githubSession = session;
@@ -1007,66 +902,39 @@ class CopilotTokenTracker implements vscode.Disposable {
 				}
 			})
 		);
+	}
 
-		// Check GitHub Copilot extension status
-		this.sessionDiscovery.checkCopilotExtension();
-
-		// Create status bar item
-		this.statusBarItem = vscode.window.createStatusBarItem(
-			'ai-engineering-fluency',
-			vscode.StatusBarAlignment.Right,
-			100
-		);
+	private initializeStatusBar(): void {
+		this.statusBarItem = vscode.window.createStatusBarItem('ai-engineering-fluency', vscode.StatusBarAlignment.Right, 100);
 		this.statusBarItem.name = "AI Engineering Fluency";
 		this.setStatusBarText("$(loading~spin) AI Fluency: Loading...");
 		this.statusBarItem.tooltip = "AI Engineering Fluency — daily and 30-day token usage - Click to open details";
 		this.statusBarItem.command = 'aiEngineeringFluency.showDetails';
 		this.statusBarItem.show();
-
 		this.log('Status bar item created and shown');
+	}
 
-		// Re-render open panels when display settings change
-		// Also restart backend sync timer when backend settings change
+	private setupConfigurationListener(context: vscode.ExtensionContext): void {
 		context.subscriptions.push(
 			vscode.workspace.onDidChangeConfiguration(e => {
-				if (e.affectsConfiguration('aiEngineeringFluency.display')) {
-					this.refreshOpenPanelsForSettingChange();
-				}
+				if (e.affectsConfiguration('aiEngineeringFluency.display')) { this.refreshOpenPanelsForSettingChange(); }
 				if (e.affectsConfiguration('aiEngineeringFluency.backend')) {
 					this.startBackendSyncAfterInitialAnalysis();
-					// Force an immediate sync so the "Last Sync" timestamp updates right away
-					// instead of waiting for the next timer tick.
 					const backend = this.backend;
 					if (backend && typeof backend.syncToBackendStore === 'function') {
 						void (async () => {
 							try {
 								await backend.syncToBackendStore(true);
-								// Refresh diagnostics again after sync completes so "Last Sync" shows the new time
-								if (this.diagnosticsPanel) {
-									this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
-								}
+								if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
 							} catch (err: unknown) {
 								this.warn('Backend sync after settings change failed: ' + err);
 							}
 						})();
 					}
-					// If the diagnostic report is open, refresh it so the Backend Storage
-					// section reflects the new settings immediately (e.g. after saving the
-					// Team Server config panel).
-					if (this.diagnosticsPanel) {
-						this.loadDiagnosticDataInBackground(this.diagnosticsPanel);
-					}
+					if (this.diagnosticsPanel) { this.loadDiagnosticDataInBackground(this.diagnosticsPanel); }
 				}
 			})
 		);
-
-		// Smart initial update with delay for extension loading
-		this.scheduleInitialUpdate();
-
-		// Update every 5 minutes (cache is saved automatically after each update)
-		this.updateInterval = setInterval(() => {
-			this.updateTokenStats(true, true); // Silent background update — skip if a run is already in progress
-		}, 5 * 60 * 1000);
 	}
 
 	private scheduleInitialUpdate(): void {
