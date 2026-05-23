@@ -1519,6 +1519,228 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 	};
 }
 
+/** Mutable mode state passed through JSONL event handlers. */
+type AsuModeState = { sessionMode: string };
+/** Mutable CLI tracking state passed through JSONL event handlers. */
+type AsuCliState = {
+	defaultModel: string;
+	defaultEffort: string | null;
+	requestCount: number;
+	effortByRequest: { [effort: string]: number };
+};
+
+/** Check if the first JSONL line indicates a delta-based VS Code incremental format. */
+function _asuIsDeltaBased(lines: string[]): boolean {
+	if (lines.length === 0) { return false; }
+	try {
+		const first = JSON.parse(lines[0]);
+		return first && typeof first.kind === 'number';
+	} catch { return false; }
+}
+
+/** Reconstruct delta state from all lines and dispatch to processDeltaSessionAnalysis. */
+function _asuReconstructAndProcessDeltaState(
+	deps: UsageAnalysisDeps,
+	lines: string[],
+	analysis: SessionUsageAnalysis
+): void {
+	let sessionState: DeltaSessionState = {};
+	for (const line of lines) {
+		try {
+			const delta = JSON.parse(line);
+			sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
+		} catch { /* skip invalid lines */ }
+	}
+	processDeltaSessionAnalysis(deps, sessionState, lines, analysis);
+}
+
+/** Check if a selection range represents an actual selection (not just cursor position). */
+function _asuCheckImplicitSelection(selections: unknown[], refs: ContextReferenceUsage): void {
+	for (const sel of selections) {
+		// eslint-disable-next-line @typescript-eslint/no-explicit-any
+		const s = sel as any;
+		if (s && (s.startLineNumber !== s.endLineNumber || s.startColumn !== s.endColumn)) {
+			refs.implicitSelection++;
+			break;
+		}
+	}
+}
+
+/** Handle VS Code incremental format kind=0 (session header) events. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuHandleKind0Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
+	if (event.kind !== 0 || !event.v?.inputState?.mode) { return; }
+	modeState.sessionMode = getModeType(event.v.inputState.mode);
+	if (!Array.isArray(event.v?.inputState?.selections)) { return; }
+	_asuCheckImplicitSelection(event.v.inputState.selections, analysis.contextReferences);
+}
+
+/** Handle VS Code incremental format kind=1 (incremental update) events. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuHandleKind1Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
+	if (event.kind !== 1) { return; }
+	if (event.k?.includes('mode') && event.v) { modeState.sessionMode = getModeType(event.v); }
+	if (event.k?.includes('selections') && Array.isArray(event.v)) {
+		_asuCheckImplicitSelection(event.v, analysis.contextReferences);
+	}
+	if (event.k?.includes('contentReferences') && Array.isArray(event.v)) {
+		analyzeContentReferences(event.v, analysis.contextReferences);
+	}
+	if (event.k?.includes('variableData') && event.v) {
+		analyzeVariableData(event.v, analysis.contextReferences);
+	}
+}
+
+/** Extract the tool name from a response item. */
+function _asuExtractToolName(item: ResponseItemRaw): string {
+	return item.toolId || item.toolName || item.invocationMessage?.toolName || item.toolSpecificData?.kind || 'unknown';
+}
+
+/** Record tool invocations from a full response array (kind=2 with requests). */
+function _asuProcessResponseItems(items: ResponseItemRaw[], analysis: SessionUsageAnalysis): void {
+	for (const item of items) {
+		if (!item) { continue; }
+		if (item.kind === 'toolInvocationSerialized' || item.kind === 'prepareToolInvocation') {
+			analysis.toolCalls.total++;
+			const toolName = _asuExtractToolName(item);
+			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+		}
+	}
+}
+
+/** Record tool invocations from a response update array (kind=2 with response). */
+function _asuProcessResponseUpdates(items: unknown[], analysis: SessionUsageAnalysis): void {
+	for (const responseItem of items) {
+		const item = responseItem as ResponseItemRaw;
+		if (!item) { continue; }
+		if (item.kind === 'toolInvocationSerialized') {
+			analysis.toolCalls.total++;
+			const toolName = _asuExtractToolName(item);
+			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+		}
+	}
+}
+
+/** Process a single request from a kind=2 requests array. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuProcessRequest(request: any, analysis: SessionUsageAnalysis, sessionMode: string): void {
+	if (request.requestId) { incrementModeUsage(sessionMode, analysis.modeUsage); }
+	if (request.agent?.id) {
+		analysis.toolCalls.total++;
+		analysis.toolCalls.byTool[request.agent.id] = (analysis.toolCalls.byTool[request.agent.id] || 0) + 1;
+	}
+	analyzeRequestContext(request, analysis.contextReferences);
+	if (request.response && Array.isArray(request.response)) {
+		_asuProcessResponseItems(request.response, analysis);
+	}
+}
+
+/** Handle VS Code incremental format kind=2 (batch add) events. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuHandleKind2Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, toolNameMap: { [key: string]: string }): void {
+	if (event.kind !== 2) { return; }
+	if (event.k?.[0] === 'requests' && Array.isArray(event.v)) {
+		for (const request of event.v) {
+			_asuProcessRequest(request, analysis, modeState.sessionMode);
+		}
+	}
+	if (event.k?.includes('response') && Array.isArray(event.v)) {
+		_asuProcessResponseUpdates(event.v, analysis);
+	}
+}
+
+/** Handle Copilot CLI events (session.start, session.model_change, user.message). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
+	if (event.type === 'session.start' && event.data) {
+		if (typeof event.data.selectedModel === 'string') { cliState.defaultModel = event.data.selectedModel; }
+		if (typeof event.data.reasoningEffort === 'string') { cliState.defaultEffort = event.data.reasoningEffort; }
+	}
+	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
+		cliState.defaultModel = event.data.newModel;
+	}
+	if (event.type === 'user.message') {
+		cliState.requestCount++;
+		const effort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliState.defaultEffort;
+		if (effort) { cliState.effortByRequest[effort] = (cliState.effortByRequest[effort] || 0) + 1; }
+		if (jetBrainsMode === 'agent') { analysis.modeUsage.agent++; }
+		else if (jetBrainsMode === 'ask') { analysis.modeUsage.ask++; }
+		else { analysis.modeUsage.cli++; }
+	}
+}
+
+/** Handle tool.call / tool.result / tool.execution_start events. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
+	if (event.type !== 'tool.call' && event.type !== 'tool.result' && event.type !== 'tool.execution_start') { return; }
+	const toolName = event.data?.toolName || event.toolName || 'unknown';
+	recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
+}
+
+/** Handle mcp.tool.call events and events with data.mcpServer set. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): void {
+	if (event.type !== 'mcp.tool.call' && !event.data?.mcpServer) { return; }
+	analysis.mcpTools.total++;
+	const serverName = event.data?.mcpServer || 'unknown';
+	const mcpToolName = event.data?.toolName || event.toolName || 'unknown';
+	analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
+	const normalizedMcpTool = normalizeMcpToolName(mcpToolName);
+	analysis.mcpTools.byTool[normalizedMcpTool] = (analysis.mcpTools.byTool[normalizedMcpTool] || 0) + 1;
+}
+
+/** Handle tool.call / tool.result / mcp.tool.call events. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuHandleToolAndMcpEvents(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
+	_asuHandleToolCallEvent(event, analysis, toolNameMap);
+	_asuHandleMcpToolEvent(event, analysis);
+}
+
+/** Dispatch a single JSONL event to the appropriate event handlers. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function _asuProcessJsonlEvent(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, cliState: AsuCliState, jetBrainsMode: JetBrainsMode | null, toolNameMap: { [key: string]: string }): void {
+	_asuHandleKind0Event(event, analysis, modeState);
+	_asuHandleKind1Event(event, analysis, modeState);
+	_asuHandleKind2Event(event, analysis, modeState, toolNameMap);
+	_asuProcessCliEvents(event, cliState, analysis, jetBrainsMode);
+	_asuHandleToolAndMcpEvents(event, analysis, toolNameMap);
+}
+
+/** Store CLI thinking effort data from the accumulated CLI state. */
+function _asuApplyCliThinkingEffort(cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	if (cliState.defaultEffort === null && Object.keys(cliState.effortByRequest).length === 0) { return; }
+	const byEffort = Object.keys(cliState.effortByRequest).length > 0
+		? cliState.effortByRequest
+		: (cliState.defaultEffort !== null ? { [cliState.defaultEffort]: cliState.requestCount } : {});
+	analysis.thinkingEffort = { byEffort, switchCount: 0, defaultEffort: cliState.defaultEffort };
+}
+
+/** Process a non-delta JSONL session file (Copilot CLI or VS Code incremental). */
+async function _asuProcessNonDeltaJsonl(
+	deps: UsageAnalysisDeps,
+	sessionFile: string,
+	lines: string[],
+	fileContent: string,
+	analysis: SessionUsageAnalysis
+): Promise<void> {
+	const modeState: AsuModeState = { sessionMode: 'ask' };
+	const cliState: AsuCliState = { defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {} };
+	const isJetBrains = isJetBrainsSessionPath(sessionFile);
+	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
+
+	for (const line of lines) {
+		if (!line.trim()) { continue; }
+		try {
+			const event = JSON.parse(line);
+			_asuProcessJsonlEvent(event, analysis, modeState, cliState, jetBrainsMode, deps.toolNameMap);
+		} catch { /* skip malformed lines */ }
+	}
+
+	_asuApplyCliThinkingEffort(cliState, analysis);
+	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
+	deriveConversationPatterns(analysis);
+}
+
 /**
  * Analyze a session file for usage patterns (tool calls, modes, context references, MCP tools)
  */
@@ -1526,249 +1748,31 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 	const analysis: SessionUsageAnalysis = createEmptySessionUsageAnalysis();
 
 	try {
-		// Dispatch to ecosystem adapter when available
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco && isAnalyzable(eco)) {
 			return eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
 		}
 
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-
-		// Handle .jsonl files OR .json files with JSONL content (Copilot CLI format and VS Code incremental format)
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
+
 		if (isJsonl) {
 			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
-
-			// Detect if this is delta-based format (VS Code incremental)
-			let isDeltaBased = false;
-			if (lines.length > 0) {
-				try {
-					const firstLine = JSON.parse(lines[0]);
-					if (firstLine && typeof firstLine.kind === 'number') {
-						isDeltaBased = true;
-					}
-				} catch {
-					// Not delta format
-				}
-			}
-
-			if (isDeltaBased) {
-				// Delta-based format: reconstruct full state first, then process
-				let sessionState: DeltaSessionState = {};
-				for (const line of lines) {
-					try {
-						const delta = JSON.parse(line);
-						sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
-					} catch {
-						// Skip invalid lines
-					}
-				}
-				processDeltaSessionAnalysis(deps, sessionState, lines, analysis);
+			if (_asuIsDeltaBased(lines)) {
+				_asuReconstructAndProcessDeltaState(deps, lines, analysis);
 				return analysis;
 			}
-
-			// Non-delta JSONL (Copilot CLI format) - process line-by-line
-			let sessionMode = 'ask';
-			let cliDefaultModel = 'unknown';
-			let cliDefaultEffort: string | null = null;
-			let cliRequestCount = 0;
-			const cliEffortByRequest: { [effort: string]: number } = {};
-
-			// JetBrains partition files (~/.copilot/jb/{uuid}/partition-{n}.jsonl) share
-			// the JSONL fallback path with Copilot CLI but represent IDE chat (ask/agent),
-			// not a CLI tool session. Detect this once up front so we can route their
-			// `user.message` events into modeUsage.ask / modeUsage.agent below.
-			const isJetBrains = isJetBrainsSessionPath(sessionFile);
-			const jetBrainsMode: JetBrainsMode | null = isJetBrains
-				? detectJetBrainsModeFromContent(fileContent)
-				: null;
-			for (const line of lines) {
-				if (!line.trim()) { continue; }
-				try {
-					const event = JSON.parse(line);
-
-					// Copilot CLI session.start carries model + reasoningEffort
-					if (event.type === 'session.start' && event.data) {
-						if (typeof event.data.selectedModel === 'string') {
-							cliDefaultModel = event.data.selectedModel;
-						}
-						if (typeof event.data.reasoningEffort === 'string') {
-							cliDefaultEffort = event.data.reasoningEffort;
-						}
-					}
-
-					// Copilot CLI: session.model_change carries the currently active model
-					if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-						cliDefaultModel = event.data.newModel;
-					}
-
-					// Count user.message requests and accumulate effort counts
-					if (event.type === 'user.message') {
-						cliRequestCount++;
-						const effort = typeof event.data?.reasoningEffort === 'string'
-							? event.data.reasoningEffort
-							: cliDefaultEffort;
-						if (effort) {
-							cliEffortByRequest[effort] = (cliEffortByRequest[effort] || 0) + 1;
-						}
-					}
-
-					// Handle VS Code incremental format - detect mode from session header
-					if (event.kind === 0 && event.v?.inputState?.mode) {
-						sessionMode = getModeType(event.v.inputState.mode);
-
-						// Detect implicit selections in initial state (only if there's an actual range)
-						if (event.v?.inputState?.selections && Array.isArray(event.v.inputState.selections)) {
-							for (const sel of event.v.inputState.selections) {
-								// Only count if it's an actual selection (not just a cursor position)
-								if (sel.startLineNumber !== sel.endLineNumber || sel.startColumn !== sel.endColumn) {
-									analysis.contextReferences.implicitSelection++;
-									break; // Count once per session
-								}
-							}
-						}
-					}
-
-					// Handle mode changes (kind: 1 with mode update)
-					if (event.kind === 1 && event.k?.includes('mode') && event.v) {
-						sessionMode = getModeType(event.v);
-					}
-
-					// Detect implicit selections in updates to inputState.selections
-					if (event.kind === 1 && event.k?.includes('selections') && Array.isArray(event.v)) {
-						for (const sel of event.v) {
-							// Only count if it's an actual selection (not just a cursor position)
-							if (sel && (sel.startLineNumber !== sel.endLineNumber || sel.startColumn !== sel.endColumn)) {
-								analysis.contextReferences.implicitSelection++;
-								break; // Count once per update
-							}
-						}
-					}
-
-					// Handle contentReferences updates (kind: 1 with contentReferences update)
-					if (event.kind === 1 && event.k?.includes('contentReferences') && Array.isArray(event.v)) {
-						analyzeContentReferences(event.v, analysis.contextReferences);
-					}
-
-					// Handle variableData updates (kind: 1 with variableData update)
-					if (event.kind === 1 && event.k?.includes('variableData') && event.v) {
-						analyzeVariableData(event.v, analysis.contextReferences);
-					}
-
-					// Handle VS Code incremental format - count requests as interactions
-					if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-						for (const request of event.v) {
-							if (request.requestId) {
-								// Count by mode type
-								incrementModeUsage(sessionMode, analysis.modeUsage);
-							}
-							// Check for agent in request
-							if (request.agent?.id) {
-								const toolName = request.agent.id;
-								analysis.toolCalls.total++;
-								analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-							}
-
-							// Analyze all context references from this request
-							analyzeRequestContext(request, analysis.contextReferences);
-
-							// Extract tool calls from request.response array (when full request is added)
-							if (request.response && Array.isArray(request.response)) {
-								for (const responseItemRaw of request.response as ResponseItemRaw[]) {
-									if (!responseItemRaw) { continue; }
-									const responseItem = responseItemRaw;
-									if (responseItem.kind === 'toolInvocationSerialized' || responseItem.kind === 'prepareToolInvocation') {
-										analysis.toolCalls.total++;
-										const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || responseItem.toolSpecificData?.kind || 'unknown';
-										analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-									}
-								}
-							}
-						}
-					}
-
-					// Handle VS Code incremental format - tool invocations in responses
-					if (event.kind === 2 && event.k?.includes('response') && Array.isArray(event.v)) {
-						for (const responseItem of event.v) {
-							if (!responseItem) { continue; }
-							if (responseItem.kind === 'toolInvocationSerialized') {
-								analysis.toolCalls.total++;
-								const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || responseItem.toolSpecificData?.kind || 'unknown';
-								analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-							}
-						}
-					}
-
-					// Handle Copilot CLI format
-					// CLI sessions are always classified as 'cli' mode, EXCEPT for
-					// JetBrains IDE partition files which share the same event shape
-					// but represent in-IDE chat (ask/agent).
-					if (event.type === 'user.message') {
-						if (jetBrainsMode === 'agent') {
-							analysis.modeUsage.agent++;
-						} else if (jetBrainsMode === 'ask') {
-							analysis.modeUsage.ask++;
-						} else {
-							analysis.modeUsage.cli++;
-						}
-					}
-
-					// Detect tool calls from Copilot CLI
-					// tool.execution_start is the Copilot CLI event for built-in tools (rename_session, powershell, etc.)
-					if (event.type === 'tool.call' || event.type === 'tool.result' || event.type === 'tool.execution_start') {
-						const toolName = event.data?.toolName || event.toolName || 'unknown';
-
-						// Route to MCP or regular tool counters
-						recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
-					}
-
-					// Detect MCP tools from explicit MCP events
-					if (event.type === 'mcp.tool.call' || (event.data?.mcpServer)) {
-						analysis.mcpTools.total++;
-						const serverName = event.data?.mcpServer || 'unknown';
-						const mcpToolName = event.data?.toolName || event.toolName || 'unknown';
-						analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
-						const normalizedMcpTool = normalizeMcpToolName(mcpToolName);
-						analysis.mcpTools.byTool[normalizedMcpTool] = (analysis.mcpTools.byTool[normalizedMcpTool] || 0) + 1;
-					}
-				} catch (e) {
-					// Skip malformed lines
-				}
+			await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
+		} else {
+			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+			if (!isParsedSessionJson(parsed)) {
+				deps.warn(`Unexpected session format in ${sessionFile}`);
+				return analysis;
 			}
-
-			// Store CLI thinking effort data if available
-			if (cliDefaultEffort !== null || Object.keys(cliEffortByRequest).length > 0) {
-				const byEffort = Object.keys(cliEffortByRequest).length > 0
-					? cliEffortByRequest
-					: (cliDefaultEffort !== null ? { [cliDefaultEffort]: cliRequestCount } : {});
-				analysis.thinkingEffort = { byEffort, switchCount: 0, defaultEffort: cliDefaultEffort };
-			}
-
-			// Calculate model switching for JSONL files before returning
-			await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
-
-			// Derive conversation patterns from mode usage before returning
-			deriveConversationPatterns(analysis);
-
-			return analysis;
+			processJsonSessionRequests(deps, parsed, analysis);
+			await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
+			await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
 		}
-
-		// Handle regular .json files
-		const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-		if (!isParsedSessionJson(parsed)) {
-			deps.warn(`Unexpected session format in ${sessionFile}`);
-			return analysis;
-		}
-		const sessionContent = parsed;
-
-		// Process requests for mode usage, context references, and tool/MCP invocations
-		processJsonSessionRequests(deps, sessionContent, analysis);
-
-		// Calculate model switching statistics from session (pass preloaded content to avoid re-reading)
-		await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
-
-		// Track new metrics: edit scope, apply usage, session duration, conversation patterns, agent types
-		await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
 	} catch (error) {
 		deps.warn(`Error analyzing session usage from ${sessionFile}: ${error}`);
 	}
