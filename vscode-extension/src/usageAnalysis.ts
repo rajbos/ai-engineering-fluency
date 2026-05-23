@@ -626,56 +626,166 @@ function processJsonSessionRequests(
 
 }
 
+/** Merge context reference field counts from analysis into period. */
+function _muaMergeContextRefFields(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	const p = period.contextReferences;
+	const a = analysis.contextReferences;
+	p.file += a.file;
+	p.selection += a.selection;
+	p.implicitSelection += a.implicitSelection || 0;
+	p.symbol += a.symbol;
+	p.codebase += a.codebase;
+	p.workspace += a.workspace;
+	p.terminal += a.terminal;
+	p.vscode += a.vscode;
+	p.terminalLastCommand += a.terminalLastCommand || 0;
+	p.terminalSelection += a.terminalSelection || 0;
+	p.clipboard += a.clipboard || 0;
+	p.changes += a.changes || 0;
+	p.outputPanel += a.outputPanel || 0;
+	p.problemsPanel += a.problemsPanel || 0;
+	p.pullRequest += a.pullRequest || 0;
+	p.copilotInstructions += a.copilotInstructions || 0;
+	p.agentsMd += a.agentsMd || 0;
+}
+
+/** Merge byKind and byPath maps from analysis context references into period. */
+function _muaMergeContextRefMaps(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	for (const [kind, count] of Object.entries(analysis.contextReferences.byKind || {})) {
+		period.contextReferences.byKind[kind] = (period.contextReferences.byKind[kind] || 0) + count;
+	}
+	for (const [path, count] of Object.entries(analysis.contextReferences.byPath || {})) {
+		period.contextReferences.byPath[path] = (period.contextReferences.byPath[path] || 0) + count;
+	}
+}
+
+type SessionModelSwitching = SessionUsageAnalysis['modelSwitching'];
+
+/** Add unique model names from a tier list into the period's tracked list if not already present. */
+function _muaMergeTierModels(period: UsageAnalysisPeriod, ms: SessionModelSwitching): void {
+	for (const model of ms.tiers.standard) {
+		if (!period.modelSwitching.standardModels.includes(model)) { period.modelSwitching.standardModels.push(model); }
+	}
+	for (const model of ms.tiers.premium) {
+		if (!period.modelSwitching.premiumModels.includes(model)) { period.modelSwitching.premiumModels.push(model); }
+	}
+	for (const model of ms.tiers.unknown) {
+		if (!period.modelSwitching.unknownModels.includes(model)) { period.modelSwitching.unknownModels.push(model); }
+	}
+}
+
+/** Recalculate aggregate model-switching statistics from the accumulated modelsPerSession array. */
+function _muaUpdateModelSwitchingStats(period: UsageAnalysisPeriod): void {
+	const counts = period.modelSwitching.modelsPerSession;
+	if (counts.length === 0) { return; }
+	period.modelSwitching.averageModelsPerSession = counts.reduce((a, b) => a + b, 0) / counts.length;
+	period.modelSwitching.maxModelsPerSession = Math.max(...counts);
+	period.modelSwitching.minModelsPerSession = Math.min(...counts);
+	period.modelSwitching.switchingFrequency = (counts.filter(c => c > 1).length / counts.length) * 100;
+}
+
+/** Merge model switching statistics from analysis into period. */
+function _muaMergeModelSwitching(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.modelSwitching) {
+		(analysis as { modelSwitching?: SessionModelSwitching }).modelSwitching = {
+			uniqueModels: [], modelCount: 0, switchCount: 0,
+			tiers: { standard: [], premium: [], unknown: [] },
+			hasMixedTiers: false, standardRequests: 0, premiumRequests: 0,
+			unknownRequests: 0, totalRequests: 0
+		};
+	}
+	if (analysis.modelSwitching.modelCount <= 0) { return; }
+	const ms: SessionModelSwitching = analysis.modelSwitching;
+	period.modelSwitching.totalSessions++;
+	period.modelSwitching.modelsPerSession.push(ms.modelCount);
+	_muaMergeTierModels(period, ms);
+	if (ms.hasMixedTiers) { period.modelSwitching.mixedTierSessions++; }
+	period.modelSwitching.standardRequests += ms.standardRequests || 0;
+	period.modelSwitching.premiumRequests += ms.premiumRequests || 0;
+	period.modelSwitching.unknownRequests += ms.unknownRequests || 0;
+	period.modelSwitching.totalRequests += ms.totalRequests || 0;
+	_muaUpdateModelSwitchingStats(period);
+}
+
+/** Merge edit scope metrics from analysis into period. */
+function _muaMergeEditScope(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.editScope) { return; }
+	period.editScope.singleFileEdits += analysis.editScope.singleFileEdits;
+	period.editScope.multiFileEdits += analysis.editScope.multiFileEdits;
+	period.editScope.totalEditedFiles += analysis.editScope.totalEditedFiles;
+	const editSessions = period.editScope.singleFileEdits + period.editScope.multiFileEdits;
+	period.editScope.avgFilesPerSession = editSessions > 0 ? period.editScope.totalEditedFiles / editSessions : 0;
+}
+
+/** Merge apply usage (code block application) metrics from analysis into period. */
+function _muaMergeApplyUsage(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.applyUsage) { return; }
+	period.applyUsage.totalApplies += analysis.applyUsage.totalApplies;
+	period.applyUsage.totalCodeBlocks += analysis.applyUsage.totalCodeBlocks;
+	period.applyUsage.applyRate = period.applyUsage.totalCodeBlocks > 0
+		? (period.applyUsage.totalApplies / period.applyUsage.totalCodeBlocks) * 100
+		: 0;
+}
+
+/** Merge session duration metrics from analysis into period using weighted averaging. */
+function _muaMergeSessionDuration(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.sessionDuration) { return; }
+	period.sessionDuration.totalDurationMs += analysis.sessionDuration.totalDurationMs;
+	const sessionCount = period.sessions;
+	if (sessionCount <= 0) { return; }
+	period.sessionDuration.avgDurationMs = period.sessionDuration.totalDurationMs / sessionCount;
+	const prevFirst = period.sessionDuration.avgFirstProgressMs * (sessionCount - 1);
+	period.sessionDuration.avgFirstProgressMs = (prevFirst + analysis.sessionDuration.avgFirstProgressMs) / sessionCount;
+	const prevElapsed = period.sessionDuration.avgTotalElapsedMs * (sessionCount - 1);
+	period.sessionDuration.avgTotalElapsedMs = (prevElapsed + analysis.sessionDuration.avgTotalElapsedMs) / sessionCount;
+	const prevWait = period.sessionDuration.avgWaitTimeMs * (sessionCount - 1);
+	period.sessionDuration.avgWaitTimeMs = (prevWait + analysis.sessionDuration.avgWaitTimeMs) / sessionCount;
+}
+
+/** Merge conversation pattern metrics from analysis into period. */
+function _muaMergeConversationPatterns(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.conversationPatterns) { return; }
+	period.conversationPatterns.multiTurnSessions += analysis.conversationPatterns.multiTurnSessions;
+	period.conversationPatterns.singleTurnSessions += analysis.conversationPatterns.singleTurnSessions;
+	period.conversationPatterns.maxTurnsInSession = Math.max(
+		period.conversationPatterns.maxTurnsInSession,
+		analysis.conversationPatterns.maxTurnsInSession
+	);
+	const totalSessions = period.conversationPatterns.multiTurnSessions + period.conversationPatterns.singleTurnSessions;
+	if (totalSessions <= 0) { return; }
+	const prevTotalTurns = period.conversationPatterns.avgTurnsPerSession * (totalSessions - 1);
+	period.conversationPatterns.avgTurnsPerSession = (prevTotalTurns + analysis.conversationPatterns.avgTurnsPerSession) / totalSessions;
+}
+
+/** Merge thinking effort data from analysis into period. */
+function _muaMergeThinkingEffort(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.thinkingEffort) { return; }
+	if (!period.thinkingEffortUsage) {
+		period.thinkingEffortUsage = { byEffort: {}, sessionCount: 0, switchCount: 0 };
+	}
+	period.thinkingEffortUsage.sessionCount++;
+	period.thinkingEffortUsage.switchCount += analysis.thinkingEffort.switchCount;
+	for (const [effort, count] of Object.entries(analysis.thinkingEffort.byEffort)) {
+		period.thinkingEffortUsage.byEffort[effort] = (period.thinkingEffortUsage.byEffort[effort] || 0) + count;
+	}
+}
+
 /**
  * Merge usage analysis data into period stats
  */
 export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
-	// Merge tool calls
 	period.toolCalls.total += analysis.toolCalls.total;
 	for (const [tool, count] of Object.entries(analysis.toolCalls.byTool)) {
 		period.toolCalls.byTool[tool] = (period.toolCalls.byTool[tool] || 0) + count;
 	}
-
-	// Merge mode usage
 	period.modeUsage.ask += analysis.modeUsage.ask;
 	period.modeUsage.edit += analysis.modeUsage.edit;
 	period.modeUsage.agent += analysis.modeUsage.agent;
 	period.modeUsage.plan += analysis.modeUsage.plan;
 	period.modeUsage.customAgent += analysis.modeUsage.customAgent;
 	period.modeUsage.cli += analysis.modeUsage.cli;
-
-	// Merge context references
-	period.contextReferences.file += analysis.contextReferences.file;
-	period.contextReferences.selection += analysis.contextReferences.selection;
-	period.contextReferences.implicitSelection += analysis.contextReferences.implicitSelection || 0;
-	period.contextReferences.symbol += analysis.contextReferences.symbol;
-	period.contextReferences.codebase += analysis.contextReferences.codebase;
-	period.contextReferences.workspace += analysis.contextReferences.workspace;
-	period.contextReferences.terminal += analysis.contextReferences.terminal;
-	period.contextReferences.vscode += analysis.contextReferences.vscode;
-	period.contextReferences.terminalLastCommand += analysis.contextReferences.terminalLastCommand || 0;
-	period.contextReferences.terminalSelection += analysis.contextReferences.terminalSelection || 0;
-	period.contextReferences.clipboard += analysis.contextReferences.clipboard || 0;
-	period.contextReferences.changes += analysis.contextReferences.changes || 0;
-	period.contextReferences.outputPanel += analysis.contextReferences.outputPanel || 0;
-	period.contextReferences.problemsPanel += analysis.contextReferences.problemsPanel || 0;
-	period.contextReferences.pullRequest += analysis.contextReferences.pullRequest || 0;
-
-	// Merge contentReferences counts
-	period.contextReferences.copilotInstructions += analysis.contextReferences.copilotInstructions || 0;
-	period.contextReferences.agentsMd += analysis.contextReferences.agentsMd || 0;
-
-	// Merge byKind tracking
-	for (const [kind, count] of Object.entries(analysis.contextReferences.byKind || {})) {
-		period.contextReferences.byKind[kind] = (period.contextReferences.byKind[kind] || 0) + count;
-	}
-
-	// Merge byPath tracking
-	for (const [path, count] of Object.entries(analysis.contextReferences.byPath || {})) {
-		period.contextReferences.byPath[path] = (period.contextReferences.byPath[path] || 0) + count;
-	}
-
-	// Merge MCP tools
+	_muaMergeContextRefFields(period, analysis);
+	_muaMergeContextRefMaps(period, analysis);
 	period.mcpTools.total += analysis.mcpTools.total;
 	for (const [server, count] of Object.entries(analysis.mcpTools.byServer)) {
 		period.mcpTools.byServer[server] = (period.mcpTools.byServer[server] || 0) + count;
@@ -683,143 +793,18 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	for (const [tool, count] of Object.entries(analysis.mcpTools.byTool)) {
 		period.mcpTools.byTool[tool] = (period.mcpTools.byTool[tool] || 0) + count;
 	}
-
-	// Merge model switching data
-	// Ensure modelSwitching exists (backward compatibility with old cache)
-	if (!analysis.modelSwitching) {
-		analysis.modelSwitching = {
-			uniqueModels: [],
-			modelCount: 0,
-			switchCount: 0,
-			tiers: { standard: [], premium: [], unknown: [] },
-			hasMixedTiers: false,
-			standardRequests: 0,
-			premiumRequests: 0,
-			unknownRequests: 0,
-			totalRequests: 0
-		};
-	}
-
-	// Only count sessions with at least 1 model detected for model switching stats
-	// Sessions without detected models (modelCount === 0) should not affect the average
-	if (analysis.modelSwitching.modelCount > 0) {
-		period.modelSwitching.totalSessions++;
-		period.modelSwitching.modelsPerSession.push(analysis.modelSwitching.modelCount);
-
-		// Track unique models by tier
-		for (const model of analysis.modelSwitching.tiers.standard) {
-			if (!period.modelSwitching.standardModels.includes(model)) {
-				period.modelSwitching.standardModels.push(model);
-			}
-		}
-		for (const model of analysis.modelSwitching.tiers.premium) {
-			if (!period.modelSwitching.premiumModels.includes(model)) {
-				period.modelSwitching.premiumModels.push(model);
-			}
-		}
-		for (const model of analysis.modelSwitching.tiers.unknown) {
-			if (!period.modelSwitching.unknownModels.includes(model)) {
-				period.modelSwitching.unknownModels.push(model);
-			}
-		}
-
-		// Count sessions with mixed tiers
-		if (analysis.modelSwitching.hasMixedTiers) {
-			period.modelSwitching.mixedTierSessions++;
-		}
-
-		// Aggregate request counts per tier
-		period.modelSwitching.standardRequests += analysis.modelSwitching.standardRequests || 0;
-		period.modelSwitching.premiumRequests += analysis.modelSwitching.premiumRequests || 0;
-		period.modelSwitching.unknownRequests += analysis.modelSwitching.unknownRequests || 0;
-		period.modelSwitching.totalRequests += analysis.modelSwitching.totalRequests || 0;
-
-		// Calculate aggregate statistics
-		if (period.modelSwitching.modelsPerSession.length > 0) {
-			const counts = period.modelSwitching.modelsPerSession;
-			period.modelSwitching.averageModelsPerSession = counts.reduce((a, b) => a + b, 0) / counts.length;
-			period.modelSwitching.maxModelsPerSession = Math.max(...counts);
-			period.modelSwitching.minModelsPerSession = Math.min(...counts);
-			period.modelSwitching.switchingFrequency = (counts.filter(c => c > 1).length / counts.length) * 100;
-		}
-	}
-	
-	// Merge new enhanced metrics
-	if (analysis.editScope) {
-		period.editScope.singleFileEdits += analysis.editScope.singleFileEdits;
-		period.editScope.multiFileEdits += analysis.editScope.multiFileEdits;
-		period.editScope.totalEditedFiles += analysis.editScope.totalEditedFiles;
-		// Recalculate average
-		const editSessions = period.editScope.singleFileEdits + period.editScope.multiFileEdits;
-		period.editScope.avgFilesPerSession = editSessions > 0 
-			? period.editScope.totalEditedFiles / editSessions 
-			: 0;
-	}
-	
-	if (analysis.applyUsage) {
-		period.applyUsage.totalApplies += analysis.applyUsage.totalApplies;
-		period.applyUsage.totalCodeBlocks += analysis.applyUsage.totalCodeBlocks;
-		// Recalculate apply rate
-		period.applyUsage.applyRate = period.applyUsage.totalCodeBlocks > 0
-			? (period.applyUsage.totalApplies / period.applyUsage.totalCodeBlocks) * 100
-			: 0;
-	}
-	
-	if (analysis.sessionDuration) {
-		period.sessionDuration.totalDurationMs += analysis.sessionDuration.totalDurationMs;
-		// Calculate avgDurationMs as total / sessionCount
-		const sessionCount = period.sessions;
-		if (sessionCount > 0) {
-			period.sessionDuration.avgDurationMs = period.sessionDuration.totalDurationMs / sessionCount;
-			
-			// For other timing metrics, use weighted averaging (approximation across per-session averages)
-			const prevAvgFirstProgress = period.sessionDuration.avgFirstProgressMs * (sessionCount - 1);
-			period.sessionDuration.avgFirstProgressMs = (prevAvgFirstProgress + analysis.sessionDuration.avgFirstProgressMs) / sessionCount;
-			
-			const prevAvgTotalElapsed = period.sessionDuration.avgTotalElapsedMs * (sessionCount - 1);
-			period.sessionDuration.avgTotalElapsedMs = (prevAvgTotalElapsed + analysis.sessionDuration.avgTotalElapsedMs) / sessionCount;
-			
-			const prevAvgWaitTime = period.sessionDuration.avgWaitTimeMs * (sessionCount - 1);
-			period.sessionDuration.avgWaitTimeMs = (prevAvgWaitTime + analysis.sessionDuration.avgWaitTimeMs) / sessionCount;
-		}
-	}
-	
-	if (analysis.conversationPatterns) {
-		period.conversationPatterns.multiTurnSessions += analysis.conversationPatterns.multiTurnSessions;
-		period.conversationPatterns.singleTurnSessions += analysis.conversationPatterns.singleTurnSessions;
-		period.conversationPatterns.maxTurnsInSession = Math.max(
-			period.conversationPatterns.maxTurnsInSession,
-			analysis.conversationPatterns.maxTurnsInSession
-		);
-		// Calculate average turns by summing total turns across all sessions
-		const totalSessions = period.conversationPatterns.multiTurnSessions + period.conversationPatterns.singleTurnSessions;
-		if (totalSessions > 0) {
-			// Reconstruct previous total turns from previous average
-			const prevTotalTurns = period.conversationPatterns.avgTurnsPerSession * (totalSessions - 1);
-			// Add current session's turn count (which is stored in avgTurnsPerSession for single session)
-			const newTotalTurns = prevTotalTurns + analysis.conversationPatterns.avgTurnsPerSession;
-			// Calculate true average
-			period.conversationPatterns.avgTurnsPerSession = newTotalTurns / totalSessions;
-		}
-	}
-	
+	_muaMergeModelSwitching(period, analysis);
+	_muaMergeEditScope(period, analysis);
+	_muaMergeApplyUsage(period, analysis);
+	_muaMergeSessionDuration(period, analysis);
+	_muaMergeConversationPatterns(period, analysis);
 	if (analysis.agentTypes) {
 		period.agentTypes.editsAgent += analysis.agentTypes.editsAgent;
 		period.agentTypes.defaultAgent += analysis.agentTypes.defaultAgent;
 		period.agentTypes.workspaceAgent += analysis.agentTypes.workspaceAgent;
 		period.agentTypes.other += analysis.agentTypes.other;
 	}
-
-	if (analysis.thinkingEffort) {
-		if (!period.thinkingEffortUsage) {
-			period.thinkingEffortUsage = { byEffort: {}, sessionCount: 0, switchCount: 0 };
-		}
-		period.thinkingEffortUsage.sessionCount++;
-		period.thinkingEffortUsage.switchCount += analysis.thinkingEffort.switchCount;
-		for (const [effort, count] of Object.entries(analysis.thinkingEffort.byEffort)) {
-			period.thinkingEffortUsage.byEffort[effort] = (period.thinkingEffortUsage.byEffort[effort] || 0) + count;
-		}
-	}
+	_muaMergeThinkingEffort(period, analysis);
 }
 
 /**
