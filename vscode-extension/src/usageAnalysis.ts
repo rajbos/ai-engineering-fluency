@@ -327,6 +327,45 @@ function extractAgentMetrics(req: SessionRequestRaw): AgentMetrics {
 /**
  * Extract edited file paths and codeblock/apply counts from a request's response items.
  */
+type SingleEditObj = { text?: unknown; range?: { startLineNumber?: number; endLineNumber?: number } };
+
+/** Count lines added/removed from a single edit object, accumulating into languageUsage. */
+function _eemCountSingleEdit(editObj: SingleEditObj, ext: string, languageUsage: LanguageUsage): { linesAdded: number; linesRemoved: number } {
+	let linesAdded = 0;
+	let linesRemoved = 0;
+	if (typeof editObj.text === 'string' && editObj.text) {
+		const added = (editObj.text.match(/\n/g) ?? []).length + (editObj.text.endsWith('\n') ? 0 : 1);
+		linesAdded += added;
+		if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+		languageUsage[ext].linesAdded += added;
+	}
+	if (editObj.range && typeof editObj.range.startLineNumber === 'number' && typeof editObj.range.endLineNumber === 'number') {
+		const removed = Math.max(0, editObj.range.endLineNumber - editObj.range.startLineNumber);
+		linesRemoved += removed;
+		if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+		languageUsage[ext].linesRemoved += removed;
+	}
+	return { linesAdded, linesRemoved };
+}
+
+/** Process all edit groups for a textEditGroup response item, returning line delta totals. */
+function _eemProcessEdits(respRaw: unknown, ext: string, languageUsage: LanguageUsage): { linesAdded: number; linesRemoved: number } {
+	const respRawAny = respRaw as { edits?: unknown };
+	let linesAdded = 0;
+	let linesRemoved = 0;
+	if (!Array.isArray(respRawAny.edits)) { return { linesAdded, linesRemoved }; }
+	for (const editGroup of respRawAny.edits as unknown[]) {
+		if (!Array.isArray(editGroup)) { continue; }
+		for (const edit of editGroup as unknown[]) {
+			if (!edit || typeof edit !== 'object') { continue; }
+			const delta = _eemCountSingleEdit(edit as SingleEditObj, ext, languageUsage);
+			linesAdded += delta.linesAdded;
+			linesRemoved += delta.linesRemoved;
+		}
+	}
+	return { linesAdded, linesRemoved };
+}
+
 function extractEditMetrics(req: SessionRequestRaw): EditMetrics {
 	const editedFilePaths: string[] = [];
 	let codeBlocks = 0;
@@ -335,46 +374,24 @@ function extractEditMetrics(req: SessionRequestRaw): EditMetrics {
 	let linesRemoved = 0;
 	const languageUsage: LanguageUsage = {};
 
-	if (req.response && Array.isArray(req.response)) {
-		for (const respRaw of req.response as ResponseItemRaw[]) {
-			if (!respRaw) { continue; }
-			if (respRaw.kind === 'textEditGroup' && respRaw.uri) {
-				const filePath = respRaw.uri.path || JSON.stringify(respRaw.uri);
-				editedFilePaths.push(filePath);
-
-				const ext = normalizeExtension(filePath);
-				const respRawAny = respRaw as unknown as { edits?: unknown };
-				if (Array.isArray(respRawAny.edits)) {
-					for (const editGroup of respRawAny.edits as unknown[]) {
-						if (!Array.isArray(editGroup)) { continue; }
-						for (const edit of editGroup as unknown[]) {
-							if (!edit || typeof edit !== 'object') { continue; }
-							const editObj = edit as { text?: unknown; range?: { startLineNumber?: number; endLineNumber?: number } };
-							if (typeof editObj.text === 'string' && editObj.text) {
-								const added = (editObj.text.match(/\n/g) ?? []).length + (editObj.text.endsWith('\n') ? 0 : 1);
-								linesAdded += added;
-								if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-								languageUsage[ext].linesAdded += added;
-							}
-							if (editObj.range && typeof editObj.range.startLineNumber === 'number' && typeof editObj.range.endLineNumber === 'number') {
-								const removed = Math.max(0, editObj.range.endLineNumber - editObj.range.startLineNumber);
-								linesRemoved += removed;
-								if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-								languageUsage[ext].linesRemoved += removed;
-							}
-						}
-					}
-				}
-			}
-			if (respRaw.kind === 'codeblockUri') {
-				codeBlocks++;
-				if (respRaw.isEdit === true) {
-					applies++;
-				}
-			}
+	if (!req.response || !Array.isArray(req.response)) {
+		return { editedFilePaths, codeBlocks, applies, linesAdded, linesRemoved, languageUsage };
+	}
+	for (const respRaw of req.response as ResponseItemRaw[]) {
+		if (!respRaw) { continue; }
+		if (respRaw.kind === 'textEditGroup' && respRaw.uri) {
+			const filePath = respRaw.uri.path || JSON.stringify(respRaw.uri);
+			editedFilePaths.push(filePath);
+			const ext = normalizeExtension(filePath);
+			const delta = _eemProcessEdits(respRaw, ext, languageUsage);
+			linesAdded += delta.linesAdded;
+			linesRemoved += delta.linesRemoved;
+		}
+		if (respRaw.kind === 'codeblockUri') {
+			codeBlocks++;
+			if (respRaw.isEdit === true) { applies++; }
 		}
 	}
-
 	return { editedFilePaths, codeBlocks, applies, linesAdded, linesRemoved, languageUsage };
 }
 
@@ -424,6 +441,111 @@ function processRequestsForEnhancedMetrics(
 	return { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage };
 }
 
+/** Detect implicit selection from reconstructed delta state and increment counter if found. */
+function _pdsaDetectImplicitSelection(sessionState: DeltaSessionState, analysis: SessionUsageAnalysis): void {
+	if (!sessionState.inputState?.selections || !Array.isArray(sessionState.inputState.selections)) { return; }
+	for (const sel of sessionState.inputState.selections) {
+		if (sel && (sel.startLineNumber !== sel.endLineNumber || sel.startColumn !== sel.endColumn)) {
+			analysis.contextReferences.implicitSelection++;
+			break;
+		}
+	}
+}
+
+/** Process tool/MCP invocations from a single request's response array. */
+function _pdsaProcessRequestResponse(
+	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
+	response: ResponseItemRaw[],
+	analysis: SessionUsageAnalysis
+): void {
+	for (const responseItemRaw of response) {
+		if (!responseItemRaw) { continue; }
+		if (responseItemRaw.kind === 'toolInvocationSerialized' || responseItemRaw.kind === 'prepareToolInvocation') {
+			const toolName = responseItemRaw.toolId || responseItemRaw.toolName || responseItemRaw.invocationMessage?.toolName || responseItemRaw.toolSpecificData?.kind || 'unknown';
+			recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
+		}
+	}
+}
+
+/** Process the reconstructed requests array for mode, tool, and context metrics. */
+function _pdsaProcessRequests(
+	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
+	sessionModeType: string,
+	requests: SessionRequestRaw[],
+	analysis: SessionUsageAnalysis
+): void {
+	for (const request of requests) {
+		if (!request || !request.requestId) { continue; }
+		incrementModeUsage(sessionModeType, analysis.modeUsage);
+		if (request.agent?.id) {
+			const toolName = request.agent.id;
+			analysis.toolCalls.total++;
+			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+		}
+		analyzeRequestContext(request, analysis.contextReferences);
+		if (request.response && Array.isArray(request.response)) {
+			_pdsaProcessRequestResponse(deps, request.response as ResponseItemRaw[], analysis);
+		}
+	}
+}
+
+/** Derive the session-level default model from reconstructed delta state. */
+function _pdsaGetSessionDefaultModel(sessionState: DeltaSessionState): string {
+	return (
+		sessionState.selectedModel?.identifier ||
+		sessionState.selectedModel?.metadata?.id ||
+		sessionState.inputState?.selectedModel?.metadata?.id ||
+		'gpt-4o'
+	).replace(/^copilot\//, '');
+}
+
+/** Compute model switching statistics from reconstructed request list and populate analysis. */
+function _pdsaComputeModelSwitching(
+	deps: Pick<UsageAnalysisDeps, 'modelPricing'>,
+	requests: SessionRequestRaw[],
+	sessionState: DeltaSessionState,
+	analysis: SessionUsageAnalysis
+): void {
+	const sessionDefaultModel = _pdsaGetSessionDefaultModel(sessionState);
+	const models: string[] = [];
+	for (const req of requests) {
+		if (!req || !req.requestId) { continue; }
+		let reqModel = sessionDefaultModel;
+		if (req.modelId) {
+			reqModel = req.modelId.replace(/^copilot\//, '');
+		} else if (req.result?.metadata?.modelId) {
+			reqModel = req.result.metadata.modelId.replace(/^copilot\//, '');
+		} else if (req.result?.details) {
+			reqModel = getModelFromRequest(req, deps.modelPricing);
+		}
+		models.push(reqModel);
+	}
+	const uniqueModels = [...new Set(models)];
+	analysis.modelSwitching.uniqueModels = uniqueModels;
+	analysis.modelSwitching.modelCount = uniqueModels.length;
+	analysis.modelSwitching.totalRequests = models.length;
+	let switchCount = 0;
+	for (let mi = 1; mi < models.length; mi++) {
+		if (models[mi] !== models[mi - 1]) { switchCount++; }
+	}
+	analysis.modelSwitching.switchCount = switchCount;
+	applyModelTierClassification(deps.modelPricing, uniqueModels, models, analysis);
+}
+
+/** Extract thinking effort from delta lines and populate analysis. */
+function _pdsaExtractThinkingEffort(lines: string[], requests: SessionRequestRaw[], analysis: SessionUsageAnalysis): void {
+	const { effortByRequestId, defaultEffort, switchCount: effortSwitchCount } = buildReasoningEffortTimeline(lines);
+	if (defaultEffort === null && effortByRequestId.size === 0) { return; }
+	const byEffort: { [effort: string]: number } = {};
+	for (const [, effort] of effortByRequestId) {
+		byEffort[effort] = (byEffort[effort] || 0) + 1;
+	}
+	if (effortByRequestId.size === 0 && defaultEffort !== null) {
+		byEffort[defaultEffort] = requests.length;
+	}
+	analysis.thinkingEffort = { byEffort, switchCount: effortSwitchCount, defaultEffort };
+}
+
 /**
  * Process a fully-reconstructed delta session state to populate usage analysis.
  * Handles mode detection, context references, tool invocations, model switching,
@@ -435,111 +557,51 @@ function processDeltaSessionAnalysis(
 	lines: string[],
 	analysis: SessionUsageAnalysis
 ): void {
-
-	// Extract session mode from reconstructed state
-	const sessionModeType = sessionState.inputState?.mode 
+	const sessionModeType = sessionState.inputState?.mode
 		? getModeType(sessionState.inputState.mode)
 		: 'ask';
-
-	// Detect implicit selections
-	if (sessionState.inputState?.selections && Array.isArray(sessionState.inputState.selections)) {
-		for (const sel of sessionState.inputState.selections) {
-			if (sel && (sel.startLineNumber !== sel.endLineNumber || sel.startColumn !== sel.endColumn)) {
-				analysis.contextReferences.implicitSelection++;
-				break;
-			}
-		}
-	}
-
-	// Process reconstructed requests array
 	const requests = (sessionState.requests ?? []) as SessionRequestRaw[];
-	for (const request of requests) {
-		if (!request || !request.requestId) { continue; }
 
-		// Count by mode type
-		incrementModeUsage(sessionModeType, analysis.modeUsage);
-
-		// Check for agent in request
-		if (request.agent?.id) {
-			const toolName = request.agent.id;
-			analysis.toolCalls.total++;
-			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-		}
-
-		// Analyze all context references from this request
-		analyzeRequestContext(request, analysis.contextReferences);
-
-		// Extract tool calls and MCP tools from request.response array
-		if (request.response && Array.isArray(request.response)) {
-			for (const responseItemRaw of request.response as ResponseItemRaw[]) {
-				if (!responseItemRaw) { continue; }
-				const responseItem = responseItemRaw;
-				if (responseItem.kind === 'toolInvocationSerialized' || responseItem.kind === 'prepareToolInvocation') {
-					const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || responseItem.toolSpecificData?.kind || 'unknown';
-
-					// Route to MCP or regular tool counters
-					recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
-				}
-			}
-		}
-	}
-
-	// Compute model switching inline from the already-reconstructed state
-	// to avoid re-reading and re-parsing the file in calculateModelSwitching.
-	{
-		// Derive the session-level default model from reconstructed state,
-		// mirroring the selectedModel extraction used in the line-by-line path.
-		const sessionDefaultModel = (
-			sessionState.selectedModel?.identifier ||
-			sessionState.selectedModel?.metadata?.id ||
-			sessionState.inputState?.selectedModel?.metadata?.id ||
-			'gpt-4o'
-		).replace(/^copilot\//, '');
-
-		const models: string[] = [];
-		for (const req of requests) {
-			if (!req || !req.requestId) { continue; }
-			let reqModel = sessionDefaultModel;
-			if (req.modelId) {
-				reqModel = req.modelId.replace(/^copilot\//, '');
-			} else if (req.result?.metadata?.modelId) {
-				reqModel = req.result.metadata.modelId.replace(/^copilot\//, '');
-			} else if (req.result?.details) {
-				reqModel = getModelFromRequest(req, deps.modelPricing);
-			}
-			models.push(reqModel);
-		}
-		const uniqueModels = [...new Set(models)];
-		analysis.modelSwitching.uniqueModels = uniqueModels;
-		analysis.modelSwitching.modelCount = uniqueModels.length;
-		analysis.modelSwitching.totalRequests = models.length;
-		let switchCount = 0;
-		for (let mi = 1; mi < models.length; mi++) {
-			if (models[mi] !== models[mi - 1]) { switchCount++; }
-		}
-		analysis.modelSwitching.switchCount = switchCount;
-		applyModelTierClassification(deps.modelPricing, uniqueModels, models, analysis);
-	}
-
-	// Extract thinking effort (reasoning effort) from delta lines
-	{
-		const { effortByRequestId, defaultEffort, switchCount: effortSwitchCount } = buildReasoningEffortTimeline(lines);
-		if (defaultEffort !== null || effortByRequestId.size > 0) {
-			const byEffort: { [effort: string]: number } = {};
-			for (const [, effort] of effortByRequestId) {
-				byEffort[effort] = (byEffort[effort] || 0) + 1;
-			}
-			// If we have a defaultEffort but no per-request data, record it as the session default
-			if (effortByRequestId.size === 0 && defaultEffort !== null) {
-				byEffort[defaultEffort] = requests.length;
-			}
-			analysis.thinkingEffort = { byEffort, switchCount: effortSwitchCount, defaultEffort };
-		}
-	}
-
-
-	// Derive conversation patterns from mode usage
+	_pdsaDetectImplicitSelection(sessionState, analysis);
+	_pdsaProcessRequests(deps, sessionModeType, requests, analysis);
+	_pdsaComputeModelSwitching(deps, requests, sessionState, analysis);
+	_pdsaExtractThinkingEffort(lines, requests, analysis);
 	deriveConversationPatterns(analysis);
+}
+
+/** Determine the request mode string for a single JSON session request. */
+function _pjsrGetRequestMode(request: SessionRequestRaw, sessionContent: ParsedSessionJson): string {
+	if (request.agent?.id) {
+		const agentId = request.agent.id.toLowerCase();
+		if (agentId.includes('edit')) { return 'edit'; }
+		if (agentId.includes('agent')) { return 'agent'; }
+	} else if (sessionContent.mode?.id) {
+		const modeId = sessionContent.mode.id.toLowerCase();
+		if (modeId.includes('agent')) { return 'agent'; }
+		if (modeId.includes('edit')) { return 'edit'; }
+	}
+	return 'ask';
+}
+
+/** Process a single response item for tool/MCP invocations in a JSON session. */
+function _pjsrProcessResponseItem(
+	responseItem: ResponseItemRaw,
+	analysis: SessionUsageAnalysis,
+	toolNameMap: { [key: string]: string }
+): void {
+	if (responseItem.kind === 'toolInvocationSerialized' || responseItem.kind === 'prepareToolInvocation') {
+		const toolName = responseItem.toolId || responseItem.toolName || responseItem.invocationMessage?.toolName || 'unknown';
+		recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
+	}
+	if (responseItem.kind === 'mcpServersStarting' && responseItem.didStartServerIds) {
+		for (const serverId of responseItem.didStartServerIds) {
+			analysis.mcpTools.total++;
+			analysis.mcpTools.byServer[serverId] = (analysis.mcpTools.byServer[serverId] || 0) + 1;
+		}
+	}
+	if (responseItem.kind === 'inlineReference' && responseItem.inlineReference) {
+		analyzeContentReferences([responseItem], analysis.contextReferences);
+	}
 }
 
 /**
@@ -551,79 +613,21 @@ function processJsonSessionRequests(
 	sessionContent: ParsedSessionJson,
 	analysis: SessionUsageAnalysis
 ): void {
-	// Detect session mode and count interactions per request
-	if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-		for (const requestRaw of sessionContent.requests) {
-			const request = requestRaw as SessionRequestRaw;
-			// Determine mode for each individual request
-			let requestMode = 'ask'; // default
-
-			// Check request-level agent ID first (more specific)
-			if (request.agent?.id) {
-				const agentId = request.agent.id.toLowerCase();
-				if (agentId.includes('edit')) {
-					requestMode = 'edit';
-				} else if (agentId.includes('agent')) {
-					requestMode = 'agent';
-				}
-			}
-			// Fall back to session-level mode if no request-specific agent
-			else if (sessionContent.mode?.id) {
-				const modeId = sessionContent.mode.id.toLowerCase();
-				if (modeId.includes('agent')) {
-					requestMode = 'agent';
-				} else if (modeId.includes('edit')) {
-					requestMode = 'edit';
-				}
-			}
-
-			// Count this request in the appropriate mode
-			if (requestMode === 'agent') {
-				analysis.modeUsage.agent++;
-			} else if (requestMode === 'edit') {
-				analysis.modeUsage.edit++;
-			} else {
-				analysis.modeUsage.ask++;
-			}
-
-			// Analyze all context references from this request
-			analyzeRequestContext(request, analysis.contextReferences);
-
-			// Analyze response for tool calls and MCP tools
-			if (request.response && Array.isArray(request.response)) {
-				for (const responseItemRaw of request.response as ResponseItemRaw[]) {
-					if (!responseItemRaw) { continue; }
-					const responseItem = responseItemRaw;
-					// Detect tool invocations
-					if (responseItem.kind === 'toolInvocationSerialized' ||
-						responseItem.kind === 'prepareToolInvocation') {
-						const toolName = responseItem.toolId ||
-							responseItem.toolName ||
-							responseItem.invocationMessage?.toolName ||
-							'unknown';
-
-						// Route to MCP or regular tool counters
-						recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
-					}
-
-					// Detect MCP servers starting
-					if (responseItem.kind === 'mcpServersStarting' && responseItem.didStartServerIds) {
-						for (const serverId of responseItem.didStartServerIds) {
-							analysis.mcpTools.total++;
-							analysis.mcpTools.byServer[serverId] = (analysis.mcpTools.byServer[serverId] || 0) + 1;
-						}
-					}
-
-					// Detect inline references in response items
-					if (responseItem.kind === 'inlineReference' && responseItem.inlineReference) {
-						// Treat response inlineReferences as contentReferences
-						analyzeContentReferences([responseItem], analysis.contextReferences);
-					}
-				}
+	if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) { return; }
+	for (const requestRaw of sessionContent.requests) {
+		const request = requestRaw as SessionRequestRaw;
+		const requestMode = _pjsrGetRequestMode(request, sessionContent);
+		if (requestMode === 'agent') { analysis.modeUsage.agent++; }
+		else if (requestMode === 'edit') { analysis.modeUsage.edit++; }
+		else { analysis.modeUsage.ask++; }
+		analyzeRequestContext(request, analysis.contextReferences);
+		if (request.response && Array.isArray(request.response)) {
+			for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+				if (!responseItemRaw) { continue; }
+				_pjsrProcessResponseItem(responseItemRaw, analysis, deps.toolNameMap);
 			}
 		}
 	}
-
 }
 
 /**
