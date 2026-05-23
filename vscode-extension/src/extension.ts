@@ -3751,477 +3751,35 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async getSessionLogData(sessionFile: string): Promise<SessionLogData> {
 		const details = await this.getSessionFileDetails(sessionFile);
-		const turns: ChatTurn[] = [];
 		let subAgentsStarted: number | undefined;
+		let turns: ChatTurn[] = [];
 
 		try {
-// Delegate to ecosystem adapter if available
-const eco = this.findEcosystem(sessionFile);
-if (eco?.buildTurns) {
-const result = await eco.buildTurns(sessionFile);
-turns.push(...result.turns);
-return {
-file: details.file,
-title: details.title || null,
-editorSource: details.editorSource,
-editorName: details.editorName || getEcosystemDisplayName(eco, sessionFile),
-size: details.size,
-modified: details.modified,
-interactions: details.interactions,
-contextReferences: details.contextReferences,
-firstInteraction: details.firstInteraction,
-lastInteraction: details.lastInteraction,
-turns,
-...(result.actualTokens !== undefined ? { actualTokens: result.actualTokens } : {}),
-usageAnalysis: undefined
-};
-}
-			const fileContent = await fs.promises.readFile(sessionFile, 'utf8');
-
-			// Check if this is a UUID-only file (new Copilot CLI format)
-			if (this.isUuidPointerFile(fileContent)) {
-				// This is a session ID pointer file with no actual conversation data
-				return {
-					file: details.file,
-					title: details.title || null,
-					editorSource: details.editorSource,
-					editorName: details.editorName || details.editorSource,
-					size: details.size,
-					modified: details.modified,
-					interactions: details.interactions,
-					contextReferences: details.contextReferences,
-					firstInteraction: details.firstInteraction,
-					lastInteraction: details.lastInteraction,
-					turns,
-					usageAnalysis: undefined
-				};
+			const eco = this.findEcosystem(sessionFile);
+			if (eco?.buildTurns) {
+				const result = await eco.buildTurns(sessionFile);
+				return this.buildBaseLogData(details, result.turns, undefined, undefined, eco, sessionFile, result.actualTokens);
 			}
 
-			// Check for JSONL content (either by extension or content detection)
+			const fileContent = await fs.promises.readFile(sessionFile, 'utf8');
+			if (this.isUuidPointerFile(fileContent)) {
+				return this.buildBaseLogData(details, [], undefined);
+			}
+
 			const isJsonlContent = sessionFile.endsWith('.jsonl') || this.isJsonlContent(fileContent);
-
 			if (isJsonlContent) {
-				// Handle JSONL formats (CLI and VS Code incremental/delta-based)
 				const lines = fileContent.trim().split('\n').filter(l => l.trim());
-
-				// Detect if this is delta-based format (VS Code incremental)
-				let isDeltaBased = false;
-				if (lines.length > 0) {
-					try {
-						const firstLine = JSON.parse(lines[0]);
-						if (firstLine && typeof firstLine.kind === 'number') {
-							isDeltaBased = true;
-						}
-					} catch {
-						// Not delta format
-					}
-				}
-
+				const isDeltaBased = this.detectIsDeltaBased(lines);
 				if (isDeltaBased) {
-					// Delta-based format: reconstruct full state asynchronously to avoid
-					// blocking the extension host event loop on large files.
-					const { sessionState } = await _reconstructJsonlStateAsync(lines);
-
-					// Build per-request effort map from delta lines
-					const { effortByRequestId } = _buildReasoningEffortTimeline(lines);
-
-					// Extract session-level info
-					let sessionMode: 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' = 'ask';
-					let currentModel: string | null = null;
-
-					if (sessionState.inputState?.mode) {
-						sessionMode = this.getModeType(sessionState.inputState.mode);
-						if (sessionState.inputState?.selectedModel?.metadata?.id) {
-							currentModel = sessionState.inputState.selectedModel.metadata.id;
-						}
-					}
-
-					// Extract turns from reconstructed requests array
-					const requests = sessionState.requests || [];
-					// Pre-compute regex-based token extraction for lines that failed JSON.parse
-					const rawUsageFallback = this.extractPerRequestUsageFromRawLines(lines);
-					for (let i = 0; i < requests.length; i++) {
-						const request = requests[i];
-						if (!request || !request.requestId) { continue; }
-
-						const contextRefs = this.createEmptyContextRefs();
-						const userMessage = request.message?.text || '';
-
-						// Analyze all context references from this request
-						this.analyzeRequestContext(request, contextRefs);
-
-						// Get model from request or fall back to session model
-						const requestModel = request.modelId ||
-							currentModel ||
-							this.getModelFromRequest(request) ||
-							'gpt-4';
-
-						// Extract response data
-						const { responseText, thinkingText, toolCalls, mcpTools } = this.extractResponseData(request.response || []);
-						
-						// Extract actual usage data from request.result if available
-						let actualUsage: ActualUsage | undefined;
-						if (request.result?.usage) {
-							// OLD FORMAT (pre-Feb 2026): Tokens nested under request.result.usage
-							const u = request.result.usage;
-							actualUsage = {
-								completionTokens: typeof u.completionTokens === 'number' ? u.completionTokens : 0,
-								promptTokens: typeof u.promptTokens === 'number' ? u.promptTokens : 0,
-								promptTokenDetails: Array.isArray(u.promptTokenDetails) ? u.promptTokenDetails : undefined,
-								details: typeof request.result.details === 'string' ? request.result.details : undefined
-							};
-						} else if (typeof request.result?.promptTokens === 'number' && typeof request.result?.outputTokens === 'number') {
-							// NEW FORMAT (Feb 2026+): Tokens directly at request.result level
-							actualUsage = {
-								completionTokens: request.result.outputTokens,
-								promptTokens: request.result.promptTokens,
-								details: typeof request.result.details === 'string' ? request.result.details : undefined
-							};
-						} else if (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number' && typeof request.result.metadata.outputTokens === 'number') {
-							// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
-							actualUsage = {
-								completionTokens: request.result.metadata.outputTokens,
-								promptTokens: request.result.metadata.promptTokens,
-								details: typeof request.result.details === 'string' ? request.result.details : undefined
-							};
-						}
-
-						// FALLBACK: If reconstruction missed result data (bad escape chars), use regex extraction
-						if (!actualUsage) {
-							const extracted = rawUsageFallback.get(i);
-							if (extracted) {
-								actualUsage = {
-									completionTokens: extracted.outputTokens,
-									promptTokens: extracted.promptTokens
-								};
-							}
-						}
-
-					const turn: ChatTurn = {
-						turnNumber: i + 1,
-						timestamp: request.timestamp ? new Date(request.timestamp).toISOString() : null,
-						mode: sessionMode,
-						userMessage,
-						assistantResponse: responseText,
-						model: requestModel,
-						toolCalls,
-						contextReferences: contextRefs,
-						mcpTools,
-						inputTokensEstimate: this.estimateTokensFromText(userMessage, requestModel),
-						outputTokensEstimate: this.estimateTokensFromText(responseText, requestModel),
-						thinkingTokensEstimate: this.estimateTokensFromText(thinkingText, requestModel),
-						actualUsage,
-						thinkingEffort: effortByRequestId.get(request.requestId)
-					};
-
-					turns.push(turn);
+					turns = await this.buildDeltaJsonlTurns(lines);
+				} else {
+					const cliResult = await this.buildCliJsonlTurns(lines, sessionFile, fileContent);
+					turns = cliResult.turns;
+					subAgentsStarted = cliResult.subAgentsStarted;
 				}
 			} else {
-			// Non-delta JSONL (Copilot CLI format, also used by JetBrains IDE partition files)
-			let turnNumber = 0;
-			// Default model is 'gpt-4o' for Copilot CLI sessions but JetBrains JSONL never
-			// carries a model field, so for JetBrains files we'd rather show 'unknown' or a
-			// best-effort hint derived from `toolCallId` prefixes (toolu_* → claude,
-			// call_* → gpt) than mislead users with a hard-coded gpt-4o.
-			const isJetBrainsFile = isJetBrainsSessionPath(sessionFile);
-			// Per-turn mode for JetBrains is computed below as we scan events
-			// (default 'ask', upgraded to 'agent' on tool.execution_start within
-			// the same turn). The conversation-wide detector
-			// `detectJetBrainsModeFromContent` is no longer needed for this path.
-
-			const jetBrainsModelHint: string | null = isJetBrainsFile
-				? detectJetBrainsModelHintFromContent(fileContent)
-				: null;
-			let cliSessionModel = isJetBrainsFile ? (jetBrainsModelHint || 'unknown') : 'unknown';
-			let cliSessionEffort: string | undefined;
-
-			// JetBrains partition files (~/.copilot/jb/{uuid}/partition-{n}.jsonl) share
-			// this fallback parser with the Copilot CLI but are IDE chat sessions, so
-			// per-turn `mode` should be ask/agent rather than the catch-all `cli`.
-
-			// Pre-scan for model and effort:
-			// 1. session.start.data.selectedModel (older CLI format)
-			// 2. session.model_change.data.newModel (current CLI format)
-			// 3. First assistant.message.data.model (per-turn model)
-			// 4. First tool.execution_complete.data.model (newer CLI format — session.start has no selectedModel)
-			let cliModelFound = false;
-			for (const line of lines) {
-				try {
-					const ev = JSON.parse(line);
-					if (ev.type === 'session.start' && ev.data) {
-						if (typeof ev.data.selectedModel === 'string') {
-							cliSessionModel = ev.data.selectedModel;
-							cliModelFound = true;
-						}
-						if (typeof ev.data.reasoningEffort === 'string') { cliSessionEffort = ev.data.reasoningEffort; }
-						if (cliModelFound) { break; }
-						// No model in session.start — continue scanning
-					}
-					// Current CLI format: model change event
-					if (ev.type === 'session.model_change' && typeof ev.data?.newModel === 'string') {
-						cliSessionModel = ev.data.newModel;
-						cliModelFound = true;
-						break;
-					}
-					// Per-turn model from assistant.message
-					if (ev.type === 'assistant.message' && typeof ev.data?.model === 'string') {
-						cliSessionModel = ev.data.model;
-						cliModelFound = true;
-						break;
-					}
-					// Newer format: model stored per tool call result
-					if (ev.type === 'tool.execution_complete' && typeof ev.data?.model === 'string') {
-						cliSessionModel = ev.data.model;
-						break;
-					}
-					// JetBrains / generic: model in assistant.turn_start.data.model
-					if (ev.type === 'assistant.turn_start' && typeof ev.data?.model === 'string') {
-						cliSessionModel = ev.data.model;
-						break;
-					}
-					// Fallback: session.start.data.model (not selectedModel)
-					if (ev.type === 'session.start' && typeof ev.data?.model === 'string' && !cliModelFound) {
-						cliSessionModel = ev.data.model;
-						cliModelFound = true;
-					}
-				} catch { /* skip */ }
-			}
-
-			// Track output tokens per subagent (keyed by parentToolCallId)
-			const subAgentOutputTokenMap = new Map<string, number>();
-
-			for (const line of lines) {
-				try {
-					const event = JSON.parse(line);
-
-					// Track model changes so subsequent turns use the correct model
-					if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-						cliSessionModel = event.data.newModel;
-					}
-
-					// Handle Copilot CLI format (type: 'user.message')
-					if (event.type === 'user.message' && event.data?.content) {
-						turnNumber++;
-						const contextRefs = this.createEmptyContextRefs();
-						const userMessage = event.data.content;
-						this.analyzeContextReferences(userMessage, contextRefs);
-						let turnModel: string = event.model || event.data?.model || cliSessionModel;
-						// JetBrains JSONL never persists the model, so be honest:
-						//   • First turn → "claude?" / "gpt?" — the family is inferred from
-						//     the first tool.execution_start.toolCallId prefix.
-						//   • Subsequent turns → "?" — we can't tell whether the user
-						//     switched models partway through the session.
-						// The renderer recognises these sentinels and renders an
-						// explanatory tooltip.
-						if (isJetBrainsFile) {
-							if (turnNumber === 1) {
-								turnModel = jetBrainsModelHint && jetBrainsModelHint !== 'unknown'
-									? `${jetBrainsModelHint}?`
-									: '?';
-							} else {
-								turnModel = '?';
-							}
-						}
-						const turnEffort: string | undefined = typeof event.data?.reasoningEffort === 'string'
-							? event.data.reasoningEffort
-							: cliSessionEffort;
-						const turn: ChatTurn = {
-							turnNumber,
-							timestamp: event.timestamp ? new Date(event.timestamp).toISOString() : null,
-							mode: isJetBrainsFile ? 'ask' : 'cli',
-							userMessage,
-							assistantResponse: '',
-							model: turnModel,
-							toolCalls: [],
-							contextReferences: contextRefs,
-							mcpTools: [],
-							inputTokensEstimate: this.estimateTokensFromText(userMessage, turnModel),
-							outputTokensEstimate: 0,
-							thinkingTokensEstimate: 0,
-							thinkingEffort: turnEffort
-						};
-						turns.push(turn);
-					}
-
-					// Handle CLI assistant response
-					if (event.type === 'assistant.message' && event.data?.content) {
-						if (event.data.parentToolCallId) {
-							// Subagent response — accumulate output tokens keyed by parent tool call
-							const prev = subAgentOutputTokenMap.get(event.data.parentToolCallId) ?? 0;
-							subAgentOutputTokenMap.set(event.data.parentToolCallId, prev + this.estimateTokensFromText(event.data.content, cliSessionModel));
-						} else if (turns.length > 0) {
-							const lastTurn = turns[turns.length - 1];
-							// Update turn model from per-event model if available
-							if (typeof event.data.model === 'string') {
-								lastTurn.model = event.data.model;
-							}
-							lastTurn.assistantResponse += event.data.content;
-							lastTurn.outputTokensEstimate = this.estimateTokensFromText(lastTurn.assistantResponse, lastTurn.model || cliSessionModel);
-						}
-					}
-
-					// Handle CLI tool calls (tool.execution_start is the actual event type in current CLI format)
-					const CLI_SUB_AGENT_TOOLS = new Set(['task', 'read_agent', 'write_agent', 'list_agents']);
-					if ((event.type === 'tool.call' || event.type === 'tool.result' || event.type === 'tool.execution_start')
-					&& turns.length > 0
-					&& !event.data?.parentToolCallId) {
-						const lastTurn = turns[turns.length - 1];
-						const toolName = event.data?.toolName || event.toolName || 'unknown';
-						const isSubAgent = CLI_SUB_AGENT_TOOLS.has(toolName);
-
-						// JetBrains: a turn defaults to 'ask' and is upgraded to 'agent'
-						// the moment we see any tool execution within it. This lets us
-						// detect per-turn mode flips (e.g. agent → ask later in the
-						// conversation) since JetBrains JSONL has no explicit mode field.
-						if (isJetBrainsFile && event.type === 'tool.execution_start') {
-							lastTurn.mode = 'agent';
-						}
-
-						// Check if this is an MCP tool by name pattern
-						if (this.isMcpTool(toolName)) {
-							const serverName = this.extractMcpServerName(toolName);
-							lastTurn.mcpTools.push({ server: serverName, tool: toolName });
-						} else if (isSubAgent) {
-							const subAgentCallId: string | undefined = event.data?.toolCallId;
-							const subAgentEntry: any = {
-								toolName,
-								arguments: event.data?.arguments ? JSON.stringify(event.data.arguments) : undefined,
-								result: undefined,
-								isSubAgent: true,
-							};
-							if (subAgentCallId) { subAgentEntry._callId = subAgentCallId; }
-							lastTurn.toolCalls.push(subAgentEntry);
-						} else {
-							// Add to regular tool calls (skip duplicate execution_start events per toolCallId)
-							const callId: string | undefined = event.data?.toolCallId;
-							const alreadyAdded = callId && lastTurn.toolCalls.some((tc: any) => tc._callId === callId);
-							if (!alreadyAdded) {
-								const tc: any = {
-									toolName,
-									arguments: event.type !== 'tool.result' ? JSON.stringify(event.data?.arguments || {}) : undefined,
-									result: event.type === 'tool.result' ? event.data?.output : undefined
-								};
-								if (callId) { tc._callId = callId; }
-								lastTurn.toolCalls.push(tc);
-							}
-						}
-					}
-
-					// Handle explicit MCP tool calls from CLI
-					if ((event.type === 'mcp.tool.call' || event.data?.mcpServer) && turns.length > 0) {
-						const lastTurn = turns[turns.length - 1];
-						const serverName = event.data?.mcpServer || 'unknown';
-						const toolName = event.data?.toolName || event.toolName || 'unknown';
-						lastTurn.mcpTools.push({ server: serverName, tool: toolName });
-					}
-
-					// Count distinct subagent sessions launched
-					if (event.type === 'subagent.started') {
-						subAgentsStarted = (subAgentsStarted ?? 0) + 1;
-					}
-				} catch {
-					// Skip malformed lines
-				}
-			}
-
-			// Attach subagent token estimates to sub-agent tool call entries
-			if (subAgentOutputTokenMap.size > 0) {
-				for (const turn of turns) {
-					for (const tc of turn.toolCalls as any[]) {
-						if (tc.isSubAgent && tc._callId) {
-							const outputTokens = subAgentOutputTokenMap.get(tc._callId) ?? 0;
-							let inputTokens = 0;
-							if (tc.arguments) {
-								try {
-									const args = JSON.parse(tc.arguments);
-									const prompt = typeof args?.prompt === 'string' ? args.prompt : tc.arguments;
-									inputTokens = this.estimateTokensFromText(prompt, cliSessionModel);
-								} catch {
-									inputTokens = this.estimateTokensFromText(tc.arguments, cliSessionModel);
-								}
-							}
-							if (outputTokens > 0 || inputTokens > 0) {
-								tc.subAgentTokens = { input: inputTokens, output: outputTokens };
-							}
-						}
-					}
-				}
-			}
-		}
 				const sessionContent = JSON.parse(fileContent);
-				let sessionMode: 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' = 'ask';
-
-				// Detect session-level mode
-				if (sessionContent.mode) {
-					sessionMode = this.getModeType(sessionContent.mode);
-				}
-
-				if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
-					let turnNumber = 0;
-					for (const request of sessionContent.requests) {
-						turnNumber++;
-
-						// Determine mode for this request
-						let requestMode = sessionMode;
-						if (request.agent?.id) {
-							const agentId = request.agent.id.toLowerCase();
-							if (agentId.includes('edit')) {
-								requestMode = 'edit';
-							} else if (agentId.includes('agent')) {
-								requestMode = 'agent';
-							}
-						}
-
-						// Extract user message
-						let userMessage = '';
-						if (request.message?.text) {
-							userMessage = request.message.text;
-						} else if (request.message?.parts) {
-							userMessage = request.message.parts
-								.filter((p: any) => p.text)
-								.map((p: any) => p.text)
-								.join('\n');
-						}
-
-						// Analyze context references
-						const contextRefs = this.createEmptyContextRefs();
-						this.analyzeRequestContext(request, contextRefs);
-
-						// Extract model
-						const model = this.getModelFromRequest(request);
-
-						// Extract response
-						let assistantResponse = '';
-						let thinkingText = '';
-						const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
-						const mcpTools: { server: string; tool: string }[] = [];
-
-						if (request.response && Array.isArray(request.response)) {
-							const { responseText, thinkingText: tt, toolCalls: tc, mcpTools: mcp } = this.extractResponseData(request.response);
-							assistantResponse = responseText;
-							thinkingText = tt;
-							toolCalls.push(...tc);
-							mcpTools.push(...mcp);
-						}
-
-						const turn: ChatTurn = {
-							turnNumber,
-							timestamp: request.timestamp || request.ts || request.result?.timestamp || null,
-							mode: requestMode,
-							userMessage,
-							assistantResponse,
-							model,
-							toolCalls,
-							contextReferences: contextRefs,
-							mcpTools,
-							inputTokensEstimate: this.estimateTokensFromText(userMessage, model),
-							outputTokensEstimate: this.estimateTokensFromText(assistantResponse, model),
-							thinkingTokensEstimate: this.estimateTokensFromText(thinkingText, model)
-						};
-
-						turns.push(turn);
-					}
-				}
+				turns = this.buildJsonSessionTurns(sessionContent);
 			}
 		} catch (error) {
 			this.warn(`Error extracting chat turns from ${sessionFile}: ${error}`);
@@ -4236,26 +3794,317 @@ usageAnalysis: undefined
 		}
 
 		const sessionCache = this.getCachedSessionData(sessionFile);
+		return this.buildBaseLogData(details, turns, usageAnalysis, sessionCache, undefined, undefined, undefined, subAgentsStarted);
+	}
 
+	private buildBaseLogData(
+		details: SessionFileDetails,
+		turns: ChatTurn[],
+		usageAnalysis: SessionUsageAnalysis | undefined,
+		sessionCache?: SessionFileCache | null,
+		eco?: IEcosystemAdapter | null,
+		sessionFile?: string,
+		ecoActualTokens?: number,
+		subAgentsStarted?: number
+	): SessionLogData {
+		const editorName = details.editorName || (eco && sessionFile ? getEcosystemDisplayName(eco, sessionFile) : details.editorSource);
+		const actualTokens = ecoActualTokens ?? sessionCache?.actualTokens ?? 0;
 		return {
-			file: details.file,
-			title: details.title || null,
-			editorSource: details.editorSource,
-			editorName: details.editorName || details.editorSource,
-			size: details.size,
-			modified: details.modified,
-			interactions: details.interactions,
-			contextReferences: details.contextReferences,
-			firstInteraction: details.firstInteraction,
-			lastInteraction: details.lastInteraction,
-			turns,
-			usageAnalysis,
-			actualTokens: sessionCache?.actualTokens || 0,
+			file: details.file, title: details.title || null, editorSource: details.editorSource,
+			editorName, size: details.size, modified: details.modified, interactions: details.interactions,
+			contextReferences: details.contextReferences, firstInteraction: details.firstInteraction,
+			lastInteraction: details.lastInteraction, turns, usageAnalysis, actualTokens,
+			...this.buildLogDataCacheFields(sessionCache, subAgentsStarted),
+		};
+	}
+
+	private buildLogDataCacheFields(sessionCache: SessionFileCache | null | undefined, subAgentsStarted?: number): Partial<SessionLogData> {
+		return {
 			...(sessionCache?.cacheReadTokens ? { cachedTokens: sessionCache.cacheReadTokens } : {}),
 			...(subAgentsStarted !== undefined ? { subAgentsStarted } : {}),
 			...(sessionCache?.debugLogInputTokens !== undefined ? { debugLogInputTokens: sessionCache.debugLogInputTokens } : {}),
 			...(sessionCache?.debugLogOutputTokens !== undefined ? { debugLogOutputTokens: sessionCache.debugLogOutputTokens } : {}),
 			...(sessionCache?.modelTurns !== undefined ? { modelTurns: sessionCache.modelTurns } : {}),
+		};
+	}
+
+	private detectIsDeltaBased(lines: string[]): boolean {
+		if (lines.length === 0) { return false; }
+		try {
+			const firstLine = JSON.parse(lines[0]);
+			return firstLine && typeof firstLine.kind === 'number';
+		} catch { return false; }
+	}
+
+	private async buildDeltaJsonlTurns(lines: string[]): Promise<ChatTurn[]> {
+		const turns: ChatTurn[] = [];
+		const { sessionState } = await _reconstructJsonlStateAsync(lines);
+		const { effortByRequestId } = _buildReasoningEffortTimeline(lines);
+		const rawUsageFallback = this.extractPerRequestUsageFromRawLines(lines);
+
+		let sessionMode: 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' = 'ask';
+		let currentModel: string | null = null;
+		if (sessionState.inputState?.mode) {
+			sessionMode = this.getModeType(sessionState.inputState.mode);
+			if (sessionState.inputState?.selectedModel?.metadata?.id) {
+				currentModel = sessionState.inputState.selectedModel.metadata.id;
+			}
+		}
+
+		const requests = sessionState.requests || [];
+		for (let i = 0; i < requests.length; i++) {
+			const request = requests[i];
+			if (!request || !request.requestId) { continue; }
+			const turn = this.buildDeltaTurn(i, request, sessionMode, currentModel, effortByRequestId, rawUsageFallback);
+			turns.push(turn);
+		}
+		return turns;
+	}
+
+	private buildDeltaTurn(i: number, request: any, sessionMode: 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent', currentModel: string | null, effortByRequestId: Map<string, string>, rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>): ChatTurn {
+		const contextRefs = this.createEmptyContextRefs();
+		const userMessage = request.message?.text || '';
+		this.analyzeRequestContext(request, contextRefs);
+		const requestModel = request.modelId || currentModel || this.getModelFromRequest(request) || 'gpt-4';
+		const { responseText, thinkingText, toolCalls, mcpTools } = this.extractResponseData(request.response || []);
+		const actualUsage = this.extractActualUsageFromRequest(request, rawUsageFallback, i);
+		return {
+			turnNumber: i + 1,
+			timestamp: request.timestamp ? new Date(request.timestamp).toISOString() : null,
+			mode: sessionMode, userMessage, assistantResponse: responseText, model: requestModel,
+			toolCalls, contextReferences: contextRefs, mcpTools,
+			inputTokensEstimate: this.estimateTokensFromText(userMessage, requestModel),
+			outputTokensEstimate: this.estimateTokensFromText(responseText, requestModel),
+			thinkingTokensEstimate: this.estimateTokensFromText(thinkingText, requestModel),
+			actualUsage, thinkingEffort: effortByRequestId.get(request.requestId)
+		};
+	}
+
+	private extractActualUsageFromRequest(request: any, rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>, index: number): ActualUsage | undefined {
+		const resultDetails = typeof request.result?.details === 'string' ? request.result.details : undefined;
+		if (request.result?.usage) {
+			return this.extractUsageFromResultUsage(request.result.usage, resultDetails);
+		}
+		if (typeof request.result?.promptTokens === 'number' && typeof request.result?.outputTokens === 'number') {
+			return { completionTokens: request.result.outputTokens, promptTokens: request.result.promptTokens, details: resultDetails };
+		}
+		const meta = request.result?.metadata;
+		if (meta && typeof meta.promptTokens === 'number' && typeof meta.outputTokens === 'number') {
+			return { completionTokens: meta.outputTokens, promptTokens: meta.promptTokens, details: resultDetails };
+		}
+		const extracted = rawUsageFallback.get(index);
+		if (extracted) { return { completionTokens: extracted.outputTokens, promptTokens: extracted.promptTokens }; }
+		return undefined;
+	}
+
+	private extractUsageFromResultUsage(u: any, details: string | undefined): ActualUsage {
+		return {
+			completionTokens: typeof u.completionTokens === 'number' ? u.completionTokens : 0,
+			promptTokens: typeof u.promptTokens === 'number' ? u.promptTokens : 0,
+			promptTokenDetails: Array.isArray(u.promptTokenDetails) ? u.promptTokenDetails : undefined,
+			details
+		};
+	}
+
+	private async buildCliJsonlTurns(lines: string[], sessionFile: string, fileContent: string): Promise<{ turns: ChatTurn[]; subAgentsStarted: number | undefined }> {
+		const turns: ChatTurn[] = [];
+		let subAgentsStarted: number | undefined;
+		const isJetBrainsFile = isJetBrainsSessionPath(sessionFile);
+		const jetBrainsModelHint: string | null = isJetBrainsFile ? detectJetBrainsModelHintFromContent(fileContent) : null;
+		let cliSessionModel = isJetBrainsFile ? (jetBrainsModelHint || 'unknown') : 'unknown';
+		let cliSessionEffort: string | undefined;
+
+		cliSessionModel = this.detectCliSessionModel(lines, isJetBrainsFile, jetBrainsModelHint, cliSessionModel);
+		const modelRef = { value: cliSessionModel };
+		const effortRef = { value: cliSessionEffort };
+
+		const subAgentOutputTokenMap = new Map<string, number>();
+		let turnNumber = 0;
+
+		for (const line of lines) {
+			try {
+				const event = JSON.parse(line);
+				const result = this.processCliEventForTurns(event, turns, modelRef, effortRef, isJetBrainsFile, jetBrainsModelHint, turnNumber, subAgentOutputTokenMap);
+				if (result.turnAdded) { turnNumber++; }
+				if (result.subAgentStarted) { subAgentsStarted = (subAgentsStarted ?? 0) + 1; }
+			} catch { /* skip malformed */ }
+		}
+
+		this.attachSubAgentTokens(turns, subAgentOutputTokenMap, modelRef.value);
+		return { turns, subAgentsStarted };
+	}
+
+	private detectCliSessionModel(lines: string[], isJetBrainsFile: boolean, jetBrainsModelHint: string | null, defaultModel: string): string {
+		if (isJetBrainsFile && jetBrainsModelHint) { return jetBrainsModelHint; }
+		for (const line of lines) {
+			try {
+				const model = this.pickModelFromCliEvent(JSON.parse(line));
+				if (model) { return model; }
+			} catch { /* skip */ }
+		}
+		return defaultModel;
+	}
+
+	private pickModelFromCliEvent(ev: any): string | null {
+		if (ev.type === 'session.start' && ev.data) {
+			return ev.data.selectedModel || ev.data.model || null;
+		}
+		if (ev.type === 'session.model_change') { return ev.data?.newModel || null; }
+		const modelEventTypes = ['assistant.message', 'tool.execution_complete', 'assistant.turn_start'];
+		if (modelEventTypes.includes(ev.type)) { return ev.data?.model || null; }
+		return null;
+	}
+
+	private processCliEventForTurns(event: any, turns: ChatTurn[], modelRef: { value: string }, effortRef: { value: string | undefined }, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, turnNumber: number, subAgentOutputTokenMap: Map<string, number>): { turnAdded: boolean; subAgentStarted: boolean } {
+		const subAgentStarted = event.type === 'subagent.started';
+		let turnAdded = false;
+		if (event.type === 'session.model_change') { this.updateCliSessionRefs(event, modelRef, effortRef); }
+		if (event.type === 'user.message' && event.data?.content) {
+			turns.push(this.buildCliUserTurn(event, turnNumber + 1, modelRef.value, isJetBrainsFile, jetBrainsModelHint, turnNumber + 1, effortRef.value));
+			turnAdded = true;
+		}
+		if (event.type === 'assistant.message' && event.data?.content) {
+			this.updateCliAssistantTurn(event, turns, modelRef.value, subAgentOutputTokenMap);
+		}
+		if (this.isCliToolEvent(event) && turns.length > 0) { this.addCliToolCall(event, turns[turns.length - 1], isJetBrainsFile); }
+		if (event.type === 'mcp.tool.call' || event.data?.mcpServer) { this.handleCliMcpEvent(event, turns); }
+		return { turnAdded, subAgentStarted };
+	}
+
+	private handleCliMcpEvent(event: any, turns: ChatTurn[]): void {
+		if (turns.length === 0) { return; }
+		turns[turns.length - 1].mcpTools.push({ server: event.data?.mcpServer || 'unknown', tool: event.data?.toolName || event.toolName || 'unknown' });
+	}
+
+	private updateCliSessionRefs(event: any, modelRef: { value: string }, effortRef: { value: string | undefined }): void {
+		if (typeof event.data?.newModel === 'string') { modelRef.value = event.data.newModel; }
+		if (typeof event.data?.reasoningEffort === 'string') { effortRef.value = event.data.reasoningEffort; }
+	}
+
+	private isCliToolEvent(event: any): boolean {
+		return (event.type === 'tool.call' || event.type === 'tool.result' || event.type === 'tool.execution_start') && !event.data?.parentToolCallId;
+	}
+
+	private buildCliUserTurn(event: any, turnNumber: number, cliSessionModel: string, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, localTurnNumber: number, cliSessionEffort: string | undefined): ChatTurn {
+		const contextRefs = this.createEmptyContextRefs();
+		const userMessage = event.data.content;
+		this.analyzeContextReferences(userMessage, contextRefs);
+		const turnModel = this.resolveCliTurnModel(event, cliSessionModel, isJetBrainsFile, jetBrainsModelHint, localTurnNumber);
+		const turnEffort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliSessionEffort;
+		return {
+			turnNumber, timestamp: event.timestamp ? new Date(event.timestamp).toISOString() : null,
+			mode: isJetBrainsFile ? 'ask' : 'cli', userMessage, assistantResponse: '', model: turnModel,
+			toolCalls: [], contextReferences: contextRefs, mcpTools: [],
+			inputTokensEstimate: this.estimateTokensFromText(userMessage, turnModel),
+			outputTokensEstimate: 0, thinkingTokensEstimate: 0, thinkingEffort: turnEffort
+		};
+	}
+
+	private resolveCliTurnModel(event: any, cliSessionModel: string, isJetBrainsFile: boolean, jetBrainsModelHint: string | null, turnNumber: number): string {
+		if (!isJetBrainsFile) { return event.model || event.data?.model || cliSessionModel; }
+		if (turnNumber !== 1) { return '?'; }
+		return jetBrainsModelHint && jetBrainsModelHint !== 'unknown' ? `${jetBrainsModelHint}?` : '?';
+	}
+
+	private updateCliAssistantTurn(event: any, turns: ChatTurn[], cliSessionModel: string, subAgentOutputTokenMap: Map<string, number>): void {
+		if (event.data.parentToolCallId) {
+			const prev = subAgentOutputTokenMap.get(event.data.parentToolCallId) ?? 0;
+			subAgentOutputTokenMap.set(event.data.parentToolCallId, prev + this.estimateTokensFromText(event.data.content, cliSessionModel));
+		} else if (turns.length > 0) {
+			const lastTurn = turns[turns.length - 1];
+			if (typeof event.data.model === 'string') { lastTurn.model = event.data.model; }
+			lastTurn.assistantResponse += event.data.content;
+			lastTurn.outputTokensEstimate = this.estimateTokensFromText(lastTurn.assistantResponse, lastTurn.model || cliSessionModel);
+		}
+	}
+
+	private addCliToolCall(event: any, lastTurn: ChatTurn, isJetBrainsFile: boolean): void {
+		const CLI_SUB_AGENT_TOOLS = new Set(['task', 'read_agent', 'write_agent', 'list_agents']);
+		const toolName = event.data?.toolName || event.toolName || 'unknown';
+		const isSubAgent = CLI_SUB_AGENT_TOOLS.has(toolName);
+		if (isJetBrainsFile && event.type === 'tool.execution_start') { lastTurn.mode = 'agent'; }
+		if (this.isMcpTool(toolName)) {
+			lastTurn.mcpTools.push({ server: this.extractMcpServerName(toolName), tool: toolName });
+		} else if (isSubAgent) {
+			this.addSubAgentToolCall(event, lastTurn, toolName);
+		} else {
+			this.addRegularToolCall(event, lastTurn, toolName);
+		}
+	}
+
+	private addSubAgentToolCall(event: any, lastTurn: ChatTurn, toolName: string): void {
+		const entry: any = { toolName, arguments: event.data?.arguments ? JSON.stringify(event.data.arguments) : undefined, result: undefined, isSubAgent: true };
+		if (event.data?.toolCallId) { entry._callId = event.data.toolCallId; }
+		lastTurn.toolCalls.push(entry);
+	}
+
+	private addRegularToolCall(event: any, lastTurn: ChatTurn, toolName: string): void {
+		const callId = event.data?.toolCallId;
+		if (callId && lastTurn.toolCalls.some((tc: any) => tc._callId === callId)) { return; }
+		const tc: any = {
+			toolName,
+			arguments: event.type !== 'tool.result' ? JSON.stringify(event.data?.arguments || {}) : undefined,
+			result: event.type === 'tool.result' ? event.data?.output : undefined
+		};
+		if (callId) { tc._callId = callId; }
+		lastTurn.toolCalls.push(tc);
+	}
+
+	private attachSubAgentTokens(turns: ChatTurn[], subAgentOutputTokenMap: Map<string, number>, cliSessionModel: string): void {
+		if (subAgentOutputTokenMap.size === 0) { return; }
+		for (const turn of turns) {
+			for (const tc of turn.toolCalls as any[]) {
+				if (!tc.isSubAgent || !tc._callId) { continue; }
+				const outputTokens = subAgentOutputTokenMap.get(tc._callId) ?? 0;
+				const inputTokens = this.computeSubAgentInputTokens(tc, cliSessionModel);
+				if (outputTokens > 0 || inputTokens > 0) { tc.subAgentTokens = { input: inputTokens, output: outputTokens }; }
+			}
+		}
+	}
+
+	private computeSubAgentInputTokens(tc: any, model: string): number {
+		if (!tc.arguments) { return 0; }
+		try {
+			const args = JSON.parse(tc.arguments);
+			const prompt = typeof args?.prompt === 'string' ? args.prompt : tc.arguments;
+			return this.estimateTokensFromText(prompt, model);
+		} catch { return this.estimateTokensFromText(tc.arguments, model); }
+	}
+
+	private buildJsonSessionTurns(sessionContent: any): ChatTurn[] {
+		if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) { return []; }
+		let sessionMode: 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent' = 'ask';
+		if (sessionContent.mode) { sessionMode = this.getModeType(sessionContent.mode); }
+		return sessionContent.requests.map((request: any, idx: number) => this.buildJsonRequestTurn(request, idx + 1, sessionMode));
+	}
+
+	private buildJsonRequestTurn(request: any, turnNumber: number, sessionMode: 'ask' | 'edit' | 'agent' | 'plan' | 'customAgent'): ChatTurn {
+		let requestMode = sessionMode;
+		if (request.agent?.id) {
+			const agentId = request.agent.id.toLowerCase();
+			if (agentId.includes('edit')) { requestMode = 'edit'; }
+			else if (agentId.includes('agent')) { requestMode = 'agent'; }
+		}
+		let userMessage = '';
+		if (request.message?.text) { userMessage = request.message.text; }
+		else if (request.message?.parts) { userMessage = request.message.parts.filter((p: any) => p.text).map((p: any) => p.text).join('\n'); }
+		const contextRefs = this.createEmptyContextRefs();
+		this.analyzeRequestContext(request, contextRefs);
+		const model = this.getModelFromRequest(request);
+		let assistantResponse = ''; let thinkingText = '';
+		const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
+		const mcpTools: { server: string; tool: string }[] = [];
+		if (request.response && Array.isArray(request.response)) {
+			const extracted = this.extractResponseData(request.response);
+			assistantResponse = extracted.responseText; thinkingText = extracted.thinkingText;
+			toolCalls.push(...extracted.toolCalls); mcpTools.push(...extracted.mcpTools);
+		}
+		return {
+			turnNumber, timestamp: request.timestamp || request.ts || request.result?.timestamp || null,
+			mode: requestMode, userMessage, assistantResponse, model, toolCalls, contextReferences: contextRefs, mcpTools,
+			inputTokensEstimate: this.estimateTokensFromText(userMessage, model),
+			outputTokensEstimate: this.estimateTokensFromText(assistantResponse, model),
+			thinkingTokensEstimate: this.estimateTokensFromText(thinkingText, model)
 		};
 	}
 
