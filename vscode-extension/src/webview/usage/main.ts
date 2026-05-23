@@ -2229,23 +2229,7 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 	return container;
 }
 
-function renderRepositoryHygienePanels(): void {
-	const listPane = document.getElementById('repo-list-pane');
-	const listContainer = document.getElementById('repo-list-pane-container');
-	const detailsPane = document.getElementById('repo-details-pane');
-	const detailsContainer = document.getElementById('repo-details-pane-container');
-	if (!listPane || !listContainer || !detailsPane || !detailsContainer || !hygieneMatrixState) {
-		return;
-	}
-
-	const hasSelectedRepository = !!selectedRepoPath && !isSwitchingRepository;
-	const visibleWorkspaces = hasSelectedRepository
-		? hygieneMatrixState.workspaces.filter((ws) => ws.workspacePath === selectedRepoPath)
-		: hygieneMatrixState.workspaces;
-
-	listContainer.classList.remove('repo-hygiene-pane-collapsed');
-	detailsContainer.classList.toggle('repo-hygiene-pane-collapsed', !hasSelectedRepository);
-
+function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], hasSelectedRepository: boolean): void {
 	const colStyles = {
 		sessions: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
 		interactions: 'width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
@@ -2285,6 +2269,47 @@ function renderRepositoryHygienePanels(): void {
 			</div>
 		`;
 	}).join('');
+}
+
+function renderRepoDetailSuccess(detailsPane: HTMLElement, record: any, workspaceName: string): void {
+	detailsPane.replaceChildren();
+	const card = el('div', 'repo-details-card');
+	card.setAttribute('style', 'padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;');
+	const header = el('div', 'repo-details-card-header');
+	header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;');
+	const label = el('div');
+	label.setAttribute('style', 'font-size: 12px; color: var(--text-secondary);');
+	label.textContent = 'Repository: ';
+	const repoName = el('span');
+	repoName.setAttribute('style', "color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;");
+	repoName.textContent = workspaceName;
+	label.appendChild(repoName);
+	const switchButton = document.createElement('vscode-button');
+	switchButton.id = 'btn-switch-repository';
+	switchButton.setAttribute('style', 'min-width: 120px;');
+	switchButton.textContent = 'Switch Repository';
+	header.append(label, switchButton);
+	card.append(header, buildRepoAnalysisBodyElement(record.data, selectedRepoPath ?? undefined));
+	detailsPane.appendChild(card);
+}
+
+function renderRepositoryHygienePanels(): void {
+	const listPane = document.getElementById('repo-list-pane');
+	const listContainer = document.getElementById('repo-list-pane-container');
+	const detailsPane = document.getElementById('repo-details-pane');
+	const detailsContainer = document.getElementById('repo-details-pane-container');
+	if (!listPane || !listContainer || !detailsPane || !detailsContainer || !hygieneMatrixState) {
+		return;
+	}
+
+	const hasSelectedRepository = !!selectedRepoPath && !isSwitchingRepository;
+	const visibleWorkspaces = hasSelectedRepository
+		? hygieneMatrixState.workspaces.filter((ws) => ws.workspacePath === selectedRepoPath)
+		: hygieneMatrixState.workspaces;
+
+	listContainer.classList.remove('repo-hygiene-pane-collapsed');
+	detailsContainer.classList.toggle('repo-hygiene-pane-collapsed', !hasSelectedRepository);
+	renderRepoListPane(listPane, visibleWorkspaces, hasSelectedRepository);
 
 	if (!hasSelectedRepository || !selectedRepoPath) {
 		detailsPane.replaceChildren();
@@ -2294,30 +2319,7 @@ function renderRepositoryHygienePanels(): void {
 	const workspaceName = getWorkspaceName(selectedRepoPath);
 	const record = repoAnalysisState.get(selectedRepoPath);
 	if (record?.data) {
-		detailsPane.replaceChildren();
-		const card = el('div', 'repo-details-card');
-		card.setAttribute('style', 'padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;');
-
-		const header = el('div', 'repo-details-card-header');
-		header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;');
-
-		const label = el('div');
-		label.setAttribute('style', 'font-size: 12px; color: var(--text-secondary);');
-		label.textContent = 'Repository: ';
-
-		const repoName = el('span');
-		repoName.setAttribute('style', "color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;");
-		repoName.textContent = workspaceName;
-		label.appendChild(repoName);
-
-		const switchButton = document.createElement('vscode-button');
-		switchButton.id = 'btn-switch-repository';
-		switchButton.setAttribute('style', 'min-width: 120px;');
-		switchButton.textContent = 'Switch Repository';
-
-		header.append(label, switchButton);
-		card.append(header, buildRepoAnalysisBodyElement(record.data, selectedRepoPath ?? undefined));
-		detailsPane.appendChild(card);
+		renderRepoDetailSuccess(detailsPane, record, workspaceName);
 		return;
 	}
 
