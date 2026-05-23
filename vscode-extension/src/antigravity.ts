@@ -71,33 +71,46 @@ return content.trim();
 // buildAntigravityTurns helpers
 // ---------------------------------------------------------------------------
 
-type BatTurnData = { assistantResponse: string; toolCalls: NonNullable<ChatTurn['toolCalls']>; thinkingContent: string };
+interface BatGroupAcc {
+	assistantResponse: string;
+	thinkingContent: string;
+	toolCalls: ChatTurn['toolCalls'];
+}
 
-function _batProcessPlannerResponse(next: AntigravityEntry, data: BatTurnData): void {
-	if (next.content?.trim()) { data.assistantResponse += (data.assistantResponse ? '\n\n' : '') + next.content.trim(); }
-	if (next.thinking?.trim()) { data.thinkingContent += (data.thinkingContent ? '\n\n' : '') + next.thinking.trim(); }
-	if (!Array.isArray(next.tool_calls)) { return; }
-	for (const tc of next.tool_calls) {
-		if (tc.name) { data.toolCalls.push({ toolName: tc.name, arguments: tc.args ? JSON.stringify(tc.args) : undefined }); }
+function _batHandlePlannerResponse(next: AntigravityEntry, acc: BatGroupAcc): void {
+	if (next.content && next.content.trim()) {
+		acc.assistantResponse += (acc.assistantResponse ? '\n\n' : '') + next.content.trim();
+	}
+	if (next.thinking && next.thinking.trim()) {
+		acc.thinkingContent += (acc.thinkingContent ? '\n\n' : '') + next.thinking.trim();
+	}
+	for (const tc of (next.tool_calls ?? [])) {
+		if (tc.name) { acc.toolCalls.push({ toolName: tc.name, arguments: tc.args ? JSON.stringify(tc.args) : undefined }); }
 	}
 }
 
-function _batProcessSearchWeb(next: AntigravityEntry, data: BatTurnData): void {
-	if (!next.content || data.toolCalls.length === 0) { return; }
-	const last = data.toolCalls[data.toolCalls.length - 1];
-	if (!last.result) { last.result = next.content.trim(); }
+function _batHandleSearchWeb(next: AntigravityEntry, acc: BatGroupAcc): void {
+	if (acc.toolCalls.length > 0 && !acc.toolCalls[acc.toolCalls.length - 1].result && next.content) {
+		acc.toolCalls[acc.toolCalls.length - 1].result = next.content.trim();
+	}
 }
 
-function _batCollectTurnData(allEntries: AntigravityEntry[], startIdx: number): BatTurnData {
-	const data: BatTurnData = { assistantResponse: '', toolCalls: [], thinkingContent: '' };
-	for (let j = startIdx + 1; j < allEntries.length; j++) {
+function _batProcessModelEntry(next: AntigravityEntry, acc: BatGroupAcc): void {
+	if (next.type === 'PLANNER_RESPONSE') {
+		_batHandlePlannerResponse(next, acc);
+	} else if (next.type === 'SEARCH_WEB' && next.content) {
+		_batHandleSearchWeb(next, acc);
+	}
+}
+
+function _batCollectGroupData(allEntries: AntigravityEntry[], startIdx: number): BatGroupAcc {
+	const acc: BatGroupAcc = { assistantResponse: '', thinkingContent: '', toolCalls: [] };
+	for (let j = startIdx; j < allEntries.length; j++) {
 		const next = allEntries[j];
 		if (next.type === 'USER_INPUT' && next.source === 'USER_EXPLICIT') { break; }
-		if (next.source !== 'MODEL') { continue; }
-		if (next.type === 'PLANNER_RESPONSE') { _batProcessPlannerResponse(next, data); }
-		else if (next.type === 'SEARCH_WEB') { _batProcessSearchWeb(next, data); }
+		if (next.source === 'MODEL') { _batProcessModelEntry(next, acc); }
 	}
-	return data;
+	return acc;
 }
 
 // ---------------------------------------------------------------------------
@@ -320,7 +333,8 @@ const entry = allEntries[i];
 if (entry.type !== 'USER_INPUT' || entry.source !== 'USER_EXPLICIT') { continue; }
 turnNumber++;
 const userMessage = extractUserRequestText(entry.content ?? '');
-const { assistantResponse, toolCalls } = _batCollectTurnData(allEntries, i);
+const { assistantResponse, toolCalls } = _batCollectGroupData(allEntries, i + 1);
+
 turns.push({
 turnNumber,
 timestamp: entry.created_at ?? null,
