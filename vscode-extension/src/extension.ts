@@ -1332,7 +1332,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const since = new Date();
 		since.setDate(since.getDate() - 30);
 
-		// If the user explicitly signed out from our extension, don't auto-acquire the VS Code session
 		if (this._githubSignedOutByUser) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
@@ -1340,7 +1339,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		// Require GitHub auth — read:user gives 5000 req/hr on public repos
 		const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
 		if (!session) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
@@ -1349,8 +1347,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		// Sync our tracked auth state if VS Code already has a session we weren't aware of
-		// (e.g. from GitHub Copilot or another extension that authenticated earlier)
 		if (!this.githubSession) {
 			this.githubSession = session;
 			await this.context.globalState.update('github.authenticated', true);
@@ -1366,47 +1362,39 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (let i = 0; i < repos.length; i++) {
 			const { owner, repo } = repos[i];
 			const { prs, error } = await fetchRepoPrs(owner, repo, session.accessToken, since);
-
-			let totalPrs = 0;
-			let aiAuthoredPrs = 0;
-			let aiReviewRequestedPrs = 0;
-			const aiDetails: RepoPrDetail[] = [];
-
-			if (!error) {
-				totalPrs = prs.length;
-				for (const pr of prs) {
-					const authorAi = detectAiType(pr.user?.login ?? '');
-					if (authorAi) {
-						aiAuthoredPrs++;
-						aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: authorAi, role: 'author' });
-					}
-					for (const reviewer of (pr.requested_reviewers ?? [])) {
-						const reviewerAi = detectAiType(reviewer.login ?? '');
-						if (reviewerAi) {
-							aiReviewRequestedPrs++;
-							aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: reviewerAi, role: 'reviewer-requested' });
-						}
-					}
-				}
-			}
-
-			results.push({
-				owner,
-				repo,
-				repoUrl: `https://github.com/${owner}/${repo}`,
-				totalPrs,
-				aiAuthoredPrs,
-				aiReviewRequestedPrs,
-				aiDetails,
-				error,
-			});
-
+			const stats = this.collectAiPrStats(prs, error);
+			results.push({ owner, repo, repoUrl: `https://github.com/${owner}/${repo}`, ...stats, error });
 			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
 		}
 
 		const result: RepoPrStatsResult = { repos: results, authenticated: true, since: since.toISOString() };
 		this._lastRepoPrStats = result;
 		this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+	}
+
+	private collectAiPrStats(prs: any[], error: any): { totalPrs: number; aiAuthoredPrs: number; aiReviewRequestedPrs: number; aiDetails: RepoPrDetail[] } {
+		let totalPrs = 0;
+		let aiAuthoredPrs = 0;
+		let aiReviewRequestedPrs = 0;
+		const aiDetails: RepoPrDetail[] = [];
+		if (!error) {
+			totalPrs = prs.length;
+			for (const pr of prs) {
+				const authorAi = detectAiType(pr.user?.login ?? '');
+				if (authorAi) {
+					aiAuthoredPrs++;
+					aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: authorAi, role: 'author' });
+				}
+				for (const reviewer of (pr.requested_reviewers ?? [])) {
+					const reviewerAi = detectAiType(reviewer.login ?? '');
+					if (reviewerAi) {
+						aiReviewRequestedPrs++;
+						aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: reviewerAi, role: 'reviewer-requested' });
+					}
+				}
+			}
+		}
+		return { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails };
 	}
 
 	/**
@@ -1542,28 +1530,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const knownPlan = planId ? plans[planId] : undefined;
 			const planLabel = knownPlan ? `${knownPlan.name} (${planId})` : (planId ?? 'unknown');
 			this.log(`Copilot plan: ${planLabel}`);
-			if (knownPlan) {
-				const credits = knownPlan.monthlyPremiumRequests !== null ? `${knownPlan.monthlyPremiumRequests.toLocaleString()}/month` : 'unlimited';
-				this.log(`  Monthly premium requests: ${credits}`);
-				const aiCredits = knownPlan.monthlyAiCreditsUsd > 0 ? `$${knownPlan.monthlyAiCreditsUsd}/month included` : 'none';
-				this.log(`  Monthly AI credits: ${aiCredits}`);
-				this._copilotPlanResolved = {
-					planId: planId!,
-					planName: knownPlan.name,
-					monthlyAiCreditsUsd: knownPlan.monthlyAiCreditsUsd,
-					monthlyPremiumRequests: knownPlan.monthlyPremiumRequests,
-				};
-			} else if (planId) {
-				// Unknown plan ID — store it with no credits so the webview still shows it
-				this._copilotPlanResolved = { planId, planName: planId, monthlyAiCreditsUsd: 0, monthlyPremiumRequests: null };
-			}
-			if (planInfo.ide_chat !== undefined)          { this.log(`  IDE chat: ${planInfo.ide_chat}`); }
-			if (planInfo.copilot_ide_agent !== undefined) { this.log(`  Agent mode: ${planInfo.copilot_ide_agent}`); }
-			if (planInfo.public_code_suggestions !== undefined) { this.log(`  Public code suggestions: ${planInfo.public_code_suggestions}`); }
-			if (planInfo.unlimited_pr_summaries !== undefined)  { this.log(`  Unlimited PR summaries: ${planInfo.unlimited_pr_summaries}`); }
+			this.logCopilotPlanDetails(planId, knownPlan, planInfo);
 		} catch (err) {
 			this.warn('Failed to load Copilot plan info: ' + String(err));
 		}
+	}
+
+	private logCopilotPlanDetails(planId: string | undefined, knownPlan: { name: string; monthlyPremiumRequests: number | null; monthlyPricePerUser: number; monthlyAiCreditsUsd: number } | undefined, planInfo: any): void {
+		if (knownPlan) {
+			const credits = knownPlan.monthlyPremiumRequests !== null ? `${knownPlan.monthlyPremiumRequests.toLocaleString()}/month` : 'unlimited';
+			this.log(`  Monthly premium requests: ${credits}`);
+			const aiCredits = knownPlan.monthlyAiCreditsUsd > 0 ? `$${knownPlan.monthlyAiCreditsUsd}/month included` : 'none';
+			this.log(`  Monthly AI credits: ${aiCredits}`);
+			this._copilotPlanResolved = {
+				planId: planId!,
+				planName: knownPlan.name,
+				monthlyAiCreditsUsd: knownPlan.monthlyAiCreditsUsd,
+				monthlyPremiumRequests: knownPlan.monthlyPremiumRequests,
+			};
+		} else if (planId) {
+			this._copilotPlanResolved = { planId, planName: planId, monthlyAiCreditsUsd: 0, monthlyPremiumRequests: null };
+		}
+		if (planInfo.ide_chat !== undefined)          { this.log(`  IDE chat: ${planInfo.ide_chat}`); }
+		if (planInfo.copilot_ide_agent !== undefined) { this.log(`  Agent mode: ${planInfo.copilot_ide_agent}`); }
+		if (planInfo.public_code_suggestions !== undefined) { this.log(`  Public code suggestions: ${planInfo.public_code_suggestions}`); }
+		if (planInfo.unlimited_pr_summaries !== undefined)  { this.log(`  Unlimited PR summaries: ${planInfo.unlimited_pr_summaries}`); }
 	}
 
 	public async updateTokenStats(silent: boolean = false, skipIfBusy = false): Promise<DetailedStats | undefined> {
@@ -5088,56 +5079,21 @@ usageAnalysis: undefined
 	}
 
 	private async runRepoHygieneAnalysis(workspacePath?: string): Promise<any> {
-		// Determine which workspace to analyze
-		let workspaceRoot: string;
-		
-		if (workspacePath) {
-			// Use the provided workspace path
-			workspaceRoot = workspacePath;
-		} else {
-			// Fall back to the first open workspace folder
-			const firstFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
-			if (!firstFolder) {
-				throw new Error('No workspace folder open');
-			}
-			workspaceRoot = firstFolder;
-		}
-
-		// Get repository info
-		let branchName = 'unknown';
-		let repoName = path.basename(workspaceRoot);
-		try {
-			const branch = childProcess.execSync('git rev-parse --abbrev-ref HEAD', {
-				cwd: workspaceRoot,
-				encoding: 'utf8',
-				timeout: 5000,
-				stdio: ['pipe', 'pipe', 'pipe']
-			}).trim();
-			branchName = branch;
-
-			try {
-				const remote = childProcess.execSync('git remote get-url origin', {
-					cwd: workspaceRoot,
-					encoding: 'utf8',
-					timeout: 5000,
-					stdio: ['pipe', 'pipe', 'pipe']
-				}).trim();
-				const match = remote.match(/[:/]([^/]+\/[^/]+?)(\.git)?$/);
-				if (match) {
-					repoName = match[1];
-				}
-			} catch {
-				// Ignore remote fetch errors
-			}
-		} catch {
-			// Ignore git errors
-		}
-
-		// Get workspace file tree for context
+		const workspaceRoot = this.resolveWorkspaceRoot(workspacePath);
+		const { branchName, repoName } = this.getGitRepoInfo(workspaceRoot);
 		const fileTree = await this.getWorkspaceFileTree(workspaceRoot);
+		const prompt = this.buildRepoHygienePrompt(repoName, branchName, workspaceRoot, fileTree);
+		try {
+			const fullResponse = await this.invokeCopilotModel(prompt);
+			return this.parseCopilotHygieneResponse(fullResponse);
+		} catch (error) {
+			this.error(`Failed to get analysis from Copilot: ${error}`);
+			throw new Error(`AI analysis failed: ${error instanceof Error ? error.message : String(error)}. Please try again or check that GitHub Copilot is properly configured.`);
+		}
+	}
 
-		// Prepare the prompt for Copilot
-		const prompt = `You are a repository analyzer. Analyze this repository for hygiene and best practices.
+	private buildRepoHygienePrompt(repoName: string, branchName: string, workspaceRoot: string, fileTree: string): string {
+		return `You are a repository analyzer. Analyze this repository for hygiene and best practices.
 
 Use these skill instructions:
 
@@ -5200,59 +5156,61 @@ Perform the 17 hygiene checks as specified in the skill instructions. Return ONL
 }
 
 Return ONLY the JSON object, no markdown formatting, no explanations.`;
+	}
 
-		try {
-			// Use VS Code Language Model API to invoke Copilot
-			const models = await vscode.lm.selectChatModels({
-				vendor: 'copilot',
-				family: 'gpt-4o'
-			});
-
-			if (models.length === 0) {
-				throw new Error('No Copilot models available. Please ensure GitHub Copilot is installed and activated.');
-			}
-
-			const model = models[0];
-			this.log(`🤖 Using Copilot model: ${model.id} for repository analysis`);
-
-			const messages = [
-				vscode.LanguageModelChatMessage.User(prompt)
-			];
-
-			const cts = new vscode.CancellationTokenSource();
-			try {
-				const response = await model.sendRequest(messages, {}, cts.token);
-
-				let fullResponse = '';
-				for await (const chunk of response.text) {
-					fullResponse += chunk;
-				}
-
-				this.log(`📋 Copilot analysis response length: ${fullResponse.length} characters`);
-
-				// Extract JSON from response (in case it's wrapped in markdown code blocks)
-				let jsonText = fullResponse.trim();
-				const jsonMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-				if (jsonMatch) {
-					jsonText = jsonMatch[1].trim();
-				}
-
-				// Parse the JSON response
-				const results = JSON.parse(jsonText);
-
-				// Validate the structure
-				if (!results.summary || !results.checks || !results.metadata) {
-					throw new Error('Invalid response structure from Copilot');
-				}
-
-				return results;
-			} finally {
-				cts.dispose();
-			}
-		} catch (error) {
-			this.error(`Failed to get analysis from Copilot: ${error}`);
-			throw new Error(`AI analysis failed: ${error instanceof Error ? error.message : String(error)}. Please try again or check that GitHub Copilot is properly configured.`);
+	private async invokeCopilotModel(prompt: string): Promise<string> {
+		const models = await vscode.lm.selectChatModels({ vendor: 'copilot', family: 'gpt-4o' });
+		if (models.length === 0) {
+			throw new Error('No Copilot models available. Please ensure GitHub Copilot is installed and activated.');
 		}
+		const model = models[0];
+		this.log(`🤖 Using Copilot model: ${model.id} for repository analysis`);
+		const cts = new vscode.CancellationTokenSource();
+		try {
+			const response = await model.sendRequest([vscode.LanguageModelChatMessage.User(prompt)], {}, cts.token);
+			let fullResponse = '';
+			for await (const chunk of response.text) { fullResponse += chunk; }
+			this.log(`📋 Copilot analysis response length: ${fullResponse.length} characters`);
+			return fullResponse;
+		} finally {
+			cts.dispose();
+		}
+	}
+
+	private resolveWorkspaceRoot(workspacePath?: string): string {
+		if (workspacePath) { return workspacePath; }
+		const firstFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath;
+		if (!firstFolder) { throw new Error('No workspace folder open'); }
+		return firstFolder;
+	}
+
+	private getGitRepoInfo(workspaceRoot: string): { branchName: string; repoName: string } {
+		let branchName = 'unknown';
+		let repoName = path.basename(workspaceRoot);
+		try {
+			branchName = childProcess.execSync('git rev-parse --abbrev-ref HEAD', {
+				cwd: workspaceRoot, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
+			}).trim();
+			try {
+				const remote = childProcess.execSync('git remote get-url origin', {
+					cwd: workspaceRoot, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
+				}).trim();
+				const match = remote.match(/[:/]([^/]+\/[^/]+?)(\.git)?$/);
+				if (match) { repoName = match[1]; }
+			} catch { /* Ignore remote fetch errors */ }
+		} catch { /* Ignore git errors */ }
+		return { branchName, repoName };
+	}
+
+	private parseCopilotHygieneResponse(fullResponse: string): any {
+		let jsonText = fullResponse.trim();
+		const jsonMatch = jsonText.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+		if (jsonMatch) { jsonText = jsonMatch[1].trim(); }
+		const results = JSON.parse(jsonText);
+		if (!results.summary || !results.checks || !results.metadata) {
+			throw new Error('Invalid response structure from Copilot');
+		}
+		return results;
 	}
 
 	private async getWorkspaceFileTree(workspaceRoot: string): Promise<string> {
@@ -7081,17 +7039,18 @@ ${hashtag}`;
       settings?.storageAccount &&
       settings?.aggTable
     );
-    const rawUrl = (settings?.sharingServerEnabled && settings?.sharingServerEndpointUrl) ? settings.sharingServerEndpointUrl : '';
-    let teamServerUrl = '';
-    if (rawUrl) {
-      try {
-        const parsed = new URL(rawUrl);
-        if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-          teamServerUrl = rawUrl;
-        }
-      } catch { /* invalid URL — leave empty */ }
-    }
+    const teamServerUrl = this.buildTeamServerUrl(settings);
     return { azureConfigured, teamServerConfigured: !!teamServerUrl, teamServerUrl };
+  }
+
+  private buildTeamServerUrl(settings: any): string {
+    const rawUrl = (settings?.sharingServerEnabled && settings?.sharingServerEndpointUrl) ? settings.sharingServerEndpointUrl : '';
+    if (!rawUrl) { return ''; }
+    try {
+      const parsed = new URL(rawUrl);
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') { return rawUrl; }
+    } catch { /* invalid URL — leave empty */ }
+    return '';
   }
 
   private getLoadingHtml(webview: vscode.Webview): string {
