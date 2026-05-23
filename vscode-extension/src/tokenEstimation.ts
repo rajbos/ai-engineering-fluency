@@ -258,6 +258,115 @@ export interface TokenEstimationStrategy {
 	estimate(lines: string[]): TokenEstimationResult;
 }
 
+// --- DeltaTokenStrategy helpers ---
+
+/** Accumulator for the incremental-token counting loop in DeltaTokenStrategy. */
+interface DtsAccumulator {
+	totalTokens: number;
+	totalThinkingTokens: number;
+	parseFailedLines: number;
+}
+
+/** Extract token count from one request's result object (all known delta formats). */
+function _dtsExtractFromResult(result: RequestResult): number {
+	if (typeof result.promptTokens === 'number' && typeof result.outputTokens === 'number') {
+		return result.promptTokens + result.outputTokens;
+	}
+	// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
+	if (result.metadata && typeof result.metadata.promptTokens === 'number' && typeof result.metadata.outputTokens === 'number') {
+		return result.metadata.promptTokens + result.metadata.outputTokens;
+	}
+	if (result.usage) {
+		const prompt = typeof result.usage.promptTokens === 'number' ? result.usage.promptTokens : 0;
+		const completion = typeof result.usage.completionTokens === 'number' ? result.usage.completionTokens : 0;
+		return prompt + completion;
+	}
+	return 0;
+}
+
+/**
+ * Extract total actual tokens from reconstructed request list.
+ * Falls back to regex-parsed usage when a request result failed JSON.parse.
+ */
+function _dtsExtractActualTokens(
+	requests: unknown[],
+	rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>
+): number {
+	let maxIndex = requests.length;
+	for (const idx of rawUsageFallback.keys()) {
+		if (idx + 1 > maxIndex) { maxIndex = idx + 1; }
+	}
+	let totalActualTokens = 0;
+	for (let i = 0; i < maxIndex; i++) {
+		const result = getRequestResult(requests[i]);
+		const fromResult = result ? _dtsExtractFromResult(result) : 0;
+		if (fromResult > 0) {
+			totalActualTokens += fromResult;
+		} else {
+			const extracted = rawUsageFallback.get(i);
+			if (extracted) { totalActualTokens += extracted.promptTokens + extracted.outputTokens; }
+		}
+	}
+	return totalActualTokens;
+}
+
+/** Count estimated tokens for a single response item if it is a completed sub-agent invocation. */
+function _dtsCountSubAgentItem(responseItem: unknown): number {
+	const subAgent = extractSubAgentData(responseItem);
+	if (!subAgent) { return 0; }
+	let total = 0;
+	if (subAgent.prompt) { total += estimateTokensFromText(subAgent.prompt); }
+	if (subAgent.result) { total += estimateTokensFromText(subAgent.result); }
+	return total;
+}
+
+/**
+ * Count sub-agent tokens from the fully-reconstructed request list.
+ * Sub-agent results accumulate char-by-char; only the final state is complete.
+ */
+function _dtsExtractSubAgentTokens(requests: unknown[]): number {
+	let total = 0;
+	for (const request of requests) {
+		const responseItems = getResponseArray(request);
+		if (!responseItems) { continue; }
+		for (const responseItem of responseItems) {
+			total += _dtsCountSubAgentItem(responseItem);
+		}
+	}
+	return total;
+}
+
+/** Estimate tokens from incremental kind:2 request appends. Returns 0 for non-matching events. */
+function _dtsProcessIncrementalRequests(event: Record<string, unknown>): number {
+	const k = event.k as unknown[] | undefined;
+	if (event.kind !== 2 || k?.[0] !== 'requests' || !Array.isArray(event.v)) { return 0; }
+	let tokens = 0;
+	for (const request of event.v as unknown[]) {
+		const req = request as Record<string, unknown>;
+		const msg = req['message'] as Record<string, unknown> | undefined;
+		if (msg?.['text']) { tokens += estimateTokensFromText(String(msg['text'])); }
+	}
+	return tokens;
+}
+
+/** Add estimated tokens for one response item to the accumulator. Skips sub-agent items. */
+function _dtsAddResponseItemTokens(responseItem: unknown, acc: DtsAccumulator): void {
+	if (extractSubAgentData(responseItem)) { return; }
+	const { text, isThinking } = extractResponseItemText(responseItem);
+	if (!text) { return; }
+	if (isThinking) { acc.totalThinkingTokens += estimateTokensFromText(text); }
+	else { acc.totalTokens += estimateTokensFromText(text); }
+}
+
+/** Process incremental kind:2 response appends, updating the accumulator in place. */
+function _dtsProcessIncrementalResponse(event: Record<string, unknown>, acc: DtsAccumulator): void {
+	const k = event.k as unknown[] | undefined;
+	if (event.kind !== 2 || !k?.includes('response') || !Array.isArray(event.v)) { return; }
+	for (const responseItem of event.v as unknown[]) {
+		_dtsAddResponseItemTokens(responseItem, acc);
+	}
+}
+
 /**
  * Handles VS Code delta-based JSONL format (kind:0/1/2 events).
  *
@@ -269,105 +378,162 @@ export interface TokenEstimationStrategy {
  */
 export class DeltaTokenStrategy implements TokenEstimationStrategy {
 	estimate(lines: string[]): TokenEstimationResult {
-		let totalTokens = 0;
-		let totalThinkingTokens = 0;
+		const acc: DtsAccumulator = { totalTokens: 0, totalThinkingTokens: 0, parseFailedLines: 0 };
 		let sessionState: Record<string, unknown> = {};
-		let parseFailedLines = 0;
 
 		for (const line of lines) {
 			if (!line.trim()) { continue; }
 			try {
-				const event = JSON.parse(line);
+				const event = JSON.parse(line) as Record<string, unknown>;
 				sessionState = applyDelta(sessionState, event) as Record<string, unknown>;
-
-				// Incremental request messages (kind:2 append to requests array)
-				if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-					for (const request of event.v) {
-						if (request.message?.text) {
-							totalTokens += estimateTokensFromText(request.message.text);
-						}
-					}
-				}
-
-				// Incremental response items (kind:2 append to response array)
-				if (event.kind === 2 && event.k?.includes('response') && Array.isArray(event.v)) {
-					for (const responseItem of event.v) {
-						// Sub-agent results are incomplete mid-stream; count from reconstructed state below.
-						if (extractSubAgentData(responseItem)) { continue; }
-						const { text, isThinking } = extractResponseItemText(responseItem);
-						if (text) {
-							if (isThinking) { totalThinkingTokens += estimateTokensFromText(text); }
-							else { totalTokens += estimateTokensFromText(text); }
-						}
-					}
-				}
+				acc.totalTokens += _dtsProcessIncrementalRequests(event);
+				_dtsProcessIncrementalResponse(event, acc);
 			} catch {
-				parseFailedLines++;
+				acc.parseFailedLines++;
 			}
 		}
 
 		// Extract actual tokens from the reconstructed state (handles all delta path patterns).
 		// Use per-request regex fallback so that requests whose result lines failed JSON.parse
 		// still contribute actual tokens instead of being silently lost.
-		const rawUsageFallback = parseFailedLines > 0
+		const rawUsageFallback = acc.parseFailedLines > 0
 			? extractPerRequestUsageFromRawLines(lines)
 			: new Map<number, { promptTokens: number; outputTokens: number }>();
 		const rawRequests = sessionState['requests'];
 		const requests = (Array.isArray(rawRequests) ? rawRequests : []) as unknown[];
-		let maxIndex = requests.length;
-		for (const idx of rawUsageFallback.keys()) {
-			if (idx + 1 > maxIndex) { maxIndex = idx + 1; }
-		}
-		let totalActualTokens = 0;
-		for (let i = 0; i < maxIndex; i++) {
-			const result = getRequestResult(requests[i]);
-			let found = false;
-			if (result) {
-				if (typeof result.promptTokens === 'number' && typeof result.outputTokens === 'number') {
-					totalActualTokens += result.promptTokens + result.outputTokens;
-					found = true;
-				} else if (result.metadata && typeof result.metadata.promptTokens === 'number' && typeof result.metadata.outputTokens === 'number') {
-					// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
-					totalActualTokens += result.metadata.promptTokens + result.metadata.outputTokens;
-					found = true;
-				} else if (result.usage) {
-					const u = result.usage;
-					const prompt = typeof u.promptTokens === 'number' ? u.promptTokens : 0;
-					const completion = typeof u.completionTokens === 'number' ? u.completionTokens : 0;
-					totalActualTokens += prompt + completion;
-					found = true;
-				}
-			}
-			if (!found) {
-				const extracted = rawUsageFallback.get(i);
-				if (extracted) {
-					totalActualTokens += extracted.promptTokens + extracted.outputTokens;
-				}
-			}
-		}
+		const totalActualTokens = _dtsExtractActualTokens(requests, rawUsageFallback);
 
 		// Sub-agent results are built up char-by-char via delta events and are only
 		// complete in the fully reconstructed state — count them here.
-		for (const request of requests) {
-			const responseItems = getResponseArray(request);
-			if (!responseItems) { continue; }
-			for (const responseItem of responseItems) {
-				const subAgent = extractSubAgentData(responseItem);
-				if (subAgent) {
-					if (subAgent.prompt) { totalTokens += estimateTokensFromText(subAgent.prompt); }
-					if (subAgent.result) { totalTokens += estimateTokensFromText(subAgent.result); }
-				}
-			}
-		}
+		acc.totalTokens += _dtsExtractSubAgentTokens(requests);
 
 		return {
-			tokens: totalTokens + totalThinkingTokens,
-			thinkingTokens: totalThinkingTokens,
+			tokens: acc.totalTokens + acc.totalThinkingTokens,
+			thinkingTokens: acc.totalThinkingTokens,
 			actualTokens: totalActualTokens,
 			cacheReadTokens: 0,
 			modelUsage: {},
 			dailyActualTokens: {},
 		};
+	}
+}
+
+// --- EventJsonlTokenStrategy helpers ---
+
+/** Mutable state accumulated while processing an event-based JSONL session. */
+interface EjtsState {
+	totalTokens: number;
+	totalThinkingTokens: number;
+	cliActualTokens: number;
+	cliCacheReadTokens: number;
+	cliShutdownModelUsage: ModelUsage | null;
+	cliRealOutputByModel: { [model: string]: number } | null;
+	totalEstToolCalls: number;
+	dailyActualTokens: Record<string, number>;
+}
+
+/** Accumulate one model's metrics from a session.shutdown event into state. Returns the total tokens added. */
+function _ejtsAccumulateModelMetrics(modelName: string, metrics: ShutdownModelMetrics, state: EjtsState): number {
+	const usage = metrics?.usage;
+	if (!usage) { return 0; }
+	const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
+	const output = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
+	const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
+	const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
+	state.cliActualTokens += input + output;
+	state.cliCacheReadTokens += cacheRead;
+	if (!state.cliShutdownModelUsage![modelName]) {
+		state.cliShutdownModelUsage![modelName] = { inputTokens: 0, outputTokens: 0 };
+	}
+	state.cliShutdownModelUsage![modelName].inputTokens += input;
+	state.cliShutdownModelUsage![modelName].outputTokens += output;
+	if (cacheRead > 0) {
+		state.cliShutdownModelUsage![modelName].cachedReadTokens = (state.cliShutdownModelUsage![modelName].cachedReadTokens ?? 0) + cacheRead;
+	}
+	if (cacheWrite > 0) {
+		state.cliShutdownModelUsage![modelName].cacheCreationTokens = (state.cliShutdownModelUsage![modelName].cacheCreationTokens ?? 0) + cacheWrite;
+	}
+	return input + output;
+}
+
+/** Handle a session.shutdown event — extract per-model token totals and daily attribution. */
+function _ejtsHandleShutdown(event: Record<string, unknown>, state: EjtsState): void {
+	const data = event.data as Record<string, unknown> | undefined;
+	if (!data?.modelMetrics) { return; }
+	if (!state.cliShutdownModelUsage) { state.cliShutdownModelUsage = {}; }
+	let shutdownTotal = 0;
+	for (const [modelName, metrics] of Object.entries(data.modelMetrics) as [string, ShutdownModelMetrics][]) {
+		shutdownTotal += _ejtsAccumulateModelMetrics(modelName, metrics, state);
+	}
+	if (shutdownTotal > 0 && event.timestamp) {
+		const dayKey = new Date(String(event.timestamp)).toISOString().slice(0, 10);
+		if (dayKey && dayKey !== 'Inval') {
+			state.dailyActualTokens[dayKey] = (state.dailyActualTokens[dayKey] || 0) + shutdownTotal;
+		}
+	}
+}
+
+function _ejtsAccumulateThinkingTokens(data: Record<string, unknown> | undefined, state: EjtsState): void {
+	const reasoningText = data?.reasoningText;
+	if (typeof reasoningText === 'string' && reasoningText) { state.totalThinkingTokens += estimateTokensFromText(reasoningText); }
+	const thinkingText = (data?.thinking as Record<string, unknown> | undefined)?.text;
+	if (typeof thinkingText === 'string' && thinkingText) { state.totalThinkingTokens += estimateTokensFromText(thinkingText); }
+}
+
+function _ejtsAccumulateRealOutput(data: Record<string, unknown>, realOut: number, state: EjtsState): void {
+	if (!state.cliRealOutputByModel) { state.cliRealOutputByModel = {}; }
+	const m = String(data?.model ?? 'unknown');
+	state.cliRealOutputByModel[m] = (state.cliRealOutputByModel[m] ?? 0) + realOut;
+}
+
+/** Handle assistant.message event — accumulate real or estimated output tokens and thinking tokens. */
+function _ejtsHandleAssistantMessage(event: Record<string, unknown>, state: EjtsState): void {
+	const data = event.data as Record<string, unknown> | undefined;
+	const realOut = typeof data?.outputTokens === 'number' ? data.outputTokens as number : 0;
+	if (realOut > 0) { _ejtsAccumulateRealOutput(data!, realOut, state); }
+	else if (data?.content) { state.totalTokens += estimateTokensFromText(String(data.content)); }
+	_ejtsAccumulateThinkingTokens(data, state);
+}
+
+function _ejtsHandleToolComplete(data: Record<string, unknown> | undefined, state: EjtsState): void {
+	if (!data?.result) { return; }
+	const result = data.result as Record<string, unknown>;
+	const text = typeof result.detailedContent === 'string' ? result.detailedContent
+		: typeof result.content === 'string' ? result.content : '';
+	if (text) { state.totalTokens += estimateTokensFromText(text); }
+}
+
+/** Dispatch an event to the appropriate handler based on its type field. */
+function _ejtsHandleEventType(event: Record<string, unknown>, state: EjtsState): void {
+	const data = event.data as Record<string, unknown> | undefined;
+	if (event.type === 'user.message' && data?.content) {
+		state.totalTokens += estimateTokensFromText(String(data.content));
+	} else if (event.type === 'user.message_rendered' && data?.renderedMessage) {
+		state.totalTokens += estimateTokensFromText(String(data.renderedMessage));
+	} else if (event.type === 'assistant.message') {
+		_ejtsHandleAssistantMessage(event, state);
+	} else if (event.type === 'tool.execution_start') {
+		state.totalEstToolCalls++;
+	} else if (event.type === 'tool.execution_complete') {
+		_ejtsHandleToolComplete(data, state);
+	} else if (event.content) {
+		state.totalTokens += estimateTokensFromText(String(event.content));
+	}
+}
+
+/**
+ * Apply ratio-based total estimation when no session.shutdown token data is available.
+ * Heavy agent sessions show ~130x ratio; cache reads ≈ input (50% of total from completed sessions).
+ */
+function _ejtsEstimateFromRealOutput(state: EjtsState): void {
+	if (!state.cliRealOutputByModel) { return; }
+	const inputOutputRatio = state.totalEstToolCalls > TOOL_CALLS_HIGH_THRESHOLD ? TOKEN_RATIO_HIGH_TOOLS
+		: state.totalEstToolCalls > TOOL_CALLS_MED_THRESHOLD ? TOKEN_RATIO_MED_TOOLS
+		: TOKEN_RATIO_LOW_TOOLS;
+	for (const realOutput of Object.values(state.cliRealOutputByModel)) {
+		const estimatedInput = Math.round(realOutput * inputOutputRatio);
+		state.cliActualTokens += estimatedInput + realOutput;  // input + output (cache is a subset of input)
+		state.cliCacheReadTokens += estimatedInput;            // cache ≈ input from empirical data
 	}
 }
 
@@ -383,126 +549,36 @@ export class DeltaTokenStrategy implements TokenEstimationStrategy {
  */
 export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 	estimate(lines: string[]): TokenEstimationResult {
-		let totalTokens = 0;
-		let totalThinkingTokens = 0;
-		let cliActualTokens = 0;
-		let cliCacheReadTokens = 0;
-		let cliShutdownModelUsage: ModelUsage | null = null;
-		let cliRealOutputByModel: { [model: string]: number } | null = null;
-		let totalEstToolCalls = 0;
-		const dailyActualTokens: Record<string, number> = {};
+		const state: EjtsState = {
+			totalTokens: 0,
+			totalThinkingTokens: 0,
+			cliActualTokens: 0,
+			cliCacheReadTokens: 0,
+			cliShutdownModelUsage: null,
+			cliRealOutputByModel: null,
+			totalEstToolCalls: 0,
+			dailyActualTokens: {},
+		};
 
 		for (const line of lines) {
 			if (!line.trim()) { continue; }
 			try {
-				const event = JSON.parse(line);
-
-				// session.shutdown contains exact token totals per model
-				if (event.type === 'session.shutdown' && event.data?.modelMetrics) {
-					if (!cliShutdownModelUsage) { cliShutdownModelUsage = {}; }
-					let shutdownTotal = 0;
-					for (const [modelName, metrics] of Object.entries(event.data.modelMetrics) as [string, ShutdownModelMetrics][]) {
-						const usage = metrics?.usage;
-						if (usage) {
-							const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
-							const output = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
-							const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
-							const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
-							cliActualTokens += input + output;
-							cliCacheReadTokens += cacheRead;
-							shutdownTotal += input + output;
-							if (!cliShutdownModelUsage[modelName]) {
-								cliShutdownModelUsage[modelName] = { inputTokens: 0, outputTokens: 0 };
-							}
-							cliShutdownModelUsage[modelName].inputTokens += input;
-							cliShutdownModelUsage[modelName].outputTokens += output;
-							// Cache breakdown — inputTokens is the total (uncached + reads + writes).
-							// Populate these so calculateEstimatedCost can apply the correct discount rates.
-							if (cacheRead > 0) {
-								cliShutdownModelUsage[modelName].cachedReadTokens = (cliShutdownModelUsage[modelName].cachedReadTokens ?? 0) + cacheRead;
-							}
-							if (cacheWrite > 0) {
-								cliShutdownModelUsage[modelName].cacheCreationTokens = (cliShutdownModelUsage[modelName].cacheCreationTokens ?? 0) + cacheWrite;
-							}
-						}
-					}
-					// Attribute this shutdown's tokens to its UTC day
-					if (shutdownTotal > 0 && event.timestamp) {
-						const dayKey = new Date(event.timestamp).toISOString().slice(0, 10);
-						if (dayKey && dayKey !== 'Inval') {
-							dailyActualTokens[dayKey] = (dailyActualTokens[dayKey] || 0) + shutdownTotal;
-						}
-					}
-				}
-
-				// User / assistant / tool event types
-				if (event.type === 'user.message' && event.data?.content) {
-					totalTokens += estimateTokensFromText(event.data.content);
-				} else if (event.type === 'user.message_rendered' && event.data?.renderedMessage) {
-					// JetBrains IDE: rendered message includes injected file context alongside the
-					// user question. Count it in place of user.message so the context tokens are
-					// captured. (user.message and user.message_rendered share the same turnId;
-					// the rendered version subsumes the bare message, so any double-count is minor
-					// as user.message is typically short compared to the full rendered content.)
-					totalTokens += estimateTokensFromText(event.data.renderedMessage);
-				} else if (event.type === 'assistant.message') {
-					const realOut = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
-					if (realOut > 0) {
-						// Real API-reported output tokens — accumulate for ratio-based total estimation
-						if (!cliRealOutputByModel) { cliRealOutputByModel = {}; }
-						const m = event.data?.model || 'unknown';
-						cliRealOutputByModel[m] = (cliRealOutputByModel[m] ?? 0) + realOut;
-					} else if (event.data?.content) {
-						totalTokens += estimateTokensFromText(event.data.content);
-					}
-				} else if (event.type === 'tool.execution_start') {
-					totalEstToolCalls++;
-				} else if (event.type === 'tool.execution_complete' && event.data?.result) {
-					const result = event.data.result;
-					// Prefer detailedContent (captures full subagent prompt for task launches)
-					const text = typeof result.detailedContent === 'string' ? result.detailedContent
-						: typeof result.content === 'string' ? result.content : '';
-					if (text) { totalTokens += estimateTokensFromText(text); }
-				} else if (event.content) {
-					// Fallback for other formats that might have content
-					totalTokens += estimateTokensFromText(event.content);
-				}
-
-				// Extract thinking tokens from assistant.message events
-				if (event.type === 'assistant.message') {
-					const reasoningText = event.data?.reasoningText;
-					if (typeof reasoningText === 'string' && reasoningText) {
-						totalThinkingTokens += estimateTokensFromText(reasoningText);
-					}
-					// JetBrains format uses event.data.thinking.text
-					const thinkingText = event.data?.thinking?.text;
-					if (typeof thinkingText === 'string' && thinkingText) {
-						totalThinkingTokens += estimateTokensFromText(thinkingText);
-					}
-				}
+				const event = JSON.parse(line) as Record<string, unknown>;
+				if (event.type === 'session.shutdown') { _ejtsHandleShutdown(event, state); }
+				_ejtsHandleEventType(event, state);
 			} catch { /* skip invalid lines */ }
 		}
 
 		// No session.shutdown: use real outputTokens from assistant.message + observed input:output ratios.
-		// Heavy agent sessions show ~130x ratio; cache reads ≈ input (50% of total from completed sessions).
-		if (!cliActualTokens && cliRealOutputByModel) {
-			const inputOutputRatio = totalEstToolCalls > TOOL_CALLS_HIGH_THRESHOLD ? TOKEN_RATIO_HIGH_TOOLS
-			: totalEstToolCalls > TOOL_CALLS_MED_THRESHOLD ? TOKEN_RATIO_MED_TOOLS
-			: TOKEN_RATIO_LOW_TOOLS;
-			for (const realOutput of Object.values(cliRealOutputByModel)) {
-				const estimatedInput = Math.round(realOutput * inputOutputRatio);
-				cliActualTokens += estimatedInput + realOutput;  // input + output (cache is a subset of input)
-				cliCacheReadTokens += estimatedInput;            // cache ≈ input from empirical data
-			}
-		}
+		if (!state.cliActualTokens) { _ejtsEstimateFromRealOutput(state); }
 
 		return {
-			tokens: totalTokens + totalThinkingTokens,
-			thinkingTokens: totalThinkingTokens,
-			actualTokens: cliActualTokens,
-			cacheReadTokens: cliCacheReadTokens,
-			modelUsage: cliShutdownModelUsage ?? {},
-			dailyActualTokens,
+			tokens: state.totalTokens + state.totalThinkingTokens,
+			thinkingTokens: state.totalThinkingTokens,
+			actualTokens: state.cliActualTokens,
+			cacheReadTokens: state.cliCacheReadTokens,
+			modelUsage: state.cliShutdownModelUsage ?? {},
+			dailyActualTokens: state.dailyActualTokens,
 		};
 	}
 }
@@ -564,6 +640,34 @@ export async function reconstructJsonlStateAsync(lines: string[], yieldInterval 
 	return { sessionState, isDeltaBased };
 }
 
+/** Accumulator used by extractAllTokensFromDebugLog. */
+interface EatdlAcc {
+	inputTokens: number;
+	outputTokens: number;
+	cachedTokens: number;
+	modelTurns: number;
+	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
+}
+
+/** Process one llm_request event into the accumulator. */
+function _eatdlProcessLlmRequest(event: Record<string, unknown>, acc: EatdlAcc): void {
+	acc.modelTurns++;
+	const attrs = event.attrs as Record<string, unknown> | undefined;
+	const inp = typeof attrs?.inputTokens === 'number' ? attrs.inputTokens : 0;
+	const out = typeof attrs?.outputTokens === 'number' ? attrs.outputTokens : 0;
+	const cached = typeof attrs?.cachedTokens === 'number' ? attrs.cachedTokens : 0;
+	acc.inputTokens += inp;
+	acc.outputTokens += out;
+	acc.cachedTokens += cached;
+	const model = typeof attrs?.model === 'string' && attrs.model ? attrs.model : '';
+	if (!model) { return; }
+	const entry = acc.modelBreakdown[model] ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+	entry.inputTokens += inp;
+	entry.outputTokens += out;
+	entry.cachedTokens += cached;
+	acc.modelBreakdown[model] = entry;
+}
+
 /**
  * Extract token totals from all `llm_request` events in a Copilot Chat debug log.
  *
@@ -574,6 +678,29 @@ export async function reconstructJsonlStateAsync(lines: string[], yieldInterval 
  * Returns null when no `llm_request` events are found (debug logging disabled,
  * or file is empty / does not exist).
  */
+type EatdlState = { inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> };
+
+function _eatdlProcessEvent(event: unknown, state: EatdlState): void {
+	const ev = event as Record<string, unknown>;
+	if (ev['type'] !== 'llm_request') { return; }
+	state.modelTurns++;
+	const attrs = ev['attrs'] as Record<string, unknown> | undefined;
+	const inp = typeof attrs?.['inputTokens'] === 'number' ? attrs['inputTokens'] as number : 0;
+	const out = typeof attrs?.['outputTokens'] === 'number' ? attrs['outputTokens'] as number : 0;
+	const cached = typeof attrs?.['cachedTokens'] === 'number' ? attrs['cachedTokens'] as number : 0;
+	state.inputTokens += inp;
+	state.outputTokens += out;
+	state.cachedTokens += cached;
+	const model = typeof attrs?.['model'] === 'string' && attrs['model'] ? attrs['model'] as string : '';
+	if (model) {
+		const entry = state.modelBreakdown[model] ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
+		entry.inputTokens += inp;
+		entry.outputTokens += out;
+		entry.cachedTokens += cached;
+		state.modelBreakdown[model] = entry;
+	}
+}
+
 export function extractAllTokensFromDebugLog(content: string): {
 	inputTokens: number;
 	outputTokens: number;
@@ -581,36 +708,15 @@ export function extractAllTokensFromDebugLog(content: string): {
 	modelTurns: number;
 	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
 } | null {
-	let inputTokens = 0;
-	let outputTokens = 0;
-	let cachedTokens = 0;
-	let modelTurns = 0;
-	const modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> = {};
+	const acc: EatdlAcc = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, modelTurns: 0, modelBreakdown: {} };
 	for (const line of content.split(/\r?\n/)) {
 		if (!line.trim()) { continue; }
 		try {
 			const event = JSON.parse(line);
-			if (event.type === 'llm_request') {
-				modelTurns++;
-				const inp = typeof event?.attrs?.inputTokens === 'number' ? event.attrs.inputTokens : 0;
-				const out = typeof event?.attrs?.outputTokens === 'number' ? event.attrs.outputTokens : 0;
-				const cached = typeof event?.attrs?.cachedTokens === 'number' ? event.attrs.cachedTokens : 0;
-				inputTokens += inp;
-				outputTokens += out;
-				cachedTokens += cached;
-				// Accumulate per-model breakdown using attrs.model when present
-				const model = typeof event?.attrs?.model === 'string' && event.attrs.model ? event.attrs.model : '';
-				if (model) {
-					const entry = modelBreakdown[model] ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
-					entry.inputTokens += inp;
-					entry.outputTokens += out;
-					entry.cachedTokens += cached;
-					modelBreakdown[model] = entry;
-				}
-			}
+			if (event.type === 'llm_request') { _eatdlProcessLlmRequest(event as Record<string, unknown>, acc); }
 		} catch { /* skip invalid lines */ }
 	}
-	return modelTurns > 0 ? { inputTokens, outputTokens, cachedTokens, modelTurns, modelBreakdown } : null;
+	return acc.modelTurns > 0 ? acc : null;
 }
 
 /**
@@ -629,84 +735,84 @@ export function extractCachedTokensFromDebugLog(content: string): number {
 }
 
 /**
- * Build a map from requestId → reasoning effort level by scanning delta-based JSONL lines.
- *
- * The effort level is taken from `configurationSchema.properties.reasoningEffort.default`
- * on the active selectedModel at the time each request is added to the session.
- *
- * Returns: Map<requestId, effort> plus the default effort at session start.
+ * Extract the reasoning effort level from a model object's metadata.
+ * Navigates: model → metadata → configurationSchema → properties → reasoningEffort → default.
  */
+function _bretExtractEffortFromModel(model: unknown): string | null {
+	if (!model || typeof model !== 'object') { return null; }
+	const m = model as Record<string, unknown>;
+	const metadata = m['metadata'];
+	if (!metadata || typeof metadata !== 'object') { return null; }
+	const meta = metadata as Record<string, unknown>;
+	const schema = meta['configurationSchema'];
+	if (!schema || typeof schema !== 'object') { return null; }
+	const s = schema as Record<string, unknown>;
+	const props = s['properties'];
+	if (!props || typeof props !== 'object') { return null; }
+	const p = props as Record<string, unknown>;
+	const re = p['reasoningEffort'];
+	if (!re || typeof re !== 'object') { return null; }
+	const r = re as Record<string, unknown>;
+	return typeof r['default'] === 'string' ? r['default'] : null;
+}
+
+/** Mutable state for buildReasoningEffortTimeline. */
+interface BretState {
+	effortByRequestId: Map<string, string>;
+	currentEffort: string | null;
+	defaultEffort: string | null;
+	switchCount: number;
+}
+
+/** Handle kind:0 (initial state) delta for reasoning effort timeline. */
+function _bretHandleKind0(delta: DeltaEvent, state: BretState): void {
+	const v = delta.v as Record<string, unknown> | undefined;
+	const inputState = v?.['inputState'] as Record<string, unknown> | undefined;
+	const effort = _bretExtractEffortFromModel(inputState?.['selectedModel']);
+	if (effort !== null) { state.currentEffort = effort; state.defaultEffort = effort; }
+}
+
+/** Handle kind:1 (update) delta for reasoning effort timeline. */
+function _bretHandleKind1(delta: DeltaEvent, state: BretState): void {
+	const k = delta.k;
+	if (!Array.isArray(k) || k[0] !== 'inputState' || k[1] !== 'selectedModel') { return; }
+	const effort = _bretExtractEffortFromModel(delta.v);
+	if (effort !== null && effort !== state.currentEffort) {
+		if (state.currentEffort !== null) { state.switchCount++; }
+		state.currentEffort = effort;
+	}
+}
+
+/** Handle kind:2 (append) delta for reasoning effort timeline. */
+function _bretHandleKind2(delta: DeltaEvent, state: BretState): void {
+	const k = delta.k;
+	if (!Array.isArray(k) || k[0] !== 'requests' || typeof k[1] !== 'number' || state.currentEffort === null) { return; }
+	const req = delta.v;
+	if (!req || typeof req !== 'object') { return; }
+	const requestId = typeof (req as Record<string, unknown>)['requestId'] === 'string'
+		? (req as Record<string, unknown>)['requestId'] as string : null;
+	if (requestId) { state.effortByRequestId.set(requestId, state.currentEffort); }
+}
+
+
 export function buildReasoningEffortTimeline(lines: string[]): {
   effortByRequestId: Map<string, string>;
   defaultEffort: string | null;
   switchCount: number;
 } {
-  const effortByRequestId = new Map<string, string>();
-  let currentEffort: string | null = null;
-  let defaultEffort: string | null = null;
-  let switchCount = 0;
+	const state: BretState = { effortByRequestId: new Map(), currentEffort: null, defaultEffort: null, switchCount: 0 };
 
-  function extractEffortFromModel(model: unknown): string | null {
-    if (!model || typeof model !== 'object') { return null; }
-    const m = model as Record<string, unknown>;
-    const metadata = m['metadata'];
-    if (!metadata || typeof metadata !== 'object') { return null; }
-    const meta = metadata as Record<string, unknown>;
-    const schema = meta['configurationSchema'];
-    if (!schema || typeof schema !== 'object') { return null; }
-    const s = schema as Record<string, unknown>;
-    const props = s['properties'];
-    if (!props || typeof props !== 'object') { return null; }
-    const p = props as Record<string, unknown>;
-    const re = p['reasoningEffort'];
-    if (!re || typeof re !== 'object') { return null; }
-    const r = re as Record<string, unknown>;
-    return typeof r['default'] === 'string' ? r['default'] : null;
-  }
+	for (const line of lines) {
+		if (!line.trim()) { continue; }
+		let delta: DeltaEvent;
+		try { delta = JSON.parse(line) as DeltaEvent; } catch { continue; }
+		if (typeof delta.kind !== 'number') { continue; }
+		if (delta.kind === 0) { _bretHandleKind0(delta, state); }
+		else if (delta.kind === 1) { _bretHandleKind1(delta, state); }
+		else if (delta.kind === 2) { _bretHandleKind2(delta, state); }
+	}
 
-  for (const line of lines) {
-    if (!line.trim()) { continue; }
-    let delta: DeltaEvent;
-    try { delta = JSON.parse(line) as DeltaEvent; } catch { continue; }
-    if (typeof delta.kind !== 'number') { continue; }
-
-    if (delta.kind === 0) {
-      // Initial state: extract model from inputState.selectedModel
-      const v = delta.v as Record<string, unknown> | undefined;
-      const inputState = v?.['inputState'] as Record<string, unknown> | undefined;
-      const model = inputState?.['selectedModel'];
-      const effort = extractEffortFromModel(model);
-      if (effort !== null) {
-        currentEffort = effort;
-        defaultEffort = effort;
-      }
-    } else if (delta.kind === 1) {
-      const k = delta.k;
-      // Update to inputState.selectedModel — two-element path
-      if (Array.isArray(k) && k[0] === 'inputState' && k[1] === 'selectedModel') {
-        const effort = extractEffortFromModel(delta.v);
-        if (effort !== null && effort !== currentEffort) {
-          if (currentEffort !== null) { switchCount++; }
-          currentEffort = effort;
-        }
-      }
-    } else if (delta.kind === 2) {
-      const k = delta.k;
-      // New request being added: k = ["requests", <index>]
-      if (Array.isArray(k) && k[0] === 'requests' && typeof k[1] === 'number' && currentEffort !== null) {
-        const req = delta.v;
-        if (req && typeof req === 'object') {
-          const r = req as Record<string, unknown>;
-          const requestId = typeof r['requestId'] === 'string' ? r['requestId'] : null;
-          if (requestId) {
-            effortByRequestId.set(requestId, currentEffort);
-          }
-        }
-      }
-    }
-  }
-
-  return { effortByRequestId, defaultEffort, switchCount };
+	return { effortByRequestId: state.effortByRequestId, defaultEffort: state.defaultEffort, switchCount: state.switchCount };
 }
 
 /**
@@ -734,38 +840,63 @@ export function extractPerRequestUsageFromRawLines(lines: string[]): Map<number,
 	return usage;
 }
 
+/** Build a reverse lookup map from display name → model ID using modelPricing entries. */
+function _gmfrBuildReverseMap(modelPricing: { [key: string]: ModelPricing }): { [displayName: string]: string } {
+	const reverseMap: { [displayName: string]: string } = {};
+	for (const [modelId, pricing] of Object.entries(modelPricing)) {
+		if (pricing.displayNames) {
+			for (const displayName of pricing.displayNames) {
+				reverseMap[displayName] = modelId;
+			}
+		}
+	}
+	return reverseMap;
+}
+
+/** Find the model ID for a request by matching display names against its details string. Returns null if not found. */
+function _gmfrFindByDisplayName(details: string, modelPricing: { [key: string]: ModelPricing }): string | null {
+	const reverseMap = _gmfrBuildReverseMap(modelPricing);
+	// Sort by length descending to match longer names first (e.g., "Gemini 3 Pro (Preview)" before "Gemini 3 Pro")
+	const sortedNames = Object.keys(reverseMap).sort((a, b) => b.length - a.length);
+	for (const displayName of sortedNames) {
+		if (details.includes(displayName)) { return reverseMap[displayName]; }
+	}
+	return null;
+}
+
+function _gmrBuildDisplayNameLookup(modelPricing: { [key: string]: ModelPricing }): { [displayName: string]: string } {
+const map: { [displayName: string]: string } = {};
+for (const [modelId, pricing] of Object.entries(modelPricing)) {
+if (pricing.displayNames) {
+for (const displayName of pricing.displayNames) { map[displayName] = modelId; }
+}
+}
+return map;
+}
+
+function _gmrMatchDisplayName(details: string, displayNameMap: { [dn: string]: string }): string | null {
+const sorted = Object.keys(displayNameMap).sort((a, b) => b.length - a.length);
+for (const displayName of sorted) {
+if (details.includes(displayName)) { return displayNameMap[displayName]; }
+}
+return null;
+}
+
 export function getModelFromRequest(request: ModelRequestSource, modelPricing: { [key: string]: ModelPricing } = {}): string {
-	// Try to determine model from request metadata (most reliable source)
-	// First check the top-level modelId field (VS Code format)
-	if (request.modelId) {
-		// Remove "copilot/" prefix if present
-		return request.modelId.replace(/^copilot\//, '');
+	if (request.modelId) { return request.modelId.replace(/^copilot\//, ''); }
+	if (request.result?.metadata?.modelId) { return request.result.metadata.modelId.replace(/^copilot\//, ''); }
+	if (request.result?.details) {
+		const matched = _gmrMatchDisplayName(request.result.details, _gmrBuildDisplayNameLookup(modelPricing));
+		if (matched) { return matched; }
 	}
 
-	if (request.result && request.result.metadata && request.result.metadata.modelId) {
+	if (request.result?.metadata?.modelId) {
 		return request.result.metadata.modelId.replace(/^copilot\//, '');
 	}
 
-	// Build a lookup map from display names to model IDs from modelPricing.json
-	if (request.result && request.result.details) {
-		// Create reverse lookup: displayName -> modelId
-		const displayNameToModelId: { [displayName: string]: string } = {};
-		for (const [modelId, pricing] of Object.entries(modelPricing)) {
-			if (pricing.displayNames) {
-				for (const displayName of pricing.displayNames) {
-					displayNameToModelId[displayName] = modelId;
-				}
-			}
-		}
-
-		// Check which display name appears in the details
-		// Sort by length descending to match longer names first (e.g., "Gemini 3 Pro (Preview)" before "Gemini 3 Pro")
-		const sortedDisplayNames = Object.keys(displayNameToModelId).sort((a, b) => b.length - a.length);
-		for (const displayName of sortedDisplayNames) {
-			if (request.result.details.includes(displayName)) {
-				return displayNameToModelId[displayName];
-			}
-		}
+	if (request.result?.details) {
+		const found = _gmfrFindByDisplayName(request.result.details, modelPricing);
+		if (found) { return found; }
 	}
 
 	return 'gpt-4'; // default
@@ -803,91 +934,77 @@ export function isUuidPointerFile(content: string): boolean {
 	return /^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(trimmedContent);
 }
 
-/**
- * Apply a delta to reconstruct session state from delta-based JSONL format.
- * VS Code Insiders uses this format where:
- * - kind: 0 = initial state (full replacement)
- * - kind: 1 = update value at key path
- * - kind: 2 = append to array at key path
- * - k = key path (array of strings)
- * - v = value
- */
-export function applyDelta(state: unknown, delta: unknown): unknown {
-	if (typeof delta !== 'object' || delta === null) {
-		return state;
-	}
+// --- applyDelta helpers ---
 
+/** During path traversal, get-or-create the child node at `seg` inside `container`. */
+function _adGetOrCreate(
+	container: Record<string, unknown> | unknown[],
+	seg: string,
+	wantsArray: boolean
+): Record<string, unknown> | unknown[] {
+	if (Array.isArray(container)) {
+		const idx = Number(seg);
+		if (!container[idx] || typeof container[idx] !== 'object') {
+			container[idx] = wantsArray ? [] : {};
+		}
+		return container[idx] as Record<string, unknown> | unknown[];
+	} else {
+		if (!container[seg] || typeof container[seg] !== 'object') {
+			container[seg] = wantsArray ? [] : {};
+		}
+		return container[seg] as Record<string, unknown> | unknown[];
+	}
+}
+
+/** Set value at the last path segment (kind:1). */
+function _adApplyKind1(current: Record<string, unknown> | unknown[], lastSeg: string, v: unknown): void {
+	if (Array.isArray(current)) { current[Number(lastSeg)] = v; }
+	else { current[lastSeg] = v; }
+}
+
+/** Push value(s) onto an array target. */
+function _adApplyKind2Target(target: unknown[], v: unknown): void {
+	if (Array.isArray(v)) { target.push(...(v as unknown[])); }
+	else { target.push(v); }
+}
+
+/** Get-or-create the target array at the last path segment and append value(s) (kind:2). */
+function _adApplyKind2(current: Record<string, unknown> | unknown[], lastSeg: string, v: unknown): void {
+	let target: unknown[];
+	if (Array.isArray(current)) {
+		const idx = Number(lastSeg);
+		if (!Array.isArray(current[idx])) { current[idx] = []; }
+		target = current[idx] as unknown[];
+	} else {
+		if (!Array.isArray(current[lastSeg])) { current[lastSeg] = []; }
+		target = current[lastSeg] as unknown[];
+	}
+	_adApplyKind2Target(target, v);
+}
+
+
+export function applyDelta(state: unknown, delta: unknown): unknown {
+	if (typeof delta !== 'object' || delta === null) { return state; }
 	const d = delta as Record<string, unknown>;
 	const { kind, k, v } = d;
 
-	if (kind === 0) {
-		// Initial state - full replacement
-		return v;
-	}
+	if (kind === 0) { return v; }
 
-	if (!Array.isArray(k) || k.length === 0) {
-		return state;
-	}
+	if (!Array.isArray(k) || k.length === 0) { return state; }
 
 	const pathArr = k.map(String);
-	let root: Record<string, unknown> | unknown[] = typeof state === 'object' && state !== null ? state as Record<string, unknown> | unknown[] : {};
+	let root: Record<string, unknown> | unknown[] = typeof state === 'object' && state !== null
+		? state as Record<string, unknown> | unknown[] : {};
 	let current: Record<string, unknown> | unknown[] = root;
 
 	// Traverse to the parent of the target location
 	for (let i = 0; i < pathArr.length - 1; i++) {
-		const seg = pathArr[i];
-		const nextSeg = pathArr[i + 1];
-		const wantsArray = /^\d+$/.test(nextSeg);
-
-		if (Array.isArray(current)) {
-			const idx = Number(seg);
-			if (!current[idx] || typeof current[idx] !== 'object') {
-				current[idx] = wantsArray ? [] : {};
-			}
-			current = current[idx] as Record<string, unknown> | unknown[];
-		} else {
-			if (!current[seg] || typeof current[seg] !== 'object') {
-				current[seg] = wantsArray ? [] : {};
-			}
-			current = current[seg] as Record<string, unknown> | unknown[];
-		}
+		current = _adGetOrCreate(current, pathArr[i], /^\d+$/.test(pathArr[i + 1]));
 	}
 
 	const lastSeg = pathArr[pathArr.length - 1];
-
-	if (kind === 1) {
-		// Set value at key path
-		if (Array.isArray(current)) {
-			current[Number(lastSeg)] = v;
-		} else {
-			current[lastSeg] = v;
-		}
-		return root;
-	}
-
-	if (kind === 2) {
-		// Append value(s) to array at key path
-		let target: unknown[];
-		if (Array.isArray(current)) {
-			const idx = Number(lastSeg);
-			if (!Array.isArray(current[idx])) {
-				current[idx] = [];
-			}
-			target = current[idx] as unknown[];
-		} else {
-			if (!Array.isArray(current[lastSeg])) {
-				current[lastSeg] = [];
-			}
-			target = current[lastSeg] as unknown[];
-		}
-
-		if (Array.isArray(v)) {
-			target.push(...(v as unknown[]));
-		} else {
-			target.push(v);
-		}
-		return root;
-	}
+	if (kind === 1) { _adApplyKind1(current, lastSeg, v); return root; }
+	if (kind === 2) { _adApplyKind2(current, lastSeg, v); return root; }
 
 	return root;
 }

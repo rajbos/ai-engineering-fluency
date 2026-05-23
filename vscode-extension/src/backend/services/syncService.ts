@@ -36,7 +36,7 @@ type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions
  * The caller is responsible for any logging based on the result.
  */
 export function parseConsentTimestamp(raw: unknown): Date | Error {
-	const ts = raw == null ? '' : String(raw);
+	const ts = (raw === null || raw === undefined) ? '' : String(raw);
 	if (!ts) {
 		return new Error('no consent timestamp provided');
 	}
@@ -378,9 +378,7 @@ const req = request as ChatRequest;
 const reqId = (req as any).requestId as string | undefined;
 if (reqId && seenRequestIds.has(reqId)) { continue; }
 if (reqId) { seenRequestIds.add(reqId); }
-const normalizedTs = this.utility.normalizeTimestampToMs(
-typeof req.timestamp !== 'undefined' ? req.timestamp : undefined
-);
+const normalizedTs = this.utility.normalizeTimestampToMs(req.timestamp);
 const eventMs = Number.isFinite(normalizedTs) ? normalizedTs : fileMtimeMs;
 if (!eventMs || eventMs < startMs) { continue; }
 const dayKey = this.utility.toUtcDayKey(new Date(eventMs));
@@ -388,7 +386,7 @@ const rawModel = (req as any).modelId || (req as any).result?.metadata?.modelId;
 const model = rawModel ? (rawModel as string).replace(/^copilot\//, '') : defaultModel;
 if (!dayModelInteractions.has(dayKey)) { dayModelInteractions.set(dayKey, new Map()); }
 const dayMap = dayModelInteractions.get(dayKey)!;
-dayMap.set(model, (dayMap.get(model) || 0) + 1);
+dayMap.set(model, (dayMap.get(model) ?? 0) + 1);
 }
 }
 
@@ -432,6 +430,24 @@ return null;
 }
 }
 
+private redistributeToMappedModels(
+modelMap: Map<string, number>,
+unmappedModels: Set<string>,
+cachedModelNames: string[],
+cachedModelUsage: ModelUsage,
+totalCachedTokens: number
+): void {
+let unmappedCount = 0;
+for (const um of unmappedModels) { unmappedCount += modelMap.get(um) ?? 0; modelMap.delete(um); }
+if (unmappedCount === 0) { return; }
+for (const cm of cachedModelNames) {
+const ct = cachedModelUsage[cm].inputTokens + cachedModelUsage[cm].outputTokens;
+const share = totalCachedTokens > 0 ? ct / totalCachedTokens : 1 / cachedModelNames.length;
+const redistributed = Math.round(unmappedCount * share);
+if (redistributed > 0) { modelMap.set(cm, (modelMap.get(cm) ?? 0) + redistributed); }
+}
+}
+
 /**
  * Remap event model names to cached model names when there is a mismatch.
  * CLI sessions often omit the model in individual events while session.shutdown
@@ -448,28 +464,12 @@ for (const modelMap of dayModelInteractions.values()) {
 for (const m of modelMap.keys()) { allEventModels.add(m); }
 }
 const unmappedModels = new Set<string>();
-for (const m of allEventModels) {
-if (!cachedModelUsage[m]) { unmappedModels.add(m); }
-}
+for (const m of allEventModels) { if (!cachedModelUsage[m]) { unmappedModels.add(m); } }
 if (unmappedModels.size === 0) { return; }
 const totalCachedTokens = cachedModelNames.reduce((sum, m) =>
 sum + cachedModelUsage[m].inputTokens + cachedModelUsage[m].outputTokens, 0);
 for (const [, modelMap] of dayModelInteractions) {
-let unmappedCount = 0;
-for (const um of unmappedModels) {
-unmappedCount += modelMap.get(um) || 0;
-modelMap.delete(um);
-}
-if (unmappedCount > 0) {
-for (const cm of cachedModelNames) {
-const ct = cachedModelUsage[cm].inputTokens + cachedModelUsage[cm].outputTokens;
-const share = totalCachedTokens > 0 ? ct / totalCachedTokens : 1 / cachedModelNames.length;
-const redistributed = Math.round(unmappedCount * share);
-if (redistributed > 0) {
-modelMap.set(cm, (modelMap.get(cm) || 0) + redistributed);
-}
-}
-}
+this.redistributeToMappedModels(modelMap, unmappedModels, cachedModelNames, cachedModelUsage, totalCachedTokens);
 }
 }
 
@@ -1186,6 +1186,21 @@ return true;
 		return { rollups, workspaceNamesById, machineNamesById };
 	}
 
+	private async tryProcessSpecialSession(
+		sessionFile: string, fileMtimeMs: number,
+		sessionArgs: ReturnType<typeof this.makeSessionRollupArgs>,
+		isType: (f: string) => boolean,
+		process: (f: string, mtime: number, args: ReturnType<typeof this.makeSessionRollupArgs>) => Promise<boolean>,
+		filesSkipped: { count: number }
+	): Promise<boolean> {
+		if (!isType(sessionFile)) { return false; }
+		try {
+			const processed = await process(sessionFile, fileMtimeMs, sessionArgs);
+			if (!processed) { filesSkipped.count++; }
+		} catch (e) { this.deps.logger.warn(`Backend sync: failed to process session ${sessionFile}: ${e}`); }
+		return true;
+	}
+
 	private async processOneSessionForRollup(
 		sessionFile: string,
 		ctx: {
@@ -1199,37 +1214,20 @@ return true;
 	): Promise<void> {
 		const fileMtimeMs = await this.statSessionFileForRollup(sessionFile, ctx);
 		if (fileMtimeMs === undefined) { return; }
-
 		const editorForFile = this.getEditorForFile(sessionFile, ctx.includeEditorDimension);
-
 		if (this.isVSSessionFileType(sessionFile)) { ctx.progress.filesSkipped++; return; }
-
 		const sessionArgs = this.makeSessionRollupArgs(ctx.machineId, ctx.userId, editorForFile, ctx.workspaceNamesById, ctx.rollups, ctx.startMs);
-		if (this.isOpenCodeSessionType(sessionFile)) {
-			try {
-				const processed = await this.processOpenCodeSession(sessionFile, fileMtimeMs, sessionArgs);
-				if (!processed) { ctx.progress.filesSkipped++; }
-			} catch (e) { this.deps.logger.warn(`Backend sync: failed to process OpenCode session ${sessionFile}: ${e}`); }
-			return;
-		}
-		if (this.isCrushSessionType(sessionFile)) {
-			try {
-				const processed = await this.processCrushSession(sessionFile, fileMtimeMs, sessionArgs);
-				if (!processed) { ctx.progress.filesSkipped++; }
-			} catch (e) { this.deps.logger.warn(`Backend sync: failed to process Crush session ${sessionFile}: ${e}`); }
-			return;
-		}
-
+		const skipped = { count: 0 };
+		if (await this.tryProcessSpecialSession(sessionFile, fileMtimeMs, sessionArgs, this.isOpenCodeSessionType.bind(this), this.processOpenCodeSession.bind(this), skipped)) { ctx.progress.filesSkipped += skipped.count; return; }
+		if (await this.tryProcessSpecialSession(sessionFile, fileMtimeMs, sessionArgs, this.isCrushSessionType.bind(this), this.processCrushSession.bind(this), skipped)) { ctx.progress.filesSkipped += skipped.count; return; }
 		const workspaceId = this.utility.extractWorkspaceIdFromSessionPath(sessionFile);
 		await this.ensureWorkspaceNameResolved(workspaceId, sessionFile, ctx.workspaceNamesById);
-
 		if (ctx.useCachedData) {
 			const fileStat = await this.deps.sessionHandlers.statSessionFile(sessionFile);
 			const cacheSuccess = await this.processCachedSessionFile(sessionFile, fileMtimeMs, fileStat.size, workspaceId, ctx.machineId, ctx.userId, ctx.rollups, ctx.startMs, ctx.now, editorForFile);
 			if (cacheSuccess) { ctx.progress.cacheHits++; return; }
 			ctx.progress.cacheMisses++;
 		}
-
 		let content: string;
 		try {
 			content = await fs.promises.readFile(sessionFile, 'utf8');

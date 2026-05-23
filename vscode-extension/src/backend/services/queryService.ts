@@ -156,75 +156,21 @@ export class QueryService {
 		});
 	}
 
-	/**
-	 * Query backend rollups for a date range.
-	 */
-	async queryBackendRollups(settings: BackendSettings, filters: BackendQueryFilters, startDayKey: string, endDayKey: string): Promise<BackendQueryResultLike> {
-		const cacheKey = this.buildBackendCacheKey(settings, filters, startDayKey, endDayKey);
-		if (this.backendLastQueryCacheKey === cacheKey && this.backendLastQueryCacheAt && Date.now() - this.backendLastQueryCacheAt < QUERY_CACHE_TTL_MS && this.backendLastQueryResult) {
-			return this.backendLastQueryResult;
-		}
-		const creds = await this.credentialService.getBackendDataPlaneCredentialsOrThrow(settings);
-		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential) as unknown as TableClientLike;
-		const allEntities = await this.dataPlaneService.listEntitiesForRange({
-			tableClient,
-			datasetId: settings.datasetId,
-			startDayKey,
-			endDayKey
-		});
-
-		const acc: RollupAccumulator = {
-			modelsSet: new Set<string>(),
-			workspacesSet: new Set<string>(),
-			machinesSet: new Set<string>(),
-			usersSet: new Set<string>(),
-			workspaceNamesById: {},
-			machineNamesById: {},
-			totalTokens: 0,
-			totalInteractions: 0,
-			modelUsage: {},
-			workspaceTokens: new Map<string, number>(),
-			machineTokens: new Map<string, number>()
-		};
-
-		for (const entity of allEntities) {
-			const rollup = this.mapEntityToRollup(entity);
-			if (!rollup) { continue; }
-
-			acc.modelsSet.add(rollup.model);
-			acc.workspacesSet.add(rollup.workspaceId);
-			acc.machinesSet.add(rollup.machineId);
-			if (rollup.userId) { acc.usersSet.add(rollup.userId); }
-			if (rollup.workspaceName && !acc.workspaceNamesById[rollup.workspaceId]) {
-				acc.workspaceNamesById[rollup.workspaceId] = rollup.workspaceName;
-			}
-			if (rollup.machineName && !acc.machineNamesById[rollup.machineId]) {
-				acc.machineNamesById[rollup.machineId] = rollup.machineName;
-			}
-
-			if (!this.filterRollup(rollup, filters)) { continue; }
-			this.accumulateRollup(acc, rollup);
-		}
-
+	private buildBackendQueryResult(acc: RollupAccumulator): BackendQueryResultLike {
 		const { modelsSet, workspacesSet, machinesSet, usersSet, workspaceNamesById, machineNamesById,
 			totalTokens, totalInteractions, modelUsage, workspaceTokens, machineTokens } = acc;
-
 		const cost = this.deps.calculateEstimatedCost(modelUsage);
 		const co2 = (totalTokens / 1000) * this.deps.co2Per1kTokens;
 		const waterUsage = (totalTokens / 1000) * this.deps.waterUsagePer1kTokens;
 		const statsForRange: StatsForPeriod = {
-			tokens: totalTokens,
-			sessions: totalInteractions,
+			tokens: totalTokens, sessions: totalInteractions,
 			avgInteractionsPerSession: totalInteractions > 0 ? 1 : 0,
 			avgTokensPerSession: totalInteractions > 0 ? Math.round(totalTokens / totalInteractions) : 0,
-			modelUsage,
-			editorUsage: {},
-			co2,
+			modelUsage, editorUsage: {}, co2,
 			treesEquivalent: co2 / this.deps.co2AbsorptionPerTreePerYear,
-			waterUsage,
-			estimatedCost: cost
+			waterUsage, estimatedCost: cost
 		};
-		const result: BackendQueryResultLike = {
+		return {
 			stats: { today: statsForRange, month: statsForRange, lastUpdated: new Date() },
 			availableModels: Array.from(modelsSet).sort(),
 			availableWorkspaces: Array.from(workspacesSet).sort(),
@@ -235,6 +181,37 @@ export class QueryService {
 			workspaceTokenTotals: Array.from(workspaceTokens.entries()).map(([workspaceId, tokens]) => ({ workspaceId, tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, MAX_UI_LIST_ITEMS),
 			machineTokenTotals: Array.from(machineTokens.entries()).map(([machineId, tokens]) => ({ machineId, tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, MAX_UI_LIST_ITEMS)
 		};
+	}
+
+	/**
+	 * Query backend rollups for a date range.
+	 */
+	async queryBackendRollups(settings: BackendSettings, filters: BackendQueryFilters, startDayKey: string, endDayKey: string): Promise<BackendQueryResultLike> {
+		const cacheKey = this.buildBackendCacheKey(settings, filters, startDayKey, endDayKey);
+		if (this.backendLastQueryCacheKey === cacheKey && this.backendLastQueryCacheAt && Date.now() - this.backendLastQueryCacheAt < QUERY_CACHE_TTL_MS && this.backendLastQueryResult) {
+			return this.backendLastQueryResult;
+		}
+		const creds = await this.credentialService.getBackendDataPlaneCredentialsOrThrow(settings);
+		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential) as unknown as TableClientLike;
+		const allEntities = await this.dataPlaneService.listEntitiesForRange({ tableClient, datasetId: settings.datasetId, startDayKey, endDayKey });
+		const acc: RollupAccumulator = {
+			modelsSet: new Set<string>(), workspacesSet: new Set<string>(), machinesSet: new Set<string>(), usersSet: new Set<string>(),
+			workspaceNamesById: {}, machineNamesById: {}, totalTokens: 0, totalInteractions: 0, modelUsage: {},
+			workspaceTokens: new Map<string, number>(), machineTokens: new Map<string, number>()
+		};
+		for (const entity of allEntities) {
+			const rollup = this.mapEntityToRollup(entity);
+			if (!rollup) { continue; }
+			acc.modelsSet.add(rollup.model);
+			acc.workspacesSet.add(rollup.workspaceId);
+			acc.machinesSet.add(rollup.machineId);
+			if (rollup.userId) { acc.usersSet.add(rollup.userId); }
+			if (rollup.workspaceName && !acc.workspaceNamesById[rollup.workspaceId]) { acc.workspaceNamesById[rollup.workspaceId] = rollup.workspaceName; }
+			if (rollup.machineName && !acc.machineNamesById[rollup.machineId]) { acc.machineNamesById[rollup.machineId] = rollup.machineName; }
+			if (!this.filterRollup(rollup, filters)) { continue; }
+			this.accumulateRollup(acc, rollup);
+		}
+		const result = this.buildBackendQueryResult(acc);
 		this.backendLastQueryResult = result;
 		this.backendLastQueryCacheKey = cacheKey;
 		this.backendLastQueryCacheAt = Date.now();

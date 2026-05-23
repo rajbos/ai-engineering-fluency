@@ -11,7 +11,7 @@ This skill documents the methods and approaches used by the GitHub Copilot Token
 
 The extension analyzes two types of log files:
 - **`.json` files**: Standard VS Code Copilot Chat session files
-- **`.jsonl` files**: Copilot CLI/Agent mode sessions, JetBrains IDE Copilot Chat sessions, Claude Code sessions, and other ecosystem adapters (one JSON event per line)
+- **`.jsonl` files**: Copilot CLI/Agent mode sessions, JetBrains IDE Copilot Chat sessions, Claude Code sessions, Gemini CLI sessions, **Antigravity sessions**, and other ecosystem adapters (one JSON event per line)
 
 ## Session File Discovery
 
@@ -36,6 +36,8 @@ This method discovers session files across all VS Code variants and locations:
 3. **Copilot Chat Extension Storage**: `{VSCode User Path}/globalStorage/github.copilot-chat/**/*.json`
 4. **Copilot CLI Sessions**: `~/.copilot/session-state/*.jsonl`
 5. **JetBrains IDE Copilot Sessions**: `~/.copilot/jb/{conversationId}/partition-{n}.jsonl`
+6. **Gemini CLI Sessions**: `~/.gemini/tmp/{project}/chats/session-*.jsonl`
+7. **Antigravity Sessions**: `~/.gemini/antigravity/brain/{session-uuid}/.system_generated/logs/transcript.jsonl`
 
 **Platform-Specific Paths:**
 - **Windows**: `%APPDATA%/{Variant}/User`
@@ -225,7 +227,39 @@ See the **Executable Scripts** section for available utilities:
 - **Model**: not in the file. Best-effort heuristic from `toolCallId` prefix (`toolu_*` ⇒ Anthropic Claude, `call_*` ⇒ OpenAI), otherwise `unknown`
 - **First/last interaction**: timestamps of the first `user.message` and the last `assistant.turn_end` (or `assistant.message`) event
 
-## Pricing and Cost Calculation
+## JSONL File Structure (Antigravity)
+
+**What**: Google's closed-source successor to Gemini CLI, released May 2026. An Electron-based desktop IDE backed by `cloudcode-pa.googleapis.com`.
+
+**Location**: `%USERPROFILE%\.gemini\antigravity\brain\{session-uuid}\.system_generated\logs\transcript.jsonl`
+
+**Full schema documentation**: [`docs/logFilesSchema/antigravity-session-format.md`](../../../docs/logFilesSchema/antigravity-session-format.md)
+
+**Entry types** (each line is one entry):
+
+```jsonl
+{"step_index":0,"source":"USER_EXPLICIT","type":"USER_INPUT","status":"DONE","created_at":"2026-05-22T21:48:22Z","content":"<USER_REQUEST>\nuser message here\n</USER_REQUEST>\n<ADDITIONAL_METADATA>...</ADDITIONAL_METADATA>"}
+{"step_index":1,"source":"SYSTEM","type":"CONVERSATION_HISTORY","status":"DONE","created_at":"2026-05-22T21:48:22Z"}
+{"step_index":2,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-05-22T21:48:22Z","tool_calls":[{"name":"search_web","args":{"query":"..."}}]}
+{"step_index":3,"source":"MODEL","type":"SEARCH_WEB","status":"DONE","created_at":"2026-05-22T21:48:23Z","content":"Search result text..."}
+{"step_index":11,"source":"MODEL","type":"PLANNER_RESPONSE","status":"DONE","created_at":"2026-05-22T21:48:44Z","content":"Final answer text...","thinking":"Chain of thought..."}
+```
+
+**Key extraction rules** (implemented by `AntigravityDataAccess` in `src/antigravity.ts`):
+
+- **Interactions**: count of `USER_INPUT` entries (`source: "USER_EXPLICIT"`)
+- **Session title**: `content` of first `USER_INPUT`, strip `<USER_REQUEST>` XML wrapper
+- **User message**: strip the `<USER_REQUEST>...</USER_REQUEST>` wrapper; discard everything after `</USER_REQUEST>` (metadata blocks)
+- **Model response**: `content` field of the last `PLANNER_RESPONSE` with non-empty `content`
+- **Thinking**: `thinking` field of any `PLANNER_RESPONSE`
+- **Tool calls**: `tool_calls[].name` on `PLANNER_RESPONSE` entries (e.g. `search_web`)
+- **Tool results**: `content` of `SEARCH_WEB` entries (and future tool result entry types)
+- **Actual tokens**: always 0 — **no token counts in Antigravity transcripts**
+- **Model**: not available — not stored in the transcript format
+- **Session ID**: the UUID directory name under `brain/`
+- **Timestamps**: `created_at` of first and last entries
+
+
 
 ### Pricing Data
 **Location**: `src/modelPricing.json`

@@ -192,171 +192,123 @@ const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countL
 	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month' },
 };
 
-function renderLayout(data: InitialChartData): void {
-	setCompactNumbers(data.compactNumbers !== false);
-	const root = document.getElementById('root');
-	if (!root) {
-		return;
-	}
+function isComboSupported(metric: string, split: string): boolean {
+	if (metric === 'cost') { return split === 'total'; }
+	if (metric === 'output') { return split !== 'model'; }
+	return split !== 'language';
+}
 
-	root.replaceChildren();
-
-	const themeStyle = document.createElement('style');
-	themeStyle.textContent = themeStyles;
-	const style = document.createElement('style');
-	style.textContent = styles;
-
-	const container = el('div', 'container');
+function buildChartHeader(data: InitialChartData): HTMLElement {
 	const header = el('div', 'header');
 	const headerLeft = el('div', 'header-left');
-	const icon = el('span', 'header-icon', '📈');
 	const title = el('span', 'header-title', getChartTitle());
 	title.id = 'chart-title';
-	headerLeft.append(icon, title);
+	headerLeft.append(el('span', 'header-icon', '📈'), title);
 	const buttons = el('div', 'button-row');
 	buttons.append(
-		createButton(BUTTONS['btn-refresh']),
-		createButton(BUTTONS['btn-details']),
-		createButton(BUTTONS['btn-usage']),
-		createButton(BUTTONS['btn-environmental']),
-		createButton(BUTTONS['btn-diagnostics']),
-		createButton(BUTTONS['btn-maturity']),
+		createButton(BUTTONS['btn-refresh']), createButton(BUTTONS['btn-details']),
+		createButton(BUTTONS['btn-usage']), createButton(BUTTONS['btn-environmental']),
+		createButton(BUTTONS['btn-diagnostics']), createButton(BUTTONS['btn-maturity']),
 	);
-	if (data.backendConfigured) {
-		buttons.append(createButton(BUTTONS['btn-dashboard']));
-	}
+	if (data.backendConfigured) { buttons.append(createButton(BUTTONS['btn-dashboard'])); }
 	header.append(headerLeft, buttons);
+	return header;
+}
 
-	const periodData = getActivePeriodData(data);
-	const periodMeta = PERIOD_LABELS[currentPeriod];
-
-	const summarySection = el('div', 'section');
-	summarySection.append(el('h3', '', '📊 Summary'));
+function buildSummaryCards(periodData: ChartPeriodData, periodMeta: typeof PERIOD_LABELS[ChartPeriod]): HTMLElement {
+	const totalLabel = currentMetric === 'cost' ? 'Total Cost (est.)' : currentMetric === 'output' ? 'Total Lines (AI)' : 'Total Tokens';
+	const totalValue = currentMetric === 'cost' ? `$${periodData.totalCost.toFixed(2)}`
+		: currentMetric === 'output' ? ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString()
+		: formatCompact(periodData.totalTokens);
+	const avgLabel = currentMetric === 'cost' ? periodMeta.avgCostLabel : currentMetric === 'output' ? periodMeta.avgLocLabel : periodMeta.avgLabel;
+	const avgValue = currentMetric === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}`
+		: currentMetric === 'output' ? Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString()
+		: formatCompact(periodData.avgPerPeriod);
 	const cards = el('div', 'cards');
 	cards.id = 'summary-cards';
 	cards.append(
-		buildCard('card-period-count',  periodMeta.countLabel,   periodData.periodCount.toLocaleString()),
-		buildCard('card-total-tokens',
-			currentMetric === 'cost' ? 'Total Cost (est.)' :
-			currentMetric === 'output' ? 'Total Lines (AI)' : 'Total Tokens',
-			currentMetric === 'cost' ? `$${periodData.totalCost.toFixed(2)}` :
-			currentMetric === 'output' ? ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString() :
-			formatCompact(periodData.totalTokens)),
-		buildCard('card-avg-tokens',
-			currentMetric === 'cost' ? periodMeta.avgCostLabel :
-			currentMetric === 'output' ? periodMeta.avgLocLabel :
-			periodMeta.avgLabel,
-			currentMetric === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}` :
-			currentMetric === 'output' ? Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString() :
-			formatCompact(periodData.avgPerPeriod)),
-		buildCard('card-total-sessions','Total Sessions',         periodData.totalSessions.toLocaleString())
+		buildCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString()),
+		buildCard('card-total-tokens', totalLabel, totalValue),
+		buildCard('card-avg-tokens', avgLabel, avgValue),
+		buildCard('card-total-sessions', 'Total Sessions', periodData.totalSessions.toLocaleString()),
 	);
-	summarySection.append(cards);
+	return cards;
+}
 
-	const editorCards = buildEditorCards(data.editorTotalsMap);
-	if (editorCards) {
-		summarySection.append(editorCards);
-	}
-
-	const chartSection = el('div', 'section');
-	// Chart section header: title left, period toggles right
-	const chartSectionHeader = el('div', 'chart-section-header');
-	chartSectionHeader.append(el('h3', '', '📊 Charts'));
-
-	// Period toggles (compact, inline with section heading)
+function buildPeriodToggles(periodsReady: boolean): HTMLElement {
 	const periodToggles = el('div', 'period-controls');
-	const periodsReady = data.periodsReady !== false;
 	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, '📅 Day');
 	dayBtn.id = 'period-day';
 	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, periodsReady ? '🗓️ Week' : '🗓️ Week ⌛');
 	weekBtn.id = 'period-week';
-	if (!periodsReady) {
-		(weekBtn as HTMLButtonElement).disabled = true;
-		weekBtn.title = 'Loading historical data…';
-	}
 	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, periodsReady ? '📆 Month' : '📆 Month ⌛');
 	monthBtn.id = 'period-month';
 	if (!periodsReady) {
-		(monthBtn as HTMLButtonElement).disabled = true;
-		monthBtn.title = 'Loading historical data…';
+		(weekBtn as HTMLButtonElement).disabled = true; weekBtn.title = 'Loading historical data…';
+		(monthBtn as HTMLButtonElement).disabled = true; monthBtn.title = 'Loading historical data…';
 	}
 	periodToggles.append(dayBtn, weekBtn, monthBtn);
-	chartSectionHeader.append(periodToggles);
-	chartSection.append(chartSectionHeader);
+	return periodToggles;
+}
 
-	const chartShell = el('div', 'chart-shell');
-
-	// Supported metric/split combos
-	const isComboSupported = (metric: string, split: string): boolean => {
-		if (metric === 'cost') { return split === 'total'; }
-		if (metric === 'output') { return split !== 'model'; }
-		return split !== 'language'; // tokens
-	};
-
-	// Chart controls: [Metric group] | [Split group] | [Rolling avg]
+function buildChartControls(data: InitialChartData): HTMLElement {
 	const toggles = el('div', 'chart-controls');
-
-	// Metric group
 	const metricGroup = el('div', 'control-group');
 	const tokensBtn = el('button', `toggle${currentMetric === 'tokens' ? ' active' : ''}`, 'Tokens');
 	tokensBtn.id = 'metric-tokens';
 	const outputBtn = el('button', `toggle${currentMetric === 'output' ? ' active' : ''}${!data.hasLocData ? ' dim' : ''}`, '✏️ Output');
 	outputBtn.id = 'metric-output';
-	if (!data.hasLocData) {
-		outputBtn.title = 'No edit data available yet (VS Code edit/agent sessions only)';
-	}
+	if (!data.hasLocData) { outputBtn.title = 'No edit data available yet (VS Code edit/agent sessions only)'; }
 	const costBtn = el('button', `toggle${currentMetric === 'cost' ? ' active' : ''}`, '💰 Cost');
 	costBtn.id = 'metric-cost';
 	metricGroup.append(tokensBtn, outputBtn, costBtn);
-
-	const sep1 = el('div', 'control-group-separator');
-
-	// Split group
 	const splitGroup = el('div', 'control-group');
-	const makeSplitBtn = (id: string, split: string, label: string) => {
+	const mkSplit = (id: string, split: string, label: string) => {
 		const supported = isComboSupported(currentMetric, split);
 		const btn = el('button', `toggle${currentSplit === split ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
 		btn.id = id;
-		if (!supported) {
-			(btn as HTMLButtonElement).disabled = true;
-			btn.title = `Not available for ${currentMetric} metric`;
-		}
+		if (!supported) { (btn as HTMLButtonElement).disabled = true; btn.title = `Not available for ${currentMetric} metric`; }
 		return btn;
 	};
-	const totalSplitBtn = makeSplitBtn('split-total', 'total', 'Total');
-	const modelSplitBtn = makeSplitBtn('split-model', 'model', 'By Model');
-	const editorSplitBtn = makeSplitBtn('split-editor', 'editor', 'By Editor');
-	const repoSplitBtn = makeSplitBtn('split-repository', 'repository', 'By Repository');
-	const langSplitBtn = makeSplitBtn('split-language', 'language', 'By Language');
-	splitGroup.append(totalSplitBtn, modelSplitBtn, editorSplitBtn, repoSplitBtn, langSplitBtn);
-
-	const sep2 = el('div', 'control-group-separator');
-
-	// Rolling avg group (only visible for total split with tokens/cost)
-	const rollingGroup = el('div', 'control-group');
-	const rollingApplicableNow = currentSplit === 'total' && currentMetric !== 'output';
-	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicableNow ? '' : ' hidden'}`, '📈 Rolling Avg');
+	splitGroup.append(mkSplit('split-total', 'total', 'Total'), mkSplit('split-model', 'model', 'By Model'),
+		mkSplit('split-editor', 'editor', 'By Editor'), mkSplit('split-repository', 'repository', 'By Repository'),
+		mkSplit('split-language', 'language', 'By Language'));
+	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output';
+	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicable ? '' : ' hidden'}`, '📈 Rolling Avg');
 	rollingBtn.id = 'view-rolling';
+	const rollingGroup = el('div', 'control-group');
 	rollingGroup.append(rollingBtn);
+	toggles.append(metricGroup, el('div', 'control-group-separator'), splitGroup, el('div', 'control-group-separator'), rollingGroup);
+	return toggles;
+}
 
-	toggles.append(metricGroup, sep1, splitGroup, sep2, rollingGroup);
-
+function renderLayout(data: InitialChartData): void {
+	setCompactNumbers(data.compactNumbers !== false);
+	const root = document.getElementById('root');
+	if (!root) { return; }
+	root.replaceChildren();
+	const themeStyle = document.createElement('style'); themeStyle.textContent = themeStyles;
+	const style = document.createElement('style'); style.textContent = styles;
+	const periodData = getActivePeriodData(data);
+	const periodMeta = PERIOD_LABELS[currentPeriod];
+	const summarySection = el('div', 'section');
+	summarySection.append(el('h3', '', '📊 Summary'), buildSummaryCards(periodData, periodMeta));
+	const editorCards = buildEditorCards(data.editorTotalsMap);
+	if (editorCards) { summarySection.append(editorCards); }
+	const chartSectionHeader = el('div', 'chart-section-header');
+	chartSectionHeader.append(el('h3', '', '📊 Charts'), buildPeriodToggles(data.periodsReady !== false));
 	const canvasWrap = el('div', 'canvas-wrap');
-	const canvas = document.createElement('canvas');
-	canvas.id = 'token-chart';
-	canvasWrap.append(canvas);
-
-	chartShell.append(toggles, canvasWrap);
-	chartSection.append(chartShell);
-
+	const canvas = document.createElement('canvas'); canvas.id = 'token-chart'; canvasWrap.append(canvas);
+	const chartShell = el('div', 'chart-shell');
+	chartShell.append(buildChartControls(data), canvasWrap);
+	const chartSection = el('div', 'section');
+	chartSection.append(chartSectionHeader, chartShell);
 	const footer = el('div', 'footer',
-		`${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`
-	);
+		`${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`);
 	footer.id = 'chart-footer';
-
-	container.append(header, summarySection, chartSection, footer);
+	const container = el('div', 'container');
+	container.append(buildChartHeader(data), summarySection, chartSection, footer);
 	root.append(themeStyle, style, container);
-
 	wireInteractions(data);
 	void setupChart(canvas, data);
 }
@@ -381,6 +333,11 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 		// info marker on the card so users don't compare apples-to-oranges.
 		if (editor === 'JetBrains') {
 			card.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.';
+			const labelEl = card.querySelector('.card-label');
+			if (labelEl) { labelEl.textContent = `${editor} ⓘ`; }
+		}
+		if (editor === 'Antigravity') {
+			card.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.';
 			const labelEl = card.querySelector('.card-label');
 			if (labelEl) { labelEl.textContent = `${editor} ⓘ`; }
 		}
@@ -583,13 +540,27 @@ async function switchMetric(metric: typeof currentMetric, data: InitialChartData
 	chart = new Chart(ctx, createConfig(data));
 }
 
+function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
+	return (metric === 'cost' && split === 'total') ||
+		(metric === 'output' && split !== 'model') ||
+		(metric === 'tokens' && split !== 'language');
+}
+
+async function reinitChart(data: InitialChartData): Promise<void> {
+	if (!chart) { return; }
+	const canvas = chart.canvas as HTMLCanvasElement | null;
+	chart.destroy();
+	if (!canvas) { return; }
+	const ctx = canvas.getContext('2d');
+	if (!ctx) { return; }
+	await loadChartModule();
+	if (!Chart) { return; }
+	chart = new Chart(ctx, createConfig(data));
+}
+
 async function switchSplit(split: typeof currentSplit, data: InitialChartData): Promise<void> {
 	if (currentSplit === split) { return; }
-	// Check if this combo is supported
-	const supported = (currentMetric === 'cost' && split === 'total') ||
-		(currentMetric === 'output' && split !== 'model') ||
-		(currentMetric === 'tokens' && split !== 'language');
-	if (!supported) { return; }
+	if (!isSplitSupported(currentMetric, split)) { return; }
 	currentSplit = split;
 	const rollingApplicable = split === 'total' && currentMetric !== 'output';
 	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
@@ -602,15 +573,7 @@ async function switchSplit(split: typeof currentSplit, data: InitialChartData): 
 		rollingBtnEl.classList.toggle('active', rollingApplicable && currentDisplayMode === 'rolling');
 	}
 	updateSummaryCards(data);
-	if (!chart) { return; }
-	const canvas = chart.canvas as HTMLCanvasElement | null;
-	chart.destroy();
-	if (!canvas) { return; }
-	const ctx = canvas.getContext('2d');
-	if (!ctx) { return; }
-	await loadChartModule();
-	if (!Chart) { return; }
-	chart = new Chart(ctx, createConfig(data));
+	await reinitChart(data);
 }
 
 function setActivePeriod(period: ChartPeriod): void {
@@ -679,310 +642,155 @@ async function switchDisplayMode(data: InitialChartData): Promise<void> {
 	chart = new Chart(ctx, createConfig(data));
 }
 
-function createConfig(data: InitialChartData): ChartConfig {
-	const period = getActivePeriodData(data);
-	const view = currentMetric === 'tokens' ? (currentSplit === 'model' ? 'model' : currentSplit === 'editor' ? 'editor' : currentSplit === 'repository' ? 'repository' : 'total')
-		: currentMetric === 'cost' ? 'cost'
-		: `output-${currentSplit}`;
+const PROJECTION_LABELS: Record<ChartPeriod, string> = {
+	day: '📈 Projected (today)', week: '📈 Projected (this week)', month: '📈 Projected (this month)',
+};
 
-	// Get CSS variables for theme-aware colors
-	const styles = getComputedStyle(document.body);
-	const textColor = styles.getPropertyValue('--text-primary') || '#e0e0e0';
-	const mutedColor = styles.getPropertyValue('--text-muted') || '#999999';
-	const borderColor = styles.getPropertyValue('--border-subtle') || '#3a3a40';
-	const bgColor = styles.getPropertyValue('--bg-tertiary') || '#1e1e1e';
+type ChartColors = { textColor: string; gridColor: string; borderColor: string; bgColor: string };
 
-	// Make grid lines very subtle with low opacity
-	const gridColor = 'rgba(128, 128, 128, 0.15)';
-
-	// Projection labels per period
-	const PROJECTION_LABELS: Record<ChartPeriod, string> = {
-		day:   '📈 Projected (today)',
-		week:  '📈 Projected (this week)',
-		month: '📈 Projected (this month)',
+function getChartColors(): ChartColors {
+	const s = getComputedStyle(document.body);
+	return {
+		textColor: s.getPropertyValue('--text-primary') || '#e0e0e0',
+		gridColor: 'rgba(128, 128, 128, 0.15)',
+		borderColor: s.getPropertyValue('--border-subtle') || '#3a3a40',
+		bgColor: s.getPropertyValue('--bg-tertiary') || '#1e1e1e',
 	};
+}
 
-	const baseOptions = {
-		responsive: true,
-		maintainAspectRatio: false,
+function buildBaseOptions(c: ChartColors) {
+	return {
+		responsive: true, maintainAspectRatio: false,
 		interaction: { mode: 'index' as const, intersect: false },
 		plugins: {
-			legend: { position: 'top' as const, labels: { color: textColor, font: { size: 12 } } },
-			tooltip: {
-				backgroundColor: bgColor,
-				titleColor: textColor,
-				bodyColor: textColor,
-				borderColor: borderColor,
-				borderWidth: 1,
-				padding: 10,
-				displayColors: true
-			}
+			legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } },
+			tooltip: { backgroundColor: c.bgColor, titleColor: c.textColor, bodyColor: c.textColor, borderColor: c.borderColor, borderWidth: 1, padding: 10, displayColors: true }
 		},
-		scales: {
-			x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } }
-		} as const
+		scales: { x: { grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } } } as const
 	};
+}
 
-	if (view === 'total') {
-		const isRolling = currentDisplayMode === 'rolling';
-		const rollingLabel = getRollingLabel();
-		const tokenData = isRolling ? computeRollingAverage(period.tokensData, ROLLING_WINDOW[currentPeriod]) : period.tokensData;
-
-		// Projection: only in actual (non-rolling) mode, for the last bar (current period)
-		const lastIdx = period.tokensData.length - 1;
-		const fraction = getCurrentPeriodFraction(currentPeriod);
-		const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], fraction) : null;
-		const projDataset = projExtra !== null ? [{
-			label: PROJECTION_LABELS[currentPeriod],
-			data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0),
-			backgroundColor: 'rgba(54, 162, 235, 0.2)',
-			borderColor: 'rgba(54, 162, 235, 0.5)',
-			borderWidth: 1,
-			yAxisID: 'y'
-		}] : [];
-
-		return {
-			type: 'bar' as const,
-			data: {
-				labels: period.labels,
-				datasets: [
-					{
-						label: isRolling ? rollingLabel : 'Tokens',
-						data: tokenData,
-						backgroundColor: isRolling ? 'rgba(54, 162, 235, 0.15)' : 'rgba(54, 162, 235, 0.6)',
-						borderColor: 'rgba(54, 162, 235, 1)',
-						borderWidth: isRolling ? 2 : 1,
-						type: isRolling ? 'line' as const : undefined,
-						tension: isRolling ? 0.4 : undefined,
-						fill: isRolling ? false : undefined,
-						yAxisID: 'y'
-					},
-					...projDataset,
-					{
-						label: 'Sessions',
-						data: period.sessionsData,
-						backgroundColor: 'rgba(255, 99, 132, 0.6)',
-						borderColor: 'rgba(255, 99, 132, 1)',
-						borderWidth: 1,
-						type: 'line' as const,
-						yAxisID: 'y1'
-					}
-				]
-			},
-			options: {
-				...baseOptions,
-				scales: {
-					x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-					y: {
-						stacked: true,
-						type: 'linear' as const,
-						display: true,
-						position: 'left' as const,
-						grid: { color: gridColor },
-						ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() },
-						title: { display: true, text: 'Tokens', color: textColor, font: { size: 12, weight: 'bold' } }
-					},
-					y1: {
-						type: 'linear' as const,
-						display: true,
-						position: 'right' as const,
-						grid: { drawOnChartArea: false },
-						ticks: { color: textColor, font: { size: 11 } },
-						title: { display: true, text: 'Sessions', color: textColor, font: { size: 12, weight: 'bold' } }
-					}
-				}
-			}
-		};
-	}
-
-	const datasets = view === 'model' ? period.modelDatasets : view === 'repository' ? period.repositoryDatasets : period.editorDatasets;
-
-	if (view === 'cost') {
-		const isRolling = currentDisplayMode === 'rolling';
-		const rollingLabel = getRollingLabel();
-		const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
-
-		// Projection for cost: only in actual (non-rolling) mode
-		const lastIdx = period.costData.length - 1;
-		const fraction = getCurrentPeriodFraction(currentPeriod);
-		const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.costData[lastIdx], fraction) : null;
-		const projDataset = projExtra !== null ? [{
-			label: PROJECTION_LABELS[currentPeriod],
-			data: period.costData.map((_: number, i: number) => i === lastIdx ? projExtra : 0),
-			backgroundColor: 'rgba(34, 197, 94, 0.2)',
-			borderColor: 'rgba(34, 197, 94, 0.5)',
-			borderWidth: 1,
-			yAxisID: 'y'
-		}] : [];
-
-		return {
-			type: 'bar' as const,
-			data: {
-				labels: period.labels,
-				datasets: [
-					{
-						label: isRolling ? `${rollingLabel} (UBB)` : 'Est. Cost (UBB)',
-						data: costData,
-						backgroundColor: isRolling ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.6)',
-						borderColor: 'rgba(34, 197, 94, 1)',
-						borderWidth: isRolling ? 2 : 1,
-						type: isRolling ? 'line' as const : undefined,
-						tension: isRolling ? 0.4 : undefined,
-						fill: isRolling ? false : undefined,
-						yAxisID: 'y'
-					},
-					...projDataset
-				]
-			},
-			options: {
-				...baseOptions,
-				plugins: {
-					...baseOptions.plugins,
-					tooltip: {
-						...baseOptions.plugins.tooltip,
-						callbacks: {
-							label: (ctx: any) => ` $${Number(ctx.parsed.y).toFixed(4)}`
-						}
-					}
-				},
-				scales: {
-					x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-					y: {
-						stacked: true,
-						type: 'linear' as const,
-						display: true,
-						position: 'left' as const,
-						grid: { color: gridColor },
-						ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` },
-						title: { display: true, text: 'Estimated Cost (UBB)', color: textColor, font: { size: 12, weight: 'bold' as const } }
-					}
-				}
-			}
-		};
-	}
-
-	// Output metric (lines of code)
-	if (view.startsWith('output-')) {
-		const locDatasets = view === 'output-language' ? (period.languageDatasets ?? []) :
-			view === 'output-editor' ? (period.locEditorDatasets ?? []) :
-			view === 'output-repository' ? (period.locRepositoryDatasets ?? []) :
-			// output-total: stacked added/removed
-			[
-				{
-					label: 'Lines Added',
-					data: period.linesAddedData ?? [],
-					backgroundColor: 'rgba(75, 192, 192, 0.6)',
-					borderColor: 'rgba(75, 192, 192, 1)',
-					borderWidth: 1,
-				},
-				{
-					label: 'Lines Removed',
-					data: (period.linesRemovedData ?? []).map((v: number) => -v),
-					backgroundColor: 'rgba(255, 99, 132, 0.6)',
-					borderColor: 'rgba(255, 99, 132, 1)',
-					borderWidth: 1,
-				},
-			];
-
-		return {
-			type: 'bar' as const,
-			data: { labels: period.labels, datasets: locDatasets as any },
-			options: {
-				...baseOptions,
-				plugins: {
-					...baseOptions.plugins,
-					legend: { position: 'top' as const, labels: { color: textColor, font: { size: 11 } } },
-					tooltip: {
-						...baseOptions.plugins.tooltip,
-						callbacks: {
-							label: (ctx: any) => ` ${Math.abs(Number(ctx.parsed.y)).toLocaleString()} lines`
-						}
-					}
-				},
-				scales: {
-					x: { stacked: view === 'output-total', grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-					y: {
-						stacked: view === 'output-total',
-						grid: { color: gridColor },
-						ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Math.abs(Number(value)).toLocaleString() },
-						title: { display: true, text: 'Lines of Code', color: textColor, font: { size: 12, weight: 'bold' } }
-					}
-				}
-			}
-		};
-	}
-
-	// Stacked views: model / editor / repository (tokens metric)
-	// Compute total-token projection for the last bar and add a single "Projected" segment on top.
+function buildTotalViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const isRolling = currentDisplayMode === 'rolling';
+	const tokenData = isRolling ? computeRollingAverage(period.tokensData, ROLLING_WINDOW[currentPeriod]) : period.tokensData;
 	const lastIdx = period.tokensData.length - 1;
-	const fraction = getCurrentPeriodFraction(currentPeriod);
-	const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], fraction) : null;
-	const projDataset = projExtra !== null ? [{
-		label: PROJECTION_LABELS[currentPeriod],
-		data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0),
-		backgroundColor: 'rgba(200, 200, 200, 0.25)',
-		borderColor: 'rgba(200, 200, 200, 0.5)',
-		borderWidth: 1,
-	}] : [];
-
-	// Add sessions line as an overlay on all stacked views
-	const sessionsDataset = {
-		label: 'Sessions',
-		data: period.sessionsData,
-		backgroundColor: 'rgba(255, 99, 132, 0.6)',
-		borderColor: 'rgba(255, 99, 132, 1)',
-		borderWidth: 2,
-		type: 'line' as const,
-		yAxisID: 'y1',
-		stack: undefined // Don't stack the line
-	};
-
+	const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0), backgroundColor: 'rgba(54, 162, 235, 0.2)', borderColor: 'rgba(54, 162, 235, 0.5)', borderWidth: 1, yAxisID: 'y' }] : [];
+	const rollingLabel = getRollingLabel();
 	return {
 		type: 'bar' as const,
-		data: { labels: period.labels, datasets: [...datasets, ...projDataset, sessionsDataset] },
-		options: {
-			...baseOptions,
-			plugins: {
-				...baseOptions.plugins,
-				legend: { position: 'top' as const, labels: { color: textColor, font: { size: 11 } } },
-				tooltip: {
-					...baseOptions.plugins.tooltip,
-					callbacks: {
-						// JetBrains JSONL only persists user messages + assistant text
-						// (no API counts, no thinking tokens). Flag this in the chart
-						// tooltip whenever a JetBrains dataset is present in the hover.
-						footer: (items: any[]) => {
-							if (currentSplit !== 'editor') { return ''; }
-							const hasJetBrains = items.some(i => i?.dataset?.label === 'JetBrains');
-							return hasJetBrains
-								? 'JetBrains: estimates from user messages + assistant text only.\nActual API counts and thinking tokens are not available.'
-								: '';
-						}
-					}
-				}
-			},
-			scales: {
-				...baseOptions.scales,
-				y: {
-					stacked: true,
-					grid: { color: gridColor },
-					ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() },
-					title: { display: true, text: 'Tokens', color: textColor, font: { size: 12, weight: 'bold' } }
-				},
-				x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-				y1: {
-					type: 'linear' as const,
-					display: true,
-					position: 'right' as const,
-					grid: { drawOnChartArea: false },
-					ticks: { color: textColor, font: { size: 11 } },
-					title: { display: true, text: 'Sessions', color: textColor, font: { size: 12, weight: 'bold' } }
-				}
-			}
+		data: { labels: period.labels, datasets: [
+			{ label: isRolling ? rollingLabel : 'Tokens', data: tokenData, backgroundColor: isRolling ? 'rgba(54, 162, 235, 0.15)' : 'rgba(54, 162, 235, 0.6)', borderColor: 'rgba(54, 162, 235, 1)', borderWidth: isRolling ? 2 : 1, type: isRolling ? 'line' as const : undefined, tension: isRolling ? 0.4 : undefined, fill: isRolling ? false : undefined, yAxisID: 'y' },
+			...projDs,
+			{ label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 1, type: 'line' as const, yAxisID: 'y1' }
+		] },
+		options: { ...baseOptions, scales: {
+			x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+			y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Tokens', color: c.textColor, font: { size: 12, weight: 'bold' } } },
+			y1: { type: 'linear' as const, display: true, position: 'right' as const, grid: { drawOnChartArea: false }, ticks: { color: c.textColor, font: { size: 11 } }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
+		} }
+	};
+}
+
+function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const isRolling = currentDisplayMode === 'rolling';
+	const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
+	const lastIdx = period.costData.length - 1;
+	const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.costData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.costData.map((_: number, i: number) => i === lastIdx ? projExtra : 0), backgroundColor: 'rgba(34, 197, 94, 0.2)', borderColor: 'rgba(34, 197, 94, 0.5)', borderWidth: 1, yAxisID: 'y' }] : [];
+	const rollingLabel = getRollingLabel();
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: [
+			{ label: isRolling ? `${rollingLabel} (UBB)` : 'Est. Cost (UBB)', data: costData, backgroundColor: isRolling ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.6)', borderColor: 'rgba(34, 197, 94, 1)', borderWidth: isRolling ? 2 : 1, type: isRolling ? 'line' as const : undefined, tension: isRolling ? 0.4 : undefined, fill: isRolling ? false : undefined, yAxisID: 'y' },
+			...projDs
+		] },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` $${Number(ctx.parsed.y).toFixed(4)}` } } },
+			scales: { x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (UBB)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } } }
 		}
 	};
 }
 
+function buildOutputViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const locDatasets = view === 'output-language' ? (period.languageDatasets ?? []) : view === 'output-editor' ? (period.locEditorDatasets ?? []) : view === 'output-repository' ? (period.locRepositoryDatasets ?? []) :
+		[{ label: 'Lines Added', data: period.linesAddedData ?? [], backgroundColor: 'rgba(75, 192, 192, 0.6)', borderColor: 'rgba(75, 192, 192, 1)', borderWidth: 1 },
+		 { label: 'Lines Removed', data: (period.linesRemovedData ?? []).map((v: number) => -v), backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 1 }];
+	const stacked = view === 'output-total';
+	return {
+		type: 'bar' as const, data: { labels: period.labels, datasets: locDatasets as any },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } }, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` ${Math.abs(Number(ctx.parsed.y)).toLocaleString()} lines` } } },
+			scales: { x: { stacked, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y: { stacked, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Math.abs(Number(value)).toLocaleString() }, title: { display: true, text: 'Lines of Code', color: c.textColor, font: { size: 12, weight: 'bold' } } } }
+		}
+	};
+}
+
+function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = view === 'model' ? period.modelDatasets : view === 'repository' ? period.repositoryDatasets : period.editorDatasets;
+	const lastIdx = period.tokensData.length - 1;
+	const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0), backgroundColor: 'rgba(200, 200, 200, 0.25)', borderColor: 'rgba(200, 200, 200, 0.5)', borderWidth: 1 }] : [];
+	const sessionsDs = { label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 2, type: 'line' as const, yAxisID: 'y1', stack: undefined };
+	return {
+		type: 'bar' as const, data: { labels: period.labels, datasets: [...datasets, ...projDs, sessionsDs] },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
+			tooltip: { ...baseOptions.plugins.tooltip, callbacks: { footer: (items: any[]) => {
+				if (currentSplit !== 'editor') { return ''; }
+				if (items.some(i => i?.dataset?.label === 'JetBrains')) { return 'JetBrains: estimates from user messages + assistant text only.\nActual API counts and thinking tokens are not available.'; }
+				if (items.some(i => i?.dataset?.label === 'Antigravity')) { return 'Antigravity: estimates from transcript content.\nActual API counts are not stored locally.'; }
+				return '';
+			} } } },
+			scales: { ...baseOptions.scales, y: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Tokens', color: c.textColor, font: { size: 12, weight: 'bold' } } }, x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y1: { type: 'linear' as const, display: true, position: 'right' as const, grid: { drawOnChartArea: false }, ticks: { color: c.textColor, font: { size: 11 } }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } } }
+		}
+	};
+}
+
+function createConfig(data: InitialChartData): ChartConfig {
+	const period = getActivePeriodData(data);
+	const view = currentMetric === 'tokens'
+		? (currentSplit === 'model' ? 'model' : currentSplit === 'editor' ? 'editor' : currentSplit === 'repository' ? 'repository' : 'total')
+		: currentMetric === 'cost' ? 'cost' : `output-${currentSplit}`;
+	const c = getChartColors();
+	const baseOptions = buildBaseOptions(c);
+	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
+	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c); }
+	if (view.startsWith('output-')) { return buildOutputViewConfig(view, period, baseOptions, c); }
+	return buildStackedViewConfig(view, period, baseOptions, c);
+}
+
+
+type MetricSplit = { metric: typeof currentMetric; split: typeof currentSplit };
+
+function migrateViewKey(view: string): MetricSplit {
+	const map: Record<string, MetricSplit> = {
+		total: { metric: 'tokens', split: 'total' }, model: { metric: 'tokens', split: 'model' },
+		editor: { metric: 'tokens', split: 'editor' }, repository: { metric: 'tokens', split: 'repository' },
+		cost: { metric: 'cost', split: 'total' },
+	};
+	return map[view] ?? { metric: 'tokens', split: 'total' };
+}
+
+function restoreChartState(initialData: InitialChartData): void {
+	const saved = chartState.restore();
+	if (!vscode.getState()) {
+		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
+		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
+		if (initialData.initialSplit) { currentSplit = initialData.initialSplit; }
+		else if (initialData.initialView) {
+			const m = migrateViewKey(initialData.initialView);
+			currentMetric = m.metric; currentSplit = m.split;
+		}
+		return;
+	}
+	currentPeriod = saved.period;
+	currentDisplayMode = saved.displayMode;
+	if (saved.view && !saved.metric) {
+		const m = migrateViewKey(saved.view);
+		currentMetric = m.metric; currentSplit = m.split;
+	} else {
+		currentMetric = saved.metric ?? 'tokens';
+		currentSplit = saved.split ?? 'total';
+	}
+}
 
 async function bootstrap(): Promise<void> {
 	const { provideVSCodeDesignSystem, vsCodeButton } = await import('@vscode/webview-ui-toolkit');
@@ -990,53 +798,11 @@ async function bootstrap(): Promise<void> {
 
 	if (!initialData) {
 		const root = document.getElementById('root');
-		if (root) {
-			root.textContent = 'No data available.';
-		}
+		if (root) { root.textContent = 'No data available.'; }
 		return;
 	}
 
-	// Restore view state — vscode.getState() survives context destruction (retainContextWhenHidden: false)
-	const saved = chartState.restore();
-	// chartState.restore() merges defaults, so only override if the saved value differs from default
-	const hasSaved = !!vscode.getState();
-	if (hasSaved) {
-		currentPeriod = saved.period;
-		currentDisplayMode = saved.displayMode;
-		// Migrate old saved state: 'view' → metric + split
-		if (saved.view && !saved.metric) {
-			const viewMigration: Record<string, { metric: typeof currentMetric; split: typeof currentSplit }> = {
-				total:      { metric: 'tokens', split: 'total'      },
-				model:      { metric: 'tokens', split: 'model'      },
-				editor:     { metric: 'tokens', split: 'editor'     },
-				repository: { metric: 'tokens', split: 'repository' },
-				cost:       { metric: 'cost',   split: 'total'      },
-			};
-			const migration = viewMigration[saved.view] ?? { metric: 'tokens', split: 'total' };
-			currentMetric = migration.metric;
-			currentSplit = migration.split;
-		} else {
-			currentMetric = saved.metric ?? 'tokens';
-			currentSplit = saved.split ?? 'total';
-		}
-	} else {
-		// Fall back to server-supplied initial values (e.g., panel closed and reopened)
-		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
-		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
-		if (initialData.initialSplit) { currentSplit = initialData.initialSplit; }
-		// Legacy fallback from old initialView
-		else if (initialData.initialView) {
-			const legacyMap: Record<string, { metric: typeof currentMetric; split: typeof currentSplit }> = {
-				total: { metric: 'tokens', split: 'total' }, model: { metric: 'tokens', split: 'model' },
-				editor: { metric: 'tokens', split: 'editor' }, repository: { metric: 'tokens', split: 'repository' },
-				cost: { metric: 'cost', split: 'total' },
-			};
-			const mapped = legacyMap[initialData.initialView] ?? { metric: 'tokens', split: 'total' };
-			currentMetric = mapped.metric;
-			currentSplit = mapped.split;
-		}
-	}
-
+	restoreChartState(initialData);
 	renderLayout(initialData);
 }
 

@@ -134,5 +134,7 @@
 
   "add_loaded_assembly",
   "analyze_symbol",
-  "search_decompiled_symbols"
+  "search_decompiled_symbols",
+
+  "search_web"
 ]

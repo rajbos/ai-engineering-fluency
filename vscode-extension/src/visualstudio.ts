@@ -111,19 +111,19 @@ const pattern = /Updating session file '([^']+)'/;
 for (const logFile of logFiles) {
 try {
 const content = fs.readFileSync(logFile, 'utf8');
+this._processLogFileLines(content, pattern, seen, results);
+} catch { /* ignore file read errors */ }
+}
+}
+
+private _processLogFileLines(content: string, pattern: RegExp, seen: Set<string>, results: string[]): void {
 for (const line of content.split('\n')) {
 const m = pattern.exec(line);
 if (!m) { continue; }
 const sessionPath = m[1];
 if (seen.has(sessionPath)) { continue; }
 seen.add(sessionPath);
-try {
-if (fs.existsSync(sessionPath)) {
-results.push(sessionPath);
-}
-} catch { /* ignore */ }
-}
-} catch { /* ignore file read errors */ }
+try { if (fs.existsSync(sessionPath)) { results.push(sessionPath); } } catch { /* ignore */ }
 }
 }
 
@@ -199,6 +199,27 @@ this._scanForVsDirs(fullPath, depth + 1, maxDepth, seen, results);
 }
 }
 
+private _collectFromSessionsDir(sessionsDir: string, seen: Set<string>, results: string[]): void {
+let sessionFiles: fs.Dirent[];
+try { sessionFiles = fs.readdirSync(sessionsDir, { withFileTypes: true }); } catch { return; }
+for (const sf of sessionFiles) {
+if (!sf.isFile()) { continue; }
+const fullPath = path.join(sessionsDir, sf.name);
+if (seen.has(fullPath)) { continue; }
+seen.add(fullPath);
+results.push(fullPath);
+}
+}
+
+private _collectFromHashDirs(copilotChatDir: string, seen: Set<string>, results: string[]): void {
+let hashDirs: fs.Dirent[];
+try { hashDirs = fs.readdirSync(copilotChatDir, { withFileTypes: true }); } catch { return; }
+for (const hashDir of hashDirs) {
+if (!hashDir.isDirectory()) { continue; }
+this._collectFromSessionsDir(path.join(copilotChatDir, hashDir.name, 'sessions'), seen, results);
+}
+}
+
 /**
  * Given a `.vs` directory, find all `copilot-chat/<hash>/sessions/<uuid>` files.
  * Pattern: `.vs/<solution-dir>/copilot-chat/<hash>/sessions/<file>`
@@ -211,28 +232,7 @@ solutionDirs = fs.readdirSync(vsDir, { withFileTypes: true });
 
 for (const sol of solutionDirs) {
 if (!sol.isDirectory()) { continue; }
-const copilotChatDir = path.join(vsDir, sol.name, 'copilot-chat');
-let hashDirs: fs.Dirent[];
-try {
-hashDirs = fs.readdirSync(copilotChatDir, { withFileTypes: true });
-} catch { continue; }
-
-for (const hashDir of hashDirs) {
-if (!hashDir.isDirectory()) { continue; }
-const sessionsDir = path.join(copilotChatDir, hashDir.name, 'sessions');
-let sessionFiles: fs.Dirent[];
-try {
-sessionFiles = fs.readdirSync(sessionsDir, { withFileTypes: true });
-} catch { continue; }
-
-for (const sf of sessionFiles) {
-if (!sf.isFile()) { continue; }
-const fullPath = path.join(sessionsDir, sf.name);
-if (seen.has(fullPath)) { continue; }
-seen.add(fullPath);
-results.push(fullPath);
-}
-}
+this._collectFromHashDirs(path.join(vsDir, sol.name, 'copilot-chat'), seen, results);
 }
 }
 
@@ -253,28 +253,7 @@ versionDirs = fs.readdirSync(ssmsDir, { withFileTypes: true });
 
 for (const versionDir of versionDirs) {
 if (!versionDir.isDirectory()) { continue; }
-const copilotChatDir = path.join(ssmsDir, versionDir.name, 'SSMSGitHubCopilot', 'copilot-chat');
-let hashDirs: fs.Dirent[];
-try {
-hashDirs = fs.readdirSync(copilotChatDir, { withFileTypes: true });
-} catch { continue; }
-
-for (const hashDir of hashDirs) {
-if (!hashDir.isDirectory()) { continue; }
-const sessionsDir = path.join(copilotChatDir, hashDir.name, 'sessions');
-let sessionFiles: fs.Dirent[];
-try {
-sessionFiles = fs.readdirSync(sessionsDir, { withFileTypes: true });
-} catch { continue; }
-
-for (const sf of sessionFiles) {
-if (!sf.isFile()) { continue; }
-const fullPath = path.join(sessionsDir, sf.name);
-if (seen.has(fullPath)) { continue; }
-seen.add(fullPath);
-results.push(fullPath);
-}
-}
+this._collectFromHashDirs(path.join(ssmsDir, versionDir.name, 'SSMSGitHubCopilot', 'copilot-chat'), seen, results);
 }
 }
 
@@ -344,11 +323,30 @@ parts.push(inner.Content);
 return parts.join('\n');
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+private _decodeVcRaw(vcRaw: any, parts: string[]): void {
+const keys = Object.keys(vcRaw);
+if (keys.length === 0) { return; }
+if (!isNaN(Number(keys[0]))) {
+try {
+const numKeys = keys.map(Number).sort((a, b) => a - b);
+const bytes = Buffer.from(numKeys.map(k => (vcRaw as Record<number, number>)[k]));
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const inner = decode(bytes) as any;
+const innerData = Array.isArray(inner) ? inner[1] : inner;
+if (innerData?.Content && typeof innerData.Content === 'string') { parts.push(innerData.Content); }
+} catch { /* ignore malformed context */ }
+} else if (vcRaw.Content && typeof vcRaw.Content === 'string') {
+parts.push(vcRaw.Content);
+}
+}
+
 /**
  * Extract text from the Context array attached to a VS request message.
  * Each context item carries a ValueContainer whose second element is a
  * nested MessagePack-encoded byte array; decoded inner object has a Content field.
  */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
 extractContextText(contextArr: any): string {
 if (!Array.isArray(contextArr)) { return ''; }
 const parts: string[] = [];
@@ -357,22 +355,7 @@ const vc = item?.ValueContainer;
 if (!Array.isArray(vc) || vc.length < 2) { continue; }
 const vcRaw = vc[1];
 if (!vcRaw || typeof vcRaw !== 'object') { continue; }
-const keys = Object.keys(vcRaw);
-if (keys.length === 0) { continue; }
-if (!isNaN(Number(keys[0]))) {
-// Byte array stored as numeric-keyed object — decode as nested MessagePack
-try {
-const numKeys = keys.map(Number).sort((a, b) => a - b);
-const bytes = Buffer.from(numKeys.map(k => (vcRaw as Record<number, number>)[k]));
-const inner = decode(bytes) as any;
-const innerData = Array.isArray(inner) ? inner[1] : inner;
-if (innerData?.Content && typeof innerData.Content === 'string') {
-parts.push(innerData.Content);
-}
-} catch { /* ignore malformed context */ }
-} else if (vcRaw.Content && typeof vcRaw.Content === 'string') {
-parts.push(vcRaw.Content);
-}
+this._decodeVcRaw(vcRaw, parts);
 }
 return parts.join('\n');
 }

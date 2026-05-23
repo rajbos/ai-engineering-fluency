@@ -376,6 +376,10 @@ function getEditorBadgeClass(editor: string): string {
   if (lower.includes("mistral")) {
     return "editor-badge editor-badge-mistral-vibe";
   }
+  // Antigravity must be checked before gemini (both contain 'gemini' in their path)
+  if (lower.includes("antigravity")) {
+    return "editor-badge editor-badge-antigravity";
+  }
   if (lower.includes("gemini")) {
     return "editor-badge editor-badge-gemini-cli";
   }
@@ -395,6 +399,10 @@ function getEditorIcon(editor: string): string {
   }
   if (lower.includes("mistral")) {
     return "🔥";
+  }
+  // Antigravity: rocket emoji — evokes the anti-gravity concept and space theme
+  if (lower.includes("antigravity")) {
+    return "🚀";
   }
   if (lower.includes("gemini")) {
     return "💎";
@@ -1082,6 +1090,7 @@ function renderFolderAnalyzerTab(): string {
           <option value="copilot-cli">🤖 GitHub Copilot CLI</option>
           <option value="claude-code">🟣 Claude Code (.jsonl only)</option>
           <option value="gemini-cli">💎 Gemini CLI (.jsonl only)</option>
+          <option value="antigravity">🚀 Antigravity (.jsonl only)</option>
           <option value="continue">⚡ Continue</option>
           <option value="opencode">🟢 OpenCode (JSON format only — DB not supported)</option>
           <option value="mistral-vibe">🔥 Mistral Vibe</option>
@@ -2255,3 +2264,4 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap();
+

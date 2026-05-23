@@ -469,11 +469,17 @@ const tr = document.createElement('tr');
 if (editor === 'JetBrains') {
 tr.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.';
 }
+if (editor === 'Antigravity') {
+tr.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.';
+}
 const labelTd = document.createElement('td');
 const labelWrapper = document.createElement('span');
 labelWrapper.className = 'metric-label';
 labelWrapper.textContent = `${getEditorIcon(editor)} ${editor}`;
 if (editor === 'JetBrains') {
+labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`;
+}
+if (editor === 'Antigravity') {
 labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`;
 }
 labelTd.append(labelWrapper);
@@ -822,7 +828,8 @@ const toolsTexts = [
 '🖥️ Visual Studio 2022+ — GitHub Copilot Chat extension',
 '🟢 OpenCode, 🦀 Crush — terminal-based coding agents',
 '🤖 Claude Code — Anthropic\'s CLI coding agent',
-'💎 Gemini CLI — Google\'s CLI coding agent',
+'💎 Gemini CLI — Google\'s open-source CLI coding agent',
+'🚀 Antigravity — Google\'s Gemini-powered desktop IDE',
 '💻 Copilot CLI — GitHub Copilot in the terminal',
 ];
 toolsTexts.forEach(text => {
@@ -842,7 +849,7 @@ steps.className = 'empty-state-steps';
 const stepTexts = [
 'Use any of the supported tools or editors listed above to interact with an AI model.',
 'For GitHub Copilot in VS Code: open the Copilot Chat panel (Ctrl+Alt+I / Cmd+Alt+I) and start a conversation.',
-'For terminal agents (Claude Code, Gemini CLI, OpenCode, Copilot CLI): run a coding session in your terminal.',
+'For terminal agents (Claude Code, Gemini CLI, Antigravity, OpenCode, Copilot CLI): run a coding session in your terminal.',
 'Click the 🔄 Refresh button above to reload the stats after your first session.',
 ];
 stepTexts.forEach(text => {

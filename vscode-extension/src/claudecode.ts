@@ -73,35 +73,35 @@ export class ClaudeCodeDataAccess {
 	getClaudeCodeSessionFiles(): string[] {
 		const projectsDir = this.getClaudeCodeProjectsDir();
 		if (!fs.existsSync(projectsDir)) { return []; }
-		const results: string[] = [];
 		try {
 			const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true });
-			for (const projectDir of projectDirs) {
-				if (!projectDir.isDirectory()) { continue; }
-				const projectPath = path.join(projectsDir, projectDir.name);
-				try {
-					const entries = fs.readdirSync(projectPath, { withFileTypes: true });
-					for (const entry of entries) {
-						if (!entry.isDirectory() && entry.name.endsWith('.jsonl')) {
-							const fullPath = path.join(projectPath, entry.name);
-							try {
-								const stats = fs.statSync(fullPath);
-								if (stats.size > 0) {
-									results.push(fullPath);
-								}
-							} catch (err) {
-								console.error(`[claudecode] Failed to stat ${fullPath}:`, err);
-							}
-						}
-					}
-				} catch (err) {
-					console.error(`[claudecode] Failed to read project dir ${projectPath}:`, err);
-				}
-			}
+			return projectDirs
+				.filter(d => d.isDirectory())
+				.flatMap(d => this.collectJsonlFilesFromProject(path.join(projectsDir, d.name)));
 		} catch (err) {
 			console.error('[claudecode] Failed to read projects dir:', err);
+			return [];
 		}
-		return results;
+	}
+
+	private collectJsonlFilesFromProject(projectPath: string): string[] {
+		try {
+			const entries = fs.readdirSync(projectPath, { withFileTypes: true });
+			return entries
+				.filter(e => !e.isDirectory() && e.name.endsWith('.jsonl'))
+				.flatMap(e => {
+					const fullPath = path.join(projectPath, e.name);
+					try {
+						return fs.statSync(fullPath).size > 0 ? [fullPath] : [];
+					} catch (err) {
+						console.error(`[claudecode] Failed to stat ${fullPath}:`, err);
+						return [];
+					}
+				});
+		} catch (err) {
+			console.error(`[claudecode] Failed to read project dir ${projectPath}:`, err);
+			return [];
+		}
 	}
 
 	/**
@@ -253,35 +253,7 @@ export class ClaudeCodeDataAccess {
 	} | null {
 		const events = this.readSessionEvents(sessionFilePath);
 		if (events.length === 0) { return null; }
-
-		let title: string | undefined;
-		let entrypoint: string | undefined;
-		let cwd: string | undefined;
-		const timestamps: number[] = [];
-
-		for (const event of events) {
-			// Extract AI-generated title
-			if (event.type === 'ai-title' && event.aiTitle) {
-				title = event.aiTitle;
-			}
-
-			// Extract entrypoint and cwd from any event
-			if (!entrypoint && event.entrypoint) {
-				entrypoint = event.entrypoint;
-			}
-			if (!cwd && event.cwd) {
-				cwd = event.cwd;
-			}
-
-			// Collect timestamps
-			if (event.timestamp) {
-				const ts = new Date(event.timestamp).getTime();
-				if (!isNaN(ts)) {
-					timestamps.push(ts);
-				}
-			}
-		}
-
+		const { title, entrypoint, cwd, timestamps } = this.extractMetaFieldsFromEvents(events);
 		let firstInteraction: string | undefined;
 		let lastInteraction: string | undefined;
 		if (timestamps.length > 0) {
@@ -289,8 +261,24 @@ export class ClaudeCodeDataAccess {
 			firstInteraction = new Date(timestamps[0]).toISOString();
 			lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
 		}
-
 		return { title, entrypoint, firstInteraction, lastInteraction, cwd };
+	}
+
+	private extractMetaFieldsFromEvents(events: any[]): { title?: string; entrypoint?: string; cwd?: string; timestamps: number[] } {
+		let title: string | undefined;
+		let entrypoint: string | undefined;
+		let cwd: string | undefined;
+		const timestamps: number[] = [];
+		for (const event of events) {
+			if (event.type === 'ai-title' && event.aiTitle) { title = event.aiTitle; }
+			if (!entrypoint && event.entrypoint) { entrypoint = event.entrypoint; }
+			if (!cwd && event.cwd) { cwd = event.cwd; }
+			if (event.timestamp) {
+				const ts = new Date(event.timestamp).getTime();
+				if (!isNaN(ts)) { timestamps.push(ts); }
+			}
+		}
+		return { title, entrypoint, cwd, timestamps };
 	}
 
 	/**

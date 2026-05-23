@@ -84,6 +84,22 @@ interface CustomizationFileEntry {
 
 type CustomizationTypeStatus = '✅' | '⚠️' | '❌';
 
+/**
+ * Returns a modern styled HTML badge for a status value, replacing plain emoji icons.
+ * Pass/fresh → green ✓, warning/stale → amber !, fail/missing → red ✕
+ */
+function statusBadgeHtml(status: CustomizationTypeStatus | string, label?: string): string {
+	const titleAttr = label ? ` title="${escapeHtml(label)}"` : '';
+	const base = 'display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font-weight:700;flex-shrink:0;';
+	if (status === '✅') {
+		return `<span style="${base}background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#4ade80;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Present and fresh')}">✓</span>`;
+	} else if (status === '⚠️') {
+		return `<span style="${base}background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Present but stale')}">!</span>`;
+	} else {
+		return `<span style="${base}background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);color:#f87171;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Missing')}">✕</span>`;
+	}
+}
+
 interface WorkspaceCustomizationRow {
 	workspacePath: string;
 	workspaceName: string;
@@ -180,7 +196,7 @@ function showLoadError(message: string): void {
 	container.style.cssText = 'padding: 32px; text-align: center; font-size: 14px;';
 	const icon = document.createElement('div');
 	icon.style.cssText = 'font-size: 24px; margin-bottom: 12px;';
-	icon.textContent = '❌';
+	icon.innerHTML = statusBadgeHtml('❌', 'Error');
 	const msg = document.createElement('div');
 	msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
 	msg.textContent = message;
@@ -475,8 +491,8 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
 	if (missed.length === 0) {
 		return `
 			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px;">
-				<div style="font-size: 13px; font-weight: 600; color: var(--success-fg); margin-bottom: 8px;">
-					✅ No other AI tool configs missing a Copilot counterpart
+				<div style="font-size: 13px; font-weight: 600; color: var(--success-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+					${statusBadgeHtml('✅')} No other AI tool configs missing a Copilot counterpart
 				</div>
 				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
 					All active workspaces that contain instruction files for other AI tools (e.g. .cursorrules, CLAUDE.md, AGENTS.md) also have Copilot customization files configured.
@@ -490,8 +506,8 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
 
 	return `
         <div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px;">
-            <div style="font-size: 13px; font-weight: 600; color: var(--warning-fg); margin-bottom: 8px;">
-                ⚠️ Missed Potential: Non-Copilot Instruction Files
+            <div style="font-size: 13px; font-weight: 600; color: var(--warning-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                ${statusBadgeHtml('⚠️')} Missed Potential: Non-Copilot Instruction Files
             </div>
             <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
                 These active workspaces use other AI tools but lack Copilot customizations. <a href="https://code.visualstudio.com/docs/copilot/customization/custom-instructions" style="color: var(--link-color);" target="_blank">Learn how to add Copilot instructions</a>.
@@ -1196,11 +1212,11 @@ function renderLayout(stats: UsageAnalysisStats): void {
 				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
 					🛠️ Copilot Customization Files
 				</div>
-				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
 					Showing ${matrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
 					${matrix.workspacesWithIssues > 0
-						? `<span class="stale-warning">⚠️ ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
-						: '✅ All workspaces have up-to-date customizations.'}
+						? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
+						: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
 				</div>
 				<div class="customization-matrix-container">
 					<table class="customization-matrix">
@@ -1221,7 +1237,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 								return `
 								<tr>
 									<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
-										${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ' <span title="No customization files" style="font-family: sans-serif;">⚠️</span>' : ''}
+						${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}
 									</td>
 									<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
 										${ws.sessionCount}
@@ -1237,9 +1253,8 @@ function renderLayout(stats: UsageAnalysisStats): void {
 														? 'Missing'
 														: 'Status unknown';
 										return `
-										<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; font-size: 16px;" title="${escapeHtml(statusLabel)}" aria-label="${escapeHtml(statusLabel)}">
-											<span aria-hidden="true">${escapeHtml(status)}</span>
-											<span style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">${escapeHtml(statusLabel)}</span>
+										<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center;">
+											${statusBadgeHtml(status, statusLabel)}
 										</td>
 										`;
 									}).join('')}
@@ -1254,8 +1269,12 @@ function renderLayout(stats: UsageAnalysisStats): void {
 							<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
 						`).join('')}
 					</div>
-					<div style="margin-top: 8px;">
-						✅ = Present &amp; Fresh&nbsp;&nbsp;•&nbsp;&nbsp;⚠️ = Present but Stale&nbsp;&nbsp;•&nbsp;&nbsp;❌ = Missing
+					<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>
+						<span style="color: var(--text-muted);">•</span>
+						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>
+						<span style="color: var(--text-muted);">•</span>
+						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>
 					</div>
 				</div>
 			</div>`;
@@ -2038,15 +2057,15 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 
 		for (const check of categoryChecks) {
 			const status = check?.status === 'pass' || check?.status === 'warning' ? check.status : 'fail';
-			const statusIcon = status === 'pass' ? '✅' : status === 'warning' ? '⚠️' : '❌';
+			const statusEmoji: CustomizationTypeStatus = status === 'pass' ? '✅' : status === 'warning' ? '⚠️' : '❌';
 			const statusColor = status === 'pass' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#ef4444';
 
 			const checkRow = el('div');
 			checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
 
 			const icon = el('span');
-			icon.setAttribute('style', 'font-size: 16px;');
-			icon.textContent = statusIcon;
+			icon.setAttribute('style', 'flex-shrink: 0; padding-top: 1px;');
+			icon.innerHTML = statusBadgeHtml(statusEmoji);
 
 			const content = el('div');
 			content.setAttribute('style', 'flex: 1;');

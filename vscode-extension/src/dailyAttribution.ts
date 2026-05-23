@@ -21,65 +21,62 @@ interface DailyFractionStrategy {
 class JsonlDailyFractionStrategy implements DailyFractionStrategy {
 	extractCounts(content: string): Record<string, number> {
 		const dayCounts: Record<string, number> = {};
-		// Track per-index timestamps for kind:1 updates so we can record them
-		// even when the corresponding kind:2 append had no timestamp yet.
 		const requestTsMap: Record<number, unknown> = {};
-
 		const lines = content.trim().split('\n');
 		for (const line of lines) {
 			if (!line.trim()) { continue; }
 			try {
 				const event = JSON.parse(line);
-
-				// Copilot CLI JSONL: user.message events carry the interaction timestamp
 				if (event.type === 'user.message') {
-					const ts = event.timestamp ?? event.ts ?? event.data?.timestamp;
-					recordTimestamp(ts, dayCounts);
+					recordTimestamp(event.timestamp ?? event.ts ?? event.data?.timestamp, dayCounts);
 					continue;
 				}
-
-				// VS Code delta JSONL
-				const kind = event.kind;
-				const k: unknown[] = event.k;
-				const v = event.v;
-
-				if (kind === 0 && v?.requests && Array.isArray(v.requests)) {
-					// Initial state — extract timestamps from existing requests
-					for (const req of v.requests) {
-						const ts = req.timestamp ?? req.ts;
-						recordTimestamp(ts, dayCounts);
-					}
-				} else if (kind === 2 && Array.isArray(k) && k[0] === 'requests') {
-					if (Array.isArray(v)) {
-						// Batch append
-						for (const req of v) {
-							const ts = req.timestamp ?? req.ts;
-							recordTimestamp(ts, dayCounts);
-						}
-					} else if (v && typeof v === 'object') {
-						// Single request append — may or may not have timestamp yet
-						const ts = (v as Record<string, unknown>).timestamp ?? (v as Record<string, unknown>).ts;
-						if (ts !== undefined) {
-							recordTimestamp(ts, dayCounts);
-						}
-						// Track index for potential kind:1 timestamp update below
-						if (typeof k[1] === 'number') {
-							requestTsMap[k[1]] = ts;
-						}
-					}
-				} else if (kind === 1 && Array.isArray(k) && k.length === 3 && k[0] === 'requests' &&
-						(k[2] === 'timestamp' || k[2] === 'ts') && typeof k[1] === 'number') {
-					// kind:1 updates the timestamp on an existing request
-					const idx = k[1] as number;
-					if (requestTsMap[idx] === undefined) {
-						// First time seeing a timestamp for this request index
-						recordTimestamp(v, dayCounts);
-					}
-					requestTsMap[idx] = v;
-				}
+				this.processVsCodeDeltaEvent(event, requestTsMap, dayCounts);
 			} catch { /* skip malformed lines */ }
 		}
 		return dayCounts;
+	}
+
+	private processVsCodeDeltaEvent(event: any, requestTsMap: Record<number, unknown>, dayCounts: Record<string, number>): void {
+		const kind = event.kind;
+		const k: unknown[] = event.k;
+		const v = event.v;
+		if (kind === 0 && v?.requests && Array.isArray(v.requests)) {
+			this.processKind0Event(v, dayCounts);
+		} else if (kind === 2 && Array.isArray(k) && k[0] === 'requests') {
+			this.processKind2Event(k, v, requestTsMap, dayCounts);
+		} else if (this.isKind1TimestampUpdate(kind, k)) {
+			this.processKind1Event(k, v, requestTsMap, dayCounts);
+		}
+	}
+
+	private isKind1TimestampUpdate(kind: unknown, k: unknown[]): boolean {
+		return kind === 1 && Array.isArray(k) && k.length === 3 && k[0] === 'requests' &&
+			(k[2] === 'timestamp' || k[2] === 'ts') && typeof k[1] === 'number';
+	}
+
+	private processKind0Event(v: any, dayCounts: Record<string, number>): void {
+		for (const req of v.requests) {
+			recordTimestamp(req.timestamp ?? req.ts, dayCounts);
+		}
+	}
+
+	private processKind2Event(k: unknown[], v: unknown, requestTsMap: Record<number, unknown>, dayCounts: Record<string, number>): void {
+		if (Array.isArray(v)) {
+			for (const req of v) {
+				recordTimestamp((req as Record<string, unknown>).timestamp ?? (req as Record<string, unknown>).ts, dayCounts);
+			}
+		} else if (v && typeof v === 'object') {
+			const ts = (v as Record<string, unknown>).timestamp ?? (v as Record<string, unknown>).ts;
+			if (ts !== undefined) { recordTimestamp(ts, dayCounts); }
+			if (typeof k[1] === 'number') { requestTsMap[k[1]] = ts; }
+		}
+	}
+
+	private processKind1Event(k: unknown[], v: unknown, requestTsMap: Record<number, unknown>, dayCounts: Record<string, number>): void {
+		const idx = k[1] as number;
+		if (requestTsMap[idx] === undefined) { recordTimestamp(v, dayCounts); }
+		requestTsMap[idx] = v;
 	}
 }
 
