@@ -101,14 +101,14 @@ Ask the user to confirm before proceeding.
 For VS Code extension (if changed):
 ```bash
 cd vscode-extension
-npm version <bump-type> --no-git-tag-version
+pnpm version <bump-type> --no-git-tag-version
 cd ..
 ```
 
 For CLI (if changed):
 ```bash
 cd cli
-npm version <bump-type> --no-git-tag-version
+pnpm version <bump-type> --no-git-tag-version
 cd ..
 ```
 
@@ -238,9 +238,9 @@ Only set `vscode_only=false` when the Visual Studio extension was *also* bumped 
 - **Always confirm the plan with the user** before creating files/branches/PRs (Step 5).
 - **Dry-run mode**: If the user says "preview", "dry run", or "check only", stop after Step 5 without making any changes.
 - **Only stage version files** in the commit — do not stage other changes.
-- **Use `--no-git-tag-version`** with `npm version` to prevent npm from creating a git tag automatically.
+- **Use `--no-git-tag-version`** with `pnpm version` to prevent pnpm from creating a git tag automatically.
 - The VS extension's `<Identity Version="...">` is on a different line than `<PackageManifest Version="2.0.0">` — make sure to update only the `<Identity>` element.
-- After `npm version`, also stage the `package-lock.json` — npm updates both files.
+- After `pnpm version`, also stage the `pnpm-lock.yaml` — pnpm updates both files.
 - **Never trigger the CLI publish workflow via `workflow_dispatch` right after merging a release-prep PR** — it re-bumps the version itself and will publish a version one patch ahead of the one just merged. Push a `cli/vX.Y.Z` tag instead (see Step 11).
 - **Always pass `vscode_only=true`** to the `Extensions - Release` workflow when only the VS Code extension changed — otherwise it also rebuilds/republishes the unchanged Visual Studio extension.
 

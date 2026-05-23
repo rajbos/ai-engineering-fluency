@@ -180,8 +180,8 @@ For broader session-level caveats (multiple bullet points), use the `editorNote:
 - [ ] `test/unit/ecosystemAdapters.test.ts` — adapter added to `allAdapters`, count bumped, `id` assertion added
 - [ ] (Optional) `webview/diagnostics/main.ts` + `styles.css` — dedicated badge class/colour, only if the generic fallback isn't distinctive enough
 - [ ] (Optional) `webview/logviewer/main.ts` — `ESTIMATED_TOKENS_NOTES` entry if the editor doesn't persist actual token counts
-- [ ] `npm run compile` passes with **0 errors and 0 warnings** (not just 0 errors — check for complexity/lint warnings on new code)
-- [ ] CLI build (`cd cli && npm run build`) succeeds, since it shares the same adapter registry
+- [ ] `pnpm run compile` passes with **0 errors and 0 warnings** (not just 0 errors — check for complexity/lint warnings on new code)
+- [ ] CLI build (`cd cli && pnpm run build`) succeeds, since it shares the same adapter registry
 - [ ] `node cli/dist/cli.js diagnostics` shows the new editor's candidate path as `yes` (exists) with non-zero file/session/token counts — this is the fastest end-to-end confidence check
 - [ ] Sessions appear in the session list with the correct editor name and icon
 - [ ] Token counts are non-zero and plausible

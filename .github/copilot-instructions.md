@@ -48,8 +48,8 @@ Use the root orchestrator from the repo root:
 
 Individual project builds:
 ```bash
-cd vscode-extension && npm run compile   # VS Code extension
-cd cli && npm run build                   # CLI
+cd vscode-extension && pnpm run compile   # VS Code extension
+cd cli && pnpm run build                   # CLI
 ```
 
 ## Documentation
@@ -145,11 +145,11 @@ Do not enter retry loops trying to capture terminal output. These patterns waste
 
 ### What to do instead
 
-1. **Use `npm` scripts for standard operations** (from inside `vscode-extension/`):
-   - `npm run compile` — lint + build
-   - `npm run compile-tests` — compile test files to `out/`
-   - `npm run test:node` — compile + run unit tests
-   - `npm run test:coverage` — compile + run tests with coverage thresholds
+1. **Use `pnpm` scripts for standard operations** (from inside `vscode-extension/`):
+   - `pnpm run compile` — lint + build
+   - `pnpm run compile-tests` — compile test files to `out/`
+   - `pnpm run test:node` — compile + run unit tests
+   - `pnpm run test:coverage` — compile + run tests with coverage thresholds
 
 2. **Use `get_errors` to validate compilation.** After edits, call `get_errors` on the changed files instead of running `tsc` in the terminal.
 

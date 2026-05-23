@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env pwsh
+#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Root build orchestrator for the Copilot Token Tracker mono-repo.
@@ -80,9 +80,9 @@ function Build-VsCode {
     Push-Location "$PSScriptRoot/vscode-extension"
     try {
         switch ($Target) {
-            'build'   { Ensure-NpmDeps .; npm run compile }
-            'package' { Ensure-NpmDeps .; npm run package; npx vsce package }
-            'test'    { Ensure-NpmDeps .; npm run test:node }
+            'build'   { pnpm install --frozen-lockfile; pnpm run compile }
+            'package' { pnpm install --frozen-lockfile; pnpm run package; pnpm exec vsce package }
+            'test'    { pnpm install --frozen-lockfile; pnpm run compile-tests; pnpm test }
             'clean'   { Remove-Item -Recurse -Force dist, out -ErrorAction SilentlyContinue }
         }
         Write-Ok "vscode-extension done."
@@ -98,8 +98,8 @@ function Build-Cli {
     Push-Location "$PSScriptRoot/cli"
     try {
         switch ($Target) {
-            'build'   { Ensure-NpmDeps .; npm run build }
-            'package' { Ensure-NpmDeps .; npm run build:production; & pwsh -NoProfile -File bundle-exe.ps1 -SkipBuild }
+            'build'   { pnpm install --frozen-lockfile; pnpm run build }
+            'package' { pnpm install --frozen-lockfile; pnpm run build:production; & pwsh -NoProfile -File bundle-exe.ps1 -SkipBuild }
             'test'    { Write-Host "    (no CLI tests yet)" }
             'clean'   { Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue }
         }
@@ -115,7 +115,7 @@ function Build-CliExe {
     Write-Step "cli: bundle-exe"
     Push-Location "$PSScriptRoot/cli"
     try {
-        Ensure-NpmDeps .
+        pnpm install --frozen-lockfile
         & pwsh -NoProfile -File bundle-exe.ps1
         if ($LASTEXITCODE -ne 0) { throw "CLI exe bundling failed" }
         Write-Ok "cli exe bundled."
@@ -139,8 +139,8 @@ function Build-VisualStudio {
     Write-Step "vscode-extension: compile (for VS webview bundles)"
     Push-Location "$PSScriptRoot/vscode-extension"
     try {
-        Ensure-NpmDeps .
-        npm run compile
+        pnpm install --frozen-lockfile
+        pnpm run compile
         if ($LASTEXITCODE -ne 0) { throw "vscode-extension compile failed" }
         Write-Ok "vscode-extension compiled."
     }
@@ -251,8 +251,8 @@ function Build-Jetbrains {
     Write-Step "vscode-extension: compile (for JetBrains webview bundles)"
     Push-Location "$PSScriptRoot/vscode-extension"
     try {
-        Ensure-NpmDeps .
-        npm run compile
+        pnpm install --frozen-lockfile
+        pnpm run compile
         if ($LASTEXITCODE -ne 0) { throw "vscode-extension compile failed" }
     }
     finally { Pop-Location }
@@ -283,8 +283,8 @@ function Build-Sharing {
     Push-Location "$PSScriptRoot/sharing-server"
     try {
         switch ($Target) {
-            'build'   { Ensure-NpmDeps .; npm run build }
-            'package' { Ensure-NpmDeps .; npm run build:production }
+            'build'   { pnpm install --frozen-lockfile; pnpm run build }
+            'package' { pnpm install --frozen-lockfile; pnpm run build:production }
             'test'    { Write-Host "    (no sharing-server tests yet)" }
             'clean'   { Remove-Item -Recurse -Force dist -ErrorAction SilentlyContinue }
         }
