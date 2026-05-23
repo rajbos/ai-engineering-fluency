@@ -7342,276 +7342,147 @@ body {
 
   public async generateDiagnosticReport(): Promise<string> {
     this.log("Generating diagnostic report...");
-
     const report: string[] = [];
+    this.buildDiagReportHeader(report);
+    this.buildDiagReportExtensionInfo(report);
+    this.buildDiagReportSystemInfo(report);
+    this.buildDiagReportCopilotStatus(report);
+    this.buildDiagReportBackendConfig(report);
+    await this.buildDiagReportSessionFiles(report);
+    this.buildDiagReportCacheStats(report);
+    await this.buildDiagReportTokenStats(report);
+    this.buildDiagReportFooter(report);
+    this.log("Diagnostic report generated successfully");
+    return report.join("\n");
+  }
 
-    // Header
-    report.push("=".repeat(70));
-    report.push("AI Engineering Fluency - Diagnostic Report");
-    report.push("=".repeat(70));
-    report.push("");
+  private buildDiagReportHeader(report: string[]): void {
+    report.push("=".repeat(70)); report.push("AI Engineering Fluency - Diagnostic Report"); report.push("=".repeat(70)); report.push("");
+  }
 
-    // Extension Information
+  private buildDiagReportExtensionInfo(report: string[]): void {
     report.push("## Extension Information");
-    report.push(
-      `Extension Version: ${(vscode.extensions.getExtension("RobBos.ai-engineering-fluency") ?? vscode.extensions.getExtension("RobBos.copilot-token-tracker"))?.packageJSON.version || "Unknown"}`,
-    );
-    report.push(`VS Code Version: ${vscode.version}`);
-    report.push("");
+    report.push(`Extension Version: ${(vscode.extensions.getExtension("RobBos.ai-engineering-fluency") ?? vscode.extensions.getExtension("RobBos.copilot-token-tracker"))?.packageJSON.version || "Unknown"}`);
+    report.push(`VS Code Version: ${vscode.version}`); report.push("");
+  }
 
-    // System Information
+  private buildDiagReportSystemInfo(report: string[]): void {
     report.push("## System Information");
     report.push(`OS: ${os.platform()} ${os.release()} (${os.arch()})`);
     report.push(`Node Version: ${process.version}`);
     report.push(`Home Directory: ${os.homedir()}`);
-    report.push(
-      `Environment: ${process.env.CODESPACES === "true" ? "GitHub Codespaces" : vscode.env.remoteName || "Local"}`,
-    );
+    report.push(`Environment: ${process.env.CODESPACES === "true" ? "GitHub Codespaces" : vscode.env.remoteName || "Local"}`);
     report.push(`VS Code Machine ID: ${vscode.env.machineId}`);
     report.push(`VS Code Session ID: ${vscode.env.sessionId}`);
-    report.push(
-      `VS Code UI Kind: ${vscode.env.uiKind === vscode.UIKind.Desktop ? "Desktop" : "Web"}`,
-    );
-    report.push(`Remote Name: ${vscode.env.remoteName || "N/A"}`);
-    report.push("");
+    report.push(`VS Code UI Kind: ${vscode.env.uiKind === vscode.UIKind.Desktop ? "Desktop" : "Web"}`);
+    report.push(`Remote Name: ${vscode.env.remoteName || "N/A"}`); report.push("");
+  }
 
-    // GitHub Copilot Extension Status
+  private buildDiagReportCopilotStatus(report: string[]): void {
     report.push("## GitHub Copilot Extension Status");
     const copilotExtension = vscode.extensions.getExtension("GitHub.copilot");
-    const copilotChatExtension = vscode.extensions.getExtension(
-      "GitHub.copilot-chat",
-    );
-
+    const copilotChatExtension = vscode.extensions.getExtension("GitHub.copilot-chat");
     if (copilotExtension) {
       report.push(`GitHub Copilot Extension:`);
       report.push(`  - Installed: Yes`);
       report.push(`  - Version: ${copilotExtension.packageJSON.version}`);
       report.push(`  - Active: ${copilotExtension.isActive ? "Yes" : "No"}`);
-
-      // Try to get Copilot tier information if available
       try {
         const copilotApi = copilotExtension.exports;
-        if (copilotApi && copilotApi.status) {
+        if (copilotApi?.status) {
           const status = copilotApi.status;
-          // Display key status fields in a readable format
-          if (typeof status === "object") {
-            Object.keys(status).forEach((key) => {
-              const value = status[key];
-              if (value !== undefined && value !== null) {
-                report.push(`  - ${key}: ${value}`);
-              }
-            });
-          } else {
-            report.push(`  - Status: ${status}`);
-          }
+          if (typeof status === "object") { Object.keys(status).forEach((key) => { const value = status[key]; if (value !== undefined && value !== null) { report.push(`  - ${key}: ${value}`); } }); }
+          else { report.push(`  - Status: ${status}`); }
         }
-      } catch (error) {
-        this.log(`Could not retrieve Copilot tier information: ${error}`);
-      }
-    } else {
-      report.push(`GitHub Copilot Extension: Not Installed`);
-    }
-
+      } catch (error) { this.log(`Could not retrieve Copilot tier information: ${error}`); }
+    } else { report.push(`GitHub Copilot Extension: Not Installed`); }
     if (copilotChatExtension) {
-      report.push(`GitHub Copilot Chat Extension:`);
-      report.push(`  - Installed: Yes`);
+      report.push(`GitHub Copilot Chat Extension:`); report.push(`  - Installed: Yes`);
       report.push(`  - Version: ${copilotChatExtension.packageJSON.version}`);
-      report.push(
-        `  - Active: ${copilotChatExtension.isActive ? "Yes" : "No"}`,
-      );
-    } else {
-      report.push(`GitHub Copilot Chat Extension: Not Installed`);
-    }
+      report.push(`  - Active: ${copilotChatExtension.isActive ? "Yes" : "No"}`);
+    } else { report.push(`GitHub Copilot Chat Extension: Not Installed`); }
     report.push("");
+  }
 
-    // Backend Configuration
+  private buildDiagReportBackendConfig(report: string[]): void {
     report.push("## Backend Configuration");
     const settings = this.backend?.getSettings();
     const githubAuthStatus = this.getGitHubAuthStatus();
     report.push(`GitHub Authentication: ${githubAuthStatus.authenticated ? `Authenticated (${githubAuthStatus.username || "unknown"})` : "Not Authenticated"}`);
     if (settings?.sharingServerEnabled) {
-      report.push(`Team Server: Enabled`);
-      report.push(`  - Server URL: ${settings.sharingServerEndpointUrl || "(not set)"}`);
-      if (!githubAuthStatus.authenticated) {
-        report.push(`  - ⚠️ WARNING: GitHub authentication is required for team server sync`);
-      }
-    } else {
-      report.push(`Team Server: Disabled`);
-    }
-    if (settings?.enabled) {
-      report.push(`Azure Storage: Enabled`);
-      report.push(`  - Storage Account: ${settings.storageAccount || "(not set)"}`);
-    } else {
-      report.push(`Azure Storage: Disabled`);
-    }
+      report.push(`Team Server: Enabled`); report.push(`  - Server URL: ${settings.sharingServerEndpointUrl || "(not set)"}`);
+      if (!githubAuthStatus.authenticated) { report.push(`  - ⚠️ WARNING: GitHub authentication is required for team server sync`); }
+    } else { report.push(`Team Server: Disabled`); }
+    if (settings?.enabled) { report.push(`Azure Storage: Enabled`); report.push(`  - Storage Account: ${settings.storageAccount || "(not set)"}`); }
+    else { report.push(`Azure Storage: Disabled`); }
     report.push("");
+  }
 
-    // Session Files Discovery
+  private async buildDiagReportSessionFiles(report: string[]): Promise<void> {
     report.push("## Session Files Discovery");
     try {
       const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-      report.push(`Total Session Files Found: ${sessionFiles.length}`);
+      report.push(`Total Session Files Found: ${sessionFiles.length}`); report.push("");
+      if (sessionFiles.length > 0) { await this.appendSessionFileListing(report, sessionFiles); }
+      else { this.appendNoSessionFilesMessage(report); }
       report.push("");
+    } catch (error) { report.push(`Error discovering session files: ${error}`); report.push(""); }
+  }
 
-      if (sessionFiles.length > 0) {
-        report.push("Session File Locations (first 20):");
+  private async appendSessionFileListing(report: string[], sessionFiles: string[]): Promise<void> {
+    report.push("Session File Locations (first 20):");
+    const filesToShow = sessionFiles.slice(0, 20);
+    const fileStats = await Promise.all(filesToShow.map(async (file) => { try { const stat = await fs.promises.stat(file); return { file, stat, error: null }; } catch (error) { return { file, stat: null, error }; } }));
+    fileStats.forEach((result, index) => {
+      if (result.stat) { report.push(`  ${index + 1}. ${result.file}`); report.push(`     - Size: ${result.stat.size} bytes`); report.push(`     - Modified: ${result.stat.mtime.toISOString()}`); }
+      else { report.push(`  ${index + 1}. ${result.file}`); report.push(`     - Error: ${result.error}`); }
+    });
+    if (sessionFiles.length > 20) { report.push(`  ... and ${sessionFiles.length - 20} more files`); }
+  }
 
-        // Use async file stat to avoid blocking the event loop
-        const filesToShow = sessionFiles.slice(0, 20);
-        const fileStats = await Promise.all(
-          filesToShow.map(async (file) => {
-            try {
-              const stat = await fs.promises.stat(file);
-              return { file, stat, error: null };
-            } catch (error) {
-              return { file, stat: null, error };
-            }
-          }),
-        );
-
-        fileStats.forEach((result, index) => {
-          if (result.stat) {
-            report.push(`  ${index + 1}. ${result.file}`);
-            report.push(`     - Size: ${result.stat.size} bytes`);
-            report.push(`     - Modified: ${result.stat.mtime.toISOString()}`);
-          } else {
-            report.push(`  ${index + 1}. ${result.file}`);
-            report.push(`     - Error: ${result.error}`);
-          }
-        });
-
-        if (sessionFiles.length > 20) {
-          report.push(`  ... and ${sessionFiles.length - 20} more files`);
-        }
-      } else {
-        report.push("No session files found. Possible reasons:");
-        report.push("  - Copilot extensions are not active");
-        report.push("  - No Copilot Chat conversations have been initiated");
-        report.push("  - Sessions stored in unsupported location");
-        report.push("  - Authentication required with GitHub Copilot");
-        if (vscode.env.remoteName === "wsl") {
-          report.push("");
-          report.push("WSL note: the extension host runs inside WSL and scans both the");
-          report.push("  Linux-side ~/.vscode-server paths and the Windows-side");
-          report.push("  /mnt/c/Users/<you>/AppData/Roaming/Code paths.");
-          report.push("  If /mnt/c is not mounted, Windows-side sessions cannot be read.");
-        }
-      }
-      report.push("");
-    } catch (error) {
-      report.push(`Error discovering session files: ${error}`);
-      report.push("");
+  private appendNoSessionFilesMessage(report: string[]): void {
+    report.push("No session files found. Possible reasons:");
+    report.push("  - Copilot extensions are not active");
+    report.push("  - No Copilot Chat conversations have been initiated");
+    report.push("  - Sessions stored in unsupported location");
+    report.push("  - Authentication required with GitHub Copilot");
+    if (vscode.env.remoteName === "wsl") {
+      report.push(""); report.push("WSL note: the extension host runs inside WSL and scans both the");
+      report.push("  Linux-side ~/.vscode-server paths and the Windows-side");
+      report.push("  /mnt/c/Users/<you>/AppData/Roaming/Code paths.");
+      report.push("  If /mnt/c is not mounted, Windows-side sessions cannot be read.");
     }
+  }
 
-    // Cache Statistics
+  private buildDiagReportCacheStats(report: string[]): void {
     report.push("## Cache Statistics");
     report.push(`Cached Session Files: ${this.cacheManager.cache.size}`);
-    report.push(`Cache Storage: Extension Global State`);
-    report.push("");
-    report.push(
-      "Cache provides faster loading by storing parsed session data with file modification timestamps.",
-    );
-    report.push(
-      "Files are only re-parsed when their modification time changes.",
-    );
-    report.push("");
+    report.push(`Cache Storage: Extension Global State`); report.push("");
+    report.push("Cache provides faster loading by storing parsed session data with file modification timestamps.");
+    report.push("Files are only re-parsed when their modification time changes."); report.push("");
+  }
 
-    // Token Statistics
+  private async buildDiagReportTokenStats(report: string[]): Promise<void> {
     report.push("## Token Usage Statistics");
     try {
-      // Use cached session files to avoid redundant scans during diagnostic report generation
-      // DO NOT call calculateDetailedStats here - it triggers expensive re-analysis
-      // The loadDiagnosticDataInBackground method ensures stats are calculated if needed
-      try {
-        const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-        report.push(`Total Session Files Found: ${sessionFiles.length}`);
-        report.push("");
-
-        // Group session files by their parent directory
-        const dirCounts = new Map<string, number>();
-        for (const file of sessionFiles) {
-          const parent = require("path").dirname(file);
-          dirCounts.set(parent, (dirCounts.get(parent) || 0) + 1);
-        }
-        if (dirCounts.size > 0) {
-          report.push("Session Files by Directory:");
-          for (const [dir, count] of dirCounts.entries()) {
-            report.push(`  ${dir}: ${count}`);
-          }
-          report.push("");
-        }
-
-        if (sessionFiles.length > 0) {
-          report.push("Session File Locations (first 20):");
-          const filesToShow = sessionFiles.slice(0, 20);
-          const fileStats = await Promise.all(
-            filesToShow.map(async (file) => {
-              try {
-                const stat = await fs.promises.stat(file);
-                return { file, stat, error: null };
-              } catch (error) {
-                return { file, stat: null, error };
-              }
-            }),
-          );
-          fileStats.forEach((result, index) => {
-            if (result.stat) {
-              report.push(`  ${index + 1}. ${result.file}`);
-              report.push(`     - Size: ${result.stat.size} bytes`);
-              report.push(
-                `     - Modified: ${result.stat.mtime.toISOString()}`,
-              );
-            } else {
-              report.push(`  ${index + 1}. ${result.file}`);
-              report.push(`     - Error: ${result.error}`);
-            }
-          });
-          if (sessionFiles.length > 20) {
-            report.push(`  ... and ${sessionFiles.length - 20} more files`);
-          }
-        } else {
-          report.push("No session files found. Possible reasons:");
-          report.push("  - Copilot extensions are not active");
-          report.push("  - No Copilot Chat conversations have been initiated");
-          report.push("  - Sessions stored in unsupported location");
-          report.push("  - Authentication required with GitHub Copilot");
-          if (vscode.env.remoteName === "wsl") {
-            report.push("");
-            report.push("WSL note: the extension host runs inside WSL and scans both the");
-            report.push("  Linux-side ~/.vscode-server paths and the Windows-side");
-            report.push("  /mnt/c/Users/<you>/AppData/Roaming/Code paths.");
-            report.push("  If /mnt/c is not mounted, Windows-side sessions cannot be read.");
-          }
-        }
-        report.push("");
-      } catch (error) {
-        report.push(`Error discovering session files: ${error}`);
-        report.push("");
-      }
-    } catch (error) {
-      report.push(`Error calculating token usage statistics: ${error}`);
+      const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+      report.push(`Total Session Files Found: ${sessionFiles.length}`); report.push("");
+      const dirCounts = new Map<string, number>();
+      for (const file of sessionFiles) { const parent = require("path").dirname(file); dirCounts.set(parent, (dirCounts.get(parent) || 0) + 1); }
+      if (dirCounts.size > 0) { report.push("Session Files by Directory:"); for (const [dir, count] of dirCounts.entries()) { report.push(`  ${dir}: ${count}`); } report.push(""); }
+      if (sessionFiles.length > 0) { await this.appendSessionFileListing(report, sessionFiles); }
+      else { this.appendNoSessionFilesMessage(report); }
       report.push("");
-    }
-
-    // Footer
-    report.push("=".repeat(70));
-    report.push(`Report Generated: ${new Date().toISOString()}`);
-    report.push("=".repeat(70));
-    report.push("");
-    report.push(
-      "This report can be shared with the extension maintainers to help",
-    );
-    report.push(
-      "troubleshoot issues. No sensitive data from your code is included.",
-    );
-    report.push("");
-    report.push("Submit issues at:");
-    report.push(`${this.getRepositoryUrl()}/issues`);
-
-    const fullReport = report.join("\n");
-    this.log("Diagnostic report generated successfully");
-    return fullReport;
+    } catch (error) { report.push(`Error calculating token usage statistics: ${error}`); report.push(""); }
   }
+
+  private buildDiagReportFooter(report: string[]): void {
+    report.push("=".repeat(70)); report.push(`Report Generated: ${new Date().toISOString()}`); report.push("=".repeat(70)); report.push("");
+    report.push("This report can be shared with the extension maintainers to help");
+    report.push("troubleshoot issues. No sensitive data from your code is included."); report.push("");
+    report.push("Submit issues at:"); report.push(`${this.getRepositoryUrl()}/issues`);
+  }
+
 
   public async showDiagnosticReport(): Promise<void> {
     this.log("🔍 Opening Diagnostic Report");
@@ -8333,73 +8204,47 @@ body {
    */
   private async getBackendStorageInfo(): Promise<any> {
     const config = vscode.workspace.getConfiguration("aiEngineeringFluency");
-    // Use the authoritative settings object so isConfigured uses the same logic as the sync engine
     const settings = this.backend?.getSettings();
-
-    // Azure Storage settings
-    const azureEnabled = settings?.enabled ?? false;
-    const storageAccount = settings?.storageAccount ?? "";
-    const subscriptionId = settings?.subscriptionId ?? "";
-    const resourceGroup = settings?.resourceGroup ?? "";
-    const aggTable = settings?.aggTable ?? "usageAggDaily";
-    const eventsTable = settings?.eventsTable ?? "usageEvents";
-    const authMode = settings?.authMode ?? "entraId";
-    const sharingProfile = config.get<string>("backend.sharingProfile", "off");
-    // Team Server settings
-    const sharingServerEnabled = settings?.sharingServerEnabled ?? false;
-    const sharingServerEndpointUrl = settings?.sharingServerEndpointUrl ?? "";
-
-    // Use the same isConfigured logic as the sync engine
-    const azureIsConfigured = settings ? this.backend!.isConfigured(settings) : false;
-    const teamServerIsConfigured = sharingServerEnabled && !!sharingServerEndpointUrl;
-
-    // Get last sync time from global state
+    const azureSettings = this.extractAzureStorageSettings(settings, config);
+    const teamSettings = this.extractTeamServerSettings(settings, azureSettings.sharingProfile);
     const lastSyncAt = this.context.globalState.get<number>("backend.lastSyncAt");
     const lastSyncTime = lastSyncAt ? new Date(lastSyncAt).toISOString() : null;
-
-    // Get unique device count from session files (estimate based on unique workspace roots)
     const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-    const workspaceIds = new Set<string>();
-
-    for (const file of sessionFiles) {
-      const parts = file.split(/[\\\/]/);
-      const workspaceStorageIdx = parts.findIndex(
-        (p) => p.toLowerCase() === "workspacestorage",
-      );
-      if (workspaceStorageIdx >= 0 && workspaceStorageIdx < parts.length - 1) {
-        const workspaceId = parts[workspaceStorageIdx + 1];
-        if (workspaceId && workspaceId.length > 10) {
-          workspaceIds.add(workspaceId);
-        }
-      }
-    }
-
+    const workspaceIds = this.extractWorkspaceIdsFromFiles(sessionFiles);
     return {
-      azure: {
-        enabled: azureEnabled,
-        isConfigured: azureIsConfigured,
-        storageAccount,
-        subscriptionId: subscriptionId ? subscriptionId.substring(0, 8) + "..." : "",
-        resourceGroup,
-        aggTable,
-        eventsTable,
-        authMode,
-        sharingProfile,
-        lastSyncTime: azureEnabled ? lastSyncTime : null,
-        deviceCount: workspaceIds.size,
-        sessionCount: sessionFiles.length,
-        recordCount: null,
-      },
-      teamServer: {
-        enabled: sharingServerEnabled,
-        isConfigured: teamServerIsConfigured,
-        endpointUrl: sharingServerEndpointUrl,
-        sharingProfile,
-        lastSyncTime: sharingServerEnabled ? lastSyncTime : null,
-        sessionCount: sessionFiles.length,
-      },
+      azure: { ...azureSettings, isConfigured: settings ? this.backend!.isConfigured(settings) : false, lastSyncTime: azureSettings.enabled ? lastSyncTime : null, deviceCount: workspaceIds.size, sessionCount: sessionFiles.length, recordCount: null },
+      teamServer: { ...teamSettings, isConfigured: teamSettings.enabled && !!teamSettings.endpointUrl, lastSyncTime: teamSettings.enabled ? lastSyncTime : null, sessionCount: sessionFiles.length },
     };
   }
+
+  private extractAzureStorageSettings(settings: any, config: any): any {
+    const subscriptionId = settings?.subscriptionId ?? "";
+    return {
+      enabled: settings?.enabled ?? false, storageAccount: settings?.storageAccount ?? "",
+      subscriptionId: subscriptionId ? subscriptionId.substring(0, 8) + "..." : "",
+      resourceGroup: settings?.resourceGroup ?? "", aggTable: settings?.aggTable ?? "usageAggDaily",
+      eventsTable: settings?.eventsTable ?? "usageEvents", authMode: settings?.authMode ?? "entraId",
+      sharingProfile: config.get("backend.sharingProfile", "off") as string,
+    };
+  }
+
+  private extractTeamServerSettings(settings: any, sharingProfile: string): any {
+    return { enabled: settings?.sharingServerEnabled ?? false, endpointUrl: settings?.sharingServerEndpointUrl ?? "", sharingProfile };
+  }
+
+  private extractWorkspaceIdsFromFiles(sessionFiles: string[]): Set<string> {
+    const workspaceIds = new Set<string>();
+    for (const file of sessionFiles) {
+      const parts = file.split(/[\\\/]/);
+      const idx = parts.findIndex((p) => p.toLowerCase() === "workspacestorage");
+      if (idx >= 0 && idx < parts.length - 1) {
+        const workspaceId = parts[idx + 1];
+        if (workspaceId && workspaceId.length > 10) { workspaceIds.add(workspaceId); }
+      }
+    }
+    return workspaceIds;
+  }
+
 
   private getDiagnosticReportHtml(
     webview: vscode.Webview,
