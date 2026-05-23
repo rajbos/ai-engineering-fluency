@@ -1797,133 +1797,101 @@ function wireCopyButtons(): void {
 	});
 }
 
+function handleUpdateStats(message: any): void {
+	clearLoadingTimeout();
+	if (message.data?.locale) {
+		setFormatLocale(message.data.locale);
+	}
+	if (typeof message.data?.use24HourTime === 'boolean') {
+		use24HourTime = message.data.use24HourTime;
+	}
+	const sanitized = sanitizeStats(message.data);
+	if (sanitized) {
+		renderLayout(sanitized);
+		setupSessionsTableSort();
+		renderRepositoryHygienePanels();
+		if (repoPrStatsData) { updateReposPrPanel(repoPrStatsData); }
+		if (agentSessionsData) { updateAgentSessionsPanel(agentSessionsData); }
+	} else {
+		showLoadError('Received invalid data from the extension. Try refreshing.');
+	}
+}
+
+function handleToolSuppressed(toolName: string): void {
+	if (!toolName) { return; }
+	const section = document.getElementById('unknown-mcp-tools-section');
+	if (!section) { return; }
+	section.querySelectorAll<HTMLButtonElement>('button[data-suppress-tool]').forEach(btn => {
+		if (btn.getAttribute('data-suppress-tool') === toolName) {
+			btn.closest('span')?.remove();
+		}
+	});
+	if (section.querySelectorAll('button[data-suppress-tool]').length === 0) {
+		section.remove();
+	}
+}
+
+function handleHighlightUnknownTools(): void {
+	activeTab = 'tools';
+	document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
+		btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
+	});
+	document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
+		panel.style.display = 'none';
+	});
+	const toolsPanel = document.getElementById('tab-panel-tools');
+	if (toolsPanel) { toolsPanel.style.display = 'block'; }
+	const el = document.getElementById('unknown-mcp-tools-section');
+	if (el) {
+		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		el.style.transition = 'box-shadow 0.3s ease';
+		el.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
+		setTimeout(() => { el.style.boxShadow = ''; }, 2000);
+	}
+}
+
+function handleRepoPrStatsLoaded(data: any): void {
+	repoPrStatsData = sanitizeRepoPrStatsData(data);
+	if (!repoPrStatsData.authenticated) { repoPrStatsLoaded = false; }
+	updateReposPrPanel(repoPrStatsData);
+}
+
+function handleAgentSessionsLoaded(data: any): void {
+	if (!data || typeof data !== 'object') { return; }
+	agentSessionsData = sanitizeAgentSessionsData(data);
+	if (!agentSessionsData.authenticated) { agentSessionsLoaded = false; }
+	updateAgentSessionsPanel(agentSessionsData);
+}
+
 // Listen for messages from the extension
 registerMessageHandler<any>((message) => {
 	switch (message.command) {
 		case 'repoAnalysisResults':
-			displayRepoAnalysisResults(message.data, message.workspacePath);
-			break;
+			displayRepoAnalysisResults(message.data, message.workspacePath); break;
 		case 'repoAnalysisError':
-			displayRepoAnalysisError(message.error, message.workspacePath);
-			break;
+			displayRepoAnalysisError(message.error, message.workspacePath); break;
 		case 'repoAnalysisBatchComplete':
-			handleBatchAnalysisComplete();
-			break;
+			handleBatchAnalysisComplete(); break;
 		case 'updateStats':
-			// Re-render the layout with fresh stats, then restore repo analysis results
-			clearLoadingTimeout();
-			if (message.data?.locale) {
-				setFormatLocale(message.data.locale);
-			}
-			if (typeof message.data?.use24HourTime === 'boolean') {
-				use24HourTime = message.data.use24HourTime;
-			}
-			{
-				const sanitized = sanitizeStats(message.data);
-				if (sanitized) {
-					renderLayout(sanitized);
-					setupSessionsTableSort();
-					renderRepositoryHygienePanels();
-					// Restore repos PR tab if we already fetched data (renderLayout resets the DOM)
-					if (repoPrStatsData) {
-						updateReposPrPanel(repoPrStatsData);
-					}
-					// Restore cloud agent tab if we already fetched data
-					if (agentSessionsData) {
-						updateAgentSessionsPanel(agentSessionsData);
-					}
-				} else {
-					showLoadError('Received invalid data from the extension. Try refreshing.');
-				}
-			}
-			break;
+			handleUpdateStats(message); break;
 		case 'updateStatsError':
 			clearLoadingTimeout();
 			showLoadError('Failed to calculate usage analysis. Check the Output panel for details.');
 			break;
-		case 'toolSuppressed': {
-			// Immediately remove the suppressed tool chip from the DOM without a full re-render.
-			const suppressedName = message.toolName as string;
-			if (suppressedName) {
-				const section = document.getElementById('unknown-mcp-tools-section');
-				if (section) {
-					section.querySelectorAll<HTMLButtonElement>('button[data-suppress-tool]').forEach(btn => {
-						if (btn.getAttribute('data-suppress-tool') === suppressedName) {
-							btn.closest('span')?.remove();
-						}
-					});
-					if (section.querySelectorAll('button[data-suppress-tool]').length === 0) {
-						section.remove();
-					}
-				}
-			}
+		case 'toolSuppressed':
+			handleToolSuppressed(message.toolName as string); break;
+		case 'highlightUnknownTools':
+			handleHighlightUnknownTools(); break;
+		case 'repoPrStatsLoaded':
+			handleRepoPrStatsLoaded(message.data); break;
+		case 'repoPrStatsProgress':
+			updateProgressPanel('#repos-pr-content', 'repos-pr-progress', 'Fetching PRs…', message.done as number, message.total as number);
 			break;
-		}
-		case 'highlightUnknownTools': {
-			// Switch to tools tab
-			activeTab = 'tools';
-			document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
-				btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
-			});
-			document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
-				panel.style.display = 'none';
-			});
-			const toolsPanel = document.getElementById('tab-panel-tools');
-			if (toolsPanel) { toolsPanel.style.display = 'block'; }
-			// Then scroll to the element
-			const el = document.getElementById('unknown-mcp-tools-section');
-			if (el) {
-				el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-				el.style.transition = 'box-shadow 0.3s ease';
-				el.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
-				setTimeout(() => {
-					el.style.boxShadow = '';
-				}, 2000);
-			}
+		case 'agentSessionsLoaded':
+			handleAgentSessionsLoaded(message.data); break;
+		case 'agentSessionsProgress':
+			updateProgressPanel('#agent-sessions-content', 'agent-sessions-progress', 'Fetching agent sessions…', message.done as number, message.total as number);
 			break;
-		}
-		case 'repoPrStatsLoaded': {
-			repoPrStatsData = sanitizeRepoPrStatsData(message.data);
-			// Reset the loaded flag when not authenticated so re-authenticating and clicking the tab
-			// again triggers a fresh fetch instead of showing the stale "not authenticated" placeholder.
-			if (!repoPrStatsData.authenticated) {
-				repoPrStatsLoaded = false;
-			}
-			updateReposPrPanel(repoPrStatsData);
-			break;
-		}
-		case 'repoPrStatsProgress': {
-			updateProgressPanel(
-				'#repos-pr-content',
-				'repos-pr-progress',
-				'Fetching PRs…',
-				message.done as number,
-				message.total as number,
-			);
-			break;
-		}
-		case 'agentSessionsLoaded': {
-			const raw = message.data;
-			if (raw && typeof raw === 'object') {
-				agentSessionsData = sanitizeAgentSessionsData(raw);
-				if (!agentSessionsData.authenticated) {
-					// Reset loaded flag so re-authenticating and revisiting the tab triggers a fresh fetch
-					agentSessionsLoaded = false;
-				}
-				updateAgentSessionsPanel(agentSessionsData);
-			}
-			break;
-		}
-		case 'agentSessionsProgress': {
-			updateProgressPanel(
-				'#agent-sessions-content',
-				'agent-sessions-progress',
-				'Fetching agent sessions…',
-				message.done as number,
-				message.total as number,
-			);
-			break;
-		}
 	}
 });
 
