@@ -218,133 +218,169 @@ export class TokenAccumulator {
     }
 }
 
+function resolveRequestModel(
+  req: ProcessableRequest,
+  getModelFromRequest: ((req: ProcessableRequest) => string) | undefined,
+  defaultModel: string
+): string {
+  const rawRequestModel = req.modelId ?? req.selectedModel?.identifier ?? req.model;
+  const requestModel = normalizeModelId(rawRequestModel, defaultModel);
+  if (typeof rawRequestModel === 'string' && rawRequestModel.trim()) { return requestModel; }
+  const callbackModelRaw = getModelFromRequest ? getModelFromRequest(req) : undefined;
+  return normalizeModelId(callbackModelRaw, '') || requestModel;
+}
+
+function accumulateRequestInput(
+  req: ProcessableRequest,
+  model: string,
+  addInput: (m: string, text: string) => void
+): void {
+  if (req.message?.parts) {
+    for (const part of req.message.parts) {
+      if (typeof part?.text === 'string' && part.text) { addInput(model, part.text); }
+    }
+  } else if (typeof req.message?.text === 'string') {
+    addInput(model, req.message.text);
+  }
+}
+
+function handleSubAgentItem(
+  subAgent: { modelName?: string; prompt?: string; result?: string },
+  model: string,
+  addInput: (m: string, text: string) => void,
+  addOutput: (m: string, text: string) => void
+): void {
+  const saModel = subAgent.modelName || model;
+  if (subAgent.prompt) { addInput(saModel, subAgent.prompt); }
+  if (subAgent.result) { addOutput(saModel, subAgent.result); }
+}
+
+function processResponseItem(
+  responseItem: ResponseItem,
+  model: string,
+  addInput: (m: string, text: string) => void,
+  addOutput: (m: string, text: string) => void
+): void {
+  const subAgent = extractSubAgentData(responseItem);
+  if (subAgent) {
+    handleSubAgentItem(subAgent, model, addInput, addOutput);
+    return;
+  }
+  // .value (including thinking) already handled by extractResponseAndThinkingText — skip
+  if (responseItem && (responseItem.kind === 'thinking' || typeof responseItem.value === 'string')) { return; }
+  // message.parts not covered by extractResponseAndThinkingText
+  const parts = responseItem?.message?.parts;
+  if (parts) {
+    for (const p of parts) {
+      if (typeof p?.text === 'string' && p.text) { addOutput(model, p.text); }
+    }
+  }
+}
+
+function accumulateResponseItems(
+  responseItems: ResponseItem[],
+  model: string,
+  addInput: (m: string, text: string) => void,
+  addOutput: (m: string, text: string) => void
+): void {
+  for (const item of responseItems) { processResponseItem(item, model, addInput, addOutput); }
+}
+
+function extractActualTokenCount(result: RequestResult | undefined): number {
+  if (!result) { return 0; }
+  if (result.usage) {
+    const prompt = typeof result.usage.promptTokens === 'number' ? result.usage.promptTokens : 0;
+    const completion = typeof result.usage.completionTokens === 'number' ? result.usage.completionTokens : 0;
+    return prompt + completion;
+  }
+  if (typeof result.promptTokens === 'number' && typeof result.outputTokens === 'number') {
+    return result.promptTokens + result.outputTokens;
+  }
+  if (result.metadata && typeof result.metadata.promptTokens === 'number' && typeof result.metadata.outputTokens === 'number') {
+    return result.metadata.promptTokens + result.metadata.outputTokens;
+  }
+  return 0;
+}
+
+function extractJsonRequests(sessionJson: Record<string, unknown>): unknown[] {
+  if (Array.isArray(sessionJson['requests'])) { return sessionJson['requests'] as unknown[]; }
+  if (Array.isArray(sessionJson['history'])) { return sessionJson['history'] as unknown[]; }
+  return [];
+}
+
+function isNonEmptyLine(l: string): boolean { return l.trim().length > 0; }
+
+interface ParseState {
+  thinkingTokens: number;
+  actualTokens: number;
+}
+
+function processRequest(
+  request: unknown,
+  state: ParseState,
+  addInput: (m: string, text: string) => void,
+  addOutput: (m: string, text: string) => void,
+  getModelFromRequest: ((req: ProcessableRequest) => string) | undefined,
+  defaultModel: string,
+  estimateTokensFromText: (text: string, model?: string) => number
+): void {
+  if (request === null || request === undefined || typeof request !== 'object') { return; }
+  const req = request as ProcessableRequest;
+  const model = resolveRequestModel(req, getModelFromRequest, defaultModel);
+  accumulateRequestInput(req, model, addInput);
+  const { responseText, thinkingText } = extractResponseAndThinkingText(req.response);
+  if (responseText) { addOutput(model, responseText); }
+  if (thinkingText) { state.thinkingTokens += estimateTokensFromText(thinkingText, model); }
+  const responseItems: ResponseItem[] = Array.isArray(req.response) ? req.response : (Array.isArray(req.responses) ? req.responses : []);
+  accumulateResponseItems(responseItems, model, addInput, addOutput);
+  state.actualTokens += extractActualTokenCount(req.result);
+}
+
+function isUserInteractionRequest(r: unknown): boolean {
+  if (!isObject(r)) { return false; }
+  const msg = r['message'];
+  return isObject(msg) && typeof msg['text'] === 'string' && !!(msg['text'] as string).trim();
+}
+
+function reconstructDeltaRequests(lines: string[]): unknown[] | null {
+  if (lines.length === 0) { return null; }
+  const first = safeJsonParse<{ kind?: number }>(lines[0], 'sessionParser');
+  if (!first || typeof first.kind !== 'number') { return null; }
+  let sessionState: unknown = Object.create(null);
+  for (const line of lines) {
+    const delta = safeJsonParse<unknown>(line, 'sessionParser');
+    if (delta !== undefined) { sessionState = applyDelta(sessionState, delta); }
+  }
+  const sessionStateObj = isObject(sessionState) ? sessionState : null;
+  return sessionStateObj && Array.isArray(sessionStateObj['requests']) ? (sessionStateObj['requests'] as unknown[]) : [];
+}
+
 export function parseSessionFileContent(
 sessionFilePath: string,
 fileContent: string,
 estimateTokensFromText: (text: string, model?: string) => number,
 getModelFromRequest?: (req: ProcessableRequest) => string
 ) {
-// Aggregates and helpers are declared up front; the heavy lifting is delegated
-let interactions = 0;
-let totalThinkingTokens = 0;
-let totalActualTokens = 0;
-
 let sessionJson: unknown;
 const defaultModel = 'unknown';
-
 const accumulator = new TokenAccumulator(defaultModel, estimateTokensFromText);
 const { modelUsage } = accumulator;
 const addInput = accumulator.addInput.bind(accumulator);
 const addOutput = accumulator.addOutput.bind(accumulator);
+const state: ParseState = { thinkingTokens: 0, actualTokens: 0 };
 
-// Process a single request (used by both JSON and reconstructed delta flows)
-const processRequest = (request: unknown) => {
-if (request == null || typeof request !== 'object') { return; }
-const req = request as ProcessableRequest;
-
-const rawRequestModel = req.modelId ?? req.selectedModel?.identifier ?? req.model;
-const requestModel = normalizeModelId(rawRequestModel, defaultModel);
-
-let model: string;
-if (typeof rawRequestModel === 'string' && rawRequestModel.trim()) {
-model = requestModel;
-} else {
-const callbackModelRaw = getModelFromRequest ? getModelFromRequest(req) : undefined;
-const callbackModel = normalizeModelId(callbackModelRaw, '');
-model = callbackModel || requestModel;
-}
-
-// Input parts
-if (req.message?.parts) {
-for (const part of req.message.parts) {
-if (typeof part?.text === 'string' && part.text) { addInput(model, part.text); }
-}
-} else if (typeof req.message?.text === 'string') {
-addInput(model, req.message.text);
-}
-
-// Extract output and thinking text via extractResponseAndThinkingText, which handles
-// both plain .value and delta-format content.value shapes.
-const { responseText, thinkingText } = extractResponseAndThinkingText(req.response);
-if (responseText) { addOutput(model, responseText); }
-if (thinkingText) { totalThinkingTokens += estimateTokensFromText(thinkingText, model); }
-
-// Loop only for sub-agents and message.parts — skip .value and thinking items
-// because extractResponseAndThinkingText already counted them above.
-const responseItems: ResponseItem[] = Array.isArray(req.response) ? req.response : (Array.isArray(req.responses) ? req.responses : []);
-for (const responseItem of responseItems) {
-const subAgent = extractSubAgentData(responseItem);
-if (subAgent) {
-const saModel = subAgent.modelName || model;
-if (subAgent.prompt) { addInput(saModel, subAgent.prompt); }
-if (subAgent.result) { addOutput(saModel, subAgent.result); }
-continue;
-}
-// .value (including thinking) already handled — skip to avoid double-counting
-if (responseItem?.kind === 'thinking') { continue; }
-if (typeof responseItem?.value === 'string') { continue; }
-
-// message.parts is not covered by extractResponseAndThinkingText
-if (responseItem?.message?.parts) {
-for (const p of responseItem.message.parts) {
-if (typeof p?.text === 'string' && p.text) { addOutput(model, p.text); }
-}
-}
-}
-
-// Actual token counts if present
-if (req.result?.usage) {
-const u = req.result.usage;
-const prompt = typeof u.promptTokens === 'number' ? u.promptTokens : 0;
-const completion = typeof u.completionTokens === 'number' ? u.completionTokens : 0;
-totalActualTokens += prompt + completion;
-} else if (typeof req.result?.promptTokens === 'number' && typeof req.result?.outputTokens === 'number') {
-totalActualTokens += req.result.promptTokens + req.result.outputTokens;
-} else if (req.result?.metadata && typeof req.result.metadata.promptTokens === 'number' && typeof req.result.metadata.outputTokens === 'number') {
-totalActualTokens += req.result.metadata.promptTokens + req.result.metadata.outputTokens;
-}
-};
-
-// Handle delta-based JSONL format (VS Code Insiders)
 if (sessionFilePath.endsWith('.jsonl')) {
-const lines = fileContent.split(/\r?\n/).filter(l => l.trim());
-let isDeltaBased = false;
-if (lines.length > 0) {
-const first = safeJsonParse<{ kind?: number }>(lines[0], 'sessionParser');
-if (first && typeof first.kind === 'number') { isDeltaBased = true; }
+const lines = fileContent.split(/\r?\n/).filter(isNonEmptyLine);
+const deltaRequests = reconstructDeltaRequests(lines);
+if (deltaRequests !== null) {
+const interactions = deltaRequests.filter(isUserInteractionRequest).length;
+for (const r of deltaRequests) { processRequest(r, state, addInput, addOutput, getModelFromRequest, defaultModel, estimateTokensFromText); }
+return { tokens: accumulator.totalInputTokens + accumulator.totalOutputTokens + state.thinkingTokens, interactions, modelUsage, thinkingTokens: state.thinkingTokens, actualTokens: 0 };
 }
-
-if (isDeltaBased) {
-let sessionState: unknown = Object.create(null);
-for (const line of lines) {
-const delta = safeJsonParse<unknown>(line, 'sessionParser');
-if (delta !== undefined) { sessionState = applyDelta(sessionState, delta); }
-}
-
-const sessionStateObj = isObject(sessionState) ? sessionState : null;
-const requests: unknown[] = sessionStateObj && Array.isArray(sessionStateObj['requests']) ? (sessionStateObj['requests'] as unknown[]) : [];
-// Count only requests that look like user interactions
-interactions = requests.filter((r) => {
-if (!isObject(r)) { return false; }
-const msg = r['message'];
-return isObject(msg) && typeof msg['text'] === 'string' && (msg['text'] as string).trim();
-}).length;
-for (const r of requests) { processRequest(r); }
-return {
-tokens: accumulator.totalInputTokens + accumulator.totalOutputTokens + totalThinkingTokens,
-interactions,
-modelUsage,
-thinkingTokens: totalThinkingTokens,
-actualTokens: 0,
-};
-}
-
-// Fallback: sometimes .jsonl contains a single JSON object
 sessionJson = safeJsonParse<unknown>(fileContent.trim(), 'sessionParser');
 if (sessionJson === undefined) { return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
 }
 
-// Non-jsonl (JSON file) - try to parse full JSON
 if (!sessionJson) {
 sessionJson = safeJsonParse<unknown>(fileContent, 'sessionParser');
 if (sessionJson === undefined) { return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 }; }
@@ -354,16 +390,16 @@ if (!isObject(sessionJson) || Array.isArray(sessionJson)) {
 return { tokens: 0, interactions: 0, modelUsage: {}, thinkingTokens: 0, actualTokens: 0 };
 }
 
-const requests: unknown[] = Array.isArray(sessionJson['requests']) ? (sessionJson['requests'] as unknown[]) : (Array.isArray(sessionJson['history']) ? (sessionJson['history'] as unknown[]) : []);
-interactions = requests.length;
-for (const request of requests) { processRequest(request); }
+const requests = extractJsonRequests(sessionJson as Record<string, unknown>);
+const interactions = requests.length;
+for (const request of requests) { processRequest(request, state, addInput, addOutput, getModelFromRequest, defaultModel, estimateTokensFromText); }
 
 return {
-tokens: accumulator.totalInputTokens + accumulator.totalOutputTokens + totalThinkingTokens,
+tokens: accumulator.totalInputTokens + accumulator.totalOutputTokens + state.thinkingTokens,
 interactions,
 modelUsage,
-thinkingTokens: totalThinkingTokens,
-actualTokens: totalActualTokens,
+thinkingTokens: state.thinkingTokens,
+actualTokens: state.actualTokens,
 };
 }
 
