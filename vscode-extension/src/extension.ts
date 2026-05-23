@@ -216,7 +216,7 @@ type StatusBarDisplaySetting = 'none' | 'today' | 'last30days' | 'currentMonth' 
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 49; // Debug-log modelUsage breakdown for accurate per-model cost calculation
+	private static readonly CACHE_VERSION = 50; // Add Antigravity ecosystem adapter
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 
