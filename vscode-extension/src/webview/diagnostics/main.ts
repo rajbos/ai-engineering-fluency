@@ -831,199 +831,52 @@ ${authenticated ? `
   `;
 }
 
+function getBackendStatus(isConfigured: boolean, enabled: boolean): { color: string; icon: string; text: string } {
+  return isConfigured
+    ? { color: "#2d6a4f", icon: "✅", text: "Configured & Enabled" }
+    : enabled
+      ? { color: "#d97706", icon: "⚠️", text: "Enabled but Not Configured" }
+      : { color: "#666", icon: "⚪", text: "Disabled" };
+}
+
+function renderAzureDetailsSection(azureInfo: AzureStorageInfo): string {
+  if (!azureInfo.isConfigured) {
+    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Azure Storage</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">To enable cloud synchronization, configure an Azure Storage account via the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Azure subscription with Storage Account access</li><li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li><li>VS Code signed in with your Azure account (for Entra ID auth)</li></ul></div>`;
+  }
+  return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Storage Account</td><td>${escapeHtml(azureInfo.storageAccount)}</td></tr><tr><td style="font-weight: 600;">Subscription ID</td><td>${escapeHtml(azureInfo.subscriptionId)}</td></tr><tr><td style="font-weight: 600;">Resource Group</td><td>${escapeHtml(azureInfo.resourceGroup)}</td></tr><tr><td style="font-weight: 600;">Aggregation Table</td><td>${escapeHtml(azureInfo.aggTable)}</td></tr><tr><td style="font-weight: 600;">Events Table</td><td>${escapeHtml(azureInfo.eventsTable)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">💻 Unique Devices</div><div class="summary-value">${escapeHtml(String(azureInfo.deviceCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Based on workspace IDs</div></div><div class="summary-card"><div class="summary-label">📁 Total Sessions</div><div class="summary-value">${escapeHtml(String(azureInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">☁️ Cloud Records</div><div class="summary-value">${azureInfo.recordCount !== null ? escapeHtml(String(azureInfo.recordCount)) : "—"}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Azure Storage records</div></div><div class="summary-card"><div class="summary-label">🔄 Sync Status</div><div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? formatDate(azureInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
+}
+
 function renderAzureStoragePanel(azureInfo: AzureStorageInfo): string {
-  const statusColor = azureInfo.isConfigured ? "#2d6a4f" : azureInfo.enabled ? "#d97706" : "#666";
-  const statusIcon = azureInfo.isConfigured ? "✅" : azureInfo.enabled ? "⚠️" : "⚪";
-  const statusText = azureInfo.isConfigured
-    ? "Configured & Enabled"
-    : azureInfo.enabled
-      ? "Enabled but Not Configured"
-      : "Disabled";
+  const { color, icon, text } = getBackendStatus(azureInfo.isConfigured, azureInfo.enabled);
+  return `<div class="info-box"><div class="info-box-title">☁️ Azure Storage Backend</div><div>Sync your token usage data to Azure Storage Tables for team-wide reporting and multi-device access.</div></div>
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div><div class="summary-card"><div class="summary-label">🔐 Auth Mode</div><div class="summary-value" style="font-size: 16px;">${azureInfo.authMode === "entraId" ? "Entra ID" : "Shared Key"}</div></div><div class="summary-card"><div class="summary-label">👥 Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(azureInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 Last Sync</div><div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? getTimeSince(azureInfo.lastSyncTime) : "Never"}</div></div></div>
+    ${renderAzureDetailsSection(azureInfo)}
+    <div class="button-group"><button class="button" id="btn-configure-backend"><span>${azureInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${azureInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
+}
 
-  return `
-    <div class="info-box">
-      <div class="info-box-title">☁️ Azure Storage Backend</div>
-      <div>Sync your token usage data to Azure Storage Tables for team-wide reporting and multi-device access.</div>
-    </div>
+function renderTeamServerGithubAuthCard(githubAuth: GitHubAuthStatus | undefined, githubNotAuthenticated: boolean): string {
+  const authColor = githubNotAuthenticated ? '#d97706' : githubAuth?.authenticated ? '#2d6a4f' : '#666';
+  const authIcon = githubNotAuthenticated ? '⚠️' : githubAuth?.authenticated ? '✅' : '⚪';
+  const authValue = githubNotAuthenticated ? 'Not Authenticated' : githubAuth?.authenticated ? escapeHtml(githubAuth.username || 'Authenticated') : 'Not Authenticated';
+  return `<div class="summary-card" style="border-left: 4px solid ${authColor};"><div class="summary-label">${authIcon} GitHub Auth</div><div class="summary-value" style="font-size: 14px; color: ${authColor};">${authValue}</div></div>`;
+}
 
-    <div class="summary-cards">
-      <div class="summary-card" style="border-left: 4px solid ${statusColor};">
-        <div class="summary-label">${statusIcon} Status</div>
-        <div class="summary-value" style="font-size: 16px; color: ${statusColor};">${statusText}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">🔐 Auth Mode</div>
-        <div class="summary-value" style="font-size: 16px;">${azureInfo.authMode === "entraId" ? "Entra ID" : "Shared Key"}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">👥 Sharing Profile</div>
-        <div class="summary-value" style="font-size: 14px;">${escapeHtml(azureInfo.sharingProfile)}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">🕒 Last Sync</div>
-        <div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? getTimeSince(azureInfo.lastSyncTime) : "Never"}</div>
-      </div>
-    </div>
-
-    ${azureInfo.isConfigured ? `
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4>
-        <table class="session-table">
-          <tbody>
-            <tr><td style="font-weight: 600; width: 200px;">Storage Account</td><td>${escapeHtml(azureInfo.storageAccount)}</td></tr>
-            <tr><td style="font-weight: 600;">Subscription ID</td><td>${escapeHtml(azureInfo.subscriptionId)}</td></tr>
-            <tr><td style="font-weight: 600;">Resource Group</td><td>${escapeHtml(azureInfo.resourceGroup)}</td></tr>
-            <tr><td style="font-weight: 600;">Aggregation Table</td><td>${escapeHtml(azureInfo.aggTable)}</td></tr>
-            <tr><td style="font-weight: 600;">Events Table</td><td>${escapeHtml(azureInfo.eventsTable)}</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4>
-        <div class="summary-cards">
-          <div class="summary-card">
-            <div class="summary-label">💻 Unique Devices</div>
-            <div class="summary-value">${escapeHtml(String(azureInfo.deviceCount))}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Based on workspace IDs</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">📁 Total Sessions</div>
-            <div class="summary-value">${escapeHtml(String(azureInfo.sessionCount))}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">☁️ Cloud Records</div>
-            <div class="summary-value">${azureInfo.recordCount !== null ? escapeHtml(String(azureInfo.recordCount)) : "—"}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Azure Storage records</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">🔄 Sync Status</div>
-            <div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? formatDate(azureInfo.lastSyncTime) : "Never"}</div>
-          </div>
-        </div>
-      </div>
-    ` : `
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Azure Storage</h4>
-        <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
-          To enable cloud synchronization, configure an Azure Storage account via the Backend configuration panel.
-        </p>
-        <ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;">
-          <li>Azure subscription with Storage Account access</li>
-          <li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li>
-          <li>VS Code signed in with your Azure account (for Entra ID auth)</li>
-        </ul>
-      </div>
-    `}
-
-    <div class="button-group">
-      <button class="button" id="btn-configure-backend">
-        <span>${azureInfo.isConfigured ? "⚙️" : "🔧"}</span>
-        <span>${azureInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span>
-      </button>
-    </div>
-  `;
+function renderTeamServerDetailsSection(teamInfo: TeamServerInfo): string {
+  if (!teamInfo.isConfigured) {
+    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`;
+  }
+  return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Server URL</td><td>${escapeHtml(teamInfo.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">📁 Total Sessions</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">🔄 Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
 }
 
 function renderTeamServerPanel(teamInfo: TeamServerInfo, githubAuth?: GitHubAuthStatus): string {
-  const statusColor = teamInfo.isConfigured ? "#2d6a4f" : teamInfo.enabled ? "#d97706" : "#666";
-  const statusIcon = teamInfo.isConfigured ? "✅" : teamInfo.enabled ? "⚠️" : "⚪";
-  const statusText = teamInfo.isConfigured
-    ? "Configured & Enabled"
-    : teamInfo.enabled
-      ? "Enabled but Not Configured"
-      : "Disabled";
-
+  const { color, icon, text } = getBackendStatus(teamInfo.isConfigured, teamInfo.enabled);
   const githubNotAuthenticated = teamInfo.isConfigured && !githubAuth?.authenticated;
-
-  return `
-    <div class="info-box">
-      <div class="info-box-title">🖥️ Team Server Backend</div>
-      <div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div>
-    </div>
-
-    ${githubNotAuthenticated ? `
-    <button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub">
-      <span style="font-size: 18px; flex-shrink: 0;">⚠️</span>
-      <div style="flex: 1;">
-        <div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div>
-        <div style="color: #d4a017; font-size: 12px;">
-          Team server sync will not run until you sign in to GitHub.
-          <strong style="color: #fbbf24;">Click here to sign in.</strong>
-        </div>
-      </div>
-      <span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">→</span>
-    </button>
-    ` : ''}
-
-    <div class="summary-cards">
-      <div class="summary-card" style="border-left: 4px solid ${statusColor};">
-        <div class="summary-label">${statusIcon} Status</div>
-        <div class="summary-value" style="font-size: 16px; color: ${statusColor};">${statusText}</div>
-      </div>
-      <div class="summary-card" style="border-left: 4px solid ${githubNotAuthenticated ? '#d97706' : githubAuth?.authenticated ? '#2d6a4f' : '#666'};">
-        <div class="summary-label">${githubNotAuthenticated ? '⚠️' : githubAuth?.authenticated ? '✅' : '⚪'} GitHub Auth</div>
-        <div class="summary-value" style="font-size: 14px; color: ${githubNotAuthenticated ? '#d97706' : githubAuth?.authenticated ? '#2d6a4f' : '#666'};">${githubNotAuthenticated ? 'Not Authenticated' : githubAuth?.authenticated ? escapeHtml(githubAuth.username || 'Authenticated') : 'Not Authenticated'}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">👥 Sharing Profile</div>
-        <div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">🕒 Last Sync</div>
-        <div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div>
-      </div>
-    </div>
-
-    ${teamInfo.isConfigured ? `
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4>
-        <table class="session-table">
-          <tbody>
-            <tr>
-              <td style="font-weight: 600; width: 200px;">Server URL</td>
-              <td>${escapeHtml(teamInfo.endpointUrl)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4>
-        <div class="summary-cards">
-          <div class="summary-card">
-            <div class="summary-label">📁 Total Sessions</div>
-            <div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">🔄 Last Sync</div>
-            <div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : "Never"}</div>
-          </div>
-        </div>
-      </div>
-    ` : `
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4>
-        <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
-          Deploy the sharing server and configure its URL in the Backend configuration panel.
-        </p>
-        <ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;">
-          <li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li>
-          <li>Enter the server's base URL in the Backend configuration panel</li>
-          <li>Data syncs automatically every 5 minutes once configured</li>
-        </ul>
-      </div>
-    `}
-
-    <div class="button-group">
-      <button class="button" id="btn-configure-backend-team">
-        <span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span>
-        <span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span>
-      </button>
-    </div>
-  `;
+  const authWarning = githubNotAuthenticated ? `<button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub"><span style="font-size: 18px; flex-shrink: 0;">⚠️</span><div style="flex: 1;"><div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div><div style="color: #d4a017; font-size: 12px;">Team server sync will not run until you sign in to GitHub. <strong style="color: #fbbf24;">Click here to sign in.</strong></div></div><span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">→</span></button>` : '';
+  return `<div class="info-box"><div class="info-box-title">🖥️ Team Server Backend</div><div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div></div>
+    ${authWarning}
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">👥 Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div></div></div>
+    ${renderTeamServerDetailsSection(teamInfo)}
+    <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
 }
 
 function renderBackendStoragePanel(
