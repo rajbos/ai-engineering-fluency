@@ -216,7 +216,7 @@ type StatusBarDisplaySetting = 'none' | 'today' | 'last30days' | 'currentMonth' 
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 50; // Add Antigravity ecosystem adapter
+	private static readonly CACHE_VERSION = 53; // Add Antigravity ecosystem adapter + LOC support
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 
@@ -299,6 +299,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastChartPeriod: 'day' | 'week' | 'month' = 'day';
 	/** Last view selected by the user in the chart view; restored on next open. */
 	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' = 'total';
+	private lastChartMetric: string = 'tokens';
+	private lastChartSplit: string = 'total';
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
 	private lastDashboardData: any | undefined;
 	private tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsData.estimators;
@@ -316,6 +318,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
+
+	// Flag to track if details panel is currently showing the loading screen
+	private _detailsPanelIsLoading = false;
 
 	// Cache mapping workspaceStorageId -> resolved workspace folder path (or undefined if not resolvable)
 	private _workspaceIdToFolderCache: Map<string, string | undefined> = new Map();
@@ -1235,6 +1240,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.statusBarItem.text = this._devBranch ? `${text} [${this._devBranch}]` : text;
 	}
 
+	private sendLoadingPanelMessage(msg: object): void {
+		if (this.detailsPanel && this._detailsPanelIsLoading) {
+			void this.detailsPanel.webview.postMessage(msg);
+		}
+	}
+
 	/**
 	 * Authenticate with GitHub using VS Code's authentication API.
 	 */
@@ -1636,15 +1647,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());
 			const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 
+			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
+
+			let parsingStepNotified = false;
+			let lastProgressSentMs = 0;
 			const progressCallback = silent ? undefined : (completed: number, total: number) => {
 				const percentage = Math.round((completed / total) * 100);
 				this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
+				if (!parsingStepNotified) {
+					parsingStepNotified = true;
+					this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'parsing', total });
+				}
+				// Throttle panel updates to at most once per 500 ms to avoid flooding the webview
+				const now = Date.now();
+				if (now - lastProgressSentMs >= 500 || completed === total) {
+					lastProgressSentMs = now;
+					this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
+				}
 			};
 
 			// Single preload pass: discover all session files, stat, and parse/cache each one.
 			// Both calculateDetailedStats and calculateUsageAnalysisStats reuse this result,
 			// eliminating duplicate filesystem scans and stat() calls.
 			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback);
+
+			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
 
 			const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 			this.lastDailyStats = dailyStats;
@@ -2238,7 +2265,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 						// Per-UTC-day rollup path
 						for (const [dayKey, dayRollup] of Object.entries(sessionData.dailyRollups)) {
 							if (dayKey < cutoffUtcStartKey) { continue; }
-							const dayTokens = dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens;
+							const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
 
 							if (!dailyStatsMap.has(dayKey)) {
 								dailyStatsMap.set(dayKey, { date: dayKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
@@ -2259,7 +2286,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 						// Fallback: session-level attribution
 						const estimatedTokens = sessionData.tokens;
 						const actualTokens = sessionData.actualTokens || 0;
-						const tokens = actualTokens > 0 ? actualTokens : estimatedTokens;
+						const tokens = (actualTokens > 0 ? actualTokens : estimatedTokens);
 						const interactions = sessionData.interactions;
 						const modelUsage = sessionData.modelUsage;
 
@@ -3365,6 +3392,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 				debugLogOutputTokens: debugLogTokens.outputTokens,
 			} : {}),
 			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
+			...(usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0 ? {
+				linesAdded: usageAnalysis.editScope.linesAdded,
+				linesRemoved: usageAnalysis.editScope.linesRemoved ?? 0,
+				...(usageAnalysis.editScope.languageUsage ? { languageUsage: usageAnalysis.editScope.languageUsage } : {}),
+			} : {}),
 		};
 
 		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
@@ -3546,6 +3578,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(existingCache?.modelTurns !== undefined ? { modelTurns: existingCache.modelTurns } : {}),
 			...(existingCache?.debugLogInputTokens !== undefined ? { debugLogInputTokens: existingCache.debugLogInputTokens } : {}),
 			...(existingCache?.debugLogOutputTokens !== undefined ? { debugLogOutputTokens: existingCache.debugLogOutputTokens } : {}),
+			// Preserve LOC fields from existing cache
+			...(existingCache?.linesAdded !== undefined ? { linesAdded: existingCache.linesAdded } : {}),
+			...(existingCache?.linesRemoved !== undefined ? { linesRemoved: existingCache.linesRemoved } : {}),
+			...(existingCache?.languageUsage !== undefined ? { languageUsage: existingCache.languageUsage } : {}),
 			usageAnalysis: existingCache?.usageAnalysis || {
 				toolCalls: { total: 0, byTool: {} },
 				modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
@@ -4642,16 +4678,6 @@ usageAnalysis: undefined
 			return;
 		}
 
-		// Use cached stats if available, otherwise calculate
-		let stats = this.lastDetailedStats;
-		if (!stats) {
-			this.log('No cached stats available, calculating...');
-			stats = await this.updateTokenStats();
-			if (!stats) {
-				return;
-			}
-		}
-
 		// Log environment context to help diagnose blank-panel issues
 		this.log(`📊 Creating Details panel (uiKind=${vscode.env.uiKind === vscode.UIKind.Desktop ? 'Desktop' : 'Web'}, remote=${vscode.env.remoteName || 'none'})`);
 
@@ -4693,6 +4719,28 @@ usageAnalysis: undefined
 			}
 		});
 
+		// Handle panel disposal
+		this.detailsPanel.onDidDispose(() => {
+			this.log('📊 Details panel closed');
+			this.detailsPanel = undefined;
+			this._detailsPanelIsLoading = false;
+		});
+
+		// Use cached stats if available, otherwise show loading screen while calculating
+		let stats = this.lastDetailedStats;
+		if (!stats) {
+			this.log('No cached stats — showing loading screen while calculating...');
+			this._detailsPanelIsLoading = true;
+			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview);
+
+			stats = await this.updateTokenStats();
+
+			this._detailsPanelIsLoading = false;
+			if (!stats || !this.detailsPanel) {
+				return;
+			}
+		}
+
 		// Set the HTML content
 		try {
 			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, stats);
@@ -4700,12 +4748,6 @@ usageAnalysis: undefined
 		} catch (err) {
 			this.error('❌ Failed to set Details panel HTML', err);
 		}
-
-		// Handle panel disposal
-		this.detailsPanel.onDidDispose(() => {
-			this.log('📊 Details panel closed');
-			this.detailsPanel = undefined;
-		});
 	}
 
 	public async showEnvironmental(): Promise<void> {
@@ -4838,6 +4880,8 @@ usageAnalysis: undefined
 				if (v === 'total' || v === 'model' || v === 'editor' || v === 'repository' || v === 'cost') {
 					this.lastChartView = v;
 				}
+				if (typeof message.metric === 'string') { this.lastChartMetric = message.metric; }
+				if (typeof message.split === 'string') { this.lastChartSplit = message.split; }
 			}
 		});
 
@@ -7063,6 +7107,401 @@ ${hashtag}`;
     return { azureConfigured, teamServerConfigured: !!teamServerUrl, teamServerUrl };
   }
 
+  private getLoadingHtml(webview: vscode.Webview): string {
+    const nonce = getNonce();
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+${buildCspMeta(webview, nonce)}
+<title>AI Engineering Fluency — Loading</title>
+<style>
+:root {
+    --bg-primary: var(--vscode-editor-background, #1e1e2e);
+    --bg-secondary: var(--vscode-sideBar-background, #181825);
+    --bg-card: var(--vscode-editorWidget-background, #24273a);
+    --text-primary: var(--vscode-editor-foreground, #cdd6f4);
+    --text-muted: var(--vscode-disabledForeground, #6c7086);
+    --accent: var(--vscode-textLink-foreground, #89b4fa);
+    --success: var(--vscode-terminal-ansiGreen, #a6e3a1);
+    --border: var(--vscode-panel-border, #313244);
+    --badge-bg: var(--vscode-badge-background, #313244);
+    --badge-fg: var(--vscode-badge-foreground, #cdd6f4);
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 20px;
+}
+.card {
+    width: 100%;
+    max-width: 680px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px 28px;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+}
+.header-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    margin-bottom: 4px;
+    gap: 16px;
+}
+.badge-label {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.15em;
+    text-transform: uppercase;
+    color: var(--accent);
+    margin-bottom: 4px;
+}
+.title {
+    font-size: 22px;
+    font-weight: 700;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+.subtitle {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    max-width: 380px;
+}
+.header-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    gap: 6px;
+    flex-shrink: 0;
+}
+.pct-display {
+    font-size: 32px;
+    font-weight: 800;
+    color: var(--text-primary);
+    line-height: 1;
+    min-width: 70px;
+    text-align: right;
+    font-variant-numeric: tabular-nums;
+}
+.meta-badges {
+    display: flex;
+    gap: 6px;
+}
+.meta-badge {
+    font-size: 11px;
+    padding: 3px 10px;
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    color: var(--text-muted);
+    background: var(--bg-card);
+    white-space: nowrap;
+}
+.progress-wrap {
+    margin: 16px 0;
+}
+.progress-track {
+    height: 6px;
+    background: var(--border);
+    border-radius: 3px;
+    overflow: hidden;
+}
+.progress-fill {
+    height: 100%;
+    border-radius: 3px;
+    background: linear-gradient(90deg, var(--accent), var(--success));
+    transition: width 0.5s ease;
+    width: 2%;
+    position: relative;
+}
+.progress-fill.indeterminate {
+    width: 25%;
+    animation: slide-shimmer 1.8s ease-in-out infinite;
+    background: linear-gradient(90deg, transparent, var(--accent), var(--success), transparent);
+}
+@keyframes slide-shimmer {
+    0%   { margin-left: -30%; }
+    100% { margin-left: 110%; }
+}
+.stats-chips {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+.chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 12px;
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    font-size: 12px;
+    color: var(--text-primary);
+}
+.chip .chip-value { font-weight: 700; }
+.steps-box {
+    background: var(--bg-card);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+.step {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 5px 0;
+    color: var(--text-muted);
+    font-size: 13px;
+    transition: color 0.25s;
+}
+.step.step-done   { color: var(--success); }
+.step.step-active { color: var(--accent); font-weight: 600; }
+.step-ico { width: 18px; text-align: center; flex-shrink: 0; font-style: normal; }
+.spin-ico { display: inline-block; animation: spin 0.75s linear infinite; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.step-lbl { flex: 1; }
+.step-cnt { font-size: 11px; opacity: 0.75; font-variant-numeric: tabular-nums; }
+@keyframes pop-in {
+    0%   { transform: scale(0.4); opacity: 0; }
+    60%  { transform: scale(1.3); }
+    100% { transform: scale(1);   opacity: 1; }
+}
+.pop { animation: pop-in 0.35s ease both; }
+.log-box {
+    background: var(--bg-primary);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 8px 12px;
+    height: 110px;
+    overflow-y: auto;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 11px;
+}
+.log-line { line-height: 1.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.log-ts  { color: var(--accent); margin-right: 4px; }
+.log-txt { color: var(--text-muted); }
+.log-line.log-cur .log-txt { color: var(--text-primary); font-weight: 600; }
+</style>
+</head>
+<body>
+<div class="card">
+    <div class="header-row">
+        <div>
+            <div class="badge-label">🤖 Analyzing Your AI Activity</div>
+            <div class="title">Building Activity Index</div>
+            <div class="subtitle" id="subtitle">Discovering session files...</div>
+        </div>
+        <div class="header-right">
+            <div class="pct-display" id="pct">–</div>
+            <div class="meta-badges">
+                <div class="meta-badge" id="badge-files">– files</div>
+                <div class="meta-badge" id="badge-elapsed">0s</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="progress-wrap">
+        <div class="progress-track">
+            <div class="progress-fill indeterminate" id="prog-fill"></div>
+        </div>
+    </div>
+
+    <div class="stats-chips" id="chips" style="display:none">
+        <div class="chip">📂 <span class="chip-value" id="chip-total">–</span> session files</div>
+        <div class="chip">✅ <span class="chip-value" id="chip-done">–</span> processed</div>
+    </div>
+    <div id="editors-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;"></div>
+
+    <div class="steps-box">
+        <div class="step step-active" id="s-discover">
+            <i class="step-ico"><span class="spin-ico">↻</span></i>
+            <span class="step-lbl">Discovering session files</span>
+            <span class="step-cnt" id="sc-discover"></span>
+        </div>
+        <div class="step" id="s-cache">
+            <i class="step-ico">○</i>
+            <span class="step-lbl">Checking cache</span>
+            <span class="step-cnt"></span>
+        </div>
+        <div class="step" id="s-parse">
+            <i class="step-ico">○</i>
+            <span class="step-lbl">Parsing session logs</span>
+            <span class="step-cnt" id="sc-parse"></span>
+        </div>
+        <div class="step" id="s-compute">
+            <i class="step-ico">○</i>
+            <span class="step-lbl">Computing statistics</span>
+            <span class="step-cnt"></span>
+        </div>
+        <div class="step" id="s-ready">
+            <i class="step-ico">○</i>
+            <span class="step-lbl">Ready!</span>
+            <span class="step-cnt"></span>
+        </div>
+    </div>
+
+    <div class="log-box" id="log"></div>
+</div>
+<script nonce="${nonce}">
+(function () {
+    var t0 = Date.now();
+    var EDITORS = [
+        { icon: '💙', name: 'VS Code' },
+        { icon: '🤖', name: 'Copilot CLI' },
+        { icon: '⚡', name: 'Cursor' },
+        { icon: '🟠', name: 'Claude Code' },
+        { icon: '🟢', name: 'OpenCode' },
+        { icon: '🔥', name: 'Mistral Vibe' },
+        { icon: '💎', name: 'Gemini CLI' },
+        { icon: '🪟', name: 'Visual Studio' },
+        { icon: '🔷', name: 'VSCodium' },
+        { icon: '💚', name: 'VS Code Insiders' },
+    ];
+    var editorsSeen = 0;
+
+    // Elapsed ticker
+    setInterval(function () {
+        var s = Math.floor((Date.now() - t0) / 1000);
+        var el = document.getElementById('badge-elapsed');
+        if (!el) return;
+        if (s < 60) { el.textContent = s + 's'; }
+        else { el.textContent = Math.floor(s / 60) + 'm ' + (s % 60) + 's'; }
+    }, 1000);
+
+    function ts() {
+        var d = new Date();
+        return '[' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ']';
+    }
+    function pad(n) { return n < 10 ? '0' + n : '' + n; }
+
+    function log(msg, isCurrent) {
+        var box = document.getElementById('log');
+        if (!box) return;
+        var prev = box.querySelector('.log-cur');
+        if (prev) prev.classList.remove('log-cur');
+        var div = document.createElement('div');
+        div.className = 'log-line' + (isCurrent ? ' log-cur' : '');
+        div.innerHTML = '<span class="log-ts">' + ts() + '</span><span class="log-txt">' + esc(msg) + '</span>';
+        box.appendChild(div);
+        while (box.children.length > 60) box.removeChild(box.firstChild);
+        box.scrollTop = box.scrollHeight;
+    }
+
+    function esc(s) {
+        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    }
+
+    function setDone(id, count) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('step-active');
+        el.classList.add('step-done');
+        var ico = el.querySelector('.step-ico');
+        if (ico) { ico.className = 'step-ico'; ico.innerHTML = '<span class="pop">✓</span>'; }
+    }
+
+    function setActive(id) {
+        var el = document.getElementById(id);
+        if (!el) return;
+        el.classList.remove('step-done');
+        el.classList.add('step-active');
+        var ico = el.querySelector('.step-ico');
+        if (ico) { ico.className = 'step-ico'; ico.innerHTML = '<span class="spin-ico">↻</span>'; }
+    }
+
+    log('Starting AI session analysis...', true);
+
+    window.addEventListener('message', function (ev) {
+        var m = ev.data;
+        if (!m) return;
+
+        if (m.command === 'loadingStep') {
+            if (m.step === 'discovering') {
+                setActive('s-discover');
+                log('Scanning for AI session files...', true);
+
+            } else if (m.step === 'parsing') {
+                var total = m.total || 0;
+                setDone('s-discover');
+                var sc = document.getElementById('sc-discover');
+                if (sc) sc.textContent = '(' + total + ' found)';
+                setDone('s-cache');
+                setActive('s-parse');
+
+                var sub = document.getElementById('subtitle');
+                if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
+                var bf = document.getElementById('badge-files');
+                if (bf) bf.textContent = total + ' files';
+                var chips = document.getElementById('chips');
+                if (chips) chips.style.display = 'flex';
+                var ct = document.getElementById('chip-total');
+                if (ct) ct.textContent = total.toLocaleString();
+                log('Found ' + total + ' session files \u2014 parsing...', true);
+
+            } else if (m.step === 'computing') {
+                setDone('s-parse');
+                setActive('s-compute');
+                var fill = document.getElementById('prog-fill');
+                if (fill) { fill.classList.remove('indeterminate'); fill.style.width = '96%'; }
+                var pct = document.getElementById('pct');
+                if (pct) pct.textContent = '96%';
+                var sub2 = document.getElementById('subtitle');
+                if (sub2) sub2.textContent = 'Computing statistics...';
+                log('Computing aggregated statistics...', true);
+            }
+
+        } else if (m.command === 'loadingProgress') {
+            var pct2 = document.getElementById('pct');
+            if (pct2) pct2.textContent = m.percentage + '%';
+            var fill2 = document.getElementById('prog-fill');
+            if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (m.percentage < 3 ? 3 : m.percentage) + '%'; }
+            var cd = document.getElementById('chip-done');
+            if (cd) cd.textContent = m.completed.toLocaleString();
+            var bf2 = document.getElementById('badge-files');
+            if (bf2) bf2.textContent = m.completed + '\u202f/\u202f' + m.total + ' files';
+            var sc2 = document.getElementById('sc-parse');
+            if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
+            var sub3 = document.getElementById('subtitle');
+            if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\u202f/\u202f' + m.total + '\u2026';
+
+            // Log each throttled update (extension already limits to ~500 ms intervals)
+            log('Parsing session ' + m.completed + '/' + m.total, true);
+
+            // Whimsical: pop in a new editor pill at each ~10% milestone
+            if (m.completed % Math.max(1, Math.floor(m.total / 10)) === 0 && editorsSeen < EDITORS.length) {
+                var editor = EDITORS[editorsSeen];
+                editorsSeen++;
+                var row = document.getElementById('editors-row');
+                if (row) {
+                    var pill = document.createElement('div');
+                    pill.className = 'chip';
+                    pill.style.animation = 'pop-in 0.35s ease both';
+                    pill.innerHTML = '<span>' + editor.icon + '</span>\u00a0<span class="chip-value">' + esc(editor.name) + '</span>';
+                    row.appendChild(pill);
+                }
+            }
+        }
+    });
+}());
+</script>
+</body>
+</html>`;
+  }
+
   private getDetailsHtml(
     webview: vscode.Webview,
     stats: DetailedStats,
@@ -8352,7 +8791,7 @@ ${hashtag}`;
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "chart.js"),
     );
 
-    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView };
+    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView, initialMetric: this.lastChartMetric, initialSplit: this.lastChartSplit };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
 

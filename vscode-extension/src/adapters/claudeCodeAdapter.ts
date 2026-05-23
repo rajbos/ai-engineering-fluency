@@ -107,35 +107,46 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		const models: string[] = [];
 		for (const event of events) {
 			if (event.type === 'user' && event.message?.role === 'user' && !event.isSidechain) {
-				analysis.modeUsage.cli++;
-				// Detect Claude Code slash commands from the first line of user messages
-				const cmd = extractClaudeSlashCommand(event.message?.content);
-				if (cmd) {
-					const key = `__slash__${cmd}`;
-					analysis.toolCalls.byTool[key] = (analysis.toolCalls.byTool[key] || 0) + 1;
-					// Note: do NOT increment analysis.toolCalls.total — slash commands are not tool calls
-				}
+				this.processUserEvent(event, analysis);
 			} else if (event.type === 'assistant') {
-				const model = normalizeClaudeModelId(event.message?.model || 'unknown');
-				models.push(model);
-				const content: any[] = Array.isArray(event.message?.content) ? event.message.content : [];
-				for (const c of content) {
-					if (c?.type === 'tool_use') {
-						const toolName = String(c.name || 'tool');
-						if (isMcpTool(toolName)) {
-							// Route MCP tools to mcpTools tracking
-							const server = extractMcpServerName(toolName, ctx.toolNameMap);
-							analysis.mcpTools.total++;
-							analysis.mcpTools.byServer[server] = (analysis.mcpTools.byServer[server] || 0) + 1;
-							analysis.mcpTools.byTool[toolName] = (analysis.mcpTools.byTool[toolName] || 0) + 1;
-						} else {
-							analysis.toolCalls.total++;
-							analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-						}
-					}
-				}
+				this.processAssistantEvent(event, analysis, ctx, models);
 			}
 		}
+		this.applyModelSwitchingStats(models, analysis);
+		applyModelTierClassification(ctx.modelPricing, analysis.modelSwitching.uniqueModels, models, analysis);
+		return analysis;
+	}
+
+	private processUserEvent(event: any, analysis: import('../types').SessionUsageAnalysis): void {
+		analysis.modeUsage.cli++;
+		const cmd = extractClaudeSlashCommand(event.message?.content);
+		if (cmd) {
+			const key = `__slash__${cmd}`;
+			// Note: do NOT increment analysis.toolCalls.total — slash commands are not tool calls
+			analysis.toolCalls.byTool[key] = (analysis.toolCalls.byTool[key] || 0) + 1;
+		}
+	}
+
+	private processAssistantEvent(event: any, analysis: import('../types').SessionUsageAnalysis, ctx: UsageAnalysisAdapterContext, models: string[]): void {
+		const model = normalizeClaudeModelId(event.message?.model || 'unknown');
+		models.push(model);
+		const content: any[] = Array.isArray(event.message?.content) ? event.message.content : [];
+		for (const c of content) {
+			if (c?.type !== 'tool_use') { continue; }
+			const toolName = String(c.name || 'tool');
+			if (isMcpTool(toolName)) {
+				const server = extractMcpServerName(toolName, ctx.toolNameMap);
+				analysis.mcpTools.total++;
+				analysis.mcpTools.byServer[server] = (analysis.mcpTools.byServer[server] || 0) + 1;
+				analysis.mcpTools.byTool[toolName] = (analysis.mcpTools.byTool[toolName] || 0) + 1;
+			} else {
+				analysis.toolCalls.total++;
+				analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+			}
+		}
+	}
+
+	private applyModelSwitchingStats(models: string[], analysis: import('../types').SessionUsageAnalysis): void {
 		const uniqueModels = [...new Set(models)];
 		analysis.modelSwitching.uniqueModels = uniqueModels;
 		analysis.modelSwitching.modelCount = uniqueModels.length;
@@ -145,7 +156,5 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			if (models[i] !== models[i - 1]) { switchCount++; }
 		}
 		analysis.modelSwitching.switchCount = switchCount;
-		applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
-		return analysis;
 	}
 }

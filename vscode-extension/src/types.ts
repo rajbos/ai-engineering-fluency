@@ -55,6 +55,8 @@ export interface EditorUsage {
   [editorType: string]: {
     tokens: number;
     sessions: number;
+    linesAdded?: number;
+    linesRemoved?: number;
   };
 }
 
@@ -62,6 +64,15 @@ export interface RepositoryUsage {
   [repository: string]: {
     tokens: number;
     sessions: number;
+    linesAdded?: number;
+    linesRemoved?: number;
+  };
+}
+
+export interface LanguageUsage {
+  [extension: string]: {
+    linesAdded: number;
+    linesRemoved: number;
   };
 }
 
@@ -105,6 +116,9 @@ export interface DailyTokenStats {
   modelUsage: ModelUsage;
   editorUsage: EditorUsage;
   repositoryUsage: RepositoryUsage;
+  languageUsage?: LanguageUsage;
+  linesAdded?: number;
+  linesRemoved?: number;
 }
 
 /** Aggregated data for one time window (day/week/month) in the chart. */
@@ -127,6 +141,15 @@ export interface ChartPeriodData {
   totalCost: number;
   /** Average estimated cost per bar in USD (provider/API rates). Raw float, not rounded. */
   avgCostPerPeriod: number;
+  locData?: number[];
+  linesAddedData?: number[];
+  linesRemovedData?: number[];
+  languageDatasets?: object[];
+  locEditorDatasets?: object[];
+  locRepositoryDatasets?: object[];
+  totalLinesAdded?: number;
+  totalLinesRemoved?: number;
+  avgLocPerPeriod?: number;
 }
 
 /** Shape of the data payload sent to the chart webview (via window.__INITIAL_CHART__ or postMessage). */
@@ -157,6 +180,7 @@ export interface ChartDataPayload {
    * When false, the webview should indicate that those views are loading.
    */
   periodsReady?: boolean;
+  hasLocData?: boolean;
 }
 
 /** Per-UTC-day token/interaction breakdown for a single session. Used for accurate daily stats. */
@@ -189,6 +213,9 @@ export interface SessionFileCache {
   debugLogOutputTokens?: number; // Output token total from debug log (sum across all llm_request events)
   /** Per-UTC-day token/interaction breakdown (keyed by YYYY-MM-DD UTC). Used for consistent daily stats. */
   dailyRollups?: { [utcDayKey: string]: DailyRollupEntry };
+  linesAdded?: number;
+  linesRemoved?: number;
+  languageUsage?: LanguageUsage;
 }
 
 // Local copy of customization file entry type (mirrors webview/shared/contextRefUtils.ts)
@@ -287,6 +314,9 @@ export interface EditScopeUsage {
   multiFileEdits: number; // Edit sessions touching 2+ files
   totalEditedFiles: number; // Total unique files edited
   avgFilesPerSession: number; // Average files per edit session
+  linesAdded?: number;
+  linesRemoved?: number;
+  languageUsage?: LanguageUsage;
 }
 
 export interface ApplyButtonUsage {

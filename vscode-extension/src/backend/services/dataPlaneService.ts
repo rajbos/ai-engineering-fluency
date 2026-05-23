@@ -21,6 +21,55 @@ import type {
 } from "../storageTables";
 import { BackendUtility } from "./utilityService";
 
+/** Map a raw Azure Table entity to a typed BackendAggDailyEntityLike. */
+function mapEntityToAggDailyEntity(entity: any): BackendAggDailyEntityLike {
+  const pk = entity.partitionKey;
+  const rk = entity.rowKey;
+  // Extract day from partition key (format: datasetId|day)
+  const pkParts = (pk ?? "").toString().split("|");
+  const day = pkParts.length === 2 ? pkParts[1] : "";
+  const datasetId = pkParts[0] ?? "";
+  // Parse RowKey: model|workspaceId|machineId|userId
+  const rkParts = (rk ?? "").toString().split("|");
+  return {
+    partitionKey: (pk ?? "").toString(),
+    rowKey: (rk ?? "").toString(),
+    datasetId,
+    day,
+    model: rkParts[0] ?? "",
+    workspaceId: rkParts[1] ?? "",
+    machineId: rkParts[2] ?? "",
+    userId: rkParts[3] ?? "",
+    inputTokens: entity.inputTokens,
+    outputTokens: entity.outputTokens,
+    interactions: entity.interactions,
+    workspaceName: entity.workspaceName,
+    machineName: entity.machineName,
+    schemaVersion: typeof entity.schemaVersion === "number" ? entity.schemaVersion : undefined,
+    ...(typeof entity.askModeCount === "number" ? { askModeCount: entity.askModeCount } : {}),
+    ...(typeof entity.editModeCount === "number" ? { editModeCount: entity.editModeCount } : {}),
+    ...(typeof entity.agentModeCount === "number" ? { agentModeCount: entity.agentModeCount } : {}),
+    ...(typeof entity.planModeCount === "number" ? { planModeCount: entity.planModeCount } : {}),
+    ...(typeof entity.customAgentModeCount === "number" ? { customAgentModeCount: entity.customAgentModeCount } : {}),
+    ...(entity.toolCallsJson ? { toolCallsJson: entity.toolCallsJson.toString() } : {}),
+    ...(entity.contextRefsJson ? { contextRefsJson: entity.contextRefsJson.toString() } : {}),
+    ...(entity.mcpToolsJson ? { mcpToolsJson: entity.mcpToolsJson.toString() } : {}),
+    ...(entity.modelSwitchingJson ? { modelSwitchingJson: entity.modelSwitchingJson.toString() } : {}),
+    ...(entity.editScopeJson ? { editScopeJson: entity.editScopeJson.toString() } : {}),
+    ...(entity.agentTypesJson ? { agentTypesJson: entity.agentTypesJson.toString() } : {}),
+    ...(entity.repositoriesJson ? { repositoriesJson: entity.repositoriesJson.toString() } : {}),
+    ...(entity.applyUsageJson ? { applyUsageJson: entity.applyUsageJson.toString() } : {}),
+    ...(entity.sessionDurationJson ? { sessionDurationJson: entity.sessionDurationJson.toString() } : {}),
+    ...(typeof entity.repoCustomizationRate === "number" ? { repoCustomizationRate: entity.repoCustomizationRate } : {}),
+    ...(typeof entity.multiTurnSessions === "number" ? { multiTurnSessions: entity.multiTurnSessions } : {}),
+    ...(typeof entity.avgTurnsPerSession === "number" ? { avgTurnsPerSession: entity.avgTurnsPerSession } : {}),
+    ...(typeof entity.multiFileEdits === "number" ? { multiFileEdits: entity.multiFileEdits } : {}),
+    ...(typeof entity.avgFilesPerEdit === "number" ? { avgFilesPerEdit: entity.avgFilesPerEdit } : {}),
+    ...(typeof entity.codeBlockApplyRate === "number" ? { codeBlockApplyRate: entity.codeBlockApplyRate } : {}),
+    ...(typeof entity.sessionCount === "number" ? { sessionCount: entity.sessionCount } : {}),
+  };
+}
+
 /**
  * DataPlaneService manages Azure Table Storage clients and operations.
  */
@@ -183,59 +232,7 @@ export class DataPlaneService {
     const iterator = tableClient.listEntities({ queryOptions: { filter } });
 
     for await (const entity of iterator) {
-      const pk = entity.partitionKey;
-      const rk = entity.rowKey;
-
-      // Extract day from partition key (format: datasetId|day)
-      const pkParts = (pk ?? "").toString().split("|");
-      const day = pkParts.length === 2 ? pkParts[1] : "";
-      const datasetId = pkParts[0] ?? "";
-
-      // Parse RowKey: model|workspaceId|machineId|userId
-      const rkParts = (rk ?? "").toString().split("|");
-      const model = rkParts[0] ?? "";
-      const workspaceId = rkParts[1] ?? "";
-      const machineId = rkParts[2] ?? "";
-      const userId = rkParts[3] ?? "";
-
-      entities.push({
-        partitionKey: (pk ?? "").toString(),
-        rowKey: (rk ?? "").toString(),
-        datasetId,
-        day,
-        model,
-        workspaceId,
-        machineId,
-        userId,
-        inputTokens: entity.inputTokens,
-        outputTokens: entity.outputTokens,
-        interactions: entity.interactions,
-        workspaceName: entity.workspaceName,
-        machineName: entity.machineName,
-        schemaVersion: typeof entity.schemaVersion === "number" ? entity.schemaVersion : undefined,
-        // Fluency metrics (schema version 4+)
-        ...(typeof entity.askModeCount === "number" ? { askModeCount: entity.askModeCount } : {}),
-        ...(typeof entity.editModeCount === "number" ? { editModeCount: entity.editModeCount } : {}),
-        ...(typeof entity.agentModeCount === "number" ? { agentModeCount: entity.agentModeCount } : {}),
-        ...(typeof entity.planModeCount === "number" ? { planModeCount: entity.planModeCount } : {}),
-        ...(typeof entity.customAgentModeCount === "number" ? { customAgentModeCount: entity.customAgentModeCount } : {}),
-        ...(entity.toolCallsJson ? { toolCallsJson: entity.toolCallsJson.toString() } : {}),
-        ...(entity.contextRefsJson ? { contextRefsJson: entity.contextRefsJson.toString() } : {}),
-        ...(entity.mcpToolsJson ? { mcpToolsJson: entity.mcpToolsJson.toString() } : {}),
-        ...(entity.modelSwitchingJson ? { modelSwitchingJson: entity.modelSwitchingJson.toString() } : {}),
-        ...(entity.editScopeJson ? { editScopeJson: entity.editScopeJson.toString() } : {}),
-        ...(entity.agentTypesJson ? { agentTypesJson: entity.agentTypesJson.toString() } : {}),
-        ...(entity.repositoriesJson ? { repositoriesJson: entity.repositoriesJson.toString() } : {}),
-        ...(entity.applyUsageJson ? { applyUsageJson: entity.applyUsageJson.toString() } : {}),
-        ...(entity.sessionDurationJson ? { sessionDurationJson: entity.sessionDurationJson.toString() } : {}),
-        ...(typeof entity.repoCustomizationRate === "number" ? { repoCustomizationRate: entity.repoCustomizationRate } : {}),
-        ...(typeof entity.multiTurnSessions === "number" ? { multiTurnSessions: entity.multiTurnSessions } : {}),
-        ...(typeof entity.avgTurnsPerSession === "number" ? { avgTurnsPerSession: entity.avgTurnsPerSession } : {}),
-        ...(typeof entity.multiFileEdits === "number" ? { multiFileEdits: entity.multiFileEdits } : {}),
-        ...(typeof entity.avgFilesPerEdit === "number" ? { avgFilesPerEdit: entity.avgFilesPerEdit } : {}),
-        ...(typeof entity.codeBlockApplyRate === "number" ? { codeBlockApplyRate: entity.codeBlockApplyRate } : {}),
-        ...(typeof entity.sessionCount === "number" ? { sessionCount: entity.sessionCount } : {}),
-      });
+      entities.push(mapEntityToAggDailyEntity(entity));
     }
 
     this.log(`Found ${entities.length} entities across all datasets`);

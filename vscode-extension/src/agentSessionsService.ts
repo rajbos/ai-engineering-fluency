@@ -185,10 +185,26 @@ export async function fetchAgentSessionsForRepo(
 	fetchTaskDetail: FetchTaskDetailFn = fetchAgentTaskDetail,
 ): Promise<AgentRepoSummary> {
 	const sinceStr = since.toISOString();
+	const { allTasks, error } = await fetchAllTasksForRepo(owner, repo, token, sinceStr, fetchTaskPage);
+	if (error) { return error; }
+
+	const tasksTotal = allTasks.length;
+	const tasksToDetail = allTasks.slice(0, MAX_TASKS_DETAIL_PER_REPO);
+	const partial = tasksTotal > MAX_TASKS_DETAIL_PER_REPO;
+	const { totalTasks, totalSessions, totalCredits } = await aggregateTaskDetails(tasksToDetail, owner, repo, token, fetchTaskDetail);
+
+	return { owner, repo, totalTasks, totalSessions, totalCredits, tasksScanned: tasksToDetail.length, tasksTotal, partial };
+}
+
+async function fetchAllTasksForRepo(
+	owner: string,
+	repo: string,
+	token: string,
+	sinceStr: string,
+	fetchTaskPage: FetchTaskPageFn,
+): Promise<{ allTasks: any[]; error?: AgentRepoSummary }> {
 	const allTasks: any[] = [];
 	const seen = new Set<string>();
-
-	// Fetch active and archived task lists
 	for (const archived of [false, true]) {
 		for (let page = 1; page <= 5; page++) {
 			const { tasks, statusCode, error } = await fetchTaskPage({ owner, repo, token, page, archived, since: sinceStr });
@@ -199,7 +215,7 @@ export async function fetchAgentSessionsForRepo(
 						: statusCode === 403
 						? 'Access denied — check that your GitHub token has repo scope'
 						: `API error (HTTP ${statusCode ?? 'unknown'})`;
-					return { owner, repo, totalTasks: 0, totalSessions: 0, totalCredits: 0, tasksScanned: 0, tasksTotal: 0, partial: false, error: msg };
+					return { allTasks: [], error: { owner, repo, totalTasks: 0, totalSessions: 0, totalCredits: 0, tasksScanned: 0, tasksTotal: 0, partial: false, error: msg } };
 				}
 				break;
 			}
@@ -209,22 +225,23 @@ export async function fetchAgentSessionsForRepo(
 			if (tasks.length < 100) { break; }
 		}
 	}
+	return { allTasks };
+}
 
-	const tasksTotal = allTasks.length;
-	const tasksToDetail = allTasks.slice(0, MAX_TASKS_DETAIL_PER_REPO);
-	const partial = tasksTotal > MAX_TASKS_DETAIL_PER_REPO;
-
+async function aggregateTaskDetails(
+	tasksToDetail: any[],
+	owner: string,
+	repo: string,
+	token: string,
+	fetchTaskDetail: FetchTaskDetailFn,
+): Promise<{ totalTasks: number; totalSessions: number; totalCredits: number }> {
 	let totalTasks = 0;
 	let totalSessions = 0;
 	let totalCredits = 0;
-
-	// Fetch task details in small concurrent batches
 	const CONCURRENCY = 5;
 	for (let i = 0; i < tasksToDetail.length; i += CONCURRENCY) {
 		const batch = tasksToDetail.slice(i, i + CONCURRENCY);
-		const results = await Promise.all(
-			batch.map(task => fetchTaskDetail(owner, repo, task.id, token))
-		);
+		const results = await Promise.all(batch.map(task => fetchTaskDetail(owner, repo, task.id, token)));
 		for (const { sessions } of results) {
 			if (!sessions || sessions.length === 0) { continue; }
 			const cloudSessions = sessions.filter(s => detectSessionSource(s) === 'cloud-agent');
@@ -232,17 +249,10 @@ export async function fetchAgentSessionsForRepo(
 				totalTasks++;
 				totalSessions += cloudSessions.length;
 				for (const s of cloudSessions) {
-					if (s.usage && typeof s.usage.credits === 'number') {
-						totalCredits += s.usage.credits;
-					}
+					if (s.usage && typeof s.usage.credits === 'number') { totalCredits += s.usage.credits; }
 				}
 			}
 		}
 	}
-
-	return {
-		owner, repo,
-		totalTasks, totalSessions, totalCredits,
-		tasksScanned: tasksToDetail.length, tasksTotal, partial,
-	};
+	return { totalTasks, totalSessions, totalCredits };
 }

@@ -205,38 +205,41 @@ export class BackendUtility {
 			];
 
 			for (const filePath of candidates) {
-				try {
-					const raw = await fs.readFile(filePath, 'utf8');
-					const parsed = JSON.parse(raw);
-					
-					const uriStr = (parsed?.folder ?? parsed?.workspace ?? parsed?.configuration ?? '').toString();
-					if (!uriStr) {
-						continue;
-					}
-					
-					// Parse the URI string to get the file path
-					const fsPath = uriStr.startsWith('file://') ? fileUriToPath(uriStr) : uriStr;
-					
-					if (!fsPath) {
-						continue;
-					}
-					const base = path.basename(fsPath);
-					if (!base) {
-						continue;
-					}
-					// For .code-workspace files, show name without extension.
-					const name = base.toLowerCase().endsWith(CODE_WORKSPACE_EXTENSION)
-						? base.substring(0, base.length - CODE_WORKSPACE_EXTENSION.length)
-						: base;
-					return BackendUtility.normalizeNameForStorage(name);
-				} catch {
-					// File doesn't exist or can't be read - continue to next candidate
-					continue;
+				const name = await BackendUtility.tryReadWorkspaceNameFromFile(filePath);
+				if (name !== undefined) {
+					return name;
 				}
 			}
 		} catch {
 			// Best-effort only.
 		}
 		return undefined;
+	}
+
+	private static async tryReadWorkspaceNameFromFile(filePath: string): Promise<string | undefined> {
+		try {
+			const raw = await fs.readFile(filePath, 'utf8');
+			const parsed = JSON.parse(raw);
+			const uriStr = (parsed?.folder ?? parsed?.workspace ?? parsed?.configuration ?? '').toString();
+			if (!uriStr) {
+				return undefined;
+			}
+			const fsPath = uriStr.startsWith('file://') ? fileUriToPath(uriStr) : uriStr;
+			if (!fsPath) {
+				return undefined;
+			}
+			const base = path.basename(fsPath);
+			if (!base) {
+				return undefined;
+			}
+			// For .code-workspace files, show name without extension.
+			const name = base.toLowerCase().endsWith(CODE_WORKSPACE_EXTENSION)
+				? base.substring(0, base.length - CODE_WORKSPACE_EXTENSION.length)
+				: base;
+			return BackendUtility.normalizeNameForStorage(name);
+		} catch {
+			// File doesn't exist or can't be read - not a valid candidate.
+			return undefined;
+		}
 	}
 }

@@ -172,6 +172,7 @@ export class QueryService {
 			startDayKey,
 			endDayKey
 		});
+
 		const acc: RollupAccumulator = {
 			modelsSet: new Set<string>(),
 			workspacesSet: new Set<string>(),
@@ -188,16 +189,12 @@ export class QueryService {
 
 		for (const entity of allEntities) {
 			const rollup = this.mapEntityToRollup(entity);
-			if (!rollup) {
-				continue;
-			}
+			if (!rollup) { continue; }
 
 			acc.modelsSet.add(rollup.model);
 			acc.workspacesSet.add(rollup.workspaceId);
 			acc.machinesSet.add(rollup.machineId);
-			if (rollup.userId) {
-				acc.usersSet.add(rollup.userId);
-			}
+			if (rollup.userId) { acc.usersSet.add(rollup.userId); }
 			if (rollup.workspaceName && !acc.workspaceNamesById[rollup.workspaceId]) {
 				acc.workspaceNamesById[rollup.workspaceId] = rollup.workspaceName;
 			}
@@ -205,10 +202,7 @@ export class QueryService {
 				acc.machineNamesById[rollup.machineId] = rollup.machineName;
 			}
 
-			if (!this.filterRollup(rollup, filters)) {
-				continue;
-			}
-
+			if (!this.filterRollup(rollup, filters)) { continue; }
 			this.accumulateRollup(acc, rollup);
 		}
 
@@ -218,10 +212,9 @@ export class QueryService {
 		const cost = this.deps.calculateEstimatedCost(modelUsage);
 		const co2 = (totalTokens / 1000) * this.deps.co2Per1kTokens;
 		const waterUsage = (totalTokens / 1000) * this.deps.waterUsagePer1kTokens;
-
 		const statsForRange: StatsForPeriod = {
 			tokens: totalTokens,
-			sessions: totalInteractions, // best-effort: backend store is interaction-focused
+			sessions: totalInteractions,
 			avgInteractionsPerSession: totalInteractions > 0 ? 1 : 0,
 			avgTokensPerSession: totalInteractions > 0 ? Math.round(totalTokens / totalInteractions) : 0,
 			modelUsage,
@@ -231,29 +224,17 @@ export class QueryService {
 			waterUsage,
 			estimatedCost: cost
 		};
-
 		const result: BackendQueryResultLike = {
-			stats: {
-				today: statsForRange,
-				month: statsForRange,
-				lastUpdated: new Date()
-			},
+			stats: { today: statsForRange, month: statsForRange, lastUpdated: new Date() },
 			availableModels: Array.from(modelsSet).sort(),
 			availableWorkspaces: Array.from(workspacesSet).sort(),
 			availableMachines: Array.from(machinesSet).sort(),
 			availableUsers: Array.from(usersSet).sort(),
 			workspaceNamesById: Object.keys(workspaceNamesById).length ? workspaceNamesById : undefined,
 			machineNamesById: Object.keys(machineNamesById).length ? machineNamesById : undefined,
-			workspaceTokenTotals: Array.from(workspaceTokens.entries())
-				.map(([workspaceId, tokens]) => ({ workspaceId, tokens }))
-				.sort((a, b) => b.tokens - a.tokens)
-				.slice(0, MAX_UI_LIST_ITEMS),
-			machineTokenTotals: Array.from(machineTokens.entries())
-				.map(([machineId, tokens]) => ({ machineId, tokens }))
-				.sort((a, b) => b.tokens - a.tokens)
-				.slice(0, MAX_UI_LIST_ITEMS)
+			workspaceTokenTotals: Array.from(workspaceTokens.entries()).map(([workspaceId, tokens]) => ({ workspaceId, tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, MAX_UI_LIST_ITEMS),
+			machineTokenTotals: Array.from(machineTokens.entries()).map(([machineId, tokens]) => ({ machineId, tokens })).sort((a, b) => b.tokens - a.tokens).slice(0, MAX_UI_LIST_ITEMS)
 		};
-
 		this.backendLastQueryResult = result;
 		this.backendLastQueryCacheKey = cacheKey;
 		this.backendLastQueryCacheAt = Date.now();

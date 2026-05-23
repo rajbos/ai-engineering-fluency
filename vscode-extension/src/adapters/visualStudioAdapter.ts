@@ -104,41 +104,49 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 			const req = objects[i];
 			const res = objects[i + 1];
 			if (!req) { continue; }
-			const reqData = req[1];
-			const resData = res?.[1];
 			turnNumber++;
-			const userText = this.visualStudio.extractTextFromContent(reqData?.Content || []);
-			const assistantText = res ? this.visualStudio.extractTextFromContent(resData?.Content || []) : '';
-			const model = this.visualStudio.getModelId(resData ?? reqData, !resData);
-			const contextText = this.visualStudio.extractContextText(reqData?.Context);
-			const inputTokens = this.estimateTokens(userText + contextText, model ?? 'gpt-4');
-			const outputTokens = res ? this.estimateTokens(assistantText, model ?? 'gpt-4') : 0;
-			const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
-			for (const c of (resData?.Content || [])) {
-				const inner = Array.isArray(c) ? c[1] : null;
-				if (inner?.Function) {
-					toolCalls.push({
-						toolName: String(inner.Function.Description || 'tool'),
-						result: typeof inner.Function.Result === 'string' ? inner.Function.Result : undefined
-					});
-				}
-			}
-			turns.push({
-				turnNumber,
-				timestamp: reqData?.Timestamp ? new Date(reqData.Timestamp).toISOString() : null,
-				mode: 'ask' as const,
-				userMessage: userText,
-				assistantResponse: assistantText,
-				model,
-				toolCalls,
-				contextReferences: createEmptyContextRefs(),
-				mcpTools: [],
-				inputTokensEstimate: inputTokens,
-				outputTokensEstimate: outputTokens,
-				thinkingTokensEstimate: 0
-			});
+			turns.push(this.buildVSTurn(req, res, turnNumber));
 		}
 		return { turns };
+	}
+
+	private buildVSTurn(req: any, res: any, turnNumber: number): ChatTurn {
+		const reqData = req[1];
+		const resData = res?.[1];
+		const userText = this.visualStudio.extractTextFromContent(reqData?.Content || []);
+		const assistantText = res ? this.visualStudio.extractTextFromContent(resData?.Content || []) : '';
+		const model = this.visualStudio.getModelId(resData ?? reqData, !resData);
+		const contextText = this.visualStudio.extractContextText(reqData?.Context);
+		const inputTokens = this.estimateTokens(userText + contextText, model ?? 'gpt-4');
+		const outputTokens = res ? this.estimateTokens(assistantText, model ?? 'gpt-4') : 0;
+		return {
+			turnNumber,
+			timestamp: reqData?.Timestamp ? new Date(reqData.Timestamp).toISOString() : null,
+			mode: 'ask' as const,
+			userMessage: userText,
+			assistantResponse: assistantText,
+			model,
+			toolCalls: this.extractVSToolCalls(resData),
+			contextReferences: createEmptyContextRefs(),
+			mcpTools: [],
+			inputTokensEstimate: inputTokens,
+			outputTokensEstimate: outputTokens,
+			thinkingTokensEstimate: 0
+		};
+	}
+
+	private extractVSToolCalls(resData: any): { toolName: string; arguments?: string; result?: string }[] {
+		const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
+		for (const c of (resData?.Content || [])) {
+			const inner = Array.isArray(c) ? c[1] : null;
+			if (inner?.Function) {
+				toolCalls.push({
+					toolName: String(inner.Function.Description || 'tool'),
+					result: typeof inner.Function.Result === 'string' ? inner.Function.Result : undefined
+				});
+			}
+		}
+		return toolCalls;
 	}
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
@@ -147,29 +155,10 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 		const models: string[] = [];
 		for (let i = 1; i < objects.length; i++) {
 			const isRequest = i % 2 === 1;
-			const objData = objects[i]?.[1];
 			if (isRequest) {
 				analysis.modeUsage.ask++;
 			} else {
-				const model = this.visualStudio.getModelId(objData, false);
-				if (model) { models.push(model); }
-				for (const c of ((objData?.Content ?? []) as any[])) {
-					const inner: any = Array.isArray(c) ? c[1] : null;
-					if (inner?.Function) {
-						analysis.toolCalls.total++;
-						const toolName = String(inner.Function.Name || inner.Function.Description || 'tool');
-						if (isMcpTool(toolName)) {
-							analysis.mcpTools.total++;
-							const serverName = extractMcpServerName(toolName, ctx.toolNameMap);
-							analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
-							const normalizedTool = normalizeMcpToolName(toolName);
-							analysis.mcpTools.byTool[normalizedTool] = (analysis.mcpTools.byTool[normalizedTool] || 0) + 1;
-							analysis.toolCalls.total--;
-						} else {
-							analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-						}
-					}
-				}
+				this.processVSResponseObject(objects[i]?.[1], analysis, models, ctx);
 			}
 		}
 		const uniqueModels = [...new Set(models)];
@@ -183,5 +172,26 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 		analysis.modelSwitching.switchCount = switchCount;
 		applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
 		return analysis;
+	}
+
+	private processVSResponseObject(objData: any, analysis: import('../types').SessionUsageAnalysis, models: string[], ctx: UsageAnalysisAdapterContext): void {
+		const model = this.visualStudio.getModelId(objData, false);
+		if (model) { models.push(model); }
+		for (const c of ((objData?.Content ?? []) as any[])) {
+			const inner: any = Array.isArray(c) ? c[1] : null;
+			if (!inner?.Function) { continue; }
+			analysis.toolCalls.total++;
+			const toolName = String(inner.Function.Name || inner.Function.Description || 'tool');
+			if (isMcpTool(toolName)) {
+				analysis.mcpTools.total++;
+				const serverName = extractMcpServerName(toolName, ctx.toolNameMap);
+				analysis.mcpTools.byServer[serverName] = (analysis.mcpTools.byServer[serverName] || 0) + 1;
+				const normalizedTool = normalizeMcpToolName(toolName);
+				analysis.mcpTools.byTool[normalizedTool] = (analysis.mcpTools.byTool[normalizedTool] || 0) + 1;
+				analysis.toolCalls.total--;
+			} else {
+				analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+			}
+		}
 	}
 }

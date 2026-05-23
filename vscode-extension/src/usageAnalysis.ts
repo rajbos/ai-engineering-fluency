@@ -19,6 +19,7 @@ import type {
 	UsageAnalysisPeriod,
 	ModelPricing,
 	TokenEstimator,
+	LanguageUsage,
 } from './types';
 import {
 	applyDelta,
@@ -279,6 +280,18 @@ interface EditMetrics {
 	editedFilePaths: string[];
 	codeBlocks: number;
 	applies: number;
+	linesAdded: number;
+	linesRemoved: number;
+	languageUsage: LanguageUsage;
+}
+
+function normalizeExtension(filePath: string): string {
+	const name = filePath.split('/').pop()?.split('\\').pop() ?? '';
+	const dotIdx = name.lastIndexOf('.');
+	if (dotIdx <= 0) {
+		return name.toLowerCase() || 'unknown';
+	}
+	return name.slice(dotIdx + 1).toLowerCase();
 }
 
 /**
@@ -318,12 +331,40 @@ function extractEditMetrics(req: SessionRequestRaw): EditMetrics {
 	const editedFilePaths: string[] = [];
 	let codeBlocks = 0;
 	let applies = 0;
+	let linesAdded = 0;
+	let linesRemoved = 0;
+	const languageUsage: LanguageUsage = {};
 
 	if (req.response && Array.isArray(req.response)) {
 		for (const respRaw of req.response as ResponseItemRaw[]) {
 			if (!respRaw) { continue; }
 			if (respRaw.kind === 'textEditGroup' && respRaw.uri) {
-				editedFilePaths.push(respRaw.uri.path || JSON.stringify(respRaw.uri));
+				const filePath = respRaw.uri.path || JSON.stringify(respRaw.uri);
+				editedFilePaths.push(filePath);
+
+				const ext = normalizeExtension(filePath);
+				const respRawAny = respRaw as unknown as { edits?: unknown };
+				if (Array.isArray(respRawAny.edits)) {
+					for (const editGroup of respRawAny.edits as unknown[]) {
+						if (!Array.isArray(editGroup)) { continue; }
+						for (const edit of editGroup as unknown[]) {
+							if (!edit || typeof edit !== 'object') { continue; }
+							const editObj = edit as { text?: unknown; range?: { startLineNumber?: number; endLineNumber?: number } };
+							if (typeof editObj.text === 'string' && editObj.text) {
+								const added = (editObj.text.match(/\n/g) ?? []).length + (editObj.text.endsWith('\n') ? 0 : 1);
+								linesAdded += added;
+								if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+								languageUsage[ext].linesAdded += added;
+							}
+							if (editObj.range && typeof editObj.range.startLineNumber === 'number' && typeof editObj.range.endLineNumber === 'number') {
+								const removed = Math.max(0, editObj.range.endLineNumber - editObj.range.startLineNumber);
+								linesRemoved += removed;
+								if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+								languageUsage[ext].linesRemoved += removed;
+							}
+						}
+					}
+				}
 			}
 			if (respRaw.kind === 'codeblockUri') {
 				codeBlocks++;
@@ -334,7 +375,7 @@ function extractEditMetrics(req: SessionRequestRaw): EditMetrics {
 		}
 	}
 
-	return { editedFilePaths, codeBlocks, applies };
+	return { editedFilePaths, codeBlocks, applies, linesAdded, linesRemoved, languageUsage };
 }
 
 /**
@@ -349,9 +390,12 @@ function processRequestsForEnhancedMetrics(
 	timestamps: number[],
 	timingsData: { firstProgress?: number; totalElapsed?: number }[],
 	waitTimes: number[]
-): { totalApplies: number; totalCodeBlocks: number } {
+): { totalApplies: number; totalCodeBlocks: number; totalLinesAdded: number; totalLinesRemoved: number; languageUsage: LanguageUsage } {
 	let totalApplies = 0;
 	let totalCodeBlocks = 0;
+	let totalLinesAdded = 0;
+	let totalLinesRemoved = 0;
+	const languageUsage: LanguageUsage = {};
 	for (const requestRaw of requests) {
 		if (!requestRaw) { continue; }
 
@@ -369,8 +413,15 @@ function processRequestsForEnhancedMetrics(
 		for (const filePath of edits.editedFilePaths) { editedFiles.add(filePath); }
 		totalCodeBlocks += edits.codeBlocks;
 		totalApplies += edits.applies;
+		totalLinesAdded += edits.linesAdded;
+		totalLinesRemoved += edits.linesRemoved;
+		for (const [ext, usage] of Object.entries(edits.languageUsage)) {
+			if (!languageUsage[ext]) { languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+			languageUsage[ext].linesAdded += usage.linesAdded;
+			languageUsage[ext].linesRemoved += usage.linesRemoved;
+		}
 	}
-	return { totalApplies, totalCodeBlocks };
+	return { totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage };
 }
 
 /**
@@ -1317,6 +1368,9 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 		const editedFiles = new Set<string>();
 		let totalApplies = 0;
 		let totalCodeBlocks = 0;
+		let totalLinesAdded = 0;
+		let totalLinesRemoved = 0;
+		const allLanguageUsage: LanguageUsage = {};
 		const timestamps: number[] = [];
 		const timingsData: { firstProgress?: number; totalElapsed?: number; }[] = [];
 		const waitTimes: number[] = [];
@@ -1329,7 +1383,7 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 		
 		if (isJsonl) {
 			// Handle delta-based JSONL format
-			const lines = fileContent.trim().split('\n').filter(l => l.trim());
+			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
 			let isDeltaBased = false;
 			if (lines.length > 0) {
 				try {
@@ -1358,7 +1412,13 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 				
 				// Process requests
 				const requests = (sessionState.requests || []) as SessionRequestRaw[];
-				({ totalApplies, totalCodeBlocks } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
+				let processedLoc: LanguageUsage;
+				({ totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage: processedLoc } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
+				for (const [ext, usage] of Object.entries(processedLoc)) {
+					if (!allLanguageUsage[ext]) { allLanguageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+					allLanguageUsage[ext].linesAdded += usage.linesAdded;
+					allLanguageUsage[ext].linesRemoved += usage.linesRemoved;
+				}
 			}
 		} else {
 			// Handle regular JSON files
@@ -1375,7 +1435,13 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 			
 			// Process requests
 			const requests = (sessionContent.requests ?? []) as SessionRequestRaw[];
-			({ totalApplies, totalCodeBlocks } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
+			let processedLoc2: LanguageUsage;
+			({ totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage: processedLoc2 } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
+			for (const [ext, usage] of Object.entries(processedLoc2)) {
+				if (!allLanguageUsage[ext]) { allLanguageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+				allLanguageUsage[ext].linesAdded += usage.linesAdded;
+				allLanguageUsage[ext].linesRemoved += usage.linesRemoved;
+			}
 		}
 		
 		// Store edit scope data
@@ -1384,7 +1450,10 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 			singleFileEdits: editedFiles.size === 1 ? 1 : 0,
 			multiFileEdits: editedFiles.size > 1 ? 1 : 0,
 			totalEditedFiles: editedFiles.size,
-			avgFilesPerSession: editSessionCount > 0 ? editedFiles.size / editSessionCount : 0
+			avgFilesPerSession: editSessionCount > 0 ? editedFiles.size / editSessionCount : 0,
+			linesAdded: totalLinesAdded,
+			linesRemoved: totalLinesRemoved,
+			...(Object.keys(allLanguageUsage).length > 0 ? { languageUsage: allLanguageUsage } : {}),
 		};
 		
 		// Store apply button usage
@@ -1468,7 +1537,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		// Handle .jsonl files OR .json files with JSONL content (Copilot CLI format and VS Code incremental format)
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
 		if (isJsonl) {
-			const lines = fileContent.trim().split('\n').filter(l => l.trim());
+			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
 
 			// Detect if this is delta-based format (VS Code incremental)
 			let isDeltaBased = false;

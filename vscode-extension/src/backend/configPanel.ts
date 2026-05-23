@@ -189,63 +189,7 @@ function buildSharingSection(): string {
 						<vscode-option value="teamIdentified">Team Identified</vscode-option>
 					</vscode-dropdown>
 					<div id="sharingProfile-help" class="helper" style="margin-bottom: 8px;">Choose your privacy level. Each profile controls what data is synced to Azure and who can see it.</div>
-					<details style="margin-bottom: 12px;">
-						<summary style="cursor: pointer; color: #3794ff; font-size: 12px; margin-bottom: 8px;">What do these profiles mean?</summary>
-						<div style="margin-top: 12px; font-size: 11px; line-height: 1.5;">
-							<div style="background: #2d2d30; border-left: 3px solid #555; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">🔒 Off (Local-only)</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> No one — data never leaves your device</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Nothing synced to Azure</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ Not synced</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ Not synced</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Use this to keep all data private on this device only.</div>
-							</div>
-							<div style="background: #2d2d30; border-left: 3px solid #0e639c; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👤 Solo</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Only you (single-user Azure storage)</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ✅ <em>Actual names</em> (e.g., "frontend-monorepo")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ✅ <em>Actual names</em> (e.g., "DESKTOP-ABC123")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID (you're the only user)</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Perfect for personal tracking across multiple devices. No privacy concerns since only you have access.</div>
-							</div>
-							<div style="background: #2d2d30; border-left: 3px solid #4ec9b0; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Anonymized</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Strongest team privacy: team sees aggregated usage but can't identify specific workspaces, machines, or users.</div>
-							</div>
-							<div style="background: #2d2d30; border-left: 3px solid #c586c0; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Pseudonymous</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Stable alias auto-derived from Entra ID</em> (e.g., "dev-001")</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Track usage per-person without revealing real names. Same developer always gets same alias across sessions.</div>
-							</div>
-							<div style="background: #2d2d30; border-left: 3px solid #d7ba7d; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Identified</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "frontend-monorepo")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "DESKTOP-ABC123")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Team alias OR Entra object ID</em> (e.g., "alex-dev" or GUID)</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Full transparency: team sees who uses what. Best for small teams or compliance scenarios.</div>
-							</div>
-							<div style="background: #3a3d41; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; margin-top: 12px;">
-								<div style="color: #f48771; font-size: 10px; font-weight: bold; margin-bottom: 4px;">⚠️ IMPORTANT</div>
-								<div style="color: #b3b3b3; font-size: 10px;">• Token counts, model names, and dates are <strong>always included</strong> when backend is enabled</div>
-								<div style="color: #b3b3b3; font-size: 10px;">• "Who can see" means anyone with read access to your Azure Storage account</div>
-								<div style="color: #b3b3b3; font-size: 10px;">• Upgrading to more permissive profiles requires explicit consent</div>
-								<div style="color: #b3b3b3; font-size: 10px;">• Use the "Store readable workspace &amp; machine names" checkbox below to control name storage</div>
-							</div>
-						</div>
-					</details>
+				${buildProfileDetailsHtml()}
 				</div>
 				<div id="nameStorageControl" style="margin-top: 16px;">
 					<div class="field inline">
@@ -377,7 +321,67 @@ function buildReviewSection(): string {
  * Returns the two <script> blocks for the config panel webview.
  * Includes XSS protection via escHtml() for all user-controlled values rendered via innerHTML.
  */
-function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string, aliasRegex: string): string {
+function buildProfileDetailsHtml(): string {
+	return `					<details style="margin-bottom: 12px;">
+						<summary style="cursor: pointer; color: #3794ff; font-size: 12px; margin-bottom: 8px;">What do these profiles mean?</summary>
+						<div style="margin-top: 12px; font-size: 11px; line-height: 1.5;">
+							<div style="background: #2d2d30; border-left: 3px solid #555; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">🔒 Off (Local-only)</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> No one — data never leaves your device</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Nothing synced to Azure</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ Not synced</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ Not synced</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Use this to keep all data private on this device only.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #0e639c; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👤 Solo</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Only you (single-user Azure storage)</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ✅ <em>Actual names</em> (e.g., "frontend-monorepo")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ✅ <em>Actual names</em> (e.g., "DESKTOP-ABC123")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID (you're the only user)</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Perfect for personal tracking across multiple devices. No privacy concerns since only you have access.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #4ec9b0; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Anonymized</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Strongest team privacy: team sees aggregated usage but can't identify specific workspaces, machines, or users.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #c586c0; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Pseudonymous</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Stable alias auto-derived from Entra ID</em> (e.g., "dev-001")</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Track usage per-person without revealing real names. Same developer always gets same alias across sessions.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #d7ba7d; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Identified</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "frontend-monorepo")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "DESKTOP-ABC123")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Team alias OR Entra object ID</em> (e.g., "alex-dev" or GUID)</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Full transparency: team sees who uses what. Best for small teams or compliance scenarios.</div>
+							</div>
+							<div style="background: #3a3d41; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; margin-top: 12px;">
+								<div style="color: #f48771; font-size: 10px; font-weight: bold; margin-bottom: 4px;">⚠️ IMPORTANT</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Token counts, model names, and dates are <strong>always included</strong> when backend is enabled</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• "Who can see" means anyone with read access to your Azure Storage account</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Upgrading to more permissive profiles requires explicit consent</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Use the "Store readable workspace &amp; machine names" checkbox below to control name storage</div>
+							</div>
+						</div>
+					</details>`;
+}
+
+function buildToolkitScriptTag(nonce: string, toolkitUri: string): string {
 	return `	<script type="module" nonce="${nonce}">
 		// Register toolkit components before main script runs
 		try {
@@ -388,13 +392,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 		}
 		// Signal that toolkit registration is complete (or has failed)
 		window.__toolkitReady = true;
-	</script>
-	<script nonce="${nonce}">
-		const vscodeApi = acquireVsCodeApi();
-		const initial = ${initialState};
-		let currentState = initial;
-		const aliasRegex = new RegExp(${aliasRegex});
+	</script>`;
+}
 
+function buildCoreUtilFunctions(): string {
+	return `
 		/** Escapes HTML entities to prevent XSS when injecting user-controlled values via innerHTML. */
 		function escHtml(s) {
 			return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -451,7 +453,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			updateBlobSettingsState();
 			updateReviewSummary();
 		}
+`;
+}
 
+function buildSetErrorsAndSyncFunctions(): string {
+	return `
 		function setErrors(errors = {}) {
 			document.querySelectorAll('.error').forEach((el) => { el.textContent = ''; });
 			// Clear all aria-invalid attributes
@@ -494,7 +500,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			el.className = 'status-line ok';
 			el.textContent = 'Last sync: ' + when + ' (' + new Date(lastSyncAt).toLocaleTimeString() + ')';
 		}
+`;
+}
 
+function buildReadDraftFunction(): string {
+	return `
 		function readDraft() {
 			const profile = byId('sharingProfile').value;
 			const backendType = byId('backendType').value;
@@ -535,7 +545,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 				},
 			};
 		}
+`;
+}
 
+function buildValidateFunctions(): string {
+	return `
 		function validateLocal(draft) {
 			const errors = {};
 			if (!draft.datasetId || !draft.datasetId.trim()) errors.datasetId = 'Required';
@@ -583,7 +597,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			const allowSave = validation.valid && byId('confirmApply').checked;
 			byId('saveBtnReview').disabled = !allowSave;
 		}
+`;
+}
 
+function buildIdentityFunctions(): string {
+	return `
 		function updateIdentityVisibility() {
 			const isIdentified = byId('sharingProfile').value === 'teamIdentified';
 			byId('identityCard').style.display = isIdentified ? 'block' : 'none';
@@ -605,7 +623,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			const storedFor = (currentState?.draft?.azureResources?.storageAccount || '').trim();
 			return !!currentState.sharedKeySet && storage && storage === storedFor;
 		}
+`;
+}
 
+function buildEnabledStateFunctions(): string {
+	return `
 		function updateEnabledState() {
 			const draft = readDraft();
 			const enabled = draft.enabled;
@@ -663,7 +685,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 				}
 			}
 		}
+`;
+}
 
+function buildReviewAndAuthFunctions(): string {
+	return `
 		function updateReviewSummary() {
 			const draft = readDraft();
 			const summary = byId('reviewSummary');
@@ -732,7 +758,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			}
 			updateConnectionAvailability();
 		}
+`;
+}
 
+function buildNavAndBindFunctions(): string {
+	return `
 		function updateConnectionAvailability() {
 			const enabled = byId('enabledToggle').checked;
 			const offline = !navigator.onLine;
@@ -787,7 +817,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			});
 			byId('clearSettingsBtn').addEventListener('click', () => vscodeApi.postMessage({ command: 'clearAzureSettings' }));
 		}
+`;
+}
 
+function buildMessageHandlerAndInit(): string {
+	return `
 		window.addEventListener('message', (event) => {
 			const msg = event.data;
 			if (msg.type === 'state') {
@@ -833,6 +867,27 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 
 		waitForToolkit();
 	</script>`;
+}
+
+function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string, aliasRegex: string): string {
+	const scriptOpen = `
+	<script nonce="${nonce}">
+		const vscodeApi = acquireVsCodeApi();
+		const initial = ${initialState};
+		let currentState = initial;
+		const aliasRegex = new RegExp(${aliasRegex});
+`;
+	return buildToolkitScriptTag(nonce, toolkitUri)
+		+ scriptOpen
+		+ buildCoreUtilFunctions()
+		+ buildSetErrorsAndSyncFunctions()
+		+ buildReadDraftFunction()
+		+ buildValidateFunctions()
+		+ buildIdentityFunctions()
+		+ buildEnabledStateFunctions()
+		+ buildReviewAndAuthFunctions()
+		+ buildNavAndBindFunctions()
+		+ buildMessageHandlerAndInit();
 }
 
 /**
