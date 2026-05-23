@@ -1314,84 +1314,48 @@ function setupTabHandlers(): void {
   });
 }
 
-function setupButtonHandlers(): void {
-  document.getElementById("btn-copy")?.addEventListener("click", () => {
-    vscode.postMessage({ command: "copyReport" });
-  });
-
-  document.getElementById("btn-issue")?.addEventListener("click", () => {
-    vscode.postMessage({ command: "openIssue" });
-  });
-
-  document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
-    const btn = document.getElementById(
-      "btn-clear-cache",
-    ) as HTMLButtonElement | null;
-    if (btn) {
-      btn.style.background = "#d97706";
-      btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-      btn.disabled = true;
+function handleGlobalClickEvent(event: MouseEvent): void {
+  const target = event.target as HTMLElement;
+  if (!target) {
+    return;
+  }
+  if (
+    target.id === "btn-clear-cache" ||
+    target.id === "btn-clear-cache-tab"
+  ) {
+    target.style.background = "#d97706";
+    target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+    if (target instanceof HTMLButtonElement) {
+      target.disabled = true;
     }
     updateCacheNumbers();
     vscode.postMessage({ command: "clearCache" });
-  });
+  }
+  if (target.id === "btn-reset-debug-counters") {
+    vscode.postMessage({ command: "resetDebugCounters" });
+  }
+  if (target.classList.contains("debug-counter-set")) {
+    const key = target.getAttribute("data-key");
+    const row = target.closest("tr");
+    const input = row?.querySelector(".debug-counter-input") as HTMLInputElement | null;
+    if (key && input) {
+      const value = parseInt(input.value, 10);
+      if (!isNaN(value)) {
+        vscode.postMessage({ command: "setDebugCounter", key, value });
+      }
+    }
+  }
+  if (target.classList.contains("debug-flag-set")) {
+    const key = target.getAttribute("data-key");
+    const row = target.closest("tr");
+    const input = row?.querySelector(".debug-flag-input") as HTMLInputElement | null;
+    if (key && input) {
+      vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
+    }
+  }
+}
 
-  document
-    .getElementById("btn-clear-cache-tab")
-    ?.addEventListener("click", () => {
-      const btn = document.getElementById(
-        "btn-clear-cache-tab",
-      ) as HTMLButtonElement | null;
-      if (btn) {
-        btn.style.background = "#d97706";
-        btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-        btn.disabled = true;
-      }
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    });
-
-  document.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
-    if (!target) {
-      return;
-    }
-    if (
-      target.id === "btn-clear-cache" ||
-      target.id === "btn-clear-cache-tab"
-    ) {
-      target.style.background = "#d97706";
-      target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-      if (target instanceof HTMLButtonElement) {
-        target.disabled = true;
-      }
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    }
-    if (target.id === "btn-reset-debug-counters") {
-      vscode.postMessage({ command: "resetDebugCounters" });
-    }
-    if (target.classList.contains("debug-counter-set")) {
-      const key = target.getAttribute("data-key");
-      const row = target.closest("tr");
-      const input = row?.querySelector(".debug-counter-input") as HTMLInputElement | null;
-      if (key && input) {
-        const value = parseInt(input.value, 10);
-        if (!isNaN(value)) {
-          vscode.postMessage({ command: "setDebugCounter", key, value });
-        }
-      }
-    }
-    if (target.classList.contains("debug-flag-set")) {
-      const key = target.getAttribute("data-key");
-      const row = target.closest("tr");
-      const input = row?.querySelector(".debug-flag-input") as HTMLInputElement | null;
-      if (key && input) {
-        vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
-      }
-    }
-  });
-
+function wireNavButtons(): void {
   document
     .getElementById("btn-refresh")
     ?.addEventListener("click", () =>
@@ -1433,6 +1397,48 @@ function setupButtonHandlers(): void {
       vscode.postMessage({ command: "showEnvironmental" }),
     );
   wireExtensionPointButtons(vscode);
+}
+
+function setupButtonHandlers(): void {
+  document.getElementById("btn-copy")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "copyReport" });
+  });
+
+  document.getElementById("btn-issue")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "openIssue" });
+  });
+
+  document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
+    const btn = document.getElementById(
+      "btn-clear-cache",
+    ) as HTMLButtonElement | null;
+    if (btn) {
+      btn.style.background = "#d97706";
+      btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+      btn.disabled = true;
+    }
+    updateCacheNumbers();
+    vscode.postMessage({ command: "clearCache" });
+  });
+
+  document
+    .getElementById("btn-clear-cache-tab")
+    ?.addEventListener("click", () => {
+      const btn = document.getElementById(
+        "btn-clear-cache-tab",
+      ) as HTMLButtonElement | null;
+      if (btn) {
+        btn.style.background = "#d97706";
+        btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+        btn.disabled = true;
+      }
+      updateCacheNumbers();
+      vscode.postMessage({ command: "clearCache" });
+    });
+
+  document.addEventListener("click", handleGlobalClickEvent);
+
+  wireNavButtons();
 }
 
 function setupMessageHandlers(): void {
