@@ -68,6 +68,39 @@ return content.trim();
 }
 
 // ---------------------------------------------------------------------------
+// buildAntigravityTurns helpers
+// ---------------------------------------------------------------------------
+
+type BatTurnData = { assistantResponse: string; toolCalls: NonNullable<ChatTurn['toolCalls']>; thinkingContent: string };
+
+function _batProcessPlannerResponse(next: AntigravityEntry, data: BatTurnData): void {
+	if (next.content?.trim()) { data.assistantResponse += (data.assistantResponse ? '\n\n' : '') + next.content.trim(); }
+	if (next.thinking?.trim()) { data.thinkingContent += (data.thinkingContent ? '\n\n' : '') + next.thinking.trim(); }
+	if (!Array.isArray(next.tool_calls)) { return; }
+	for (const tc of next.tool_calls) {
+		if (tc.name) { data.toolCalls.push({ toolName: tc.name, arguments: tc.args ? JSON.stringify(tc.args) : undefined }); }
+	}
+}
+
+function _batProcessSearchWeb(next: AntigravityEntry, data: BatTurnData): void {
+	if (!next.content || data.toolCalls.length === 0) { return; }
+	const last = data.toolCalls[data.toolCalls.length - 1];
+	if (!last.result) { last.result = next.content.trim(); }
+}
+
+function _batCollectTurnData(allEntries: AntigravityEntry[], startIdx: number): BatTurnData {
+	const data: BatTurnData = { assistantResponse: '', toolCalls: [], thinkingContent: '' };
+	for (let j = startIdx + 1; j < allEntries.length; j++) {
+		const next = allEntries[j];
+		if (next.type === 'USER_INPUT' && next.source === 'USER_EXPLICIT') { break; }
+		if (next.source !== 'MODEL') { continue; }
+		if (next.type === 'PLANNER_RESPONSE') { _batProcessPlannerResponse(next, data); }
+		else if (next.type === 'SEARCH_WEB') { _batProcessSearchWeb(next, data); }
+	}
+	return data;
+}
+
+// ---------------------------------------------------------------------------
 // Data access class
 // ---------------------------------------------------------------------------
 
@@ -286,53 +319,15 @@ for (let i = 0; i < allEntries.length; i++) {
 const entry = allEntries[i];
 if (entry.type !== 'USER_INPUT' || entry.source !== 'USER_EXPLICIT') { continue; }
 turnNumber++;
-
 const userMessage = extractUserRequestText(entry.content ?? '');
-
-// Collect everything until the next USER_INPUT.
-let assistantResponse = '';
-const toolCalls: ChatTurn['toolCalls'] = [];
-let thinkingContent = '';
-
-for (let j = i + 1; j < allEntries.length; j++) {
-const next = allEntries[j];
-if (next.type === 'USER_INPUT' && next.source === 'USER_EXPLICIT') { break; }
-
-if (next.source === 'MODEL') {
-if (next.type === 'PLANNER_RESPONSE') {
-if (next.content && next.content.trim()) {
-assistantResponse += (assistantResponse ? '\n\n' : '') + next.content.trim();
-}
-if (next.thinking && next.thinking.trim()) {
-thinkingContent += (thinkingContent ? '\n\n' : '') + next.thinking.trim();
-}
-if (Array.isArray(next.tool_calls)) {
-for (const tc of next.tool_calls) {
-if (tc.name) {
-toolCalls.push({
-toolName: tc.name,
-arguments: tc.args ? JSON.stringify(tc.args) : undefined,
-});
-}
-}
-}
-} else if (next.type === 'SEARCH_WEB' && next.content) {
-// Treat SEARCH_WEB result as a tool call result.
-// The last tool call (if any) receives this as its result.
-if (toolCalls.length > 0 && !toolCalls[toolCalls.length - 1].result) {
-toolCalls[toolCalls.length - 1].result = next.content.trim();
-}
-}
-}
-}
-
+const { assistantResponse, toolCalls } = _batCollectTurnData(allEntries, i);
 turns.push({
 turnNumber,
 timestamp: entry.created_at ?? null,
 mode: 'cli',
 userMessage,
 assistantResponse,
-model: null, // Model name not available in transcript
+model: null,
 toolCalls,
 contextReferences: createEmptyContextRefs(),
 mcpTools: [],
