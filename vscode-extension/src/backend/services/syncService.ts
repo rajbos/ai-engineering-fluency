@@ -708,91 +708,75 @@ return false;
 	 * @returns Fluency metrics object ready for storage
 	 */
 	private extractFluencyMetricsFromCache(cachedData: any, ratio: number = 1): any {
-		if (!cachedData.usageAnalysis) {
-			return undefined;
-		}
-
+		if (!cachedData.usageAnalysis) { return undefined; }
 		const analysis = cachedData.usageAnalysis;
-		const fluencyMetrics: any = {};
-
-		// Extract mode usage counts
-		if (analysis.modeUsage) {
-			fluencyMetrics.askModeCount = Math.round((analysis.modeUsage.ask || 0) * ratio);
-			fluencyMetrics.editModeCount = Math.round((analysis.modeUsage.edit || 0) * ratio);
-			fluencyMetrics.agentModeCount = Math.round((analysis.modeUsage.agent || 0) * ratio);
-			fluencyMetrics.planModeCount = Math.round((analysis.modeUsage.plan || 0) * ratio);
-			fluencyMetrics.customAgentModeCount = Math.round((analysis.modeUsage.customAgent || 0) * ratio);
-			fluencyMetrics.cliModeCount = Math.round((analysis.modeUsage.cli || 0) * ratio);
-		}
-
-		// Serialize complex objects as JSON
-		if (analysis.toolCalls) {
-			fluencyMetrics.toolCallsJson = JSON.stringify(analysis.toolCalls);
-		}
-
-		if (analysis.contextReferences) {
-			fluencyMetrics.contextRefsJson = JSON.stringify(analysis.contextReferences);
-		}
-
-		if (analysis.mcpTools) {
-			fluencyMetrics.mcpToolsJson = JSON.stringify(analysis.mcpTools);
-		}
-
-		if (analysis.modelSwitching) {
-			fluencyMetrics.modelSwitchingJson = JSON.stringify(analysis.modelSwitching);
-		}
-
-		// NEW: Store editScope for full agentic scoring
-		if (analysis.editScope) {
-			fluencyMetrics.editScopeJson = JSON.stringify(analysis.editScope);
-			// Also store direct fields for easier querying
-			fluencyMetrics.multiFileEdits = analysis.editScope.multiFileEdits || 0;
-			fluencyMetrics.avgFilesPerEdit = analysis.editScope.avgFilesPerSession || 0;
-		}
-
-		// NEW: Store agentTypes for tool usage scoring
-		if (analysis.agentTypes) {
-			fluencyMetrics.agentTypesJson = JSON.stringify(analysis.agentTypes);
-		}
-
-		// NEW: Store repositories for customization scoring
-		if (analysis.repositories || analysis.repositoriesWithCustomization) {
-			const repoData = {
-				repositories: analysis.repositories || [],
-				repositoriesWithCustomization: analysis.repositoriesWithCustomization || []
-			};
-			fluencyMetrics.repositoriesJson = JSON.stringify(repoData);
-			
-			// Calculate and store customization rate
-			const totalRepos = (analysis.repositories || []).length;
-			const customizedRepos = (analysis.repositoriesWithCustomization || []).length;
-			if (totalRepos > 0) {
-				fluencyMetrics.repoCustomizationRate = customizedRepos / totalRepos;
-			}
-		}
-
-		// NEW: Store applyUsage for workflow integration scoring
-		if (analysis.applyUsage) {
-			fluencyMetrics.applyUsageJson = JSON.stringify(analysis.applyUsage);
-			fluencyMetrics.codeBlockApplyRate = analysis.applyUsage.applyRate || 0;
-		}
-
-		// NEW: Store sessionDuration data
-		if (analysis.sessionDuration) {
-			fluencyMetrics.sessionDurationJson = JSON.stringify(analysis.sessionDuration);
-		}
-
-		// Extract conversation patterns
-		if (analysis.conversationPatterns) {
-			fluencyMetrics.multiTurnSessions = analysis.conversationPatterns.multiTurnSessions || 0;
-			fluencyMetrics.avgTurnsPerSession = analysis.conversationPatterns.avgTurnsPerSession || 0;
-		}
-
-		// Count this as one session
-		fluencyMetrics.sessionCount = 1;
-
-		// Only return if we have at least some fluency metrics
+		const fluencyMetrics: any = {
+			...this.extractModeUsageFluency(analysis, ratio),
+			...this.extractJsonFieldsFluency(analysis),
+			...this.extractEditScopeFluency(analysis),
+			...this.extractRepositoriesFluency(analysis),
+			...this.extractActivityFluency(analysis),
+			sessionCount: 1
+		};
 		return Object.keys(fluencyMetrics).length > 0 ? fluencyMetrics : undefined;
+	}
+
+	private extractModeUsageFluency(analysis: any, ratio: number): any {
+		if (!analysis.modeUsage) { return {}; }
+		return {
+			askModeCount: Math.round((analysis.modeUsage.ask || 0) * ratio),
+			editModeCount: Math.round((analysis.modeUsage.edit || 0) * ratio),
+			agentModeCount: Math.round((analysis.modeUsage.agent || 0) * ratio),
+			planModeCount: Math.round((analysis.modeUsage.plan || 0) * ratio),
+			customAgentModeCount: Math.round((analysis.modeUsage.customAgent || 0) * ratio),
+			cliModeCount: Math.round((analysis.modeUsage.cli || 0) * ratio)
+		};
+	}
+
+	private extractJsonFieldsFluency(analysis: any): any {
+		const result: any = {};
+		if (analysis.toolCalls) { result.toolCallsJson = JSON.stringify(analysis.toolCalls); }
+		if (analysis.contextReferences) { result.contextRefsJson = JSON.stringify(analysis.contextReferences); }
+		if (analysis.mcpTools) { result.mcpToolsJson = JSON.stringify(analysis.mcpTools); }
+		if (analysis.modelSwitching) { result.modelSwitchingJson = JSON.stringify(analysis.modelSwitching); }
+		if (analysis.agentTypes) { result.agentTypesJson = JSON.stringify(analysis.agentTypes); }
+		if (analysis.sessionDuration) { result.sessionDurationJson = JSON.stringify(analysis.sessionDuration); }
+		return result;
+	}
+
+	private extractEditScopeFluency(analysis: any): any {
+		if (!analysis.editScope) { return {}; }
+		return {
+			editScopeJson: JSON.stringify(analysis.editScope),
+			multiFileEdits: analysis.editScope.multiFileEdits || 0,
+			avgFilesPerEdit: analysis.editScope.avgFilesPerSession || 0
+		};
+	}
+
+	private extractRepositoriesFluency(analysis: any): any {
+		if (!analysis.repositories && !analysis.repositoriesWithCustomization) { return {}; }
+		const repoData = {
+			repositories: analysis.repositories || [],
+			repositoriesWithCustomization: analysis.repositoriesWithCustomization || []
+		};
+		const result: any = { repositoriesJson: JSON.stringify(repoData) };
+		const totalRepos = (analysis.repositories || []).length;
+		const customizedRepos = (analysis.repositoriesWithCustomization || []).length;
+		if (totalRepos > 0) { result.repoCustomizationRate = customizedRepos / totalRepos; }
+		return result;
+	}
+
+	private extractActivityFluency(analysis: any): any {
+		const result: any = {};
+		if (analysis.applyUsage) {
+			result.applyUsageJson = JSON.stringify(analysis.applyUsage);
+			result.codeBlockApplyRate = analysis.applyUsage.applyRate || 0;
+		}
+		if (analysis.conversationPatterns) {
+			result.multiTurnSessions = analysis.conversationPatterns.multiTurnSessions || 0;
+			result.avgTurnsPerSession = analysis.conversationPatterns.avgTurnsPerSession || 0;
+		}
+		return result;
 	}
 
 	/**
