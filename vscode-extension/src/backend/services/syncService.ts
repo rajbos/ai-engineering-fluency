@@ -458,20 +458,36 @@ userId: string | undefined,
 rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
 editor?: string
 ): void {
-// Total interactions per model across all days — used to compute each day's fraction.
 const totalInteractionsPerModel = new Map<string, number>();
 for (const modelMap of dayModelInteractions.values()) {
 for (const [m, c] of modelMap) {
 totalInteractionsPerModel.set(m, (totalInteractionsPerModel.get(m) || 0) + c);
 }
 }
-
 for (const [dayKey, modelMap] of dayModelInteractions) {
+this.processModelInteractionsForDay(dayKey, modelMap, totalInteractionsPerModel, cachedData, sessionFile, workspaceId, machineId, userId, rollups, editor);
+}
+if (dayModelInteractions.size > 1) {
+const days = Array.from(dayModelInteractions.keys()).sort();
+this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${days.length} days: ${days.join(', ')}`);
+}
+}
+
+private processModelInteractionsForDay(
+dayKey: string,
+modelMap: Map<string, number>,
+totalInteractionsPerModel: Map<string, number>,
+cachedData: SessionFileCache,
+sessionFile: string,
+workspaceId: string,
+machineId: string,
+userId: string | undefined,
+rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
+editor?: string
+): void {
 for (const [model, interactions] of modelMap) {
 const cachedUsage = cachedData.modelUsage[model];
 if (!cachedUsage) { continue; }
-
-// Validate individual model token values — reject negative or non-finite values.
 const cachedInput = typeof cachedUsage.inputTokens === 'number' ? cachedUsage.inputTokens : NaN;
 const cachedOutput = typeof cachedUsage.outputTokens === 'number' ? cachedUsage.outputTokens : NaN;
 if (!Number.isFinite(cachedInput) || cachedInput < 0 ||
@@ -479,30 +495,13 @@ if (!Number.isFinite(cachedInput) || cachedInput < 0 ||
 this.deps.logger.warn(`Backend sync: invalid inputTokens or outputTokens in model usage for ${sessionFile}`);
 continue;
 }
-
 const key: DailyRollupKey = { day: dayKey, model, workspaceId, machineId, userId, editor };
-
-// Fraction of this model's interactions that fall on this day (for multi-day sessions).
 const totalModelInteractions = totalInteractionsPerModel.get(model) || 1;
 const dayFraction = totalModelInteractions > 0 ? interactions / totalModelInteractions : 1;
-
 const inputTokens = Math.round(cachedInput * dayFraction);
 const outputTokens = Math.round(cachedOutput * dayFraction);
-
 const fluencyMetrics = this.extractFluencyMetricsFromCache(cachedData, dayFraction);
-upsertDailyRollup(rollups, key, {
-inputTokens,
-outputTokens,
-interactions,
-fluencyMetrics
-});
-}
-}
-
-// Log if this file had data for multiple days
-if (dayModelInteractions.size > 1) {
-const days = Array.from(dayModelInteractions.keys()).sort();
-this.deps.logger.log(`Backend sync: file ${sessionFile.split(/[/\\]/).pop()} spans ${days.length} days: ${days.join(', ')}`);
+upsertDailyRollup(rollups, key, { inputTokens, outputTokens, interactions, fluencyMetrics });
 }
 }
 
