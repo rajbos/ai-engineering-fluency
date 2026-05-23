@@ -3016,7 +3016,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}> {
 		let title: string | undefined;
 		const timestamps: number[] = [];
-		// Request-level timestamps (excludes session creationDate) for per-day interaction counts
 		const requestTimestamps: number[] = [];
 
 		try {
@@ -3027,97 +3026,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 			}
 
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-
-			// Check if this is a UUID-only file (new Copilot CLI format)
 			if (_isUuidPointerFile(fileContent)) {
 				return { title, firstInteraction: null, lastInteraction: null, dailyInteractions: {} };
 			}
 
 			const isJsonlContent = sessionFile.endsWith('.jsonl') || _isJsonlContent(fileContent);
-
 			if (isJsonlContent) {
-				const lines = fileContent.trim().split('\n');
-				let firstUserMessage: string | undefined;
-				for (const line of lines) {
-					if (!line.trim()) { continue; }
-					try {
-						const event = JSON.parse(line);
-
-						// Handle Copilot CLI format
-						if (event.type === 'user.message') {
-							const ts = event.timestamp || event.ts || event.data?.timestamp;
-							if (ts) {
-								const ms = new Date(ts).getTime();
-								timestamps.push(ms);
-								requestTimestamps.push(ms);
-							}
-							if (!firstUserMessage && event.data?.content) {
-								firstUserMessage = event.data.content;
-							}
-						}
-
-						// Handle Copilot CLI rename_session tool call - always use the last rename
-						if (event.type === 'tool.execution_start' && event.data?.toolName === 'rename_session') {
-							if (event.data?.arguments?.title) { title = event.data.arguments.title; }
-						}
-
-						// Handle VS Code incremental .jsonl format
-						if (event.kind === 0 && event.v) {
-							// creationDate is session creation, not a request — only add to timestamps (not requestTimestamps)
-							if (event.v.creationDate) { timestamps.push(event.v.creationDate); }
-							// Always update title - we want the LAST title in the file (matches VS Code UI)
-							if (event.v.customTitle) { title = event.v.customTitle; }
-						}
-
-						// Handle kind: 2 events (requests array with timestamps)
-						if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-							for (const request of event.v) {
-								if (request.timestamp) {
-									timestamps.push(request.timestamp);
-									requestTimestamps.push(request.timestamp);
-								}
-							}
-						}
-
-						// Check kind: 1 (value updates) for title changes
-						if (event.kind === 1 && event.k?.includes('customTitle') && event.v) {
-							title = event.v;
-						}
-					} catch {
-						// Skip malformed lines
-					}
-				}
-
-				// Fall back to first user message if no explicit title was set
-				if (!title && firstUserMessage) {
-					const trimmed = firstUserMessage.trim();
-					title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
-				}
+				const result = this.extractMetadataFromJsonl(fileContent.trim().split('\n'));
+				title = result.title; timestamps.push(...result.timestamps); requestTimestamps.push(...result.requestTimestamps);
 			} else {
-				// JSON format - try to parse
-				try {
-					const parsed = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-					if (parsed.customTitle) { title = parsed.customTitle; }
-					// creationDate is session creation, not a request — only add to timestamps
-					if (parsed.creationDate) { timestamps.push(parsed.creationDate); }
-					// Extract timestamps from requests array (like getSessionFileDetails does)
-					if (parsed.requests && Array.isArray(parsed.requests)) {
-						for (const request of parsed.requests) {
-							if (request.timestamp || request.ts || request.result?.timestamp) {
-								const ts = request.timestamp || request.ts || request.result?.timestamp;
-								const ms = new Date(ts).getTime();
-								timestamps.push(ms);
-								requestTimestamps.push(ms);
-							}
-						}
-					}
-				} catch {
-					// Unable to parse
-				}
+				const result = this.extractMetadataFromJson(fileContent, preloadedParsedJson);
+				title = result.title; timestamps.push(...result.timestamps); requestTimestamps.push(...result.requestTimestamps);
 			}
-		} catch {
-			// File read error
-		}
+		} catch { /* file read error */ }
 
 		let firstInteraction: string | null = null;
 		let lastInteraction: string | null = null;
@@ -3127,7 +3048,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 			lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
 		}
 
-		// Build per-UTC-day interaction counts from request timestamps
 		const dailyInteractions: { [utcDayKey: string]: number } = {};
 		for (const ts of requestTimestamps) {
 			const dayKey = new Date(ts).toISOString().slice(0, 10);
@@ -3135,6 +3055,88 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		return { title, firstInteraction, lastInteraction, dailyInteractions };
+	}
+
+	private extractMetadataFromJsonl(lines: string[]): { title: string | undefined; timestamps: number[]; requestTimestamps: number[] } {
+		let title: string | undefined;
+		const timestamps: number[] = [];
+		const requestTimestamps: number[] = [];
+		let firstUserMessage: string | undefined;
+
+		for (const line of lines) {
+			if (!line.trim()) { continue; }
+			try {
+				const event = JSON.parse(line);
+				const userMsg = this.processUserMessageMetadata(event, timestamps, requestTimestamps);
+				if (userMsg && !firstUserMessage) { firstUserMessage = userMsg; }
+				const renameTitle = this.processRenameSessionTitle(event);
+				if (renameTitle) { title = renameTitle; }
+				const kind0Title = this.processKind0Metadata(event, timestamps);
+				if (kind0Title) { title = kind0Title; }
+				this.processKind2Requests(event, timestamps, requestTimestamps);
+				const kind1Title = this.processKind1TitleUpdate(event);
+				if (kind1Title) { title = kind1Title; }
+			} catch { /* skip malformed */ }
+		}
+
+		if (!title && firstUserMessage) {
+			const trimmed = firstUserMessage.trim();
+			title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
+		}
+		return { title, timestamps, requestTimestamps };
+	}
+
+	private processUserMessageMetadata(event: any, timestamps: number[], requestTimestamps: number[]): string | undefined {
+		if (event.type !== 'user.message') { return undefined; }
+		const ts = event.timestamp || event.ts || event.data?.timestamp;
+		if (ts) { const ms = new Date(ts).getTime(); timestamps.push(ms); requestTimestamps.push(ms); }
+		return event.data?.content as string | undefined;
+	}
+
+	private processRenameSessionTitle(event: any): string | undefined {
+		if (event.type === 'tool.execution_start' && event.data?.toolName === 'rename_session' && event.data?.arguments?.title) {
+			return event.data.arguments.title as string;
+		}
+		return undefined;
+	}
+
+	private processKind0Metadata(event: any, timestamps: number[]): string | undefined {
+		if (event.kind !== 0 || !event.v) { return undefined; }
+		if (event.v.creationDate) { timestamps.push(event.v.creationDate); }
+		return event.v.customTitle as string | undefined;
+	}
+
+	private processKind2Requests(event: any, timestamps: number[], requestTimestamps: number[]): void {
+		if (event.kind !== 2 || event.k?.[0] !== 'requests' || !Array.isArray(event.v)) { return; }
+		for (const request of event.v) {
+			if (request.timestamp) { timestamps.push(request.timestamp); requestTimestamps.push(request.timestamp); }
+		}
+	}
+
+	private processKind1TitleUpdate(event: any): string | undefined {
+		if (event.kind === 1 && event.k?.includes('customTitle') && event.v) { return event.v as string; }
+		return undefined;
+	}
+
+	private extractMetadataFromJson(fileContent: string, preloadedParsedJson?: any): { title: string | undefined; timestamps: number[]; requestTimestamps: number[] } {
+		let title: string | undefined;
+		const timestamps: number[] = [];
+		const requestTimestamps: number[] = [];
+		try {
+			const parsed = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+			if (parsed.customTitle) { title = parsed.customTitle; }
+			if (parsed.creationDate) { timestamps.push(parsed.creationDate); }
+			if (parsed.requests && Array.isArray(parsed.requests)) {
+				for (const request of parsed.requests) {
+					if (request.timestamp || request.ts || request.result?.timestamp) {
+						const ts = request.timestamp || request.ts || request.result?.timestamp;
+						const ms = new Date(ts).getTime();
+						timestamps.push(ms); requestTimestamps.push(ms);
+					}
+				}
+			}
+		} catch { /* unable to parse */ }
+		return { title, timestamps, requestTimestamps };
 	}
 
 	// Cached versions of session file reading methods
