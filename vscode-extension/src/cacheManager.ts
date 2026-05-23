@@ -108,42 +108,6 @@ export class CacheManager {
 		return path.join(this.context.globalStorageUri.fsPath, `cache_${cacheId}.lock`);
 	}
 
-	private async writeLockFile(lockPath: string): Promise<boolean> {
-		try {
-			const fd = await fs.promises.open(lockPath, 'wx');
-			await fd.writeFile(JSON.stringify({ sessionId: vscode.env.sessionId, pid: process.pid, timestamp: Date.now() }));
-			await fd.close();
-			return true;
-		} catch {
-			return false;
-		}
-	}
-
-	private isLockOwnerAlive(pid: number): boolean {
-		try {
-			process.kill(pid, 0);
-			return true;
-		} catch (killErr: unknown) {
-			if (killErr instanceof Error && (killErr as NodeJS.ErrnoException).code === 'ESRCH') { return false; }
-			return true; // EPERM means process exists but is owned by another user
-		}
-	}
-
-	private async handleExistingLock(lockPath: string, staleThreshold: number): Promise<boolean> {
-		try {
-			const content = await fs.promises.readFile(lockPath, 'utf-8');
-			const lock = JSON.parse(content);
-			const ownerAlive = typeof lock.pid === 'number' ? this.isLockOwnerAlive(lock.pid) : true;
-			const isTimestampStale = Date.now() - lock.timestamp > staleThreshold;
-			if (!ownerAlive || isTimestampStale) {
-				this.deps.log(ownerAlive ? 'Breaking stale cache lock' : 'Breaking stale cache lock (owner process no longer running)');
-				await fs.promises.unlink(lockPath);
-				return await this.writeLockFile(lockPath);
-			}
-		} catch { /* lock file deleted or unreadable */ }
-		return false;
-	}
-
 	/**
 	 * Acquire an exclusive file lock for cache writes.
 	 * Uses atomic file creation (O_EXCL / CREATE_NEW) to prevent concurrent writes
@@ -154,18 +118,59 @@ export class CacheManager {
 		const lockPath = this.getCacheLockPath();
 		try {
 			await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
+			return await this.writeLockFile(lockPath);
+		} catch (err: unknown) {
+			const errCode = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
+			if (errCode !== 'EEXIST') {
+				const message = err instanceof Error ? err.message : String(err);
+				this.deps.warn(`Unexpected error acquiring cache lock: ${message}`);
+				return false;
+			}
+			return this.handleExistingLock(lockPath);
+		}
+	}
+
+	private async writeLockFile(lockPath: string): Promise<boolean> {
+		try {
 			const fd = await fs.promises.open(lockPath, 'wx');
 			await fd.writeFile(JSON.stringify({ sessionId: vscode.env.sessionId, pid: process.pid, timestamp: Date.now() }));
 			await fd.close();
 			return true;
 		} catch (err: unknown) {
-			const errCode = err instanceof Error ? (err as NodeJS.ErrnoException).code : undefined;
-			if (errCode !== 'EEXIST') {
-				this.deps.warn(`Unexpected error acquiring cache lock: ${err instanceof Error ? err.message : String(err)}`);
-				return false;
-			}
-			return await this.handleExistingLock(lockPath, 5 * 60 * 1000);
+			if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'EEXIST') { throw err; }
+			return false;
 		}
+	}
+
+	private checkOwnerAlive(pid: unknown): boolean {
+		if (typeof pid !== 'number') { return true; }
+		try {
+			process.kill(pid, 0);
+			return true;
+		} catch (killErr: unknown) {
+			if (killErr instanceof Error && (killErr as NodeJS.ErrnoException).code === 'ESRCH') {
+				return false; // Process no longer exists
+			}
+			return true; // EPERM means process exists but is owned by another user
+		}
+	}
+
+	private async handleExistingLock(lockPath: string): Promise<boolean> {
+		try {
+			const content = await fs.promises.readFile(lockPath, 'utf-8');
+			const lock = JSON.parse(content);
+			const staleThreshold = 5 * 60 * 1000;
+			const ownerAlive = this.checkOwnerAlive(lock.pid);
+			const isTimestampStale = Date.now() - lock.timestamp > staleThreshold;
+			if (!ownerAlive || isTimestampStale) {
+				this.deps.log(ownerAlive ? 'Breaking stale cache lock' : 'Breaking stale cache lock (owner process no longer running)');
+				await fs.promises.unlink(lockPath);
+				return this.writeLockFile(lockPath);
+			}
+		} catch {
+			// Can't read lock file — might have been deleted by the owner already
+		}
+		return false;
 	}
 
 	/**
@@ -218,14 +223,6 @@ export class CacheManager {
 		}
 	}
 
-	private removeScopedKeyIfOld(key: string, prefix: string, currentKey: string): boolean {
-		if (!key.startsWith(prefix) || key === currentKey) { return false; }
-		const suffix = key.replace(prefix, '');
-		if (suffix === 'dev' || suffix === 'prod') { return false; }
-		this.context.globalState.update(key, undefined);
-		return true;
-	}
-
 	/**
 	 * One-time migration: remove old per-session cache keys that were created by
 	 * earlier versions of the extension (keys containing sessionId or timestamp).
@@ -238,15 +235,7 @@ export class CacheManager {
 			const currentVersionKey = `sessionFileCacheVersion_${currentCacheId}`;
 			let removedCount = 0;
 			for (const key of allKeys) {
-				if (key.startsWith('sessionFileCacheTimestamp_')) {
-					this.context.globalState.update(key, undefined);
-					removedCount++;
-					continue;
-				}
-				if (this.removeScopedKeyIfOld(key, 'sessionFileCache_', currentCacheKey)) { removedCount++; }
-				if (this.removeScopedKeyIfOld(key, 'sessionFileCacheVersion_', currentVersionKey)) { removedCount++; }
-				if (key === 'sessionFileCache' || key === 'sessionFileCacheVersion') {
-					this.context.globalState.update(key, undefined);
+				if (this.removeObsoleteCacheKey(key, currentCacheKey, currentVersionKey)) {
 					removedCount++;
 				}
 			}
@@ -256,6 +245,32 @@ export class CacheManager {
 		} catch (error) {
 			this.deps.error(`Error migrating old cache keys: ${error}`);
 		}
+	}
+
+	private removeObsoleteCacheKey(key: string, currentCacheKey: string, currentVersionKey: string): boolean {
+		if (key.startsWith('sessionFileCacheTimestamp_')) {
+			this.context.globalState.update(key, undefined);
+			return true;
+		}
+		if (key.startsWith('sessionFileCache_') && key !== currentCacheKey) {
+			const suffix = key.replace('sessionFileCache_', '');
+			if (suffix !== 'dev' && suffix !== 'prod') {
+				this.context.globalState.update(key, undefined);
+				return true;
+			}
+		}
+		if (key.startsWith('sessionFileCacheVersion_') && key !== currentVersionKey) {
+			const suffix = key.replace('sessionFileCacheVersion_', '');
+			if (suffix !== 'dev' && suffix !== 'prod') {
+				this.context.globalState.update(key, undefined);
+				return true;
+			}
+		}
+		if (key === 'sessionFileCache' || key === 'sessionFileCacheVersion') {
+			this.context.globalState.update(key, undefined);
+			return true;
+		}
+		return false;
 	}
 
 	async saveCacheToStorage(): Promise<void> {
