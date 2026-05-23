@@ -6087,7 +6087,8 @@ ${this.getLoadingHtmlScript()}
             var bf2 = document.getElementById('badge-files'); if (bf2) bf2.textContent = m.completed + '\\u202f/\\u202f' + m.total + ' files';
             var sc2 = document.getElementById('sc-parse'); if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
             var sub3 = document.getElementById('subtitle'); if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\\u202f/\\u202f' + m.total + '\\u2026';
-            if (m.completed % Math.max(1, Math.floor(m.total / 10)) === 0 && editorsSeen < EDITORS.length) {
+            var expectedPills = Math.min(EDITORS.length, Math.floor((m.completed / Math.max(1, m.total)) * EDITORS.length));
+            while (editorsSeen < expectedPills) {
                 var editor = EDITORS[editorsSeen]; editorsSeen++;
                 var row = document.getElementById('editors-row');
                 if (row) { var pill = document.createElement('div'); pill.className = 'chip'; pill.style.animation = 'pop-in 0.35s ease both'; pill.innerHTML = '<span>' + editor.icon + '</span>\\u00a0<span class="chip-value">' + esc(editor.name) + '</span>'; row.appendChild(pill); }
