@@ -1219,259 +1219,209 @@ return true;
 	 * @throws Error if sync fails due to network or auth issues
 	 */
 	async syncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<void> {
-		this.syncQueue = this.syncQueue.then(async () => {
-			if (this.backendSyncInProgress) {
-				return;
-			}
-			const sharingPolicy = computeBackendSharingPolicy({
-				enabled: settings.enabled,
-				profile: settings.sharingProfile,
-				shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
-			});
-			if (!sharingPolicy.allowCloudSync || !isConfigured) {
-				if (!sharingPolicy.allowCloudSync) {
-					this.deps.logger.log(`Backend sync: skipping (sharing policy does not allow cloud sync, profile: ${settings.sharingProfile})`);
-				} else if (!isConfigured) {
-					this.deps.logger.log('Backend sync: skipping (backend not configured - missing storage account, subscription, or resource group)');
-				}
-				return;
-			}
-
-			// Avoid excessive syncing when UI refreshes frequently.
-			const lastSyncAt = this.deps.context?.globalState.get<number>('backend.lastSyncAt');
-			if (!force && lastSyncAt && Date.now() - lastSyncAt < BACKEND_SYNC_MIN_INTERVAL_MS) {
-				const secondsSinceLastSync = Math.round((Date.now() - lastSyncAt) / 1000);
-				this.deps.logger.log(`Backend sync: skipping (last sync was ${secondsSinceLastSync}s ago, minimum interval is ${BACKEND_SYNC_MIN_INTERVAL_MS / 1000}s)`);
-				return;
-			}
-
-			// Acquire cross-instance file lock to prevent concurrent syncs from multiple VS Code
-			// windows targeting the same server. Windows configured for different endpoints are
-			// allowed to sync concurrently — the URL is stored in the lock and compared here.
-			const serverUrl = settings.backend === 'sharingServer'
-				? settings.sharingServerEndpointUrl
-				: settings.storageAccount;
-			const lockAcquired = await this.acquireSyncLock(settings.backend, serverUrl);
-			if (!lockAcquired) {
-				this.deps.logger.log('Backend sync: skipping (another VS Code window is currently syncing to the same server)');
-				return;
-			}
-
-			this.backendSyncInProgress = true;
-			try {
-				// Sharing server backend: entirely different sync path — no Azure deps.
-				if (settings.backend === 'sharingServer') {
-					await this.syncToSharingServer(settings, sharingPolicy);
-					try {
-						await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
-					} catch (e) {
-						this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
-					}
-					this.consecutiveFailures = 0;
-					return;
-				}
-
-				this.deps.logger.log('Backend sync: starting rollup sync');
-				const creds = await this.credentialService.getBackendDataPlaneCredentials(settings);
-				if (!creds) {
-					// Shared Key mode selected but key not available (or user canceled). Keep local mode functional.
-					this.deps.logger.warn('Backend sync: skipping (credentials not available - check authentication mode and secrets)');
-					// Update timestamp to prevent stale "last sync" display
-					try {
-						await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
-					} catch (e) {
-						this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
-					}
-					return;
-				}
-				await this.dataPlaneService.ensureTableExists(settings, creds.tableCredential);
-				await this.dataPlaneService.validateAccess(settings, creds.tableCredential);
-
-				// Check blob upload status upfront (before expensive file scanning)
-				let blobUploadNeeded = false;
-				if (settings.blobUploadEnabled && this.blobUploadService) {
-					const machineId = vscode.env.machineId;
-					const uploadSettings = {
-						enabled: settings.blobUploadEnabled,
-						containerName: settings.blobContainerName,
-						uploadFrequencyHours: settings.blobUploadFrequencyHours,
-						compressFiles: settings.blobCompressFiles
-					};
-					blobUploadNeeded = this.blobUploadService.shouldUpload(machineId, uploadSettings);
-					if (blobUploadNeeded) {
-						this.deps.logger.log('Blob upload: will upload session files after table sync');
-					} else {
-						const status = this.blobUploadService.getUploadStatus(machineId);
-						const hoursSince = status ? Math.round((Date.now() - status.lastUploadTime) / (1000 * 60 * 60)) : 0;
-						this.deps.logger.log(`Blob upload: not needed (last upload ${hoursSince}h ago, frequency: ${settings.blobUploadFrequencyHours}h)`);
-					}
-				}
-
-				// Fetch session files once and reuse for both rollups and blob upload
-				const sessionFiles = await this.deps.sessionHandlers.getCopilotSessionFiles();
-
-				const resolvedIdentity = await this.resolveEffectiveUserIdentityForSync(settings, sharingPolicy.includeUserDimension);
-				const { rollups, workspaceNamesById, machineNamesById } = await this.computeDailyRollupsFromLocalSessions({ 
-					lookbackDays: settings.lookbackDays, 
-					userId: resolvedIdentity.userId,
-					sessionFiles // Pass pre-fetched session files to avoid rescan
-				});
-				
-				// Log day keys being synced for better visibility
-				const dayKeys = new Set<string>();
-				for (const { key } of rollups.values()) {
-					dayKeys.add(key.day);
-				}
-				const sortedDays = Array.from(dayKeys).sort();
-				if (sortedDays.length > 0) {
-					this.deps.logger.log(`Backend sync: processing data for ${sortedDays.length} days: ${sortedDays.join(', ')}`);
-				}
-				
-				this.deps.logger.log(`Backend sync: upserting ${rollups.size} rollup entities (lookback ${settings.lookbackDays} days)`);
-
-				const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
-
-				// One-time cleanup: delete stale Azure entities for this user before upserting.
-				// Previous syncs may have written rows with incorrect model names, which create phantom
-				// RowKey entries that inflate the dashboard total. We track 'backend.lastCleanSyncVersion'
-				// so this runs once per cache version bump and not on every sync cycle.
-				const CLEAN_SYNC_VERSION = 2; // Bump when the delete logic changes
-				const lastCleanVersion = this.deps.context?.globalState.get<number>('backend.lastCleanSyncVersion') ?? 0;
-				const cacheWasCleared = lastCleanVersion < CLEAN_SYNC_VERSION;
-				if (cacheWasCleared && resolvedIdentity.userId && sortedDays.length > 0) {
-					const startDayKey = sortedDays[0];
-					const endDayKey = sortedDays[sortedDays.length - 1];
-					this.deps.logger.log(`Backend sync: cleaning stale entities for user "${resolvedIdentity.userId}" (${startDayKey} to ${endDayKey})`);
-					try {
-						const deleteResult = await this.dataPlaneService.deleteEntitiesForUserDataset({
-							tableClient,
-							userId: resolvedIdentity.userId,
-							datasetId: settings.datasetId,
-							startDayKey,
-							endDayKey,
-						});
-						this.deps.logger.log(`Backend sync: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
-						await this.deps.context?.globalState.update('backend.lastCleanSyncVersion', CLEAN_SYNC_VERSION);
-					} catch (e) {
-						this.deps.logger.warn(`Backend sync: failed to clean stale entities: ${e}`);
-					}
-				}
-
-				const entities: BackendAggDailyEntityLike[] = [];
-				for (const { key, value } of rollups.values()) {
-					const effectiveUserId = (key.userId ?? '').trim() || undefined;
-					const includeConsent = sharingPolicy.includeUserDimension && !!effectiveUserId;
-					const includeNames = sharingPolicy.includeNames;
-					const workspaceIdToStore = sharingPolicy.workspaceIdStrategy === 'hashed'
-						? hashWorkspaceIdForTeam({ datasetId: settings.datasetId, workspaceId: key.workspaceId })
-						: key.workspaceId;
-					const machineIdToStore = sharingPolicy.machineIdStrategy === 'hashed'
-						? hashMachineIdForTeam({ datasetId: settings.datasetId, machineId: key.machineId })
-						: key.machineId;
-					const workspaceName = includeNames ? workspaceNamesById[key.workspaceId] : undefined;
-					const machineName = includeNames ? machineNamesById[key.machineId] : undefined;
-					const entity = createDailyAggEntity({
-						datasetId: settings.datasetId,
-						day: key.day,
-						model: key.model,
-						workspaceId: workspaceIdToStore,
-						workspaceName,
-						machineId: machineIdToStore,
-						machineName,
-						userId: effectiveUserId,
-						userKeyType: resolvedIdentity.userKeyType,
-						shareWithTeam: includeConsent ? true : undefined,
-						consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.logger.log),
-						inputTokens: value.inputTokens,
-						outputTokens: value.outputTokens,
-						interactions: value.interactions,
-						fluencyMetrics: value.fluencyMetrics
-					});
-					entities.push(entity);
-				}
-
-				const { successCount, errors } = await this.dataPlaneService.upsertEntitiesBatch(tableClient, entities);
-				
-				if (errors.length > 0) {
-					this.deps.logger.warn(`Backend sync: ${successCount}/${entities.length} entities synced successfully, ${errors.length} failed`);
-				} else {
-					this.deps.logger.log(`Backend sync: ${successCount} entities synced successfully`);
-				}
-
-				this.consecutiveFailures = 0;
-
-				try {
-					await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
-				} catch (e) {
-					this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
-				}
-				
-				this.deps.logger.log('Backend sync: completed');
-				
-				// Upload session files to Blob Storage if needed (check was done earlier)
-				if (blobUploadNeeded && this.blobUploadService) {
-					try {
-						const machineId = vscode.env.machineId;
-						const uploadSettings = {
-							enabled: settings.blobUploadEnabled,
-							containerName: settings.blobContainerName,
-							uploadFrequencyHours: settings.blobUploadFrequencyHours,
-							compressFiles: settings.blobCompressFiles
-						};
-
-						this.deps.logger.log('Blob upload: starting');
-						
-						const uploadResult = await this.blobUploadService.uploadSessionFiles(
-							settings.storageAccount,
-							uploadSettings,
-							creds.blobCredential,
-							sessionFiles, // Reuse session files from rollup computation
-							machineId,
-							settings.datasetId
-						);
-						
-						if (uploadResult.success) {
-							this.deps.logger.log(`Blob upload: ${uploadResult.message}`);
-						} else {
-							this.deps.logger.warn(`Blob upload: ${uploadResult.message}`);
-						}
-					} catch (blobError: any) {
-						this.deps.logger.warn(`Blob upload: failed - ${blobError?.message ?? blobError}`);
-					}
-				}
-
-				// Additionally sync to sharing server if it is configured alongside Azure.
-				// The sharing server is an additive upload destination — it receives rollup data
-				// for the team dashboard independently of the Azure storage backend.
-				if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
-					try {
-						await this.syncToSharingServer(settings, sharingPolicy);
-					} catch (ssErr: unknown) {
-						this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
-					}
-				}
-
-				// DO NOT trigger UI refresh here - it causes redundant analysis and blocks UI
-				// The periodic timer in extension.ts will handle UI updates
-			} catch (e: unknown) {
-				// Keep local mode functional.
-				const secretsToRedact = await this.credentialService.getBackendSecretsToRedactForError(settings);
-				this.deps.logger.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
-
-				// Azure sync failed — still attempt the sharing server sync if configured.
-				if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
-					try {
-						await this.syncToSharingServer(settings, sharingPolicy);
-					} catch (ssErr: unknown) {
-						this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`);
-					}
-				}
-			} finally {
-				this.backendSyncInProgress = false;
-				await this.releaseSyncLock(settings.backend);
-			}
-		});
+		this.syncQueue = this.syncQueue.then(() => this.doSyncToBackendStore(force, settings, isConfigured));
 		return this.syncQueue;
+	}
+
+	private logSyncSkipReason(sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>, isConfigured: boolean, settings: BackendSettings): void {
+		if (!sharingPolicy.allowCloudSync) {
+			this.deps.logger.log(`Backend sync: skipping (sharing policy does not allow cloud sync, profile: ${settings.sharingProfile})`);
+		} else if (!isConfigured) {
+			this.deps.logger.log('Backend sync: skipping (backend not configured - missing storage account, subscription, or resource group)');
+		}
+	}
+
+	private async checkSyncThrottle(force: boolean): Promise<boolean> {
+		const lastSyncAt = this.deps.context?.globalState.get<number>('backend.lastSyncAt');
+		if (!force && lastSyncAt && Date.now() - lastSyncAt < BACKEND_SYNC_MIN_INTERVAL_MS) {
+			const secondsSinceLastSync = Math.round((Date.now() - lastSyncAt) / 1000);
+			this.deps.logger.log(`Backend sync: skipping (last sync was ${secondsSinceLastSync}s ago, minimum interval is ${BACKEND_SYNC_MIN_INTERVAL_MS / 1000}s)`);
+			return true;
+		}
+		return false;
+	}
+
+	private async tryUpdateLastSyncAt(): Promise<void> {
+		try {
+			await this.deps.context?.globalState.update('backend.lastSyncAt', Date.now());
+		} catch (e) {
+			this.deps.logger.warn(`Backend sync: failed to update lastSyncAt: ${e}`);
+		}
+	}
+
+	private async handleAzureSyncError(e: unknown, settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
+		const secretsToRedact = await this.credentialService.getBackendSecretsToRedactForError(settings);
+		this.deps.logger.warn(`Backend sync: ${safeStringifyError(e, secretsToRedact)}`);
+		if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
+			try { await this.syncToSharingServer(settings, sharingPolicy); }
+			catch (ssErr: unknown) { this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`); }
+		}
+	}
+
+	private async doSyncToBackendStore(force: boolean, settings: BackendSettings, isConfigured: boolean): Promise<void> {
+		if (this.backendSyncInProgress) { return; }
+		const sharingPolicy = computeBackendSharingPolicy({
+			enabled: settings.enabled,
+			profile: settings.sharingProfile,
+			shareWorkspaceMachineNames: settings.shareWorkspaceMachineNames
+		});
+		if (!sharingPolicy.allowCloudSync || !isConfigured) {
+			this.logSyncSkipReason(sharingPolicy, isConfigured, settings);
+			return;
+		}
+		if (await this.checkSyncThrottle(force)) { return; }
+		const serverUrl = settings.backend === 'sharingServer' ? settings.sharingServerEndpointUrl : settings.storageAccount;
+		if (!await this.acquireSyncLock(settings.backend, serverUrl)) {
+			this.deps.logger.log('Backend sync: skipping (another VS Code window is currently syncing to the same server)');
+			return;
+		}
+		this.backendSyncInProgress = true;
+		try {
+			if (settings.backend === 'sharingServer') {
+				await this.syncToSharingServer(settings, sharingPolicy);
+				await this.tryUpdateLastSyncAt();
+				this.consecutiveFailures = 0;
+				return;
+			}
+			await this.performAzureTableSync(settings, sharingPolicy);
+		} catch (e: unknown) {
+			await this.handleAzureSyncError(e, settings, sharingPolicy);
+		} finally {
+			this.backendSyncInProgress = false;
+			await this.releaseSyncLock(settings.backend);
+		}
+	}
+
+	private checkBlobUploadNeeded(settings: BackendSettings): boolean {
+		if (!settings.blobUploadEnabled || !this.blobUploadService) { return false; }
+		const machineId = vscode.env.machineId;
+		const uploadSettings = { enabled: settings.blobUploadEnabled, containerName: settings.blobContainerName, uploadFrequencyHours: settings.blobUploadFrequencyHours, compressFiles: settings.blobCompressFiles };
+		const needed = this.blobUploadService.shouldUpload(machineId, uploadSettings);
+		if (needed) {
+			this.deps.logger.log('Blob upload: will upload session files after table sync');
+		} else {
+			const status = this.blobUploadService.getUploadStatus(machineId);
+			const hoursSince = status ? Math.round((Date.now() - status.lastUploadTime) / (1000 * 60 * 60)) : 0;
+			this.deps.logger.log(`Blob upload: not needed (last upload ${hoursSince}h ago, frequency: ${settings.blobUploadFrequencyHours}h)`);
+		}
+		return needed;
+	}
+
+	private getSortedDayKeys(rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>): string[] {
+		const dayKeys = new Set<string>();
+		for (const { key } of rollups.values()) { dayKeys.add(key.day); }
+		return Array.from(dayKeys).sort();
+	}
+
+	private async maybeCleanStaleEntities(
+		settings: BackendSettings,
+		resolvedIdentity: { userId?: string; userKeyType?: BackendUserIdentityMode },
+		sortedDays: string[],
+		tableClient: any
+	): Promise<void> {
+		const CLEAN_SYNC_VERSION = 2;
+		const lastCleanVersion = this.deps.context?.globalState.get<number>('backend.lastCleanSyncVersion') ?? 0;
+		if (lastCleanVersion >= CLEAN_SYNC_VERSION || !resolvedIdentity.userId || sortedDays.length === 0) { return; }
+		const startDayKey = sortedDays[0];
+		const endDayKey = sortedDays[sortedDays.length - 1];
+		this.deps.logger.log(`Backend sync: cleaning stale entities for user "${resolvedIdentity.userId}" (${startDayKey} to ${endDayKey})`);
+		try {
+			const deleteResult = await this.dataPlaneService.deleteEntitiesForUserDataset({ tableClient, userId: resolvedIdentity.userId, datasetId: settings.datasetId, startDayKey, endDayKey });
+			this.deps.logger.log(`Backend sync: deleted ${deleteResult.deletedCount} stale entities (${deleteResult.errors.length} errors)`);
+			await this.deps.context?.globalState.update('backend.lastCleanSyncVersion', CLEAN_SYNC_VERSION);
+		} catch (e) {
+			this.deps.logger.warn(`Backend sync: failed to clean stale entities: ${e}`);
+		}
+	}
+
+	private buildEntitiesForSync(
+		rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>,
+		settings: BackendSettings,
+		sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>,
+		resolvedIdentity: { userId?: string; userKeyType?: BackendUserIdentityMode },
+		workspaceNamesById: Record<string, string>,
+		machineNamesById: Record<string, string>
+	): BackendAggDailyEntityLike[] {
+		const entities: BackendAggDailyEntityLike[] = [];
+		for (const { key, value } of rollups.values()) {
+			const effectiveUserId = (key.userId ?? '').trim() || undefined;
+			const includeConsent = sharingPolicy.includeUserDimension && !!effectiveUserId;
+			const includeNames = sharingPolicy.includeNames;
+			const workspaceIdToStore = sharingPolicy.workspaceIdStrategy === 'hashed'
+				? hashWorkspaceIdForTeam({ datasetId: settings.datasetId, workspaceId: key.workspaceId })
+				: key.workspaceId;
+			const machineIdToStore = sharingPolicy.machineIdStrategy === 'hashed'
+				? hashMachineIdForTeam({ datasetId: settings.datasetId, machineId: key.machineId })
+				: key.machineId;
+			entities.push(createDailyAggEntity({
+				datasetId: settings.datasetId, day: key.day, model: key.model,
+				workspaceId: workspaceIdToStore, workspaceName: includeNames ? workspaceNamesById[key.workspaceId] : undefined,
+				machineId: machineIdToStore, machineName: includeNames ? machineNamesById[key.machineId] : undefined,
+				userId: effectiveUserId, userKeyType: resolvedIdentity.userKeyType,
+				shareWithTeam: includeConsent ? true : undefined,
+				consentAt: validateConsentTimestamp(settings.shareConsentAt, this.deps.logger.log),
+				inputTokens: value.inputTokens, outputTokens: value.outputTokens,
+				interactions: value.interactions, fluencyMetrics: value.fluencyMetrics
+			}));
+		}
+		return entities;
+	}
+
+	private async performBlobUploadIfNeeded(settings: BackendSettings, creds: any, sessionFiles: string[]): Promise<void> {
+		try {
+			const machineId = vscode.env.machineId;
+			const uploadSettings = { enabled: settings.blobUploadEnabled, containerName: settings.blobContainerName, uploadFrequencyHours: settings.blobUploadFrequencyHours, compressFiles: settings.blobCompressFiles };
+			this.deps.logger.log('Blob upload: starting');
+			const uploadResult = await this.blobUploadService!.uploadSessionFiles(settings.storageAccount, uploadSettings, creds.blobCredential, sessionFiles, machineId, settings.datasetId);
+			if (uploadResult.success) { this.deps.logger.log(`Blob upload: ${uploadResult.message}`); }
+			else { this.deps.logger.warn(`Blob upload: ${uploadResult.message}`); }
+		} catch (blobError: any) {
+			this.deps.logger.warn(`Blob upload: failed - ${blobError?.message ?? blobError}`);
+		}
+	}
+
+	private async performAzureTableSync(settings: BackendSettings, sharingPolicy: ReturnType<typeof computeBackendSharingPolicy>): Promise<void> {
+		this.deps.logger.log('Backend sync: starting rollup sync');
+		const creds = await this.credentialService.getBackendDataPlaneCredentials(settings);
+		if (!creds) {
+			this.deps.logger.warn('Backend sync: skipping (credentials not available - check authentication mode and secrets)');
+			await this.tryUpdateLastSyncAt();
+			return;
+		}
+		await this.dataPlaneService.ensureTableExists(settings, creds.tableCredential);
+		await this.dataPlaneService.validateAccess(settings, creds.tableCredential);
+
+		const blobUploadNeeded = this.checkBlobUploadNeeded(settings);
+		const sessionFiles = await this.deps.sessionHandlers.getCopilotSessionFiles();
+		const resolvedIdentity = await this.resolveEffectiveUserIdentityForSync(settings, sharingPolicy.includeUserDimension);
+		const { rollups, workspaceNamesById, machineNamesById } = await this.computeDailyRollupsFromLocalSessions({
+			lookbackDays: settings.lookbackDays, userId: resolvedIdentity.userId, sessionFiles
+		});
+
+		const sortedDays = this.getSortedDayKeys(rollups);
+		if (sortedDays.length > 0) { this.deps.logger.log(`Backend sync: processing data for ${sortedDays.length} days: ${sortedDays.join(', ')}`); }
+		this.deps.logger.log(`Backend sync: upserting ${rollups.size} rollup entities (lookback ${settings.lookbackDays} days)`);
+
+		const tableClient = this.dataPlaneService.createTableClient(settings, creds.tableCredential);
+		await this.maybeCleanStaleEntities(settings, resolvedIdentity, sortedDays, tableClient);
+
+		const entities = this.buildEntitiesForSync(rollups, settings, sharingPolicy, resolvedIdentity, workspaceNamesById, machineNamesById);
+		const { successCount, errors } = await this.dataPlaneService.upsertEntitiesBatch(tableClient, entities);
+		if (errors.length > 0) {
+			this.deps.logger.warn(`Backend sync: ${successCount}/${entities.length} entities synced successfully, ${errors.length} failed`);
+		} else {
+			this.deps.logger.log(`Backend sync: ${successCount} entities synced successfully`);
+		}
+
+		this.consecutiveFailures = 0;
+		await this.tryUpdateLastSyncAt();
+		this.deps.logger.log('Backend sync: completed');
+
+		if (blobUploadNeeded && this.blobUploadService) { await this.performBlobUploadIfNeeded(settings, creds, sessionFiles); }
+		if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
+			try { await this.syncToSharingServer(settings, sharingPolicy); }
+			catch (ssErr: unknown) { this.deps.logger.warn(`Sharing server sync: failed - ${safeStringifyError(ssErr)}`); }
+		}
 	}
 
 	/**
