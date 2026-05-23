@@ -144,7 +144,7 @@ import {
 import { buildChartData as _buildChartData } from './chartDataBuilder';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, type SessionAggregateInput } from './statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, type SessionAggregateInput } from './statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -2191,7 +2191,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					const editorType = this.getEditorTypeFromPath(sessionFile);
 					const repository = sessionData.repository || 'Unknown';
 					if (sessionData.dailyRollups && Object.keys(sessionData.dailyRollups).length > 0) {
-						this.accumulateDailyRollups(dailyStatsMap, sessionData.dailyRollups, editorType, repository, cutoffUtcStartKey);
+						this.accumulateDailyRollups(dailyStatsMap, sessionData, editorType, repository, cutoffUtcStartKey);
 					} else {
 						this.accumulateSessionFallback(dailyStatsMap, sessionData, mtime, editorType, repository, cutoffUtcStartKey);
 					}
@@ -2208,7 +2208,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return result;
 	}
 
-	private accumulateDailyRollups(dailyStatsMap: Map<string, DailyTokenStats>, dailyRollups: Record<string, DailyRollupEntry>, editorType: string, repository: string, cutoffUtcStartKey: string): void {
+	private accumulateDailyRollups(dailyStatsMap: Map<string, DailyTokenStats>, sessionData: SessionFileCache, editorType: string, repository: string, cutoffUtcStartKey: string): void {
+		const dailyRollups = sessionData.dailyRollups!;
+		let lastDayKey: string | undefined;
 		for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
 			if (dayKey < cutoffUtcStartKey) { continue; }
 			const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
@@ -2226,6 +2228,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 			dailyEntry.repositoryUsage[repository].tokens += dayTokens;
 			dailyEntry.repositoryUsage[repository].sessions += 1;
 			addModelUsage(dailyEntry.modelUsage, dayRollup.modelUsage);
+			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
+		}
+		// Attribute session-level LOC to the last day bucket in the cutoff window
+		if (lastDayKey && (sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
+			const locEntry = dailyStatsMap.get(lastDayKey)!;
+			locEntry.linesAdded = (locEntry.linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
+			locEntry.linesRemoved = (locEntry.linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+			if (!locEntry.editorUsage[editorType]) { locEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
+			locEntry.editorUsage[editorType].linesAdded = (locEntry.editorUsage[editorType].linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
+			locEntry.editorUsage[editorType].linesRemoved = (locEntry.editorUsage[editorType].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+			if (!locEntry.repositoryUsage[repository]) { locEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
+			locEntry.repositoryUsage[repository].linesAdded = (locEntry.repositoryUsage[repository].linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
+			locEntry.repositoryUsage[repository].linesRemoved = (locEntry.repositoryUsage[repository].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+			if (sessionData.languageUsage) {
+				if (!locEntry.languageUsage) { locEntry.languageUsage = {}; }
+				addLanguageUsage(locEntry.languageUsage, sessionData.languageUsage);
+			}
 		}
 	}
 
@@ -2250,6 +2269,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 		dailyEntry.repositoryUsage[repository].tokens += tokens;
 		dailyEntry.repositoryUsage[repository].sessions += 1;
 		addModelUsage(dailyEntry.modelUsage, sessionData.modelUsage);
+		// LOC attribution
+		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
+			dailyEntry.linesAdded = (dailyEntry.linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
+			dailyEntry.linesRemoved = (dailyEntry.linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+			dailyEntry.editorUsage[editorType].linesAdded = (dailyEntry.editorUsage[editorType].linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
+			dailyEntry.editorUsage[editorType].linesRemoved = (dailyEntry.editorUsage[editorType].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+			dailyEntry.repositoryUsage[repository].linesAdded = (dailyEntry.repositoryUsage[repository].linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
+			dailyEntry.repositoryUsage[repository].linesRemoved = (dailyEntry.repositoryUsage[repository].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+			if (sessionData.languageUsage) {
+				if (!dailyEntry.languageUsage) { dailyEntry.languageUsage = {}; }
+				addLanguageUsage(dailyEntry.languageUsage, sessionData.languageUsage);
+			}
+		}
 	}
 
 	private detectMissedPotential(
