@@ -10,6 +10,25 @@ import * as os from 'os';
 import type { ModelUsage } from './types';
 import { normalizePathForComparison } from './workspaceHelpers';
 
+
+type ContinueTurn = {
+	userText: string;
+	assistantText: string;
+	model: string | null;
+	toolCalls: Array<{ toolName: string; arguments?: string; result?: string }>;
+	inputTokens: number;
+	outputTokens: number;
+};
+
+type TurnState = {
+	assistantText: string;
+	model: string | null;
+	inputTokens: number;
+	outputTokens: number;
+	toolCalls: Array<{ toolName: string; arguments?: string; result?: string }>;
+	pendingToolCalls: Map<string, { toolName: string; arguments?: string }>;
+};
+
 export class ContinueDataAccess {
 
 	/**
@@ -188,96 +207,82 @@ export class ContinueDataAccess {
 	 * Build chat turns from a Continue session's history array.
 	 * Returns an array of turn objects for the log viewer.
 	 */
-	buildContinueTurns(sessionFilePath: string): Array<{
-		userText: string;
-		assistantText: string;
-		model: string | null;
-		toolCalls: Array<{ toolName: string; arguments?: string; result?: string }>;
-		inputTokens: number;
-		outputTokens: number;
-	}> {
+	buildContinueTurns(sessionFilePath: string): ContinueTurn[] {
 		const session = this.readSessionFile(sessionFilePath);
 		if (!session || !Array.isArray(session.history)) { return []; }
 
 		const history: any[] = session.history;
-		const turns: Array<{
-			userText: string;
-			assistantText: string;
-			model: string | null;
-			toolCalls: Array<{ toolName: string; arguments?: string; result?: string }>;
-			inputTokens: number;
-			outputTokens: number;
-		}> = [];
-
+		const turns: ContinueTurn[] = [];
 		let i = 0;
 		while (i < history.length) {
 			const item = history[i];
 			if (item.message?.role !== 'user') { i++; continue; }
-
-			const userText = this.extractUserText(item.message.content);
-			let assistantText = '';
-			const toolCalls: Array<{ toolName: string; arguments?: string; result?: string }> = [];
-			let model: string | null = session.chatModelTitle || null;
-			let inputTokens = 0;
-			let outputTokens = 0;
-
-			// Pending tool calls waiting for their results
-			const pendingToolCalls: Map<string, { toolName: string; arguments?: string }> = new Map();
-
-			// Collect all subsequent non-user items until the next user message
-			let j = i + 1;
-			while (j < history.length && history[j].message?.role !== 'user') {
-				const sub = history[j];
-				const role = sub.message?.role;
-
-				if (role === 'assistant') {
-					// Accumulate assistant text
-					if (typeof sub.message.content === 'string' && sub.message.content) {
-						assistantText += sub.message.content;
-					}
-					// Get model from promptLogs
-					if (Array.isArray(sub.promptLogs) && sub.promptLogs.length > 0) {
-						const log = sub.promptLogs[0];
-						if (log.modelTitle) { model = log.modelTitle as string; }
-						for (const plog of sub.promptLogs) {
-							inputTokens += this.estimateTokens((plog.prompt as string) || '');
-							outputTokens += this.estimateTokens((plog.completion as string) || '');
-						}
-					}
-					// Collect tool calls
-					if (Array.isArray(sub.message.toolCalls)) {
-						for (const tc of sub.message.toolCalls) {
-							const toolName: string = tc.function?.name || tc.name || 'unknown';
-							const args: string | undefined = tc.function?.arguments;
-							const callId: string = tc.id || toolName;
-							pendingToolCalls.set(callId, { toolName, arguments: args });
-						}
-					}
-				} else if (role === 'tool') {
-					// Match tool result back to the pending tool call
-					const callId: string = sub.message.toolCallId || '';
-					const resultText = this.extractUserText(sub.message.content);
-					const pending = pendingToolCalls.get(callId);
-					if (pending) {
-						toolCalls.push({ ...pending, result: resultText });
-						pendingToolCalls.delete(callId);
-					} else {
-						// Unknown tool call id — just record with null toolName
-						toolCalls.push({ toolName: 'unknown', result: resultText });
-					}
-				}
-				j++;
-			}
-
-			// Flush any unmatched pending tool calls (no result received)
-			for (const [, pending] of pendingToolCalls) {
-				toolCalls.push(pending);
-			}
-
-			turns.push({ userText, assistantText, model, toolCalls, inputTokens, outputTokens });
-			i = j;
+			const { turn, nextIndex } = this.buildTurnFromHistory(history, i, session.chatModelTitle || null);
+			turns.push(turn);
+			i = nextIndex;
 		}
-
 		return turns;
+	}
+
+	private buildTurnFromHistory(history: any[], i: number, defaultModel: string | null): { turn: ContinueTurn; nextIndex: number } {
+		const userText = this.extractUserText(history[i].message.content);
+		const state: TurnState = {
+			assistantText: '',
+			model: defaultModel,
+			inputTokens: 0,
+			outputTokens: 0,
+			toolCalls: [],
+			pendingToolCalls: new Map(),
+		};
+		let j = i + 1;
+		while (j < history.length && history[j].message?.role !== 'user') {
+			const sub = history[j];
+			const role = sub.message?.role;
+			if (role === 'assistant') { this.processAssistantSubItem(sub, state); }
+			else if (role === 'tool') { this.processToolSubItem(sub, state); }
+			j++;
+		}
+		for (const [, pending] of state.pendingToolCalls) { state.toolCalls.push(pending); }
+		return {
+			turn: { userText, assistantText: state.assistantText, model: state.model, toolCalls: state.toolCalls, inputTokens: state.inputTokens, outputTokens: state.outputTokens },
+			nextIndex: j
+		};
+	}
+
+	private processAssistantSubItem(sub: any, state: TurnState): void {
+		if (typeof sub.message.content === 'string' && sub.message.content) {
+			state.assistantText += sub.message.content;
+		}
+		if (Array.isArray(sub.promptLogs) && sub.promptLogs.length > 0) {
+			const log = sub.promptLogs[0];
+			if (log.modelTitle) { state.model = log.modelTitle as string; }
+			for (const plog of sub.promptLogs) {
+				state.inputTokens += this.estimateTokens((plog.prompt as string) || '');
+				state.outputTokens += this.estimateTokens((plog.completion as string) || '');
+			}
+		}
+		this.collectToolCallsFromAssistant(sub, state);
+	}
+
+	private collectToolCallsFromAssistant(sub: any, state: TurnState): void {
+		if (!Array.isArray(sub.message.toolCalls)) { return; }
+		for (const tc of sub.message.toolCalls) {
+			const toolName: string = tc.function?.name || tc.name || 'unknown';
+			const args: string | undefined = tc.function?.arguments;
+			const callId: string = tc.id || toolName;
+			state.pendingToolCalls.set(callId, { toolName, arguments: args });
+		}
+	}
+
+	private processToolSubItem(sub: any, state: TurnState): void {
+		const callId: string = sub.message.toolCallId || '';
+		const resultText = this.extractUserText(sub.message.content);
+		const pending = state.pendingToolCalls.get(callId);
+		if (pending) {
+			state.toolCalls.push({ ...pending, result: resultText });
+			state.pendingToolCalls.delete(callId);
+		} else {
+			state.toolCalls.push({ toolName: 'unknown', result: resultText });
+		}
 	}
 }
