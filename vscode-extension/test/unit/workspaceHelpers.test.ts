@@ -475,6 +475,14 @@ test('detectEditorSource: Copilot CLI takes priority over code path', () => {
         assert.equal(detectEditorSource('/home/user/.copilot/session-state/session123.json'), 'Copilot CLI');
 });
 
+test('detectEditorSource: detects Copilot CLI from session-store.db virtual path (Unix)', () => {
+        assert.equal(detectEditorSource('/home/user/.copilot/session-store.db#3ee22c56-uuid'), 'Copilot CLI');
+});
+
+test('detectEditorSource: detects Copilot CLI from session-store.db virtual path (Windows)', () => {
+        assert.equal(detectEditorSource('C:\\Users\\alice\\.copilot\\session-store.db#3ee22c56-uuid'), 'Copilot CLI');
+});
+
 test('detectEditorSource: JetBrains detected from .copilot/jb path', () => {
         assert.equal(detectEditorSource('/home/user/.copilot/jb/uuid-1234/partition-0.jsonl'), 'JetBrains');
 });

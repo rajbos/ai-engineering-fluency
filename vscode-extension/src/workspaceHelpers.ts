@@ -961,6 +961,7 @@ export function detectEditorSource(filePath: string, isOpenCodeSessionFile?: (p:
 	const lowerPath = normalizePathForComparison(filePath);
 	if (lowerPath.includes('/.copilot/jb/')) { return 'JetBrains'; }
 	if (lowerPath.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
+	if (lowerPath.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
 	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
 	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }

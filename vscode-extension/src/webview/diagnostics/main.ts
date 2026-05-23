@@ -525,6 +525,11 @@ function renderSessionTable(
   // Count zero-interaction sessions (before hiding them) for the toggle label
   const zeroInteractionCount = filteredFiles.filter(sf => sf.interactions === 0).length;
 
+  // Auto-reveal hidden sessions when the current filter would leave nothing visible
+  if (hideEmptySessions && zeroInteractionCount === filteredFiles.length && filteredFiles.length > 0) {
+    hideEmptySessions = false;
+  }
+
   // Hide sessions with 0 interactions when filter is active
   if (hideEmptySessions) {
     filteredFiles = filteredFiles.filter(sf => sf.interactions > 0);
