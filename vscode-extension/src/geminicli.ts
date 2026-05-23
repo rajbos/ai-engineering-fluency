@@ -186,6 +186,19 @@ export class GeminiCliDataAccess {
 			&& normalized.endsWith('.jsonl');
 	}
 
+	private collectSessionFilesFromChatDir(chatsDir: string): string[] {
+		const files: string[] = [];
+		try {
+			const chatEntries = fs.readdirSync(chatsDir, { withFileTypes: true });
+			for (const entry of chatEntries) {
+				if (entry.isDirectory() || !entry.name.startsWith('session-') || !entry.name.endsWith('.jsonl')) { continue; }
+				const fullPath = path.join(chatsDir, entry.name);
+				try { if (fs.statSync(fullPath).size > 0) { files.push(fullPath); } } catch { /* skip */ }
+			}
+		} catch { /* ignore unreadable chat directories */ }
+		return files;
+	}
+
 	getGeminiCliSessionFiles(): string[] {
 		const tmpDir = this.getGeminiTmpDir();
 		if (!fs.existsSync(tmpDir)) { return []; }
@@ -194,6 +207,64 @@ export class GeminiCliDataAccess {
 			return projectDirs.flatMap(dir => _ggcsfCollectProjectFiles(tmpDir, dir));
 		} catch {
 			return [];
+		}
+	}
+
+	private parseGeminiSessionHeader(parsed: any): GeminiCliSessionHeader {
+		return {
+			sessionId: parsed.sessionId,
+			projectHash: isNonEmptyString(parsed.projectHash) ? parsed.projectHash : undefined,
+			startTime: isNonEmptyString(parsed.startTime) ? parsed.startTime : undefined,
+			lastUpdated: isNonEmptyString(parsed.lastUpdated) ? parsed.lastUpdated : undefined,
+			kind: isNonEmptyString(parsed.kind) ? parsed.kind : undefined,
+		};
+	}
+
+	private parseGeminiUserRecord(parsed: any, lineNumber: number, seenUserIds: Set<string>): GeminiCliUserRecord | null {
+		const userId = isNonEmptyString(parsed.id) ? parsed.id : `__user_${lineNumber}`;
+		if (seenUserIds.has(userId)) { return null; }
+		seenUserIds.add(userId);
+		return {
+			id: isNonEmptyString(parsed.id) ? parsed.id : undefined,
+			timestamp: isNonEmptyString(parsed.timestamp) ? parsed.timestamp : undefined,
+			type: 'user', content: parsed.content, lineNumber,
+		};
+	}
+
+	private parseGeminiAssistantRecord(parsed: any, lineNumber: number, counter: { value: number }): { id: string; record: GeminiCliAssistantRecord } {
+		const id = isNonEmptyString(parsed.id) ? parsed.id : `__assistant_${counter.value++}_${lineNumber}`;
+		return {
+			id,
+			record: {
+				id: isNonEmptyString(parsed.id) ? parsed.id : undefined,
+				timestamp: isNonEmptyString(parsed.timestamp) ? parsed.timestamp : undefined,
+				type: 'gemini', content: parsed.content,
+				thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : [],
+				tokens: parsed.tokens,
+				model: isNonEmptyString(parsed.model) ? parsed.model : undefined,
+				toolCalls: Array.isArray(parsed.toolCalls) ? parsed.toolCalls : [],
+				lineNumber,
+			},
+		};
+	}
+
+	private processOneParsedLine(line: string, lineNumber: number, state: {
+		header: GeminiCliSessionHeader | null; latestHeaderUpdate: string | undefined;
+		userRecords: GeminiCliUserRecord[]; assistantRecords: Map<string, GeminiCliAssistantRecord>;
+		seenUserIds: Set<string>; counter: { value: number };
+	}): void {
+		let parsed: any;
+		try { parsed = JSON.parse(line); } catch { return; }
+		if (!state.header && isNonEmptyString(parsed?.sessionId)) { state.header = this.parseGeminiSessionHeader(parsed); return; }
+		if (isNonEmptyString(parsed?.$set?.lastUpdated)) { state.latestHeaderUpdate = parsed.$set.lastUpdated; return; }
+		if (parsed?.type === 'user') {
+			const record = this.parseGeminiUserRecord(parsed, lineNumber, state.seenUserIds);
+			if (record) { state.userRecords.push(record); }
+			return;
+		}
+		if (parsed?.type === 'gemini') {
+			const { id, record } = this.parseGeminiAssistantRecord(parsed, lineNumber, state.counter);
+			state.assistantRecords.set(id, record);
 		}
 	}
 
@@ -361,6 +432,28 @@ export class GeminiCliDataAccess {
 		};
 	}
 
+	private processAssistantGroup(group: { assistants: GeminiCliAssistantRecord[] }): {
+		assistantContents: string[];
+		toolCalls: ChatTurn['toolCalls'];
+		model: string | null;
+		inputTokens: number; outputTokens: number; thinkingTokens: number; toolTokens: number; cachedTokens: number; totalTokens: number;
+	} {
+		const assistantContents: string[] = [];
+		const toolCalls: ChatTurn['toolCalls'] = [];
+		let model: string | null = null;
+		let inputTokens = 0; let outputTokens = 0; let thinkingTokens = 0; let toolTokens = 0; let cachedTokens = 0; let totalTokens = 0;
+		for (const assistant of group.assistants) {
+			const tok = this.getTokenBreakdown(assistant.tokens);
+			totalTokens += tok.total; inputTokens += tok.input; outputTokens += tok.output;
+			thinkingTokens += tok.thinking; toolTokens += tok.tool; cachedTokens += tok.cached;
+			const text = isNonEmptyString(assistant.content) ? assistant.content.trim() : '';
+			if (text.length > 0) { assistantContents.push(text); }
+			for (const tc of this.toDisplayToolCalls(assistant.toolCalls)) { toolCalls.push(tc); }
+			if (isNonEmptyString(assistant.model)) { model = normalizeGeminiModelId(assistant.model); }
+		}
+		return { assistantContents, toolCalls, model, inputTokens, outputTokens, thinkingTokens, toolTokens, cachedTokens, totalTokens };
+	}
+
 	buildGeminiCliTurns(sessionFilePath: string): { turns: ChatTurn[]; actualTokens: number } {
 		const session = this.readGeminiCliSession(sessionFilePath);
 		const groups = this.groupConversationTurns(session);
@@ -515,16 +608,7 @@ export class GeminiCliDataAccess {
 		return mappings;
 	}
 
-	private addProjectMapping(mappings: Map<string, string>, keyHint: string | undefined, value: unknown): void {
-		if (typeof value === 'string') {
-			this._apmHandleStringValue(mappings, keyHint, value);
-			return;
-		}
-		if (!value || typeof value !== 'object' || Array.isArray(value)) { return; }
-		this._apmHandleObjectValue(mappings, keyHint, value as Record<string, unknown>);
-	}
-
-	private _apmHandleStringValue(mappings: Map<string, string>, keyHint: string | undefined, value: string): void {
+	private applyStringValueMapping(mappings: Map<string, string>, keyHint: string | undefined, value: string): void {
 		if (keyHint && this.looksLikePath(keyHint) && !this.looksLikePath(value)) {
 			mappings.set(value, this.normalizeWorkspacePath(keyHint));
 		} else if (keyHint && !this.looksLikePath(keyHint) && this.looksLikePath(value)) {
@@ -532,10 +616,9 @@ export class GeminiCliDataAccess {
 		}
 	}
 
-	private _apmHandleObjectValue(mappings: Map<string, string>, keyHint: string | undefined, entry: Record<string, unknown>): void {
+	private applyObjectValueMapping(mappings: Map<string, string>, keyHint: string | undefined, entry: Record<string, unknown>): void {
 		const projectBucket = this.pickString(entry, ['projectHash', 'projectBucket', 'bucket', 'slug', 'name', 'id']);
 		const workspacePath = this.pickString(entry, ['workspacePath', 'path', 'directory', 'cwd', 'rootPath', 'repoPath', 'workspace', 'root']);
-
 		if (projectBucket && workspacePath && this.looksLikePath(workspacePath)) {
 			mappings.set(projectBucket, this.normalizeWorkspacePath(workspacePath));
 		}
@@ -545,6 +628,12 @@ export class GeminiCliDataAccess {
 		if (keyHint && !this.looksLikePath(keyHint) && workspacePath && this.looksLikePath(workspacePath)) {
 			mappings.set(keyHint, this.normalizeWorkspacePath(workspacePath));
 		}
+	}
+
+	private addProjectMapping(mappings: Map<string, string>, keyHint: string | undefined, value: unknown): void {
+		if (typeof value === 'string') { this.applyStringValueMapping(mappings, keyHint, value); return; }
+		if (!value || typeof value !== 'object' || Array.isArray(value)) { return; }
+		this.applyObjectValueMapping(mappings, keyHint, value as Record<string, unknown>);
 	}
 
 	private pickString(entry: Record<string, unknown>, keys: string[]): string | undefined {
