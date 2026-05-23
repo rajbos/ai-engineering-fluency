@@ -1635,6 +1635,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
 
 			let parsingStepNotified = false;
+			let lastProgressSentMs = 0;
 			const progressCallback = silent ? undefined : (completed: number, total: number) => {
 				const percentage = Math.round((completed / total) * 100);
 				this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
@@ -1642,7 +1643,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 					parsingStepNotified = true;
 					this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'parsing', total });
 				}
-				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
+				// Throttle panel updates to at most once per 500 ms to avoid flooding the webview
+				const now = Date.now();
+				if (now - lastProgressSentMs >= 500 || completed === total) {
+					lastProgressSentMs = now;
+					this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
+				}
 			};
 
 			// Single preload pass: discover all session files, stat, and parse/cache each one.
@@ -7345,7 +7351,9 @@ body {
     setInterval(function () {
         var s = Math.floor((Date.now() - t0) / 1000);
         var el = document.getElementById('badge-elapsed');
-        if (el) el.textContent = s + 's';
+        if (!el) return;
+        if (s < 60) { el.textContent = s + 's'; }
+        else { el.textContent = Math.floor(s / 60) + 'm ' + (s % 60) + 's'; }
     }, 1000);
 
     function ts() {
@@ -7444,11 +7452,8 @@ body {
             var sub3 = document.getElementById('subtitle');
             if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\u202f/\u202f' + m.total + '\u2026';
 
-            // Log every ~5% milestone
-            var stride = Math.max(1, Math.floor(m.total / 20));
-            if (m.completed % stride === 0 || m.completed === m.total) {
-                log('Parsing session ' + m.completed + '/' + m.total, true);
-            }
+            // Log each throttled update (extension already limits to ~500 ms intervals)
+            log('Parsing session ' + m.completed + '/' + m.total, true);
 
             // Whimsical: pop in a new editor pill at each ~10% milestone
             if (m.completed % Math.max(1, Math.floor(m.total / 10)) === 0 && editorsSeen < EDITORS.length) {
