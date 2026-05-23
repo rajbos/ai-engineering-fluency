@@ -825,99 +825,29 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 /**
  * Analyze text for context references like #file, #selection, @workspace
  */
+const CONTEXT_REF_PATTERNS: Array<[RegExp, keyof Omit<ContextReferenceUsage, 'byKind' | 'byPath'>]> = [
+	[/#file/gi, 'file'],
+	[/#selection/gi, 'selection'],
+	[/#symbol/gi, 'symbol'],
+	[/#sym(?![:\w])/gi, 'symbol'],
+	[/#codebase/gi, 'codebase'],
+	[/#terminalLastCommand/gi, 'terminalLastCommand'],
+	[/#terminalSelection/gi, 'terminalSelection'],
+	[/#clipboard/gi, 'clipboard'],
+	[/#changes/gi, 'changes'],
+	[/#outputPanel/gi, 'outputPanel'],
+	[/#problemsPanel\b/gi, 'problemsPanel'],
+	[/#pr\b/gi, 'pullRequest'],
+	[/#pullRequest\b/gi, 'pullRequest'],
+	[/@workspace/gi, 'workspace'],
+	[/@terminal/gi, 'terminal'],
+	[/@vscode/gi, 'vscode'],
+];
+
 export function analyzeContextReferences(text: string, refs: ContextReferenceUsage): void {
-	// Count #file references
-	const fileMatches = text.match(/#file/gi);
-	if (fileMatches) {
-		refs.file += fileMatches.length;
-	}
-
-	// Count #selection references
-	const selectionMatches = text.match(/#selection/gi);
-	if (selectionMatches) {
-		refs.selection += selectionMatches.length;
-	}
-
-	// Count #symbol and #sym references (both aliases)
-	// Note: #sym:symbolName format is handled via variableData, not text matching
-	const symbolMatches = text.match(/#symbol/gi);
-	const symMatches = text.match(/#sym(?![:\w])/gi);  // Negative lookahead: don't match #symbol or #sym:
-	if (symbolMatches) {
-		refs.symbol += symbolMatches.length;
-	}
-	if (symMatches) {
-		refs.symbol += symMatches.length;
-	}
-
-	// Count #codebase references
-	const codebaseMatches = text.match(/#codebase/gi);
-	if (codebaseMatches) {
-		refs.codebase += codebaseMatches.length;
-	}
-
-	// Count #terminalLastCommand references
-	const terminalLastCommandMatches = text.match(/#terminalLastCommand/gi);
-	if (terminalLastCommandMatches) {
-		refs.terminalLastCommand += terminalLastCommandMatches.length;
-	}
-
-	// Count #terminalSelection references
-	const terminalSelectionMatches = text.match(/#terminalSelection/gi);
-	if (terminalSelectionMatches) {
-		refs.terminalSelection += terminalSelectionMatches.length;
-	}
-
-	// Count #clipboard references
-	const clipboardMatches = text.match(/#clipboard/gi);
-	if (clipboardMatches) {
-		refs.clipboard += clipboardMatches.length;
-	}
-
-	// Count #changes references
-	const changesMatches = text.match(/#changes/gi);
-	if (changesMatches) {
-		refs.changes += changesMatches.length;
-	}
-
-	// Count #outputPanel references
-	const outputPanelMatches = text.match(/#outputPanel/gi);
-	if (outputPanelMatches) {
-		refs.outputPanel += outputPanelMatches.length;
-	}
-
-	// Count #problemsPanel references
-	const problemsPanelMatches = text.match(/#problemsPanel\b/gi);
-	if (problemsPanelMatches) {
-		refs.problemsPanel += problemsPanelMatches.length;
-	}
-
-	// Count #pr and #pullRequest references (Copilot PR chat, April 2026)
-	// Use word boundaries to avoid matching #problemsPanel or #pullRequestReview etc.
-	const prMatches = text.match(/#pr\b/gi);
-	if (prMatches) {
-		refs.pullRequest += prMatches.length;
-	}
-	const pullRequestMatches = text.match(/#pullRequest\b/gi);
-	if (pullRequestMatches) {
-		refs.pullRequest += pullRequestMatches.length;
-	}
-
-	// Count @workspace references
-	const workspaceMatches = text.match(/@workspace/gi);
-	if (workspaceMatches) {
-		refs.workspace += workspaceMatches.length;
-	}
-
-	// Count @terminal references
-	const terminalMatches = text.match(/@terminal/gi);
-	if (terminalMatches) {
-		refs.terminal += terminalMatches.length;
-	}
-
-	// Count @vscode references
-	const vscodeMatches = text.match(/@vscode/gi);
-	if (vscodeMatches) {
-		refs.vscode += vscodeMatches.length;
+	for (const [pattern, field] of CONTEXT_REF_PATTERNS) {
+		const matches = text.match(pattern);
+		if (matches) { (refs as unknown as Record<string, number>)[field] += matches.length; }
 	}
 }
 
