@@ -6518,7 +6518,16 @@ ${hashtag}`;
 ${buildCspMeta(webview, nonce)}
 <title>AI Engineering Fluency — Loading</title>
 <style>
-:root {
+${this.getLoadingHtmlCssBase()}
+${this.getLoadingHtmlCssSteps()}
+</style>
+</head>
+${this.getLoadingHtmlBody(nonce)}
+</html>`;
+  }
+
+  private getLoadingHtmlCssBase(): string {
+    return `:root {
     --bg-primary: var(--vscode-editor-background, #1e1e2e);
     --bg-secondary: var(--vscode-sideBar-background, #181825);
     --bg-card: var(--vscode-editorWidget-background, #24273a);
@@ -6532,143 +6541,32 @@ ${buildCspMeta(webview, nonce)}
 }
 * { box-sizing: border-box; margin: 0; padding: 0; }
 body {
-    background: var(--bg-primary);
-    color: var(--text-primary);
+    background: var(--bg-primary); color: var(--text-primary);
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-    min-height: 100vh;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
+    min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
 }
-.card {
-    width: 100%;
-    max-width: 680px;
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 16px;
-    padding: 24px 28px;
-    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
-}
-.header-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    margin-bottom: 4px;
-    gap: 16px;
-}
-.badge-label {
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.15em;
-    text-transform: uppercase;
-    color: var(--accent);
-    margin-bottom: 4px;
-}
-.title {
-    font-size: 22px;
-    font-weight: 700;
-    color: var(--text-primary);
-    margin-bottom: 4px;
-}
-.subtitle {
-    font-size: 12px;
-    color: var(--text-muted);
-    margin-bottom: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 380px;
-}
-.header-right {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-end;
-    gap: 6px;
-    flex-shrink: 0;
-}
-.pct-display {
-    font-size: 32px;
-    font-weight: 800;
-    color: var(--text-primary);
-    line-height: 1;
-    min-width: 70px;
-    text-align: right;
-    font-variant-numeric: tabular-nums;
-}
-.meta-badges {
-    display: flex;
-    gap: 6px;
-}
-.meta-badge {
-    font-size: 11px;
-    padding: 3px 10px;
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    color: var(--text-muted);
-    background: var(--bg-card);
-    white-space: nowrap;
-}
-.progress-wrap {
-    margin: 16px 0;
-}
-.progress-track {
-    height: 6px;
-    background: var(--border);
-    border-radius: 3px;
-    overflow: hidden;
-}
-.progress-fill {
-    height: 100%;
-    border-radius: 3px;
-    background: linear-gradient(90deg, var(--accent), var(--success));
-    transition: width 0.5s ease;
-    width: 2%;
-    position: relative;
-}
-.progress-fill.indeterminate {
-    width: 25%;
-    animation: slide-shimmer 1.8s ease-in-out infinite;
-    background: linear-gradient(90deg, transparent, var(--accent), var(--success), transparent);
-}
-@keyframes slide-shimmer {
-    0%   { margin-left: -30%; }
-    100% { margin-left: 110%; }
-}
-.stats-chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-    margin-bottom: 16px;
-}
-.chip {
-    display: inline-flex;
-    align-items: center;
-    gap: 5px;
-    padding: 5px 12px;
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 20px;
-    font-size: 12px;
-    color: var(--text-primary);
-}
-.chip .chip-value { font-weight: 700; }
-.steps-box {
-    background: var(--bg-card);
-    border: 1px solid var(--border);
-    border-radius: 10px;
-    padding: 14px 16px;
-    margin-bottom: 14px;
-}
-.step {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 5px 0;
-    color: var(--text-muted);
-    font-size: 13px;
-    transition: color 0.25s;
-}
+.card { width: 100%; max-width: 680px; background: var(--bg-secondary); border: 1px solid var(--border); border-radius: 16px; padding: 24px 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+.header-row { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; gap: 16px; }
+.badge-label { font-size: 11px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: var(--accent); margin-bottom: 4px; }
+.title { font-size: 22px; font-weight: 700; color: var(--text-primary); margin-bottom: 4px; }
+.subtitle { font-size: 12px; color: var(--text-muted); margin-bottom: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 380px; }
+.header-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+.pct-display { font-size: 32px; font-weight: 800; color: var(--text-primary); line-height: 1; min-width: 70px; text-align: right; font-variant-numeric: tabular-nums; }
+.meta-badges { display: flex; gap: 6px; }
+.meta-badge { font-size: 11px; padding: 3px 10px; border: 1px solid var(--border); border-radius: 20px; color: var(--text-muted); background: var(--bg-card); white-space: nowrap; }
+.progress-wrap { margin: 16px 0; }
+.progress-track { height: 6px; background: var(--border); border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--accent), var(--success)); transition: width 0.5s ease; width: 2%; position: relative; }
+.progress-fill.indeterminate { width: 25%; animation: slide-shimmer 1.8s ease-in-out infinite; background: linear-gradient(90deg, transparent, var(--accent), var(--success), transparent); }
+@keyframes slide-shimmer { 0% { margin-left: -30%; } 100% { margin-left: 110%; } }
+.stats-chips { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 16px; }
+.chip { display: inline-flex; align-items: center; gap: 5px; padding: 5px 12px; background: var(--bg-card); border: 1px solid var(--border); border-radius: 20px; font-size: 12px; color: var(--text-primary); }
+.chip .chip-value { font-weight: 700; }`;
+  }
+
+  private getLoadingHtmlCssSteps(): string {
+    return `.steps-box { background: var(--bg-card); border: 1px solid var(--border); border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+.step { display: flex; align-items: center; gap: 10px; padding: 5px 0; color: var(--text-muted); font-size: 13px; transition: color 0.25s; }
 .step.step-done   { color: var(--success); }
 .step.step-active { color: var(--accent); font-weight: 600; }
 .step-ico { width: 18px; text-align: center; flex-shrink: 0; font-style: normal; }
@@ -6676,16 +6574,12 @@ body {
 @keyframes spin { to { transform: rotate(360deg); } }
 .step-lbl { flex: 1; }
 .step-cnt { font-size: 11px; opacity: 0.75; font-variant-numeric: tabular-nums; }
-@keyframes pop-in {
-    0%   { transform: scale(0.4); opacity: 0; }
-    60%  { transform: scale(1.3); }
-    100% { transform: scale(1);   opacity: 1; }
-}
-.pop { animation: pop-in 0.35s ease both; }
+@keyframes pop-in { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.3); } 100% { transform: scale(1); opacity: 1; } }
+.pop { animation: pop-in 0.35s ease both; }`;
+  }
 
-</style>
-</head>
-<body>
+  private getLoadingHtmlBody(nonce: string): string {
+    return `<body>
 <div class="card">
     <div class="header-row">
         <div>
@@ -6701,166 +6595,86 @@ body {
             </div>
         </div>
     </div>
-
-    <div class="progress-wrap">
-        <div class="progress-track">
-            <div class="progress-fill indeterminate" id="prog-fill"></div>
-        </div>
-    </div>
-
+    <div class="progress-wrap"><div class="progress-track"><div class="progress-fill indeterminate" id="prog-fill"></div></div></div>
     <div class="stats-chips" id="chips" style="display:none">
         <div class="chip">📂 <span class="chip-value" id="chip-total">–</span> session files</div>
         <div class="chip">✅ <span class="chip-value" id="chip-done">–</span> processed</div>
     </div>
     <div id="editors-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;"></div>
-
     <div class="steps-box">
-        <div class="step step-active" id="s-discover">
-            <i class="step-ico"><span class="spin-ico">↻</span></i>
-            <span class="step-lbl">Discovering session files</span>
-            <span class="step-cnt" id="sc-discover"></span>
-        </div>
-        <div class="step" id="s-cache">
-            <i class="step-ico">○</i>
-            <span class="step-lbl">Checking cache</span>
-            <span class="step-cnt"></span>
-        </div>
-        <div class="step" id="s-parse">
-            <i class="step-ico">○</i>
-            <span class="step-lbl">Parsing session logs</span>
-            <span class="step-cnt" id="sc-parse"></span>
-        </div>
-        <div class="step" id="s-compute">
-            <i class="step-ico">○</i>
-            <span class="step-lbl">Computing statistics</span>
-            <span class="step-cnt"></span>
-        </div>
-        <div class="step" id="s-ready">
-            <i class="step-ico">○</i>
-            <span class="step-lbl">Ready!</span>
-            <span class="step-cnt"></span>
-        </div>
+        <div class="step step-active" id="s-discover"><i class="step-ico"><span class="spin-ico">↻</span></i><span class="step-lbl">Discovering session files</span><span class="step-cnt" id="sc-discover"></span></div>
+        <div class="step" id="s-cache"><i class="step-ico">○</i><span class="step-lbl">Checking cache</span><span class="step-cnt"></span></div>
+        <div class="step" id="s-parse"><i class="step-ico">○</i><span class="step-lbl">Parsing session logs</span><span class="step-cnt" id="sc-parse"></span></div>
+        <div class="step" id="s-compute"><i class="step-ico">○</i><span class="step-lbl">Computing statistics</span><span class="step-cnt"></span></div>
+        <div class="step" id="s-ready"><i class="step-ico">○</i><span class="step-lbl">Ready!</span><span class="step-cnt"></span></div>
     </div>
-
-
 </div>
 <script nonce="${nonce}">
-(function () {
+${this.getLoadingHtmlScript()}
+</script>
+</body>`;
+  }
+
+  private getLoadingHtmlScript(): string {
+    return `(function () {
     var t0 = Date.now();
     var EDITORS = [
-        { icon: '💙', name: 'VS Code' },
-        { icon: '🤖', name: 'Copilot CLI' },
-        { icon: '⚡', name: 'Cursor' },
-        { icon: '🟠', name: 'Claude Code' },
-        { icon: '🟢', name: 'OpenCode' },
-        { icon: '🔥', name: 'Mistral Vibe' },
-        { icon: '💎', name: 'Gemini CLI' },
-        { icon: '🪟', name: 'Visual Studio' },
-        { icon: '🔷', name: 'VSCodium' },
+        { icon: '💙', name: 'VS Code' }, { icon: '🤖', name: 'Copilot CLI' }, { icon: '⚡', name: 'Cursor' },
+        { icon: '🟠', name: 'Claude Code' }, { icon: '🟢', name: 'OpenCode' }, { icon: '🔥', name: 'Mistral Vibe' },
+        { icon: '💎', name: 'Gemini CLI' }, { icon: '🪟', name: 'Visual Studio' }, { icon: '🔷', name: 'VSCodium' },
         { icon: '💚', name: 'VS Code Insiders' },
     ];
     var editorsSeen = 0;
-
-    // Elapsed ticker
     setInterval(function () {
         var s = Math.floor((Date.now() - t0) / 1000);
         var el = document.getElementById('badge-elapsed');
         if (!el) return;
-        if (s < 60) { el.textContent = s + 's'; }
-        else { el.textContent = Math.floor(s / 60) + 'm ' + (s % 60) + 's'; }
+        if (s < 60) { el.textContent = s + 's'; } else { el.textContent = Math.floor(s / 60) + 'm ' + (s % 60) + 's'; }
     }, 1000);
-
-    function esc(s) {
-        return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+    function esc(s) { return s.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;'); }
+    function setDone(id) {
+        var el = document.getElementById(id); if (!el) return;
+        el.classList.remove('step-active'); el.classList.add('step-done');
+        var ico = el.querySelector('.step-ico'); if (ico) { ico.className = 'step-ico'; ico.innerHTML = '<span class="pop">✓</span>'; }
     }
-
-    function setDone(id, count) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        el.classList.remove('step-active');
-        el.classList.add('step-done');
-        var ico = el.querySelector('.step-ico');
-        if (ico) { ico.className = 'step-ico'; ico.innerHTML = '<span class="pop">✓</span>'; }
-    }
-
     function setActive(id) {
-        var el = document.getElementById(id);
-        if (!el) return;
-        el.classList.remove('step-done');
-        el.classList.add('step-active');
-        var ico = el.querySelector('.step-ico');
-        if (ico) { ico.className = 'step-ico'; ico.innerHTML = '<span class="spin-ico">↻</span>'; }
+        var el = document.getElementById(id); if (!el) return;
+        el.classList.remove('step-done'); el.classList.add('step-active');
+        var ico = el.querySelector('.step-ico'); if (ico) { ico.className = 'step-ico'; ico.innerHTML = '<span class="spin-ico">↻</span>'; }
     }
-
     window.addEventListener('message', function (ev) {
-        var m = ev.data;
-        if (!m) return;
-
+        var m = ev.data; if (!m) return;
         if (m.command === 'loadingStep') {
-            if (m.step === 'discovering') {
-                setActive('s-discover');
-
+            if (m.step === 'discovering') { setActive('s-discover');
             } else if (m.step === 'parsing') {
-                var total = m.total || 0;
-                setDone('s-discover');
-                var sc = document.getElementById('sc-discover');
-                if (sc) sc.textContent = '(' + total + ' found)';
-                setDone('s-cache');
-                setActive('s-parse');
-
-                var sub = document.getElementById('subtitle');
-                if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
-                var bf = document.getElementById('badge-files');
-                if (bf) bf.textContent = total + ' files';
-                var chips = document.getElementById('chips');
-                if (chips) chips.style.display = 'flex';
-                var ct = document.getElementById('chip-total');
-                if (ct) ct.textContent = total.toLocaleString();
-
+                var total = m.total || 0; setDone('s-discover');
+                var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)';
+                setDone('s-cache'); setActive('s-parse');
+                var sub = document.getElementById('subtitle'); if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
+                var bf = document.getElementById('badge-files'); if (bf) bf.textContent = total + ' files';
+                var chips = document.getElementById('chips'); if (chips) chips.style.display = 'flex';
+                var ct = document.getElementById('chip-total'); if (ct) ct.textContent = total.toLocaleString();
             } else if (m.step === 'computing') {
-                setDone('s-parse');
-                setActive('s-compute');
-                var fill = document.getElementById('prog-fill');
-                if (fill) { fill.classList.remove('indeterminate'); fill.style.width = '96%'; }
-                var pct = document.getElementById('pct');
-                if (pct) pct.textContent = '96%';
-                var sub2 = document.getElementById('subtitle');
-                if (sub2) sub2.textContent = 'Computing statistics...';
+                setDone('s-parse'); setActive('s-compute');
+                var fill = document.getElementById('prog-fill'); if (fill) { fill.classList.remove('indeterminate'); fill.style.width = '96%'; }
+                var pct = document.getElementById('pct'); if (pct) pct.textContent = '96%';
+                var sub2 = document.getElementById('subtitle'); if (sub2) sub2.textContent = 'Computing statistics...';
             }
-
         } else if (m.command === 'loadingProgress') {
-            var pct2 = document.getElementById('pct');
-            if (pct2) pct2.textContent = m.percentage + '%';
-            var fill2 = document.getElementById('prog-fill');
-            if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (m.percentage < 3 ? 3 : m.percentage) + '%'; }
-            var cd = document.getElementById('chip-done');
-            if (cd) cd.textContent = m.completed.toLocaleString();
-            var bf2 = document.getElementById('badge-files');
-            if (bf2) bf2.textContent = m.completed + '\u202f/\u202f' + m.total + ' files';
-            var sc2 = document.getElementById('sc-parse');
-            if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
-            var sub3 = document.getElementById('subtitle');
-            if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\u202f/\u202f' + m.total + '\u2026';
-
-            // Whimsical: pop in a new editor pill at each ~10% milestone
+            var pct2 = document.getElementById('pct'); if (pct2) pct2.textContent = m.percentage + '%';
+            var fill2 = document.getElementById('prog-fill'); if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (m.percentage < 3 ? 3 : m.percentage) + '%'; }
+            var cd = document.getElementById('chip-done'); if (cd) cd.textContent = m.completed.toLocaleString();
+            var bf2 = document.getElementById('badge-files'); if (bf2) bf2.textContent = m.completed + '\\u202f/\\u202f' + m.total + ' files';
+            var sc2 = document.getElementById('sc-parse'); if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
+            var sub3 = document.getElementById('subtitle'); if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\\u202f/\\u202f' + m.total + '\\u2026';
             if (m.completed % Math.max(1, Math.floor(m.total / 10)) === 0 && editorsSeen < EDITORS.length) {
-                var editor = EDITORS[editorsSeen];
-                editorsSeen++;
+                var editor = EDITORS[editorsSeen]; editorsSeen++;
                 var row = document.getElementById('editors-row');
-                if (row) {
-                    var pill = document.createElement('div');
-                    pill.className = 'chip';
-                    pill.style.animation = 'pop-in 0.35s ease both';
-                    pill.innerHTML = '<span>' + editor.icon + '</span>\u00a0<span class="chip-value">' + esc(editor.name) + '</span>';
-                    row.appendChild(pill);
-                }
+                if (row) { var pill = document.createElement('div'); pill.className = 'chip'; pill.style.animation = 'pop-in 0.35s ease both'; pill.innerHTML = '<span>' + editor.icon + '</span>\\u00a0<span class="chip-value">' + esc(editor.name) + '</span>'; row.appendChild(pill); }
             }
         }
     });
-}());
-</script>
-</body>
-</html>`;
+}());`;
   }
 
   private getDetailsHtml(
@@ -7552,94 +7366,47 @@ body {
   /**
    * Load session file details in the background and send to webview.
    */
-  private async loadSessionFilesInBackground(
-    panel: vscode.WebviewPanel,
-    sessionFiles: string[],
-  ): Promise<void> {
+  private async loadSessionFilesInBackground(panel: vscode.WebviewPanel, sessionFiles: string[]): Promise<void> {
     const fourteenDaysAgo = new Date();
     fourteenDaysAgo.setDate(fourteenDaysAgo.getDate() - 14);
     const detailedSessionFiles: SessionFileDetails[] = [];
-
-    // Track cache performance for this load operation
     const initialCacheHits = this._cacheHits;
     const initialCacheMisses = this._cacheMisses;
-
-    // Sort files by modification time (most recent first) before taking first 500
-    // This ensures we prioritize recent sessions regardless of their folder location
-    const fileStats = await Promise.all(
-      sessionFiles.map(async (file) => {
-        try {
-          const stat = await this.statSessionFile(file);
-          return { file, mtime: stat.mtime.getTime() };
-        } catch {
-          return { file, mtime: 0 };
-        }
-      }),
-    );
-
-    const sortedFiles = fileStats
-      .sort((a, b) => b.mtime - a.mtime)
-      .map((item) => item.file);
-
-    // Process up to 500 most recent session files
+    const sortedFiles = await this.sortSessionFilesByMtime(sessionFiles);
     for (const file of sortedFiles.slice(0, 500)) {
-      // Check if panel was disposed
-      if (!this.isPanelOpen(panel)) {
-        this.log("Diagnostic panel closed, stopping background load");
-        return;
-      }
-
+      if (!this.isPanelOpen(panel)) { this.log("Diagnostic panel closed, stopping background load"); return; }
       try {
         const details = await this.getSessionFileDetails(file);
-        // Only include sessions with activity (lastInteraction or file modified time) within the last x days
-        const lastActivity = details.lastInteraction
-          ? new Date(details.lastInteraction)
-          : new Date(details.modified);
-        if (lastActivity >= fourteenDaysAgo) {
-          detailedSessionFiles.push(details);
-        }
-      } catch {
-        // Skip inaccessible files
-      }
+        const lastActivity = details.lastInteraction ? new Date(details.lastInteraction) : new Date(details.modified);
+        if (lastActivity >= fourteenDaysAgo) { detailedSessionFiles.push(details); }
+      } catch { /* Skip inaccessible files */ }
     }
+    await this.sendBgLoadResults(panel, detailedSessionFiles, initialCacheHits, initialCacheMisses);
+  }
 
-    // Send the loaded data to the webview
+  private async sortSessionFilesByMtime(sessionFiles: string[]): Promise<string[]> {
+    const fileStats = await Promise.all(
+      sessionFiles.map(async (file) => {
+        try { const stat = await this.statSessionFile(file); return { file, mtime: stat.mtime.getTime() }; }
+        catch { return { file, mtime: 0 }; }
+      })
+    );
+    return fileStats.sort((a, b) => b.mtime - a.mtime).map((item) => item.file);
+  }
+
+  private async sendBgLoadResults(panel: vscode.WebviewPanel, detailedSessionFiles: SessionFileDetails[], initialCacheHits: number, initialCacheMisses: number): Promise<void> {
     try {
-      // Cache the loaded session files so we can re-send if the webview is recreated
-      if (panel === this.diagnosticsPanel) {
-        this.diagnosticsCachedFiles = detailedSessionFiles;
-      }
-      // Log summary stats
+      if (panel === this.diagnosticsPanel) { this.diagnosticsCachedFiles = detailedSessionFiles; }
       const withRepo = detailedSessionFiles.filter((s) => s.repository).length;
-      this.log(
-        `📊 Sending ${detailedSessionFiles.length} sessions to diagnostics (${withRepo} with repository info)`,
-      );
-      await panel.webview.postMessage({
-        command: "sessionFilesLoaded",
-        detailedSessionFiles,
-      });
-
-      // Calculate and log cache performance for this operation
+      this.log(`📊 Sending ${detailedSessionFiles.length} sessions to diagnostics (${withRepo} with repository info)`);
+      await panel.webview.postMessage({ command: "sessionFilesLoaded", detailedSessionFiles });
       const cacheHits = this._cacheHits - initialCacheHits;
       const cacheMisses = this._cacheMisses - initialCacheMisses;
       const totalAccesses = cacheHits + cacheMisses;
-      const hitRate =
-        totalAccesses > 0
-          ? ((cacheHits / totalAccesses) * 100).toFixed(1)
-          : "0.0";
-
-      this.log(
-        `Loaded ${detailedSessionFiles.length} session files in background (Cache: ${cacheHits} hits, ${cacheMisses} misses, ${hitRate}% hit rate)`,
-      );
-
-      // Mark diagnostics as loaded so we don't reload unnecessarily
-      if (panel === this.diagnosticsPanel) {
-        this.diagnosticsHasLoadedFiles = true;
-      }
-    } catch (err) {
-      // Panel may have been disposed
-      this.log("Could not send session files to panel (may be closed)");
-    }
+      const hitRate = totalAccesses > 0 ? ((cacheHits / totalAccesses) * 100).toFixed(1) : "0.0";
+      this.log(`Loaded ${detailedSessionFiles.length} session files in background (Cache: ${cacheHits} hits, ${cacheMisses} misses, ${hitRate}% hit rate)`);
+      if (panel === this.diagnosticsPanel) { this.diagnosticsHasLoadedFiles = true; }
+    } catch { this.log("Could not send session files to panel (may be closed)"); }
   }
 
   /**
@@ -7648,121 +7415,53 @@ body {
    * Does NOT touch the cache — reads each file once and calls countInteractionsInSession
    * and estimateTokensFromSession directly with preloaded content.
    */
-  private async analyzeFolderPath(
-    panel: vscode.WebviewPanel,
-    folderPath: string,
-    toolType: string,
-  ): Promise<void> {
-    const MAX_FILES = 500;
-    const MAX_DEPTH = 5;
+  private async analyzeFolderPath(panel: vscode.WebviewPanel, folderPath: string, toolType: string): Promise<void> {
+    const { allowJson, allowJsonl } = this.resolveFolderScanOptions(toolType);
+    const ctx = { results: [] as Array<{ file: string; size: number; modified: string; interactions: number; tokens: number; actualTokens: number }>, totalScanned: 0, parseErrors: 0, truncated: false };
+    await this.scanFolderRecursive(folderPath, 0, allowJson, allowJsonl, ctx);
+    if (this.isPanelOpen(panel)) {
+      panel.webview.postMessage({ command: "folderAnalysisResult", files: ctx.results, totalScanned: ctx.totalScanned, parseErrors: ctx.parseErrors, truncated: ctx.truncated, folderPath, toolType });
+    }
+  }
 
-    // Determine which extensions to accept
+  private resolveFolderScanOptions(toolType: string): { allowJson: boolean; allowJsonl: boolean } {
     const jsonOnly = ["claude-code", "gemini-cli"];
     const jsonlOnly = ["continue", "opencode", "mistral-vibe", "claude-desktop"];
-    let allowJson = true;
-    let allowJsonl = true;
-    if (jsonOnly.includes(toolType)) {
-      allowJson = false;
-      allowJsonl = true;
-    } else if (jsonlOnly.includes(toolType)) {
-      allowJson = true;
-      allowJsonl = false;
+    if (jsonOnly.includes(toolType)) { return { allowJson: false, allowJsonl: true }; }
+    if (jsonlOnly.includes(toolType)) { return { allowJson: true, allowJsonl: false }; }
+    return { allowJson: true, allowJsonl: true };
+  }
+
+  private async scanFolderRecursive(dir: string, depth: number, allowJson: boolean, allowJsonl: boolean, ctx: { results: Array<{ file: string; size: number; modified: string; interactions: number; tokens: number; actualTokens: number }>; totalScanned: number; parseErrors: number; truncated: boolean }): Promise<void> {
+    const MAX_FILES = 500; const MAX_DEPTH = 5;
+    if (ctx.totalScanned >= MAX_FILES) { ctx.truncated = true; return; }
+    if (depth > MAX_DEPTH) { return; }
+    let entries: fs.Dirent[];
+    try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const entry of entries) {
+      if (ctx.totalScanned >= MAX_FILES) { ctx.truncated = true; break; }
+      const full = path.join(dir, entry.name);
+      if (entry.isDirectory()) { await this.scanFolderRecursive(full, depth + 1, allowJson, allowJsonl, ctx); }
+      else if (entry.isFile()) {
+        const isJson = entry.name.endsWith(".json"); const isJsonl = entry.name.endsWith(".jsonl");
+        if ((isJson && allowJson) || (isJsonl && allowJsonl)) { await this.scanFolderFile(full, ctx); }
+      }
     }
+  }
 
-    const results: Array<{
-      file: string;
-      size: number;
-      modified: string;
-      interactions: number;
-      tokens: number;
-      actualTokens: number;
-    }> = [];
-    let totalScanned = 0;
-    let parseErrors = 0;
-    let truncated = false;
-
-    // Recursive scan helper
-    const scan = async (dir: string, depth: number): Promise<void> => {
-      if (totalScanned >= MAX_FILES) {
-        truncated = true;
-        return;
-      }
-      if (depth > MAX_DEPTH) { return; }
-
-      let entries: fs.Dirent[];
-      try {
-        entries = await fs.promises.readdir(dir, { withFileTypes: true });
-      } catch {
-        return;
-      }
-
-      for (const entry of entries) {
-        if (totalScanned >= MAX_FILES) {
-          truncated = true;
-          break;
-        }
-        const full = path.join(dir, entry.name);
-        if (entry.isDirectory()) {
-          await scan(full, depth + 1);
-        } else if (entry.isFile()) {
-          const isJson = entry.name.endsWith(".json");
-          const isJsonl = entry.name.endsWith(".jsonl");
-          if ((isJson && allowJson) || (isJsonl && allowJsonl)) {
-            totalScanned++;
-
-            let stat: fs.Stats;
-            try {
-              stat = await fs.promises.stat(full);
-            } catch {
-              parseErrors++;
-              continue;
-            }
-
-            let content: string;
-            try {
-              content = await fs.promises.readFile(full, "utf8");
-            } catch {
-              parseErrors++;
-              results.push({
-                file: full,
-                size: stat.size,
-                modified: stat.mtime.toISOString(),
-                interactions: 0,
-                tokens: 0,
-                actualTokens: 0,
-              });
-              continue;
-            }
-
-            const interactions = await this.countInteractionsInSession(full, content);
-            const tokenResult = await this.estimateTokensFromSession(full, content);
-
-            results.push({
-              file: full,
-              size: stat.size,
-              modified: stat.mtime.toISOString(),
-              interactions,
-              tokens: tokenResult.tokens,
-              actualTokens: tokenResult.actualTokens,
-            });
-          }
-        }
-      }
-    };
-
-    await scan(folderPath, 0);
-
-    if (this.isPanelOpen(panel)) {
-      panel.webview.postMessage({
-        command: "folderAnalysisResult",
-        files: results,
-        totalScanned,
-        parseErrors,
-        truncated,
-        folderPath,
-        toolType,
-      });
+  private async scanFolderFile(full: string, ctx: { results: Array<{ file: string; size: number; modified: string; interactions: number; tokens: number; actualTokens: number }>; totalScanned: number; parseErrors: number }): Promise<void> {
+    ctx.totalScanned++;
+    let stat: fs.Stats;
+    try { stat = await fs.promises.stat(full); } catch { ctx.parseErrors++; return; }
+    let content: string;
+    try { content = await fs.promises.readFile(full, "utf8"); } catch {
+      ctx.parseErrors++;
+      ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0, tokens: 0, actualTokens: 0 });
+      return;
     }
+    const interactions = await this.countInteractionsInSession(full, content);
+    const tokenResult = await this.estimateTokensFromSession(full, content);
+    ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions, tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens });
   }
 
   /**
