@@ -2232,16 +2232,16 @@ function renderRepositoryHygienePanels(): void {
 	detailsContainer.classList.toggle('repo-hygiene-pane-collapsed', !hasSelectedRepository);
 
 	const colStyles = {
-		sessions: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
-		interactions: 'width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
-		score: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
+		sessions: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
+		interactions: 'width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
+		score: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
 	};
 	const headerHtml = `
 		<div style="padding: 4px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary);">
-			<div style="flex: 1; min-width: 0; font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Repository</div>
-			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
-			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
-			<div style="${colStyles.score} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
+			<div style="flex: 1; min-width: 0; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Repository</div>
+			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
+			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
+			<div style="${colStyles.score} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
 			<div style="width: 80px; flex-shrink: 0;"></div>
 		</div>
 	`;
