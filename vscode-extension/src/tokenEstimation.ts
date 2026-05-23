@@ -258,6 +258,234 @@ export interface TokenEstimationStrategy {
 	estimate(lines: string[]): TokenEstimationResult;
 }
 
+// ---------------------------------------------------------------------------
+// DeltaTokenStrategy helpers
+// ---------------------------------------------------------------------------
+
+type DtsProcessResult = { totalTokens: number; totalThinkingTokens: number; sessionState: Record<string, unknown>; parseFailedLines: number };
+
+/** Process incremental kind:2 requests-append events, returning additional estimated tokens. */
+function _dtsProcessKind2Requests(v: unknown[]): number {
+	let tokens = 0;
+	for (const request of v) {
+		const req = request as { message?: { text?: string } };
+		if (req.message?.text) { tokens += estimateTokensFromText(req.message.text); }
+	}
+	return tokens;
+}
+
+/** Process incremental kind:2 response-append events, returning token and thinking deltas. */
+function _dtsProcessKind2Response(v: unknown[]): { tokensDelta: number; thinkingDelta: number } {
+	let tokensDelta = 0;
+	let thinkingDelta = 0;
+	for (const item of v) {
+		if (extractSubAgentData(item)) { continue; }
+		const { text, isThinking } = extractResponseItemText(item);
+		if (!text) { continue; }
+		if (isThinking) { thinkingDelta += estimateTokensFromText(text); }
+		else { tokensDelta += estimateTokensFromText(text); }
+	}
+	return { tokensDelta, thinkingDelta };
+}
+
+/** Iterate all JSONL lines, applying deltas and accumulating estimated tokens. */
+function _dtsProcessLines(lines: string[]): DtsProcessResult {
+	let totalTokens = 0;
+	let totalThinkingTokens = 0;
+	let sessionState: Record<string, unknown> = {};
+	let parseFailedLines = 0;
+	for (const line of lines) {
+		if (!line.trim()) { continue; }
+		try {
+			const event = JSON.parse(line);
+			sessionState = applyDelta(sessionState, event) as Record<string, unknown>;
+			if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
+				totalTokens += _dtsProcessKind2Requests(event.v);
+			}
+			if (event.kind === 2 && event.k?.includes('response') && Array.isArray(event.v)) {
+				const { tokensDelta, thinkingDelta } = _dtsProcessKind2Response(event.v);
+				totalTokens += tokensDelta;
+				totalThinkingTokens += thinkingDelta;
+			}
+		} catch { parseFailedLines++; }
+	}
+	return { totalTokens, totalThinkingTokens, sessionState, parseFailedLines };
+}
+
+/** Extract actual token count from a single request result object, or null if unavailable. */
+function _dtsGetRequestTokens(result: unknown): number | null {
+	if (!result || typeof result !== 'object') { return null; }
+	const r = result as { promptTokens?: number; outputTokens?: number; metadata?: { promptTokens?: number; outputTokens?: number }; usage?: { promptTokens?: number; completionTokens?: number } };
+	if (typeof r.promptTokens === 'number' && typeof r.outputTokens === 'number') { return r.promptTokens + r.outputTokens; }
+	if (r.metadata && typeof r.metadata.promptTokens === 'number' && typeof r.metadata.outputTokens === 'number') { return r.metadata.promptTokens + r.metadata.outputTokens; }
+	if (r.usage) {
+		const prompt = typeof r.usage.promptTokens === 'number' ? r.usage.promptTokens : 0;
+		const completion = typeof r.usage.completionTokens === 'number' ? r.usage.completionTokens : 0;
+		return prompt + completion;
+	}
+	return null;
+}
+
+/** Compute total actual tokens from reconstructed requests, using regex fallback where needed. */
+function _dtsComputeActualTokens(requests: unknown[], rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>): number {
+	let total = 0;
+	let maxIndex = requests.length;
+	for (const idx of rawUsageFallback.keys()) { if (idx + 1 > maxIndex) { maxIndex = idx + 1; } }
+	for (let i = 0; i < maxIndex; i++) {
+		const tokens = _dtsGetRequestTokens(getRequestResult(requests[i]));
+		if (tokens !== null) { total += tokens; }
+		else { const extracted = rawUsageFallback.get(i); if (extracted) { total += extracted.promptTokens + extracted.outputTokens; } }
+	}
+	return total;
+}
+
+/** Count estimated tokens from sub-agent invocations in the reconstructed state. */
+function _dtsCountSubAgentTokens(requests: unknown[]): number {
+	let total = 0;
+	for (const request of requests) {
+		const responseItems = getResponseArray(request);
+		if (!responseItems) { continue; }
+		for (const responseItem of responseItems) {
+			const subAgent = extractSubAgentData(responseItem);
+			if (!subAgent) { continue; }
+			if (subAgent.prompt) { total += estimateTokensFromText(subAgent.prompt); }
+			if (subAgent.result) { total += estimateTokensFromText(subAgent.result); }
+		}
+	}
+	return total;
+}
+
+// ---------------------------------------------------------------------------
+// EventJsonlTokenStrategy helpers
+// ---------------------------------------------------------------------------
+
+type EjsState = {
+	totalTokens: number;
+	totalThinkingTokens: number;
+	cliActualTokens: number;
+	cliCacheReadTokens: number;
+	cliShutdownModelUsage: ModelUsage | null;
+	cliRealOutputByModel: { [model: string]: number } | null;
+	totalEstToolCalls: number;
+	dailyActualTokens: Record<string, number>;
+};
+
+/** Accumulate token data for a single model from a session.shutdown event. Returns input+output total. */
+function _ejsAccumulateShutdownModel(modelName: string, metrics: ShutdownModelMetrics, state: EjsState): number {
+	const usage = metrics?.usage;
+	if (!usage) { return 0; }
+	const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
+	const output = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
+	const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
+	const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
+	state.cliActualTokens += input + output;
+	state.cliCacheReadTokens += cacheRead;
+	const ms = state.cliShutdownModelUsage!;
+	if (!ms[modelName]) { ms[modelName] = { inputTokens: 0, outputTokens: 0 }; }
+	ms[modelName].inputTokens += input;
+	ms[modelName].outputTokens += output;
+	if (cacheRead > 0) { ms[modelName].cachedReadTokens = (ms[modelName].cachedReadTokens ?? 0) + cacheRead; }
+	if (cacheWrite > 0) { ms[modelName].cacheCreationTokens = (ms[modelName].cacheCreationTokens ?? 0) + cacheWrite; }
+	return input + output;
+}
+
+/** Attribute a shutdown event's token total to its UTC day in dailyActualTokens. */
+function _ejsAttributeShutdownToDay(event: any, shutdownTotal: number, dailyActualTokens: Record<string, number>): void {
+	if (shutdownTotal <= 0 || !event.timestamp) { return; }
+	const dayKey = new Date(event.timestamp).toISOString().slice(0, 10);
+	if (dayKey && dayKey !== 'Inval') { dailyActualTokens[dayKey] = (dailyActualTokens[dayKey] || 0) + shutdownTotal; }
+}
+
+/** Process a session.shutdown event, accumulating exact token totals from modelMetrics. */
+function _ejsProcessShutdownEvent(event: any, state: EjsState): void {
+	if (!event.data?.modelMetrics) { return; }
+	if (!state.cliShutdownModelUsage) { state.cliShutdownModelUsage = {}; }
+	let shutdownTotal = 0;
+	for (const [modelName, metrics] of Object.entries(event.data.modelMetrics) as [string, ShutdownModelMetrics][]) {
+		shutdownTotal += _ejsAccumulateShutdownModel(modelName, metrics, state);
+	}
+	_ejsAttributeShutdownToDay(event, shutdownTotal, state.dailyActualTokens);
+}
+
+/** Accumulate thinking tokens from assistant.message event data. */
+function _ejsAccumulateThinkingTokens(event: any, state: EjsState): void {
+	if (typeof event.data?.reasoningText === 'string' && event.data.reasoningText) {
+		state.totalThinkingTokens += estimateTokensFromText(event.data.reasoningText);
+	}
+	const thinkingText = event.data?.thinking?.text;
+	if (typeof thinkingText === 'string' && thinkingText) {
+		state.totalThinkingTokens += estimateTokensFromText(thinkingText);
+	}
+}
+
+/** Handle an assistant.message event, capturing output tokens and thinking tokens. */
+function _ejsHandleAssistantMessage(event: any, state: EjsState): void {
+	const realOut = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
+	if (realOut > 0) {
+		if (!state.cliRealOutputByModel) { state.cliRealOutputByModel = {}; }
+		const m = event.data?.model || 'unknown';
+		state.cliRealOutputByModel[m] = (state.cliRealOutputByModel[m] ?? 0) + realOut;
+	} else if (event.data?.content) {
+		state.totalTokens += estimateTokensFromText(event.data.content);
+	}
+	_ejsAccumulateThinkingTokens(event, state);
+}
+
+/** Handle a tool.execution_complete event, estimating tool output as input tokens. */
+function _ejsHandleToolComplete(event: any, state: EjsState): void {
+	const result = event.data?.result;
+	if (!result) { return; }
+	const text = typeof result.detailedContent === 'string' ? result.detailedContent : typeof result.content === 'string' ? result.content : '';
+	if (text) { state.totalTokens += estimateTokensFromText(text); }
+}
+
+/** Dispatch a message or tool event to the appropriate handler in state. */
+function _ejsProcessMessageAndToolEvents(event: any, state: EjsState): void {
+	if (event.type === 'user.message' && event.data?.content) {
+		state.totalTokens += estimateTokensFromText(event.data.content);
+	} else if (event.type === 'user.message_rendered' && event.data?.renderedMessage) {
+		state.totalTokens += estimateTokensFromText(event.data.renderedMessage);
+	} else if (event.type === 'assistant.message') {
+		_ejsHandleAssistantMessage(event, state);
+	} else if (event.type === 'tool.execution_start') {
+		state.totalEstToolCalls++;
+	} else if (event.type === 'tool.execution_complete') {
+		_ejsHandleToolComplete(event, state);
+	} else if (event.content) {
+		state.totalTokens += estimateTokensFromText(event.content);
+	}
+}
+
+/** Iterate all JSONL lines, processing events into the accumulator state. */
+function _ejsProcessLines(lines: string[]): EjsState {
+	const state: EjsState = {
+		totalTokens: 0, totalThinkingTokens: 0, cliActualTokens: 0, cliCacheReadTokens: 0,
+		cliShutdownModelUsage: null, cliRealOutputByModel: null, totalEstToolCalls: 0, dailyActualTokens: {}
+	};
+	for (const line of lines) {
+		if (!line.trim()) { continue; }
+		try {
+			const event: any = JSON.parse(line);
+			if (event.type === 'session.shutdown') { _ejsProcessShutdownEvent(event, state); }
+			_ejsProcessMessageAndToolEvents(event, state);
+		} catch { /* skip invalid lines */ }
+	}
+	return state;
+}
+
+/** When no session.shutdown event was found, estimate total tokens using real output and ratios. */
+function _ejsEstimateWithoutShutdown(state: EjsState): void {
+	if (state.cliActualTokens || !state.cliRealOutputByModel) { return; }
+	const inputOutputRatio = state.totalEstToolCalls > TOOL_CALLS_HIGH_THRESHOLD ? TOKEN_RATIO_HIGH_TOOLS
+		: state.totalEstToolCalls > TOOL_CALLS_MED_THRESHOLD ? TOKEN_RATIO_MED_TOOLS
+		: TOKEN_RATIO_LOW_TOOLS;
+	for (const realOutput of Object.values(state.cliRealOutputByModel)) {
+		const estimatedInput = Math.round(realOutput * inputOutputRatio);
+		state.cliActualTokens += estimatedInput + realOutput;
+		state.cliCacheReadTokens += estimatedInput;
+	}
+}
+
 /**
  * Handles VS Code delta-based JSONL format (kind:0/1/2 events).
  *
@@ -269,100 +497,17 @@ export interface TokenEstimationStrategy {
  */
 export class DeltaTokenStrategy implements TokenEstimationStrategy {
 	estimate(lines: string[]): TokenEstimationResult {
-		let totalTokens = 0;
-		let totalThinkingTokens = 0;
-		let sessionState: Record<string, unknown> = {};
-		let parseFailedLines = 0;
-
-		for (const line of lines) {
-			if (!line.trim()) { continue; }
-			try {
-				const event = JSON.parse(line);
-				sessionState = applyDelta(sessionState, event) as Record<string, unknown>;
-
-				// Incremental request messages (kind:2 append to requests array)
-				if (event.kind === 2 && event.k?.[0] === 'requests' && Array.isArray(event.v)) {
-					for (const request of event.v) {
-						if (request.message?.text) {
-							totalTokens += estimateTokensFromText(request.message.text);
-						}
-					}
-				}
-
-				// Incremental response items (kind:2 append to response array)
-				if (event.kind === 2 && event.k?.includes('response') && Array.isArray(event.v)) {
-					for (const responseItem of event.v) {
-						// Sub-agent results are incomplete mid-stream; count from reconstructed state below.
-						if (extractSubAgentData(responseItem)) { continue; }
-						const { text, isThinking } = extractResponseItemText(responseItem);
-						if (text) {
-							if (isThinking) { totalThinkingTokens += estimateTokensFromText(text); }
-							else { totalTokens += estimateTokensFromText(text); }
-						}
-					}
-				}
-			} catch {
-				parseFailedLines++;
-			}
-		}
-
-		// Extract actual tokens from the reconstructed state (handles all delta path patterns).
-		// Use per-request regex fallback so that requests whose result lines failed JSON.parse
-		// still contribute actual tokens instead of being silently lost.
-		const rawUsageFallback = parseFailedLines > 0
+		const result = _dtsProcessLines(lines);
+		const rawUsageFallback = result.parseFailedLines > 0
 			? extractPerRequestUsageFromRawLines(lines)
 			: new Map<number, { promptTokens: number; outputTokens: number }>();
-		const rawRequests = sessionState['requests'];
+		const rawRequests = result.sessionState['requests'];
 		const requests = (Array.isArray(rawRequests) ? rawRequests : []) as unknown[];
-		let maxIndex = requests.length;
-		for (const idx of rawUsageFallback.keys()) {
-			if (idx + 1 > maxIndex) { maxIndex = idx + 1; }
-		}
-		let totalActualTokens = 0;
-		for (let i = 0; i < maxIndex; i++) {
-			const result = getRequestResult(requests[i]);
-			let found = false;
-			if (result) {
-				if (typeof result.promptTokens === 'number' && typeof result.outputTokens === 'number') {
-					totalActualTokens += result.promptTokens + result.outputTokens;
-					found = true;
-				} else if (result.metadata && typeof result.metadata.promptTokens === 'number' && typeof result.metadata.outputTokens === 'number') {
-					// INSIDERS FORMAT (Feb 2026+): Tokens nested under result.metadata
-					totalActualTokens += result.metadata.promptTokens + result.metadata.outputTokens;
-					found = true;
-				} else if (result.usage) {
-					const u = result.usage;
-					const prompt = typeof u.promptTokens === 'number' ? u.promptTokens : 0;
-					const completion = typeof u.completionTokens === 'number' ? u.completionTokens : 0;
-					totalActualTokens += prompt + completion;
-					found = true;
-				}
-			}
-			if (!found) {
-				const extracted = rawUsageFallback.get(i);
-				if (extracted) {
-					totalActualTokens += extracted.promptTokens + extracted.outputTokens;
-				}
-			}
-		}
-
-		// Sub-agent results are built up char-by-char via delta events and are only
-		// complete in the fully reconstructed state — count them here.
-		for (const request of requests) {
-			const responseItems = getResponseArray(request);
-			if (!responseItems) { continue; }
-			for (const responseItem of responseItems) {
-				const subAgent = extractSubAgentData(responseItem);
-				if (subAgent) {
-					if (subAgent.prompt) { totalTokens += estimateTokensFromText(subAgent.prompt); }
-					if (subAgent.result) { totalTokens += estimateTokensFromText(subAgent.result); }
-				}
-			}
-		}
-
+		const totalActualTokens = _dtsComputeActualTokens(requests, rawUsageFallback);
+		const estimatedTokens = result.totalTokens + _dtsCountSubAgentTokens(requests);
 		return {
-			tokens: totalTokens + totalThinkingTokens,
-			thinkingTokens: totalThinkingTokens,
+			tokens: estimatedTokens + result.totalThinkingTokens,
+			thinkingTokens: result.totalThinkingTokens,
 			actualTokens: totalActualTokens,
 			cacheReadTokens: 0,
 			modelUsage: {},
@@ -383,126 +528,15 @@ export class DeltaTokenStrategy implements TokenEstimationStrategy {
  */
 export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 	estimate(lines: string[]): TokenEstimationResult {
-		let totalTokens = 0;
-		let totalThinkingTokens = 0;
-		let cliActualTokens = 0;
-		let cliCacheReadTokens = 0;
-		let cliShutdownModelUsage: ModelUsage | null = null;
-		let cliRealOutputByModel: { [model: string]: number } | null = null;
-		let totalEstToolCalls = 0;
-		const dailyActualTokens: Record<string, number> = {};
-
-		for (const line of lines) {
-			if (!line.trim()) { continue; }
-			try {
-				const event = JSON.parse(line);
-
-				// session.shutdown contains exact token totals per model
-				if (event.type === 'session.shutdown' && event.data?.modelMetrics) {
-					if (!cliShutdownModelUsage) { cliShutdownModelUsage = {}; }
-					let shutdownTotal = 0;
-					for (const [modelName, metrics] of Object.entries(event.data.modelMetrics) as [string, ShutdownModelMetrics][]) {
-						const usage = metrics?.usage;
-						if (usage) {
-							const input = typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
-							const output = typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
-							const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
-							const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
-							cliActualTokens += input + output;
-							cliCacheReadTokens += cacheRead;
-							shutdownTotal += input + output;
-							if (!cliShutdownModelUsage[modelName]) {
-								cliShutdownModelUsage[modelName] = { inputTokens: 0, outputTokens: 0 };
-							}
-							cliShutdownModelUsage[modelName].inputTokens += input;
-							cliShutdownModelUsage[modelName].outputTokens += output;
-							// Cache breakdown — inputTokens is the total (uncached + reads + writes).
-							// Populate these so calculateEstimatedCost can apply the correct discount rates.
-							if (cacheRead > 0) {
-								cliShutdownModelUsage[modelName].cachedReadTokens = (cliShutdownModelUsage[modelName].cachedReadTokens ?? 0) + cacheRead;
-							}
-							if (cacheWrite > 0) {
-								cliShutdownModelUsage[modelName].cacheCreationTokens = (cliShutdownModelUsage[modelName].cacheCreationTokens ?? 0) + cacheWrite;
-							}
-						}
-					}
-					// Attribute this shutdown's tokens to its UTC day
-					if (shutdownTotal > 0 && event.timestamp) {
-						const dayKey = new Date(event.timestamp).toISOString().slice(0, 10);
-						if (dayKey && dayKey !== 'Inval') {
-							dailyActualTokens[dayKey] = (dailyActualTokens[dayKey] || 0) + shutdownTotal;
-						}
-					}
-				}
-
-				// User / assistant / tool event types
-				if (event.type === 'user.message' && event.data?.content) {
-					totalTokens += estimateTokensFromText(event.data.content);
-				} else if (event.type === 'user.message_rendered' && event.data?.renderedMessage) {
-					// JetBrains IDE: rendered message includes injected file context alongside the
-					// user question. Count it in place of user.message so the context tokens are
-					// captured. (user.message and user.message_rendered share the same turnId;
-					// the rendered version subsumes the bare message, so any double-count is minor
-					// as user.message is typically short compared to the full rendered content.)
-					totalTokens += estimateTokensFromText(event.data.renderedMessage);
-				} else if (event.type === 'assistant.message') {
-					const realOut = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
-					if (realOut > 0) {
-						// Real API-reported output tokens — accumulate for ratio-based total estimation
-						if (!cliRealOutputByModel) { cliRealOutputByModel = {}; }
-						const m = event.data?.model || 'unknown';
-						cliRealOutputByModel[m] = (cliRealOutputByModel[m] ?? 0) + realOut;
-					} else if (event.data?.content) {
-						totalTokens += estimateTokensFromText(event.data.content);
-					}
-				} else if (event.type === 'tool.execution_start') {
-					totalEstToolCalls++;
-				} else if (event.type === 'tool.execution_complete' && event.data?.result) {
-					const result = event.data.result;
-					// Prefer detailedContent (captures full subagent prompt for task launches)
-					const text = typeof result.detailedContent === 'string' ? result.detailedContent
-						: typeof result.content === 'string' ? result.content : '';
-					if (text) { totalTokens += estimateTokensFromText(text); }
-				} else if (event.content) {
-					// Fallback for other formats that might have content
-					totalTokens += estimateTokensFromText(event.content);
-				}
-
-				// Extract thinking tokens from assistant.message events
-				if (event.type === 'assistant.message') {
-					const reasoningText = event.data?.reasoningText;
-					if (typeof reasoningText === 'string' && reasoningText) {
-						totalThinkingTokens += estimateTokensFromText(reasoningText);
-					}
-					// JetBrains format uses event.data.thinking.text
-					const thinkingText = event.data?.thinking?.text;
-					if (typeof thinkingText === 'string' && thinkingText) {
-						totalThinkingTokens += estimateTokensFromText(thinkingText);
-					}
-				}
-			} catch { /* skip invalid lines */ }
-		}
-
-		// No session.shutdown: use real outputTokens from assistant.message + observed input:output ratios.
-		// Heavy agent sessions show ~130x ratio; cache reads ≈ input (50% of total from completed sessions).
-		if (!cliActualTokens && cliRealOutputByModel) {
-			const inputOutputRatio = totalEstToolCalls > TOOL_CALLS_HIGH_THRESHOLD ? TOKEN_RATIO_HIGH_TOOLS
-			: totalEstToolCalls > TOOL_CALLS_MED_THRESHOLD ? TOKEN_RATIO_MED_TOOLS
-			: TOKEN_RATIO_LOW_TOOLS;
-			for (const realOutput of Object.values(cliRealOutputByModel)) {
-				const estimatedInput = Math.round(realOutput * inputOutputRatio);
-				cliActualTokens += estimatedInput + realOutput;  // input + output (cache is a subset of input)
-				cliCacheReadTokens += estimatedInput;            // cache ≈ input from empirical data
-			}
-		}
-
+		const state = _ejsProcessLines(lines);
+		_ejsEstimateWithoutShutdown(state);
 		return {
-			tokens: totalTokens + totalThinkingTokens,
-			thinkingTokens: totalThinkingTokens,
-			actualTokens: cliActualTokens,
-			cacheReadTokens: cliCacheReadTokens,
-			modelUsage: cliShutdownModelUsage ?? {},
-			dailyActualTokens,
+			tokens: state.totalTokens + state.totalThinkingTokens,
+			thinkingTokens: state.totalThinkingTokens,
+			actualTokens: state.cliActualTokens,
+			cacheReadTokens: state.cliCacheReadTokens,
+			modelUsage: state.cliShutdownModelUsage ?? {},
+			dailyActualTokens: state.dailyActualTokens,
 		};
 	}
 }
