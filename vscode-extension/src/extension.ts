@@ -2220,73 +2220,61 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
 			if (dayKey < cutoffUtcStartKey) { continue; }
 			const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
-			if (!dailyStatsMap.has(dayKey)) {
-				dailyStatsMap.set(dayKey, { date: dayKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
-			}
-			const dailyEntry = dailyStatsMap.get(dayKey)!;
-			dailyEntry.tokens += dayTokens;
-			dailyEntry.sessions += 1;
-			dailyEntry.interactions += dayRollup.interactions;
-			if (!dailyEntry.editorUsage[editorType]) { dailyEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
-			dailyEntry.editorUsage[editorType].tokens += dayTokens;
-			dailyEntry.editorUsage[editorType].sessions += 1;
-			if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
-			dailyEntry.repositoryUsage[repository].tokens += dayTokens;
-			dailyEntry.repositoryUsage[repository].sessions += 1;
-			addModelUsage(dailyEntry.modelUsage, dayRollup.modelUsage);
+			const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dayKey);
+			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
-		// Attribute session-level LOC to the last day bucket in the cutoff window
 		if (lastDayKey && (sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			const locEntry = dailyStatsMap.get(lastDayKey)!;
-			locEntry.linesAdded = (locEntry.linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
-			locEntry.linesRemoved = (locEntry.linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
-			if (!locEntry.editorUsage[editorType]) { locEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
-			locEntry.editorUsage[editorType].linesAdded = (locEntry.editorUsage[editorType].linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
-			locEntry.editorUsage[editorType].linesRemoved = (locEntry.editorUsage[editorType].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
-			if (!locEntry.repositoryUsage[repository]) { locEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
-			locEntry.repositoryUsage[repository].linesAdded = (locEntry.repositoryUsage[repository].linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
-			locEntry.repositoryUsage[repository].linesRemoved = (locEntry.repositoryUsage[repository].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
-			if (sessionData.languageUsage) {
-				if (!locEntry.languageUsage) { locEntry.languageUsage = {}; }
-				addLanguageUsage(locEntry.languageUsage, sessionData.languageUsage);
-			}
+			this.addLocToDailyEntry(locEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
 		}
 	}
 
 	private accumulateSessionFallback(dailyStatsMap: Map<string, DailyTokenStats>, sessionData: SessionFileCache, mtime: number, editorType: string, repository: string, cutoffUtcStartKey: string): void {
-		const estimatedTokens = sessionData.tokens;
 		const actualTokens = sessionData.actualTokens || 0;
-		const tokens = (actualTokens > 0 ? actualTokens : estimatedTokens);
+		const tokens = (actualTokens > 0 ? actualTokens : sessionData.tokens);
 		const lastActivity = sessionData.lastInteraction ? new Date(sessionData.lastInteraction) : new Date(mtime);
 		const dateKey = lastActivity.toISOString().slice(0, 10);
 		if (dateKey < cutoffUtcStartKey) { return; }
+		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
+		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage);
+		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
+			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
+		}
+	}
+
+	private getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dateKey: string): DailyTokenStats {
 		if (!dailyStatsMap.has(dateKey)) {
 			dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
 		}
-		const dailyEntry = dailyStatsMap.get(dateKey)!;
-		dailyEntry.tokens += tokens;
-		dailyEntry.sessions += 1;
-		dailyEntry.interactions += sessionData.interactions;
-		if (!dailyEntry.editorUsage[editorType]) { dailyEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
-		dailyEntry.editorUsage[editorType].tokens += tokens;
-		dailyEntry.editorUsage[editorType].sessions += 1;
-		if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
-		dailyEntry.repositoryUsage[repository].tokens += tokens;
-		dailyEntry.repositoryUsage[repository].sessions += 1;
-		addModelUsage(dailyEntry.modelUsage, sessionData.modelUsage);
-		// LOC attribution
-		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
-			dailyEntry.linesAdded = (dailyEntry.linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
-			dailyEntry.linesRemoved = (dailyEntry.linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
-			dailyEntry.editorUsage[editorType].linesAdded = (dailyEntry.editorUsage[editorType].linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
-			dailyEntry.editorUsage[editorType].linesRemoved = (dailyEntry.editorUsage[editorType].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
-			dailyEntry.repositoryUsage[repository].linesAdded = (dailyEntry.repositoryUsage[repository].linesAdded ?? 0) + (sessionData.linesAdded ?? 0);
-			dailyEntry.repositoryUsage[repository].linesRemoved = (dailyEntry.repositoryUsage[repository].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
-			if (sessionData.languageUsage) {
-				if (!dailyEntry.languageUsage) { dailyEntry.languageUsage = {}; }
-				addLanguageUsage(dailyEntry.languageUsage, sessionData.languageUsage);
-			}
+		return dailyStatsMap.get(dateKey)!;
+	}
+
+	private addUsageToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: any): void {
+		entry.tokens += tokens;
+		entry.sessions += 1;
+		entry.interactions += interactions;
+		if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
+		entry.editorUsage[editorType].tokens += tokens;
+		entry.editorUsage[editorType].sessions += 1;
+		if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
+		entry.repositoryUsage[repository].tokens += tokens;
+		entry.repositoryUsage[repository].sessions += 1;
+		addModelUsage(entry.modelUsage, modelUsage);
+	}
+
+	private addLocToDailyEntry(entry: DailyTokenStats, linesAdded: number, linesRemoved: number, editorType: string, repository: string, languageUsage?: any): void {
+		entry.linesAdded = (entry.linesAdded ?? 0) + linesAdded;
+		entry.linesRemoved = (entry.linesRemoved ?? 0) + linesRemoved;
+		if (!entry.editorUsage[editorType]) { entry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
+		entry.editorUsage[editorType].linesAdded = (entry.editorUsage[editorType].linesAdded ?? 0) + linesAdded;
+		entry.editorUsage[editorType].linesRemoved = (entry.editorUsage[editorType].linesRemoved ?? 0) + linesRemoved;
+		if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
+		entry.repositoryUsage[repository].linesAdded = (entry.repositoryUsage[repository].linesAdded ?? 0) + linesAdded;
+		entry.repositoryUsage[repository].linesRemoved = (entry.repositoryUsage[repository].linesRemoved ?? 0) + linesRemoved;
+		if (languageUsage) {
+			if (!entry.languageUsage) { entry.languageUsage = {}; }
+			addLanguageUsage(entry.languageUsage, languageUsage);
 		}
 	}
 
@@ -3704,21 +3692,28 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private processCliJsonlEvent(event: any, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): string | undefined {
-		let userMessageContent: string | undefined;
-		if (event.type === 'user.message') {
-			details.interactions++;
-			if (event.timestamp || event.ts || event.data?.timestamp) {
-				timestamps.push(new Date(event.timestamp || event.ts || event.data.timestamp).getTime());
-			}
-			if (event.data?.content) {
-				this.analyzeContextReferences(event.data.content, details.contextReferences);
-				userMessageContent = event.data.content;
-			}
+		if (event.type === 'user.message') { return this.processUserMessageEvent(event, details, timestamps); }
+		if (event.type === 'tool.execution_start') { this.processToolExecutionEvent(event, details, allContentReferences); }
+		return undefined;
+	}
+
+	private processUserMessageEvent(event: any, details: SessionFileDetails, timestamps: number[]): string | undefined {
+		details.interactions++;
+		if (event.timestamp || event.ts || event.data?.timestamp) {
+			timestamps.push(new Date(event.timestamp || event.ts || event.data.timestamp).getTime());
 		}
-		if (event.type === 'tool.execution_start' && event.data?.toolName === 'rename_session' && event.data?.arguments?.title) {
+		if (event.data?.content) {
+			this.analyzeContextReferences(event.data.content, details.contextReferences);
+			return event.data.content;
+		}
+		return undefined;
+	}
+
+	private processToolExecutionEvent(event: any, details: SessionFileDetails, allContentReferences: any[]): void {
+		if (event.data?.toolName === 'rename_session' && event.data?.arguments?.title) {
 			details.title = event.data.arguments.title;
 		}
-		if (event.type === 'tool.execution_start' && event.data?.arguments) {
+		if (event.data?.arguments) {
 			const args = event.data.arguments as Record<string, unknown>;
 			for (const val of Object.values(args)) {
 				if (typeof val === 'string' && val.length > 3 && (val.includes('/') || val.includes('\\'))) {
@@ -3726,7 +3721,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 				}
 			}
 		}
-		return userMessageContent;
 	}
 
 	private async processJsonRequestsDetails(requests: any[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<void> {
@@ -3743,22 +3737,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private processJsonRequest(request: any, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): void {
-		if (request.timestamp || request.ts || request.result?.timestamp) {
-			const ts = request.timestamp || request.ts || request.result?.timestamp;
-			timestamps.push(new Date(ts).getTime());
-		}
+		const ts = request.timestamp || request.ts || request.result?.timestamp;
+		if (ts) { timestamps.push(new Date(ts).getTime()); }
 		this.analyzeRequestContext(request, details.contextReferences);
-		if (request.message?.text) { this.analyzeContextReferences(request.message.text, details.contextReferences); }
-		if (request.message?.parts) {
-			for (const part of request.message.parts) { if (part.text) { this.analyzeContextReferences(part.text, details.contextReferences); } }
-		}
+		this.analyzeRequestMessage(request.message, details.contextReferences);
 		if (request.contentReferences && Array.isArray(request.contentReferences)) { allContentReferences.push(...request.contentReferences); }
-		if (request.variableData) {
-			const varDataStr = JSON.stringify(request.variableData).toLowerCase();
-			if (varDataStr.includes('workspace')) { details.contextReferences.workspace++; }
-			if (varDataStr.includes('terminal')) { details.contextReferences.terminal++; }
-			if (varDataStr.includes('vscode')) { details.contextReferences.vscode++; }
+		if (request.variableData) { this.processRequestVariableData(request.variableData, details.contextReferences); }
+	}
+
+	private analyzeRequestMessage(message: any, contextReferences: any): void {
+		if (!message) { return; }
+		if (message.text) { this.analyzeContextReferences(message.text, contextReferences); }
+		if (message.parts) {
+			for (const part of message.parts) { if (part.text) { this.analyzeContextReferences(part.text, contextReferences); } }
 		}
+	}
+
+	private processRequestVariableData(variableData: any, contextReferences: SessionFileDetails['contextReferences']): void {
+		const varDataStr = JSON.stringify(variableData).toLowerCase();
+		if (varDataStr.includes('workspace')) { contextReferences.workspace++; }
+		if (varDataStr.includes('terminal')) { contextReferences.terminal++; }
+		if (varDataStr.includes('vscode')) { contextReferences.vscode++; }
 	}
 
 	private setDetailsTimestamps(details: SessionFileDetails, timestamps: number[], stat: fs.Stats): void {
@@ -4392,9 +4391,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.log('✅ Details panel created successfully');
 
 		// Track when the panel becomes active or inactive
-		this.detailsPanel.onDidChangeViewState((e) => {
-			this.log(`📊 Details panel view state changed: active=${e.webviewPanel.active}, visible=${e.webviewPanel.visible}`);
-		});
+		this.detailsPanel.onDidChangeViewState((e) => { this.log(`📊 Details panel view state changed: active=${e.webviewPanel.active}, visible=${e.webviewPanel.visible}`); });
 
 		// Handle messages from the webview
 		this.detailsPanel.webview.onDidReceiveMessage(async (message) => {
@@ -4559,23 +4556,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.chartPanel.webview.onDidReceiveMessage(async (message) => {
 			if (this.handleLocalViewRegressionMessage(message)) { return; }
 			if (await this.dispatchSharedCommand(message)) { return; }
-			if (message.command === 'refresh') {
-				await this.dispatch('refresh:chart', () => this.refreshChartPanel());
-			}
-			if (message.command === 'setPeriodPreference') {
-				const p = message.period;
-				if (p === 'day' || p === 'week' || p === 'month') {
-					this.lastChartPeriod = p;
-				}
-			}
-			if (message.command === 'setViewPreference') {
-				const v = message.view;
-				if (v === 'total' || v === 'model' || v === 'editor' || v === 'repository' || v === 'cost') {
-					this.lastChartView = v;
-				}
-				if (typeof message.metric === 'string') { this.lastChartMetric = message.metric; }
-				if (typeof message.split === 'string') { this.lastChartSplit = message.split; }
-			}
+			if (message.command === 'refresh') { await this.dispatch('refresh:chart', () => this.refreshChartPanel()); }
+			if (message.command === 'setPeriodPreference') { this.setChartPeriodPreference(message.period); }
+			if (message.command === 'setViewPreference') { this.setChartViewPreference(message); }
 		});
 
 		// Render immediately; Week/Month buttons are shown as loading if full-year data isn't ready
@@ -4597,6 +4580,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 				});
 			}
 		}
+	}
+
+	private setChartPeriodPreference(period: string): void {
+		if (period === 'day' || period === 'week' || period === 'month') { this.lastChartPeriod = period; }
+	}
+
+	private setChartViewPreference(message: any): void {
+		const v = message.view;
+		if (v === 'total' || v === 'model' || v === 'editor' || v === 'repository' || v === 'cost') { this.lastChartView = v; }
+		if (typeof message.metric === 'string') { this.lastChartMetric = message.metric; }
+		if (typeof message.split === 'string') { this.lastChartSplit = message.split; }
 	}
 
 	public async showUsageAnalysis(): Promise<void> {
@@ -6058,15 +6052,19 @@ ${hashtag}`;
 
   private accumulateContextRefsJson(entity: any, fd: any): void {
     if (!entity.contextRefsJson) { return; }
-    try {
-      const cr = JSON.parse(entity.contextRefsJson);
-      fd.ctxFile += cr.file ?? 0; fd.ctxSelection += cr.selection ?? 0; fd.ctxSymbol += cr.symbol ?? 0;
-      fd.ctxCodebase += cr.codebase ?? 0; fd.ctxWorkspace += cr.workspace ?? 0; fd.ctxTerminal += cr.terminal ?? 0;
-      fd.ctxVscode += cr.vscode ?? 0; fd.ctxClipboard += cr.clipboard ?? 0; fd.ctxChanges += cr.changes ?? 0;
-      fd.ctxProblemsPanel += cr.problemsPanel ?? 0; fd.ctxOutputPanel += cr.outputPanel ?? 0;
-      fd.ctxTerminalLastCommand += cr.terminalLastCommand ?? 0; fd.ctxTerminalSelection += cr.terminalSelection ?? 0;
-      for (const [kind, count] of Object.entries(cr.byKind ?? {})) { fd.ctxByKind[kind] = (fd.ctxByKind[kind] ?? 0) + Number(count); }
-    } catch { /* ignore */ }
+    try { this.applyContextRefs(JSON.parse(entity.contextRefsJson), fd); } catch { /* ignore */ }
+  }
+
+  private applyContextRefs(cr: any, fd: any): void {
+    const fields: [string, string][] = [
+      ['ctxFile', 'file'], ['ctxSelection', 'selection'], ['ctxSymbol', 'symbol'],
+      ['ctxCodebase', 'codebase'], ['ctxWorkspace', 'workspace'], ['ctxTerminal', 'terminal'],
+      ['ctxVscode', 'vscode'], ['ctxClipboard', 'clipboard'], ['ctxChanges', 'changes'],
+      ['ctxProblemsPanel', 'problemsPanel'], ['ctxOutputPanel', 'outputPanel'],
+      ['ctxTerminalLastCommand', 'terminalLastCommand'], ['ctxTerminalSelection', 'terminalSelection'],
+    ];
+    for (const [fdKey, crKey] of fields) { fd[fdKey] += cr[crKey] ?? 0; }
+    for (const [kind, count] of Object.entries(cr.byKind ?? {})) { fd.ctxByKind[kind] = (fd.ctxByKind[kind] ?? 0) + Number(count); }
   }
 
   private accumulateMcpToolsJson(entity: any, fd: any): void {
@@ -7051,12 +7049,13 @@ ${this.getLoadingHtmlScript()}
   }
 
   private extractAzureStorageSettings(settings: any, config: any): any {
-    const subscriptionId = settings?.subscriptionId ?? "";
+    const s = settings ?? {};
+    const subscriptionId = s.subscriptionId ?? "";
     return {
-      enabled: settings?.enabled ?? false, storageAccount: settings?.storageAccount ?? "",
+      enabled: s.enabled ?? false, storageAccount: s.storageAccount ?? "",
       subscriptionId: subscriptionId ? subscriptionId.substring(0, 8) + "..." : "",
-      resourceGroup: settings?.resourceGroup ?? "", aggTable: settings?.aggTable ?? "usageAggDaily",
-      eventsTable: settings?.eventsTable ?? "usageEvents", authMode: settings?.authMode ?? "entraId",
+      resourceGroup: s.resourceGroup ?? "", aggTable: s.aggTable ?? "usageAggDaily",
+      eventsTable: s.eventsTable ?? "usageEvents", authMode: s.authMode ?? "entraId",
       sharingProfile: config.get("backend.sharingProfile", "off") as string,
     };
   }
