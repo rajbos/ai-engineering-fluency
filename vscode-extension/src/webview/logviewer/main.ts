@@ -711,10 +711,10 @@ ${totalModeTurns > 0 ? `<div class="summary-card" title="${escapeHtml(modeEntrie
 <div class="summary-value" style="font-size: 1.1em;">${primaryModeLabel}</div>
 <div class="summary-sub">${escapeHtml(modeSubLabel)}${modeEntries.length > 1 ? ` · ${modeEntries.slice(1).map(([m, n]) => `${MODE_LABELS[m]} ${n}`).join(', ')}` : ''}</div>
 </div>` : ''}
-<div class="summary-card"${data.editorName === 'JetBrains' ? ` title="JetBrains: only user messages + assistant text are persisted in the session log, so this is an estimate of those alone. Actual API token counts and thinking tokens are not available."` : ''}>
-<div class="summary-label">📊 Estimated Tokens${data.editorName === 'JetBrains' ? ' ⓘ' : ''}</div>
+<div class="summary-card"${data.editorName === 'JetBrains' ? ` title="JetBrains: only user messages + assistant text are persisted in the session log, so this is an estimate of those alone. Actual API token counts and thinking tokens are not available."` : data.editorName === 'Antigravity' ? ` title="Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally."` : ''}>
+<div class="summary-label">📊 Estimated Tokens${(data.editorName === 'JetBrains' || data.editorName === 'Antigravity') ? ' ⓘ' : ''}</div>
 <div class="summary-value">${formatCompact(totalTokens)}</div>
-<div class="summary-sub">${data.editorName === 'JetBrains' ? 'User + assistant text only (no API counts, no thinking)' : 'Input + Output estimated from text'}</div>
+<div class="summary-sub">${data.editorName === 'JetBrains' ? 'User + assistant text only (no API counts, no thinking)' : data.editorName === 'Antigravity' ? 'Estimated from transcript content' : 'Input + Output estimated from text'}</div>
 </div>
 ${hasAnyActualUsage && !data.debugLogInputTokens ? `
 <div class="summary-card">
@@ -988,7 +988,7 @@ e.preventDefault();
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
 
-function renderTurnCard(turn: ChatTurn, isJetBrains = false): string {
+function renderTurnCard(turn: ChatTurn, isJetBrains = false, isAntigravity = false): string {
 const totalTokens    = turn.inputTokensEstimate + turn.outputTokensEstimate + turn.thinkingTokensEstimate;
 const hasThinking    = turn.thinkingTokensEstimate > 0;
 const hasActualUsage = !!turn.actualUsage;
@@ -1018,7 +1018,7 @@ return `
 <span class="turn-mode" style="background: ${getModeColor(turn.mode)};">${getModeIcon(turn.mode)} ${turn.mode}</span>
 ${turn.model ? renderTurnModelBadge(turn.model) : ''}
 ${turn.thinkingEffort ? `<span class="turn-effort">💡 ${escapeHtml(getEffortDisplayName(turn.thinkingEffort))}</span>` : ''}
-${totalTokens > 0 ? `<span class="turn-tokens"${isJetBrains ? ` title="JetBrains: estimated from user message + assistant text only. Actual API counts and thinking tokens are not available."` : ''}>📊 ${formatCompact(totalTokens)} tokens (↑${turn.inputTokensEstimate} ↓${turn.outputTokensEstimate})${isJetBrains ? ' ⓘ' : ''}</span>` : ''}
+${totalTokens > 0 ? `<span class="turn-tokens"${isJetBrains ? ` title="JetBrains: estimated from user message + assistant text only. Actual API counts and thinking tokens are not available."` : isAntigravity ? ` title="Antigravity: estimated from transcript content. Actual API counts are not stored locally."` : ''}>📊 ${formatCompact(totalTokens)} tokens (↑${turn.inputTokensEstimate} ↓${turn.outputTokensEstimate})${(isJetBrains || isAntigravity) ? ' ⓘ' : ''}</span>` : ''}
 ${hasThinking ? `<span class="turn-tokens" style="color: #a78bfa;">🧠 ${formatCompact(turn.thinkingTokensEstimate)} thinking</span>` : ''}
 ${hasActualUsage ? `<span class="turn-tokens" style="color: #22c55e;">✓ ${formatCompact(turn.actualUsage!.promptTokens + turn.actualUsage!.completionTokens)} actual</span>` : ''}
 ${contextHeaderHtml}
@@ -1155,7 +1155,7 @@ aggregatedBreakdown,
 
 <div class="turns-list">
 ${data.turns.length > 0 
-? data.turns.map(turn => renderTurnCard(turn, data.editorName === 'JetBrains')).join('')
+? data.turns.map(turn => renderTurnCard(turn, data.editorName === 'JetBrains', data.editorName === 'Antigravity')).join('')
 : '<div class="empty-state">No chat turns found in this session.</div>'
 }
 </div>
