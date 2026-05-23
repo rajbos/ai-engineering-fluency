@@ -1009,55 +1009,35 @@ export function analyzeContentReferences(contentReferences: unknown[], refs: Con
  * Analyze variableData to track prompt file attachments and other variable-based context.
  * This captures automatic attachments like copilot-instructions.md via variable system.
  */
+type AvdVariable = NonNullable<VariableDataRaw['variables']>[number];
+
+function _avdProcessSymbol(variable: AvdVariable, refs: ContextReferenceUsage): void {
+	if (variable.kind !== 'generic') { return; }
+	if (typeof variable.name !== 'string' || !variable.name.startsWith('sym:')) { return; }
+	refs.symbol++;
+	refs.byPath[`#${variable.name}`] = (refs.byPath[`#${variable.name}`] || 0) + 1;
+}
+
+function _avdProcessPromptFile(variable: AvdVariable, refs: ContextReferenceUsage): void {
+	if (variable.kind !== 'promptFile' || !variable.value) { return; }
+	const fsPath = variable.value.fsPath || variable.value.path || variable.value.external;
+	if (typeof fsPath !== 'string') { return; }
+	// Skip known auto-attached files to avoid double-counting with contentReferences
+	const normalizedPath = normalizePathForComparison(fsPath);
+	void refs; // byPath intentionally not updated — automatic attachments, not explicit user selections
+	void normalizedPath;
+}
+
 export function analyzeVariableData(variableData: unknown, refs: ContextReferenceUsage): void {
-	if (!variableData || typeof variableData !== 'object') {
-		return;
-	}
+	if (!variableData || typeof variableData !== 'object') { return; }
 	const data = variableData as VariableDataRaw;
-	if (!Array.isArray(data.variables)) {
-		return;
-	}
-
+	if (!Array.isArray(data.variables)) { return; }
 	for (const variable of data.variables) {
-		if (!variable || typeof variable !== 'object') {
-			continue;
-		}
-
-		// Track by kind from variableData
+		if (!variable || typeof variable !== 'object') { continue; }
 		const kind = variable.kind;
-		if (typeof kind === 'string') {
-			refs.byKind[kind] = (refs.byKind[kind] || 0) + 1;
-		}
-
-		// Handle symbol references (e.g., #sym:functionName)
-		// These appear as kind="generic" with name starting with "sym:"
-		if (kind === 'generic' && typeof variable.name === 'string' && variable.name.startsWith('sym:')) {
-			refs.symbol++;
-			// Track symbol by name for display
-			const symbolKey = `#${variable.name}`;
-			refs.byPath[symbolKey] = (refs.byPath[symbolKey] || 0) + 1;
-		}
-
-		// Process promptFile variables that contain file references
-		if (kind === 'promptFile' && variable.value) {
-			const value = variable.value;
-			const fsPath = value.fsPath || value.path || value.external;
-
-			if (typeof fsPath === 'string') {
-				const normalizedPath = normalizePathForComparison(fsPath);
-
-				// Track specific patterns (but don't double-count if already in contentReferences)
-				if (normalizedPath.endsWith('/.github/copilot-instructions.md') ||
-					normalizedPath.includes('.github/copilot-instructions.md')) {
-					// copilotInstructions - tracked via contentReferences, skip here to avoid double counting
-				} else if (normalizedPath.endsWith('/agents.md') ||
-					normalizedPath.match(/\/agents\.md$/i)) {
-					// agents.md - tracked via contentReferences, skip here  to avoid double counting
-				}
-				// Note: We don't add to byPath here as these are automatic attachments,
-				// not explicit user file selections
-			}
-		}
+		if (typeof kind === 'string') { refs.byKind[kind] = (refs.byKind[kind] || 0) + 1; }
+		_avdProcessSymbol(variable, refs);
+		_avdProcessPromptFile(variable, refs);
 	}
 }
 
