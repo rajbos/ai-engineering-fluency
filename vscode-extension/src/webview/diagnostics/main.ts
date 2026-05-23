@@ -364,37 +364,39 @@ function getEditorIcon(editor: string): string {
   return ICONS.find(([key]) => lower.includes(key))?.[1] ?? '📝';
 }
 
+function compareSessionFiles(a: SessionFileDetails, b: SessionFileDetails): number {
+  let aNum: number;
+  let bNum: number;
+
+  if (currentSortColumn === "lastInteraction") {
+    const aVal = a.lastInteraction;
+    const bVal = b.lastInteraction;
+    if (!aVal && !bVal) { return 0; }
+    if (!aVal) { return 1; }
+    if (!bVal) { return -1; }
+    aNum = new Date(aVal).getTime();
+    bNum = new Date(bVal).getTime();
+  } else if (currentSortColumn === "size") {
+    aNum = a.size || 0;
+    bNum = b.size || 0;
+  } else if (currentSortColumn === "tokens") {
+    aNum = a.tokens || 0;
+    bNum = b.tokens || 0;
+  } else if (currentSortColumn === "interactions") {
+    aNum = a.interactions || 0;
+    bNum = b.interactions || 0;
+  } else if (currentSortColumn === "contextRefs") {
+    aNum = getTotalContextRefs(a.contextReferences);
+    bNum = getTotalContextRefs(b.contextReferences);
+  } else {
+    return 0;
+  }
+
+  return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
+}
+
 function sortSessionFiles(files: SessionFileDetails[]): SessionFileDetails[] {
-  return [...files].sort((a, b) => {
-    let aNum: number;
-    let bNum: number;
-
-    if (currentSortColumn === "lastInteraction") {
-      const aVal = a.lastInteraction;
-      const bVal = b.lastInteraction;
-      if (!aVal && !bVal) { return 0; }
-      if (!aVal) { return 1; }
-      if (!bVal) { return -1; }
-      aNum = new Date(aVal).getTime();
-      bNum = new Date(bVal).getTime();
-    } else if (currentSortColumn === "size") {
-      aNum = a.size || 0;
-      bNum = b.size || 0;
-    } else if (currentSortColumn === "tokens") {
-      aNum = a.tokens || 0;
-      bNum = b.tokens || 0;
-    } else if (currentSortColumn === "interactions") {
-      aNum = a.interactions || 0;
-      bNum = b.interactions || 0;
-    } else if (currentSortColumn === "contextRefs") {
-      aNum = getTotalContextRefs(a.contextReferences);
-      bNum = getTotalContextRefs(b.contextReferences);
-    } else {
-      return 0;
-    }
-
-    return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
-  });
+  return [...files].sort(compareSessionFiles);
 }
 
 function getSortIndicator(column: typeof currentSortColumn): string {
