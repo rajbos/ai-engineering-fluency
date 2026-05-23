@@ -1600,8 +1600,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		cutoffMs: number,
 		progressCallback?: (completed: number, total: number) => void
 	): Promise<{ sessionFiles: string[]; preloaded: SessionFilePreload[] }> {
-		this.cacheManager.clearExpiredCache();
-
 		// --- Streaming pipeline: overlap discovery with parsing ---
 		// Discovery pushes file batches into a shared queue as each adapter completes.
 		// Worker pool drains the queue immediately, starting parsing while discovery continues.
@@ -1643,11 +1641,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 					const mtime = fileStats.mtime.getTime();
 					const fileSize = fileStats.size;
 					if (mtime >= cutoffMs) {
-						const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-						const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile) : undefined;
 						const cachedData = this.getCachedSessionData(sessionFile);
 						const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+						const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
+						const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile, fileStats) : undefined;
 						preloaded.push({ sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload);
+						if (!wasCached) {
+							// Yield after CPU-intensive cache-miss work to keep VS Code responsive
+							await new Promise(r => setImmediate(r));
+						}
 					}
 				} catch { /* skip files that fail to stat/parse */ }
 				processed++;
@@ -1668,6 +1670,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
 		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+
+		// Defer expired-cache cleanup to avoid blocking discovery/workers startup
+		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
+
 		return { sessionFiles, preloaded };
 	}
 
@@ -3113,7 +3119,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public async getSessionFileDataCached(sessionFilePath: string, mtime: number, fileSize: number): Promise<SessionFileCache> {
 		const cached = this.getCachedSessionData(sessionFilePath);
 		if (cached && cached.mtime === mtime && cached.size === fileSize) {
-			if (cached.debugLogInputTokens === undefined) {
+			if (cached.debugLogInputTokens === undefined && !cached.debugLogChecked) {
 				const supplemented = await this.supplementCacheWithDebugLog(cached, sessionFilePath, fileSize);
 				if (supplemented) { return supplemented; }
 			}
@@ -3188,6 +3194,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async supplementCacheWithDebugLog(cached: SessionFileCache, sessionFilePath: string, fileSize: number): Promise<SessionFileCache | null> {
 		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
 		if (!debugLogTokens || (debugLogTokens.inputTokens + debugLogTokens.outputTokens) === 0) {
+			// Mark sentinel so we don't re-probe 4 ENOENT paths on every subsequent warm startup
+			const marked = { ...cached, debugLogChecked: true as const };
+			this.setCachedSessionData(sessionFilePath, marked, fileSize);
 			this._cacheHits++;
 			return null;
 		}
@@ -3504,6 +3513,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(existingCache?.modelTurns !== undefined ? { modelTurns: existingCache.modelTurns } : {}),
 			...(existingCache?.debugLogInputTokens !== undefined ? { debugLogInputTokens: existingCache.debugLogInputTokens } : {}),
 			...(existingCache?.debugLogOutputTokens !== undefined ? { debugLogOutputTokens: existingCache.debugLogOutputTokens } : {}),
+			...(existingCache?.debugLogChecked ? { debugLogChecked: true as const } : {}),
 		};
 	}
 
@@ -3536,8 +3546,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Analyzes session files to extract interactions, context references, and timestamps.
 	 * Uses cached data when available to avoid re-reading files.
 	 */
-	private async getSessionFileDetails(sessionFile: string): Promise<SessionFileDetails> {
-		const stat = await this.statSessionFile(sessionFile);
+	private async getSessionFileDetails(sessionFile: string, existingStat?: Awaited<ReturnType<typeof this.statSessionFile>>): Promise<SessionFileDetails> {
+		const stat = existingStat ?? await this.statSessionFile(sessionFile);
 
 		const cachedDetails = await this.getSessionFileDetailsFromCache(sessionFile, stat);
 		if (cachedDetails) {

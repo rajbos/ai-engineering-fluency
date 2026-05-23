@@ -211,6 +211,7 @@ export interface SessionFileCache {
   modelTurns?: number; // Number of LLM API calls in agent-mode sessions (from debug log)
   debugLogInputTokens?: number; // Input token total from debug log (sum across all llm_request events)
   debugLogOutputTokens?: number; // Output token total from debug log (sum across all llm_request events)
+  debugLogChecked?: boolean; // Sentinel: true means we already looked for a debug log and found none
   /** Per-UTC-day token/interaction breakdown (keyed by YYYY-MM-DD UTC). Used for consistent daily stats. */
   dailyRollups?: { [utcDayKey: string]: DailyRollupEntry };
   linesAdded?: number;
