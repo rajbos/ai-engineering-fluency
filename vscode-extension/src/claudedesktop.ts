@@ -130,23 +130,20 @@ export class ClaudeDesktopCoworkDataAccess {
 			return;
 		}
 		for (const entry of entries) {
-			const fullPath = path.join(dir, entry.name);
-			if (entry.isDirectory()) {
-				// Skip the internal 'agent' directory — it contains background Cowork agent sessions
-				// that the user didn't create directly and that have no user-visible title.
-				if (entry.name === 'agent') { continue; }
-				this.walkForJsonlFiles(fullPath, results, depth + 1, maxDepth);
-			} else if (entry.name.endsWith('.jsonl') && entry.name !== 'audit.jsonl') {
-				// Skip audit.jsonl — it's a signed audit trail, not the Claude API session JSONL.
-				// The token data is in the UUID-named JSONL under .claude/projects/.
-				try {
-					const stats = fs.statSync(fullPath);
-					if (stats.size > 0) {
-						results.push(fullPath);
-					}
-				} catch {
-					// Ignore inaccessible files
-				}
+			this.processWalkEntry(entry, dir, results, depth, maxDepth);
+		}
+	}
+
+	private processWalkEntry(entry: fs.Dirent, dir: string, results: string[], depth: number, maxDepth: number): void {
+		const fullPath = path.join(dir, entry.name);
+		if (entry.isDirectory()) {
+			if (entry.name === 'agent') { return; }
+			this.walkForJsonlFiles(fullPath, results, depth + 1, maxDepth);
+		} else if (entry.name.endsWith('.jsonl') && entry.name !== 'audit.jsonl') {
+			try {
+				if (fs.statSync(fullPath).size > 0) { results.push(fullPath); }
+			} catch {
+				// Ignore inaccessible files
 			}
 		}
 	}
@@ -183,33 +180,35 @@ export class ClaudeDesktopCoworkDataAccess {
 		let totalInputTokens = 0;
 		let totalOutputTokens = 0;
 		const seenRequestIds = new Set<string>();
-
 		for (const event of events) {
-			// Cowork format: ALL assistant events (streaming and final) have type:'assistant'
-			if (event.type !== 'assistant') { continue; }
-			const usage = event.message?.usage;
-			if (!usage) { continue; }
-
-			const requestId = event.requestId;
-			if (requestId) {
-				// stop_reason is '' on streaming fragments, 'tool_use'/'end_turn' on final events
-				if (!event.message?.stop_reason) {
-					continue; // Streaming fragment — skip (falsy catches null, undefined, and '')
-				}
-				if (seenRequestIds.has(requestId)) { continue; }
-				seenRequestIds.add(requestId);
-			}
-
-			const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
-				+ (typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0)
-				+ (typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0);
-			const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
-
-			totalInputTokens += inputTokens;
-			totalOutputTokens += outputTokens;
+			const counts = this.extractCoworkEventTokens(event, seenRequestIds);
+			if (!counts) { continue; }
+			totalInputTokens += counts.inputTokens;
+			totalOutputTokens += counts.outputTokens;
 		}
-
 		return { tokens: totalInputTokens + totalOutputTokens, thinkingTokens: 0 };
+	}
+
+	private computeCoworkTokenCounts(usage: any): { inputTokens: number; outputTokens: number; cacheCreation: number; cachedRead: number } {
+		const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+		const cachedRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+		const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0) + cacheCreation + cachedRead;
+		const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+		return { inputTokens, outputTokens, cacheCreation, cachedRead };
+	}
+
+	private extractCoworkEventTokens(event: any, seenRequestIds: Set<string>): { inputTokens: number; outputTokens: number } | null {
+		if (event.type !== 'assistant') { return null; }
+		const usage = event.message?.usage;
+		if (!usage) { return null; }
+		const requestId = event.requestId;
+		if (requestId) {
+			if (!event.message?.stop_reason) { return null; }
+			if (seenRequestIds.has(requestId)) { return null; }
+			seenRequestIds.add(requestId);
+		}
+		const { inputTokens, outputTokens } = this.computeCoworkTokenCounts(usage);
+		return { inputTokens, outputTokens };
 	}
 
 	/**
@@ -241,44 +240,29 @@ export class ClaudeDesktopCoworkDataAccess {
 		const events = this.readCoworkEvents(sessionFilePath);
 		const modelUsage: ModelUsage = {};
 		const seenRequestIds = new Set<string>();
-
 		for (const event of events) {
-			// Cowork format: ALL assistant events have type:'assistant' at top level
-			if (event.type !== 'assistant') { continue; }
-			const usage = event.message?.usage;
-			if (!usage) { continue; }
-
-			const requestId = event.requestId;
-			if (requestId) {
-				// stop_reason is '' on streaming fragments, 'tool_use'/'end_turn' on final events
-				if (!event.message?.stop_reason) { continue; }
-				if (seenRequestIds.has(requestId)) { continue; }
-				seenRequestIds.add(requestId);
-			}
-
-			const model = normalizeClaudeModelId(event.message?.model || 'unknown');
-			if (!modelUsage[model]) {
-				modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
-			}
-
-			const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
-			const cachedRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
-			const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
-				+ cacheCreation
-				+ cachedRead;
-			const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
-
-			modelUsage[model].inputTokens += inputTokens;
-			modelUsage[model].outputTokens += outputTokens;
-			if (cacheCreation > 0) {
-				modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + cacheCreation;
-			}
-			if (cachedRead > 0) {
-				modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + cachedRead;
-			}
+			this.processCoworkEventModelUsage(event, seenRequestIds, modelUsage);
 		}
-
 		return modelUsage;
+	}
+
+	private processCoworkEventModelUsage(event: any, seenRequestIds: Set<string>, modelUsage: ModelUsage): void {
+		if (event.type !== 'assistant') { return; }
+		const usage = event.message?.usage;
+		if (!usage) { return; }
+		const requestId = event.requestId;
+		if (requestId) {
+			if (!event.message?.stop_reason) { return; }
+			if (seenRequestIds.has(requestId)) { return; }
+			seenRequestIds.add(requestId);
+		}
+		const model = normalizeClaudeModelId(event.message?.model || 'unknown');
+		if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+		const { inputTokens, outputTokens, cacheCreation, cachedRead } = this.computeCoworkTokenCounts(usage);
+		modelUsage[model].inputTokens += inputTokens;
+		modelUsage[model].outputTokens += outputTokens;
+		if (cacheCreation > 0) { modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + cacheCreation; }
+		if (cachedRead > 0) { modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + cachedRead; }
 	}
 
 	/**
