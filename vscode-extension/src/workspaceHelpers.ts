@@ -496,6 +496,8 @@ export function getEditorNameFromRoot(rootPath: string): string {
 	if (lower.includes('opencode')) { return 'OpenCode'; }
 	if (lower.includes('.continue')) { return 'Continue'; }
 	if (lower.includes('.vibe')) { return 'Mistral Vibe'; }
+	// Antigravity must be checked before generic .gemini (both live under ~/.gemini/).
+	if (lower.includes('.gemini/antigravity')) { return 'Antigravity'; }
 	if (lower.includes('.gemini')) { return 'Gemini CLI'; }
 	if (isCodeInsidersRoot(lower)) { return 'VS Code Insiders'; }
 	if (isCodeExplorationRoot(lower)) { return 'VS Code Exploration'; }
@@ -902,6 +904,9 @@ function detectToolEditorFromPath(
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/.claude/projects/')) { return 'Claude Code'; }
 	if (lowerPath.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
+	// Antigravity must be checked before Gemini CLI: both live under ~/.gemini/
+	// but Antigravity sessions are under ~/.gemini/antigravity/brain/ which is more specific.
+	if (lowerPath.includes('/.gemini/antigravity/brain/')) { return 'Antigravity'; }
 	if (isGeminiCliPath(lowerPath)) { return 'Gemini CLI'; }
 	return undefined;
 }
@@ -961,12 +966,16 @@ export function detectEditorSource(filePath: string, isOpenCodeSessionFile?: (p:
 	const lowerPath = normalizePathForComparison(filePath);
 	if (lowerPath.includes('/.copilot/jb/')) { return 'JetBrains'; }
 	if (lowerPath.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
+	if (lowerPath.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
 	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
 	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/.claude/projects/')) { return 'Claude Code'; }
 	if (lowerPath.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
+	// Antigravity must be checked before Gemini CLI (both live under ~/.gemini/).
+	if (lowerPath.includes('/.gemini/antigravity/brain/')) { return 'Antigravity'; }
 	if (isGeminiCliPath(lowerPath)) { return 'Gemini CLI'; }
 	return detectIDEEditorSource(lowerPath) ?? 'Unknown';
 }
+

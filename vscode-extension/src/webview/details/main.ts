@@ -15,7 +15,7 @@ import { registerMessageHandler } from '../shared/messageHandler';
 import type { ModelUsage } from '../shared/types';
 
 type EditorUsage = Record<string, { tokens: number; sessions: number }>;
-type TableSortKey = 'name' | 'today' | 'last30Days' | 'lastMonth' | 'projected';
+type TableSortKey = 'name' | 'today' | 'last30Days' | 'month' | 'lastMonth' | 'projected';
 type SortDir = 'asc' | 'desc';
 
 type PeriodStats = {
@@ -323,6 +323,7 @@ const headers = [
 { icon: '📊', text: 'Metric' },
 { icon: '📅', text: 'Today' },
 { icon: '📈', text: 'Last 30 Days' },
+{ icon: '🗓️', text: 'Current Month' },
 { icon: '📆', text: 'Previous Month' },
 { icon: '🌍', text: 'Projected Year' }
 ];
@@ -339,19 +340,24 @@ thead.append(headerRow);
 table.append(thead);
 
 const tbody = document.createElement('tbody');
-const rows: Array<{ label: string; labelTooltip?: string; icon: string; color?: string; today: string; last30Days: string; lastMonth: string; projected: string }> = [
-{ label: 'Tokens (total)', icon: '🟣', color: '#c37bff', today: formatCompact(stats.today.tokens), last30Days: formatCompact(stats.last30Days.tokens), lastMonth: formatCompact(stats.lastMonth.tokens), projected: formatCompact(projections.projectedTokens) },
-{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },
-{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: (stats.today.actualTokens || 0) > 0 ? formatPercent(((stats.today.tokens - stats.today.estimatedTokens) / stats.today.tokens) * 100) : '—', last30Days: (stats.last30Days.actualTokens || 0) > 0 ? formatPercent(((stats.last30Days.tokens - stats.last30Days.estimatedTokens) / stats.last30Days.tokens) * 100) : '—', lastMonth: (stats.lastMonth.actualTokens || 0) > 0 ? formatPercent(((stats.lastMonth.tokens - stats.lastMonth.estimatedTokens) / stats.lastMonth.tokens) * 100) : '—', projected: '—' },
-{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
-...((stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.lastMonth.cachedTokens)
-? [{ label: 'Cached tokens', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }]
+const sumInput  = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.inputTokens,  0);
+const sumOutput = (p: PeriodStats) => Object.values(p.modelUsage).reduce((s, m) => s + m.outputTokens, 0);
+const hasActual = (p: PeriodStats) => (p.actualTokens || 0) > 0;
+const rows: Array<{ label: string; labelTooltip?: string; icon: string; color?: string; today: string; last30Days: string; month: string; lastMonth: string; projected: string }> = [
+{ label: 'Tokens (input+output)', icon: '🟣', color: '#c37bff', today: formatCompact(stats.today.tokens), last30Days: formatCompact(stats.last30Days.tokens), month: formatCompact(stats.month.tokens), lastMonth: formatCompact(stats.lastMonth.tokens), projected: formatCompact(projections.projectedTokens) },
+{ label: 'Input tokens', icon: '⬆️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumInput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumInput(stats.last30Days)) : '—', month: hasActual(stats.month) ? formatCompact(sumInput(stats.month)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumInput(stats.lastMonth)) : '—', projected: '—' },
+{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: hasActual(stats.today) ? formatCompact(sumOutput(stats.today)) : '—', last30Days: hasActual(stats.last30Days) ? formatCompact(sumOutput(stats.last30Days)) : '—', month: hasActual(stats.month) ? formatCompact(sumOutput(stats.month)) : '—', lastMonth: hasActual(stats.lastMonth) ? formatCompact(sumOutput(stats.lastMonth)) : '—', projected: '—' },
+...((stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)
+? [{ label: 'Cached tokens', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }]
 : []),
+{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), month: formatCompact(stats.month.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },
+{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: hasActual(stats.today) ? formatPercent(((stats.today.actualTokens - stats.today.estimatedTokens) / stats.today.actualTokens) * 100) : '—', last30Days: hasActual(stats.last30Days) ? formatPercent(((stats.last30Days.actualTokens - stats.last30Days.estimatedTokens) / stats.last30Days.actualTokens) * 100) : '—', month: hasActual(stats.month) ? formatPercent(((stats.month.actualTokens - stats.month.estimatedTokens) / stats.month.actualTokens) * 100) : '—', lastMonth: hasActual(stats.lastMonth) ? formatPercent(((stats.lastMonth.actualTokens - stats.lastMonth.estimatedTokens) / stats.lastMonth.actualTokens) * 100) : '—', projected: '—' },
+{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
 {
 label: 'Estimated cost (UBB)',
 labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.',
 icon: '🟢', color: '#7ce38b',
-today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0)
+today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0)
 },
 ...(stats.copilotPlan ? (() => {
 const credits = stats.copilotPlan.monthlyAiCreditsUsd > 0 ? `$${stats.copilotPlan.monthlyAiCreditsUsd} credits/month` : 'no credits';
@@ -359,12 +365,12 @@ return [{
 label: `${stats.copilotPlan.planName} (${credits})`,
 labelTooltip: `Your active GitHub Copilot subscription plan (ID: ${stats.copilotPlan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`,
 icon: '🏷️', color: '#60a5fa',
-today: '—', last30Days: '—', lastMonth: '—', projected: '—'
+today: '—', last30Days: '—', month: '—', lastMonth: '—', projected: '—'
 }];
 })() : []),
-{ label: 'Sessions', icon: '��', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
-{ label: 'Average interactions/session', icon: '💬', color: '#8ce0ff', today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: '—' },
-{ label: 'Average tokens/session', icon: '🔢', color: '#7ce38b', today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: '—' }
+{ label: 'Sessions', icon: '📂', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
+{ label: 'Average interactions/session', icon: '💬', color: '#8ce0ff', today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: '—' },
+{ label: 'Average tokens/session', icon: '🔢', color: '#7ce38b', today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: '—' }
 ];
 
 rows.forEach(row => {
@@ -373,6 +379,7 @@ tr.append(
 buildMetricLabelCell(row.icon, row.label, row.color, row.labelTooltip),
 buildValueCell(row.today),
 buildValueCell(row.last30Days),
+buildValueCell(row.month),
 buildValueCell(row.lastMonth),
 buildValueCell(row.projected)
 );
@@ -403,12 +410,14 @@ modelOtherExpanded
 function buildEditorTbody(stats: DetailedStats, allEditors: string[]): HTMLTableSectionElement {
 const todayTotal = Object.values(stats.today.editorUsage).reduce((sum, e) => sum + e.tokens, 0);
 const last30DaysTotal = Object.values(stats.last30Days.editorUsage).reduce((sum, e) => sum + e.tokens, 0);
+const monthTotal = Object.values(stats.month.editorUsage).reduce((sum, e) => sum + e.tokens, 0);
 const lastMonthTotal = Object.values(stats.lastMonth.editorUsage).reduce((sum, e) => sum + e.tokens, 0);
 
 type EditorItem = {
 editor: string;
 todayUsage: { tokens: number; sessions: number };
 last30DaysUsage: { tokens: number; sessions: number };
+monthUsage: { tokens: number; sessions: number };
 lastMonthUsage: { tokens: number; sessions: number };
 projectedTokens: number;
 projectedSessions: number;
@@ -417,11 +426,13 @@ projectedSessions: number;
 const items: EditorItem[] = allEditors.map(editor => {
 const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
 const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
+const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
 const lastMonthUsage = stats.lastMonth.editorUsage[editor] || { tokens: 0, sessions: 0 };
 return {
 editor,
 todayUsage,
 last30DaysUsage,
+monthUsage,
 lastMonthUsage,
 projectedTokens: Math.round(calculateProjection(last30DaysUsage.tokens)),
 projectedSessions: Math.round(calculateProjection(last30DaysUsage.sessions))
@@ -434,6 +445,7 @@ switch (editorSortKey) {
 case 'name': cmp = a.editor.localeCompare(b.editor); break;
 case 'today': cmp = a.todayUsage.tokens - b.todayUsage.tokens; break;
 case 'last30Days': cmp = a.last30DaysUsage.tokens - b.last30DaysUsage.tokens; break;
+case 'month': cmp = a.monthUsage.tokens - b.monthUsage.tokens; break;
 case 'lastMonth': cmp = a.lastMonthUsage.tokens - b.lastMonthUsage.tokens; break;
 case 'projected': cmp = a.projectedTokens - b.projectedTokens; break;
 default: cmp = 0;
@@ -443,9 +455,10 @@ return editorSortDir === 'asc' ? cmp : -cmp;
 
 const tbody = document.createElement('tbody');
 
-items.forEach(({ editor, todayUsage, last30DaysUsage, lastMonthUsage, projectedTokens, projectedSessions }) => {
+items.forEach(({ editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens, projectedSessions }) => {
 const todayPercent = todayTotal > 0 ? (todayUsage.tokens / todayTotal) * 100 : 0;
 const last30DaysPercent = last30DaysTotal > 0 ? (last30DaysUsage.tokens / last30DaysTotal) * 100 : 0;
+const monthPercent = monthTotal > 0 ? (monthUsage.tokens / monthTotal) * 100 : 0;
 const lastMonthPercent = lastMonthTotal > 0 ? (lastMonthUsage.tokens / lastMonthTotal) * 100 : 0;
 
 const tr = document.createElement('tr');
@@ -456,11 +469,17 @@ const tr = document.createElement('tr');
 if (editor === 'JetBrains') {
 tr.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.';
 }
+if (editor === 'Antigravity') {
+tr.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.';
+}
 const labelTd = document.createElement('td');
 const labelWrapper = document.createElement('span');
 labelWrapper.className = 'metric-label';
 labelWrapper.textContent = `${getEditorIcon(editor)} ${editor}`;
 if (editor === 'JetBrains') {
+labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`;
+}
+if (editor === 'Antigravity') {
 labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`;
 }
 labelTd.append(labelWrapper);
@@ -469,6 +488,7 @@ tr.append(
 labelTd,
 buildValueCell(formatCompact(todayUsage.tokens), `${formatPercent(todayPercent)} · ${todayUsage.sessions} sessions`),
 buildValueCell(formatCompact(last30DaysUsage.tokens), `${formatPercent(last30DaysPercent)} · ${last30DaysUsage.sessions} sessions`),
+buildValueCell(formatCompact(monthUsage.tokens), `${formatPercent(monthPercent)} · ${monthUsage.sessions} sessions`),
 buildValueCell(formatCompact(lastMonthUsage.tokens), `${formatPercent(lastMonthPercent)} · ${lastMonthUsage.sessions} sessions`),
 buildValueCell(formatCompact(projectedTokens), `${projectedSessions} sessions`)
 );
@@ -482,6 +502,7 @@ function buildEditorUsageSection(stats: DetailedStats): HTMLElement | null {
 const allEditors = new Set([
 ...Object.keys(stats.today.editorUsage),
 ...Object.keys(stats.last30Days.editorUsage),
+...Object.keys(stats.month.editorUsage),
 ...Object.keys(stats.lastMonth.editorUsage)
 ]);
 
@@ -501,6 +522,7 @@ const editorColHeaders: ColHeader[] = [
 { icon: '📝', text: 'Editor', key: 'name' },
 { icon: '📅', text: 'Today', key: 'today' },
 { icon: '📈', text: 'Last 30 Days', key: 'last30Days' },
+{ icon: '🗓️', text: 'Current Month', key: 'month' },
 { icon: '📆', text: 'Previous Month', key: 'lastMonth' },
 { icon: '🌍', text: 'Projected Year', key: 'projected' }
 ];
@@ -540,6 +562,9 @@ todayOutputPct: number;
 last30DaysTotal: number;
 last30DaysInputPct: number;
 last30DaysOutputPct: number;
+monthTotal: number;
+monthInputPct: number;
+monthOutputPct: number;
 lastMonthTotal: number;
 lastMonthInputPct: number;
 lastMonthOutputPct: number;
@@ -550,9 +575,11 @@ charsPerToken: number;
 function toModelItem(model: string): ModelItem {
 const todayUsage = stats.today.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
 const last30DaysUsage = stats.last30Days.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
+const monthUsage = stats.month.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
 const lastMonthUsage = stats.lastMonth.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
 const todayTotal = todayUsage.inputTokens + todayUsage.outputTokens;
 const last30DaysTotal = last30DaysUsage.inputTokens + last30DaysUsage.outputTokens;
+const monthTotal = monthUsage.inputTokens + monthUsage.outputTokens;
 const lastMonthTotal = lastMonthUsage.inputTokens + lastMonthUsage.outputTokens;
 return {
 model,
@@ -562,6 +589,9 @@ todayOutputPct: todayTotal > 0 ? (todayUsage.outputTokens / todayTotal) * 100 : 
 last30DaysTotal,
 last30DaysInputPct: last30DaysTotal > 0 ? (last30DaysUsage.inputTokens / last30DaysTotal) * 100 : 0,
 last30DaysOutputPct: last30DaysTotal > 0 ? (last30DaysUsage.outputTokens / last30DaysTotal) * 100 : 0,
+monthTotal,
+monthInputPct: monthTotal > 0 ? (monthUsage.inputTokens / monthTotal) * 100 : 0,
+monthOutputPct: monthTotal > 0 ? (monthUsage.outputTokens / monthTotal) * 100 : 0,
 lastMonthTotal,
 lastMonthInputPct: lastMonthTotal > 0 ? (lastMonthUsage.inputTokens / lastMonthTotal) * 100 : 0,
 lastMonthOutputPct: lastMonthTotal > 0 ? (lastMonthUsage.outputTokens / lastMonthTotal) * 100 : 0,
@@ -577,6 +607,7 @@ switch (modelSortKey) {
 case 'name': cmp = a.model.localeCompare(b.model); break;
 case 'today': cmp = a.todayTotal - b.todayTotal; break;
 case 'last30Days': cmp = a.last30DaysTotal - b.last30DaysTotal; break;
+case 'month': cmp = a.monthTotal - b.monthTotal; break;
 case 'lastMonth': cmp = a.lastMonthTotal - b.lastMonthTotal; break;
 case 'projected': cmp = a.projected - b.projected; break;
 default: cmp = 0;
@@ -611,6 +642,7 @@ tr.append(
 labelTd,
 buildValueCell(formatCompact(item.todayTotal), `↑${formatPercent(item.todayInputPct)} ↓${formatPercent(item.todayOutputPct)}`),
 buildValueCell(formatCompact(item.last30DaysTotal), `↑${formatPercent(item.last30DaysInputPct)} ↓${formatPercent(item.last30DaysOutputPct)}`),
+buildValueCell(formatCompact(item.monthTotal), `↑${formatPercent(item.monthInputPct)} ↓${formatPercent(item.monthOutputPct)}`),
 buildValueCell(formatCompact(item.lastMonthTotal), `↑${formatPercent(item.lastMonthInputPct)} ↓${formatPercent(item.lastMonthOutputPct)}`),
 buildValueCell(formatCompact(item.projected))
 );
@@ -626,7 +658,7 @@ topItems.forEach(item => tbody.append(buildModelRow(item, false)));
 // "Other" group — only rendered when there are more than TOP_N_MODELS models
 if (otherModels.length > 0) {
 // Aggregate summed stats across all periods for the "Other" group
-const sumUsage = (period: 'today' | 'last30Days' | 'lastMonth') =>
+const sumUsage = (period: 'today' | 'last30Days' | 'month' | 'lastMonth') =>
 otherModels.reduce(
 (acc, m) => {
 const u = stats[period].modelUsage[m] || { inputTokens: 0, outputTokens: 0 };
@@ -636,9 +668,11 @@ return { inputTokens: acc.inputTokens + u.inputTokens, outputTokens: acc.outputT
 );
 const otherToday = sumUsage('today');
 const otherLast30 = sumUsage('last30Days');
+const otherMonth = sumUsage('month');
 const otherLastMonth = sumUsage('lastMonth');
 const otherTodayTotal = otherToday.inputTokens + otherToday.outputTokens;
 const otherLast30Total = otherLast30.inputTokens + otherLast30.outputTokens;
+const otherMonthTotal = otherMonth.inputTokens + otherMonth.outputTokens;
 const otherLastMonthTotal = otherLastMonth.inputTokens + otherLastMonth.outputTokens;
 const otherProjected = Math.round(calculateProjection(otherLast30Total));
 
@@ -675,12 +709,17 @@ if (otherLast30Total > 0) {
 otherLast30Td.append(el('div', 'muted', `↑${formatPercent(pct(otherLast30.inputTokens, otherLast30Total))} ↓${formatPercent(pct(otherLast30.outputTokens, otherLast30Total))}`));
 }
 
+const otherMonthTd = buildValueCell(formatCompact(otherMonthTotal));
+if (otherMonthTotal > 0) {
+otherMonthTd.append(el('div', 'muted', `↑${formatPercent(pct(otherMonth.inputTokens, otherMonthTotal))} ↓${formatPercent(pct(otherMonth.outputTokens, otherMonthTotal))}`));
+}
+
 const otherLastMonthTd = buildValueCell(formatCompact(otherLastMonthTotal));
 if (otherLastMonthTotal > 0) {
 otherLastMonthTd.append(el('div', 'muted', `↑${formatPercent(pct(otherLastMonth.inputTokens, otherLastMonthTotal))} ↓${formatPercent(pct(otherLastMonth.outputTokens, otherLastMonthTotal))}`));
 }
 
-otherTr.append(otherLabelTd, otherTodayTd, otherLast30Td, otherLastMonthTd, buildValueCell(formatCompact(otherProjected)));
+otherTr.append(otherLabelTd, otherTodayTd, otherLast30Td, otherMonthTd, otherLastMonthTd, buildValueCell(formatCompact(otherProjected)));
 otherTr.addEventListener('click', () => {
 modelOtherExpanded = !modelOtherExpanded;
 saveSortSettings();
@@ -703,6 +742,7 @@ function buildModelUsageSection(stats: DetailedStats): HTMLElement | null {
 const allModels = new Set([
 ...Object.keys(stats.today.modelUsage),
 ...Object.keys(stats.last30Days.modelUsage),
+...Object.keys(stats.month.modelUsage),
 ...Object.keys(stats.lastMonth.modelUsage)
 ]);
 
@@ -731,6 +771,7 @@ const modelColHeaders: ColHeader[] = [
 { icon: '🧠', text: 'Model', key: 'name' },
 { icon: '📅', text: 'Today', key: 'today' },
 { icon: '📈', text: 'Last 30 Days', key: 'last30Days' },
+{ icon: '🗓️', text: 'Current Month', key: 'month' },
 { icon: '📆', text: 'Previous Month', key: 'lastMonth' },
 { icon: '🌍', text: 'Projected Year', key: 'projected' }
 ];
@@ -787,7 +828,8 @@ const toolsTexts = [
 '🖥️ Visual Studio 2022+ — GitHub Copilot Chat extension',
 '🟢 OpenCode, 🦀 Crush — terminal-based coding agents',
 '🤖 Claude Code — Anthropic\'s CLI coding agent',
-'💎 Gemini CLI — Google\'s CLI coding agent',
+'💎 Gemini CLI — Google\'s open-source CLI coding agent',
+'🚀 Antigravity — Google\'s Gemini-powered desktop IDE',
 '💻 Copilot CLI — GitHub Copilot in the terminal',
 ];
 toolsTexts.forEach(text => {
@@ -807,7 +849,7 @@ steps.className = 'empty-state-steps';
 const stepTexts = [
 'Use any of the supported tools or editors listed above to interact with an AI model.',
 'For GitHub Copilot in VS Code: open the Copilot Chat panel (Ctrl+Alt+I / Cmd+Alt+I) and start a conversation.',
-'For terminal agents (Claude Code, Gemini CLI, OpenCode, Copilot CLI): run a coding session in your terminal.',
+'For terminal agents (Claude Code, Gemini CLI, Antigravity, OpenCode, Copilot CLI): run a coding session in your terminal.',
 'Click the 🔄 Refresh button above to reload the stats after your first session.',
 ];
 stepTexts.forEach(text => {

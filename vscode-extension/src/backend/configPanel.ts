@@ -189,63 +189,7 @@ function buildSharingSection(): string {
 						<vscode-option value="teamIdentified">Team Identified</vscode-option>
 					</vscode-dropdown>
 					<div id="sharingProfile-help" class="helper" style="margin-bottom: 8px;">Choose your privacy level. Each profile controls what data is synced to Azure and who can see it.</div>
-					<details style="margin-bottom: 12px;">
-						<summary style="cursor: pointer; color: #3794ff; font-size: 12px; margin-bottom: 8px;">What do these profiles mean?</summary>
-						<div style="margin-top: 12px; font-size: 11px; line-height: 1.5;">
-							<div style="background: #2d2d30; border-left: 3px solid #555; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">🔒 Off (Local-only)</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> No one — data never leaves your device</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Nothing synced to Azure</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ Not synced</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ Not synced</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Use this to keep all data private on this device only.</div>
-							</div>
-							<div style="background: #2d2d30; border-left: 3px solid #0e639c; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👤 Solo</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Only you (single-user Azure storage)</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ✅ <em>Actual names</em> (e.g., "frontend-monorepo")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ✅ <em>Actual names</em> (e.g., "DESKTOP-ABC123")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID (you're the only user)</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Perfect for personal tracking across multiple devices. No privacy concerns since only you have access.</div>
-							</div>
-							<div style="background: #2d2d30; border-left: 3px solid #4ec9b0; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Anonymized</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Strongest team privacy: team sees aggregated usage but can't identify specific workspaces, machines, or users.</div>
-							</div>
-							<div style="background: #2d2d30; border-left: 3px solid #c586c0; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Pseudonymous</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Stable alias auto-derived from Entra ID</em> (e.g., "dev-001")</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Track usage per-person without revealing real names. Same developer always gets same alias across sessions.</div>
-							</div>
-							<div style="background: #2d2d30; border-left: 3px solid #d7ba7d; padding: 10px 12px; margin-bottom: 10px;">
-								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Identified</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "frontend-monorepo")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "DESKTOP-ABC123")</div>
-								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Team alias OR Entra object ID</em> (e.g., "alex-dev" or GUID)</div>
-								<div style="color: #888; font-style: italic; margin-top: 6px;">Full transparency: team sees who uses what. Best for small teams or compliance scenarios.</div>
-							</div>
-							<div style="background: #3a3d41; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; margin-top: 12px;">
-								<div style="color: #f48771; font-size: 10px; font-weight: bold; margin-bottom: 4px;">⚠️ IMPORTANT</div>
-								<div style="color: #b3b3b3; font-size: 10px;">• Token counts, model names, and dates are <strong>always included</strong> when backend is enabled</div>
-								<div style="color: #b3b3b3; font-size: 10px;">• "Who can see" means anyone with read access to your Azure Storage account</div>
-								<div style="color: #b3b3b3; font-size: 10px;">• Upgrading to more permissive profiles requires explicit consent</div>
-								<div style="color: #b3b3b3; font-size: 10px;">• Use the "Store readable workspace &amp; machine names" checkbox below to control name storage</div>
-							</div>
-						</div>
-					</details>
+				${buildProfileDetailsHtml()}
 				</div>
 				<div id="nameStorageControl" style="margin-top: 16px;">
 					<div class="field inline">
@@ -377,7 +321,67 @@ function buildReviewSection(): string {
  * Returns the two <script> blocks for the config panel webview.
  * Includes XSS protection via escHtml() for all user-controlled values rendered via innerHTML.
  */
-function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string, aliasRegex: string): string {
+function buildProfileDetailsHtml(): string {
+	return `					<details style="margin-bottom: 12px;">
+						<summary style="cursor: pointer; color: #3794ff; font-size: 12px; margin-bottom: 8px;">What do these profiles mean?</summary>
+						<div style="margin-top: 12px; font-size: 11px; line-height: 1.5;">
+							<div style="background: #2d2d30; border-left: 3px solid #555; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">🔒 Off (Local-only)</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> No one — data never leaves your device</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Nothing synced to Azure</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ Not synced</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ Not synced</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Use this to keep all data private on this device only.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #0e639c; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👤 Solo</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Only you (single-user Azure storage)</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ✅ <em>Actual names</em> (e.g., "frontend-monorepo")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ✅ <em>Actual names</em> (e.g., "DESKTOP-ABC123")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID (you're the only user)</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Perfect for personal tracking across multiple devices. No privacy concerns since only you have access.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #4ec9b0; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Anonymized</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ❌ No user ID stored</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Strongest team privacy: team sees aggregated usage but can't identify specific workspaces, machines, or users.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #c586c0; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Pseudonymous</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "ws_a7f3...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ❌ <em>Hashed IDs only</em> (e.g., "mc_9d2b...")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Stable alias auto-derived from Entra ID</em> (e.g., "dev-001")</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Track usage per-person without revealing real names. Same developer always gets same alias across sessions.</div>
+							</div>
+							<div style="background: #2d2d30; border-left: 3px solid #d7ba7d; padding: 10px 12px; margin-bottom: 10px;">
+								<div style="color: #e5e5e5; font-weight: bold; margin-bottom: 6px;">👥 Team Identified</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Who can see:</strong> Team members with Azure storage access</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>What's stored:</strong> Token counts, model usage, interaction counts, dates</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Workspace names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "frontend-monorepo")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Machine names:</strong> ⚠️ <em>Optional: can enable actual names</em> (e.g., "DESKTOP-ABC123")</div>
+								<div style="color: #b3b3b3; margin-bottom: 4px;"><strong>Your identity:</strong> ⚠️ <em>Team alias OR Entra object ID</em> (e.g., "alex-dev" or GUID)</div>
+								<div style="color: #888; font-style: italic; margin-top: 6px;">Full transparency: team sees who uses what. Best for small teams or compliance scenarios.</div>
+							</div>
+							<div style="background: #3a3d41; border: 1px solid #555; border-radius: 4px; padding: 8px 10px; margin-top: 12px;">
+								<div style="color: #f48771; font-size: 10px; font-weight: bold; margin-bottom: 4px;">⚠️ IMPORTANT</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Token counts, model names, and dates are <strong>always included</strong> when backend is enabled</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• "Who can see" means anyone with read access to your Azure Storage account</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Upgrading to more permissive profiles requires explicit consent</div>
+								<div style="color: #b3b3b3; font-size: 10px;">• Use the "Store readable workspace &amp; machine names" checkbox below to control name storage</div>
+							</div>
+						</div>
+					</details>`;
+}
+
+function buildToolkitScriptTag(nonce: string, toolkitUri: string): string {
 	return `	<script type="module" nonce="${nonce}">
 		// Register toolkit components before main script runs
 		try {
@@ -388,13 +392,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 		}
 		// Signal that toolkit registration is complete (or has failed)
 		window.__toolkitReady = true;
-	</script>
-	<script nonce="${nonce}">
-		const vscodeApi = acquireVsCodeApi();
-		const initial = ${initialState};
-		let currentState = initial;
-		const aliasRegex = new RegExp(${aliasRegex});
+	</script>`;
+}
 
+function buildCoreUtilFunctions(): string {
+	return `
 		/** Escapes HTML entities to prevent XSS when injecting user-controlled values via innerHTML. */
 		function escHtml(s) {
 			return String(s ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;').replace(/'/g, '&#39;');
@@ -404,37 +406,37 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 
 		function setFieldValues(state) {
 			byId('enabledToggle').checked = !!state.draft.enabled;
-			byId('enabledToggleTeam').checked = !!state.draft.sharingServerEnabled;
+			byId('enabledToggleTeam').checked = !!state.draft.sharing.sharingServerEnabled;
 			byId('backendType').value = state.draft.backend || 'storageTables';
-			byId('sharingProfile').value = state.draft.sharingProfile;
+			byId('sharingProfile').value = state.draft.sharing.sharingProfile;
 			byId('authMode').value = state.draft.authMode;
-			byId('subscriptionId').value = state.draft.subscriptionId || '';
-			byId('resourceGroup').value = state.draft.resourceGroup || '';
-			byId('storageAccount').value = state.draft.storageAccount || '';
-			byId('aggTable').value = state.draft.aggTable || '';
-			byId('eventsTable').value = state.draft.eventsTable || '';
+			byId('subscriptionId').value = state.draft.azureResources.subscriptionId || '';
+			byId('resourceGroup').value = state.draft.azureResources.resourceGroup || '';
+			byId('storageAccount').value = state.draft.azureResources.storageAccount || '';
+			byId('aggTable').value = state.draft.azureResources.aggTable || '';
+			byId('eventsTable').value = state.draft.azureResources.eventsTable || '';
 			byId('datasetId').value = state.draft.datasetId || '';
 			byId('lookbackDays').value = state.draft.lookbackDays ?? '';
-			byId('userIdentityMode').value = state.draft.userIdentityMode;
-			byId('userId').value = state.draft.userId || '';
-			byId('sharingServerEndpointUrl').value = state.draft.sharingServerEndpointUrl || '';
+			byId('userIdentityMode').value = state.draft.identity.userIdentityMode;
+			byId('userId').value = state.draft.identity.userId || '';
+			byId('sharingServerEndpointUrl').value = state.draft.sharing.sharingServerEndpointUrl || '';
 			updateUserIdPlaceholder();
-			byId('blobUploadEnabled').checked = !!state.draft.blobUploadEnabled;
-			byId('blobContainerName').value = state.draft.blobContainerName || '';
-			byId('blobUploadFrequencyHours').value = state.draft.blobUploadFrequencyHours ?? '';
-			byId('blobCompressFiles').checked = state.draft.blobCompressFiles !== false;
+			byId('blobUploadEnabled').checked = !!state.draft.blobUpload.blobUploadEnabled;
+			byId('blobContainerName').value = state.draft.blobUpload.blobContainerName || '';
+			byId('blobUploadFrequencyHours').value = state.draft.blobUpload.blobUploadFrequencyHours ?? '';
+			byId('blobCompressFiles').checked = state.draft.blobUpload.blobCompressFiles !== false;
 			byId('privacyBadge').innerText = 'Privacy: ' + state.privacyBadge;
 			byId('authBadge').innerText = state.authStatus;
-			byId('backendStateBadge').innerText = (state.draft.enabled || state.draft.sharingServerEnabled) ? 'Backend: Enabled' : 'Backend: Disabled';
-			const showGithubWarning = state.draft.sharingServerEnabled && !state.githubTokenAvailable;
+			byId('backendStateBadge').innerText = (state.draft.enabled || state.draft.sharing.sharingServerEnabled) ? 'Backend: Enabled' : 'Backend: Disabled';
+			const showGithubWarning = state.draft.sharing.sharingServerEnabled && !state.githubTokenAvailable;
 			byId('githubAuthWarning').style.display = showGithubWarning ? 'block' : 'none';
 			updateLastSyncLine(state.lastSyncAt);
 
 			// Update overview details
 			const detailsDiv = byId('overviewDetails');
-			if (state.draft.enabled || state.draft.sharingServerEnabled) {
+			if (state.draft.enabled || state.draft.sharing.sharingServerEnabled) {
 				detailsDiv.style.display = 'grid';
-				byId('overviewProfile').textContent = state.draft.sharingProfile;
+				byId('overviewProfile').textContent = state.draft.sharing.sharingProfile;
 				byId('overviewDataset').textContent = state.draft.datasetId || 'not set';
 				byId('statusMessage').textContent = state.message || '';
 			} else {
@@ -451,7 +453,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			updateBlobSettingsState();
 			updateReviewSummary();
 		}
+`;
+}
 
+function buildSetErrorsAndSyncFunctions(): string {
+	return `
 		function setErrors(errors = {}) {
 			document.querySelectorAll('.error').forEach((el) => { el.textContent = ''; });
 			// Clear all aria-invalid attributes
@@ -494,7 +500,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			el.className = 'status-line ok';
 			el.textContent = 'Last sync: ' + when + ' (' + new Date(lastSyncAt).toLocaleTimeString() + ')';
 		}
+`;
+}
 
+function buildReadDraftFunction(): string {
+	return `
 		function readDraft() {
 			const profile = byId('sharingProfile').value;
 			const backendType = byId('backendType').value;
@@ -505,61 +515,75 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			const shareWorkspaceMachineNames = profile === 'soloFull' || profile === 'teamPseudonymous' || profile === 'teamIdentified';
 			return {
 				enabled: enabledChecked,
-				sharingServerEnabled: sharingServerEnabledChecked,
 				backend: backendType,
 				authMode: byId('authMode').value,
-				sharingProfile: profile,
-				shareWorkspaceMachineNames,
 				includeMachineBreakdown: true, // Always enabled
 				datasetId: byId('datasetId').value,
 				lookbackDays: Number(byId('lookbackDays').value),
-				subscriptionId: byId('subscriptionId').value,
-				resourceGroup: byId('resourceGroup').value,
-				storageAccount: byId('storageAccount').value,
-				aggTable: byId('aggTable').value,
-				eventsTable: byId('eventsTable').value,
-				userIdentityMode: byId('userIdentityMode').value,
-				userId: byId('userId').value,
-				sharingServerEndpointUrl: byId('sharingServerEndpointUrl').value,
-				blobUploadEnabled: byId('blobUploadEnabled').checked,
-				blobContainerName: byId('blobContainerName').value,
-				blobUploadFrequencyHours: Number(byId('blobUploadFrequencyHours').value),
-				blobCompressFiles: byId('blobCompressFiles').checked
+				azureResources: {
+					subscriptionId: byId('subscriptionId').value,
+					resourceGroup: byId('resourceGroup').value,
+					storageAccount: byId('storageAccount').value,
+					aggTable: byId('aggTable').value,
+					eventsTable: byId('eventsTable').value,
+				},
+				identity: {
+					userIdentityMode: byId('userIdentityMode').value,
+					userId: byId('userId').value,
+				},
+				blobUpload: {
+					blobUploadEnabled: byId('blobUploadEnabled').checked,
+					blobContainerName: byId('blobContainerName').value,
+					blobUploadFrequencyHours: Number(byId('blobUploadFrequencyHours').value),
+					blobCompressFiles: byId('blobCompressFiles').checked,
+				},
+				sharing: {
+					sharingProfile: profile,
+					shareWorkspaceMachineNames,
+					sharingServerEnabled: sharingServerEnabledChecked,
+					sharingServerEndpointUrl: byId('sharingServerEndpointUrl').value,
+				},
 			};
 		}
+`;
+}
 
+function buildValidateFunctions(): string {
+	return `
 		function validateLocal(draft) {
 			const errors = {};
 			if (!draft.datasetId || !draft.datasetId.trim()) errors.datasetId = 'Required';
 			else if (!aliasRegex.test(draft.datasetId.trim())) errors.datasetId = 'Use letters, numbers, dashes, underscores';
 			if (draft.enabled) {
 				['subscriptionId','resourceGroup','storageAccount','aggTable'].forEach(f => {
-					if (!draft[f] || !draft[f].trim()) errors[f] = 'Required';
+					const v = draft.azureResources[f];
+					if (!v || !v.trim()) errors[f] = 'Required';
 				});
 			}
-			if (draft.sharingServerEnabled) {
-				if (!draft.sharingServerEndpointUrl || !draft.sharingServerEndpointUrl.trim()) {
+			if (draft.sharing.sharingServerEnabled) {
+				if (!draft.sharing.sharingServerEndpointUrl || !draft.sharing.sharingServerEndpointUrl.trim()) {
 					errors.sharingServerEndpointUrl = 'Required';
 				} else {
-					try { new URL(draft.sharingServerEndpointUrl); } catch { errors.sharingServerEndpointUrl = 'Enter a valid URL'; }
+					try { new URL(draft.sharing.sharingServerEndpointUrl); } catch { errors.sharingServerEndpointUrl = 'Enter a valid URL'; }
 				}
 			}
 			['aggTable','eventsTable'].forEach(f => {
-				if (draft[f] && !aliasRegex.test(draft[f].trim())) errors[f] = 'Use letters, numbers, dashes, underscores';
+				const v = draft.azureResources[f];
+				if (v && !aliasRegex.test(v.trim())) errors[f] = 'Use letters, numbers, dashes, underscores';
 			});
 			if (draft.lookbackDays < 1 || draft.lookbackDays > 90 || Number.isNaN(draft.lookbackDays)) {
 				errors.lookbackDays = '1-90';
 			}
-			if (draft.blobUploadEnabled) {
-				if (!draft.blobContainerName || !draft.blobContainerName.trim()) errors.blobContainerName = 'Required';
-				const freq = Number(draft.blobUploadFrequencyHours);
+			if (draft.blobUpload.blobUploadEnabled) {
+				if (!draft.blobUpload.blobContainerName || !draft.blobUpload.blobContainerName.trim()) errors.blobContainerName = 'Required';
+				const freq = Number(draft.blobUpload.blobUploadFrequencyHours);
 				if (!Number.isFinite(freq) || freq < 1 || freq > 168) errors.blobUploadFrequencyHours = '1-168';
 			}
-			if (draft.sharingProfile === 'teamIdentified') {
-				const id = (draft.userId || '').trim();
+			if (draft.sharing.sharingProfile === 'teamIdentified') {
+				const id = (draft.identity.userId || '').trim();
 				if (!id) {
 					errors.userId = 'Alias or object ID required';
-				} else if (draft.userIdentityMode === 'entraObjectId' && !/^[-0-9a-fA-F]{36}$/.test(id)) {
+				} else if (draft.identity.userIdentityMode === 'entraObjectId' && !/^[-0-9a-fA-F]{36}$/.test(id)) {
 					errors.userId = 'Use an Entra object ID (GUID)';
 				}
 			}
@@ -573,7 +597,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			const allowSave = validation.valid && byId('confirmApply').checked;
 			byId('saveBtnReview').disabled = !allowSave;
 		}
+`;
+}
 
+function buildIdentityFunctions(): string {
+	return `
 		function updateIdentityVisibility() {
 			const isIdentified = byId('sharingProfile').value === 'teamIdentified';
 			byId('identityCard').style.display = isIdentified ? 'block' : 'none';
@@ -592,14 +620,18 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 
 		function hasSharedKey() {
 			const storage = (byId('storageAccount').value || '').trim();
-			const storedFor = (currentState?.draft?.storageAccount || '').trim();
+			const storedFor = (currentState?.draft?.azureResources?.storageAccount || '').trim();
 			return !!currentState.sharedKeySet && storage && storage === storedFor;
 		}
+`;
+}
 
+function buildEnabledStateFunctions(): string {
+	return `
 		function updateEnabledState() {
 			const draft = readDraft();
 			const enabled = draft.enabled;
-			const sharingServerEnabled = draft.sharingServerEnabled;
+			const sharingServerEnabled = draft.sharing.sharingServerEnabled;
 			const azureSection = document.getElementById('azure');
 			const sharingSection = document.getElementById('sharing');
 			const advancedSection = document.getElementById('advanced');
@@ -653,7 +685,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 				}
 			}
 		}
+`;
+}
 
+function buildReviewAndAuthFunctions(): string {
+	return `
 		function updateReviewSummary() {
 			const draft = readDraft();
 			const summary = byId('reviewSummary');
@@ -661,13 +697,13 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 
 			let html = '';
 
-			const eitherEnabled = draft.enabled || draft.sharingServerEnabled;
+			const eitherEnabled = draft.enabled || draft.sharing.sharingServerEnabled;
 			if (!eitherEnabled) {
 				html = '<div class="change-item danger"><div class="change-label">⚠️ All Backends Disabled</div><div class="change-value">All token usage data will stay local-only. No sync to any backend.</div></div>';
 			} else {
 				if (draft.enabled) {
-					if (draft.subscriptionId && draft.resourceGroup && draft.storageAccount) {
-						html += '<div class="change-item"><div class="change-label">✓ Azure Storage Enabled</div><div class="change-value">Subscription: ' + escHtml(draft.subscriptionId) + '<br>Resource Group: ' + escHtml(draft.resourceGroup) + '<br>Storage Account: ' + escHtml(draft.storageAccount) + '</div></div>';
+					if (draft.azureResources.subscriptionId && draft.azureResources.resourceGroup && draft.azureResources.storageAccount) {
+						html += '<div class="change-item"><div class="change-label">✓ Azure Storage Enabled</div><div class="change-value">Subscription: ' + escHtml(draft.azureResources.subscriptionId) + '<br>Resource Group: ' + escHtml(draft.azureResources.resourceGroup) + '<br>Storage Account: ' + escHtml(draft.azureResources.storageAccount) + '</div></div>';
 					} else {
 						html += '<div class="change-item warning"><div class="change-label">⚠️ Azure Storage Enabled (incomplete)</div><div class="change-value">Not fully configured — some Azure fields are missing</div></div>';
 					}
@@ -675,9 +711,9 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 					html += '<div class="change-item"><div class="change-label">Azure Auth</div><div class="change-value">' + authLabel + '</div></div>';
 				}
 
-				if (draft.sharingServerEnabled) {
-					if (draft.sharingServerEndpointUrl) {
-						html += '<div class="change-item"><div class="change-label">✓ Team Server Enabled</div><div class="change-value">URL: ' + escHtml(draft.sharingServerEndpointUrl) + '</div></div>';
+				if (draft.sharing.sharingServerEnabled) {
+					if (draft.sharing.sharingServerEndpointUrl) {
+						html += '<div class="change-item"><div class="change-label">✓ Team Server Enabled</div><div class="change-value">URL: ' + escHtml(draft.sharing.sharingServerEndpointUrl) + '</div></div>';
 					} else {
 						html += '<div class="change-item warning"><div class="change-label">⚠️ Team Server Enabled (incomplete)</div><div class="change-value">Server URL not configured</div></div>';
 					}
@@ -690,21 +726,21 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 					'teamPseudonymous': 'Team Pseudonymous',
 					'teamIdentified': 'Team Identified'
 				};
-				const profileLabel = escHtml(profileLabels[draft.sharingProfile] || draft.sharingProfile);
+				const profileLabel = escHtml(profileLabels[draft.sharing.sharingProfile] || draft.sharing.sharingProfile);
 				let nameSync = 'Hashed IDs';
-				if (draft.sharingProfile === 'soloFull' || draft.sharingProfile === 'teamPseudonymous' || draft.sharingProfile === 'teamIdentified') {
+				if (draft.sharing.sharingProfile === 'soloFull' || draft.sharing.sharingProfile === 'teamPseudonymous' || draft.sharing.sharingProfile === 'teamIdentified') {
 					nameSync = 'Readable names';
 				}
 				html += '<div class="change-item"><div class="change-label">Privacy &amp; Sharing</div><div class="change-value">Profile: ' + profileLabel + '<br>Workspace/Machine Names: ' + nameSync + '<br>Per-machine breakdown: Always enabled</div></div>';
 
-				if (draft.sharingProfile === 'teamIdentified' && draft.userId) {
-					html += '<div class="change-item"><div class="change-label">User Identity</div><div class="change-value">' + escHtml(draft.userId) + ' (' + (draft.userIdentityMode === 'entraObjectId' ? 'Entra Object ID' : 'Team Alias') + ')</div></div>';
+				if (draft.sharing.sharingProfile === 'teamIdentified' && draft.identity.userId) {
+					html += '<div class="change-item"><div class="change-label">User Identity</div><div class="change-value">' + escHtml(draft.identity.userId) + ' (' + (draft.identity.userIdentityMode === 'entraObjectId' ? 'Entra Object ID' : 'Team Alias') + ')</div></div>';
 				}
 
 				html += '<div class="change-item"><div class="change-label">Dataset &amp; Lookback</div><div class="change-value">Dataset ID: ' + escHtml(draft.datasetId || 'default') + '<br>Lookback: ' + escHtml(draft.lookbackDays || 30) + ' days</div></div>';
 
-				if (draft.blobUploadEnabled) {
-					html += '<div class="change-item warning"><div class="change-label">⚠️ Blob Upload</div><div class="change-value">Enabled — full session log files (prompts, responses, code) will be uploaded<br>Container: ' + escHtml(draft.blobContainerName || 'copilot-session-logs') + '<br>Frequency: every ' + escHtml(draft.blobUploadFrequencyHours || 24) + ' hours<br>Compression: ' + (draft.blobCompressFiles !== false ? 'On' : 'Off') + '</div></div>';
+				if (draft.blobUpload.blobUploadEnabled) {
+					html += '<div class="change-item warning"><div class="change-label">⚠️ Blob Upload</div><div class="change-value">Enabled — full session log files (prompts, responses, code) will be uploaded<br>Container: ' + escHtml(draft.blobUpload.blobContainerName || 'copilot-session-logs') + '<br>Frequency: every ' + escHtml(draft.blobUpload.blobUploadFrequencyHours || 24) + ' hours<br>Compression: ' + (draft.blobUpload.blobCompressFiles !== false ? 'On' : 'Off') + '</div></div>';
 				}
 			}
 
@@ -722,7 +758,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			}
 			updateConnectionAvailability();
 		}
+`;
+}
 
+function buildNavAndBindFunctions(): string {
+	return `
 		function updateConnectionAvailability() {
 			const enabled = byId('enabledToggle').checked;
 			const offline = !navigator.onLine;
@@ -777,7 +817,11 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 			});
 			byId('clearSettingsBtn').addEventListener('click', () => vscodeApi.postMessage({ command: 'clearAzureSettings' }));
 		}
+`;
+}
 
+function buildMessageHandlerAndInit(): string {
+	return `
 		window.addEventListener('message', (event) => {
 			const msg = event.data;
 			if (msg.type === 'state') {
@@ -823,6 +867,27 @@ function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string
 
 		waitForToolkit();
 	</script>`;
+}
+
+function buildScriptHtml(nonce: string, toolkitUri: string, initialState: string, aliasRegex: string): string {
+	const scriptOpen = `
+	<script nonce="${nonce}">
+		const vscodeApi = acquireVsCodeApi();
+		const initial = ${initialState};
+		let currentState = initial;
+		const aliasRegex = new RegExp(${aliasRegex});
+`;
+	return buildToolkitScriptTag(nonce, toolkitUri)
+		+ scriptOpen
+		+ buildCoreUtilFunctions()
+		+ buildSetErrorsAndSyncFunctions()
+		+ buildReadDraftFunction()
+		+ buildValidateFunctions()
+		+ buildIdentityFunctions()
+		+ buildEnabledStateFunctions()
+		+ buildReviewAndAuthFunctions()
+		+ buildNavAndBindFunctions()
+		+ buildMessageHandlerAndInit();
 }
 
 /**

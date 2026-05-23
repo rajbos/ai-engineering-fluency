@@ -480,45 +480,7 @@ export class AzureResourceService {
 		const currentSettings = this.deps.getSettings();
 		const currentProfile = currentSettings.sharingProfile;
 
-		// Present profile options with "what leaves the machine" summary
-		const profileOptions = [
-			{
-				label: 'Off',
-				description: 'No cloud sync. Local-only stats.',
-				detail: 'Nothing leaves this machine.',
-				profile: 'off' as const,
-				sharingLevel: 0
-			},
-			{
-				label: 'Team / Anonymized',
-				description: 'Recommended for teams. Usage + hashed IDs; no user key, no workspace/machine names.',
-				detail: 'What leaves: day keys, model IDs, token counts, hashed workspace/machine IDs.',
-				profile: 'teamAnonymized' as const,
-				sharingLevel: 1
-			},
-			{
-				label: 'Team / Pseudonymous',
-				description: 'Usage + derived user key (privacy-preserving hash); hashed IDs; no workspace/machine names by default.',
-				detail: 'What leaves: same as Anonymized + a stable user key (reversible only within this dataset).',
-				profile: 'teamPseudonymous' as const,
-				sharingLevel: 2
-			},
-			{
-				label: 'Team / Identified',
-				description: 'Usage + visible user identity (your alias or Entra ID); hashed IDs; no workspace/machine names by default.',
-				detail: 'What leaves: same as Pseudonymous + explicit user identifier (visible to dataset viewers).',
-				profile: 'teamIdentified' as const,
-				sharingLevel: 3
-			},
-			{
-				label: 'Solo / Full Fidelity',
-				description: 'Personal dataset. Raw IDs + real workspace/machine names.',
-				detail: 'What leaves: usage + raw workspace/machine IDs + workspace/machine names.',
-				profile: 'soloFull' as const,
-				sharingLevel: 4
-			}
-		];
-
+		const profileOptions = this.buildProfileOptions();
 		const currentLevelIndex = profileOptions.findIndex(p => p.profile === currentProfile);
 		const currentLevel = currentLevelIndex >= 0 ? profileOptions[currentLevelIndex].sharingLevel : 0;
 
@@ -527,133 +489,72 @@ export class AzureResourceService {
 			placeHolder: `Current: ${currentProfile}`,
 			ignoreFocusOut: true
 		});
+		if (!picked) { return; }
 
-		if (!picked) {
-			return;
-		}
-
-		const newProfile = picked.profile;
-
-		// If transitioning to a more permissive profile (higher sharing level), require explicit confirmation
 		if (picked.sharingLevel > currentLevel) {
-			const confirmMsg = [
-				`⚠️  You are enabling ${picked.label}.`,
-				'',
-				picked.detail,
-				'',
-				'Team datasets may be visible to others with dataset access.',
-				'',
-				'Do you want to proceed?'
-			].join('\\n');
-
-			const confirm = await vscode.window.showWarningMessage(
-				confirmMsg,
-				{ modal: true },
-				'Yes, Enable'
-			);
-
-			if (confirm !== 'Yes, Enable') {
-				return;
-			}
+			const confirmed = await this.confirmMorePermissiveProfile(picked.label, picked.detail);
+			if (!confirmed) { return; }
 		}
 
-		const existingUserId = config.get<string>('backend.userId', '');
-		const existingUserIdMode = config.get<'alias' | 'custom'>('backend.userIdMode', 'alias');
-		const existingIdentityMode = config.get<'pseudonymous' | 'teamAlias' | 'entraObjectId'>('backend.userIdentityMode', 'pseudonymous');
+		const profileDefaults = this.getProfileDefaults(picked.profile, config);
+		const shareWorkspaceMachineNames = await this.maybeAskNamesForTeamProfile(picked.profile, picked.sharingLevel, currentLevel)
+			?? profileDefaults.shareWorkspaceMachineNames;
 
-		// Set profile-specific defaults
-		let shareWithTeam = false;
-		let shareWorkspaceMachineNames = false;
-		let userId: string = existingUserId;
-		let userIdMode: 'alias' | 'custom' = existingUserIdMode;
-		let userIdentityMode: 'pseudonymous' | 'teamAlias' | 'entraObjectId' = existingIdentityMode;
-		let shareConsentAt = '';
-
-		if (newProfile === 'off') {
-			// No cloud sync
-			shareWithTeam = false;
-			shareWorkspaceMachineNames = false;
-			userId = '';
-			userIdMode = 'alias';
-			userIdentityMode = 'pseudonymous';
-			shareConsentAt = '';
-		} else if (newProfile === 'soloFull') {
-			shareWithTeam = false;
-			shareWorkspaceMachineNames = true;
-			userId = '';
-			userIdMode = 'alias';
-			userIdentityMode = 'pseudonymous';
-			shareConsentAt = '';
-		} else if (newProfile === 'teamAnonymized') {
-			shareWithTeam = false;
-			shareWorkspaceMachineNames = false;
-			userId = '';
-			userIdMode = 'alias';
-			userIdentityMode = 'pseudonymous';
-			shareConsentAt = '';
-		} else if (newProfile === 'teamPseudonymous') {
-			shareWithTeam = true;
-			shareWorkspaceMachineNames = false;
-			userIdentityMode = 'pseudonymous';
-			shareConsentAt = new Date().toISOString();
-			userId = '';
-			userIdMode = 'alias';
-		} else if (newProfile === 'teamIdentified') {
-			shareWithTeam = true;
-			shareWorkspaceMachineNames = false;
-			// Keep existing userIdentityMode if already set
-			const existingMode = config.get<'pseudonymous' | 'teamAlias' | 'entraObjectId'>('backend.userIdentityMode');
-			if (existingMode === 'teamAlias' || existingMode === 'entraObjectId') {
-				userIdentityMode = existingMode;
-			} else {
-				userIdentityMode = 'teamAlias';
-			}
-			shareConsentAt = new Date().toISOString();
-		}
-
-		// For team profiles with user dimension, optionally ask about names
-		if ((newProfile === 'teamPseudonymous' || newProfile === 'teamIdentified') && picked.sharingLevel > currentLevel) {
-			const namesPick = await vscode.window.showQuickPick(
-				[
-					{
-						label: 'No (recommended)',
-						description: 'Keep workspace/machine names private.',
-						shareNames: false
-					},
-					{
-						label: 'Yes',
-						description: 'Also upload workspace/machine names (may contain project names, hostname).',
-						shareNames: true
-					}
-				],
-				{
-					title: 'Also share workspace and machine names?',
-					ignoreFocusOut: true
-				}
-			);
-			if (namesPick) {
-				shareWorkspaceMachineNames = namesPick.shareNames;
-			}
-		}
-
-		// Save settings
-		await config.update('backend.sharingProfile', newProfile, vscode.ConfigurationTarget.Global);
-		await config.update('backend.shareWithTeam', shareWithTeam, vscode.ConfigurationTarget.Global);
+		await config.update('backend.sharingProfile', picked.profile, vscode.ConfigurationTarget.Global);
+		await config.update('backend.shareWithTeam', profileDefaults.shareWithTeam, vscode.ConfigurationTarget.Global);
 		await config.update('backend.shareWorkspaceMachineNames', shareWorkspaceMachineNames, vscode.ConfigurationTarget.Global);
-		await config.update('backend.userId', userId, vscode.ConfigurationTarget.Global);
-		await config.update('backend.userIdMode', userIdMode, vscode.ConfigurationTarget.Global);
-		await config.update('backend.userIdentityMode', userIdentityMode, vscode.ConfigurationTarget.Global);
-		await config.update('backend.shareConsentAt', shareConsentAt, vscode.ConfigurationTarget.Global);
+		await config.update('backend.userId', profileDefaults.userId, vscode.ConfigurationTarget.Global);
+		await config.update('backend.userIdMode', profileDefaults.userIdMode, vscode.ConfigurationTarget.Global);
+		await config.update('backend.userIdentityMode', profileDefaults.userIdentityMode, vscode.ConfigurationTarget.Global);
+		await config.update('backend.shareConsentAt', profileDefaults.shareConsentAt, vscode.ConfigurationTarget.Global);
 
-		// Clear facade cache to prevent showing old cached data with different privacy level
 		this.deps.clearQueryCache();
-
-		// If backend is enabled, restart timer and sync
 		if (currentSettings.enabled) {
 			this.deps.startTimerIfEnabled();
 			await this.deps.syncToBackendStore(true);
 		}
+		vscode.window.showInformationMessage(`Sharing profile updated to: ${picked.profile}`);
+	}
 
-		vscode.window.showInformationMessage(`Sharing profile updated to: ${newProfile}`);
+	private buildProfileOptions() {
+		return [
+			{ label: 'Off', description: 'No cloud sync. Local-only stats.', detail: 'Nothing leaves this machine.', profile: 'off' as const, sharingLevel: 0 },
+			{ label: 'Team / Anonymized', description: 'Recommended for teams. Usage + hashed IDs; no user key, no workspace/machine names.', detail: 'What leaves: day keys, model IDs, token counts, hashed workspace/machine IDs.', profile: 'teamAnonymized' as const, sharingLevel: 1 },
+			{ label: 'Team / Pseudonymous', description: 'Usage + derived user key (privacy-preserving hash); hashed IDs; no workspace/machine names by default.', detail: 'What leaves: same as Anonymized + a stable user key (reversible only within this dataset).', profile: 'teamPseudonymous' as const, sharingLevel: 2 },
+			{ label: 'Team / Identified', description: 'Usage + visible user identity (your alias or Entra ID); hashed IDs; no workspace/machine names by default.', detail: 'What leaves: same as Pseudonymous + explicit user identifier (visible to dataset viewers).', profile: 'teamIdentified' as const, sharingLevel: 3 },
+			{ label: 'Solo / Full Fidelity', description: 'Personal dataset. Raw IDs + real workspace/machine names.', detail: 'What leaves: usage + raw workspace/machine IDs + workspace/machine names.', profile: 'soloFull' as const, sharingLevel: 4 }
+		];
+	}
+
+	private async confirmMorePermissiveProfile(label: string, detail: string): Promise<boolean> {
+		const confirmMsg = [`⚠️  You are enabling ${label}.`, '', detail, '', 'Team datasets may be visible to others with dataset access.', '', 'Do you want to proceed?'].join('\n');
+		const confirm = await vscode.window.showWarningMessage(confirmMsg, { modal: true }, 'Yes, Enable');
+		return confirm === 'Yes, Enable';
+	}
+
+	private getProfileDefaults(newProfile: string, config: vscode.WorkspaceConfiguration): {
+		shareWithTeam: boolean; shareWorkspaceMachineNames: boolean; userId: string;
+		userIdMode: 'alias' | 'custom'; userIdentityMode: 'pseudonymous' | 'teamAlias' | 'entraObjectId'; shareConsentAt: string;
+	} {
+		if (newProfile === 'teamPseudonymous') {
+			return { shareWithTeam: true, shareWorkspaceMachineNames: false, userId: '', userIdMode: 'alias', userIdentityMode: 'pseudonymous', shareConsentAt: new Date().toISOString() };
+		}
+		if (newProfile === 'teamIdentified') {
+			const existingMode = config.get<'pseudonymous' | 'teamAlias' | 'entraObjectId'>('backend.userIdentityMode');
+			const userIdentityMode = (existingMode === 'teamAlias' || existingMode === 'entraObjectId') ? existingMode : 'teamAlias';
+			const userId = config.get<string>('backend.userId', '');
+			const userIdMode = config.get<'alias' | 'custom'>('backend.userIdMode', 'alias');
+			return { shareWithTeam: true, shareWorkspaceMachineNames: false, userId, userIdMode, userIdentityMode, shareConsentAt: new Date().toISOString() };
+		}
+		return { shareWithTeam: newProfile === 'teamAnonymized' ? false : false, shareWorkspaceMachineNames: newProfile === 'soloFull', userId: '', userIdMode: 'alias', userIdentityMode: 'pseudonymous', shareConsentAt: '' };
+	}
+
+	private async maybeAskNamesForTeamProfile(newProfile: string, newSharingLevel: number, currentLevel: number): Promise<boolean | undefined> {
+		if ((newProfile !== 'teamPseudonymous' && newProfile !== 'teamIdentified') || newSharingLevel <= currentLevel) { return undefined; }
+		const namesPick = await vscode.window.showQuickPick(
+			[{ label: 'No (recommended)', description: 'Keep workspace/machine names private.', shareNames: false }, { label: 'Yes', description: 'Also upload workspace/machine names (may contain project names, hostname).', shareNames: true }],
+			{ title: 'Also share workspace and machine names?', ignoreFocusOut: true }
+		);
+		return namesPick ? namesPick.shareNames : undefined;
 	}
 }

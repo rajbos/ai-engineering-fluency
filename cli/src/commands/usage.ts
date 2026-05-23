@@ -8,6 +8,7 @@ import { ProgressTracker } from '../progress';
 import type { PeriodStats, ModelUsage } from '../../../vscode-extension/src/types';
 import { getModelTier } from '../../../vscode-extension/src/tokenEstimation';
 import { shouldOutputJson } from '../commandUtils';
+import { createDetailsPayload } from './payloads';
 
 export const usageCommand = new Command('usage')
 	.description('Show token usage for today, current month, last month, and last 30 days')
@@ -22,15 +23,7 @@ export const usageCommand = new Command('usage')
 
 		if (shouldOutputJson(options)) {
 			// Machine-readable output: emit pure JSON to stdout and exit
-			const payload = {
-				today: stats.today,
-				month: stats.month,
-				lastMonth: stats.lastMonth,
-				last30Days: stats.last30Days,
-				lastUpdated: stats.lastUpdated.toISOString(),
-				backendConfigured: false,
-			};
-			process.stdout.write(JSON.stringify(payload));
+			process.stdout.write(JSON.stringify(createDetailsPayload(stats)));
 			return;
 		}
 

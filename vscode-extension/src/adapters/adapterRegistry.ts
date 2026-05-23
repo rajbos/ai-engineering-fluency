@@ -14,6 +14,7 @@
  */
 import type { IEcosystemAdapter } from '../ecosystemAdapter';
 import { OpenCodeDataAccess } from '../opencode';
+import type { UriLike } from '../opencode';
 import { CrushDataAccess } from '../crush';
 import { ContinueDataAccess } from '../continue';
 import { VisualStudioDataAccess } from '../visualstudio';
@@ -21,6 +22,7 @@ import { ClaudeCodeDataAccess } from '../claudecode';
 import { ClaudeDesktopCoworkDataAccess } from '../claudedesktop';
 import { MistralVibeDataAccess } from '../mistralvibe';
 import { GeminiCliDataAccess } from '../geminicli';
+import { AntigravityDataAccess } from '../antigravity';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
 import { CrushAdapter } from './crushAdapter';
@@ -30,26 +32,28 @@ import { ClaudeDesktopAdapter } from './claudeDesktopAdapter';
 import { ClaudeCodeAdapter } from './claudeCodeAdapter';
 import { MistralVibeAdapter } from './mistralVibeAdapter';
 import { GeminiCliAdapter } from './geminiCliAdapter';
+import { AntigravityAdapter } from './antigravityAdapter';
 import { CopilotChatAdapter } from './copilotChatAdapter';
 import { CopilotCliAdapter } from './copilotCliAdapter';
 import { JetBrainsAdapter } from './jetbrainsAdapter';
 
 /** Data-access instances and callbacks required to build the adapter registry. */
 export interface AdapterRegistryDeps {
-	openCode: OpenCodeDataAccess;
-	crush: CrushDataAccess;
-	continue_: ContinueDataAccess;
-	visualStudio: VisualStudioDataAccess;
-	claudeCode: ClaudeCodeDataAccess;
-	claudeDesktopCowork: ClaudeDesktopCoworkDataAccess;
-	mistralVibe: MistralVibeDataAccess;
-	geminiCli: GeminiCliDataAccess;
-	/** Estimates token count from raw text for a given model. */
-	estimateTokens: (text: string, model?: string) => number;
-	/** Returns true when the tool name identifies an MCP server tool. */
-	isMcpTool: (toolName: string) => boolean;
-	/** Extracts the MCP server name from a namespaced tool name. */
-	extractMcpServerName: (toolName: string) => string;
+openCode: OpenCodeDataAccess;
+crush: CrushDataAccess;
+continue_: ContinueDataAccess;
+visualStudio: VisualStudioDataAccess;
+claudeCode: ClaudeCodeDataAccess;
+claudeDesktopCowork: ClaudeDesktopCoworkDataAccess;
+mistralVibe: MistralVibeDataAccess;
+geminiCli: GeminiCliDataAccess;
+antigravity: AntigravityDataAccess;
+/** Estimates token count from raw text for a given model. */
+estimateTokens: (text: string, model?: string) => number;
+/** Returns true when the tool name identifies an MCP server tool. */
+isMcpTool: (toolName: string) => boolean;
+/** Extracts the MCP server name from a namespaced tool name. */
+extractMcpServerName: (toolName: string) => string;
 }
 
 /**
@@ -68,17 +72,18 @@ export type DataAccessInstances = Omit<AdapterRegistryDeps, 'estimateTokens' | '
  * @param extensionUri - VS Code extension URI (or equivalent fake URI in the CLI)
  *   passed to data-access constructors that require it for WASM loading.
  */
-export function createDataAccessInstances(extensionUri: any): DataAccessInstances {
-	return {
-		openCode: new OpenCodeDataAccess(extensionUri),
-		crush: new CrushDataAccess(extensionUri),
-		continue_: new ContinueDataAccess(),
-		visualStudio: new VisualStudioDataAccess(),
-		claudeCode: new ClaudeCodeDataAccess(),
-		claudeDesktopCowork: new ClaudeDesktopCoworkDataAccess(),
-		mistralVibe: new MistralVibeDataAccess(),
-		geminiCli: new GeminiCliDataAccess(),
-	};
+export function createDataAccessInstances(extensionUri: UriLike): DataAccessInstances {
+return {
+openCode: new OpenCodeDataAccess(extensionUri),
+crush: new CrushDataAccess(extensionUri),
+continue_: new ContinueDataAccess(),
+visualStudio: new VisualStudioDataAccess(),
+claudeCode: new ClaudeCodeDataAccess(),
+claudeDesktopCowork: new ClaudeDesktopCoworkDataAccess(),
+mistralVibe: new MistralVibeDataAccess(),
+geminiCli: new GeminiCliDataAccess(),
+antigravity: new AntigravityDataAccess(),
+};
 }
 
 /**
@@ -88,25 +93,29 @@ export function createDataAccessInstances(extensionUri: any): DataAccessInstance
  * use identical registration order and constructor wiring.
  */
 export function buildAdapterRegistry(deps: AdapterRegistryDeps): IEcosystemAdapter[] {
-	return [
-		new OpenCodeAdapter(deps.openCode),
-		new CrushAdapter(deps.crush),
-		new VisualStudioAdapter(deps.visualStudio, deps.estimateTokens),
-		new ContinueAdapter(deps.continue_),
-		new ClaudeDesktopAdapter(
-			deps.claudeDesktopCowork,
-			deps.isMcpTool,
-			deps.extractMcpServerName,
-			deps.estimateTokens
-		),
-		new ClaudeCodeAdapter(deps.claudeCode),
-		new MistralVibeAdapter(deps.mistralVibe),
-		new GeminiCliAdapter(deps.geminiCli),
-		// Copilot Chat / CLI adapters: discovery-only. Their handles() returns
-		// false so processSessionFile() falls through to the shared parser path
-		// for VS Code Copilot Chat and CLI files. See issue #654.
-		new CopilotChatAdapter(),
-		new CopilotCliAdapter(),
-		new JetBrainsAdapter(),
-	];
+return [
+new OpenCodeAdapter(deps.openCode),
+new CrushAdapter(deps.crush),
+new VisualStudioAdapter(deps.visualStudio, deps.estimateTokens),
+new ContinueAdapter(deps.continue_),
+new ClaudeDesktopAdapter(
+deps.claudeDesktopCowork,
+deps.isMcpTool,
+deps.extractMcpServerName,
+deps.estimateTokens
+),
+new ClaudeCodeAdapter(deps.claudeCode),
+new MistralVibeAdapter(deps.mistralVibe),
+// Antigravity must come before GeminiCliAdapter because both live under ~/.gemini/
+// and the Gemini CLI path check would not match Antigravity paths, but we place
+// it here explicitly to make the ordering intention clear.
+new AntigravityAdapter(deps.antigravity, deps.estimateTokens),
+new GeminiCliAdapter(deps.geminiCli),
+// Copilot Chat / CLI adapters: discovery-only. Their handles() returns
+// false so processSessionFile() falls through to the shared parser path
+// for VS Code Copilot Chat and CLI files. See issue #654.
+new CopilotChatAdapter(),
+new CopilotCliAdapter(),
+new JetBrainsAdapter(),
+];
 }

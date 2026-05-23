@@ -94,10 +94,9 @@ export class TeamServerConfigPanel implements vscode.Disposable {
 		this.panel?.dispose();
 	}
 
-	private renderHtml(webview: vscode.Webview, enabled: boolean, endpointUrl: string, sharingProfile: string): string {
+	private renderHtml(_webview: vscode.Webview, enabled: boolean, endpointUrl: string, sharingProfile: string): string {
 		const nonce = getNonce();
 		const csp = `default-src 'none'; style-src 'nonce-${nonce}'; script-src 'nonce-${nonce}';`;
-
 		const enabledChecked = enabled ? 'checked' : '';
 		const safeEndpoint = endpointUrl.replace(/"/g, '&quot;');
 		const profileOptions = [
@@ -106,17 +105,30 @@ export class TeamServerConfigPanel implements vscode.Disposable {
 			{ value: 'teamAnonymized', label: 'Team Anonymized — team data, no per-user key' },
 			{ value: 'teamPseudonymous', label: 'Team Pseudonymous — stable anonymous per-user key' },
 			{ value: 'teamIdentified', label: 'Team Identified — explicit user identity' },
-		].map(o => `<option value="${o.value}"${sharingProfile === o.value ? ' selected' : ''}>${o.label}</option>`).join('\n				');
-
-		return /* html */`<!DOCTYPE html>
+		].map(o => `<option value="${o.value}"${sharingProfile === o.value ? ' selected' : ''}>${o.label}</option>`).join('\n\t\t\t\t');
+		return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
   <meta http-equiv="Content-Security-Policy" content="${csp}">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Configure Team Server</title>
-  <style nonce="${nonce}">
-    :root {
+  ${renderTeamPanelStyle(nonce)}
+</head>
+${renderTeamPanelBody(nonce, enabledChecked, safeEndpoint, profileOptions)}
+</html>`;
+	}
+}
+
+function renderTeamPanelStyle(nonce: string): string {
+	return `<style nonce="${nonce}">
+${renderTeamPanelBaseStyles()}
+${renderTeamPanelInteractiveStyles()}
+  </style>`;
+}
+
+function renderTeamPanelBaseStyles(): string {
+	return `    :root {
       --vscode-font-family: var(--vscode-font-family, system-ui, sans-serif);
       --vscode-font-size: var(--vscode-font-size, 13px);
     }
@@ -128,108 +140,50 @@ export class TeamServerConfigPanel implements vscode.Disposable {
       padding: 24px;
       max-width: 560px;
     }
-    h1 {
-      font-size: 1.2em;
-      margin-bottom: 24px;
-      font-weight: 600;
-    }
-    .field {
-      margin-bottom: 20px;
-    }
-    .field label {
-      display: block;
-      margin-bottom: 6px;
-      font-weight: 500;
-    }
+    h1 { font-size: 1.2em; margin-bottom: 24px; font-weight: 600; }
+    .field { margin-bottom: 20px; }
+    .field label { display: block; margin-bottom: 6px; font-weight: 500; }
     .field input[type="text"] {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 6px 8px;
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      border: 1px solid var(--vscode-input-border, #ccc);
-      border-radius: 2px;
-      font-size: inherit;
-      font-family: inherit;
+      width: 100%; box-sizing: border-box; padding: 6px 8px;
+      background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, #ccc); border-radius: 2px;
+      font-size: inherit; font-family: inherit;
     }
-    .field input[type="text"]:focus {
-      outline: 1px solid var(--vscode-focusBorder);
-      border-color: var(--vscode-focusBorder);
-    }
-    .field input[type="text"].error {
-      border-color: var(--vscode-inputValidation-errorBorder, #e51400);
-    }
-    .field-hint {
-      font-size: 0.9em;
-      color: var(--vscode-descriptionForeground);
-      margin-top: 4px;
-    }
+    .field input[type="text"]:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }
+    .field input[type="text"].error { border-color: var(--vscode-inputValidation-errorBorder, #e51400); }
+    .field-hint { font-size: 0.9em; color: var(--vscode-descriptionForeground); margin-top: 4px; }
     .error-msg {
       color: var(--vscode-inputValidation-errorForeground, #e51400);
       background: var(--vscode-inputValidation-errorBackground, #f2dede);
       border: 1px solid var(--vscode-inputValidation-errorBorder, #e51400);
-      border-radius: 2px;
-      padding: 4px 8px;
-      margin-top: 4px;
-      font-size: 0.9em;
-      display: none;
-    }
-    .toggle-row {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-    }
-    .toggle-row label {
-      margin: 0;
-      cursor: pointer;
-    }
-    .actions {
-      display: flex;
-      gap: 10px;
-      margin-top: 28px;
-    }
-    button {
-      padding: 6px 16px;
-      font-size: inherit;
-      font-family: inherit;
-      border: none;
-      border-radius: 2px;
-      cursor: pointer;
-    }
-    button.primary {
-      background: var(--vscode-button-background);
-      color: var(--vscode-button-foreground);
-    }
-    button.primary:hover {
-      background: var(--vscode-button-hoverBackground);
-    }
-    button.secondary {
-      background: var(--vscode-button-secondaryBackground);
-      color: var(--vscode-button-secondaryForeground);
-    }
-    button.secondary:hover {
-      background: var(--vscode-button-secondaryHoverBackground);
-    }
-    .field select {
-      width: 100%;
-      box-sizing: border-box;
-      padding: 6px 8px;
-      background: var(--vscode-input-background);
-      color: var(--vscode-input-foreground);
-      border: 1px solid var(--vscode-input-border, #ccc);
-      border-radius: 2px;
-      font-size: inherit;
-      font-family: inherit;
-    }
-    .field select:focus {
-      outline: 1px solid var(--vscode-focusBorder);
-      border-color: var(--vscode-focusBorder);
-    }
-  </style>
-</head>
-<body>
-  <h1>Configure Team Server</h1>
+      border-radius: 2px; padding: 4px 8px; margin-top: 4px; font-size: 0.9em; display: none;
+    }`;
+}
 
+function renderTeamPanelInteractiveStyles(): string {
+	return `    .toggle-row { display: flex; align-items: center; gap: 10px; }
+    .toggle-row label { margin: 0; cursor: pointer; }
+    .actions { display: flex; gap: 10px; margin-top: 28px; }
+    button {
+      padding: 6px 16px; font-size: inherit; font-family: inherit;
+      border: none; border-radius: 2px; cursor: pointer;
+    }
+    button.primary { background: var(--vscode-button-background); color: var(--vscode-button-foreground); }
+    button.primary:hover { background: var(--vscode-button-hoverBackground); }
+    button.secondary { background: var(--vscode-button-secondaryBackground); color: var(--vscode-button-secondaryForeground); }
+    button.secondary:hover { background: var(--vscode-button-secondaryHoverBackground); }
+    .field select {
+      width: 100%; box-sizing: border-box; padding: 6px 8px;
+      background: var(--vscode-input-background); color: var(--vscode-input-foreground);
+      border: 1px solid var(--vscode-input-border, #ccc); border-radius: 2px;
+      font-size: inherit; font-family: inherit;
+    }
+    .field select:focus { outline: 1px solid var(--vscode-focusBorder); border-color: var(--vscode-focusBorder); }`;
+}
+
+function renderTeamPanelBody(nonce: string, enabledChecked: string, safeEndpoint: string, profileOptions: string): string {
+	return `<body>
+  <h1>Configure Team Server</h1>
   <div class="field">
     <div class="toggle-row">
       <input type="checkbox" id="chk-enabled" ${enabledChecked}>
@@ -237,14 +191,12 @@ export class TeamServerConfigPanel implements vscode.Disposable {
     </div>
     <p class="field-hint">When enabled, session data is pushed to your self-hosted sharing server.</p>
   </div>
-
   <div class="field">
     <label for="txt-endpoint">Server endpoint URL</label>
     <input type="text" id="txt-endpoint" placeholder="https://your-server.example.com" value="${safeEndpoint}">
     <div class="error-msg" id="err-endpoint"></div>
     <p class="field-hint">The base URL of your team sharing server (no trailing slash required).</p>
   </div>
-
   <div class="field">
     <label for="sel-profile">Sharing profile</label>
     <select id="sel-profile">
@@ -252,15 +204,17 @@ export class TeamServerConfigPanel implements vscode.Disposable {
     </select>
     <p class="field-hint">Controls what user-level data is included in each sync. <strong>Off</strong> sends only aggregate counts — no user identifiers. Team profiles add per-user keys at increasing fidelity.</p>
   </div>
-
   <div class="actions">
     <button class="primary" id="btn-save">Save</button>
     <button class="secondary" id="btn-cancel">Cancel</button>
   </div>
+  ${renderTeamPanelScript(nonce)}
+</body>`;
+}
 
-  <script nonce="${nonce}">
+function renderTeamPanelScript(nonce: string): string {
+	return `<script nonce="${nonce}">
     const vscode = acquireVsCodeApi();
-
     document.getElementById('btn-save').addEventListener('click', () => {
       const enabled = document.getElementById('chk-enabled').checked;
       const endpointUrl = document.getElementById('txt-endpoint').value.trim();
@@ -268,11 +222,9 @@ export class TeamServerConfigPanel implements vscode.Disposable {
       clearErrors();
       vscode.postMessage({ command: 'save', enabled, endpointUrl, sharingProfile });
     });
-
     document.getElementById('btn-cancel').addEventListener('click', () => {
       vscode.postMessage({ command: 'cancel' });
     });
-
     window.addEventListener('message', (event) => {
       const msg = event.data;
       if (msg.command === 'validationError' && msg.field === 'endpointUrl') {
@@ -284,15 +236,11 @@ export class TeamServerConfigPanel implements vscode.Disposable {
         input.focus();
       }
     });
-
     function clearErrors() {
       const input = document.getElementById('txt-endpoint');
       const errEl = document.getElementById('err-endpoint');
       input.classList.remove('error');
       errEl.style.display = 'none';
     }
-  </script>
-</body>
-</html>`;
-	}
+  </script>`;
 }

@@ -519,7 +519,7 @@ describe('backend/commands', { concurrency: false }, () => {
 		facade: createMockFacade({
 			getSettings: () => ({
 				enabled: true,
-				sharingProfile: 'soloAnonymized',
+				sharingProfile: 'teamAnonymized',
 				shareWorkspaceMachineNames: false,
 			}),
 			isConfigured: () => true,

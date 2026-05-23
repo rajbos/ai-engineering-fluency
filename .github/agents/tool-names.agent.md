@@ -149,6 +149,38 @@ After editing `src/toolNames.json`:
 
 The `sync-toolnames` workflow (`.github/workflows/sync-toolnames.yml`) automatically syncs tool IDs from `microsoft/vscode-copilot-chat` using the prompt at `.github/workflows/prompts/sync-toolnames-prompt.md`. This covers VS Code built-in and Copilot tools. MCP tool names from user sessions are **not** covered by this sync and must be added manually via issues.
 
+## Antigravity Tool Names
+
+Antigravity (Google's closed-source successor to Gemini CLI, released May 2026) surfaces tool names via the `tool_calls[].name` field in `PLANNER_RESPONSE` entries of its `transcript.jsonl` session files. These are **not** MCP tools — they are built-in Antigravity agent capabilities.
+
+### Prefix Pattern
+
+Antigravity tools have **no prefix** — they use plain snake_case identifiers.
+
+| Raw name | Friendly name | Notes |
+|---|---|---|
+| `search_web` | `Search Web` | Built-in web search; called automatically by the agent |
+
+### Where These Names Appear
+
+The Antigravity adapter (`src/adapters/antigravityAdapter.ts`) counts tool calls from `tool_calls[].name` in parsed transcript entries and stores them in `analysis.toolCalls.byTool[tc.name]`. Any `tool_calls[].name` value that is not in `toolNames.json` will display as **"Unknown"** in the tool usage panel.
+
+### Automatic vs. Intentional
+
+All Antigravity built-in tools are **automatic** — the agent invokes them without user configuration. Add them to `automaticTools.json`.
+
+### How to Discover New Antigravity Tools
+
+1. Open `~/.gemini/antigravity/brain/*/. system_generated/logs/transcript.jsonl` for any session.
+2. Search for `"tool_calls"` — each entry's `name` field is a new tool candidate.
+3. Add the raw name to `toolNames.json` and to `automaticTools.json`.
+
+### Session Path Pattern
+
+Antigravity session paths match: `/.gemini/antigravity/brain/{uuid}/.system_generated/logs/transcript.jsonl`
+
+This is already handled by `workspaceHelpers.ts` (`detectToolEditorFromPath`, `detectEditorSource`, `getEditorNameFromRoot`) which all check for `/.gemini/antigravity/brain/` **before** the generic `/.gemini/` check used for Gemini CLI.
+
 ## Checklist
 
 - [ ] Identify all unknown tool names from the issue

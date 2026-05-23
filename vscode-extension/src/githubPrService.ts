@@ -151,6 +151,12 @@ export function fetchRepoPrsPage(
 	});
 }
 
+function buildFetchRepoPrsError(statusCode: number | undefined, error: string | undefined): string {
+	if (statusCode === 404) { return 'Repo not found or not accessible with current token'; }
+	if (statusCode === 403) { return error || 'Access denied (private repo requires additional permissions)'; }
+	return error ?? 'Unknown error';
+}
+
 /** Fetch all PRs from the last 30 days for a repo, paginating as needed. */
 export async function fetchRepoPrs(
 	owner: string,
@@ -163,25 +169,13 @@ export async function fetchRepoPrs(
 	const MAX_PAGES = 5; // Cap at 500 PRs per repo
 	for (let page = 1; page <= MAX_PAGES; page++) {
 		const { prs, statusCode, error } = await fetchPage(owner, repo, token, page);
-		if (error) {
-			const msg = statusCode === 404
-				? 'Repo not found or not accessible with current token'
-				: statusCode === 403
-				? (error || 'Access denied (private repo requires additional permissions)')
-				: error;
-			return { prs: allPrs, error: msg };
-		}
+		if (error) { return { prs: allPrs, error: buildFetchRepoPrsError(statusCode, error) }; }
 		if (prs.length === 0) { break; }
 		for (const pr of prs) {
-			if (new Date(pr.created_at) >= since) {
-				allPrs.push(pr);
-			}
+			if (new Date(pr.created_at) >= since) { allPrs.push(pr); }
 		}
-		// Stop paginating when the oldest PR on this page is before our window
 		const oldest = prs[prs.length - 1];
-		if (new Date(oldest.created_at) < since || prs.length < 100) {
-			break;
-		}
+		if (new Date(oldest.created_at) < since || prs.length < 100) { break; }
 	}
 	return { prs: allPrs };
 }

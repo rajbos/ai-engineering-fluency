@@ -61,7 +61,7 @@ test('fetchAgentSessionsForRepo: returns empty result when task list is empty', 
 
 test('fetchAgentSessionsForRepo: counts only cloud-agent sessions', async () => {
 	const tasks = [makeTask('t1')];
-	const fetchPage: FetchTaskPageFn = async (_o, _r, _t, page) =>
+	const fetchPage: FetchTaskPageFn = async ({ page }) =>
 		page === 1 ? { tasks } : { tasks: [] };
 	const fetchDetail: FetchTaskDetailFn = async () => ({
 		sessions: [
@@ -79,7 +79,7 @@ test('fetchAgentSessionsForRepo: counts only cloud-agent sessions', async () => 
 
 test('fetchAgentSessionsForRepo: task with no cloud-agent sessions does not count toward totalTasks', async () => {
 	const tasks = [makeTask('t1')];
-	const fetchPage: FetchTaskPageFn = async (_o, _r, _t, page) =>
+	const fetchPage: FetchTaskPageFn = async ({ page }) =>
 		page === 1 ? { tasks } : { tasks: [] };
 	const fetchDetail: FetchTaskDetailFn = async () => ({
 		sessions: [makeSession('', undefined)],  // cli-remote only
@@ -91,7 +91,7 @@ test('fetchAgentSessionsForRepo: task with no cloud-agent sessions does not coun
 
 test('fetchAgentSessionsForRepo: handles missing usage.credits gracefully', async () => {
 	const tasks = [makeTask('t1')];
-	const fetchPage: FetchTaskPageFn = async (_o, _r, _t, page) =>
+	const fetchPage: FetchTaskPageFn = async ({ page }) =>
 		page === 1 ? { tasks } : { tasks: [] };
 	const fetchDetail: FetchTaskDetailFn = async () => ({
 		sessions: [makeSession('cloud-model')],  // no usage field
@@ -121,7 +121,7 @@ test('fetchAgentSessionsForRepo: returns error result when API returns 403', asy
 test('fetchAgentSessionsForRepo: deduplicates tasks that appear in both active and archived lists', async () => {
 	const task = makeTask('shared-id');
 	let activePageCalled = false;
-	const fetchPage: FetchTaskPageFn = async (_o, _r, _t, page, archived) => {
+	const fetchPage: FetchTaskPageFn = async ({ page, archived }) => {
 		if (!archived && page === 1) { activePageCalled = true; return { tasks: [task] }; }
 		if (archived && page === 1) { return { tasks: [task] }; } // same task in archived
 		return { tasks: [] };
@@ -142,7 +142,7 @@ test('fetchAgentSessionsForRepo: deduplicates tasks that appear in both active a
 test('fetchAgentSessionsForRepo: marks partial=true when tasksTotal > cap', async () => {
 	// Create 51 tasks (one over the MAX_TASKS_DETAIL_PER_REPO cap of 50)
 	const tasks = Array.from({ length: 51 }, (_, i) => makeTask(`t${i}`));
-	const fetchPage: FetchTaskPageFn = async (_o, _r, _t, page) =>
+	const fetchPage: FetchTaskPageFn = async ({ page }) =>
 		page === 1 ? { tasks } : { tasks: [] };
 	const fetchDetail: FetchTaskDetailFn = async () => ({
 		sessions: [makeSession('cloud-model', 1)],
@@ -156,7 +156,7 @@ test('fetchAgentSessionsForRepo: marks partial=true when tasksTotal > cap', asyn
 
 test('fetchAgentSessionsForRepo: partial=false when tasksTotal <= cap', async () => {
 	const tasks = [makeTask('t1'), makeTask('t2')];
-	const fetchPage: FetchTaskPageFn = async (_o, _r, _t, page) =>
+	const fetchPage: FetchTaskPageFn = async ({ page }) =>
 		page === 1 ? { tasks } : { tasks: [] };
 	const fetchDetail: FetchTaskDetailFn = async () => ({
 		sessions: [makeSession('cloud-model', 1)],
@@ -168,7 +168,7 @@ test('fetchAgentSessionsForRepo: partial=false when tasksTotal <= cap', async ()
 
 test('fetchAgentSessionsForRepo: handles detail fetch failure gracefully (skips task)', async () => {
 	const tasks = [makeTask('t1'), makeTask('t2')];
-	const fetchPage: FetchTaskPageFn = async (_o, _r, _t, page) =>
+	const fetchPage: FetchTaskPageFn = async ({ page }) =>
 		page === 1 ? { tasks } : { tasks: [] };
 	let callNum = 0;
 	const fetchDetail: FetchTaskDetailFn = async () => {

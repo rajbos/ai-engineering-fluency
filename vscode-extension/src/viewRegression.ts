@@ -92,23 +92,10 @@ export function evaluateViewRegressionProbe(
   };
 }
 
-export function createViewRegressionProbeScript(
-  nonce: string,
-  config?: ViewRegressionProbeConfig,
-): string {
-  if (!config) {
-    return '';
-  }
+// ── createViewRegressionProbeScript helpers ──────────────────────────────────
 
-  const safeConfig = JSON.stringify(config).replace(/</g, '\\u003c');
-  return `<script nonce="${nonce}">
-(() => {
-  const config = ${safeConfig};
-
-  // Acquire the VS Code API and patch the global so the main bundle's call is safe.
-  // acquireVsCodeApi() may only be called once per webview; subsequent calls throw.
-  // By replacing the global with a function that returns the cached instance the main
-  // bundle (which runs after this probe) will reuse the same object without errors.
+function _cvrpsAcquireBlock(): string {
+	return `
   let vscode;
   if (typeof acquireVsCodeApi === 'function') {
     vscode = acquireVsCodeApi();
@@ -117,8 +104,11 @@ export function createViewRegressionProbeScript(
   }
   if (!vscode) {
     return;
-  }
+  }`;
+}
 
+function _cvrpsEvaluateBlock(): string {
+	return `
   const normalizeText = (value) => String(value ?? '').replace(/\\s+/g, ' ').trim();
   const evaluate = (snapshot) => {
     const reasons = [];
@@ -159,8 +149,11 @@ export function createViewRegressionProbeScript(
       pass: false,
       summary: reasons.join('; '),
     };
-  };
+  };`;
+}
 
+function _cvrpsControlBlock(): string {
+	return `
   const collectSnapshot = () => {
     const root = document.getElementById('root');
     const bodyText = normalizeText(document.body?.innerText ?? document.body?.textContent ?? '');
@@ -221,7 +214,24 @@ export function createViewRegressionProbeScript(
   window.addEventListener('load', () => {
     setTimeout(tick, config.initialDelayMs ?? 150);
   });
-  setTimeout(tick, config.initialDelayMs ?? 150);
+  setTimeout(tick, config.initialDelayMs ?? 150);`;
+}
+
+export function createViewRegressionProbeScript(
+  nonce: string,
+  config?: ViewRegressionProbeConfig,
+): string {
+  if (!config) {
+    return '';
+  }
+
+  const safeConfig = JSON.stringify(config).replace(/</g, '\\u003c');
+  return `<script nonce="${nonce}">
+(() => {
+  const config = ${safeConfig};
+${_cvrpsAcquireBlock()}
+${_cvrpsEvaluateBlock()}
+${_cvrpsControlBlock()}
 })();
 </script>`;
 }

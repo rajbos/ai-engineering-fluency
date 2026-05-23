@@ -54,6 +54,21 @@ export function redactSecretsInText(text: string, secretsToRedact: string[]): st
 	return result;
 }
 
+function _sseFromErrorInstance(error: Error, secretsToRedact?: string[]): string {
+	if (!error.stack) { return error.message || error.toString(); }
+	return secretsToRedact?.length ? redactSecretsInText(error.stack, secretsToRedact) : error.stack;
+}
+
+function _sseFromObject(error: object): string {
+	// eslint-disable-next-line @typescript-eslint/no-explicit-any
+	const errorObj = error as any;
+	try {
+		return errorObj.message || errorObj.error || JSON.stringify(error);
+	} catch {
+		return errorObj.message || errorObj.error || '[object Object]';
+	}
+}
+
 /**
  * Safely converts an error to a string, with optional secret redaction.
  * @param error - The error to stringify
@@ -62,38 +77,11 @@ export function redactSecretsInText(text: string, secretsToRedact: string[]): st
  */
 export function safeStringifyError(error: unknown, secretsToRedact?: string[]): string {
 	let message: string;
-	
-	if (error instanceof Error) {
-		// Include stack trace if available (useful for debugging)
-		if (error.stack) {
-			let stack = error.stack;
-			if (secretsToRedact && secretsToRedact.length > 0) {
-				stack = redactSecretsInText(stack, secretsToRedact);
-			}
-			message = stack;
-		} else {
-			message = error.message || error.toString();
-		}
-	} else if (typeof error === 'string') {
-		message = error;
-	} else if (error && typeof error === 'object') {
-		// Try to extract message from object
-		const errorObj = error as any;
-		try {
-			message = errorObj.message || errorObj.error || JSON.stringify(error);
-		} catch {
-			// Guard against circular structures
-			message = errorObj.message || errorObj.error || '[object Object]';
-		}
-	} else {
-		message = String(error);
-	}
-
-	// Redact secrets if provided (for non-stack trace messages)
-	if (secretsToRedact && secretsToRedact.length > 0) {
-		message = redactSecretsInText(message, secretsToRedact);
-	}
-
+	if (error instanceof Error) { message = _sseFromErrorInstance(error, secretsToRedact); }
+	else if (typeof error === 'string') { message = error; }
+	else if (error && typeof error === 'object') { message = _sseFromObject(error); }
+	else { message = String(error); }
+	if (secretsToRedact && secretsToRedact.length > 0) { message = redactSecretsInText(message, secretsToRedact); }
 	return message;
 }
 

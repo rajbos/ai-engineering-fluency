@@ -23,6 +23,7 @@ import { MistralVibeAdapter } from '../../src/adapters/mistralVibeAdapter';
 import { GeminiCliAdapter } from '../../src/adapters/geminiCliAdapter';
 import { CopilotChatAdapter } from '../../src/adapters/copilotChatAdapter';
 import { CopilotCliAdapter } from '../../src/adapters/copilotCliAdapter';
+import { AntigravityAdapter } from '../../src/adapters/antigravityAdapter';
 
 import { OpenCodeDataAccess } from '../../src/opencode';
 import { CrushDataAccess } from '../../src/crush';
@@ -32,6 +33,7 @@ import { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
 import { VisualStudioDataAccess } from '../../src/visualstudio';
 import { MistralVibeDataAccess } from '../../src/mistralvibe';
 import { GeminiCliDataAccess } from '../../src/geminicli';
+import { AntigravityDataAccess } from '../../src/antigravity';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -47,6 +49,7 @@ const claudeDesktopDA = new ClaudeDesktopCoworkDataAccess();
 const visualStudioDA = new VisualStudioDataAccess();
 const mistralVibeDA = new MistralVibeDataAccess();
 const geminiCliDA = new GeminiCliDataAccess();
+const antigravityDA = new AntigravityDataAccess();
 
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
 const crushAdapter = new CrushAdapter(crushDA);
@@ -58,22 +61,23 @@ const mistralVibeAdapter = new MistralVibeAdapter(mistralVibeDA);
 const geminiCliAdapter = new GeminiCliAdapter(geminiCliDA);
 const copilotChatAdapter = new CopilotChatAdapter();
 const copilotCliAdapter = new CopilotCliAdapter();
+const antigravityAdapter = new AntigravityAdapter(antigravityDA);
 
 const allAdapters: IEcosystemAdapter[] = [
     openCodeAdapter, crushAdapter, continueAdapter,
     claudeCodeAdapter, claudeDesktopAdapter, visualStudioAdapter, mistralVibeAdapter, geminiCliAdapter,
-    copilotChatAdapter, copilotCliAdapter,
+    copilotChatAdapter, copilotCliAdapter, antigravityAdapter,
 ];
 
 // ---------------------------------------------------------------------------
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 10 adapters', () => {
+test('isDiscoverable: returns true for all 11 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 10);
+    assert.equal(allAdapters.length, 11);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -103,6 +107,7 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(geminiCliAdapter.id, 'geminicli');
     assert.equal(copilotChatAdapter.id, 'copilotchat');
     assert.equal(copilotCliAdapter.id, 'copilotcli');
+    assert.equal(antigravityAdapter.id, 'antigravity');
 });
 
 // ---------------------------------------------------------------------------
@@ -158,6 +163,31 @@ test('GeminiCliAdapter.handles: recognises ~/.gemini session paths', () => {
 
 test('GeminiCliAdapter.handles: rejects unrelated paths', () => {
     assert.ok(!geminiCliAdapter.handles(path.join(os.homedir(), '.gemini', 'logs.json')));
+});
+
+test('GeminiCliAdapter.handles: rejects Antigravity brain paths (must not steal from AntigravityAdapter)', () => {
+    const antigravityPath = path.join(os.homedir(), '.gemini', 'antigravity', 'brain', '13e60289-abcd-1234-5678-000000000000', '.system_generated', 'logs', 'transcript.jsonl');
+    assert.ok(!geminiCliAdapter.handles(antigravityPath));
+});
+
+test('AntigravityAdapter.handles: recognises POSIX-style brain transcript paths', () => {
+    const p = path.posix.join(os.homedir().replace(/\\/g, '/'), '.gemini', 'antigravity', 'brain', '13e60289-abcd-1234-5678-000000000000', '.system_generated', 'logs', 'transcript.jsonl');
+    assert.ok(antigravityAdapter.handles(p));
+});
+
+test('AntigravityAdapter.handles: recognises Windows backslash brain transcript paths', () => {
+    const p = 'C:\\Users\\RobBos\\.gemini\\antigravity\\brain\\13e60289-abcd-1234-5678-000000000000\\.system_generated\\logs\\transcript.jsonl';
+    assert.ok(antigravityAdapter.handles(p));
+});
+
+test('AntigravityAdapter.handles: rejects generic Gemini CLI session paths', () => {
+    const p = path.join(os.homedir(), '.gemini', 'tmp', 'demo-project', 'chats', 'session-abc.jsonl');
+    assert.ok(!antigravityAdapter.handles(p));
+});
+
+test('AntigravityAdapter.handles: rejects paths that lack transcript.jsonl filename', () => {
+    const p = path.join(os.homedir(), '.gemini', 'antigravity', 'brain', 'some-uuid', '.system_generated', 'logs', 'other.jsonl');
+    assert.ok(!antigravityAdapter.handles(p));
 });
 
 test('VisualStudioAdapter.handles: recognises VS .vs session paths', () => {
@@ -285,6 +315,20 @@ test('ClaudeCodeAdapter.getEditorRoot: returns claude data directory', () => {
 test('GeminiCliAdapter.getEditorRoot: returns Gemini data directory', () => {
     const root = geminiCliAdapter.getEditorRoot('/any/path');
     assert.ok(root.includes('.gemini'));
+});
+
+test('AntigravityAdapter.getEditorRoot: returns antigravity brain directory', () => {
+    const root = antigravityAdapter.getEditorRoot('/any/path');
+    assert.ok(root.includes('.gemini'), 'Should include .gemini in path');
+    assert.ok(root.includes('antigravity'), 'Should include antigravity in path');
+    assert.ok(root.includes('brain'), 'Should include brain in path');
+});
+
+test('AntigravityAdapter.getCandidatePaths: returns brain directory path', () => {
+    const paths = antigravityAdapter.getCandidatePaths();
+    assert.equal(paths.length, 1);
+    assert.ok(paths[0].path.includes('antigravity'), 'Path should include antigravity');
+    assert.equal(paths[0].source, 'Antigravity (brain/)');
 });
 
 // ---------------------------------------------------------------------------
