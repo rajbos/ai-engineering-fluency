@@ -1515,7 +1515,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async _preloadSessionFiles(
 		cutoffMs: number,
-		progressCallback?: (completed: number, total: number) => void
+		progressCallback?: (completed: number, total: number) => void,
+		editorSet?: Set<string>
 	): Promise<{ sessionFiles: string[]; preloaded: SessionFilePreload[] }> {
 		// --- Streaming pipeline: overlap discovery with parsing ---
 		// Discovery pushes file batches into a shared queue as each adapter completes.
@@ -1534,6 +1535,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const discoveryPromise = (async () => {
 			try {
 				return await this.sessionDiscovery.getCopilotSessionFilesStreaming((batch) => {
+					if (editorSet) {
+						for (const file of batch) {
+							const editor = this.detectEditorSource(file);
+							if (editor && editor !== 'Unknown') { editorSet.add(editor); }
+						}
+					}
 					queue.push(...batch);
 					totalDiscovered += batch.length;
 				});
@@ -1605,8 +1612,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			// Streaming pipeline: discovery and parsing run concurrently.
 			// Workers start processing files as each adapter batch arrives.
-			const progressCallback = this.buildProgressCallback(silent);
-			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback);
+			const discoveredEditorSet = new Set<string>();
+			const progressCallback = this.buildProgressCallback(silent, () =>
+				[...discoveredEditorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
+			);
+			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet);
 
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
 
@@ -1643,7 +1653,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private buildProgressCallback(silent: boolean): ((completed: number, total: number) => void) | undefined {
+	private buildProgressCallback(silent: boolean, getEditors?: () => { icon: string; name: string }[]): ((completed: number, total: number) => void) | undefined {
 		if (silent) { return undefined; }
 		let parsingStepNotified = false;
 		let lastProgressSentMs = 0;
@@ -1652,7 +1662,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
 			if (!parsingStepNotified) {
 				parsingStepNotified = true;
-				this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'parsing', total });
+				const editors = getEditors?.();
+				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total };
+				if (editors && editors.length > 0) { msg.editors = editors; }
+				this.sendLoadingPanelMessage(msg);
 			}
 			const now = Date.now();
 			if (now - lastProgressSentMs >= 500 || completed === total) {
@@ -1660,6 +1673,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
 			}
 		};
+	}
+
+	/** Maps known editor display names to emoji icons for the loader animation. */
+	private getEditorIconForLoader(editorName: string): string {
+		const map: Record<string, string> = {
+			'VS Code': '💙', 'VS Code Insiders': '💚', 'VS Code Exploration': '🧪',
+			'VS Code Server': '☁️', 'VS Code Server (Insiders)': '☁️', 'VSCodium': '🔷',
+			'Cursor': '⚡', 'Copilot CLI': '🤖', 'OpenCode': '🟢', 'Visual Studio': '🪟',
+			'Claude Code': '🟠', 'Claude Desktop Cowork': '🟠', 'Mistral Vibe': '🔥',
+			'Gemini CLI': '💎', 'Antigravity': '🚀',
+		};
+		return map[editorName] ?? '📝';
 	}
 
 	private mergeIntoFullDailyStats(dailyStats: DailyTokenStats[]): void {
@@ -6068,6 +6093,7 @@ ${this.getLoadingHtmlScript()}
             if (m.step === 'discovering') { setActive('s-discover');
             } else if (m.step === 'parsing') {
                 var total = m.total || 0; setDone('s-discover');
+                if (m.editors && m.editors.length > 0) { EDITORS = m.editors; editorsSeen = 0; }
                 var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)';
                 setDone('s-cache'); setActive('s-parse');
                 var sub = document.getElementById('subtitle'); if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
