@@ -1642,227 +1642,36 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try {
 			this.log('Updating token stats...');
 
-			// Compute the date-range cutoff used by both analysis methods so we can do a
-			// single filesystem scan + file-load pass and share the results.
 			const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());
 			const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
 
-			let parsingStepNotified = false;
-			let lastProgressSentMs = 0;
-			const progressCallback = silent ? undefined : (completed: number, total: number) => {
-				const percentage = Math.round((completed / total) * 100);
-				this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
-				if (!parsingStepNotified) {
-					parsingStepNotified = true;
-					this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'parsing', total });
-				}
-				// Throttle panel updates to at most once per 500 ms to avoid flooding the webview
-				const now = Date.now();
-				if (now - lastProgressSentMs >= 500 || completed === total) {
-					lastProgressSentMs = now;
-					this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
-				}
-			};
-
-			// Single preload pass: discover all session files, stat, and parse/cache each one.
-			// Both calculateDetailedStats and calculateUsageAnalysisStats reuse this result,
-			// eliminating duplicate filesystem scans and stat() calls.
+			const progressCallback = this.buildProgressCallback(silent);
 			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback);
 
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
 
 			const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 			this.lastDailyStats = dailyStats;
-			// Keep lastFullDailyStats fresh: replace the recent 30-day entries so the chart
-			// shows the same data as the toolbar/details panel on every background refresh.
-			if (this.lastFullDailyStats) {
-				const fullMap = new Map(this.lastFullDailyStats.map(d => [d.date, d]));
-				for (const day of dailyStats) {
-					fullMap.set(day.date, day);
-				}
-				this.lastFullDailyStats = Array.from(fullMap.values()).sort((a, b) => a.date.localeCompare(b.date));
-			}
+			this.mergeIntoFullDailyStats(dailyStats);
 
-			if (detailedStats.today.sessions === 0 && detailedStats.last30Days.sessions === 0) {
-				this.setStatusBarText('$(symbol-numeric) No session data yet');
-			} else {
-				this.setStatusBarText(this.buildStatusBarText(detailedStats));
-			}
+			this.updateStatusBarAndTooltip(detailedStats);
 
-			// Create detailed tooltip with improved style
-			const tooltip = new vscode.MarkdownString();
-			tooltip.isTrusted = false;
-			// Title
-			tooltip.appendMarkdown('#### AI Engineering Fluency');
-			tooltip.appendMarkdown('\n---\n');
-			// Table layout for Today
-			tooltip.appendMarkdown(`📅 Today  \n`);
-			tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
-			tooltip.appendMarkdown(`| Tokens :                | ${detailedStats.today.tokens.toLocaleString()} |\n`);
-			tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-			tooltip.appendMarkdown(`| CO₂ estimated :              | ${detailedStats.today.co2.toFixed(2)} grams |\n`);
-			tooltip.appendMarkdown(`| Water estimated :           | ${detailedStats.today.waterUsage.toFixed(3)} liters |\n`);
-			tooltip.appendMarkdown(`| Sessions :             | ${detailedStats.today.sessions} |\n`);
-			tooltip.appendMarkdown(`| Average interactions/session :     | ${detailedStats.today.avgInteractionsPerSession} |\n`);
-			tooltip.appendMarkdown(`| Average tokens/session :            | ${detailedStats.today.avgTokensPerSession.toLocaleString()} |\n`);
-
-			tooltip.appendMarkdown('\n---\n');
-
-			// Table layout for Last 30 Days
-			tooltip.appendMarkdown(`📊 Last 30 Days  \n`);
-			tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
-			tooltip.appendMarkdown(`| Tokens :                | ${detailedStats.last30Days.tokens.toLocaleString()} |\n`);
-			tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(detailedStats.last30Days.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-			tooltip.appendMarkdown(`| CO₂ estimated :              | ${detailedStats.last30Days.co2.toFixed(2)} grams |\n`);
-			tooltip.appendMarkdown(`| Water estimated :           | ${detailedStats.last30Days.waterUsage.toFixed(3)} liters |\n`);
-			tooltip.appendMarkdown(`| Sessions :             | ${detailedStats.last30Days.sessions} |\n`);
-			tooltip.appendMarkdown(`| Average interactions/session :      | ${detailedStats.last30Days.avgInteractionsPerSession} |\n`);
-			tooltip.appendMarkdown(`| Average tokens/session :            | ${detailedStats.last30Days.avgTokensPerSession.toLocaleString()} |\n`);
-			// Footer
-			tooltip.appendMarkdown('\n---\n');
-			tooltip.appendMarkdown('*(UBB) = Copilot AI Credit rates — what Copilot will bill you under Usage Based Billing.*  \n');
-			tooltip.appendMarkdown('*Updates automatically every 5 minutes.*');
-
-			this.statusBarItem.tooltip = tooltip;
-
-			// If the details panel is open, update its content
-			if (this.detailsPanel) {
-				if (silent) {
-					// Background update: send data via postMessage to preserve UI state (scroll position, open sections)
-					void this.detailsPanel.webview.postMessage({
-						command: 'updateStats',
-						data: {
-							today: detailedStats.today,
-							month: detailedStats.month,
-							lastMonth: detailedStats.lastMonth,
-							last30Days: detailedStats.last30Days,
-							lastUpdated: detailedStats.lastUpdated.toISOString(),
-							backendConfigured: this.isBackendConfigured(),
-							compactNumbers: this.getCompactNumbersSetting(),
-						},
-					});
-				} else {
-					this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, detailedStats);
-				}
-			}
-
-			// If the chart panel is open, update its content (prefer full-year stats for week/month views)
-			if (this.chartPanel && (this.lastFullDailyStats || this.lastDailyStats)) {
-				const chartStats = this.lastFullDailyStats ?? this.lastDailyStats!;
-				if (silent) {
-					// Background update: send data via postMessage to preserve the active chart view toggle
-					void this.chartPanel.webview.postMessage({ command: 'updateChartData', data: { ...this.buildChartData(chartStats), compactNumbers: this.getCompactNumbersSetting() } });
-				} else {
-					this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, chartStats);
-				}
-			}
-
-			// If the analysis panel is open, update its content via postMessage to preserve repo hygiene results
-			if (this.analysisPanel) {
-				const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded); // Force recalculation on refresh — use preloaded data
-				if (silent) {
-					// Background update: send data via postMessage so repo analysis results are preserved.
-					// The webview re-renders stats but repoAnalysisState (module-level) restores analysis results.
-					void this.analysisPanel.webview.postMessage({
-						command: 'updateStats',
-						data: {
-							today: analysisStats.today,
-							last30Days: analysisStats.last30Days,
-							month: analysisStats.month,
-							locale: analysisStats.locale,
-							customizationMatrix: analysisStats.customizationMatrix || null,
-							missedPotential: analysisStats.missedPotential || [],
-							lastUpdated: analysisStats.lastUpdated.toISOString(),
-							backendConfigured: this.isBackendConfigured(),
-							currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
-						},
-					});
-				} else {
-					this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, analysisStats);
-				}
-			} else {
-				// Skip pre-warming usage analysis when the panel isn't open.
-				// calculateUsageAnalysisStats triggers workspace customization scans
-				// and JSONL reconstruction which can starve the extension host event loop
-				// on startup, amplifying the crash-loop risk.
-			}
-
-			// If the maturity panel is open, update its content.
-			// During background (silent) updates, skip to preserve demo panel state and user overrides.
-			// Always compute a fresh score so it can be reused for the sharing server upload below.
-			const freshMaturityData = (!silent || this.maturityPanel)
-				? await this.calculateMaturityScores(false, preloaded)
-				: undefined;
-			if (this.maturityPanel && !silent && freshMaturityData) {
-				this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, freshMaturityData);
-			}
-
-			// Upload the fluency score to the sharing server so its dashboard shows the same result
-			// as the extension's local AI Fluency Score panel (avoids independent re-computation).
-			// Run fire-and-forget to not block the UI update.
-			if (this.backend) {
-				const settings = this.backend.getSettings();
-				if (settings.sharingServerEnabled && settings.sharingServerEndpointUrl) {
-					// Use the already-computed fresh score when available; otherwise compute now.
-					void (async () => {
-						try {
-							const maturityData = await (freshMaturityData ?? this.calculateMaturityScores(false));
-							const scorePayload: Record<string, unknown> = {
-								overallStage: maturityData.overallStage,
-								overallLabel: maturityData.overallLabel,
-								categories: maturityData.categories.map((c: any) => ({
-									category: c.category,
-									icon: c.icon,
-									stage: c.stage,
-									tips: c.tips,
-								})),
-								computedAt: new Date().toISOString(),
-							};
-							await this.backend!.uploadFluencyScoreToSharingServer(settings, scorePayload);
-						} catch (err: unknown) {
-							this.warn(`Failed to upload fluency score to sharing server: ${err}`);
-						}
-					})();
-				}
-			}
-
-			// If the environmental panel is open, update its content
-			if (this.environmentalPanel) {
-				if (silent) {
-					void this.environmentalPanel.webview.postMessage({
-						command: 'updateStats',
-						data: {
-							today: detailedStats.today,
-							month: detailedStats.month,
-							lastMonth: detailedStats.lastMonth,
-							last30Days: detailedStats.last30Days,
-							lastUpdated: detailedStats.lastUpdated.toISOString(),
-							backendConfigured: this.isBackendConfigured(),
-							compactNumbers: this.getCompactNumbersSetting(),
-						},
-					});
-				} else {
-					this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, detailedStats);
-				}
-			}
+			this.updateDetailsPanelIfOpen(detailedStats, silent);
+			this.updateChartPanelIfOpen(silent);
+			await this.updateAnalysisPanelIfOpen(silent, preloaded);
+			await this.computeAndUploadFluencyScore(silent, preloaded);
+			this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
 
 			this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
-			// Store the stats for reuse without recalculation
 			this.lastDetailedStats = detailedStats;
 
-			// Save cache to ensure it's persisted for next run (don't await to avoid blocking UI)
 			void (async () => {
-				try {
-					await this.saveCacheToStorage();
-				} catch (err) {
-					this.warn(`Failed to save cache: ${err}`);
-				}
+				try { await this.saveCacheToStorage(); }
+				catch (err) { this.warn(`Failed to save cache: ${err}`); }
 			})();
 
-			// Pre-warm full-year chart data in background so the chart opens without delay.
-			// Only kick off when not already computed and the chart panel isn't open (showChart handles that case).
 			if (!this.lastFullDailyStats && !this.chartPanel) {
 				void this.calculateDailyStats(365, sessionFiles);
 			}
@@ -1873,6 +1682,158 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.setStatusBarText('$(error) Token Error');
 			this.statusBarItem.tooltip = 'Error calculating token usage';
 			return undefined;
+		}
+	}
+
+	private buildProgressCallback(silent: boolean): ((completed: number, total: number) => void) | undefined {
+		if (silent) { return undefined; }
+		let parsingStepNotified = false;
+		let lastProgressSentMs = 0;
+		return (completed: number, total: number) => {
+			const percentage = Math.round((completed / total) * 100);
+			this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
+			if (!parsingStepNotified) {
+				parsingStepNotified = true;
+				this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'parsing', total });
+			}
+			const now = Date.now();
+			if (now - lastProgressSentMs >= 500 || completed === total) {
+				lastProgressSentMs = now;
+				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
+			}
+		};
+	}
+
+	private mergeIntoFullDailyStats(dailyStats: DailyTokenStats[]): void {
+		if (!this.lastFullDailyStats) { return; }
+		const fullMap = new Map(this.lastFullDailyStats.map(d => [d.date, d]));
+		for (const day of dailyStats) { fullMap.set(day.date, day); }
+		this.lastFullDailyStats = Array.from(fullMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+	}
+
+	private updateStatusBarAndTooltip(detailedStats: DetailedStats): void {
+		if (detailedStats.today.sessions === 0 && detailedStats.last30Days.sessions === 0) {
+			this.setStatusBarText('$(symbol-numeric) No session data yet');
+		} else {
+			this.setStatusBarText(this.buildStatusBarText(detailedStats));
+		}
+		this.statusBarItem.tooltip = this.buildTooltipMarkdown(detailedStats);
+	}
+
+	private buildTooltipMarkdown(detailedStats: DetailedStats): vscode.MarkdownString {
+		const tooltip = new vscode.MarkdownString();
+		tooltip.isTrusted = false;
+		tooltip.appendMarkdown('#### AI Engineering Fluency');
+		tooltip.appendMarkdown('\n---\n');
+		tooltip.appendMarkdown(`📅 Today  \n`);
+		tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
+		tooltip.appendMarkdown(`| Tokens :                | ${detailedStats.today.tokens.toLocaleString()} |\n`);
+		tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| CO₂ estimated :              | ${detailedStats.today.co2.toFixed(2)} grams |\n`);
+		tooltip.appendMarkdown(`| Water estimated :           | ${detailedStats.today.waterUsage.toFixed(3)} liters |\n`);
+		tooltip.appendMarkdown(`| Sessions :             | ${detailedStats.today.sessions} |\n`);
+		tooltip.appendMarkdown(`| Average interactions/session :     | ${detailedStats.today.avgInteractionsPerSession} |\n`);
+		tooltip.appendMarkdown(`| Average tokens/session :            | ${detailedStats.today.avgTokensPerSession.toLocaleString()} |\n`);
+		tooltip.appendMarkdown('\n---\n');
+		tooltip.appendMarkdown(`📊 Last 30 Days  \n`);
+		tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
+		tooltip.appendMarkdown(`| Tokens :                | ${detailedStats.last30Days.tokens.toLocaleString()} |\n`);
+		tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(detailedStats.last30Days.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| CO₂ estimated :              | ${detailedStats.last30Days.co2.toFixed(2)} grams |\n`);
+		tooltip.appendMarkdown(`| Water estimated :           | ${detailedStats.last30Days.waterUsage.toFixed(3)} liters |\n`);
+		tooltip.appendMarkdown(`| Sessions :             | ${detailedStats.last30Days.sessions} |\n`);
+		tooltip.appendMarkdown(`| Average interactions/session :      | ${detailedStats.last30Days.avgInteractionsPerSession} |\n`);
+		tooltip.appendMarkdown(`| Average tokens/session :            | ${detailedStats.last30Days.avgTokensPerSession.toLocaleString()} |\n`);
+		tooltip.appendMarkdown('\n---\n');
+		tooltip.appendMarkdown('*(UBB) = Copilot AI Credit rates — what Copilot will bill you under Usage Based Billing.*  \n');
+		tooltip.appendMarkdown('*Updates automatically every 5 minutes.*');
+		return tooltip;
+	}
+
+	private updateDetailsPanelIfOpen(detailedStats: DetailedStats, silent: boolean): void {
+		if (!this.detailsPanel) { return; }
+		if (silent) {
+			void this.detailsPanel.webview.postMessage({
+				command: 'updateStats',
+				data: {
+					today: detailedStats.today, month: detailedStats.month,
+					lastMonth: detailedStats.lastMonth, last30Days: detailedStats.last30Days,
+					lastUpdated: detailedStats.lastUpdated.toISOString(),
+					backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting(),
+				},
+			});
+		} else {
+			this.detailsPanel.webview.html = this.getDetailsHtml(this.detailsPanel.webview, detailedStats);
+		}
+	}
+
+	private updateChartPanelIfOpen(silent: boolean): void {
+		if (!this.chartPanel || (!this.lastFullDailyStats && !this.lastDailyStats)) { return; }
+		const chartStats = this.lastFullDailyStats ?? this.lastDailyStats!;
+		if (silent) {
+			void this.chartPanel.webview.postMessage({ command: 'updateChartData', data: { ...this.buildChartData(chartStats), compactNumbers: this.getCompactNumbersSetting() } });
+		} else {
+			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, chartStats);
+		}
+	}
+
+	private async updateAnalysisPanelIfOpen(silent: boolean, preloaded?: SessionFilePreload[]): Promise<void> {
+		if (!this.analysisPanel) { return; }
+		const analysisStats = await this.calculateUsageAnalysisStats(false, preloaded);
+		if (silent) {
+			void this.analysisPanel.webview.postMessage({
+				command: 'updateStats',
+				data: {
+					today: analysisStats.today, last30Days: analysisStats.last30Days, month: analysisStats.month,
+					locale: analysisStats.locale, customizationMatrix: analysisStats.customizationMatrix || null,
+					missedPotential: analysisStats.missedPotential || [],
+					lastUpdated: analysisStats.lastUpdated.toISOString(), backendConfigured: this.isBackendConfigured(),
+					currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
+				},
+			});
+		} else {
+			this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, analysisStats);
+		}
+	}
+
+	private async computeAndUploadFluencyScore(silent: boolean, preloaded?: SessionFilePreload[]): Promise<void> {
+		const freshMaturityData = (!silent || this.maturityPanel)
+			? await this.calculateMaturityScores(false, preloaded)
+			: undefined;
+		if (this.maturityPanel && !silent && freshMaturityData) {
+			this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, freshMaturityData);
+		}
+		if (!this.backend) { return; }
+		const settings = this.backend.getSettings();
+		if (!settings.sharingServerEnabled || !settings.sharingServerEndpointUrl) { return; }
+		const maturityData = await (freshMaturityData ?? this.calculateMaturityScores(false));
+		const scorePayload: Record<string, unknown> = {
+			overallStage: maturityData.overallStage, overallLabel: maturityData.overallLabel,
+			categories: maturityData.categories.map((c: any) => ({
+				category: c.category, icon: c.icon, stage: c.stage, tips: c.tips,
+			})),
+			computedAt: new Date().toISOString(),
+		};
+		void (async () => {
+			try { await this.backend!.uploadFluencyScoreToSharingServer(settings, scorePayload); }
+			catch (err: unknown) { this.warn(`Failed to upload fluency score to sharing server: ${err}`); }
+		})();
+	}
+
+	private updateEnvironmentalPanelIfOpen(detailedStats: DetailedStats, silent: boolean): void {
+		if (!this.environmentalPanel) { return; }
+		if (silent) {
+			void this.environmentalPanel.webview.postMessage({
+				command: 'updateStats',
+				data: {
+					today: detailedStats.today, month: detailedStats.month,
+					lastMonth: detailedStats.lastMonth, last30Days: detailedStats.last30Days,
+					lastUpdated: detailedStats.lastUpdated.toISOString(),
+					backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting(),
+				},
+			});
+		} else {
+			this.environmentalPanel.webview.html = this.getEnvironmentalHtml(this.environmentalPanel.webview, detailedStats);
 		}
 	}
 
@@ -1914,111 +1875,80 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private async calculateDetailedStats(progressCallback?: (completed: number, total: number) => void, preloaded?: SessionFilePreload[]): Promise<{ stats: DetailedStats; dailyStats: DailyTokenStats[] }> {
 		const now = new Date();
-		// UTC-based date keys for consistent daily attribution (matching server-side)
 		const { todayUtcKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysUtcStartKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
-		// The file-load cutoff covers both the rolling 30-day window AND the full previous
-		// calendar month, so April 1–12 sessions are not skipped on May 13.
 		const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 
 		let todayStats = makePeriodAccumulator();
 		let monthStats = makePeriodAccumulator();
 		let lastMonthStats = makePeriodAccumulator();
 		let last30DaysStats = makePeriodAccumulator();
-
-		// Daily stats map for the chart (populated by aggregatePeriodStats, finalized below)
 		let dailyStatsMap = new Map<string, DailyTokenStats>();
 
 		try {
-			let cacheHits = 0;
-			let cacheMisses = 0;
-			let skippedFiles = 0;
+			let cacheHits = 0; let cacheMisses = 0; let skippedFiles = 0;
 			const analysisStartMs = Date.now();
 
-			let sessionDataResults: ({ sessionFile: string; sessionData: SessionFileCache; details: SessionFileDetails; mtime: number; wasCached: boolean } | null | undefined)[];
+			type SessionDataEntry = { sessionFile: string; sessionData: SessionFileCache; details: SessionFileDetails; mtime: number; wasCached: boolean };
+			let sessionDataResults: (SessionDataEntry | null | undefined)[];
 
 			if (preloaded) {
-				// Single-pass path: reuse pre-loaded data including details — no extra I/O needed.
-				// clearExpiredCache and discovery were already handled by _preloadSessionFiles.
 				sessionDataResults = preloaded.map(p => {
 					if (p.sessionData.interactions === 0 || !p.details) { return null; }
 					return { sessionFile: p.sessionFile, sessionData: p.sessionData, details: p.details, mtime: p.mtime, wasCached: p.wasCached };
 				});
 			} else {
-				// Standalone path: discover, stat, load, and get details independently.
-				// Clean expired cache entries
-				this.cacheManager.clearExpiredCache();
-
-				const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
-				this.log(`📊 Analyzing ${sessionFiles.length} session file(s)...`);
-
-				if (sessionFiles.length === 0) {
-					this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
-				}
-
-				// Gather per-file data (stat + cache lookup + details) in parallel with bounded concurrency,
-				// then aggregate results sequentially. This avoids serialising hundreds of cheap cache hits.
-				sessionDataResults = await this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
-					if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
-					const fileStats = await this.statSessionFile(sessionFile);
-					const mtime = fileStats.mtime.getTime();
-					const fileSize = fileStats.size;
-					if (mtime < fileLoadCutoffMs) { return null; }
-					const cachedData = this.getCachedSessionData(sessionFile);
-					const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
-					const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-					if (sessionData.interactions === 0) { return null; }
-					const details = await this.getSessionFileDetails(sessionFile);
-					return { sessionFile, sessionData, details, mtime, wasCached };
-				});
+				sessionDataResults = await this.loadSessionDataStandalone(fileLoadCutoffMs, progressCallback);
 			}
 
-			// Build pure-function inputs: map non-null results and track cache stats
 			const aggregateInputs: SessionAggregateInput[] = [];
 			for (const r of sessionDataResults) {
 				if (!r) { skippedFiles++; continue; }
 				if (r.wasCached) { cacheHits++; } else { cacheMisses++; }
 				try {
-					aggregateInputs.push({
-						editorType: this.getEditorTypeFromPath(r.sessionFile),
-						sessionData: r.sessionData,
-						mtime: r.mtime,
-						lastInteraction: r.sessionData.lastInteraction || r.details.lastInteraction,
-					});
-				} catch (fileError) {
-					this.warn(`Error processing session file ${r.sessionFile}: ${fileError}`);
-				}
+					aggregateInputs.push({ editorType: this.getEditorTypeFromPath(r.sessionFile), sessionData: r.sessionData, mtime: r.mtime, lastInteraction: r.sessionData.lastInteraction || r.details.lastInteraction });
+				} catch (fileError) { this.warn(`Error processing session file ${r.sessionFile}: ${fileError}`); }
 			}
 
-			// Delegate all token accumulation to the pure helper
-			const aggregated = aggregatePeriodStats(aggregateInputs, {
-				todayUtcKey,
-				monthUtcStartKey,
-				lastMonthUtcStartKey,
-				lastMonthUtcEndKey,
-				last30DaysUtcStartKey,
-				last30DaysStartMs,
-				lastMonthStartMs,
-			});
-			todayStats = aggregated.todayStats;
-			monthStats = aggregated.monthStats;
-			lastMonthStats = aggregated.lastMonthStats;
-			last30DaysStats = aggregated.last30DaysStats;
-			dailyStatsMap = aggregated.dailyStatsMap;
-			skippedFiles += aggregated.skippedCount;
+			const aggregated = aggregatePeriodStats(aggregateInputs, { todayUtcKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysUtcStartKey, last30DaysStartMs, lastMonthStartMs });
+			todayStats = aggregated.todayStats; monthStats = aggregated.monthStats;
+			lastMonthStats = aggregated.lastMonthStats; last30DaysStats = aggregated.last30DaysStats;
+			dailyStatsMap = aggregated.dailyStatsMap; skippedFiles += aggregated.skippedCount;
 
-			const analysisElapsedMs = Date.now() - analysisStartMs;
-			const analysisElapsedSec = (analysisElapsedMs / 1000).toFixed(1);
+			const analysisElapsedSec = ((Date.now() - analysisStartMs) / 1000).toFixed(1);
 			this.log(`✅ Analysis complete in ${analysisElapsedSec}s: Today ${todayStats.sessions} sessions, Month ${monthStats.sessions} sessions, Last 30 Days ${last30DaysStats.sessions} sessions, Previous Month ${lastMonthStats.sessions} sessions`);
-			if (skippedFiles > 0) {
-				this.log(`⏭️ Skipped ${skippedFiles} session file(s) (empty or no activity in recent months)`);
-			}
+			if (skippedFiles > 0) { this.log(`⏭️ Skipped ${skippedFiles} session file(s) (empty or no activity in recent months)`); }
 			const totalCacheAccesses = cacheHits + cacheMisses;
 			this.log(`💾 Cache performance: ${cacheHits} hits, ${cacheMisses} misses (${totalCacheAccesses > 0 ? ((cacheHits / totalCacheAccesses) * 100).toFixed(1) : 0}% hit rate)`);
 		} catch (error) {
 			this.error('Error calculating detailed stats:', error);
 		}
 
-		// Finalize daily stats: fill in missing days with zero values
+		const dailyStats = this.fillMissingDailyStats(dailyStatsMap, now);
+		const result = this.buildDetailedStatsResult(todayStats, monthStats, lastMonthStats, last30DaysStats, now);
+		return { stats: result, dailyStats };
+	}
+
+	private async loadSessionDataStandalone(fileLoadCutoffMs: number, progressCallback?: (completed: number, total: number) => void): Promise<({ sessionFile: string; sessionData: SessionFileCache; details: SessionFileDetails; mtime: number; wasCached: boolean } | null | undefined)[]> {
+		this.cacheManager.clearExpiredCache();
+		const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
+		this.log(`📊 Analyzing ${sessionFiles.length} session file(s)...`);
+		if (sessionFiles.length === 0) { this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?'); }
+		return this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
+			if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
+			const fileStats = await this.statSessionFile(sessionFile);
+			const mtime = fileStats.mtime.getTime();
+			const fileSize = fileStats.size;
+			if (mtime < fileLoadCutoffMs) { return null; }
+			const cachedData = this.getCachedSessionData(sessionFile);
+			const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+			const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
+			if (sessionData.interactions === 0) { return null; }
+			const details = await this.getSessionFileDetails(sessionFile);
+			return { sessionFile, sessionData, details, mtime, wasCached };
+		});
+	}
+
+	private fillMissingDailyStats(dailyStatsMap: Map<string, DailyTokenStats>, now: Date): DailyTokenStats[] {
 		const thirtyDaysAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30));
 		const todayDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
 		const existingDates = new Set(dailyStatsMap.keys());
@@ -2026,113 +1956,79 @@ class CopilotTokenTracker implements vscode.Disposable {
 		while (fillDate <= todayDate) {
 			const dateKey = fillDate.toISOString().slice(0, 10);
 			if (!existingDates.has(dateKey)) {
-				dailyStatsMap.set(dateKey, {
-					date: dateKey,
-					tokens: 0,
-					sessions: 0,
-					interactions: 0,
-					modelUsage: {},
-					editorUsage: {},
-					repositoryUsage: {}
-				});
+				dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
 			}
 			fillDate.setUTCDate(fillDate.getUTCDate() + 1);
 		}
-		const dailyStats = Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+		return Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
+	}
 
+	private buildDetailedStatsResult(
+		todayStats: ReturnType<typeof makePeriodAccumulator>,
+		monthStats: ReturnType<typeof makePeriodAccumulator>,
+		lastMonthStats: ReturnType<typeof makePeriodAccumulator>,
+		last30DaysStats: ReturnType<typeof makePeriodAccumulator>,
+		now: Date
+	): DetailedStats {
 		const todayCo2 = (todayStats.tokens / 1000) * this.co2Per1kTokens;
 		const monthCo2 = (monthStats.tokens / 1000) * this.co2Per1kTokens;
 		const lastMonthCo2 = (lastMonthStats.tokens / 1000) * this.co2Per1kTokens;
 		const last30DaysCo2 = (last30DaysStats.tokens / 1000) * this.co2Per1kTokens;
-
 		const todayWater = (todayStats.tokens / 1000) * this.waterUsagePer1kTokens;
 		const monthWater = (monthStats.tokens / 1000) * this.waterUsagePer1kTokens;
 		const lastMonthWater = (lastMonthStats.tokens / 1000) * this.waterUsagePer1kTokens;
 		const last30DaysWater = (last30DaysStats.tokens / 1000) * this.waterUsagePer1kTokens;
-
-		const todayCost = this.calculateEstimatedCost(todayStats.modelUsage);
-		const monthCost = this.calculateEstimatedCost(monthStats.modelUsage);
-		const lastMonthCost = this.calculateEstimatedCost(lastMonthStats.modelUsage);
-		const last30DaysCost = this.calculateEstimatedCost(last30DaysStats.modelUsage);
-
-		const todayCostCopilot = this.calculateEstimatedCost(todayStats.modelUsage, 'copilot');
-		const monthCostCopilot = this.calculateEstimatedCost(monthStats.modelUsage, 'copilot');
-		const lastMonthCostCopilot = this.calculateEstimatedCost(lastMonthStats.modelUsage, 'copilot');
-		const last30DaysCostCopilot = this.calculateEstimatedCost(last30DaysStats.modelUsage, 'copilot');
-
-		const result: DetailedStats = {
+		return {
 			today: {
-				tokens: todayStats.tokens,
-				thinkingTokens: todayStats.thinkingTokens,
-				estimatedTokens: todayStats.estimatedTokens,
-				actualTokens: todayStats.actualTokens,
+				tokens: todayStats.tokens, thinkingTokens: todayStats.thinkingTokens,
+				estimatedTokens: todayStats.estimatedTokens, actualTokens: todayStats.actualTokens,
 				sessions: todayStats.sessions,
 				avgInteractionsPerSession: todayStats.sessions > 0 ? Math.round(todayStats.interactions / todayStats.sessions) : 0,
 				avgTokensPerSession: todayStats.sessions > 0 ? Math.round(todayStats.tokens / todayStats.sessions) : 0,
-				modelUsage: todayStats.modelUsage,
-				editorUsage: todayStats.editorUsage,
-				co2: todayCo2,
-				treesEquivalent: todayCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: todayWater,
-				estimatedCost: todayCost,
-				estimatedCostCopilot: todayCostCopilot,
+				modelUsage: todayStats.modelUsage, editorUsage: todayStats.editorUsage,
+				co2: todayCo2, treesEquivalent: todayCo2 / this.co2AbsorptionPerTreePerYear,
+				waterUsage: todayWater, estimatedCost: this.calculateEstimatedCost(todayStats.modelUsage),
+				estimatedCostCopilot: this.calculateEstimatedCost(todayStats.modelUsage, 'copilot'),
 				...(todayStats.cachedTokens > 0 ? { cachedTokens: todayStats.cachedTokens } : {})
 			},
 			month: {
-				tokens: monthStats.tokens,
-				thinkingTokens: monthStats.thinkingTokens,
-				estimatedTokens: monthStats.estimatedTokens,
-				actualTokens: monthStats.actualTokens,
+				tokens: monthStats.tokens, thinkingTokens: monthStats.thinkingTokens,
+				estimatedTokens: monthStats.estimatedTokens, actualTokens: monthStats.actualTokens,
 				sessions: monthStats.sessions,
 				avgInteractionsPerSession: monthStats.sessions > 0 ? Math.round(monthStats.interactions / monthStats.sessions) : 0,
 				avgTokensPerSession: monthStats.sessions > 0 ? Math.round(monthStats.tokens / monthStats.sessions) : 0,
-				modelUsage: monthStats.modelUsage,
-				editorUsage: monthStats.editorUsage,
-				co2: monthCo2,
-				treesEquivalent: monthCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: monthWater,
-				estimatedCost: monthCost,
-				estimatedCostCopilot: monthCostCopilot,
+				modelUsage: monthStats.modelUsage, editorUsage: monthStats.editorUsage,
+				co2: monthCo2, treesEquivalent: monthCo2 / this.co2AbsorptionPerTreePerYear,
+				waterUsage: monthWater, estimatedCost: this.calculateEstimatedCost(monthStats.modelUsage),
+				estimatedCostCopilot: this.calculateEstimatedCost(monthStats.modelUsage, 'copilot'),
 				...(monthStats.cachedTokens > 0 ? { cachedTokens: monthStats.cachedTokens } : {})
 			},
 			lastMonth: {
-				tokens: lastMonthStats.tokens,
-				thinkingTokens: lastMonthStats.thinkingTokens,
-				estimatedTokens: lastMonthStats.estimatedTokens,
-				actualTokens: lastMonthStats.actualTokens,
+				tokens: lastMonthStats.tokens, thinkingTokens: lastMonthStats.thinkingTokens,
+				estimatedTokens: lastMonthStats.estimatedTokens, actualTokens: lastMonthStats.actualTokens,
 				sessions: lastMonthStats.sessions,
 				avgInteractionsPerSession: lastMonthStats.sessions > 0 ? Math.round(lastMonthStats.interactions / lastMonthStats.sessions) : 0,
 				avgTokensPerSession: lastMonthStats.sessions > 0 ? Math.round(lastMonthStats.tokens / lastMonthStats.sessions) : 0,
-				modelUsage: lastMonthStats.modelUsage,
-				editorUsage: lastMonthStats.editorUsage,
-				co2: lastMonthCo2,
-				treesEquivalent: lastMonthCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: lastMonthWater,
-				estimatedCost: lastMonthCost,
-				estimatedCostCopilot: lastMonthCostCopilot,
+				modelUsage: lastMonthStats.modelUsage, editorUsage: lastMonthStats.editorUsage,
+				co2: lastMonthCo2, treesEquivalent: lastMonthCo2 / this.co2AbsorptionPerTreePerYear,
+				waterUsage: lastMonthWater, estimatedCost: this.calculateEstimatedCost(lastMonthStats.modelUsage),
+				estimatedCostCopilot: this.calculateEstimatedCost(lastMonthStats.modelUsage, 'copilot'),
 				...(lastMonthStats.cachedTokens > 0 ? { cachedTokens: lastMonthStats.cachedTokens } : {})
 			},
 			last30Days: {
-				tokens: last30DaysStats.tokens,
-				thinkingTokens: last30DaysStats.thinkingTokens,
-				estimatedTokens: last30DaysStats.estimatedTokens,
-				actualTokens: last30DaysStats.actualTokens,
+				tokens: last30DaysStats.tokens, thinkingTokens: last30DaysStats.thinkingTokens,
+				estimatedTokens: last30DaysStats.estimatedTokens, actualTokens: last30DaysStats.actualTokens,
 				sessions: last30DaysStats.sessions,
 				avgInteractionsPerSession: last30DaysStats.sessions > 0 ? Math.round(last30DaysStats.interactions / last30DaysStats.sessions) : 0,
 				avgTokensPerSession: last30DaysStats.sessions > 0 ? Math.round(last30DaysStats.tokens / last30DaysStats.sessions) : 0,
-				modelUsage: last30DaysStats.modelUsage,
-				editorUsage: last30DaysStats.editorUsage,
-				co2: last30DaysCo2,
-				treesEquivalent: last30DaysCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: last30DaysWater,
-				estimatedCost: last30DaysCost,
-				estimatedCostCopilot: last30DaysCostCopilot,
+				modelUsage: last30DaysStats.modelUsage, editorUsage: last30DaysStats.editorUsage,
+				co2: last30DaysCo2, treesEquivalent: last30DaysCo2 / this.co2AbsorptionPerTreePerYear,
+				waterUsage: last30DaysWater, estimatedCost: this.calculateEstimatedCost(last30DaysStats.modelUsage),
+				estimatedCostCopilot: this.calculateEstimatedCost(last30DaysStats.modelUsage, 'copilot'),
 				...(last30DaysStats.cachedTokens > 0 ? { cachedTokens: last30DaysStats.cachedTokens } : {})
 			},
 			lastUpdated: now
 		};
-
-		return { stats: result, dailyStats };
 	}
 
 	private formatDateKey(date: Date): string {
