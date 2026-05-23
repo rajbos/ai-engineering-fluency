@@ -5,7 +5,7 @@
  * imported by extension.ts and exercised in isolation by unit tests.
  */
 
-import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache } from './types';
+import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage } from './types';
 
 /**
  * Merges `source` model usage into `target` (in-place).
@@ -27,7 +27,48 @@ target[model].cacheCreationTokens = (target[model].cacheCreationTokens ?? 0) + u
 }
 
 /**
- * Adds editor usage (in-place) to a period's `editorUsage` map.
+ * Merges `source` language usage into `target` (in-place).
+ */
+export function addLanguageUsage(target: LanguageUsage, source: LanguageUsage): void {
+	for (const [ext, usage] of Object.entries(source)) {
+		if (!target[ext]) { target[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+		target[ext].linesAdded += usage.linesAdded;
+		target[ext].linesRemoved += usage.linesRemoved;
+	}
+}
+
+/**
+ * Attributes session-level LOC data to the given daily stats entry.
+ * Updates totals, editorUsage LOC fields, repositoryUsage LOC fields, and languageUsage.
+ */
+function attributeLocToDay(
+	dailyEntry: DailyTokenStats,
+	sessionData: SessionFileCache,
+	editorType: string,
+	repository: string,
+): void {
+	const linesAdded = sessionData.linesAdded ?? 0;
+	const linesRemoved = sessionData.linesRemoved ?? 0;
+	if (linesAdded === 0 && linesRemoved === 0) { return; }
+
+	dailyEntry.linesAdded = (dailyEntry.linesAdded ?? 0) + linesAdded;
+	dailyEntry.linesRemoved = (dailyEntry.linesRemoved ?? 0) + linesRemoved;
+
+	if (!dailyEntry.editorUsage[editorType]) { dailyEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
+	dailyEntry.editorUsage[editorType].linesAdded = (dailyEntry.editorUsage[editorType].linesAdded ?? 0) + linesAdded;
+	dailyEntry.editorUsage[editorType].linesRemoved = (dailyEntry.editorUsage[editorType].linesRemoved ?? 0) + linesRemoved;
+
+	if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
+	dailyEntry.repositoryUsage[repository].linesAdded = (dailyEntry.repositoryUsage[repository].linesAdded ?? 0) + linesAdded;
+	dailyEntry.repositoryUsage[repository].linesRemoved = (dailyEntry.repositoryUsage[repository].linesRemoved ?? 0) + linesRemoved;
+
+	if (sessionData.languageUsage && !dailyEntry.languageUsage) { dailyEntry.languageUsage = {}; }
+	if (sessionData.languageUsage && dailyEntry.languageUsage) {
+		addLanguageUsage(dailyEntry.languageUsage, sessionData.languageUsage);
+	}
+}
+
+/**
  * Each call increments `sessions` by 1 regardless of token count.
  */
 export function addEditorUsage(target: EditorUsage, editorType: string, tokens: number): void {
@@ -274,6 +315,33 @@ addModelUsage(lastMonthStats.modelUsage, dayRollup.modelUsage);
 
 // Only count as skipped if the session contributed to neither relevant window.
 if (!addedToLast30Days && !addedToLastMonth) { skippedCount++; }
+
+// Add LOC once per session to the latest day in the rollup window
+if (addedToLast30Days && sessionData.linesAdded !== undefined) {
+const dayKeys = Object.keys(sessionData.dailyRollups).sort();
+const locDay = dayKeys.filter(k => k >= last30DaysUtcStartKey).pop();
+if (locDay) {
+const locEntry = dailyStatsMap.get(locDay);
+if (locEntry) {
+locEntry.linesAdded = (locEntry.linesAdded ?? 0) + sessionData.linesAdded;
+locEntry.linesRemoved = (locEntry.linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+if (sessionData.languageUsage) {
+if (!locEntry.languageUsage) { locEntry.languageUsage = {}; }
+for (const [ext, usage] of Object.entries(sessionData.languageUsage)) {
+if (!locEntry.languageUsage[ext]) { locEntry.languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+locEntry.languageUsage[ext].linesAdded += usage.linesAdded;
+locEntry.languageUsage[ext].linesRemoved += usage.linesRemoved;
+}
+}
+if (!locEntry.editorUsage[editorType]) { locEntry.editorUsage[editorType] = { tokens: 0, sessions: 0 }; }
+locEntry.editorUsage[editorType].linesAdded = (locEntry.editorUsage[editorType].linesAdded ?? 0) + sessionData.linesAdded;
+locEntry.editorUsage[editorType].linesRemoved = (locEntry.editorUsage[editorType].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+if (!locEntry.repositoryUsage[repository]) { locEntry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
+locEntry.repositoryUsage[repository].linesAdded = (locEntry.repositoryUsage[repository].linesAdded ?? 0) + sessionData.linesAdded;
+locEntry.repositoryUsage[repository].linesRemoved = (locEntry.repositoryUsage[repository].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+}
+}
+}
 } else {
 // ── Fallback: session-level attribution using UTC boundaries ─────
 // Used when the session cache has no per-day rollup data.
@@ -317,6 +385,22 @@ if (!dailyEntry.repositoryUsage[repository]) { dailyEntry.repositoryUsage[reposi
 dailyEntry.repositoryUsage[repository].tokens += tokens;
 dailyEntry.repositoryUsage[repository].sessions += 1;
 addModelUsage(dailyEntry.modelUsage, modelUsage);
+if (sessionData.linesAdded !== undefined) {
+dailyEntry.linesAdded = (dailyEntry.linesAdded ?? 0) + sessionData.linesAdded;
+dailyEntry.linesRemoved = (dailyEntry.linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+if (sessionData.languageUsage) {
+if (!dailyEntry.languageUsage) { dailyEntry.languageUsage = {}; }
+for (const [ext, usage] of Object.entries(sessionData.languageUsage)) {
+if (!dailyEntry.languageUsage[ext]) { dailyEntry.languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+dailyEntry.languageUsage[ext].linesAdded += usage.linesAdded;
+dailyEntry.languageUsage[ext].linesRemoved += usage.linesRemoved;
+}
+}
+dailyEntry.editorUsage[editorType].linesAdded = (dailyEntry.editorUsage[editorType].linesAdded ?? 0) + sessionData.linesAdded;
+dailyEntry.editorUsage[editorType].linesRemoved = (dailyEntry.editorUsage[editorType].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+dailyEntry.repositoryUsage[repository].linesAdded = (dailyEntry.repositoryUsage[repository].linesAdded ?? 0) + sessionData.linesAdded;
+dailyEntry.repositoryUsage[repository].linesRemoved = (dailyEntry.repositoryUsage[repository].linesRemoved ?? 0) + (sessionData.linesRemoved ?? 0);
+}
 
 // Last-30-days accumulation
 last30DaysStats.tokens += tokens;

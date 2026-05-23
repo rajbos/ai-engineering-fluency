@@ -125,9 +125,24 @@ body {
 .chart-controls {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 8px;
+	align-items: center;
+	gap: 12px;
 	margin-bottom: 8px;
 	justify-content: center;
+}
+
+.control-group {
+	display: flex;
+	gap: 4px;
+	align-items: center;
+}
+
+.control-group-separator {
+	width: 1px;
+	height: 20px;
+	background: var(--border-subtle);
+	margin: 0 4px;
+	flex-shrink: 0;
 }
 
 .period-controls {
@@ -195,6 +210,15 @@ body {
 	display: none !important;
 }
 
-.rolling-toggle {
-	margin-left: 12px;
+.toggle.dim {
+	opacity: 0.6;
+}
+
+.toggle.disabled {
+	opacity: 0.45;
+	cursor: not-allowed;
+}
+
+.toggle.disabled:hover {
+	background: var(--button-secondary-bg);
 }

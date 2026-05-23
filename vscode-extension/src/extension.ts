@@ -216,7 +216,7 @@ type StatusBarDisplaySetting = 'none' | 'today' | 'last30days' | 'currentMonth' 
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 51; // Tokens (input+output) excludes cached tokens
+	private static readonly CACHE_VERSION = 52; // Added LOC (linesAdded/linesRemoved/languageUsage)
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 
@@ -299,6 +299,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastChartPeriod: 'day' | 'week' | 'month' = 'day';
 	/** Last view selected by the user in the chart view; restored on next open. */
 	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' = 'total';
+	private lastChartMetric: string = 'tokens';
+	private lastChartSplit: string = 'total';
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
 	private lastDashboardData: any | undefined;
 	private tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsData.estimators;
@@ -3352,6 +3354,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 				debugLogOutputTokens: debugLogTokens.outputTokens,
 			} : {}),
 			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
+			...(usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0 ? {
+				linesAdded: usageAnalysis.editScope.linesAdded,
+				linesRemoved: usageAnalysis.editScope.linesRemoved ?? 0,
+				...(usageAnalysis.editScope.languageUsage ? { languageUsage: usageAnalysis.editScope.languageUsage } : {}),
+			} : {}),
 		};
 
 		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
@@ -3533,6 +3540,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(existingCache?.modelTurns !== undefined ? { modelTurns: existingCache.modelTurns } : {}),
 			...(existingCache?.debugLogInputTokens !== undefined ? { debugLogInputTokens: existingCache.debugLogInputTokens } : {}),
 			...(existingCache?.debugLogOutputTokens !== undefined ? { debugLogOutputTokens: existingCache.debugLogOutputTokens } : {}),
+			// Preserve LOC fields from existing cache
+			...(existingCache?.linesAdded !== undefined ? { linesAdded: existingCache.linesAdded } : {}),
+			...(existingCache?.linesRemoved !== undefined ? { linesRemoved: existingCache.linesRemoved } : {}),
+			...(existingCache?.languageUsage !== undefined ? { languageUsage: existingCache.languageUsage } : {}),
 			usageAnalysis: existingCache?.usageAnalysis || {
 				toolCalls: { total: 0, byTool: {} },
 				modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
@@ -4825,6 +4836,8 @@ usageAnalysis: undefined
 				if (v === 'total' || v === 'model' || v === 'editor' || v === 'repository' || v === 'cost') {
 					this.lastChartView = v;
 				}
+				if (typeof message.metric === 'string') { this.lastChartMetric = message.metric; }
+				if (typeof message.split === 'string') { this.lastChartSplit = message.split; }
 			}
 		});
 
@@ -8339,7 +8352,7 @@ ${hashtag}`;
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "chart.js"),
     );
 
-    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView };
+    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView, initialMetric: this.lastChartMetric, initialSplit: this.lastChartSplit };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
 

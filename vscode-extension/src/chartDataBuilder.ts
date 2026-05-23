@@ -1,4 +1,4 @@
-import type { DailyTokenStats, ChartDataPayload, ModelUsage } from './types';
+import type { DailyTokenStats, ChartDataPayload, ModelUsage, LanguageUsage } from './types';
 import { addModelUsage } from './statsHelpers';
 import { getModelDisplayName } from './webview/shared/modelUtils';
 
@@ -57,11 +57,29 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 			if (!target.editorUsage[e]) { target.editorUsage[e] = { tokens: 0, sessions: 0 }; }
 			target.editorUsage[e].tokens += u.tokens;
 			target.editorUsage[e].sessions += u.sessions;
+			if (u.linesAdded !== undefined) { target.editorUsage[e].linesAdded = (target.editorUsage[e].linesAdded ?? 0) + u.linesAdded; }
+			if (u.linesRemoved !== undefined) { target.editorUsage[e].linesRemoved = (target.editorUsage[e].linesRemoved ?? 0) + u.linesRemoved; }
 		}
 		for (const [r, u] of Object.entries(src.repositoryUsage)) {
 			if (!target.repositoryUsage[r]) { target.repositoryUsage[r] = { tokens: 0, sessions: 0 }; }
 			target.repositoryUsage[r].tokens += u.tokens;
 			target.repositoryUsage[r].sessions += u.sessions;
+			if (u.linesAdded !== undefined) { target.repositoryUsage[r].linesAdded = (target.repositoryUsage[r].linesAdded ?? 0) + u.linesAdded; }
+			if (u.linesRemoved !== undefined) { target.repositoryUsage[r].linesRemoved = (target.repositoryUsage[r].linesRemoved ?? 0) + u.linesRemoved; }
+		}
+		if (src.linesAdded !== undefined) {
+			target.linesAdded = (target.linesAdded ?? 0) + src.linesAdded;
+		}
+		if (src.linesRemoved !== undefined) {
+			target.linesRemoved = (target.linesRemoved ?? 0) + src.linesRemoved;
+		}
+		if (src.languageUsage) {
+			if (!target.languageUsage) { target.languageUsage = {}; }
+			for (const [ext, usage] of Object.entries(src.languageUsage)) {
+				if (!target.languageUsage[ext]) { target.languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+				target.languageUsage[ext].linesAdded += usage.linesAdded;
+				target.languageUsage[ext].linesRemoved += usage.linesRemoved;
+			}
 		}
 	};
 
@@ -142,6 +160,44 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 		const costData = entries.map(e => deps.calculateEstimatedCost(e.modelUsage, 'copilot'));
 		const totalCost = costData.reduce((a, b) => a + b, 0);
 
+		const locData = entries.map(e => (e.linesAdded ?? 0) + (e.linesRemoved ?? 0));
+		const linesAddedData = entries.map(e => e.linesAdded ?? 0);
+		const linesRemovedData = entries.map(e => e.linesRemoved ?? 0);
+		const totalLinesAdded = entries.reduce((s, e) => s + (e.linesAdded ?? 0), 0);
+		const totalLinesRemoved = entries.reduce((s, e) => s + (e.linesRemoved ?? 0), 0);
+		const totalLoc = totalLinesAdded + totalLinesRemoved;
+		const avgLocPerPeriod = entries.length > 0 ? totalLoc / entries.length : 0;
+
+		const allLanguages = new Set<string>();
+		entries.forEach(e => { if (e.languageUsage) { Object.keys(e.languageUsage).forEach(l => allLanguages.add(l)); } });
+		const languageDatasets = Array.from(allLanguages).map((lang, idx) => {
+			const color = getModelColor(idx);
+			return {
+				label: lang,
+				data: entries.map(e => (e.languageUsage?.[lang]?.linesAdded ?? 0) + (e.languageUsage?.[lang]?.linesRemoved ?? 0)),
+				backgroundColor: color.bg, borderColor: color.border, borderWidth: 1,
+			};
+		});
+
+		const locEditorDatasets = Array.from(allEditors).map((editor, idx) => {
+			const color = getModelColor(idx);
+			return {
+				label: editor,
+				data: entries.map(e => (e.editorUsage[editor]?.linesAdded ?? 0) + (e.editorUsage[editor]?.linesRemoved ?? 0)),
+				backgroundColor: color.bg, borderColor: color.border, borderWidth: 1,
+			};
+		});
+
+		const locRepositoryDatasets = Array.from(allRepos).map((repo, idx) => {
+			const color = getModelColor(idx);
+			return {
+				label: deps.getRepoDisplayName(repo),
+				fullRepo: repo,
+				data: entries.map(e => (e.repositoryUsage[repo]?.linesAdded ?? 0) + (e.repositoryUsage[repo]?.linesRemoved ?? 0)),
+				backgroundColor: color.bg, borderColor: color.border, borderWidth: 1,
+			};
+		});
+
 		return {
 			labels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets,
 			periodCount, totalTokens, totalSessions,
@@ -149,6 +205,15 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 			costData,
 			totalCost,
 			avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0,
+			locData,
+			linesAddedData,
+			linesRemovedData,
+			languageDatasets,
+			locEditorDatasets,
+			locRepositoryDatasets,
+			totalLinesAdded,
+			totalLinesRemoved,
+			avgLocPerPeriod,
 		};
 	};
 
@@ -215,6 +280,9 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 	const monthlyBuckets = Array.from(monthBucketMap.values()).sort((a, b) => a.key.localeCompare(b.key));
 	const monthlyPeriod = buildPeriodData(monthlyBuckets);
 
+	const hasLocData = Array.from(dailyBucketMap.values()).some(b => (b.stats.linesAdded ?? 0) + (b.stats.linesRemoved ?? 0) > 0)
+		|| fullDailyStats.some(d => (d.linesAdded ?? 0) + (d.linesRemoved ?? 0) > 0);
+
 	// ── Summary totals from the daily period (last 30 days) ──────────
 	const editorTotalsMap: Record<string, number> = {};
 	dailyBuckets.forEach(b => {
@@ -254,5 +322,6 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 			week: weeklyPeriod,
 			month: monthlyPeriod,
 		},
+		hasLocData,
 	};
 }

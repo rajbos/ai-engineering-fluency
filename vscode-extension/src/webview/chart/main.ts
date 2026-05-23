@@ -34,6 +34,15 @@ type ChartPeriodData = {
 	costData: number[];
 	totalCost: number;
 	avgCostPerPeriod: number;
+	locData?: number[];
+	linesAddedData?: number[];
+	linesRemovedData?: number[];
+	languageDatasets?: ModelDataset[];
+	locEditorDatasets?: ModelDataset[];
+	locRepositoryDatasets?: RepositoryDataset[];
+	totalLinesAdded?: number;
+	totalLinesRemoved?: number;
+	avgLocPerPeriod?: number;
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
@@ -55,8 +64,11 @@ type InitialChartData = {
 	backendConfigured?: boolean;
 	compactNumbers?: boolean;
 	periodsReady?: boolean;
+	hasLocData?: boolean;
 	initialPeriod?: ChartPeriod;
 	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
+	initialMetric?: 'tokens' | 'output' | 'cost';
+	initialSplit?: 'total' | 'model' | 'editor' | 'repository' | 'language';
 	periods?: {
 		day: ChartPeriodData;
 		week: ChartPeriodData;
@@ -86,10 +98,12 @@ async function loadChartModule(): Promise<void> {
 	const mod = await import('chart.js/auto');
 	Chart = mod.default;
 }
-let currentView: 'total' | 'model' | 'editor' | 'repository' | 'cost' = 'total';
+let currentMetric: 'tokens' | 'output' | 'cost' = 'tokens';
+let currentSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' = 'total';
 let currentPeriod: ChartPeriod = 'day';
 // Stores state to restore after a background data update re-initializes the chart
-let pendingView: typeof currentView | null = null;
+let pendingMetric: typeof currentMetric | null = null;
+let pendingSplit: typeof currentSplit | null = null;
 let pendingPeriod: ChartPeriod | null = null;
 
 type DisplayMode = 'actual' | 'rolling';
@@ -97,18 +111,22 @@ let currentDisplayMode: DisplayMode = 'actual';
 
 type ChartWebviewState = {
 	period: ChartPeriod;
-	view: 'total' | 'model' | 'editor' | 'repository' | 'cost';
+	metric: 'tokens' | 'output' | 'cost';
+	split: 'total' | 'model' | 'editor' | 'repository' | 'language';
 	displayMode: DisplayMode;
+	/** @deprecated Use metric + split instead. Kept for migration of old saved state. */
+	view?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
 };
 
 const chartState = createViewStateManager<ChartWebviewState>(vscode, {
 	period: 'day',
-	view: 'total',
+	metric: 'tokens',
+	split: 'total',
 	displayMode: 'actual',
 });
 
 function saveWebviewState(): void {
-	chartState.save({ period: currentPeriod, view: currentView, displayMode: currentDisplayMode });
+	chartState.save({ period: currentPeriod, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode });
 }
 const ROLLING_WINDOW: Record<ChartPeriod, number> = { day: 7, week: 4, month: 3 };
 
@@ -128,8 +146,18 @@ function getRollingLabel(): string {
 
 function getChartTitle(): string {
 	const periodMeta = PERIOD_LABELS[currentPeriod];
-	let titleText = currentView === 'cost' ? periodMeta.costTitle : periodMeta.title;
-	if (currentDisplayMode === 'rolling' && (currentView === 'total' || currentView === 'cost')) {
+	if (currentMetric === 'cost') {
+		let titleText = periodMeta.costTitle;
+		if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
+			titleText += ` (${getRollingLabel()})`;
+		}
+		return titleText;
+	}
+	if (currentMetric === 'output') {
+		return periodMeta.outputTitle;
+	}
+	let titleText = periodMeta.title;
+	if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
 		titleText += ` (${getRollingLabel()})`;
 	}
 	return titleText;
@@ -158,10 +186,10 @@ function getActivePeriodData(data: InitialChartData): ChartPeriodData {
 	};
 }
 
-const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; costTitle: string; avgCostLabel: string }> = {
-	day:   { title: 'Token Usage – Last 30 Days',  footer: 'Day-by-day token usage for the last 30 days',   countLabel: 'Total Days',   avgLabel: 'Avg Tokens / Day',   costTitle: 'Est. Cost – Last 30 Days',  avgCostLabel: 'Avg Cost / Day'   },
-	week:  { title: 'Token Usage – Last 6 Weeks',  footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks',  avgLabel: 'Avg Tokens / Week',  costTitle: 'Est. Cost – Last 6 Weeks',  avgCostLabel: 'Avg Cost / Week'  },
-	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month' },
+const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string }> = {
+	day:   { title: 'Token Usage – Last 30 Days',  footer: 'Day-by-day token usage for the last 30 days',   countLabel: 'Total Days',   avgLabel: 'Avg Tokens / Day',   costTitle: 'Est. Cost – Last 30 Days',  avgCostLabel: 'Avg Cost / Day',   outputTitle: 'Lines of Code – Last 30 Days',  avgLocLabel: 'Avg Lines / Day'   },
+	week:  { title: 'Token Usage – Last 6 Weeks',  footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks',  avgLabel: 'Avg Tokens / Week',  costTitle: 'Est. Cost – Last 6 Weeks',  avgCostLabel: 'Avg Cost / Week',  outputTitle: 'Lines of Code – Last 6 Weeks',  avgLocLabel: 'Avg Lines / Week'  },
+	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month' },
 };
 
 function renderLayout(data: InitialChartData): void {
@@ -208,8 +236,19 @@ function renderLayout(data: InitialChartData): void {
 	cards.id = 'summary-cards';
 	cards.append(
 		buildCard('card-period-count',  periodMeta.countLabel,   periodData.periodCount.toLocaleString()),
-		buildCard('card-total-tokens',  currentView === 'cost' ? 'Total Cost (est.)' : 'Total Tokens', currentView === 'cost' ? `$${periodData.totalCost.toFixed(2)}` : formatCompact(periodData.totalTokens)),
-		buildCard('card-avg-tokens',    currentView === 'cost' ? periodMeta.avgCostLabel : periodMeta.avgLabel, currentView === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}` : formatCompact(periodData.avgPerPeriod)),
+		buildCard('card-total-tokens',
+			currentMetric === 'cost' ? 'Total Cost (est.)' :
+			currentMetric === 'output' ? 'Total Lines (AI)' : 'Total Tokens',
+			currentMetric === 'cost' ? `$${periodData.totalCost.toFixed(2)}` :
+			currentMetric === 'output' ? ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString() :
+			formatCompact(periodData.totalTokens)),
+		buildCard('card-avg-tokens',
+			currentMetric === 'cost' ? periodMeta.avgCostLabel :
+			currentMetric === 'output' ? periodMeta.avgLocLabel :
+			periodMeta.avgLabel,
+			currentMetric === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}` :
+			currentMetric === 'output' ? Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString() :
+			formatCompact(periodData.avgPerPeriod)),
 		buildCard('card-total-sessions','Total Sessions',         periodData.totalSessions.toLocaleString())
 	);
 	summarySection.append(cards);
@@ -247,22 +286,60 @@ function renderLayout(data: InitialChartData): void {
 
 	const chartShell = el('div', 'chart-shell');
 
-	// Chart view toggle row
+	// Supported metric/split combos
+	const isComboSupported = (metric: string, split: string): boolean => {
+		if (metric === 'cost') { return split === 'total'; }
+		if (metric === 'output') { return split !== 'model'; }
+		return split !== 'language'; // tokens
+	};
+
+	// Chart controls: [Metric group] | [Split group] | [Rolling avg]
 	const toggles = el('div', 'chart-controls');
-	const totalBtn = el('button', `toggle${currentView === 'total' ? ' active' : ''}`, 'Total Tokens');
-	totalBtn.id = 'view-total';
-	const modelBtn = el('button', `toggle${currentView === 'model' ? ' active' : ''}`, 'By Model');
-	modelBtn.id = 'view-model';
-	const editorBtn = el('button', `toggle${currentView === 'editor' ? ' active' : ''}`, 'By Editor');
-	editorBtn.id = 'view-editor';
-	const repoBtn = el('button', `toggle${currentView === 'repository' ? ' active' : ''}`, 'By Repository');
-	repoBtn.id = 'view-repository';
-	const costBtn = el('button', `toggle${currentView === 'cost' ? ' active' : ''}`, '💰 Est. Cost');
-	costBtn.id = 'view-cost';
-	const rollingApplicableNow = currentView === 'total' || currentView === 'cost';
-	const rollingBtn = el('button', `toggle rolling-toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicableNow ? '' : ' hidden'}`, '📈 Rolling Avg');
+
+	// Metric group
+	const metricGroup = el('div', 'control-group');
+	const tokensBtn = el('button', `toggle${currentMetric === 'tokens' ? ' active' : ''}`, 'Tokens');
+	tokensBtn.id = 'metric-tokens';
+	const outputBtn = el('button', `toggle${currentMetric === 'output' ? ' active' : ''}${!data.hasLocData ? ' dim' : ''}`, '✏️ Output');
+	outputBtn.id = 'metric-output';
+	if (!data.hasLocData) {
+		outputBtn.title = 'No edit data available yet (VS Code edit/agent sessions only)';
+	}
+	const costBtn = el('button', `toggle${currentMetric === 'cost' ? ' active' : ''}`, '💰 Cost');
+	costBtn.id = 'metric-cost';
+	metricGroup.append(tokensBtn, outputBtn, costBtn);
+
+	const sep1 = el('div', 'control-group-separator');
+
+	// Split group
+	const splitGroup = el('div', 'control-group');
+	const makeSplitBtn = (id: string, split: string, label: string) => {
+		const supported = isComboSupported(currentMetric, split);
+		const btn = el('button', `toggle${currentSplit === split ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
+		btn.id = id;
+		if (!supported) {
+			(btn as HTMLButtonElement).disabled = true;
+			btn.title = `Not available for ${currentMetric} metric`;
+		}
+		return btn;
+	};
+	const totalSplitBtn = makeSplitBtn('split-total', 'total', 'Total');
+	const modelSplitBtn = makeSplitBtn('split-model', 'model', 'By Model');
+	const editorSplitBtn = makeSplitBtn('split-editor', 'editor', 'By Editor');
+	const repoSplitBtn = makeSplitBtn('split-repository', 'repository', 'By Repository');
+	const langSplitBtn = makeSplitBtn('split-language', 'language', 'By Language');
+	splitGroup.append(totalSplitBtn, modelSplitBtn, editorSplitBtn, repoSplitBtn, langSplitBtn);
+
+	const sep2 = el('div', 'control-group-separator');
+
+	// Rolling avg group (only visible for total split with tokens/cost)
+	const rollingGroup = el('div', 'control-group');
+	const rollingApplicableNow = currentSplit === 'total' && currentMetric !== 'output';
+	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicableNow ? '' : ' hidden'}`, '📈 Rolling Avg');
 	rollingBtn.id = 'view-rolling';
-	toggles.append(totalBtn, modelBtn, editorBtn, repoBtn, costBtn, rollingBtn);
+	rollingGroup.append(rollingBtn);
+
+	toggles.append(metricGroup, sep1, splitGroup, sep2, rollingGroup);
 
 	const canvasWrap = el('div', 'canvas-wrap');
 	const canvas = document.createElement('canvas');
@@ -329,9 +406,13 @@ function updateSummaryCards(data: InitialChartData): void {
 
 	updateCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString());
 
-	if (currentView === 'cost') {
+	if (currentMetric === 'cost') {
 		updateCard('card-total-tokens', 'Total Cost (est.)', `$${periodData.totalCost.toFixed(2)}`);
 		updateCard('card-avg-tokens', periodMeta.avgCostLabel, `$${periodData.avgCostPerPeriod.toFixed(2)}`);
+	} else if (currentMetric === 'output') {
+		const totalLines = (periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0);
+		updateCard('card-total-tokens', 'Total Lines (AI)', totalLines.toLocaleString());
+		updateCard('card-avg-tokens', periodMeta.avgLocLabel, Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString());
 	} else {
 		updateCard('card-total-tokens', 'Total Tokens', formatCompact(periodData.totalTokens));
 		updateCard('card-avg-tokens', periodMeta.avgLabel, formatCompact(periodData.avgPerPeriod));
@@ -383,17 +464,28 @@ function wireInteractions(data: InitialChartData): void {
 		btn?.addEventListener('click', () => { void switchPeriod(period, data); });
 	});
 
-	// Chart view toggle buttons
-	const viewButtons = [
-		{ id: 'view-total',      view: 'total'      as const },
-		{ id: 'view-model',      view: 'model'      as const },
-		{ id: 'view-editor',     view: 'editor'     as const },
-		{ id: 'view-repository', view: 'repository' as const },
-		{ id: 'view-cost',       view: 'cost'       as const },
+	// Chart metric toggle buttons
+	const metricButtons: Array<{ id: string; metric: typeof currentMetric }> = [
+		{ id: 'metric-tokens', metric: 'tokens' },
+		{ id: 'metric-output', metric: 'output' },
+		{ id: 'metric-cost',   metric: 'cost'   },
 	];
-	viewButtons.forEach(({ id, view }) => {
+	metricButtons.forEach(({ id, metric }) => {
 		const btn = document.getElementById(id);
-		btn?.addEventListener('click', () => { void switchView(view, data); });
+		btn?.addEventListener('click', () => { void switchMetric(metric, data); });
+	});
+
+	// Chart split toggle buttons
+	const splitButtons: Array<{ id: string; split: typeof currentSplit }> = [
+		{ id: 'split-total',      split: 'total'      },
+		{ id: 'split-model',      split: 'model'      },
+		{ id: 'split-editor',     split: 'editor'     },
+		{ id: 'split-repository', split: 'repository' },
+		{ id: 'split-language',   split: 'language'   },
+	];
+	splitButtons.forEach(({ id, split }) => {
+		const btn = document.getElementById(id);
+		btn?.addEventListener('click', () => { void switchSplit(split, data); });
 	});
 
 	const rollingToggle = document.getElementById('view-rolling');
@@ -409,18 +501,24 @@ async function setupChart(canvas: HTMLCanvasElement, data: InitialChartData): Pr
 	if (!Chart) {
 		return;
 	}
-	chart = new Chart(ctx, createConfig('total', data));
+	chart = new Chart(ctx, createConfig(data));
 	// Restore the previously active period and view if a background update triggered a re-render
 	if (pendingPeriod !== null && pendingPeriod !== 'day') {
 		const periodToRestore = pendingPeriod;
 		currentPeriod = 'day';
 		await switchPeriod(periodToRestore, data);
-	} else if (pendingView !== null && pendingView !== 'total') {
-		const viewToRestore = pendingView;
-		currentView = 'total';
-		await switchView(viewToRestore, data);
+	} else if (pendingMetric !== null || pendingSplit !== null) {
+		const metricToRestore = pendingMetric ?? currentMetric;
+		const splitToRestore = pendingSplit ?? currentSplit;
+		currentMetric = 'tokens';
+		currentSplit = 'total';
+		await switchMetric(metricToRestore, data);
+		if (splitToRestore !== 'total') {
+			await switchSplit(splitToRestore, data);
+		}
 	}
-	pendingView = null;
+	pendingMetric = null;
+	pendingSplit = null;
 	pendingPeriod = null;
 }
 
@@ -449,44 +547,70 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 	if (!Chart) {
 		return;
 	}
-	chart = new Chart(ctx, createConfig(currentView, data));
+	chart = new Chart(ctx, createConfig(data));
 }
 
-async function switchView(view: 'total' | 'model' | 'editor' | 'repository' | 'cost', data: InitialChartData): Promise<void> {
-	if (currentView === view) {
-		return;
-	}
-	const rollingApplicable = view === 'total' || view === 'cost';
-	if (!rollingApplicable) {
-		currentDisplayMode = 'actual';
-	}
-	currentView = view;
-	vscode.postMessage({ command: 'setViewPreference', view });
+async function switchMetric(metric: typeof currentMetric, data: InitialChartData): Promise<void> {
+	if (currentMetric === metric) { return; }
+	// When switching to cost, force split to total (only supported combo)
+	if (metric === 'cost') { currentSplit = 'total'; }
+	// When switching to output, disable unsupported splits
+	if (metric === 'output' && currentSplit === 'model') { currentSplit = 'total'; }
+	// When switching to tokens, disable language split
+	if (metric === 'tokens' && currentSplit === 'language') { currentSplit = 'total'; }
+	currentMetric = metric;
+	const rollingApplicable = currentSplit === 'total' && metric !== 'output';
+	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
+	vscode.postMessage({ command: 'setViewPreference', metric: currentMetric, split: currentSplit });
 	saveWebviewState();
-	setActiveView(view);
+	setActiveMetric(metric);
+	setActiveSplit(currentSplit);
+	updateSplitButtonStates();
 	const rollingBtnEl = document.getElementById('view-rolling');
 	if (rollingBtnEl) {
 		rollingBtnEl.classList.toggle('hidden', !rollingApplicable);
 		rollingBtnEl.classList.toggle('active', rollingApplicable && currentDisplayMode === 'rolling');
 	}
 	updateSummaryCards(data);
-	if (!chart) {
-		return;
-	}
+	if (!chart) { return; }
 	const canvas = chart.canvas as HTMLCanvasElement | null;
 	chart.destroy();
-	if (!canvas) {
-		return;
-	}
+	if (!canvas) { return; }
 	const ctx = canvas.getContext('2d');
-	if (!ctx) {
-		return;
-	}
+	if (!ctx) { return; }
 	await loadChartModule();
-	if (!Chart) {
-		return;
+	if (!Chart) { return; }
+	chart = new Chart(ctx, createConfig(data));
+}
+
+async function switchSplit(split: typeof currentSplit, data: InitialChartData): Promise<void> {
+	if (currentSplit === split) { return; }
+	// Check if this combo is supported
+	const supported = (currentMetric === 'cost' && split === 'total') ||
+		(currentMetric === 'output' && split !== 'model') ||
+		(currentMetric === 'tokens' && split !== 'language');
+	if (!supported) { return; }
+	currentSplit = split;
+	const rollingApplicable = split === 'total' && currentMetric !== 'output';
+	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
+	vscode.postMessage({ command: 'setViewPreference', metric: currentMetric, split: currentSplit });
+	saveWebviewState();
+	setActiveSplit(split);
+	const rollingBtnEl = document.getElementById('view-rolling');
+	if (rollingBtnEl) {
+		rollingBtnEl.classList.toggle('hidden', !rollingApplicable);
+		rollingBtnEl.classList.toggle('active', rollingApplicable && currentDisplayMode === 'rolling');
 	}
-	chart = new Chart(ctx, createConfig(view, data));
+	updateSummaryCards(data);
+	if (!chart) { return; }
+	const canvas = chart.canvas as HTMLCanvasElement | null;
+	chart.destroy();
+	if (!canvas) { return; }
+	const ctx = canvas.getContext('2d');
+	if (!ctx) { return; }
+	await loadChartModule();
+	if (!Chart) { return; }
+	chart = new Chart(ctx, createConfig(data));
 }
 
 function setActivePeriod(period: ChartPeriod): void {
@@ -497,13 +621,39 @@ function setActivePeriod(period: ChartPeriod): void {
 	});
 }
 
-function setActiveView(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'): void {
-	['view-total', 'view-model', 'view-editor', 'view-repository', 'view-cost'].forEach(id => {
+function setActiveMetric(metric: typeof currentMetric): void {
+	(['metric-tokens', 'metric-output', 'metric-cost'] as const).forEach(id => {
 		const btn = document.getElementById(id);
-		if (!btn) {
-			return;
-		}
-		btn.classList.toggle('active', id === `view-${view}`);
+		if (!btn) { return; }
+		btn.classList.toggle('active', id === `metric-${metric}`);
+	});
+}
+
+function setActiveSplit(split: typeof currentSplit): void {
+	(['split-total', 'split-model', 'split-editor', 'split-repository', 'split-language'] as const).forEach(id => {
+		const btn = document.getElementById(id);
+		if (!btn) { return; }
+		btn.classList.toggle('active', id === `split-${split}`);
+	});
+}
+
+function updateSplitButtonStates(): void {
+	const splits: Array<{ id: string; split: string }> = [
+		{ id: 'split-total',      split: 'total'      },
+		{ id: 'split-model',      split: 'model'      },
+		{ id: 'split-editor',     split: 'editor'     },
+		{ id: 'split-repository', split: 'repository' },
+		{ id: 'split-language',   split: 'language'   },
+	];
+	splits.forEach(({ id, split }) => {
+		const btn = document.getElementById(id) as HTMLButtonElement | null;
+		if (!btn) { return; }
+		const supported = (currentMetric === 'cost' && split === 'total') ||
+			(currentMetric === 'output' && split !== 'model') ||
+			(currentMetric === 'tokens' && split !== 'language');
+		btn.disabled = !supported;
+		btn.classList.toggle('disabled', !supported);
+		btn.title = supported ? '' : `Not available for ${currentMetric} metric`;
 	});
 }
 
@@ -526,11 +676,14 @@ async function switchDisplayMode(data: InitialChartData): Promise<void> {
 	if (!ctx) { return; }
 	await loadChartModule();
 	if (!Chart) { return; }
-	chart = new Chart(ctx, createConfig(currentView, data));
+	chart = new Chart(ctx, createConfig(data));
 }
 
-function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost', data: InitialChartData): ChartConfig {
+function createConfig(data: InitialChartData): ChartConfig {
 	const period = getActivePeriodData(data);
+	const view = currentMetric === 'tokens' ? (currentSplit === 'model' ? 'model' : currentSplit === 'editor' ? 'editor' : currentSplit === 'repository' ? 'repository' : 'total')
+		: currentMetric === 'cost' ? 'cost'
+		: `output-${currentSplit}`;
 
 	// Get CSS variables for theme-aware colors
 	const styles = getComputedStyle(document.body);
@@ -708,7 +861,58 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 		};
 	}
 
-	// Stacked views: model / editor / repository
+	// Output metric (lines of code)
+	if (view.startsWith('output-')) {
+		const locDatasets = view === 'output-language' ? (period.languageDatasets ?? []) :
+			view === 'output-editor' ? (period.locEditorDatasets ?? []) :
+			view === 'output-repository' ? (period.locRepositoryDatasets ?? []) :
+			// output-total: stacked added/removed
+			[
+				{
+					label: 'Lines Added',
+					data: period.linesAddedData ?? [],
+					backgroundColor: 'rgba(75, 192, 192, 0.6)',
+					borderColor: 'rgba(75, 192, 192, 1)',
+					borderWidth: 1,
+				},
+				{
+					label: 'Lines Removed',
+					data: (period.linesRemovedData ?? []).map((v: number) => -v),
+					backgroundColor: 'rgba(255, 99, 132, 0.6)',
+					borderColor: 'rgba(255, 99, 132, 1)',
+					borderWidth: 1,
+				},
+			];
+
+		return {
+			type: 'bar' as const,
+			data: { labels: period.labels, datasets: locDatasets as any },
+			options: {
+				...baseOptions,
+				plugins: {
+					...baseOptions.plugins,
+					legend: { position: 'top' as const, labels: { color: textColor, font: { size: 11 } } },
+					tooltip: {
+						...baseOptions.plugins.tooltip,
+						callbacks: {
+							label: (ctx: any) => ` ${Math.abs(Number(ctx.parsed.y)).toLocaleString()} lines`
+						}
+					}
+				},
+				scales: {
+					x: { stacked: view === 'output-total', grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
+					y: {
+						stacked: view === 'output-total',
+						grid: { color: gridColor },
+						ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Math.abs(Number(value)).toLocaleString() },
+						title: { display: true, text: 'Lines of Code', color: textColor, font: { size: 12, weight: 'bold' } }
+					}
+				}
+			}
+		};
+	}
+
+	// Stacked views: model / editor / repository (tokens metric)
 	// Compute total-token projection for the last bar and add a single "Projected" segment on top.
 	const lastIdx = period.tokensData.length - 1;
 	const fraction = getCurrentPeriodFraction(currentPeriod);
@@ -748,7 +952,7 @@ function createConfig(view: 'total' | 'model' | 'editor' | 'repository' | 'cost'
 						// (no API counts, no thinking tokens). Flag this in the chart
 						// tooltip whenever a JetBrains dataset is present in the hover.
 						footer: (items: any[]) => {
-							if (view !== 'editor') { return ''; }
+							if (currentSplit !== 'editor') { return ''; }
 							const hasJetBrains = items.some(i => i?.dataset?.label === 'JetBrains');
 							return hasJetBrains
 								? 'JetBrains: estimates from user messages + assistant text only.\nActual API counts and thinking tokens are not available.'
@@ -798,12 +1002,39 @@ async function bootstrap(): Promise<void> {
 	const hasSaved = !!vscode.getState();
 	if (hasSaved) {
 		currentPeriod = saved.period;
-		currentView = saved.view;
 		currentDisplayMode = saved.displayMode;
+		// Migrate old saved state: 'view' → metric + split
+		if (saved.view && !saved.metric) {
+			const viewMigration: Record<string, { metric: typeof currentMetric; split: typeof currentSplit }> = {
+				total:      { metric: 'tokens', split: 'total'      },
+				model:      { metric: 'tokens', split: 'model'      },
+				editor:     { metric: 'tokens', split: 'editor'     },
+				repository: { metric: 'tokens', split: 'repository' },
+				cost:       { metric: 'cost',   split: 'total'      },
+			};
+			const migration = viewMigration[saved.view] ?? { metric: 'tokens', split: 'total' };
+			currentMetric = migration.metric;
+			currentSplit = migration.split;
+		} else {
+			currentMetric = saved.metric ?? 'tokens';
+			currentSplit = saved.split ?? 'total';
+		}
 	} else {
 		// Fall back to server-supplied initial values (e.g., panel closed and reopened)
 		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
-		if (initialData.initialView) { currentView = initialData.initialView; }
+		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
+		if (initialData.initialSplit) { currentSplit = initialData.initialSplit; }
+		// Legacy fallback from old initialView
+		else if (initialData.initialView) {
+			const legacyMap: Record<string, { metric: typeof currentMetric; split: typeof currentSplit }> = {
+				total: { metric: 'tokens', split: 'total' }, model: { metric: 'tokens', split: 'model' },
+				editor: { metric: 'tokens', split: 'editor' }, repository: { metric: 'tokens', split: 'repository' },
+				cost: { metric: 'cost', split: 'total' },
+			};
+			const mapped = legacyMap[initialData.initialView] ?? { metric: 'tokens', split: 'total' };
+			currentMetric = mapped.metric;
+			currentSplit = mapped.split;
+		}
 	}
 
 	renderLayout(initialData);
@@ -815,7 +1046,8 @@ void bootstrap();
 registerMessageHandler((message) => {
 	if (message.command === 'updateChartData') {
 		// Save current toggles for restoration after chart re-initializes
-		pendingView = currentView;
+		pendingMetric = currentMetric;
+		pendingSplit = currentSplit;
 		pendingPeriod = currentPeriod;
 		renderLayout(message.data as InitialChartData);
 	}
