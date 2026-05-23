@@ -38,6 +38,7 @@ export type EditorName =
 	| 'Claude Desktop Cowork'
 	| 'Mistral Vibe'
 	| 'Gemini CLI'
+	| 'Antigravity'
 	| 'Unknown';
 
 /**
@@ -61,6 +62,7 @@ export const EDITOR_ICON_MAP: Record<EditorName, string> = {
 	'Claude Desktop Cowork': '🟠',
 	'Mistral Vibe': '🔥',
 	'Gemini CLI': '💎',
+	'Antigravity': '🚀',
 	'Unknown': '❓'
 };
 
