@@ -265,7 +265,7 @@ function _scdlDistributeToDays(
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 54; // Fix LOC extraction for delta-based JSONL sessions (Feb 2026+)
+	private static readonly CACHE_VERSION = 55; // Fix LOC extraction for Copilot CLI coding agent sessions (edit/create tools)
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 

@@ -994,6 +994,108 @@ test('analyzeSessionUsage: delta-based JSONL session extracts LOC data from text
     assert.equal(result.editScope?.totalEditedFiles, 1);
 });
 
+test('analyzeSessionUsage: CLI JSONL session extracts LOC from successful edit tool calls', async () => {
+    const toolCallId = 'call-edit-1';
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: '2026-05-01T10:00:00Z' },
+        {
+            type: 'tool.execution_start',
+            data: {
+                toolCallId,
+                toolName: 'edit',
+                arguments: {
+                    path: '/repo/src/foo.ts',
+                    old_str: 'line1\nline2',
+                    new_str: 'line1\nline2\nline3\nline4',
+                },
+            },
+        },
+        { type: 'tool.execution_complete', data: { toolCallId, success: true } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    // old_str has 2 lines, new_str has 4 lines (no trailing newline)
+    assert.equal(result.editScope?.linesAdded, 4, 'expected 4 lines added');
+    assert.equal(result.editScope?.linesRemoved, 2, 'expected 2 lines removed');
+    assert.equal(result.editScope?.totalEditedFiles, 1);
+    assert.ok(result.editScope?.languageUsage?.['ts'], 'expected ts language usage');
+    assert.equal(result.editScope?.languageUsage?.['ts']?.linesAdded, 4);
+});
+
+test('analyzeSessionUsage: CLI JSONL session extracts LOC from successful create tool calls', async () => {
+    const toolCallId = 'call-create-1';
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: '2026-05-01T10:00:00Z' },
+        {
+            type: 'tool.execution_start',
+            data: {
+                toolCallId,
+                toolName: 'create',
+                arguments: {
+                    path: '/repo/src/bar.ts',
+                    file_text: 'const x = 1;\nconst y = 2;\nconst z = 3;\n',
+                },
+            },
+        },
+        { type: 'tool.execution_complete', data: { toolCallId, success: true } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    // file_text has 3 lines + trailing newline → 3 lines counted (trailing \n not counted as extra line)
+    assert.equal(result.editScope?.linesAdded, 3, 'expected 3 lines added (trailing newline not counted)');
+    assert.equal(result.editScope?.linesRemoved, 0, 'create should have 0 lines removed');
+});
+
+test('analyzeSessionUsage: CLI JSONL session does NOT count LOC for failed edit tool calls', async () => {
+    const toolCallId = 'call-edit-fail';
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' } },
+        {
+            type: 'tool.execution_start',
+            data: {
+                toolCallId,
+                toolName: 'edit',
+                arguments: { path: '/repo/src/foo.ts', old_str: 'old', new_str: 'new\nlines\nhere' },
+            },
+        },
+        { type: 'tool.execution_complete', data: { toolCallId, success: false } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.editScope?.linesAdded ?? 0, 0, 'failed edits should not contribute LOC');
+    assert.equal(result.editScope?.linesRemoved ?? 0, 0, 'failed edits should not contribute LOC');
+});
+
+test('analyzeSessionUsage: CLI JSONL LOC counts multiple files across edit and create', async () => {
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' } },
+        {
+            type: 'tool.execution_start',
+            data: { toolCallId: 'id1', toolName: 'edit', arguments: { path: '/repo/a.py', old_str: 'x', new_str: 'x\ny\nz' } },
+        },
+        { type: 'tool.execution_complete', data: { toolCallId: 'id1', success: true } },
+        {
+            type: 'tool.execution_start',
+            data: { toolCallId: 'id2', toolName: 'create', arguments: { path: '/repo/b.js', file_text: 'a\nb\n' } },
+        },
+        { type: 'tool.execution_complete', data: { toolCallId: 'id2', success: true } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    // edit: new_str='x\ny\nz' → 3 lines; old_str='x' → 1 line
+    // create: file_text='a\nb\n' → 2 lines
+    assert.equal(result.editScope?.linesAdded, 5, 'expected 3+2=5 lines added');
+    assert.equal(result.editScope?.linesRemoved, 1, 'expected 1 line removed');
+    assert.equal(result.editScope?.totalEditedFiles, 2, 'expected 2 edited files');
+    assert.ok(result.editScope?.multiFileEdits, 'expected multi-file edit flag');
+    assert.ok(result.editScope?.languageUsage?.['py'], 'expected py language tracking');
+    assert.ok(result.editScope?.languageUsage?.['js'], 'expected js language tracking');
+});
+
 // ---------------------------------------------------------------------------
 // isParsedSessionJson
 // ---------------------------------------------------------------------------
