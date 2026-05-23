@@ -723,61 +723,66 @@ function unionFill(map: { [key: string]: number }, keys: string[]): { [key: stri
 	return result;
 }
 
-function sanitizeStats(raw: any): UsageAnalysisStats | null {
-	if (!raw || typeof raw !== 'object') {
-		return null;
-	}
+function coerceNumber(value: any): number {
+	const n = Number(value);
+	return Number.isFinite(n) ? n : 0;
+}
 
-	const coerceNumber = (value: any): number => {
-		const n = Number(value);
-		return Number.isFinite(n) ? n : 0;
+function sanitizeModeUsage(mode: any): ModeUsage {
+	const m = (mode && typeof mode === 'object') ? mode : {};
+	return {
+		ask: coerceNumber(m.ask),
+		edit: coerceNumber(m.edit),
+		agent: coerceNumber(m.agent),
+		plan: coerceNumber(m.plan),
+		customAgent: coerceNumber(m.customAgent),
+		cli: coerceNumber(m.cli),
 	};
+}
 
-	const sanitizeModeUsage = (mode: any): ModeUsage => ({
-		ask: coerceNumber(mode?.ask),
-		edit: coerceNumber(mode?.edit),
-		agent: coerceNumber(mode?.agent),
-		plan: coerceNumber(mode?.plan),
-		customAgent: coerceNumber(mode?.customAgent),
-		cli: coerceNumber(mode?.cli),
-	});
+function sanitizeContextRefs(refs: any): ContextReferenceUsage {
+	const r = (refs && typeof refs === 'object') ? refs : {};
+	return {
+		file: coerceNumber(r.file),
+		selection: coerceNumber(r.selection),
+		implicitSelection: coerceNumber(r.implicitSelection),
+		symbol: coerceNumber(r.symbol),
+		codebase: coerceNumber(r.codebase),
+		workspace: coerceNumber(r.workspace),
+		terminal: coerceNumber(r.terminal),
+		vscode: coerceNumber(r.vscode),
+		terminalLastCommand: coerceNumber(r.terminalLastCommand),
+		terminalSelection: coerceNumber(r.terminalSelection),
+		clipboard: coerceNumber(r.clipboard),
+		changes: coerceNumber(r.changes),
+		outputPanel: coerceNumber(r.outputPanel),
+		problemsPanel: coerceNumber(r.problemsPanel),
+		pullRequest: coerceNumber(r.pullRequest),
+		byKind: r.byKind ?? {},
+		copilotInstructions: coerceNumber(r.copilotInstructions),
+		agentsMd: coerceNumber(r.agentsMd),
+		byPath: r.byPath ?? {},
+	};
+}
 
-	const sanitizeContextRefs = (refs: any): ContextReferenceUsage => ({
-		file: coerceNumber(refs?.file),
-		selection: coerceNumber(refs?.selection),
-		implicitSelection: coerceNumber(refs?.implicitSelection),
-		symbol: coerceNumber(refs?.symbol),
-		codebase: coerceNumber(refs?.codebase),
-		workspace: coerceNumber(refs?.workspace),
-		terminal: coerceNumber(refs?.terminal),
-		vscode: coerceNumber(refs?.vscode),
-		terminalLastCommand: coerceNumber(refs?.terminalLastCommand),
-		terminalSelection: coerceNumber(refs?.terminalSelection),
-		clipboard: coerceNumber(refs?.clipboard),
-		changes: coerceNumber(refs?.changes),
-		outputPanel: coerceNumber(refs?.outputPanel),
-		problemsPanel: coerceNumber(refs?.problemsPanel),
-		pullRequest: coerceNumber(refs?.pullRequest),
-		byKind: refs?.byKind ?? {},
-		copilotInstructions: coerceNumber(refs?.copilotInstructions),
-		agentsMd: coerceNumber(refs?.agentsMd),
-		byPath: refs?.byPath ?? {},
-	});
-
-	const sanitizePeriod = (period: any): UsageAnalysisPeriod => ({
-		sessions: coerceNumber(period?.sessions),
-		modeUsage: sanitizeModeUsage(period?.modeUsage ?? {}),
-		contextReferences: sanitizeContextRefs(period?.contextReferences ?? {}),
+function sanitizePeriod(period: any): UsageAnalysisPeriod {
+	const p = (period && typeof period === 'object') ? period : {};
+	const toolCalls = (p.toolCalls && typeof p.toolCalls === 'object') ? p.toolCalls : {};
+	const mcpTools = (p.mcpTools && typeof p.mcpTools === 'object') ? p.mcpTools : {};
+	return {
+		sessions: coerceNumber(p.sessions),
+		modeUsage: sanitizeModeUsage(p.modeUsage),
+		contextReferences: sanitizeContextRefs(p.contextReferences),
 		toolCalls: {
-			total: coerceNumber(period?.toolCalls?.total),
-			byTool: period?.toolCalls?.byTool ?? {},
+			total: coerceNumber(toolCalls.total),
+			byTool: toolCalls.byTool ?? {},
 		},
 		mcpTools: {
-			total: coerceNumber(period?.mcpTools?.total),
-			byServer: period?.mcpTools?.byServer ?? {},
-			byTool: period?.mcpTools?.byTool ?? {},
+			total: coerceNumber(mcpTools.total),
+			byServer: mcpTools.byServer ?? {},
+			byTool: mcpTools.byTool ?? {},
 		},
-		modelSwitching: period?.modelSwitching ?? {
+		modelSwitching: p.modelSwitching ?? {
 			modelsPerSession: [],
 			totalSessions: 0,
 			averageModelsPerSession: 0,
@@ -793,8 +798,14 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			unknownRequests: 0,
 			totalRequests: 0,
 		},
-		thinkingEffortUsage: period?.thinkingEffortUsage,
-	});
+		thinkingEffortUsage: p.thinkingEffortUsage,
+	};
+}
+
+function sanitizeStats(raw: any): UsageAnalysisStats | null {
+	if (!raw || typeof raw !== 'object') {
+		return null;
+	}
 
 	try {
 		const sanitized: UsageAnalysisStats = {
