@@ -1413,6 +1413,8 @@ type AsuCliState = {
 	defaultEffort: string | null;
 	requestCount: number;
 	effortByRequest: { [effort: string]: number };
+	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string> }>;
+	editedFilePaths: Set<string>;
 };
 
 /** Check if the first JSONL line indicates a delta-based VS Code incremental format. */
@@ -1586,6 +1588,72 @@ function _asuHandleToolAndMcpEvents(event: any, analysis: SessionUsageAnalysis, 
 	_asuHandleMcpToolEvent(event, analysis);
 }
 
+/** Count non-empty lines in text, ignoring a trailing newline. */
+function _asuCountTextLines(text: string): number {
+	if (!text) { return 0; }
+	const lines = text.split('\n');
+	if (lines[lines.length - 1] === '') { lines.pop(); }
+	return lines.length;
+}
+
+/** Ensure editScope is initialized on the analysis object. */
+function _asuEnsureEditScope(analysis: SessionUsageAnalysis): void {
+	if (!analysis.editScope) {
+		analysis.editScope = { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0, linesAdded: 0, linesRemoved: 0 };
+	}
+}
+
+/** Handle tool.execution_start for CLI LOC tracking — stores pending tool call args. */
+function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
+	const { toolCallId, toolName, arguments: args } = event.data ?? {};
+	if (toolCallId && (toolName === 'edit' || toolName === 'create') && args) {
+		cliState.pendingToolCalls.set(toolCallId, { toolName, args });
+	}
+}
+
+/** Extract LOC counts from a completed CLI tool call and update editScope. */
+function _asuApplyToolLoc(pending: { toolName: string; args: Record<string, string> }, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	const linesAdded = pending.toolName === 'edit'
+		? _asuCountTextLines(pending.args.new_str ?? '')
+		: _asuCountTextLines(pending.args.file_text ?? '');
+	const linesRemoved = pending.toolName === 'edit' ? _asuCountTextLines(pending.args.old_str ?? '') : 0;
+	_asuEnsureEditScope(analysis);
+	analysis.editScope!.linesAdded = (analysis.editScope!.linesAdded ?? 0) + linesAdded;
+	analysis.editScope!.linesRemoved = (analysis.editScope!.linesRemoved ?? 0) + linesRemoved;
+	const filePath = pending.args.path ?? '';
+	cliState.editedFilePaths.add(filePath);
+	const ext = normalizeExtension(filePath);
+	if (!analysis.editScope!.languageUsage) { analysis.editScope!.languageUsage = {}; }
+	if (!analysis.editScope!.languageUsage[ext]) { analysis.editScope!.languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+	analysis.editScope!.languageUsage[ext].linesAdded += linesAdded;
+	analysis.editScope!.languageUsage[ext].linesRemoved += linesRemoved;
+}
+
+/** Handle tool.execution_complete for CLI LOC tracking — applies LOC on success. */
+function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	const { toolCallId, success } = event.data ?? {};
+	const pending = toolCallId ? cliState.pendingToolCalls.get(toolCallId) : undefined;
+	if (toolCallId) { cliState.pendingToolCalls.delete(toolCallId); }
+	if (pending && success) { _asuApplyToolLoc(pending, cliState, analysis); }
+}
+
+/** Handle tool.execution_start / tool.execution_complete for CLI LOC tracking. */
+function _asuHandleCliLocEvent(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	if (event.type === 'tool.execution_start') { _asuHandleToolStart(event, cliState); }
+	else if (event.type === 'tool.execution_complete') { _asuHandleToolComplete(event, cliState, analysis); }
+}
+
+/** Finalize editScope file counts from accumulated CLI tool LOC state. */
+function _asuApplyCliLocToEditScope(cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	if (cliState.editedFilePaths.size === 0) { return; }
+	_asuEnsureEditScope(analysis);
+	const fileCount = cliState.editedFilePaths.size;
+	analysis.editScope!.totalEditedFiles = fileCount;
+	analysis.editScope!.singleFileEdits = fileCount === 1 ? 1 : 0;
+	analysis.editScope!.multiFileEdits = fileCount > 1 ? 1 : 0;
+	analysis.editScope!.avgFilesPerSession = fileCount;
+}
+
 /** Dispatch a single JSONL event to the appropriate event handlers. */
  
 function _asuProcessJsonlEvent(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, cliState: AsuCliState, jetBrainsMode: JetBrainsMode | null, toolNameMap: { [key: string]: string }): void {
@@ -1594,6 +1662,7 @@ function _asuProcessJsonlEvent(event: any, analysis: SessionUsageAnalysis, modeS
 	_asuHandleKind2Event(event, analysis, modeState, toolNameMap);
 	_asuProcessCliEvents(event, cliState, analysis, jetBrainsMode);
 	_asuHandleToolAndMcpEvents(event, analysis, toolNameMap);
+	_asuHandleCliLocEvent(event, cliState, analysis);
 }
 
 /** Store CLI thinking effort data from the accumulated CLI state. */
@@ -1614,7 +1683,10 @@ async function _asuProcessNonDeltaJsonl(
 	analysis: SessionUsageAnalysis
 ): Promise<void> {
 	const modeState: AsuModeState = { sessionMode: 'ask' };
-	const cliState: AsuCliState = { defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {} };
+	const cliState: AsuCliState = {
+		defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {},
+		pendingToolCalls: new Map(), editedFilePaths: new Set(),
+	};
 	const isJetBrains = isJetBrainsSessionPath(sessionFile);
 	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
 
@@ -1626,6 +1698,7 @@ async function _asuProcessNonDeltaJsonl(
 		} catch { /* skip malformed lines */ }
 	}
 
+	_asuApplyCliLocToEditScope(cliState, analysis);
 	_asuApplyCliThinkingEffort(cliState, analysis);
 	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
 	deriveConversationPatterns(analysis);
@@ -1650,6 +1723,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
 			if (_asuIsDeltaBased(lines)) {
 				_asuReconstructAndProcessDeltaState(deps, lines, analysis);
+				await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
 				return analysis;
 			}
 			await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
