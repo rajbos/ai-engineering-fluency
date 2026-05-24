@@ -471,6 +471,17 @@ function processRequestsForEnhancedMetrics(
 // --- processDeltaSessionAnalysis helpers ---
 
 /** Process a single reconstructed request for mode/tool/context analysis. */
+function _pdsaProcessResponses(request: SessionRequestRaw, analysis: SessionUsageAnalysis, toolNameMap: Record<string, string>): void {
+	if (!request.response || !Array.isArray(request.response)) { return; }
+	for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+		if (!responseItemRaw) { continue; }
+		if (responseItemRaw.kind === 'toolInvocationSerialized' || responseItemRaw.kind === 'prepareToolInvocation') {
+			const toolName = responseItemRaw.toolId || responseItemRaw.toolName || responseItemRaw.invocationMessage?.toolName || responseItemRaw.toolSpecificData?.kind || 'unknown';
+			recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
+		}
+	}
+}
+
 function _pdsaProcessRequest(
 	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
 	request: SessionRequestRaw,
@@ -480,20 +491,24 @@ function _pdsaProcessRequest(
 	if (!request.requestId) { return; }
 	incrementModeUsage(sessionModeType, analysis.modeUsage);
 	if (request.agent?.id) {
-		const toolName = request.agent.id;
 		analysis.toolCalls.total++;
-		analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+		analysis.toolCalls.byTool[request.agent.id] = (analysis.toolCalls.byTool[request.agent.id] || 0) + 1;
 	}
 	analyzeRequestContext(request, analysis.contextReferences);
-	if (request.response && Array.isArray(request.response)) {
-		for (const responseItemRaw of request.response as ResponseItemRaw[]) {
-			if (!responseItemRaw) { continue; }
-			if (responseItemRaw.kind === 'toolInvocationSerialized' || responseItemRaw.kind === 'prepareToolInvocation') {
-				const toolName = responseItemRaw.toolId || responseItemRaw.toolName || responseItemRaw.invocationMessage?.toolName || responseItemRaw.toolSpecificData?.kind || 'unknown';
-				recordToolOrMcpInvocation(toolName, analysis, deps.toolNameMap);
-			}
-		}
-	}
+	_pdsaProcessResponses(request, analysis, deps.toolNameMap);
+}
+
+function _pdsaGetReqModel(req: SessionRequestRaw, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
+	if (req.modelId) { return req.modelId.replace(/^copilot\//, ''); }
+	if (req.result?.metadata?.modelId) { return req.result.metadata.modelId.replace(/^copilot\//, ''); }
+	if (req.result?.details) { return getModelFromRequest(req, modelPricing); }
+	return defaultModel;
+}
+
+function _pdsaCountModelSwitches(models: string[]): number {
+	let count = 0;
+	for (let i = 1; i < models.length; i++) { if (models[i] !== models[i - 1]) { count++; } }
+	return count;
 }
 
 /** Extract model switching statistics from a reconstructed delta session state. */
@@ -513,21 +528,13 @@ function _pdsaExtractModelSwitching(
 	const models: string[] = [];
 	for (const req of requests) {
 		if (!req || !req.requestId) { continue; }
-		let reqModel = sessionDefaultModel;
-		if (req.modelId) { reqModel = req.modelId.replace(/^copilot\//, ''); }
-		else if (req.result?.metadata?.modelId) { reqModel = req.result.metadata.modelId.replace(/^copilot\//, ''); }
-		else if (req.result?.details) { reqModel = getModelFromRequest(req, deps.modelPricing); }
-		models.push(reqModel);
+		models.push(_pdsaGetReqModel(req, sessionDefaultModel, deps.modelPricing));
 	}
 	const uniqueModels = [...new Set(models)];
 	analysis.modelSwitching.uniqueModels = uniqueModels;
 	analysis.modelSwitching.modelCount = uniqueModels.length;
 	analysis.modelSwitching.totalRequests = models.length;
-	let switchCount = 0;
-	for (let mi = 1; mi < models.length; mi++) {
-		if (models[mi] !== models[mi - 1]) { switchCount++; }
-	}
-	analysis.modelSwitching.switchCount = switchCount;
+	analysis.modelSwitching.switchCount = _pdsaCountModelSwitches(models);
 	applyModelTierClassification(deps.modelPricing, uniqueModels, models, analysis);
 }
 
@@ -1277,6 +1284,74 @@ export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'war
 	}
 }
 
+type TemState = {
+	totalApplies: number; totalCodeBlocks: number; totalLinesAdded: number; totalLinesRemoved: number;
+	allLanguageUsage: LanguageUsage; editedFiles: Set<string>; timestamps: number[];
+	timingsData: { firstProgress?: number; totalElapsed?: number }[]; waitTimes: number[];
+	agentCounts: { editsAgent: number; defaultAgent: number; workspaceAgent: number; other: number };
+};
+
+function _temMergeLocUsage(dest: LanguageUsage, src: LanguageUsage): void {
+	for (const [ext, usage] of Object.entries(src)) {
+		if (!dest[ext]) { dest[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+		dest[ext].linesAdded += usage.linesAdded;
+		dest[ext].linesRemoved += usage.linesRemoved;
+	}
+}
+
+function _temProcessDeltaJsonl(lines: string[], state: TemState): void {
+	let isDeltaBased = false;
+	if (lines.length > 0) {
+		try { const fl = JSON.parse(lines[0]); if (fl && typeof fl.kind === 'number') { isDeltaBased = true; } } catch { /* not delta */ }
+	}
+	if (!isDeltaBased) { return; }
+	let sessionState: DeltaSessionState = {};
+	for (const line of lines) {
+		try { sessionState = applyDelta(sessionState, JSON.parse(line)) as DeltaSessionState; } catch { /* skip */ }
+	}
+	if (sessionState.creationDate !== undefined) { state.timestamps.push(sessionState.creationDate); }
+	if (sessionState.lastMessageDate !== undefined) { state.timestamps.push(sessionState.lastMessageDate); }
+	const result = processRequestsForEnhancedMetrics((sessionState.requests || []) as SessionRequestRaw[], state.agentCounts, state.editedFiles, state.timestamps, state.timingsData, state.waitTimes);
+	state.totalApplies = result.totalApplies; state.totalCodeBlocks = result.totalCodeBlocks;
+	state.totalLinesAdded = result.totalLinesAdded; state.totalLinesRemoved = result.totalLinesRemoved;
+	_temMergeLocUsage(state.allLanguageUsage, result.languageUsage);
+}
+
+function _temProcessJsonFile(deps: Pick<UsageAnalysisDeps, 'warn'>, sessionFile: string, parsed: unknown, state: TemState): boolean {
+	if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return false; }
+	if (parsed.creationDate) { state.timestamps.push(parsed.creationDate); }
+	if (parsed.lastMessageDate) { state.timestamps.push(parsed.lastMessageDate); }
+	const result = processRequestsForEnhancedMetrics((parsed.requests ?? []) as SessionRequestRaw[], state.agentCounts, state.editedFiles, state.timestamps, state.timingsData, state.waitTimes);
+	state.totalApplies = result.totalApplies; state.totalCodeBlocks = result.totalCodeBlocks;
+	state.totalLinesAdded = result.totalLinesAdded; state.totalLinesRemoved = result.totalLinesRemoved;
+	_temMergeLocUsage(state.allLanguageUsage, result.languageUsage);
+	return true;
+}
+
+function _temStoreResults(analysis: SessionUsageAnalysis, state: TemState): void {
+	const editSessionCount = state.editedFiles.size > 0 ? 1 : 0;
+	analysis.editScope = {
+		singleFileEdits: state.editedFiles.size === 1 ? 1 : 0,
+		multiFileEdits: state.editedFiles.size > 1 ? 1 : 0,
+		totalEditedFiles: state.editedFiles.size,
+		avgFilesPerSession: editSessionCount > 0 ? state.editedFiles.size / editSessionCount : 0,
+		linesAdded: state.totalLinesAdded,
+		linesRemoved: state.totalLinesRemoved,
+		...(Object.keys(state.allLanguageUsage).length > 0 ? { languageUsage: state.allLanguageUsage } : {}),
+	};
+	analysis.applyUsage = {
+		totalApplies: state.totalApplies, totalCodeBlocks: state.totalCodeBlocks,
+		applyRate: state.totalCodeBlocks > 0 ? (state.totalApplies / state.totalCodeBlocks) * 100 : 0
+	};
+	const totalDurationMs = state.timestamps.length >= 2 ? Math.max(...state.timestamps) - Math.min(...state.timestamps) : 0;
+	const avgFirstProgressMs = state.timingsData.length > 0 ? state.timingsData.reduce((s, t) => s + (t.firstProgress || 0), 0) / state.timingsData.length : 0;
+	const avgTotalElapsedMs = state.timingsData.length > 0 ? state.timingsData.reduce((s, t) => s + (t.totalElapsed || 0), 0) / state.timingsData.length : 0;
+	const avgWaitTimeMs = state.waitTimes.length > 0 ? state.waitTimes.reduce((s, w) => s + w, 0) / state.waitTimes.length : 0;
+	analysis.sessionDuration = { totalDurationMs, avgDurationMs: totalDurationMs, avgFirstProgressMs, avgTotalElapsedMs, avgWaitTimeMs };
+	deriveConversationPatterns(analysis);
+	analysis.agentTypes = state.agentCounts;
+}
+
 /**
  * Track enhanced metrics from session files:
  * - Edit scope (single vs multi-file edits)
@@ -1288,141 +1363,20 @@ export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'war
 export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<void> {
 	try {
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-
-		// Check if this is a UUID-only file (new Copilot CLI format)
-		if (isUuidPointerFile(fileContent)) {
-			return; // No metrics to track in pointer files
-		}
-
+		if (isUuidPointerFile(fileContent)) { return; }
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
-		
-		// Initialize tracking structures
-		const editedFiles = new Set<string>();
-		let totalApplies = 0;
-		let totalCodeBlocks = 0;
-		let totalLinesAdded = 0;
-		let totalLinesRemoved = 0;
-		const allLanguageUsage: LanguageUsage = {};
-		const timestamps: number[] = [];
-		const timingsData: { firstProgress?: number; totalElapsed?: number; }[] = [];
-		const waitTimes: number[] = [];
-		const agentCounts = {
-			editsAgent: 0,
-			defaultAgent: 0,
-			workspaceAgent: 0,
-			other: 0
+		const state: TemState = {
+			totalApplies: 0, totalCodeBlocks: 0, totalLinesAdded: 0, totalLinesRemoved: 0,
+			allLanguageUsage: {}, editedFiles: new Set<string>(), timestamps: [], timingsData: [], waitTimes: [],
+			agentCounts: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 },
 		};
-		
 		if (isJsonl) {
-			// Handle delta-based JSONL format
-			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
-			let isDeltaBased = false;
-			if (lines.length > 0) {
-				try {
-					const firstLine = JSON.parse(lines[0]);
-					if (firstLine && typeof firstLine.kind === 'number') {
-						isDeltaBased = true;
-					}
-				} catch {
-					// Not delta format
-				}
-			}
-			
-			if (isDeltaBased) {
-				// Reconstruct full state
-				let sessionState: DeltaSessionState = {};
-				for (const line of lines) {
-					try {
-						const delta = JSON.parse(line);
-						sessionState = applyDelta(sessionState, delta) as DeltaSessionState;
-					} catch {
-						// Skip invalid lines
-					}
-				}
-				if (sessionState.creationDate !== undefined) { timestamps.push(sessionState.creationDate); }
-				if (sessionState.lastMessageDate !== undefined) { timestamps.push(sessionState.lastMessageDate); }
-				
-				// Process requests
-				const requests = (sessionState.requests || []) as SessionRequestRaw[];
-				let processedLoc: LanguageUsage;
-				({ totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage: processedLoc } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
-				for (const [ext, usage] of Object.entries(processedLoc)) {
-					if (!allLanguageUsage[ext]) { allLanguageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-					allLanguageUsage[ext].linesAdded += usage.linesAdded;
-					allLanguageUsage[ext].linesRemoved += usage.linesRemoved;
-				}
-			}
+			_temProcessDeltaJsonl(fileContent.trim().split('\n').filter((l: string) => l.trim()), state);
 		} else {
-			// Handle regular JSON files
-			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (!isParsedSessionJson(parsed)) {
-				deps.warn(`Unexpected session format in ${sessionFile}`);
-				return;
-			}
-			const sessionContent = parsed;
-			
-			// Extract timestamps
-			if (sessionContent.creationDate) { timestamps.push(sessionContent.creationDate); }
-			if (sessionContent.lastMessageDate) { timestamps.push(sessionContent.lastMessageDate); }
-			
-			// Process requests
-			const requests = (sessionContent.requests ?? []) as SessionRequestRaw[];
-			let processedLoc2: LanguageUsage;
-			({ totalApplies, totalCodeBlocks, totalLinesAdded, totalLinesRemoved, languageUsage: processedLoc2 } = processRequestsForEnhancedMetrics(requests, agentCounts, editedFiles, timestamps, timingsData, waitTimes));
-			for (const [ext, usage] of Object.entries(processedLoc2)) {
-				if (!allLanguageUsage[ext]) { allLanguageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
-				allLanguageUsage[ext].linesAdded += usage.linesAdded;
-				allLanguageUsage[ext].linesRemoved += usage.linesRemoved;
-			}
+			const parsed = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+			if (!_temProcessJsonFile(deps, sessionFile, parsed, state)) { return; }
 		}
-		
-		// Store edit scope data
-		const editSessionCount = editedFiles.size > 0 ? 1 : 0;
-		analysis.editScope = {
-			singleFileEdits: editedFiles.size === 1 ? 1 : 0,
-			multiFileEdits: editedFiles.size > 1 ? 1 : 0,
-			totalEditedFiles: editedFiles.size,
-			avgFilesPerSession: editSessionCount > 0 ? editedFiles.size / editSessionCount : 0,
-			linesAdded: totalLinesAdded,
-			linesRemoved: totalLinesRemoved,
-			...(Object.keys(allLanguageUsage).length > 0 ? { languageUsage: allLanguageUsage } : {}),
-		};
-		
-		// Store apply button usage
-		analysis.applyUsage = {
-			totalApplies,
-			totalCodeBlocks,
-			applyRate: totalCodeBlocks > 0 ? (totalApplies / totalCodeBlocks) * 100 : 0
-		};
-		
-		// Calculate session duration
-		const totalDurationMs = timestamps.length >= 2 
-			? Math.max(...timestamps) - Math.min(...timestamps)
-			: 0;
-		const avgFirstProgressMs = timingsData.length > 0
-			? timingsData.reduce((sum, t) => sum + (t.firstProgress || 0), 0) / timingsData.length
-			: 0;
-		const avgTotalElapsedMs = timingsData.length > 0
-			? timingsData.reduce((sum, t) => sum + (t.totalElapsed || 0), 0) / timingsData.length
-			: 0;
-		const avgWaitTimeMs = waitTimes.length > 0
-			? waitTimes.reduce((sum, w) => sum + w, 0) / waitTimes.length
-			: 0;
-		
-		analysis.sessionDuration = {
-			totalDurationMs,
-			avgDurationMs: totalDurationMs,
-			avgFirstProgressMs,
-			avgTotalElapsedMs,
-			avgWaitTimeMs
-		};
-		
-		// Store conversation patterns
-		deriveConversationPatterns(analysis);
-		
-		// Store agent type usage
-		analysis.agentTypes = agentCounts;
-		
+		_temStoreResults(analysis, state);
 	} catch (error) {
 		deps.warn(`Error tracking enhanced metrics from ${sessionFile}: ${error}`);
 	}
@@ -1459,6 +1413,8 @@ type AsuCliState = {
 	defaultEffort: string | null;
 	requestCount: number;
 	effortByRequest: { [effort: string]: number };
+	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string> }>;
+	editedFilePaths: Set<string>;
 };
 
 /** Check if the first JSONL line indicates a delta-based VS Code incremental format. */
@@ -1489,7 +1445,8 @@ function _asuReconstructAndProcessDeltaState(
 /** Check if a selection range represents an actual selection (not just cursor position). */
 function _asuCheckImplicitSelection(selections: unknown[], refs: ContextReferenceUsage): void {
 	for (const sel of selections) {
-			const s = sel as any;
+		 
+		const s = sel as any;
 		if (s && (s.startLineNumber !== s.endLineNumber || s.startColumn !== s.endColumn)) {
 			refs.implicitSelection++;
 			break;
@@ -1498,6 +1455,7 @@ function _asuCheckImplicitSelection(selections: unknown[], refs: ContextReferenc
 }
 
 /** Handle VS Code incremental format kind=0 (session header) events. */
+ 
 function _asuHandleKind0Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
 	if (event.kind !== 0 || !event.v?.inputState?.mode) { return; }
 	modeState.sessionMode = getModeType(event.v.inputState.mode);
@@ -1506,6 +1464,7 @@ function _asuHandleKind0Event(event: any, analysis: SessionUsageAnalysis, modeSt
 }
 
 /** Handle VS Code incremental format kind=1 (incremental update) events. */
+ 
 function _asuHandleKind1Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState): void {
 	if (event.kind !== 1) { return; }
 	if (event.k?.includes('mode') && event.v) { modeState.sessionMode = getModeType(event.v); }
@@ -1551,6 +1510,7 @@ function _asuProcessResponseUpdates(items: unknown[], analysis: SessionUsageAnal
 }
 
 /** Process a single request from a kind=2 requests array. */
+ 
 function _asuProcessRequest(request: any, analysis: SessionUsageAnalysis, sessionMode: string): void {
 	if (request.requestId) { incrementModeUsage(sessionMode, analysis.modeUsage); }
 	if (request.agent?.id) {
@@ -1564,6 +1524,7 @@ function _asuProcessRequest(request: any, analysis: SessionUsageAnalysis, sessio
 }
 
 /** Handle VS Code incremental format kind=2 (batch add) events. */
+ 
 function _asuHandleKind2Event(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, toolNameMap: { [key: string]: string }): void {
 	if (event.kind !== 2) { return; }
 	if (event.k?.[0] === 'requests' && Array.isArray(event.v)) {
@@ -1576,26 +1537,32 @@ function _asuHandleKind2Event(event: any, analysis: SessionUsageAnalysis, modeSt
 	}
 }
 
+function _asuHandleSessionStartEvent(data: Record<string, unknown>, cliState: AsuCliState): void {
+	if (typeof data.selectedModel === 'string') { cliState.defaultModel = data.selectedModel; }
+	if (typeof data.reasoningEffort === 'string') { cliState.defaultEffort = data.reasoningEffort; }
+}
+
+function _asuHandleUserMessageMode(jetBrainsMode: JetBrainsMode | null, analysis: SessionUsageAnalysis): void {
+	if (jetBrainsMode === 'agent') { analysis.modeUsage.agent++; }
+	else if (jetBrainsMode === 'ask') { analysis.modeUsage.ask++; }
+	else { analysis.modeUsage.cli++; }
+}
+
 /** Handle Copilot CLI events (session.start, session.model_change, user.message). */
+ 
 function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
-	if (event.type === 'session.start' && event.data) {
-		if (typeof event.data.selectedModel === 'string') { cliState.defaultModel = event.data.selectedModel; }
-		if (typeof event.data.reasoningEffort === 'string') { cliState.defaultEffort = event.data.reasoningEffort; }
-	}
-	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') {
-		cliState.defaultModel = event.data.newModel;
-	}
+	if (event.type === 'session.start' && event.data) { _asuHandleSessionStartEvent(event.data as Record<string, unknown>, cliState); }
+	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { cliState.defaultModel = event.data.newModel; }
 	if (event.type === 'user.message') {
 		cliState.requestCount++;
 		const effort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliState.defaultEffort;
 		if (effort) { cliState.effortByRequest[effort] = (cliState.effortByRequest[effort] || 0) + 1; }
-		if (jetBrainsMode === 'agent') { analysis.modeUsage.agent++; }
-		else if (jetBrainsMode === 'ask') { analysis.modeUsage.ask++; }
-		else { analysis.modeUsage.cli++; }
+		_asuHandleUserMessageMode(jetBrainsMode, analysis);
 	}
 }
 
 /** Handle tool.call / tool.result / tool.execution_start events. */
+ 
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	if (event.type !== 'tool.call' && event.type !== 'tool.result' && event.type !== 'tool.execution_start') { return; }
 	const toolName = event.data?.toolName || event.toolName || 'unknown';
@@ -1603,6 +1570,7 @@ function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, too
 }
 
 /** Handle mcp.tool.call events and events with data.mcpServer set. */
+ 
 function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): void {
 	if (event.type !== 'mcp.tool.call' && !event.data?.mcpServer) { return; }
 	analysis.mcpTools.total++;
@@ -1614,18 +1582,87 @@ function _asuHandleMcpToolEvent(event: any, analysis: SessionUsageAnalysis): voi
 }
 
 /** Handle tool.call / tool.result / mcp.tool.call events. */
+ 
 function _asuHandleToolAndMcpEvents(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	_asuHandleToolCallEvent(event, analysis, toolNameMap);
 	_asuHandleMcpToolEvent(event, analysis);
 }
 
+/** Count non-empty lines in text, ignoring a trailing newline. */
+function _asuCountTextLines(text: string): number {
+	if (!text) { return 0; }
+	const lines = text.split('\n');
+	if (lines[lines.length - 1] === '') { lines.pop(); }
+	return lines.length;
+}
+
+/** Ensure editScope is initialized on the analysis object. */
+function _asuEnsureEditScope(analysis: SessionUsageAnalysis): void {
+	if (!analysis.editScope) {
+		analysis.editScope = { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0, linesAdded: 0, linesRemoved: 0 };
+	}
+}
+
+/** Handle tool.execution_start for CLI LOC tracking — stores pending tool call args. */
+function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
+	const { toolCallId, toolName, arguments: args } = event.data ?? {};
+	if (toolCallId && (toolName === 'edit' || toolName === 'create') && args) {
+		cliState.pendingToolCalls.set(toolCallId, { toolName, args });
+	}
+}
+
+/** Extract LOC counts from a completed CLI tool call and update editScope. */
+function _asuApplyToolLoc(pending: { toolName: string; args: Record<string, string> }, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	const linesAdded = pending.toolName === 'edit'
+		? _asuCountTextLines(pending.args.new_str ?? '')
+		: _asuCountTextLines(pending.args.file_text ?? '');
+	const linesRemoved = pending.toolName === 'edit' ? _asuCountTextLines(pending.args.old_str ?? '') : 0;
+	_asuEnsureEditScope(analysis);
+	analysis.editScope!.linesAdded = (analysis.editScope!.linesAdded ?? 0) + linesAdded;
+	analysis.editScope!.linesRemoved = (analysis.editScope!.linesRemoved ?? 0) + linesRemoved;
+	const filePath = pending.args.path ?? '';
+	cliState.editedFilePaths.add(filePath);
+	const ext = normalizeExtension(filePath);
+	if (!analysis.editScope!.languageUsage) { analysis.editScope!.languageUsage = {}; }
+	if (!analysis.editScope!.languageUsage[ext]) { analysis.editScope!.languageUsage[ext] = { linesAdded: 0, linesRemoved: 0 }; }
+	analysis.editScope!.languageUsage[ext].linesAdded += linesAdded;
+	analysis.editScope!.languageUsage[ext].linesRemoved += linesRemoved;
+}
+
+/** Handle tool.execution_complete for CLI LOC tracking — applies LOC on success. */
+function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	const { toolCallId, success } = event.data ?? {};
+	const pending = toolCallId ? cliState.pendingToolCalls.get(toolCallId) : undefined;
+	if (toolCallId) { cliState.pendingToolCalls.delete(toolCallId); }
+	if (pending && success) { _asuApplyToolLoc(pending, cliState, analysis); }
+}
+
+/** Handle tool.execution_start / tool.execution_complete for CLI LOC tracking. */
+function _asuHandleCliLocEvent(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	if (event.type === 'tool.execution_start') { _asuHandleToolStart(event, cliState); }
+	else if (event.type === 'tool.execution_complete') { _asuHandleToolComplete(event, cliState, analysis); }
+}
+
+/** Finalize editScope file counts from accumulated CLI tool LOC state. */
+function _asuApplyCliLocToEditScope(cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
+	if (cliState.editedFilePaths.size === 0) { return; }
+	_asuEnsureEditScope(analysis);
+	const fileCount = cliState.editedFilePaths.size;
+	analysis.editScope!.totalEditedFiles = fileCount;
+	analysis.editScope!.singleFileEdits = fileCount === 1 ? 1 : 0;
+	analysis.editScope!.multiFileEdits = fileCount > 1 ? 1 : 0;
+	analysis.editScope!.avgFilesPerSession = fileCount;
+}
+
 /** Dispatch a single JSONL event to the appropriate event handlers. */
+ 
 function _asuProcessJsonlEvent(event: any, analysis: SessionUsageAnalysis, modeState: AsuModeState, cliState: AsuCliState, jetBrainsMode: JetBrainsMode | null, toolNameMap: { [key: string]: string }): void {
 	_asuHandleKind0Event(event, analysis, modeState);
 	_asuHandleKind1Event(event, analysis, modeState);
 	_asuHandleKind2Event(event, analysis, modeState, toolNameMap);
 	_asuProcessCliEvents(event, cliState, analysis, jetBrainsMode);
 	_asuHandleToolAndMcpEvents(event, analysis, toolNameMap);
+	_asuHandleCliLocEvent(event, cliState, analysis);
 }
 
 /** Store CLI thinking effort data from the accumulated CLI state. */
@@ -1646,7 +1683,10 @@ async function _asuProcessNonDeltaJsonl(
 	analysis: SessionUsageAnalysis
 ): Promise<void> {
 	const modeState: AsuModeState = { sessionMode: 'ask' };
-	const cliState: AsuCliState = { defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {} };
+	const cliState: AsuCliState = {
+		defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {},
+		pendingToolCalls: new Map(), editedFilePaths: new Set(),
+	};
 	const isJetBrains = isJetBrainsSessionPath(sessionFile);
 	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
 
@@ -1658,6 +1698,7 @@ async function _asuProcessNonDeltaJsonl(
 		} catch { /* skip malformed lines */ }
 	}
 
+	_asuApplyCliLocToEditScope(cliState, analysis);
 	_asuApplyCliThinkingEffort(cliState, analysis);
 	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
 	deriveConversationPatterns(analysis);
@@ -1682,6 +1723,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
 			if (_asuIsDeltaBased(lines)) {
 				_asuReconstructAndProcessDeltaState(deps, lines, analysis);
+				await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
 				return analysis;
 			}
 			await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
@@ -1768,25 +1810,29 @@ type GmusJsonlState = {
 
 type CliShutdownMetricsEntry = { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } };
 
+function _gmusApplyMetricEntry(modelName: string, usage: NonNullable<CliShutdownMetricsEntry['usage']>, dest: ModelUsage): void {
+	if (!dest[modelName]) { dest[modelName] = { inputTokens: 0, outputTokens: 0 }; }
+	dest[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
+	dest[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
+	const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
+	const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
+	if (cacheRead > 0) { dest[modelName].cachedReadTokens = (dest[modelName].cachedReadTokens ?? 0) + cacheRead; }
+	if (cacheWrite > 0) { dest[modelName].cacheCreationTokens = (dest[modelName].cacheCreationTokens ?? 0) + cacheWrite; }
+}
+
 /** Accumulate per-model token data from a session.shutdown modelMetrics block. */
 function _gmusProcessCliShutdownMetrics(
 	modelMetrics: Record<string, CliShutdownMetricsEntry>,
 	cliShutdownModelUsage: ModelUsage
 ): void {
 	for (const [modelName, metrics] of Object.entries(modelMetrics)) {
-		const usage = metrics?.usage;
-		if (!usage) { continue; }
-		if (!cliShutdownModelUsage[modelName]) { cliShutdownModelUsage[modelName] = { inputTokens: 0, outputTokens: 0 }; }
-		cliShutdownModelUsage[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
-		cliShutdownModelUsage[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
-		const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
-		const cacheWrite = typeof usage.cacheWriteTokens === 'number' ? usage.cacheWriteTokens : 0;
-		if (cacheRead > 0) { cliShutdownModelUsage[modelName].cachedReadTokens = (cliShutdownModelUsage[modelName].cachedReadTokens ?? 0) + cacheRead; }
-		if (cacheWrite > 0) { cliShutdownModelUsage[modelName].cacheCreationTokens = (cliShutdownModelUsage[modelName].cacheCreationTokens ?? 0) + cacheWrite; }
+		if (!metrics?.usage) { continue; }
+		_gmusApplyMetricEntry(modelName, metrics.usage, cliShutdownModelUsage);
 	}
 }
 
 /** Handle an assistant.message event, recording real or estimated output tokens. */
+ 
 function _gmusHandleAssistantMessage(event: any, model: string, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
 	const realOutput = typeof event.data?.outputTokens === 'number' ? event.data.outputTokens : 0;
 	if (realOutput > 0) {
@@ -1798,6 +1844,7 @@ function _gmusHandleAssistantMessage(event: any, model: string, state: GmusJsonl
 }
 
 /** Handle a session.shutdown event, accumulating CLI shutdown model metrics into state. */
+ 
 function _gmusHandleShutdownEvent(event: any, state: GmusJsonlState): void {
 	if (!event.data?.modelMetrics) { return; }
 	if (!state.cliShutdownModelUsage) { state.cliShutdownModelUsage = {}; }
@@ -1805,6 +1852,7 @@ function _gmusHandleShutdownEvent(event: any, state: GmusJsonlState): void {
 }
 
 /** Dispatch a CLI-format JSONL event to the appropriate token accumulation handler. */
+ 
 function _gmusProcessCliEventLine(event: any, model: string, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
 	if (event.type === 'session.shutdown') {
 		_gmusHandleShutdownEvent(event, state);
@@ -1821,18 +1869,21 @@ function _gmusProcessCliEventLine(event: any, model: string, state: GmusJsonlSta
 }
 
 /** Extract the model identifier from a kind-0 (session header) delta event, or null if absent. */
+ 
 function _gmusExtractKind0Model(event: any): string | null {
 	if (event.kind !== 0) { return null; }
 	return event.v?.selectedModel?.identifier || event.v?.selectedModel?.metadata?.id || event.v?.inputState?.selectedModel?.metadata?.id || null;
 }
 
 /** Extract the model identifier from a kind-2 selectedModel update event, or null if absent. */
+ 
 function _gmusExtractKind2Model(event: any): string | null {
 	if (event.kind !== 2 || event.k?.[0] !== 'selectedModel') { return null; }
 	return event.v?.identifier || event.v?.metadata?.id || null;
 }
 
 /** Update the default model tracked in state based on model-selection events. */
+ 
 function _gmusUpdateDefaultModelFromEvent(event: any, state: GmusJsonlState): void {
 	if (event.type === 'session.start' && typeof event.data?.selectedModel === 'string') {
 		state.defaultModel = event.data.selectedModel;
@@ -1849,6 +1900,7 @@ function _gmusUpdateDefaultModelFromEvent(event: any, state: GmusJsonlState): vo
 }
 
 /** Process a single parsed JSONL event, updating state and model usage. */
+ 
 function _gmusProcessJsonlLine(event: any, state: GmusJsonlState, modelUsage: ModelUsage, deps: GmusDeps): void {
 	if (typeof event.kind === 'number') {
 		state.isDeltaBased = true;
@@ -1869,7 +1921,8 @@ function _gmusParseJsonlLines(lines: string[], modelUsage: ModelUsage, deps: Gmu
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
 		try {
-					const event: any = JSON.parse(line);
+			 
+			const event: any = JSON.parse(line);
 			_gmusProcessJsonlLine(event, state, modelUsage, deps);
 		} catch { /* skip malformed lines */ }
 	}
