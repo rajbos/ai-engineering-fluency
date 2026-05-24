@@ -104,6 +104,32 @@ export function getExplicitContextRefs(refs: ContextReferenceUsage): number {
 		(refs.changes || 0) + (refs.outputPanel || 0) + (refs.problemsPanel || 0) + (refs.pullRequest || 0);
 }
 
+type RefLabelEntry = {
+	key: keyof ContextReferenceUsage;
+	full: string;
+	abbr: string;
+};
+
+const REF_LABELS: RefLabelEntry[] = [
+	{ key: 'file',                 full: '#file',                  abbr: '#file'    },
+	{ key: 'selection',            full: '#selection',             abbr: '#sel'     },
+	{ key: 'implicitSelection',    full: 'implicit',               abbr: 'impl'     },
+	{ key: 'symbol',               full: '#symbol',                abbr: '#sym'     },
+	{ key: 'codebase',             full: '#codebase',              abbr: '#cb'      },
+	{ key: 'workspace',            full: '@workspace',             abbr: '@ws'      },
+	{ key: 'terminal',             full: '@terminal',              abbr: '@term'    },
+	{ key: 'vscode',               full: '@vscode',                abbr: '@vsc'     },
+	{ key: 'terminalLastCommand',  full: '#terminalLastCommand',   abbr: '#termLC'  },
+	{ key: 'terminalSelection',    full: '#terminalSelection',     abbr: '#termSel' },
+	{ key: 'clipboard',            full: '#clipboard',             abbr: '#clip'    },
+	{ key: 'changes',              full: '#changes',               abbr: '#chg'     },
+	{ key: 'outputPanel',          full: '#outputPanel',           abbr: '#out'     },
+	{ key: 'problemsPanel',        full: '#problemsPanel',         abbr: '#prob'    },
+	{ key: 'pullRequest',          full: '#pr',                    abbr: '#pr'      },
+	{ key: 'copilotInstructions',  full: '📋 instructions',        abbr: '📋 inst'  },
+	{ key: 'agentsMd',             full: '🤖 agents',              abbr: '🤖 ag'    },
+];
+
 /**
  * Generate a summary string of context references.
  * @param refs - The context reference usage counts
@@ -111,46 +137,12 @@ export function getExplicitContextRefs(refs: ContextReferenceUsage): number {
  */
 export function getContextRefsSummary(refs: ContextReferenceUsage, abbreviated = false): string {
 	const parts: string[] = [];
-	
-	if (abbreviated) {
-		// Abbreviated labels for compact display (used in diagnostics)
-		if (refs.file > 0) { parts.push(`#file: ${refs.file}`); }
-		if (refs.selection > 0) { parts.push(`#sel: ${refs.selection}`); }
-		if (refs.implicitSelection > 0) { parts.push(`impl: ${refs.implicitSelection}`); }
-		if (refs.symbol > 0) { parts.push(`#sym: ${refs.symbol}`); }
-		if (refs.codebase > 0) { parts.push(`#cb: ${refs.codebase}`); }
-		if (refs.workspace > 0) { parts.push(`@ws: ${refs.workspace}`); }
-		if (refs.terminal > 0) { parts.push(`@term: ${refs.terminal}`); }
-		if (refs.vscode > 0) { parts.push(`@vsc: ${refs.vscode}`); }
-		if ((refs.terminalLastCommand || 0) > 0) { parts.push(`#termLC: ${refs.terminalLastCommand}`); }
-		if ((refs.terminalSelection || 0) > 0) { parts.push(`#termSel: ${refs.terminalSelection}`); }
-		if ((refs.clipboard || 0) > 0) { parts.push(`#clip: ${refs.clipboard}`); }
-		if ((refs.changes || 0) > 0) { parts.push(`#chg: ${refs.changes}`); }
-		if ((refs.outputPanel || 0) > 0) { parts.push(`#out: ${refs.outputPanel}`); }
-		if ((refs.problemsPanel || 0) > 0) { parts.push(`#prob: ${refs.problemsPanel}`); }
-		if ((refs.pullRequest || 0) > 0) { parts.push(`#pr: ${refs.pullRequest}`); }
-		if (refs.copilotInstructions > 0) { parts.push(`📋 inst: ${refs.copilotInstructions}`); }
-		if (refs.agentsMd > 0) { parts.push(`🤖 ag: ${refs.agentsMd}`); }
-	} else {
-		// Full labels for detailed display (used in logviewer)
-		if (refs.file > 0) { parts.push(`#file: ${refs.file}`); }
-		if (refs.selection > 0) { parts.push(`#selection: ${refs.selection}`); }
-		if (refs.implicitSelection > 0) { parts.push(`implicit: ${refs.implicitSelection}`); }
-		if (refs.symbol > 0) { parts.push(`#symbol: ${refs.symbol}`); }
-		if (refs.codebase > 0) { parts.push(`#codebase: ${refs.codebase}`); }
-		if (refs.workspace > 0) { parts.push(`@workspace: ${refs.workspace}`); }
-		if (refs.terminal > 0) { parts.push(`@terminal: ${refs.terminal}`); }
-		if (refs.vscode > 0) { parts.push(`@vscode: ${refs.vscode}`); }
-		if ((refs.terminalLastCommand || 0) > 0) { parts.push(`#terminalLastCommand: ${refs.terminalLastCommand}`); }
-		if ((refs.terminalSelection || 0) > 0) { parts.push(`#terminalSelection: ${refs.terminalSelection}`); }
-		if ((refs.clipboard || 0) > 0) { parts.push(`#clipboard: ${refs.clipboard}`); }
-		if ((refs.changes || 0) > 0) { parts.push(`#changes: ${refs.changes}`); }
-		if ((refs.outputPanel || 0) > 0) { parts.push(`#outputPanel: ${refs.outputPanel}`); }
-		if ((refs.problemsPanel || 0) > 0) { parts.push(`#problemsPanel: ${refs.problemsPanel}`); }
-		if ((refs.pullRequest || 0) > 0) { parts.push(`#pr: ${refs.pullRequest}`); }
-		if (refs.copilotInstructions > 0) { parts.push(`📋 instructions: ${refs.copilotInstructions}`); }
-		if (refs.agentsMd > 0) { parts.push(`🤖 agents: ${refs.agentsMd}`); }
+	for (const entry of REF_LABELS) {
+		const count = (refs[entry.key] as number) || 0;
+		if (count > 0) {
+			const label = abbreviated ? entry.abbr : entry.full;
+			parts.push(`${label}: ${count}`);
+		}
 	}
-	
 	return parts.length > 0 ? parts.join(', ') : 'None';
 }

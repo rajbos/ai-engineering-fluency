@@ -723,61 +723,66 @@ function unionFill(map: { [key: string]: number }, keys: string[]): { [key: stri
 	return result;
 }
 
-function sanitizeStats(raw: any): UsageAnalysisStats | null {
-	if (!raw || typeof raw !== 'object') {
-		return null;
-	}
+function coerceNumber(value: any): number {
+	const n = Number(value);
+	return Number.isFinite(n) ? n : 0;
+}
 
-	const coerceNumber = (value: any): number => {
-		const n = Number(value);
-		return Number.isFinite(n) ? n : 0;
+function sanitizeModeUsage(mode: any): ModeUsage {
+	const m = (mode && typeof mode === 'object') ? mode : {};
+	return {
+		ask: coerceNumber(m.ask),
+		edit: coerceNumber(m.edit),
+		agent: coerceNumber(m.agent),
+		plan: coerceNumber(m.plan),
+		customAgent: coerceNumber(m.customAgent),
+		cli: coerceNumber(m.cli),
 	};
+}
 
-	const sanitizeModeUsage = (mode: any): ModeUsage => ({
-		ask: coerceNumber(mode?.ask),
-		edit: coerceNumber(mode?.edit),
-		agent: coerceNumber(mode?.agent),
-		plan: coerceNumber(mode?.plan),
-		customAgent: coerceNumber(mode?.customAgent),
-		cli: coerceNumber(mode?.cli),
-	});
+function sanitizeContextRefs(refs: any): ContextReferenceUsage {
+	const r = (refs && typeof refs === 'object') ? refs : {};
+	return {
+		file: coerceNumber(r.file),
+		selection: coerceNumber(r.selection),
+		implicitSelection: coerceNumber(r.implicitSelection),
+		symbol: coerceNumber(r.symbol),
+		codebase: coerceNumber(r.codebase),
+		workspace: coerceNumber(r.workspace),
+		terminal: coerceNumber(r.terminal),
+		vscode: coerceNumber(r.vscode),
+		terminalLastCommand: coerceNumber(r.terminalLastCommand),
+		terminalSelection: coerceNumber(r.terminalSelection),
+		clipboard: coerceNumber(r.clipboard),
+		changes: coerceNumber(r.changes),
+		outputPanel: coerceNumber(r.outputPanel),
+		problemsPanel: coerceNumber(r.problemsPanel),
+		pullRequest: coerceNumber(r.pullRequest),
+		byKind: r.byKind ?? {},
+		copilotInstructions: coerceNumber(r.copilotInstructions),
+		agentsMd: coerceNumber(r.agentsMd),
+		byPath: r.byPath ?? {},
+	};
+}
 
-	const sanitizeContextRefs = (refs: any): ContextReferenceUsage => ({
-		file: coerceNumber(refs?.file),
-		selection: coerceNumber(refs?.selection),
-		implicitSelection: coerceNumber(refs?.implicitSelection),
-		symbol: coerceNumber(refs?.symbol),
-		codebase: coerceNumber(refs?.codebase),
-		workspace: coerceNumber(refs?.workspace),
-		terminal: coerceNumber(refs?.terminal),
-		vscode: coerceNumber(refs?.vscode),
-		terminalLastCommand: coerceNumber(refs?.terminalLastCommand),
-		terminalSelection: coerceNumber(refs?.terminalSelection),
-		clipboard: coerceNumber(refs?.clipboard),
-		changes: coerceNumber(refs?.changes),
-		outputPanel: coerceNumber(refs?.outputPanel),
-		problemsPanel: coerceNumber(refs?.problemsPanel),
-		pullRequest: coerceNumber(refs?.pullRequest),
-		byKind: refs?.byKind ?? {},
-		copilotInstructions: coerceNumber(refs?.copilotInstructions),
-		agentsMd: coerceNumber(refs?.agentsMd),
-		byPath: refs?.byPath ?? {},
-	});
-
-	const sanitizePeriod = (period: any): UsageAnalysisPeriod => ({
-		sessions: coerceNumber(period?.sessions),
-		modeUsage: sanitizeModeUsage(period?.modeUsage ?? {}),
-		contextReferences: sanitizeContextRefs(period?.contextReferences ?? {}),
+function sanitizePeriod(period: any): UsageAnalysisPeriod {
+	const p = (period && typeof period === 'object') ? period : {};
+	const toolCalls = (p.toolCalls && typeof p.toolCalls === 'object') ? p.toolCalls : {};
+	const mcpTools = (p.mcpTools && typeof p.mcpTools === 'object') ? p.mcpTools : {};
+	return {
+		sessions: coerceNumber(p.sessions),
+		modeUsage: sanitizeModeUsage(p.modeUsage),
+		contextReferences: sanitizeContextRefs(p.contextReferences),
 		toolCalls: {
-			total: coerceNumber(period?.toolCalls?.total),
-			byTool: period?.toolCalls?.byTool ?? {},
+			total: coerceNumber(toolCalls.total),
+			byTool: toolCalls.byTool ?? {},
 		},
 		mcpTools: {
-			total: coerceNumber(period?.mcpTools?.total),
-			byServer: period?.mcpTools?.byServer ?? {},
-			byTool: period?.mcpTools?.byTool ?? {},
+			total: coerceNumber(mcpTools.total),
+			byServer: mcpTools.byServer ?? {},
+			byTool: mcpTools.byTool ?? {},
 		},
-		modelSwitching: period?.modelSwitching ?? {
+		modelSwitching: p.modelSwitching ?? {
 			modelsPerSession: [],
 			totalSessions: 0,
 			averageModelsPerSession: 0,
@@ -793,8 +798,14 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			unknownRequests: 0,
 			totalRequests: 0,
 		},
-		thinkingEffortUsage: period?.thinkingEffortUsage,
-	});
+		thinkingEffortUsage: p.thinkingEffortUsage,
+	};
+}
+
+function sanitizeStats(raw: any): UsageAnalysisStats | null {
+	if (!raw || typeof raw !== 'object') {
+		return null;
+	}
 
 	try {
 		const sanitized: UsageAnalysisStats = {
@@ -1078,6 +1089,28 @@ function updateReposPrPanel(data: RepoPrStatsResult): void {
 // Cloud Agent Sessions tab
 // ---------------------------------------------------------------------------
 
+function buildAgentSessionRows(data: AgentSessionsResult, cell: string, cellCenter: string): string {
+  return data.repos.map((r) => {
+    // r.owner, r.repo, r.repoUrl and r.error are pre-sanitized by sanitizeAgentSessionsData
+    const repoLink = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r.owner}/${r.repo}</a>`;
+    if (r.error) {
+      return `<tr>
+        <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+        <td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r.error}</td>
+      </tr>`;
+    }
+    const partialNote = r.partial
+      ? ` <span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}/${r.tasksTotal} tasks scanned)</span>`
+      : '';
+    return `<tr>
+      <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
+      <td style="${cellCenter} font-weight:600;">${r.totalTasks}</td>
+      <td style="${cellCenter} font-weight:600;">${r.totalSessions}</td>
+      <td style="${cellCenter}">${r.totalCredits > 0 ? r.totalCredits.toFixed(1) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
 function renderAgentSessionsContent(data: AgentSessionsResult): string {
 	if (!data.authenticated) {
 		return `
@@ -1108,25 +1141,7 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 
 	const hasPartial = data.repos.some(r => r.partial && !r.error);
 
-	const rows = data.repos.map((r) => {
-		// r.owner, r.repo, r.repoUrl and r.error are pre-sanitized by sanitizeAgentSessionsData
-		const repoLink = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r.owner}/${r.repo}</a>`;
-		if (r.error) {
-			return `<tr>
-				<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
-				<td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r.error}</td>
-			</tr>`;
-		}
-		const partialNote = r.partial
-			? ` <span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}/${r.tasksTotal} tasks scanned)</span>`
-			: '';
-		return `<tr>
-			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
-			<td style="${cellCenter} font-weight:600;">${r.totalTasks}</td>
-			<td style="${cellCenter} font-weight:600;">${r.totalSessions}</td>
-			<td style="${cellCenter}">${r.totalCredits > 0 ? r.totalCredits.toFixed(1) : '—'}</td>
-		</tr>`;
-	}).join('');
+	const rows = buildAgentSessionRows(data, cell, cellCenter);
 
 	return `
 		<div style="margin-bottom:12px; display:flex; gap:24px; flex-wrap:wrap;">
@@ -1180,212 +1195,286 @@ function updateAgentSessionsPanel(data: AgentSessionsResult): void {
 	`;
 }
 
-function renderLayout(stats: UsageAnalysisStats): void {
-	const root = document.getElementById('root');
-	if (!root) {
-		return;
-	}
-
-	// customizationMatrix is passed as an extra field on the stats object alongside the typed fields
-	type StatsWithMatrix = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null };
-	const matrix =
-		(stats as StatsWithMatrix).customizationMatrix ??
-		(initialData as StatsWithMatrix | undefined)?.customizationMatrix ?? null;
-	hygieneMatrixState = matrix ?? null;
-	if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
-		selectedRepoPath = null;
-	}
-	if (Array.isArray(stats.currentWorkspacePaths)) {
-		currentWorkspacePaths = stats.currentWorkspacePaths;
-	}
-	let customizationHtml = '';
+function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
 	if (!matrix || !matrix.workspaces || matrix.workspaces.length === 0) {
-		customizationHtml = `
+		return `
 			<div class="section">
 				<div class="section-title"><span>🛠️</span><span>Copilot Customization Files</span></div>
 				<div class="section-subtitle">Showing workspace customization status for active workspaces</div>
 				<div style="color: var(--text-muted); padding:12px;">No workspaces with customization files detected in the last 30 days.</div>
 			</div>`;
-	} else {
-		customizationHtml = `
-			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
-				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-					🛠️ Copilot Customization Files
-				</div>
-				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
-					Showing ${matrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
-					${matrix.workspacesWithIssues > 0
-						? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
-						: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
-				</div>
-				<div class="customization-matrix-container">
-					<table class="customization-matrix">
-						<thead>
-							<tr>
-								<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>
-								<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>
-								${matrix.customizationTypes.map(type => `
-									<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);" title="${escapeHtml(type.label)}">
-										${escapeHtml(type.icon)}
-									</th>
-								`).join('')}
-							</tr>
-						</thead>
-						<tbody>
-							${matrix.workspaces.map(ws => {
-								const hasNoCustomization = Object.values(ws.typeStatuses).every(s => s === '❌');
-								return `
-								<tr>
-									<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
-						${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}
-									</td>
-									<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
-										${ws.sessionCount}
-									</td>
-									${matrix.customizationTypes.map(type => {
-										const status = ws.typeStatuses[type.id] || '❓';
-										const statusLabel =
-											status === '✅'
-												? 'Present and fresh'
-												: status === '⚠️'
-													? 'Present but stale'
-													: status === '❌'
-														? 'Missing'
-														: 'Status unknown';
-										return `
-										<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center;">
-											${statusBadgeHtml(status, statusLabel)}
-										</td>
-										`;
-									}).join('')}
-								</tr>
-							`; }).join('')}
-						</tbody>
-					</table>
-				</div>
-				<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
-					<div style="display: flex; gap: 16px; flex-wrap: wrap;">
-						${matrix.customizationTypes.map(type => `
-							<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
-						`).join('')}
-					</div>
-					<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>
-						<span style="color: var(--text-muted);">•</span>
-						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>
-						<span style="color: var(--text-muted);">•</span>
-						<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>
-					</div>
-				</div>
-			</div>`;
 	}
-
-	// Compute union of keys across all periods so every column shows every known item
-	const allToolKeys = [...new Set([
-		...Object.keys(stats.today.toolCalls.byTool),
-		...Object.keys(stats.last30Days.toolCalls.byTool),
-		...Object.keys(stats.month.toolCalls.byTool),
-	])];
-	const allMcpToolKeys = [...new Set([
-		...Object.keys(stats.today.mcpTools.byTool),
-		...Object.keys(stats.last30Days.mcpTools.byTool),
-		...Object.keys(stats.month.mcpTools.byTool),
-	])];
-	const allMcpServerKeys = [...new Set([
-		...Object.keys(stats.today.mcpTools.byServer),
-		...Object.keys(stats.last30Days.mcpTools.byServer),
-		...Object.keys(stats.month.mcpTools.byServer),
-	])];
-	const allStandardModels = [...new Set([
-		...stats.today.modelSwitching.standardModels,
-		...stats.last30Days.modelSwitching.standardModels,
-		...stats.month.modelSwitching.standardModels,
-	])];
-	const allPremiumModels = [...new Set([
-		...stats.today.modelSwitching.premiumModels,
-		...stats.last30Days.modelSwitching.premiumModels,
-		...stats.month.modelSwitching.premiumModels,
-	])];
-	const allUnknownModels = [...new Set([
-		...stats.today.modelSwitching.unknownModels,
-		...stats.last30Days.modelSwitching.unknownModels,
-		...stats.month.modelSwitching.unknownModels,
-	])];
-
-	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
-	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
-
-	const multiModelHtml = `
-			<!-- Multi-Model Usage Section -->
-			<div class="section">
-				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
-				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
-				<div class="three-column">
-					${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
-					${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
-					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
-				</div>
-			</div>`;
-
-	// Build thinking effort section if we have data for any period
-	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.month.thinkingEffortUsage;
-	const thinkingEffortHtml = effortData ? (() => {
-		const EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'max', 'xhigh'];
-		const renderEffortPeriod = (teu: { byEffort: { [effort: string]: number }; sessionCount: number; switchCount: number } | undefined) => {
-			if (!teu || teu.sessionCount === 0) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
-			const total = Object.values(teu.byEffort).reduce((s, v) => s + v, 0);
-			const sorted = EFFORT_ORDER
-				.filter(k => teu.byEffort[k] > 0)
-				.concat(Object.keys(teu.byEffort).filter(k => !EFFORT_ORDER.includes(k) && teu.byEffort[k] > 0));
+	const workspaceRows = matrix.workspaces.map(ws => {
+		const hasNoCustomization = Object.values(ws.typeStatuses).every(s => s === '❌');
+		const typeCells = matrix.customizationTypes.map(type => {
+			const status = ws.typeStatuses[type.id] || '❓';
+			const statusLabel =
+				status === '✅' ? 'Present and fresh'
+				: status === '⚠️' ? 'Present but stale'
+				: status === '❌' ? 'Missing'
+				: 'Status unknown';
 			return `
-				${sorted.map(level => {
-					const count = teu.byEffort[level] || 0;
-					const pct = total > 0 ? Math.round((count / total) * 100) : 0;
-					return `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-						<span style="width: 56px; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: capitalize;">${escapeHtml(getEffortDisplayName(level))}</span>
-						<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
-							<div style="width: ${pct}%; background: var(--link-color); height: 100%; border-radius: 4px;"></div>
-						</div>
-						<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${count} <span style="color: var(--text-secondary); font-weight: 400;">(${pct}%)</span></span>
-					</div>`;
-				}).join('')}
-				<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${teu.sessionCount} session${teu.sessionCount !== 1 ? 's' : ''} · ${teu.switchCount} effort switch${teu.switchCount !== 1 ? 'es' : ''}</div>
-			`;
-		};
+				<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center;">
+					${statusBadgeHtml(status, statusLabel)}
+				</td>`;
+		}).join('');
 		return `
-			<!-- Thinking Effort Section -->
-			<div class="section">
-				<div class="section-title"><span>💡</span><span>Thinking Effort (Reasoning)</span></div>
-				<div class="section-subtitle">How often each reasoning effort level was used (requests per level)</div>
-				<div class="three-column">
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-						${renderEffortPeriod(stats.today.thinkingEffortUsage)}
+			<tr>
+				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
+					${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}
+				</td>
+				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
+					${ws.sessionCount}
+				</td>
+				${typeCells}
+			</tr>`;
+	}).join('');
+	return `
+		<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
+				🛠️ Copilot Customization Files
+			</div>
+			<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+				Showing ${matrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
+				${matrix.workspacesWithIssues > 0
+					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
+					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
+			</div>
+			<div class="customization-matrix-container">
+				<table class="customization-matrix">
+					<thead>
+						<tr>
+							<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>
+							<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>
+							${matrix.customizationTypes.map(type => `
+								<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);" title="${escapeHtml(type.label)}">
+									${escapeHtml(type.icon)}
+								</th>
+							`).join('')}
+						</tr>
+					</thead>
+					<tbody>
+						${workspaceRows}
+					</tbody>
+				</table>
+			</div>
+			<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+				<div style="display: flex; gap: 16px; flex-wrap: wrap;">
+					${matrix.customizationTypes.map(type => `
+						<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
+					`).join('')}
+				</div>
+				<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>
+					<span style="color: var(--text-muted);">•</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>
+					<span style="color: var(--text-muted);">•</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>
+				</div>
+			</div>
+		</div>`;
+}
+
+function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
+	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.month.thinkingEffortUsage;
+	if (!effortData) { return ''; }
+	return `
+		<!-- Thinking Effort Section -->
+		<div class="section">
+			<div class="section-title"><span>💡</span><span>Thinking Effort (Reasoning)</span></div>
+			<div class="section-subtitle">How often each reasoning effort level was used (requests per level)</div>
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					${renderEffortPeriodHtml(stats.today.thinkingEffortUsage)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					${renderEffortPeriodHtml(stats.last30Days.thinkingEffortUsage)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					${renderEffortPeriodHtml(stats.month.thinkingEffortUsage)}
+				</div>
+			</div>
+		</div>`;
+}
+
+function renderEffortPeriodHtml(teu: { byEffort: { [effort: string]: number }; sessionCount: number; switchCount: number } | undefined): string {
+	const EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'max', 'xhigh'];
+	if (!teu || teu.sessionCount === 0) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	const total = Object.values(teu.byEffort).reduce((s, v) => s + v, 0);
+	const sorted = EFFORT_ORDER
+		.filter(k => teu.byEffort[k] > 0)
+		.concat(Object.keys(teu.byEffort).filter(k => !EFFORT_ORDER.includes(k) && teu.byEffort[k] > 0));
+	return `
+		${sorted.map(level => {
+			const count = teu.byEffort[level] || 0;
+			const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+			return `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+				<span style="width: 56px; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: capitalize;">${escapeHtml(getEffortDisplayName(level))}</span>
+				<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
+					<div style="width: ${pct}%; background: var(--link-color); height: 100%; border-radius: 4px;"></div>
+				</div>
+				<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${count} <span style="color: var(--text-secondary); font-weight: 400;">(${pct}%)</span></span>
+			</div>`;
+		}).join('')}
+		<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${teu.sessionCount} session${teu.sessionCount !== 1 ? 's' : ''} · ${teu.switchCount} effort switch${teu.switchCount !== 1 ? 'es' : ''}</div>
+	`;
+}
+
+function buildUsageAllKeysSets(stats: UsageAnalysisStats): {
+	allToolKeys: string[];
+	allMcpToolKeys: string[];
+	allMcpServerKeys: string[];
+	allStandardModels: string[];
+	allPremiumModels: string[];
+	allUnknownModels: string[];
+} {
+	return {
+		allToolKeys: [...new Set([...Object.keys(stats.today.toolCalls.byTool), ...Object.keys(stats.last30Days.toolCalls.byTool), ...Object.keys(stats.month.toolCalls.byTool)])],
+		allMcpToolKeys: [...new Set([...Object.keys(stats.today.mcpTools.byTool), ...Object.keys(stats.last30Days.mcpTools.byTool), ...Object.keys(stats.month.mcpTools.byTool)])],
+		allMcpServerKeys: [...new Set([...Object.keys(stats.today.mcpTools.byServer), ...Object.keys(stats.last30Days.mcpTools.byServer), ...Object.keys(stats.month.mcpTools.byServer)])],
+		allStandardModels: [...new Set([...stats.today.modelSwitching.standardModels, ...stats.last30Days.modelSwitching.standardModels, ...stats.month.modelSwitching.standardModels])],
+		allPremiumModels: [...new Set([...stats.today.modelSwitching.premiumModels, ...stats.last30Days.modelSwitching.premiumModels, ...stats.month.modelSwitching.premiumModels])],
+		allUnknownModels: [...new Set([...stats.today.modelSwitching.unknownModels, ...stats.last30Days.modelSwitching.unknownModels, ...stats.month.modelSwitching.unknownModels])],
+	};
+}
+
+function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysisStats): string {
+	return `
+		<div id="tab-panel-health" class="tab-panel"${activeTab !== 'health' ? ' style="display:none"' : ''}>
+			${customizationHtml}
+			${renderMissedPotential(stats)}
+
+			<!-- Repository Setup Section -->
+			<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
+					🏗️ Repository Hygiene Analysis
+				</div>
+				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+					Analyze repository hygiene and structure to identify missing configuration files and best practices.
+				</div>
+				${hygieneMatrixState && hygieneMatrixState.workspaces && hygieneMatrixState.workspaces.length > 0 ? `
+					<div style="margin-bottom: 12px;">
+						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${hygieneMatrixState.workspaces.length})</vscode-button>
 					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-						${renderEffortPeriod(stats.last30Days.thinkingEffortUsage)}
+					<div id="repo-list-pane-container" class="repo-hygiene-pane">
+						<div class="repo-hygiene-pane-header">📁 Repository List</div>
+						<div id="repo-list-pane" class="repo-hygiene-pane-body"></div>
 					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-						${renderEffortPeriod(stats.month.thinkingEffortUsage)}
+					<div id="repo-details-pane-container" class="repo-hygiene-pane repo-hygiene-pane-collapsed">
+						<div class="repo-hygiene-pane-header">📊 Repository Details</div>
+						<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
+					</div>
+				` : `
+					<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
+					<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
+				`}
+			</div>
+		</div>`;
+}
+
+function buildMcpToolsSectionHtml(
+	stats: UsageAnalysisStats,
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+): string {
+	return `
+		<!-- MCP Tools Section -->
+		<div class="section">
+			<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>
+			<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
+			${buildUnknownMcpToolsBannerHtml(stats)}
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.today.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
 					</div>
 				</div>
-			</div>`;
-	})() : '';
-
-	const sessionsSummaryHtml = `
-			<!-- Summary Section -->
-			<div class="section">
-				<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
-				<div class="stats-grid">
-					<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
-					<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
-					<div class="stat-card"><div class="stat-label">📅 Previous Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.last30Days.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
+					</div>
 				</div>
-			</div>`;
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.month.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
+					</div>
+				</div>
+			</div>
+			<div class="three-column" style="margin-top: 12px;">
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+			</div>
+		</div>`;
+}
 
-	root.innerHTML = `
+function buildReposAndAgentTabPanelsHtml(): string {
+	return `
+		<div id="tab-panel-repos" class="tab-panel"${activeTab !== 'repos' ? ' style="display:none"' : ''}>
+			<div class="section" id="repos-pr-content">
+				<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
+				<div class="section-subtitle">PRs from the last 30 days across your known repositories — authored or reviewed by AI agents.</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+			</div>
+		</div>
+		<div id="tab-panel-agent" class="tab-panel"${activeTab !== 'agent' ? ' style="display:none"' : ''}>
+			<div class="section" id="agent-sessions-content">
+				<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
+				<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+			</div>
+		</div>`;
+}
+
+function buildUsageRootHtml(
+	stats: UsageAnalysisStats,
+	customizationHtml: string,
+	multiModelHtml: string,
+	thinkingEffortHtml: string,
+	sessionsSummaryHtml: string,
+	todayTotalRefs: number,
+	last30DaysTotalRefs: number,
+	allToolKeys: string[],
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+	allStandardModels: string[],
+	allPremiumModels: string[],
+	allUnknownModels: string[],
+): string {
+	return `
 		<style>${themeStyles}</style>
 		<style>${styles}</style>
 		<div class="container">
@@ -1423,259 +1512,253 @@ function renderLayout(stats: UsageAnalysisStats): void {
 				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent">🤖 Cloud Agent</button>
 			</div>
 
-			<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
-				<div class="section">
-					<div class="section-title"><span>📋</span><span>Today's Sessions</span></div>
-					<div class="section-subtitle">Individual session breakdown for today — sorted by number of interactions (most active first).</div>
-					<div style="margin-top: 12px;">
-						${renderTodaySessionsTable(stats.todaySessions || [])}
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
-				${sessionsSummaryHtml}
-				<!-- Mode Usage Section -->
-				<div class="section">
-					<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
-					<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
-					<div class="two-column">
-						${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
-						${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
-					</div>
-				</div>
-
-				<!-- Context References Section -->
-				<div class="section">
-					<div class="section-title"><span>🔗</span><span>Context References</span></div>
-					<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>
-					<div class="stats-grid">
-						<div class="stat-card"><div class="stat-label">📄 #file</div><div class="stat-value">${stats.last30Days.contextReferences.file}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.file}</div></div>
-						<div class="stat-card"><div class="stat-label">✂️ #selection</div><div class="stat-value">${stats.last30Days.contextReferences.selection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.selection}</div></div>
-						<div class="stat-card" title="Text selected in your editor providing passive context to Copilot"><div class="stat-label">✨ Implicit Selection</div><div class="stat-value">${stats.last30Days.contextReferences.implicitSelection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.implicitSelection}</div></div>
-						<div class="stat-card"><div class="stat-label">🔤 #symbol</div><div class="stat-value">${stats.last30Days.contextReferences.symbol}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.symbol}</div></div>
-						<div class="stat-card"><div class="stat-label">🗂️ #codebase</div><div class="stat-value">${stats.last30Days.contextReferences.codebase}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.codebase}</div></div>
-						<div class="stat-card"><div class="stat-label">📁 @workspace</div><div class="stat-value">${stats.last30Days.contextReferences.workspace}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.workspace}</div></div>
-						<div class="stat-card"><div class="stat-label">💻 @terminal</div><div class="stat-value">${stats.last30Days.contextReferences.terminal}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminal}</div></div>
-						<div class="stat-card"><div class="stat-label">🔧 @vscode</div><div class="stat-value">${stats.last30Days.contextReferences.vscode}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.vscode}</div></div>
-						<div class="stat-card" title="Last command run in the terminal"><div class="stat-label">⌨️ #terminalLastCommand</div><div class="stat-value">${stats.last30Days.contextReferences.terminalLastCommand || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminalLastCommand || 0}</div></div>
-						<div class="stat-card" title="Selected terminal output"><div class="stat-label">🖱️ #terminalSelection</div><div class="stat-value">${stats.last30Days.contextReferences.terminalSelection || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminalSelection || 0}</div></div>
-						<div class="stat-card" title="Clipboard contents"><div class="stat-label">📋 #clipboard</div><div class="stat-value">${stats.last30Days.contextReferences.clipboard || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.clipboard || 0}</div></div>
-						<div class="stat-card" title="Uncommitted git changes"><div class="stat-label">📝 #changes</div><div class="stat-value">${stats.last30Days.contextReferences.changes || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.changes || 0}</div></div>
-						<div class="stat-card" title="Output panel contents"><div class="stat-label">📤 #outputPanel</div><div class="stat-value">${stats.last30Days.contextReferences.outputPanel || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.outputPanel || 0}</div></div>
-						<div class="stat-card" title="Problems panel contents"><div class="stat-label">⚠️ #problemsPanel</div><div class="stat-value">${stats.last30Days.contextReferences.problemsPanel || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.problemsPanel || 0}</div></div>
-						<div class="stat-card" title="Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary"><div class="stat-label">🔀 #pr</div><div class="stat-value">${stats.last30Days.contextReferences.pullRequest || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.pullRequest || 0}</div></div>
-						<div class="stat-card" title="copilot-instructions.md file references detected in session logs"><div class="stat-label">📋 Copilot Instructions</div><div class="stat-value">${stats.last30Days.contextReferences.copilotInstructions}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.copilotInstructions}</div></div>
-						<div class="stat-card" title="agents.md file references detected in session logs"><div class="stat-label">🤖 Agents.md</div><div class="stat-value">${stats.last30Days.contextReferences.agentsMd}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.agentsMd}</div></div>
-						<div class="stat-card" style="background: var(--list-active-bg); border: 2px solid var(--border-color); color: var(--list-active-fg);"><div class="stat-label" style="color: var(--list-active-fg); opacity: 0.85;">📊 Total References</div><div class="stat-value" style="color: var(--list-active-fg);">${last30DaysTotalRefs}</div><div style="font-size: 10px; color: var(--list-active-fg); opacity: 0.75; margin-top: 4px;">Today: ${todayTotalRefs}</div></div>
-					</div>
-					${Object.keys(stats.last30Days.contextReferences.byKind).length > 0 ? `
-						<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📎 Attached Files by Type (Last 30 Days)</div>
-							<div style="font-size: 12px; color: var(--text-primary);">
-								${Object.entries(stats.last30Days.contextReferences.byKind)
-									.sort(([, a], [, b]) => (b as number) - (a as number))
-									.slice(0, 5)
-									.map(([kind, count]) => `<div style="margin-bottom: 4px;"><span style="color: var(--link-color);">${escapeHtml(kind)}:</span> ${count}</div>`)
-									.join('')}
-							</div>
-						</div>
-					` : ''}
-					${Object.keys(stats.last30Days.contextReferences.byPath).length > 0 ? `
-						<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📁 Most Referenced Files (Last 30 Days)</div>
-							<div style="font-size: 11px; color: var(--text-primary);">
-								${Object.entries(stats.last30Days.contextReferences.byPath)
-									.sort(([, a], [, b]) => (b as number) - (a as number))
-									.slice(0, 10)
-									.map(([path, count]) => `<div style="margin-bottom: 4px; font-family: 'Courier New', monospace;"><span style="color: var(--link-color);">${count}×</span> ${escapeHtml(path)}</div>`)
-									.join('')}
-							</div>
-						</div>
-					` : ''}
-				</div>
-
-				${multiModelHtml}
-				${thinkingEffortHtml}
-			</div>
-
-			<div id="tab-panel-tools" class="tab-panel"${activeTab !== 'tools' ? ' style="display:none"' : ''}>
-				<!-- Tool Calls Section -->
-				<div class="section">
-					<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
-					<div class="section-subtitle">Functions and tools invoked by Copilot during interactions</div>
-					<div class="three-column">
-						<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</div>
-							${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10)}
-						</div>
-					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.total)}</div>
-								${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10)}
-							</div>
-						</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</div>
-								${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10)}
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- MCP Tools Section -->
-				<div class="section">
-					<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>
-					<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
-					${(() => {
-						const unknownTools = getUnknownMcpTools(stats);
-						if (unknownTools.length > 0) {
-							const issueUrl = createMcpToolIssueUrl(unknownTools);
-							const toolListHtml = unknownTools.map(tool => {
-								const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
-								const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
-								const monthCount = (stats.month.toolCalls.byTool[tool] || 0) + (stats.month.mcpTools.byTool[tool] || 0);
-								const countParts: string[] = [];
-								if (todayCount > 0) { countParts.push(`${todayCount} today`); }
-								if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
-								if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
-								const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${countParts.join(' | ')})</span>` : '';
-								const suppressBtn = `<button data-suppress-tool="${escapeHtml(tool)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${escapeHtml(tool)}">🔇</button>`;
-								return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${escapeHtml(tool)}${countHtml}${suppressBtn}</span>`;
-							}).join(' ');
-							return `
-								<div id="unknown-mcp-tools-section" style="margin-bottom: 12px; padding: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
-									<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
-										${toolListHtml}
-									</div>
-									<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500;">
-										<span>📝</span>
-										<span>Report Unknown Tools</span>
-									</a>
-								</div>
-							`;
-						}
-						return '';
-					})()}
-					<div class="three-column">
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.today.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.last30Days.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.month.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-					</div>
-					<div class="three-column" style="margin-top: 12px;">
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-panel-health" class="tab-panel"${activeTab !== 'health' ? ' style="display:none"' : ''}>
-				${customizationHtml}
-				${renderMissedPotential(stats)}
-
-				<!-- Repository Setup Section -->
-				<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
-					<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-						🏗️ Repository Hygiene Analysis
-					</div>
-					<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
-						Analyze repository hygiene and structure to identify missing configuration files and best practices.
-					</div>
-					${matrix && matrix.workspaces && matrix.workspaces.length > 0 ? `
-						<div style="margin-bottom: 12px;">
-							<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${matrix.workspaces.length})</vscode-button>
-						</div>
-						<div id="repo-list-pane-container" class="repo-hygiene-pane">
-							<div class="repo-hygiene-pane-header">📁 Repository List</div>
-							<div id="repo-list-pane" class="repo-hygiene-pane-body"></div>
-						</div>
-						<div id="repo-details-pane-container" class="repo-hygiene-pane repo-hygiene-pane-collapsed">
-							<div class="repo-hygiene-pane-header">📊 Repository Details</div>
-							<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
-						</div>
-					` : `
-						<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
-						<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
-					`}
-				</div>
-			</div>
-
-			<div id="tab-panel-repos" class="tab-panel"${activeTab !== 'repos' ? ' style="display:none"' : ''}>
-				<div class="section" id="repos-pr-content">
-					<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
-					<div class="section-subtitle">PRs from the last 30 days across your known repositories — authored or reviewed by AI agents.</div>
-					<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">
-						Loading… (sign in with GitHub to see data)
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-panel-agent" class="tab-panel"${activeTab !== 'agent' ? ' style="display:none"' : ''}>
-				<div class="section" id="agent-sessions-content">
-					<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
-					<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
-					<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">
-						Loading… (sign in with GitHub to see data)
-					</div>
-				</div>
-			</div>
-
+			${buildSessionsTabPanelHtml(stats)}
+			${buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs)}
+			${buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allStandardModels, allPremiumModels, allUnknownModels)}
+			${buildHealthTabPanelHtml(customizationHtml, stats)}
+			${buildReposAndAgentTabPanelsHtml()}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes
 			</div>
 		</div>
 	`;
+}
 
+function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
+	return `
+		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title"><span>📋</span><span>Today's Sessions</span></div>
+				<div class="section-subtitle">Individual session breakdown for today — sorted by number of interactions (most active first).</div>
+				<div style="margin-top: 12px;">
+					${renderTodaySessionsTable(stats.todaySessions || [])}
+				</div>
+			</div>
+		</div>`;
+}
 
+function buildActivityTabPanelHtml(
+	stats: UsageAnalysisStats,
+	multiModelHtml: string,
+	thinkingEffortHtml: string,
+	sessionsSummaryHtml: string,
+	todayTotalRefs: number,
+	last30DaysTotalRefs: number,
+): string {
+	return `
+		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
+			${sessionsSummaryHtml}
+			<!-- Mode Usage Section -->
+			<div class="section">
+				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
+				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
+				<div class="two-column">
+					${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
+					${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
+				</div>
+			</div>
+			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			${multiModelHtml}
+			${thinkingEffortHtml}
+		</div>`;
+}
+
+function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
+	const r = stats.last30Days.contextReferences;
+	const t = stats.today.contextReferences;
+	const c = (v: number | undefined): number => v || 0;
+	return `
+		<div class="stats-grid">
+			<div class="stat-card"><div class="stat-label">📄 #file</div><div class="stat-value">${r.file}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.file}</div></div>
+			<div class="stat-card"><div class="stat-label">✂️ #selection</div><div class="stat-value">${r.selection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.selection}</div></div>
+			<div class="stat-card" title="Text selected in your editor providing passive context to Copilot"><div class="stat-label">✨ Implicit Selection</div><div class="stat-value">${r.implicitSelection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.implicitSelection}</div></div>
+			<div class="stat-card"><div class="stat-label">🔤 #symbol</div><div class="stat-value">${r.symbol}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.symbol}</div></div>
+			<div class="stat-card"><div class="stat-label">🗂️ #codebase</div><div class="stat-value">${r.codebase}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.codebase}</div></div>
+			<div class="stat-card"><div class="stat-label">📁 @workspace</div><div class="stat-value">${r.workspace}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.workspace}</div></div>
+			<div class="stat-card"><div class="stat-label">💻 @terminal</div><div class="stat-value">${r.terminal}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.terminal}</div></div>
+			<div class="stat-card"><div class="stat-label">🔧 @vscode</div><div class="stat-value">${r.vscode}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.vscode}</div></div>
+			<div class="stat-card" title="Last command run in the terminal"><div class="stat-label">⌨️ #terminalLastCommand</div><div class="stat-value">${c(r.terminalLastCommand)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.terminalLastCommand)}</div></div>
+			<div class="stat-card" title="Selected terminal output"><div class="stat-label">🖱️ #terminalSelection</div><div class="stat-value">${c(r.terminalSelection)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.terminalSelection)}</div></div>
+			<div class="stat-card" title="Clipboard contents"><div class="stat-label">📋 #clipboard</div><div class="stat-value">${c(r.clipboard)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.clipboard)}</div></div>
+			<div class="stat-card" title="Uncommitted git changes"><div class="stat-label">📝 #changes</div><div class="stat-value">${c(r.changes)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.changes)}</div></div>
+			<div class="stat-card" title="Output panel contents"><div class="stat-label">📤 #outputPanel</div><div class="stat-value">${c(r.outputPanel)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.outputPanel)}</div></div>
+			<div class="stat-card" title="Problems panel contents"><div class="stat-label">⚠️ #problemsPanel</div><div class="stat-value">${c(r.problemsPanel)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.problemsPanel)}</div></div>
+			<div class="stat-card" title="Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary"><div class="stat-label">🔀 #pr</div><div class="stat-value">${c(r.pullRequest)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.pullRequest)}</div></div>
+			<div class="stat-card" title="copilot-instructions.md file references detected in session logs"><div class="stat-label">📋 Copilot Instructions</div><div class="stat-value">${r.copilotInstructions}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.copilotInstructions}</div></div>
+			<div class="stat-card" title="agents.md file references detected in session logs"><div class="stat-label">🤖 Agents.md</div><div class="stat-value">${r.agentsMd}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.agentsMd}</div></div>
+			<div class="stat-card" style="background: var(--list-active-bg); border: 2px solid var(--border-color); color: var(--list-active-fg);"><div class="stat-label" style="color: var(--list-active-fg); opacity: 0.85;">📊 Total References</div><div class="stat-value" style="color: var(--list-active-fg);">${last30DaysTotalRefs}</div><div style="font-size: 10px; color: var(--list-active-fg); opacity: 0.75; margin-top: 4px;">Today: ${todayTotalRefs}</div></div>
+		</div>`;
+}
+
+function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
+	const byKindHtml = Object.keys(stats.last30Days.contextReferences.byKind).length > 0 ? `
+		<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📎 Attached Files by Type (Last 30 Days)</div>
+			<div style="font-size: 12px; color: var(--text-primary);">
+				${Object.entries(stats.last30Days.contextReferences.byKind)
+					.sort(([, a], [, b]) => (b as number) - (a as number))
+					.slice(0, 5)
+					.map(([kind, count]) => `<div style="margin-bottom: 4px;"><span style="color: var(--link-color);">${escapeHtml(kind)}:</span> ${count}</div>`)
+					.join('')}
+			</div>
+		</div>
+	` : '';
+	const byPathHtml = Object.keys(stats.last30Days.contextReferences.byPath).length > 0 ? `
+		<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📁 Most Referenced Files (Last 30 Days)</div>
+			<div style="font-size: 11px; color: var(--text-primary);">
+				${Object.entries(stats.last30Days.contextReferences.byPath)
+					.sort(([, a], [, b]) => (b as number) - (a as number))
+					.slice(0, 10)
+					.map(([path, count]) => `<div style="margin-bottom: 4px; font-family: 'Courier New', monospace;"><span style="color: var(--link-color);">${count}×</span> ${escapeHtml(path)}</div>`)
+					.join('')}
+			</div>
+		</div>
+	` : '';
+	return `
+		<!-- Context References Section -->
+		<div class="section">
+			<div class="section-title"><span>🔗</span><span>Context References</span></div>
+			<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>
+			${buildContextRefCardsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			${byKindHtml}
+			${byPathHtml}
+		</div>`;
+}
+
+function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
+	const unknownTools = getUnknownMcpTools(stats);
+	if (unknownTools.length === 0) { return ''; }
+	const issueUrl = createMcpToolIssueUrl(unknownTools);
+	const toolListHtml = unknownTools.map(tool => {
+		const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
+		const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
+		const monthCount = (stats.month.toolCalls.byTool[tool] || 0) + (stats.month.mcpTools.byTool[tool] || 0);
+		const countParts: string[] = [];
+		if (todayCount > 0) { countParts.push(`${todayCount} today`); }
+		if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
+		if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
+		const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${countParts.join(' | ')})</span>` : '';
+		const suppressBtn = `<button data-suppress-tool="${escapeHtml(tool)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${escapeHtml(tool)}">🔇</button>`;
+		return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${escapeHtml(tool)}${countHtml}${suppressBtn}</span>`;
+	}).join(' ');
+	return `
+		<div id="unknown-mcp-tools-section" style="margin-bottom: 12px; padding: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
+			<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
+				${toolListHtml}
+			</div>
+			<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500;">
+				<span>📝</span>
+				<span>Report Unknown Tools</span>
+			</a>
+		</div>
+	`;
+}
+
+function buildToolsTabPanelHtml(
+	stats: UsageAnalysisStats,
+	allToolKeys: string[],
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+	allStandardModels: string[],
+	allPremiumModels: string[],
+	allUnknownModels: string[],
+): string {
+	return `
+		<div id="tab-panel-tools" class="tab-panel"${activeTab !== 'tools' ? ' style="display:none"' : ''}>
+			<!-- Tool Calls Section -->
+			<div class="section">
+				<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
+				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions</div>
+				<div class="three-column">
+					<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</div>
+						${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10)}
+					</div>
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.total)}</div>
+							${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10)}
+						</div>
+					</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</div>
+							${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10)}
+						</div>
+					</div>
+				</div>
+			</div>
+
+			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
+			<!-- Multi-Model Usage Section -->
+			<div class="section">
+				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
+				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
+				<div class="three-column">
+					${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+					${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+				</div>
+			</div>
+		</div>`;
+}
+
+function renderLayout(stats: UsageAnalysisStats): void {
+	const root = document.getElementById('root');
+	if (!root) {
+		return;
+	}
+
+	// customizationMatrix is passed as an extra field on the stats object alongside the typed fields
+	type StatsWithMatrix = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null };
+	const matrix =
+		(stats as StatsWithMatrix).customizationMatrix ??
+		(initialData as StatsWithMatrix | undefined)?.customizationMatrix ?? null;
+	hygieneMatrixState = matrix ?? null;
+	if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
+		selectedRepoPath = null;
+	}
+	if (Array.isArray(stats.currentWorkspacePaths)) {
+		currentWorkspacePaths = stats.currentWorkspacePaths;
+	}
+
+	const customizationHtml = buildCustomizationSectionHtml(matrix);
+	const allKeys = buildUsageAllKeysSets(stats);
+	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
+	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
+	const thinkingEffortHtml = buildThinkingEffortSectionHtml(stats);
+	const sessionsSummaryHtml = `
+		<!-- Summary Section -->
+		<div class="section">
+			<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
+			<div class="stats-grid">
+				<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📅 Previous Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+			</div>
+		</div>`;
+
+	root.innerHTML = buildUsageRootHtml(
+		stats,
+		customizationHtml,
+		'',
+		thinkingEffortHtml,
+		sessionsSummaryHtml,
+		todayTotalRefs,
+		last30DaysTotalRefs,
+		allKeys.allToolKeys,
+		allKeys.allMcpToolKeys,
+		allKeys.allMcpServerKeys,
+		allKeys.allStandardModels,
+		allKeys.allPremiumModels,
+		allKeys.allUnknownModels,
+	);
 
 	wireNavigationButtons();
 	wireRepositoryButtons();
@@ -1782,133 +1865,101 @@ function wireCopyButtons(): void {
 	});
 }
 
+function handleUpdateStats(message: any): void {
+	clearLoadingTimeout();
+	if (message.data?.locale) {
+		setFormatLocale(message.data.locale);
+	}
+	if (typeof message.data?.use24HourTime === 'boolean') {
+		use24HourTime = message.data.use24HourTime;
+	}
+	const sanitized = sanitizeStats(message.data);
+	if (sanitized) {
+		renderLayout(sanitized);
+		setupSessionsTableSort();
+		renderRepositoryHygienePanels();
+		if (repoPrStatsData) { updateReposPrPanel(repoPrStatsData); }
+		if (agentSessionsData) { updateAgentSessionsPanel(agentSessionsData); }
+	} else {
+		showLoadError('Received invalid data from the extension. Try refreshing.');
+	}
+}
+
+function handleToolSuppressed(toolName: string): void {
+	if (!toolName) { return; }
+	const section = document.getElementById('unknown-mcp-tools-section');
+	if (!section) { return; }
+	section.querySelectorAll<HTMLButtonElement>('button[data-suppress-tool]').forEach(btn => {
+		if (btn.getAttribute('data-suppress-tool') === toolName) {
+			btn.closest('span')?.remove();
+		}
+	});
+	if (section.querySelectorAll('button[data-suppress-tool]').length === 0) {
+		section.remove();
+	}
+}
+
+function handleHighlightUnknownTools(): void {
+	activeTab = 'tools';
+	document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
+		btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
+	});
+	document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
+		panel.style.display = 'none';
+	});
+	const toolsPanel = document.getElementById('tab-panel-tools');
+	if (toolsPanel) { toolsPanel.style.display = 'block'; }
+	const el = document.getElementById('unknown-mcp-tools-section');
+	if (el) {
+		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		el.style.transition = 'box-shadow 0.3s ease';
+		el.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
+		setTimeout(() => { el.style.boxShadow = ''; }, 2000);
+	}
+}
+
+function handleRepoPrStatsLoaded(data: any): void {
+	repoPrStatsData = sanitizeRepoPrStatsData(data);
+	if (!repoPrStatsData.authenticated) { repoPrStatsLoaded = false; }
+	updateReposPrPanel(repoPrStatsData);
+}
+
+function handleAgentSessionsLoaded(data: any): void {
+	if (!data || typeof data !== 'object') { return; }
+	agentSessionsData = sanitizeAgentSessionsData(data);
+	if (!agentSessionsData.authenticated) { agentSessionsLoaded = false; }
+	updateAgentSessionsPanel(agentSessionsData);
+}
+
 // Listen for messages from the extension
 registerMessageHandler<any>((message) => {
 	switch (message.command) {
 		case 'repoAnalysisResults':
-			displayRepoAnalysisResults(message.data, message.workspacePath);
-			break;
+			displayRepoAnalysisResults(message.data, message.workspacePath); break;
 		case 'repoAnalysisError':
-			displayRepoAnalysisError(message.error, message.workspacePath);
-			break;
+			displayRepoAnalysisError(message.error, message.workspacePath); break;
 		case 'repoAnalysisBatchComplete':
-			handleBatchAnalysisComplete();
-			break;
+			handleBatchAnalysisComplete(); break;
 		case 'updateStats':
-			// Re-render the layout with fresh stats, then restore repo analysis results
-			clearLoadingTimeout();
-			if (message.data?.locale) {
-				setFormatLocale(message.data.locale);
-			}
-			if (typeof message.data?.use24HourTime === 'boolean') {
-				use24HourTime = message.data.use24HourTime;
-			}
-			{
-				const sanitized = sanitizeStats(message.data);
-				if (sanitized) {
-					renderLayout(sanitized);
-					setupSessionsTableSort();
-					renderRepositoryHygienePanels();
-					// Restore repos PR tab if we already fetched data (renderLayout resets the DOM)
-					if (repoPrStatsData) {
-						updateReposPrPanel(repoPrStatsData);
-					}
-					// Restore cloud agent tab if we already fetched data
-					if (agentSessionsData) {
-						updateAgentSessionsPanel(agentSessionsData);
-					}
-				} else {
-					showLoadError('Received invalid data from the extension. Try refreshing.');
-				}
-			}
-			break;
+			handleUpdateStats(message); break;
 		case 'updateStatsError':
 			clearLoadingTimeout();
 			showLoadError('Failed to calculate usage analysis. Check the Output panel for details.');
 			break;
-		case 'toolSuppressed': {
-			// Immediately remove the suppressed tool chip from the DOM without a full re-render.
-			const suppressedName = message.toolName as string;
-			if (suppressedName) {
-				const section = document.getElementById('unknown-mcp-tools-section');
-				if (section) {
-					section.querySelectorAll<HTMLButtonElement>('button[data-suppress-tool]').forEach(btn => {
-						if (btn.getAttribute('data-suppress-tool') === suppressedName) {
-							btn.closest('span')?.remove();
-						}
-					});
-					if (section.querySelectorAll('button[data-suppress-tool]').length === 0) {
-						section.remove();
-					}
-				}
-			}
+		case 'toolSuppressed':
+			handleToolSuppressed(message.toolName as string); break;
+		case 'highlightUnknownTools':
+			handleHighlightUnknownTools(); break;
+		case 'repoPrStatsLoaded':
+			handleRepoPrStatsLoaded(message.data); break;
+		case 'repoPrStatsProgress':
+			updateProgressPanel('#repos-pr-content', 'repos-pr-progress', 'Fetching PRs…', message.done as number, message.total as number);
 			break;
-		}
-		case 'highlightUnknownTools': {
-			// Switch to tools tab
-			activeTab = 'tools';
-			document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
-				btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
-			});
-			document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
-				panel.style.display = 'none';
-			});
-			const toolsPanel = document.getElementById('tab-panel-tools');
-			if (toolsPanel) { toolsPanel.style.display = 'block'; }
-			// Then scroll to the element
-			const el = document.getElementById('unknown-mcp-tools-section');
-			if (el) {
-				el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-				el.style.transition = 'box-shadow 0.3s ease';
-				el.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
-				setTimeout(() => {
-					el.style.boxShadow = '';
-				}, 2000);
-			}
+		case 'agentSessionsLoaded':
+			handleAgentSessionsLoaded(message.data); break;
+		case 'agentSessionsProgress':
+			updateProgressPanel('#agent-sessions-content', 'agent-sessions-progress', 'Fetching agent sessions…', message.done as number, message.total as number);
 			break;
-		}
-		case 'repoPrStatsLoaded': {
-			repoPrStatsData = sanitizeRepoPrStatsData(message.data);
-			// Reset the loaded flag when not authenticated so re-authenticating and clicking the tab
-			// again triggers a fresh fetch instead of showing the stale "not authenticated" placeholder.
-			if (!repoPrStatsData.authenticated) {
-				repoPrStatsLoaded = false;
-			}
-			updateReposPrPanel(repoPrStatsData);
-			break;
-		}
-		case 'repoPrStatsProgress': {
-			updateProgressPanel(
-				'#repos-pr-content',
-				'repos-pr-progress',
-				'Fetching PRs…',
-				message.done as number,
-				message.total as number,
-			);
-			break;
-		}
-		case 'agentSessionsLoaded': {
-			const raw = message.data;
-			if (raw && typeof raw === 'object') {
-				agentSessionsData = sanitizeAgentSessionsData(raw);
-				if (!agentSessionsData.authenticated) {
-					// Reset loaded flag so re-authenticating and revisiting the tab triggers a fresh fetch
-					agentSessionsLoaded = false;
-				}
-				updateAgentSessionsPanel(agentSessionsData);
-			}
-			break;
-		}
-		case 'agentSessionsProgress': {
-			updateProgressPanel(
-				'#agent-sessions-content',
-				'agent-sessions-progress',
-				'Fetching agent sessions…',
-				message.done as number,
-				message.total as number,
-			);
-			break;
-		}
 	}
 });
 
@@ -1934,33 +1985,34 @@ function toFiniteNumber(value: unknown): number {
 	return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: string): HTMLElement {
-	const summary = data?.summary || {};
-	const checks = Array.isArray(data?.checks) ? data.checks : [];
-	const recommendations = Array.isArray(data?.recommendations) ? [...data.recommendations] : [];
+const REPO_DOCS_LINKS: { [key: string]: string } = {
+	'git-repo': 'https://docs.github.com/en/get-started/using-git/about-git',
+	'gitignore': 'https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files',
+	'env-example': 'https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions',
+	'editorconfig': 'https://editorconfig.org/',
+	'linter': 'https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning',
+	'formatter': 'https://docs.github.com/en/contributing/style-guide-and-content-model/style-guide',
+	'type-safety': 'https://docs.github.com/en/code-security/code-scanning/reference/code-ql-built-in-queries/javascript-typescript-built-in-queries',
+	'commit-messages': 'https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits',
+	'conventional-commits': 'https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets',
+	'ci-config': 'https://docs.github.com/en/actions/about-github-actions/understanding-github-actions',
+	'scripts': 'https://docs.github.com/en/actions/tutorials/build-and-test-code/nodejs',
+	'task-runner': 'https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/add-scripts',
+	'devcontainer': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration',
+	'dockerfile': 'https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry',
+	'version-pinning': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/setting-up-your-nodejs-project-for-codespaces',
+	'license': 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository'
+};
 
-	// Documentation links for each check ID
-	const docsLinks: { [key: string]: string } = {
-		'git-repo': 'https://docs.github.com/en/get-started/using-git/about-git',
-		'gitignore': 'https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files',
-		'env-example': 'https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions',
-		'editorconfig': 'https://editorconfig.org/',
-		'linter': 'https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning',
-		'formatter': 'https://docs.github.com/en/contributing/style-guide-and-content-model/style-guide',
-		'type-safety': 'https://docs.github.com/en/code-security/code-scanning/reference/code-ql-built-in-queries/javascript-typescript-built-in-queries',
-		'commit-messages': 'https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits',
-		'conventional-commits': 'https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets',
-		'ci-config': 'https://docs.github.com/en/actions/about-github-actions/understanding-github-actions',
-		'scripts': 'https://docs.github.com/en/actions/tutorials/build-and-test-code/nodejs',
-		'task-runner': 'https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/add-scripts',
-		'devcontainer': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration',
-		'dockerfile': 'https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry',
-		'version-pinning': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/setting-up-your-nodejs-project-for-codespaces',
-		'license': 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository'
-	};
+const REPO_CATEGORY_LABELS: { [key: string]: string } = {
+	versionControl: '🔄 Version Control',
+	codeQuality: '✨ Code Quality',
+	cicd: '🚀 CI/CD',
+	environment: '🔧 Environment',
+	documentation: '📚 Documentation'
+};
 
-	const container = el('div');
-
+function buildScoreHeaderElement(summary: any): HTMLElement {
 	const header = el('div');
 	header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;');
 	const title = el('div');
@@ -1970,32 +2022,17 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 	score.setAttribute('style', 'font-size: 24px; font-weight: 700; color: var(--link-color);');
 	score.textContent = `${Math.round(toFiniteNumber(summary.percentage))}%`;
 	header.append(title, score);
-	container.appendChild(header);
+	return header;
+}
 
+function buildStatsGridElement(summary: any): HTMLElement {
 	const statsGrid = el('div');
 	statsGrid.setAttribute('style', 'display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;');
-
-	const statCards: Array<{ count: unknown; label: string; cardStyle: string; countStyle: string }> = [
-		{
-			count: summary.passedChecks,
-			label: 'Passed',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: var(--success-fg);'
-		},
-		{
-			count: summary.warningChecks,
-			label: 'Warnings',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: var(--warning-fg);'
-		},
-		{
-			count: summary.failedChecks,
-			label: 'Failed',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: #ef4444;'
-		}
+	const statCards = [
+		{ count: summary.passedChecks, label: 'Passed', cardStyle: 'text-align: center; padding: 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: var(--success-fg);' },
+		{ count: summary.warningChecks, label: 'Warnings', cardStyle: 'text-align: center; padding: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: var(--warning-fg);' },
+		{ count: summary.failedChecks, label: 'Failed', cardStyle: 'text-align: center; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: #ef4444;' }
 	];
-
 	for (const statCard of statCards) {
 		const card = el('div');
 		card.setAttribute('style', statCard.cardStyle);
@@ -2008,8 +2045,163 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 		card.append(count, label);
 		statsGrid.appendChild(card);
 	}
+	return statsGrid;
+}
 
-	container.appendChild(statsGrid);
+function resolveCheckStatus(check: RepoHygieneCheck): { status: string; emoji: CustomizationTypeStatus; color: string } {
+	const status = check?.status === 'pass' || check?.status === 'warning' ? check.status : 'fail';
+	const emoji: CustomizationTypeStatus = status === 'pass' ? '✅' : status === 'warning' ? '⚠️' : '❌';
+	const color = status === 'pass' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#ef4444';
+	return { status, emoji, color };
+}
+
+function buildCheckContentElement(check: RepoHygieneCheck, statusColor: string): HTMLElement {
+	const content = el('div');
+	content.setAttribute('style', 'flex: 1;');
+	const checkLabel = el('div');
+	checkLabel.setAttribute('style', `font-size: 12px; font-weight: 600; color: ${statusColor};`);
+	checkLabel.textContent = typeof check?.label === 'string' ? check.label : '';
+	const checkDetail = el('div');
+	checkDetail.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); margin-top: 2px;');
+	checkDetail.textContent = typeof check?.detail === 'string' ? check.detail : '';
+	content.append(checkLabel, checkDetail);
+	if (typeof check?.hint === 'string' && check.hint.length > 0) {
+		const hint = el('div');
+		hint.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; font-style: italic;');
+		hint.textContent = `💡 ${check.hint}`;
+		content.appendChild(hint);
+	}
+	const docUrl = REPO_DOCS_LINKS[typeof check?.id === 'string' ? check.id : ''];
+	if (docUrl) {
+		const docLink = el('a');
+		docLink.setAttribute('href', docUrl);
+		docLink.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; display: inline-block;');
+		docLink.setAttribute('title', 'View official documentation');
+		docLink.textContent = '📖 View documentation';
+		content.appendChild(docLink);
+	}
+	return content;
+}
+
+function buildCheckRowElement(check: RepoHygieneCheck): HTMLElement {
+	const { emoji, color } = resolveCheckStatus(check);
+	const checkRow = el('div');
+	checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
+	const icon = el('span');
+	icon.setAttribute('style', 'flex-shrink: 0; padding-top: 1px;');
+	icon.innerHTML = statusBadgeHtml(emoji);
+	const weight = el('span');
+	weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
+	weight.textContent = `+${toFiniteNumber(check?.weight)}`;
+	checkRow.append(icon, buildCheckContentElement(check, color), weight);
+	return checkRow;
+}
+
+function buildCategorySectionElement(categoryId: string, categoryChecks: RepoHygieneCheck[], summary: any): HTMLElement {
+	const section = el('div');
+	section.setAttribute('style', 'margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
+	const sectionHeader = el('div');
+	sectionHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;');
+	const categoryName = el('span');
+	categoryName.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
+	categoryName.textContent = REPO_CATEGORY_LABELS[categoryId] || categoryId;
+	const categorySummary = summary?.categories?.[categoryId];
+	const categoryPct = el('span');
+	categoryPct.setAttribute('style', 'font-size: 11px; color: var(--link-color); font-weight: 600;');
+	categoryPct.textContent = `${Math.round(toFiniteNumber(categorySummary?.percentage))}%`;
+	sectionHeader.append(categoryName, categoryPct);
+	section.appendChild(sectionHeader);
+	for (const check of categoryChecks) {
+		section.appendChild(buildCheckRowElement(check));
+	}
+	return section;
+}
+
+function buildRecommendationsSectionElement(recommendations: RepoHygieneRecommendation[]): HTMLElement {
+	const section = el('div');
+	section.setAttribute('style', 'margin-top: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
+	const hdr = el('div');
+	hdr.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color);');
+	const hdrTitle = el('span');
+	hdrTitle.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
+	hdrTitle.textContent = '💡 Top Recommendations';
+	hdr.appendChild(hdrTitle);
+	section.appendChild(hdr);
+	for (const rec of recommendations.slice(0, 5)) {
+		const priority = rec?.priority === 'high' || rec?.priority === 'medium' ? rec.priority : 'low';
+		const priorityColor = priority === 'high' ? '#ef4444' : priority === 'medium' ? '#f59e0b' : '#60a5fa';
+		const row = el('div');
+		row.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px;');
+		const priorityLabel = el('span');
+		priorityLabel.setAttribute('style', `font-size: 10px; font-weight: 600; color: ${priorityColor}; min-width: 50px;`);
+		priorityLabel.textContent = String(priority).toUpperCase();
+		const content = el('div');
+		content.setAttribute('style', 'flex: 1;');
+		const action = el('div');
+		action.setAttribute('style', 'font-size: 11px; color: var(--text-primary);');
+		action.textContent = typeof rec?.action === 'string' ? rec.action : '';
+		const impact = el('div');
+		impact.setAttribute('style', 'font-size: 10px; color: var(--text-muted); margin-top: 2px;');
+		impact.textContent = typeof rec?.impact === 'string' ? rec.impact : '';
+		content.append(action, impact);
+		const weight = el('span');
+		weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
+		weight.textContent = `+${toFiniteNumber(rec?.weight)}`;
+		row.append(priorityLabel, content, weight);
+		section.appendChild(row);
+	}
+	return section;
+}
+
+function buildCopilotSectionElement(failedChecks: RepoHygieneCheck[], workspacePath?: string): HTMLElement {
+	const copilotSection = el('div');
+	copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;');
+	const copilotText = el('div');
+	copilotText.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); flex: 1;');
+	copilotText.textContent = 'Let Copilot help you fix the identified issues in this repository.';
+	const copilotBtn = document.createElement('vscode-button');
+	copilotBtn.setAttribute('style', 'min-width: 180px;');
+	copilotBtn.textContent = '🤖 Ask Copilot to Improve';
+	copilotBtn.addEventListener('click', () => {
+		const failedLines = failedChecks.map((c: RepoHygieneCheck) => `- ${c.label}: ${c.detail || ''}${c.hint ? ` (${c.hint})` : ''}`).join('\n');
+		const prompt = `Please help me improve this repository by addressing the following best practice issues:\n\n${failedLines}\n\nFor each issue, please provide specific steps or code changes to fix it.`;
+		const isRepoOpen = !workspacePath || currentWorkspacePaths.some(p => p.toLowerCase() === workspacePath.toLowerCase());
+		if (isRepoOpen) {
+			vscode.postMessage({ command: 'openCopilotChatWithPrompt', prompt });
+		} else {
+			const repoFolderName = workspacePath.split(/[/\\]/).filter(Boolean).pop() ?? workspacePath;
+			copilotSection.replaceChildren();
+			copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 4px; display: flex; flex-direction: column; gap: 8px;');
+			const instructions = el('div');
+			instructions.setAttribute('style', 'font-size: 11px; color: var(--warning-fg);');
+			instructions.textContent = `⚠️ Open "${repoFolderName}" in VS Code first, then paste this prompt into Copilot Chat:`;
+			const promptBox = el('pre');
+			promptBox.setAttribute('style', 'font-size: 10px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; font-family: monospace; margin: 0;');
+			promptBox.textContent = prompt;
+			const copyBtn = document.createElement('vscode-button');
+			copyBtn.setAttribute('appearance', 'secondary');
+			copyBtn.textContent = '📋 Copy prompt';
+			copyBtn.addEventListener('click', () => {
+				navigator.clipboard.writeText(prompt).then(() => {
+					copyBtn.textContent = '✅ Copied!';
+					setTimeout(() => { copyBtn.textContent = '📋 Copy prompt'; }, 2000);
+				});
+			});
+			copilotSection.append(instructions, promptBox, copyBtn);
+		}
+	});
+	copilotSection.append(copilotText, copilotBtn);
+	return copilotSection;
+}
+
+function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: string): HTMLElement {
+	const summary = data?.summary || {};
+	const checks = Array.isArray(data?.checks) ? data.checks : [];
+	const recommendations = Array.isArray(data?.recommendations) ? [...data.recommendations] : [];
+
+	const container = el('div');
+	container.appendChild(buildScoreHeaderElement(summary));
+	container.appendChild(buildStatsGridElement(summary));
 
 	const scoreSummary = el('div');
 	scoreSummary.setAttribute('style', 'font-size: 11px; color: var(--text-muted); text-align: center; margin-bottom: 16px;');
@@ -2022,226 +2214,37 @@ function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: st
 	const categories: Record<string, RepoHygieneCheck[]> = {};
 	for (const check of checks) {
 		const categoryId = typeof check?.category === 'string' && check.category.length > 0 ? check.category : 'other';
-		if (!categories[categoryId]) {
-			categories[categoryId] = [];
-		}
+		if (!categories[categoryId]) { categories[categoryId] = []; }
 		categories[categoryId].push(check);
 	}
-
-	const categoryLabels: { [key: string]: string } = {
-		versionControl: '🔄 Version Control',
-		codeQuality: '✨ Code Quality',
-		cicd: '🚀 CI/CD',
-		environment: '🔧 Environment',
-		documentation: '📚 Documentation'
-	};
-
 	for (const [categoryId, categoryChecks] of Object.entries(categories)) {
-		const section = el('div');
-		section.setAttribute('style', 'margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
-
-		const sectionHeader = el('div');
-		sectionHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;');
-
-		const categoryName = el('span');
-		categoryName.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
-		categoryName.textContent = categoryLabels[categoryId] || categoryId;
-
-		const categorySummary = summary?.categories?.[categoryId];
-		const categoryPct = el('span');
-		categoryPct.setAttribute('style', 'font-size: 11px; color: var(--link-color); font-weight: 600;');
-		categoryPct.textContent = `${Math.round(toFiniteNumber(categorySummary?.percentage))}%`;
-
-		sectionHeader.append(categoryName, categoryPct);
-		section.appendChild(sectionHeader);
-
-		for (const check of categoryChecks) {
-			const status = check?.status === 'pass' || check?.status === 'warning' ? check.status : 'fail';
-			const statusEmoji: CustomizationTypeStatus = status === 'pass' ? '✅' : status === 'warning' ? '⚠️' : '❌';
-			const statusColor = status === 'pass' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#ef4444';
-
-			const checkRow = el('div');
-			checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
-
-			const icon = el('span');
-			icon.setAttribute('style', 'flex-shrink: 0; padding-top: 1px;');
-			icon.innerHTML = statusBadgeHtml(statusEmoji);
-
-			const content = el('div');
-			content.setAttribute('style', 'flex: 1;');
-
-			const checkLabel = el('div');
-			checkLabel.setAttribute('style', `font-size: 12px; font-weight: 600; color: ${statusColor};`);
-			checkLabel.textContent = typeof check?.label === 'string' ? check.label : '';
-
-			const checkDetail = el('div');
-			checkDetail.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); margin-top: 2px;');
-			checkDetail.textContent = typeof check?.detail === 'string' ? check.detail : '';
-
-			content.append(checkLabel, checkDetail);
-
-			if (typeof check?.hint === 'string' && check.hint.length > 0) {
-				const hint = el('div');
-				hint.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; font-style: italic;');
-				hint.textContent = `💡 ${check.hint}`;
-				content.appendChild(hint);
-			}
-
-			const checkId = typeof check?.id === 'string' ? check.id : '';
-			const docUrl = docsLinks[checkId];
-			if (docUrl) {
-				const docLink = el('a');
-				docLink.setAttribute('href', docUrl);
-				docLink.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; display: inline-block;');
-				docLink.setAttribute('title', 'View official documentation');
-				docLink.textContent = '📖 View documentation';
-				content.appendChild(docLink);
-			}
-
-			const weight = el('span');
-			weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
-			weight.textContent = `+${toFiniteNumber(check?.weight)}`;
-
-			checkRow.append(icon, content, weight);
-			section.appendChild(checkRow);
-		}
-
-		container.appendChild(section);
+		container.appendChild(buildCategorySectionElement(categoryId, categoryChecks, summary));
 	}
 
 	if (recommendations.length > 0) {
-		const recommendationsSection = el('div');
-		recommendationsSection.setAttribute('style', 'margin-top: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
-
-		const recommendationsHeader = el('div');
-		recommendationsHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color);');
-		const recommendationsTitle = el('span');
-		recommendationsTitle.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
-		recommendationsTitle.textContent = '💡 Top Recommendations';
-		recommendationsHeader.appendChild(recommendationsTitle);
-		recommendationsSection.appendChild(recommendationsHeader);
-
-		for (const recommendation of recommendations.slice(0, 5)) {
-			const priority = recommendation?.priority === 'high' || recommendation?.priority === 'medium' ? recommendation.priority : 'low';
-			const priorityColor = priority === 'high' ? '#ef4444' : priority === 'medium' ? '#f59e0b' : '#60a5fa';
-
-			const row = el('div');
-			row.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px;');
-
-			const priorityLabel = el('span');
-			priorityLabel.setAttribute('style', `font-size: 10px; font-weight: 600; color: ${priorityColor}; min-width: 50px;`);
-			priorityLabel.textContent = String(priority).toUpperCase();
-
-			const content = el('div');
-			content.setAttribute('style', 'flex: 1;');
-
-			const action = el('div');
-			action.setAttribute('style', 'font-size: 11px; color: var(--text-primary);');
-			action.textContent = typeof recommendation?.action === 'string' ? recommendation.action : '';
-
-			const impact = el('div');
-			impact.setAttribute('style', 'font-size: 10px; color: var(--text-muted); margin-top: 2px;');
-			impact.textContent = typeof recommendation?.impact === 'string' ? recommendation.impact : '';
-
-			content.append(action, impact);
-
-			const weight = el('span');
-			weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
-			weight.textContent = `+${toFiniteNumber(recommendation?.weight)}`;
-
-			row.append(priorityLabel, content, weight);
-			recommendationsSection.appendChild(row);
-		}
-
-		container.appendChild(recommendationsSection);
+		container.appendChild(buildRecommendationsSectionElement(recommendations));
 	}
 
-	// Build a prompt summarizing the failed/warning checks for Copilot
 	const failedChecks = checks.filter((c: RepoHygieneCheck) => c?.status === 'fail' || c?.status === 'warning');
 	if (failedChecks.length > 0) {
-		const copilotSection = el('div');
-		copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;');
-
-		const copilotText = el('div');
-		copilotText.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); flex: 1;');
-		copilotText.textContent = 'Let Copilot help you fix the identified issues in this repository.';
-
-		const copilotBtn = document.createElement('vscode-button');
-		copilotBtn.setAttribute('style', 'min-width: 180px;');
-		copilotBtn.textContent = '🤖 Ask Copilot to Improve';
-		copilotBtn.addEventListener('click', () => {
-			const failedLines = failedChecks.map((c: RepoHygieneCheck) => `- ${c.label}: ${c.detail || ''}${c.hint ? ` (${c.hint})` : ''}`).join('\n');
-			const prompt = `Please help me improve this repository by addressing the following best practice issues:\n\n${failedLines}\n\nFor each issue, please provide specific steps or code changes to fix it.`;
-
-			const isRepoOpen = !workspacePath || currentWorkspacePaths.some(
-				p => p.toLowerCase() === workspacePath.toLowerCase()
-			);
-
-			if (isRepoOpen) {
-				vscode.postMessage({ command: 'openCopilotChatWithPrompt', prompt });
-			} else {
-				// Repo is not currently open — show instructions + prompt + copy button
-				const repoFolderName = workspacePath.split(/[/\\]/).filter(Boolean).pop() ?? workspacePath;
-				copilotSection.replaceChildren();
-				copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 4px; display: flex; flex-direction: column; gap: 8px;');
-
-				const instructions = el('div');
-				instructions.setAttribute('style', 'font-size: 11px; color: var(--warning-fg);');
-				instructions.textContent = `⚠️ Open "${repoFolderName}" in VS Code first, then paste this prompt into Copilot Chat:`;
-
-				const promptBox = el('pre');
-				promptBox.setAttribute('style', 'font-size: 10px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; font-family: monospace; margin: 0;');
-				promptBox.textContent = prompt;
-
-				const copyBtn = document.createElement('vscode-button');
-				copyBtn.setAttribute('appearance', 'secondary');
-				copyBtn.textContent = '📋 Copy prompt';
-				copyBtn.addEventListener('click', () => {
-					navigator.clipboard.writeText(prompt).then(() => {
-						copyBtn.textContent = '✅ Copied!';
-						setTimeout(() => { copyBtn.textContent = '📋 Copy prompt'; }, 2000);
-					});
-				});
-
-				copilotSection.append(instructions, promptBox, copyBtn);
-			}
-		});
-
-		copilotSection.append(copilotText, copilotBtn);
-		container.appendChild(copilotSection);
+		container.appendChild(buildCopilotSectionElement(failedChecks, workspacePath));
 	}
 
 	return container;
 }
 
-function renderRepositoryHygienePanels(): void {
-	const listPane = document.getElementById('repo-list-pane');
-	const listContainer = document.getElementById('repo-list-pane-container');
-	const detailsPane = document.getElementById('repo-details-pane');
-	const detailsContainer = document.getElementById('repo-details-pane-container');
-	if (!listPane || !listContainer || !detailsPane || !detailsContainer || !hygieneMatrixState) {
-		return;
-	}
-
-	const hasSelectedRepository = !!selectedRepoPath && !isSwitchingRepository;
-	const visibleWorkspaces = hasSelectedRepository
-		? hygieneMatrixState.workspaces.filter((ws) => ws.workspacePath === selectedRepoPath)
-		: hygieneMatrixState.workspaces;
-
-	listContainer.classList.remove('repo-hygiene-pane-collapsed');
-	detailsContainer.classList.toggle('repo-hygiene-pane-collapsed', !hasSelectedRepository);
-
+function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], hasSelectedRepository: boolean): void {
 	const colStyles = {
-		sessions: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
-		interactions: 'width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
-		score: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-secondary);',
+		sessions: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
+		interactions: 'width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
+		score: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
 	};
 	const headerHtml = `
 		<div style="padding: 4px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary);">
-			<div style="flex: 1; min-width: 0; font-size: 10px; font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Repository</div>
-			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
-			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
-			<div style="${colStyles.score} font-weight: 600; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
+			<div style="flex: 1; min-width: 0; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Repository</div>
+			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
+			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
+			<div style="${colStyles.score} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
 			<div style="width: 80px; flex-shrink: 0;"></div>
 		</div>
 	`;
@@ -2270,6 +2273,47 @@ function renderRepositoryHygienePanels(): void {
 			</div>
 		`;
 	}).join('');
+}
+
+function renderRepoDetailSuccess(detailsPane: HTMLElement, record: any, workspaceName: string): void {
+	detailsPane.replaceChildren();
+	const card = el('div', 'repo-details-card');
+	card.setAttribute('style', 'padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;');
+	const header = el('div', 'repo-details-card-header');
+	header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;');
+	const label = el('div');
+	label.setAttribute('style', 'font-size: 12px; color: var(--text-secondary);');
+	label.textContent = 'Repository: ';
+	const repoName = el('span');
+	repoName.setAttribute('style', "color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;");
+	repoName.textContent = workspaceName;
+	label.appendChild(repoName);
+	const switchButton = document.createElement('vscode-button');
+	switchButton.id = 'btn-switch-repository';
+	switchButton.setAttribute('style', 'min-width: 120px;');
+	switchButton.textContent = 'Switch Repository';
+	header.append(label, switchButton);
+	card.append(header, buildRepoAnalysisBodyElement(record.data, selectedRepoPath ?? undefined));
+	detailsPane.appendChild(card);
+}
+
+function renderRepositoryHygienePanels(): void {
+	const listPane = document.getElementById('repo-list-pane');
+	const listContainer = document.getElementById('repo-list-pane-container');
+	const detailsPane = document.getElementById('repo-details-pane');
+	const detailsContainer = document.getElementById('repo-details-pane-container');
+	if (!listPane || !listContainer || !detailsPane || !detailsContainer || !hygieneMatrixState) {
+		return;
+	}
+
+	const hasSelectedRepository = !!selectedRepoPath && !isSwitchingRepository;
+	const visibleWorkspaces = hasSelectedRepository
+		? hygieneMatrixState.workspaces.filter((ws) => ws.workspacePath === selectedRepoPath)
+		: hygieneMatrixState.workspaces;
+
+	listContainer.classList.remove('repo-hygiene-pane-collapsed');
+	detailsContainer.classList.toggle('repo-hygiene-pane-collapsed', !hasSelectedRepository);
+	renderRepoListPane(listPane, visibleWorkspaces, hasSelectedRepository);
 
 	if (!hasSelectedRepository || !selectedRepoPath) {
 		detailsPane.replaceChildren();
@@ -2279,30 +2323,7 @@ function renderRepositoryHygienePanels(): void {
 	const workspaceName = getWorkspaceName(selectedRepoPath);
 	const record = repoAnalysisState.get(selectedRepoPath);
 	if (record?.data) {
-		detailsPane.replaceChildren();
-		const card = el('div', 'repo-details-card');
-		card.setAttribute('style', 'padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;');
-
-		const header = el('div', 'repo-details-card-header');
-		header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;');
-
-		const label = el('div');
-		label.setAttribute('style', 'font-size: 12px; color: var(--text-secondary);');
-		label.textContent = 'Repository: ';
-
-		const repoName = el('span');
-		repoName.setAttribute('style', "color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;");
-		repoName.textContent = workspaceName;
-		label.appendChild(repoName);
-
-		const switchButton = document.createElement('vscode-button');
-		switchButton.id = 'btn-switch-repository';
-		switchButton.setAttribute('style', 'min-width: 120px;');
-		switchButton.textContent = 'Switch Repository';
-
-		header.append(label, switchButton);
-		card.append(header, buildRepoAnalysisBodyElement(record.data, selectedRepoPath ?? undefined));
-		detailsPane.appendChild(card);
+		renderRepoDetailSuccess(detailsPane, record, workspaceName);
 		return;
 	}
 

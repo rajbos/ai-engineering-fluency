@@ -265,7 +265,7 @@ function _scdlDistributeToDays(
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 53; // Add Antigravity ecosystem adapter + LOC support
+	private static readonly CACHE_VERSION = 55; // Fix LOC extraction for Copilot CLI coding agent sessions (edit/create tools)
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 
@@ -1515,7 +1515,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async _preloadSessionFiles(
 		cutoffMs: number,
-		progressCallback?: (completed: number, total: number) => void
+		progressCallback?: (completed: number, total: number) => void,
+		editorSet?: Set<string>
 	): Promise<{ sessionFiles: string[]; preloaded: SessionFilePreload[] }> {
 		// --- Streaming pipeline: overlap discovery with parsing ---
 		// Discovery pushes file batches into a shared queue as each adapter completes.
@@ -1534,6 +1535,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const discoveryPromise = (async () => {
 			try {
 				return await this.sessionDiscovery.getCopilotSessionFilesStreaming((batch) => {
+					if (editorSet) {
+						for (const file of batch) {
+							const editor = this.detectEditorSource(file);
+							if (editor && editor !== 'Unknown') { editorSet.add(editor); }
+						}
+					}
 					queue.push(...batch);
 					totalDiscovered += batch.length;
 				});
@@ -1605,8 +1612,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			// Streaming pipeline: discovery and parsing run concurrently.
 			// Workers start processing files as each adapter batch arrives.
-			const progressCallback = this.buildProgressCallback(silent);
-			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback);
+			const discoveredEditorSet = new Set<string>();
+			const progressCallback = this.buildProgressCallback(silent, () =>
+				[...discoveredEditorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
+			);
+			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet);
 
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
 
@@ -1643,7 +1653,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private buildProgressCallback(silent: boolean): ((completed: number, total: number) => void) | undefined {
+	private buildProgressCallback(silent: boolean, getEditors?: () => { icon: string; name: string }[]): ((completed: number, total: number) => void) | undefined {
 		if (silent) { return undefined; }
 		let parsingStepNotified = false;
 		let lastProgressSentMs = 0;
@@ -1652,7 +1662,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
 			if (!parsingStepNotified) {
 				parsingStepNotified = true;
-				this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'parsing', total });
+				const editors = getEditors?.() ?? [];
+				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
+				this.sendLoadingPanelMessage(msg);
 			}
 			const now = Date.now();
 			if (now - lastProgressSentMs >= 500 || completed === total) {
@@ -1660,6 +1672,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
 			}
 		};
+	}
+
+	/** Maps known editor display names to emoji icons for the loader animation. */
+	private getEditorIconForLoader(editorName: string): string {
+		const map: Record<string, string> = {
+			'VS Code': '💙', 'VS Code Insiders': '💚', 'VS Code Exploration': '🧪',
+			'VS Code Server': '☁️', 'VS Code Server (Insiders)': '☁️', 'VSCodium': '🔷',
+			'Cursor': '⚡', 'Copilot CLI': '🤖', 'OpenCode': '🟢', 'Visual Studio': '🪟',
+			'Claude Code': '🟠', 'Claude Desktop Cowork': '🟠', 'Mistral Vibe': '🔥',
+			'Gemini CLI': '💎', 'Antigravity': '🚀',
+		};
+		return map[editorName] ?? '📝';
 	}
 
 	private mergeIntoFullDailyStats(dailyStats: DailyTokenStats[]): void {
@@ -2535,6 +2559,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.deduplicateWorkspacesByCase(sessionCounts, interactionCounts);
 		this.deduplicateRemoteWorkspacePaths(sessionCounts, interactionCounts);
 		this.deduplicateCopilotWorktrees(sessionCounts, interactionCounts);
+		this.deduplicateByBasename(sessionCounts, interactionCounts);
+	}
+
+	/**
+	 * Pass 4 — same-basename dedup for local paths.
+	 * A repo cloned at two different locations (e.g. ~/.copilot/repos/my-repo AND
+	 * ~/source/my-repo) will have the same basename but different absolute paths.
+	 * Merge them into one entry; the path with more interactions wins so the richer
+	 * customization file scan is kept.
+	 */
+	private deduplicateByBasename(sessionCounts: Map<string, number>, interactionCounts: Map<string, number>): void {
+		const isRemotePath = (p: string) => process.platform === 'win32' && _normalizePath(p).startsWith('/');
+		// Group all non-remote, non-unresolved paths by lower-case basename
+		const basenameToKeys = new Map<string, string[]>();
+		for (const key of Array.from(sessionCounts.keys())) {
+			if (isRemotePath(key) || key.startsWith('<unresolved:')) { continue; }
+			const base = path.basename(key).toLowerCase();
+			const group = basenameToKeys.get(base) || [];
+			group.push(key);
+			basenameToKeys.set(base, group);
+		}
+		for (const [, group] of basenameToKeys) {
+			if (group.length < 2) { continue; }
+			// Pick winner: most interactions; on tie, most sessions; on tie, first entry
+			const winner = group.reduce((best, key) => {
+				const bestScore = (interactionCounts.get(best) || 0) * 10000 + (sessionCounts.get(best) || 0);
+				const keyScore = (interactionCounts.get(key) || 0) * 10000 + (sessionCounts.get(key) || 0);
+				return keyScore > bestScore ? key : best;
+			});
+			for (const key of group) {
+				if (key !== winner && sessionCounts.has(key)) {
+					this.mergeWorkspaceInto(winner, key, sessionCounts, interactionCounts);
+				}
+			}
+		}
 	}
 
 	private buildResolvedWorkspaceMatrixRows(
@@ -5952,7 +6011,7 @@ ${this.getLoadingHtmlBody(nonce)}
     --bg-secondary: var(--vscode-sideBar-background, #181825);
     --bg-card: var(--vscode-editorWidget-background, #24273a);
     --text-primary: var(--vscode-editor-foreground, #cdd6f4);
-    --text-muted: var(--vscode-disabledForeground, #6c7086);
+    --text-muted: var(--vscode-descriptionForeground, #9399b2);
     --accent: var(--vscode-textLink-foreground, #89b4fa);
     --success: var(--vscode-terminal-ansiGreen, #a6e3a1);
     --border: var(--vscode-panel-border, #313244);
@@ -6038,12 +6097,7 @@ ${this.getLoadingHtmlScript()}
   private getLoadingHtmlScript(): string {
     return `(function () {
     var t0 = Date.now();
-    var EDITORS = [
-        { icon: '💙', name: 'VS Code' }, { icon: '🤖', name: 'Copilot CLI' }, { icon: '⚡', name: 'Cursor' },
-        { icon: '🟠', name: 'Claude Code' }, { icon: '🟢', name: 'OpenCode' }, { icon: '🔥', name: 'Mistral Vibe' },
-        { icon: '💎', name: 'Gemini CLI' }, { icon: '🪟', name: 'Visual Studio' }, { icon: '🔷', name: 'VSCodium' },
-        { icon: '💚', name: 'VS Code Insiders' },
-    ];
+    var EDITORS = [];
     var editorsSeen = 0;
     setInterval(function () {
         var s = Math.floor((Date.now() - t0) / 1000);
@@ -6068,6 +6122,7 @@ ${this.getLoadingHtmlScript()}
             if (m.step === 'discovering') { setActive('s-discover');
             } else if (m.step === 'parsing') {
                 var total = m.total || 0; setDone('s-discover');
+                if (m.editors !== undefined) { EDITORS = m.editors; editorsSeen = 0; }
                 var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)';
                 setDone('s-cache'); setActive('s-parse');
                 var sub = document.getElementById('subtitle'); if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
@@ -6087,7 +6142,8 @@ ${this.getLoadingHtmlScript()}
             var bf2 = document.getElementById('badge-files'); if (bf2) bf2.textContent = m.completed + '\\u202f/\\u202f' + m.total + ' files';
             var sc2 = document.getElementById('sc-parse'); if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
             var sub3 = document.getElementById('subtitle'); if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\\u202f/\\u202f' + m.total + '\\u2026';
-            if (m.completed % Math.max(1, Math.floor(m.total / 10)) === 0 && editorsSeen < EDITORS.length) {
+            var expectedPills = Math.min(EDITORS.length, Math.floor((m.completed / Math.max(1, m.total)) * EDITORS.length));
+            while (editorsSeen < expectedPills) {
                 var editor = EDITORS[editorsSeen]; editorsSeen++;
                 var row = document.getElementById('editors-row');
                 if (row) { var pill = document.createElement('div'); pill.className = 'chip'; pill.style.animation = 'pop-in 0.35s ease both'; pill.innerHTML = '<span>' + editor.icon + '</span>\\u00a0<span class="chip-value">' + esc(editor.name) + '</span>'; row.appendChild(pill); }

@@ -220,7 +220,7 @@ export function validateDraft(draft: BackendConfigDraft): DraftValidationResult 
 	validateAuthMode(draft, errors);
 	validateBlobUpload(draft, errors);
 
-return { valid: Object.keys(errors).length === 0, errors };
+	return { valid: Object.keys(errors).length === 0, errors };
 }
 
 export function applyDraftToSettings(

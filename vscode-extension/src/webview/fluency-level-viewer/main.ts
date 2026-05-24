@@ -81,6 +81,24 @@ function renderLevelCards(category: CategoryLevelData): string {
 	}).join('');
 }
 
+function wireNavButtons(data: FluencyLevelData): void {
+	document.getElementById('btn-refresh')?.addEventListener('click', () => { vscode.postMessage({ command: 'refresh' }); });
+	document.getElementById('btn-maturity')?.addEventListener('click', () => { vscode.postMessage({ command: 'showMaturity' }); });
+	document.getElementById('btn-details')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDetails' }); });
+	document.getElementById('btn-chart')?.addEventListener('click', () => { vscode.postMessage({ command: 'showChart' }); });
+	document.getElementById('btn-usage')?.addEventListener('click', () => { vscode.postMessage({ command: 'showUsageAnalysis' }); });
+	document.getElementById('btn-diagnostics')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDiagnostics' }); });
+	document.getElementById('btn-dashboard')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDashboard' }); });
+	wireExtensionPointButtons(vscode);
+	document.querySelectorAll('.category-btn').forEach(btn => {
+		btn.addEventListener('click', (e) => {
+			const target = e.currentTarget as HTMLElement;
+			selectedCategoryIndex = parseInt(target.getAttribute('data-index') || '0', 10);
+			renderLayout(data);
+		});
+	});
+}
+
 function renderLayout(data: FluencyLevelData): void {
 	const root = document.getElementById('root');
 	if (!root) { return; }
@@ -130,39 +148,7 @@ function renderLayout(data: FluencyLevelData): void {
 		</div>
 	`;
 
-	// Wire up navigation buttons
-	document.getElementById('btn-refresh')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'refresh' });
-	});
-	document.getElementById('btn-maturity')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showMaturity' });
-	});
-	document.getElementById('btn-details')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showDetails' });
-	});
-	document.getElementById('btn-chart')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showChart' });
-	});
-	document.getElementById('btn-usage')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showUsageAnalysis' });
-	});
-	document.getElementById('btn-diagnostics')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showDiagnostics' });
-	});
-	document.getElementById('btn-dashboard')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showDashboard' });
-	});
-	wireExtensionPointButtons(vscode);
-
-	// Wire up category selection buttons
-	document.querySelectorAll('.category-btn').forEach(btn => {
-		btn.addEventListener('click', (e) => {
-			const target = e.currentTarget as HTMLElement;
-			const index = parseInt(target.getAttribute('data-index') || '0', 10);
-			selectedCategoryIndex = index;
-			renderLayout(data);
-		});
-	});
+	wireNavButtons(data);
 }
 
 async function bootstrap(): Promise<void> {
