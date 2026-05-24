@@ -6011,7 +6011,7 @@ ${this.getLoadingHtmlBody(nonce)}
     --bg-secondary: var(--vscode-sideBar-background, #181825);
     --bg-card: var(--vscode-editorWidget-background, #24273a);
     --text-primary: var(--vscode-editor-foreground, #cdd6f4);
-    --text-muted: var(--vscode-disabledForeground, #6c7086);
+    --text-muted: var(--vscode-descriptionForeground, #9399b2);
     --accent: var(--vscode-textLink-foreground, #89b4fa);
     --success: var(--vscode-terminal-ansiGreen, #a6e3a1);
     --border: var(--vscode-panel-border, #313244);
