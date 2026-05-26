@@ -1906,7 +1906,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!this.chartPanel || (!this.lastFullDailyStats && !this.lastDailyStats)) { return; }
 		const chartStats = this.lastFullDailyStats ?? this.lastDailyStats!;
 		if (silent) {
-			void this.chartPanel.webview.postMessage({ command: 'updateChartData', data: { ...this.buildChartData(chartStats), compactNumbers: this.getCompactNumbersSetting() } });
+			void this.chartPanel.webview.postMessage({ command: 'updateChartData', data: { ...this.buildChartData(chartStats), compactNumbers: this.getCompactNumbersSetting(), monthlyBudget: this.getMonthlyBudgetSetting() } });
 		} else {
 			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, chartStats);
 		}
@@ -7135,7 +7135,7 @@ ${this.getLoadingHtmlScript()}
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "chart.js"),
     );
 
-    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView, initialMetric: this.lastChartMetric, initialSplit: this.lastChartSplit };
+    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView, initialMetric: this.lastChartMetric, initialSplit: this.lastChartSplit, monthlyBudget: this.getMonthlyBudgetSetting() };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
 

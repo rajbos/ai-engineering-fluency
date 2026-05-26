@@ -69,6 +69,7 @@ type InitialChartData = {
 	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
 	initialMetric?: 'tokens' | 'output' | 'cost';
 	initialSplit?: 'total' | 'model' | 'editor' | 'repository' | 'language';
+	monthlyBudget?: number;
 	periods?: {
 		day: ChartPeriodData;
 		week: ChartPeriodData;
@@ -692,18 +693,22 @@ function buildTotalViewConfig(period: ChartPeriodData, baseOptions: ReturnType<t
 	};
 }
 
-function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors, monthlyBudget = 0): ChartConfig {
 	const isRolling = currentDisplayMode === 'rolling';
 	const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
 	const lastIdx = period.costData.length - 1;
 	const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.costData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
 	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.costData.map((_: number, i: number) => i === lastIdx ? projExtra : 0), backgroundColor: 'rgba(34, 197, 94, 0.2)', borderColor: 'rgba(34, 197, 94, 0.5)', borderWidth: 1, yAxisID: 'y' }] : [];
+	const budgetDs = currentPeriod === 'month' && monthlyBudget > 0
+		? [{ label: `Monthly Budget ($${monthlyBudget.toFixed(2)})`, data: period.labels.map(() => monthlyBudget), type: 'line' as const, borderColor: 'rgba(255, 80, 80, 0.9)', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, fill: false, tension: 0, yAxisID: 'y' }]
+		: [];
 	const rollingLabel = getRollingLabel();
 	return {
 		type: 'bar' as const,
 		data: { labels: period.labels, datasets: [
 			{ label: isRolling ? `${rollingLabel} (UBB)` : 'Est. Cost (UBB)', data: costData, backgroundColor: isRolling ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.6)', borderColor: 'rgba(34, 197, 94, 1)', borderWidth: isRolling ? 2 : 1, type: isRolling ? 'line' as const : undefined, tension: isRolling ? 0.4 : undefined, fill: isRolling ? false : undefined, yAxisID: 'y' },
-			...projDs
+			...projDs,
+			...budgetDs
 		] },
 		options: { ...baseOptions, plugins: { ...baseOptions.plugins, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` $${Number(ctx.parsed.y).toFixed(4)}` } } },
 			scales: { x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (UBB)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } } }
@@ -752,7 +757,7 @@ function createConfig(data: InitialChartData): ChartConfig {
 	const c = getChartColors();
 	const baseOptions = buildBaseOptions(c);
 	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
-	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c); }
+	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c, data.monthlyBudget ?? 0); }
 	if (view.startsWith('output-')) { return buildOutputViewConfig(view, period, baseOptions, c); }
 	return buildStackedViewConfig(view, period, baseOptions, c);
 }
