@@ -1161,8 +1161,10 @@ function setupDisplaySettingHandlers(): void {
   document
     .getElementById("input-monthly-budget")
     ?.addEventListener("change", (e) => {
-      const raw = (e.target as HTMLInputElement).value;
-      const value = Math.max(0, parseFloat(raw) || 0);
+      const input = e.target as HTMLInputElement;
+      const raw = parseFloat(input.value);
+      const value = isNaN(raw) ? 0 : Math.min(99999, Math.max(0, Math.round(raw * 100) / 100));
+      input.value = value.toString();
       vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.monthlyBudget", value });
     });
 }
@@ -1757,7 +1759,7 @@ function sel(current: string, value: string): string {
 function renderDiagDisplayTabHtml(data: DiagnosticsData): string {
   const showTokens = data.displaySettings?.showTokens ?? 'both';
   const showCost = data.displaySettings?.showCost ?? 'none';
-  const monthlyBudget = data.displaySettings?.monthlyBudget ?? 0;
+  const monthlyBudget = Math.round((data.displaySettings?.monthlyBudget ?? 0) * 100) / 100;
   return `
 <div id="tab-display" class="tab-content">
 <div class="info-box">
@@ -1802,7 +1804,7 @@ Set a monthly AI spend budget in USD to get visual alerts on the status bar. The
 </p>
 <div style="display: flex; align-items: center; gap: 12px;">
   <label style="color: #ccc; min-width: 160px; font-size: 13px;">💵 Monthly budget (USD):</label>
-  <input id="input-monthly-budget" type="number" min="0" step="1" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
+  <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
 </div>
 <p style="color: #888; font-size: 11px; margin-top: 12px;">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
 </div>

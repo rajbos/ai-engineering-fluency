@@ -6680,7 +6680,13 @@ ${this.getLoadingHtmlScript()}
       'display.statusBar.monthlyBudget': 'aiEngineeringFluency.display.statusBar.monthlyBudget',
     };
     const fullKey = fullKeyMap[key];
-    if (fullKey) { await vscode.workspace.getConfiguration().update(fullKey, value, vscode.ConfigurationTarget.Global); }
+    if (!fullKey) { return; }
+    let sanitised: any = value;
+    if (key === 'display.statusBar.monthlyBudget') {
+      const n = typeof value === 'number' ? value : parseFloat(value);
+      sanitised = isNaN(n) ? 0 : Math.min(99999, Math.max(0, Math.round(n * 100) / 100));
+    }
+    await vscode.workspace.getConfiguration().update(fullKey, sanitised, vscode.ConfigurationTarget.Global);
   }
 
   private async diagHandleResetDebugCounters(): Promise<void> {
