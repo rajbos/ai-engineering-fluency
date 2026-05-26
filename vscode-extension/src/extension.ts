@@ -1663,6 +1663,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (silent) { return undefined; }
 		let parsingStepNotified = false;
 		let lastProgressSentMs = 0;
+		let lastTooltipPctBucket = -1;
 		return (completed: number, total: number) => {
 			const percentage = Math.round((completed / total) * 100);
 			this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
@@ -1673,12 +1674,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
 				this.sendLoadingPanelMessage(msg);
 				// Update tooltip once when parsing starts (editors are now known).
-				// Do NOT update again on each 500ms tick — VS Code destroys and recreates the
-				// tooltip widget on every property change, causing continuous flickering.
 				// Skip entirely when the loading panel is already open — no need to double up.
 				if (!this._detailsPanelIsLoading) {
-					this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing');
+					this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing', percentage > 0 ? percentage : undefined);
 				}
+			}
+			// Update tooltip at each 10% boundary to show real progress.
+			// Using buckets (not raw %) prevents multiple updates at the same threshold.
+			// Skip when the loading panel is open — the panel already shows progress.
+			const pctBucket = Math.floor(percentage / 10);
+			if (!this._detailsPanelIsLoading && pctBucket > lastTooltipPctBucket && percentage > 0) {
+				lastTooltipPctBucket = pctBucket;
+				this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing', percentage);
 			}
 			const now = Date.now();
 			if (now - lastProgressSentMs >= 500 || completed === total) {
@@ -1716,8 +1723,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.statusBarItem.tooltip = this.buildTooltipMarkdown(detailedStats);
 	}
 
-	private buildLoadingTooltipMarkdown(step: 'discovering' | 'parsing' | 'computing'): vscode.MarkdownString {
-		const svg = this.generateLoadingSvg(step, this._loadingEditors);
+	private buildLoadingTooltipMarkdown(step: 'discovering' | 'parsing' | 'computing', percentage?: number): vscode.MarkdownString {
+		const svg = this.generateLoadingSvg(step, this._loadingEditors, percentage);
 		const tooltip = new vscode.MarkdownString(`![Loading](data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)})`);
 		tooltip.isTrusted = true;
 		tooltip.supportThemeIcons = false;
@@ -1727,7 +1734,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// eslint-disable-next-line max-lines-per-function, complexity, sonarjs/cognitive-complexity
 	private generateLoadingSvg(
 		step: 'discovering' | 'parsing' | 'computing',
-		editors: { icon: string; name: string }[]
+		editors: { icon: string; name: string }[],
+		percentage?: number
 	): string {
 		const W = 440, P = 16;
 		const BG   = '#181825', CARD  = '#24273a', FG  = '#cdd6f4';
@@ -1742,8 +1750,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'Discovering session files', 'Checking cache',
 			'Parsing session logs',      'Computing statistics', 'Ready!',
 		];
-		const pct     = step === 'computing' ? 96 : 2;
-		const pctTxt  = step === 'computing' ? '96%' : '–';
+		const pct     = step === 'computing' ? 96 : (percentage ?? 0);
+		const pctTxt  = step === 'computing' ? '96%' : (percentage !== undefined && percentage > 0 ? `${percentage}%` : '–');
 		const subtitle =
 			step === 'discovering' ? 'Discovering session files...' :
 			step === 'parsing'     ? 'Parsing session files...'     :
@@ -1788,8 +1796,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Progress track
 		o.push(`<rect x="${P}" y="${PRY}" width="${PW}" height="${PRH}" rx="2.5" fill="${BRD}"/>`);
 
-		// Progress fill — shimmer (indeterminate) during discovering/parsing, solid fill for computing
-		if (step !== 'computing') {
+		// Progress fill — shimmer (indeterminate) during discovering/early parsing, solid fill when progress is known
+		if (step !== 'computing' && pct === 0) {
 			const sw = Math.round(PW * 0.25);
 			o.push(`<rect y="${PRY}" width="${sw}" height="${PRH}" rx="2.5" fill="url(#pg)" clip-path="url(#pclip)">
   <animate attributeName="x" from="${P - Math.round(PW * 0.35)}" to="${P + Math.round(PW * 1.1)}" dur="1.8s" repeatCount="indefinite" calcMode="ease-in-out"/>
@@ -4332,6 +4340,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!stats) {
 			this.log('No cached stats — showing loading screen while calculating...');
 			this._detailsPanelIsLoading = true;
+			this.statusBarItem.tooltip = 'AI Engineering Fluency — loading in panel…';
 			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview);
 
 			stats = await this.updateTokenStats();
