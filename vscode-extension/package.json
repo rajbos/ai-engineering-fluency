@@ -391,6 +391,7 @@
     "test:coverage": "node ../scripts/prepare-test-output.js && tsc -p tsconfig.tests.json && node --require ./out/test/unit/vscode-shim-register.js --experimental-test-coverage --test --test-force-exit --test-coverage-lines=65 --test-coverage-functions=70 --test-coverage-branches=60 --test-coverage-include=out/src/backend/**/*.js --test-coverage-include=out/src/utils/**/*.js --test-coverage-include=out/src/usageAnalysis.js --test-coverage-include=out/src/tokenEstimation.js --test-coverage-include=out/src/maturityScoring.js out/test/unit/*.test.js",
     "test:coverage:ci": "node --require ./out/test/unit/vscode-shim-register.js --experimental-test-coverage --test --test-force-exit --test-coverage-include=out/src/backend/**/*.js --test-coverage-include=out/src/utils/**/*.js --test-coverage-include=out/src/usageAnalysis.js --test-coverage-include=out/src/tokenEstimation.js --test-coverage-include=out/src/maturityScoring.js out/test/unit/*.test.js",
     "test:mutation": "npm run compile-tests && npx stryker run",
+    "package:pre-release": "tsc --noEmit && eslint src && node esbuild.js --production && npx vsce package --pre-release",
     "pre-release": "node ../scripts/pre-release.js",
     "capture-screenshots": "pwsh -File ../scripts/capture-screenshots.ps1",
     "sync-changelog": "node ../scripts/sync-changelog.js",

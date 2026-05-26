@@ -26,6 +26,11 @@ on:
         required: false
         default: false
         type: boolean
+      publish_pre_release:
+        description: 'Publish as a pre-release version (uses --pre-release flag for vsce)'
+        required: false
+        default: false
+        type: boolean
 
 permissions:
   contents: read
@@ -260,7 +265,13 @@ jobs:
       working-directory: vscode-extension
       # --baseImagesUrl ensures relative image paths in README.md resolve correctly
       # on the marketplace for this monorepo (extension root ≠ repo root).
-      run: npx vsce package --baseImagesUrl https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/vscode-extension
+      # --pre-release is added when publishing a pre-release version.
+      run: |
+        PRE_RELEASE_FLAG=""
+        if [ "${{ inputs.publish_pre_release }}" == "true" ]; then
+          PRE_RELEASE_FLAG="--pre-release"
+        fi
+        npx vsce package $PRE_RELEASE_FLAG --baseImagesUrl https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/vscode-extension
       
     # Legacy VSIX creation disabled — migration flow is complete, no longer publishing copilot-token-tracker.
     # - name: Create legacy VSIX (copilot-token-tracker)
@@ -477,7 +488,11 @@ jobs:
             echo "⏭️  $label v$local_ver already published — skipping."
           else
             echo "Publishing $vsix to VS Code Marketplace ($label)..."
-            vscode-extension/node_modules/.bin/vsce publish --packagePath "$vsix" --pat "$VSCE_PAT"
+            PRE_RELEASE_FLAG=""
+            if [ "${{ inputs.publish_pre_release }}" == "true" ]; then
+              PRE_RELEASE_FLAG="--pre-release"
+            fi
+            vscode-extension/node_modules/.bin/vsce publish --packagePath "$vsix" --pat "$VSCE_PAT" $PRE_RELEASE_FLAG
           fi
         }
 
@@ -509,7 +524,11 @@ jobs:
             echo "⏭️  $label v$local_ver already published on Open VSX — skipping."
           else
             echo "Publishing $vsix to Open VSX Registry ($label)..."
-            vscode-extension/node_modules/.bin/ovsx publish --packagePath "$vsix" -p "$OPEN_VSX_TOKEN"
+            PRE_RELEASE_FLAG=""
+            if [ "${{ inputs.publish_pre_release }}" == "true" ]; then
+              PRE_RELEASE_FLAG="--pre-release"
+            fi
+            vscode-extension/node_modules/.bin/ovsx publish --packagePath "$vsix" -p "$OPEN_VSX_TOKEN" $PRE_RELEASE_FLAG
           fi
         }
 
@@ -523,7 +542,11 @@ jobs:
           echo "# 🚀 VS Code Marketplace"
           echo ""
           if [ "${{ steps.publish.outcome }}" == "success" ]; then
-            echo "✅ Extension v${{ needs.release.outputs.version }} published to the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency)"
+            if [ "${{ inputs.publish_pre_release }}" == "true" ]; then
+              echo "✅ Extension v${{ needs.release.outputs.version }} published as **pre-release** to the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency)"
+            else
+              echo "✅ Extension v${{ needs.release.outputs.version }} published to the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency)"
+            fi
           elif [ "${{ steps.version_check.outcome }}" == "failure" ]; then
             echo "⏭️ Publish skipped — v${{ needs.release.outputs.version }} is already live on the [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency)."
             echo ""
