@@ -1609,6 +1609,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
+			if (!silent) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('discovering'); }
 
 			// Streaming pipeline: discovery and parsing run concurrently.
 			// Workers start processing files as each adapter batch arrives.
@@ -1619,6 +1620,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet);
 
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
+			if (!silent) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
 
 			const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 			this.lastDailyStats = dailyStats;
@@ -1670,6 +1672,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (now - lastProgressSentMs >= 500 || completed === total) {
 				lastProgressSentMs = now;
 				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
+				this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing', percentage);
 			}
 		};
 	}
@@ -1700,6 +1703,38 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.setStatusBarText(this.buildStatusBarText(detailedStats));
 		}
 		this.statusBarItem.tooltip = this.buildTooltipMarkdown(detailedStats);
+	}
+
+	private buildLoadingTooltipMarkdown(step: 'discovering' | 'parsing' | 'computing', percentage?: number): vscode.MarkdownString {
+		const tooltip = new vscode.MarkdownString();
+		tooltip.isTrusted = false;
+		tooltip.supportThemeIcons = true;
+		tooltip.appendMarkdown('#### $(loading~spin) AI Engineering Fluency — Loading…\n');
+		tooltip.appendMarkdown('\n---\n');
+		const steps: { id: 'discovering' | 'parsing' | 'computing'; label: string }[] = [
+			{ id: 'discovering', label: 'Discovering session files' },
+			{ id: 'parsing', label: 'Parsing session logs' },
+			{ id: 'computing', label: 'Computing statistics' },
+		];
+		const order = ['discovering', 'parsing', 'computing'] as const;
+		const currentIdx = order.indexOf(step);
+		for (let i = 0; i < steps.length; i++) {
+			const s = steps[i];
+			let icon: string;
+			let label = s.label;
+			if (i < currentIdx) {
+				icon = '$(check)';
+			} else if (i === currentIdx) {
+				icon = '$(loading~spin)';
+				if (step === 'parsing' && percentage !== undefined) {
+					label += ` — ${percentage}%`;
+				}
+			} else {
+				icon = '$(circle-outline)';
+			}
+			tooltip.appendMarkdown(`${icon} ${label}  \n`);
+		}
+		return tooltip;
 	}
 
 	private buildTooltipMarkdown(detailedStats: DetailedStats): vscode.MarkdownString {
