@@ -1672,12 +1672,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this._loadingEditors = editors;
 				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
 				this.sendLoadingPanelMessage(msg);
+				// Update tooltip once when parsing starts (editors are now known).
+				// Do NOT update again on each 500ms tick — VS Code destroys and recreates the
+				// tooltip widget on every property change, causing continuous flickering.
+				this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing');
 			}
 			const now = Date.now();
 			if (now - lastProgressSentMs >= 500 || completed === total) {
 				lastProgressSentMs = now;
 				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
-				this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing', percentage);
 			}
 		};
 	}
@@ -1710,8 +1713,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.statusBarItem.tooltip = this.buildTooltipMarkdown(detailedStats);
 	}
 
-	private buildLoadingTooltipMarkdown(step: 'discovering' | 'parsing' | 'computing', percentage?: number): vscode.MarkdownString {
-		const svg = this.generateLoadingSvg(step, percentage, this._loadingEditors);
+	private buildLoadingTooltipMarkdown(step: 'discovering' | 'parsing' | 'computing'): vscode.MarkdownString {
+		const svg = this.generateLoadingSvg(step, this._loadingEditors);
 		const tooltip = new vscode.MarkdownString(`![Loading](data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)})`);
 		tooltip.isTrusted = true;
 		tooltip.supportThemeIcons = false;
@@ -1721,7 +1724,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// eslint-disable-next-line max-lines-per-function, complexity, sonarjs/cognitive-complexity
 	private generateLoadingSvg(
 		step: 'discovering' | 'parsing' | 'computing',
-		percentage: number | undefined,
 		editors: { icon: string; name: string }[]
 	): string {
 		const W = 440, P = 16;
@@ -1737,24 +1739,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 			'Discovering session files', 'Checking cache',
 			'Parsing session logs',      'Computing statistics', 'Ready!',
 		];
-		const pct     = step === 'computing' ? 96 : Math.max(2, percentage ?? 0);
-		const pctTxt  = step === 'discovering' ? '–' : `${pct}%`;
+		const pct     = step === 'computing' ? 96 : 2;
+		const pctTxt  = step === 'computing' ? '96%' : '–';
 		const subtitle =
-			step === 'discovering'                    ? 'Discovering session files...' :
-			step === 'parsing' && percentage !== undefined  ? `Parsing session files… ${pct}%` :
-			step === 'parsing'                        ? 'Parsing session files...' :
-			                                            'Computing statistics...';
+			step === 'discovering' ? 'Discovering session files...' :
+			step === 'parsing'     ? 'Parsing session files...'     :
+			                         'Computing statistics...';
 		const pills   = editors.slice(0, 6);
-		const hasPills = pills.length > 0;
 
-		// Layout
+		// Layout — always reserve pills row so height never changes between phases
 		const BY    = P + 13;
 		const TY    = BY + 20;
 		const SBY   = TY + 16;
 		const PRY   = SBY + 16;
 		const PRH   = 5;
 		const PIL_Y = PRY + PRH + 8;
-		const SBX_Y = PIL_Y + (hasPills ? 28 : 0) + 6;
+		const SBX_Y = PIL_Y + 34;  // 28px pills height + 6px gap, always reserved
 		const SBX_H = P + STEPS.length * 22 + 8;
 		const H     = SBX_Y + SBX_H + P;
 		const PW    = W - P * 2;
@@ -1785,8 +1785,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Progress track
 		o.push(`<rect x="${P}" y="${PRY}" width="${PW}" height="${PRH}" rx="2.5" fill="${BRD}"/>`);
 
-		// Progress fill — shimmer when indeterminate, solid fill otherwise
-		if (step === 'discovering') {
+		// Progress fill — shimmer (indeterminate) during discovering/parsing, solid fill for computing
+		if (step !== 'computing') {
 			const sw = Math.round(PW * 0.25);
 			o.push(`<rect y="${PRY}" width="${sw}" height="${PRH}" rx="2.5" fill="url(#pg)" clip-path="url(#pclip)">
   <animate attributeName="x" from="${P - Math.round(PW * 0.35)}" to="${P + Math.round(PW * 1.1)}" dur="1.8s" repeatCount="indefinite" calcMode="ease-in-out"/>
@@ -1797,7 +1797,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		// Editor pills
-		if (hasPills) {
+		if (pills.length > 0) {
 			let px = P;
 			for (const ed of pills) {
 				const rawLbl = `${ed.icon} ${ed.name}`;
@@ -1820,7 +1820,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const active = i === activeStep;
 			const col    = done ? OK : active ? ACC : MUT;
 			const wt     = active ? '600' : '400';
-			const lbl    = i === 2 && active && percentage !== undefined ? `Parsing session logs — ${pct}%` : STEPS[i];
+			const lbl    = STEPS[i];
 
 			if (done) {
 				o.push(`<text x="${ICX}" y="${sy}" text-anchor="middle" font-family="monospace" font-size="13" fill="${OK}">✓</text>`);
