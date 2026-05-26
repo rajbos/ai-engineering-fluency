@@ -1,0 +1,198 @@
+name: VS Code Nightly Pre-Release
+
+on:
+  schedule:
+    - cron: '0 2 * * *'  # 2am UTC daily
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force publish even if no new commits since last pre-release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  nightly-pre-release:
+    name: Nightly Pre-Release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Harden the runner (Audit all outbound calls)
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+      with:
+        egress-policy: audit
+
+    - name: Checkout code (full history for tag comparison)
+      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      with:
+        fetch-depth: 0
+
+    - name: Check for changes in vscode-extension/ since last pre-release
+      id: check_changes
+      run: |
+        # Find the most recent nightly pre-release tag, fall back to last stable tag
+        LAST_TAG=$(git tag --list 'vscode/nightly/*' --sort=-version:refname | head -1)
+        if [ -z "$LAST_TAG" ]; then
+          LAST_TAG=$(git tag --list 'vscode/v*' --sort=-version:refname | head -1)
+        fi
+
+        if [ -z "$LAST_TAG" ]; then
+          echo "No previous tags found — treating as first nightly pre-release"
+          echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          echo "since_tag=(none)" >> "$GITHUB_OUTPUT"
+        else
+          CHANGES=$(git diff --name-only "$LAST_TAG"..HEAD -- vscode-extension/ | wc -l)
+          echo "Changes in vscode-extension/ since $LAST_TAG: $CHANGES file(s)"
+          echo "since_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
+          if [ "$CHANGES" -gt 0 ] || [ "${{ inputs.force }}" == "true" ]; then
+            echo "has_changes=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "has_changes=false" >> "$GITHUB_OUTPUT"
+            echo "ℹ️ No changes to vscode-extension/ since $LAST_TAG — skipping nightly pre-release."
+          fi
+        fi
+
+    - name: Compute pre-release version
+      id: version
+      if: steps.check_changes.outputs.has_changes == 'true'
+      run: |
+        STABLE_VERSION=$(node -p "require('./vscode-extension/package.json').version")
+        MAJOR=$(echo "$STABLE_VERSION" | cut -d. -f1)
+        MINOR=$(echo "$STABLE_VERSION" | cut -d. -f2)
+        # Patch = YYYYMMDD — unique per day, always higher than any normal patch number
+        PATCH_DATE=$(date +%Y%m%d)
+        PRE_RELEASE_VERSION="${MAJOR}.${MINOR}.${PATCH_DATE}"
+        echo "version=$PRE_RELEASE_VERSION" >> "$GITHUB_OUTPUT"
+        echo "stable_version=$STABLE_VERSION" >> "$GITHUB_OUTPUT"
+        echo "Pre-release version: $PRE_RELEASE_VERSION (based on stable $STABLE_VERSION)"
+
+    - name: Bump version in package.json (no commit — build only)
+      if: steps.check_changes.outputs.has_changes == 'true'
+      run: |
+        node -e "
+          const fs = require('fs');
+          const pkg = JSON.parse(fs.readFileSync('./vscode-extension/package.json', 'utf8'));
+          pkg.version = '${{ steps.version.outputs.version }}';
+          fs.writeFileSync('./vscode-extension/package.json', JSON.stringify(pkg, null, 2) + '\n');
+        "
+        echo "✅ package.json version set to ${{ steps.version.outputs.version }} for build"
+
+    - name: Setup Node.js
+      if: steps.check_changes.outputs.has_changes == 'true'
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: '24.x'
+        cache: 'npm'
+        cache-dependency-path: vscode-extension/package-lock.json
+
+    - name: Install dependencies
+      if: steps.check_changes.outputs.has_changes == 'true'
+      working-directory: vscode-extension
+      run: npm ci
+
+    - name: Run linting
+      if: steps.check_changes.outputs.has_changes == 'true'
+      working-directory: vscode-extension
+      run: npm run lint
+
+    - name: Run type checking
+      if: steps.check_changes.outputs.has_changes == 'true'
+      working-directory: vscode-extension
+      run: npm run check-types
+
+    - name: Build production bundle
+      if: steps.check_changes.outputs.has_changes == 'true'
+      working-directory: vscode-extension
+      run: npm run package
+
+    - name: Create pre-release VSIX
+      if: steps.check_changes.outputs.has_changes == 'true'
+      working-directory: vscode-extension
+      run: |
+        npx vsce package --pre-release \
+          --baseImagesUrl https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/vscode-extension
+
+    - name: Get VSIX filename
+      if: steps.check_changes.outputs.has_changes == 'true'
+      id: vsix
+      working-directory: vscode-extension
+      run: |
+        VSIX_FILE=$(find . -maxdepth 1 -name "ai-engineering-fluency-*.vsix" -exec basename {} \; | head -n 1)
+        echo "vsix_file=$VSIX_FILE" >> "$GITHUB_OUTPUT"
+        echo "VSIX: $VSIX_FILE"
+
+    - name: Publish to VS Code Marketplace
+      if: steps.check_changes.outputs.has_changes == 'true'
+      id: publish_marketplace
+      env:
+        VSCE_PAT: ${{ secrets.VSCE_PAT }}
+      run: |
+        if [ -z "$VSCE_PAT" ]; then
+          echo "❌ VSCE_PAT secret is not configured."
+          exit 1
+        fi
+        echo "Publishing ${{ steps.vsix.outputs.vsix_file }} as pre-release to VS Code Marketplace..."
+        vscode-extension/node_modules/.bin/vsce publish \
+          --packagePath "vscode-extension/${{ steps.vsix.outputs.vsix_file }}" \
+          --pat "$VSCE_PAT" \
+          --pre-release
+
+    - name: Publish to Open VSX Registry
+      if: steps.check_changes.outputs.has_changes == 'true'
+      id: publish_open_vsx
+      env:
+        OPEN_VSX_TOKEN: ${{ secrets.OPEN_VSX_TOKEN }}
+      run: |
+        if [ -z "$OPEN_VSX_TOKEN" ]; then
+          echo "❌ OPEN_VSX_TOKEN secret is not configured."
+          exit 1
+        fi
+        echo "Publishing ${{ steps.vsix.outputs.vsix_file }} as pre-release to Open VSX Registry..."
+        vscode-extension/node_modules/.bin/ovsx publish \
+          --packagePath "vscode-extension/${{ steps.vsix.outputs.vsix_file }}" \
+          -p "$OPEN_VSX_TOKEN" \
+          --pre-release
+
+    - name: Tag nightly pre-release
+      if: steps.check_changes.outputs.has_changes == 'true' && steps.publish_marketplace.outcome == 'success'
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      run: |
+        TAG="vscode/nightly/v${{ steps.version.outputs.version }}"
+        git config --local user.name "github-actions[bot]"
+        git config --local user.email "github-actions[bot]@users.noreply.github.com"
+        git tag -a "$TAG" -m "Nightly pre-release ${{ steps.version.outputs.version }}"
+        git push origin "$TAG"
+        echo "✅ Tagged $TAG"
+
+    - name: Nightly Pre-Release Summary
+      if: always()
+      run: |
+        {
+          if [ "${{ steps.check_changes.outputs.has_changes }}" != "true" ]; then
+            echo "# ⏭️ Nightly Pre-Release Skipped"
+            echo ""
+            echo "No changes to \`vscode-extension/\` since **${{ steps.check_changes.outputs.since_tag }}**."
+            echo "Re-run with **Force publish** checked to bypass this check."
+          elif [ "${{ steps.publish_marketplace.outcome }}" == "success" ]; then
+            echo "# ✅ Nightly Pre-Release Published"
+            echo ""
+            echo "- **Version:** \`${{ steps.version.outputs.version }}\` (based on stable \`${{ steps.version.outputs.stable_version }}\`)"
+            echo "- **Since tag:** \`${{ steps.check_changes.outputs.since_tag }}\`"
+            echo "- 🛒 [VS Code Marketplace](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency)"
+            if [ "${{ steps.publish_open_vsx.outcome }}" == "success" ]; then
+              echo "- 🌐 [Open VSX Registry](https://open-vsx.org/extension/RobBos/ai-engineering-fluency)"
+            fi
+          else
+            echo "# ❌ Nightly Pre-Release Failed"
+            echo ""
+            echo "**Version:** \`${{ steps.version.outputs.version }}\`"
+            echo ""
+            echo "Check the job logs above for details."
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"
