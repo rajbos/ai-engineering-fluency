@@ -1613,7 +1613,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			this._loadingEditors = [];
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
-			if (!silent) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('discovering'); }
+			if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('discovering'); }
 
 			// Streaming pipeline: discovery and parsing run concurrently.
 			// Workers start processing files as each adapter batch arrives.
@@ -1624,7 +1624,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet);
 
 			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
-			if (!silent) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
+			if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
 
 			const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 			this.lastDailyStats = dailyStats;
@@ -1675,7 +1675,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// Update tooltip once when parsing starts (editors are now known).
 				// Do NOT update again on each 500ms tick — VS Code destroys and recreates the
 				// tooltip widget on every property change, causing continuous flickering.
-				this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing');
+				// Skip entirely when the loading panel is already open — no need to double up.
+				if (!this._detailsPanelIsLoading) {
+					this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing');
+				}
 			}
 			const now = Date.now();
 			if (now - lastProgressSentMs >= 500 || completed === total) {
