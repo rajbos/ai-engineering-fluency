@@ -196,6 +196,12 @@
           "default": "none",
           "description": "Controls which estimated costs (in USD) are shown in the status bar. Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing)."
         },
+        "aiEngineeringFluency.display.statusBar.monthlyBudget": {
+          "type": "number",
+          "default": 0,
+          "minimum": 0,
+          "description": "Monthly AI spend budget in USD. When set above 0, the status bar will change color as you approach the limit: yellow at 75%, orange at 90%, red at 100% or over. Set to 0 to disable budget coloring. Cost is estimated using GitHub Copilot AI-Credit rates."
+        },
         "aiEngineeringFluency.backend.enabled": {
           "type": "boolean",
           "default": false,

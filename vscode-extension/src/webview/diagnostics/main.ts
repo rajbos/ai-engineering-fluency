@@ -100,6 +100,7 @@ type StatusBarShowOption = 'none' | 'today' | 'last30days' | 'currentMonth' | 'b
 type DisplaySettings = {
   showTokens: StatusBarShowOption;
   showCost: StatusBarShowOption;
+  monthlyBudget?: number;
 };
 
 type DiagnosticsData = {
@@ -1156,6 +1157,14 @@ function setupDisplaySettingHandlers(): void {
       const value = (e.target as HTMLSelectElement).value;
       vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showCost", value });
     });
+
+  document
+    .getElementById("input-monthly-budget")
+    ?.addEventListener("change", (e) => {
+      const raw = (e.target as HTMLInputElement).value;
+      const value = Math.max(0, parseFloat(raw) || 0);
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.monthlyBudget", value });
+    });
 }
 
 function setupSubtabHandlers(): void {
@@ -1748,6 +1757,7 @@ function sel(current: string, value: string): string {
 function renderDiagDisplayTabHtml(data: DiagnosticsData): string {
   const showTokens = data.displaySettings?.showTokens ?? 'both';
   const showCost = data.displaySettings?.showCost ?? 'none';
+  const monthlyBudget = data.displaySettings?.monthlyBudget ?? 0;
   return `
 <div id="tab-display" class="tab-content">
 <div class="info-box">
@@ -1784,6 +1794,17 @@ Choose what to show in the VS Code status bar toolbar. You can show token counts
 </div>
 </div>
 <p style="color: #888; font-size: 11px; margin-top: 12px;">Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing). Changes apply to the status bar immediately.</p>
+</div>
+<div class="backend-card">
+<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">💰 Monthly Budget</h4>
+<p style="color: #ccc; margin-bottom: 16px;">
+Set a monthly AI spend budget in USD to get visual alerts on the status bar. The bar turns yellow at 75%, orange at 90%, and red at 100% of your budget. Set to 0 to disable.
+</p>
+<div style="display: flex; align-items: center; gap: 12px;">
+  <label style="color: #ccc; min-width: 160px; font-size: 13px;">💵 Monthly budget (USD):</label>
+  <input id="input-monthly-budget" type="number" min="0" step="1" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
+</div>
+<p style="color: #888; font-size: 11px; margin-top: 12px;">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
 </div>
 <div class="backend-card">
 <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🔢 Number Formatting</h4>
