@@ -1876,8 +1876,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.appendMarkdown(`| Average interactions/session :      | ${detailedStats.last30Days.avgInteractionsPerSession} |\n`);
 		tooltip.appendMarkdown(`| Average tokens/session :            | ${detailedStats.last30Days.avgTokensPerSession.toLocaleString()} |\n`);
 		tooltip.appendMarkdown('\n---\n');
-		tooltip.appendMarkdown('*(UBB) = Copilot AI Credit rates — what Copilot will bill you under Usage Based Billing.*  \n');
-		tooltip.appendMarkdown('*Updates automatically every 5 minutes.*');
 		const budget = this.getMonthlyBudgetSetting();
 		if (budget > 0) {
 			const monthCost = detailedStats.month.estimatedCostCopilot ?? detailedStats.month.estimatedCost ?? 0;
