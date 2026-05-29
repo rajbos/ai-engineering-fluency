@@ -10,6 +10,7 @@ import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
+import { getModelDisplayName } from '../shared/modelUtils';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -638,7 +639,7 @@ function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 	const rows = sorted.map((s, idx) => {
 		const title = escapeHtml(s.title || 'Untitled session');
 		const filePath = escapeHtml(s.filePath || '');
-		const models = s.models.map(m => escapeHtml(m)).join(', ') || '—';
+		const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—';
 		const editor = escapeHtml(s.editor || 'unknown');
 		const cost = s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—';
 		const time = s.lastActivity ? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }) : '—';
