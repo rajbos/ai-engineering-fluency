@@ -1767,13 +1767,13 @@ function renderDiagDisplayTabHtml(data: DiagnosticsData): string {
 <div>Configure what is shown in the status bar at the bottom of VS Code. Changes take effect immediately — no data refresh needed.</div>
 </div>
 <div class="backend-card">
-<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Status Bar Display</h4>
-<p style="color: #ccc; margin-bottom: 16px;">
+<h4>📊 Status Bar Display</h4>
+<p>
 Choose what to show in the VS Code status bar toolbar. You can show token counts, estimated costs, both, or neither for each period.
 </p>
 <div style="display: grid; gap: 16px;">
 <div style="display: flex; align-items: center; gap: 12px;">
-  <label style="color: #ccc; min-width: 160px; font-size: 13px;">🔢 Token counts:</label>
+  <label style="min-width: 175px; font-size: 13px;">🔢 Token counts:</label>
   <select id="select-show-tokens" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
     <option value="none" ${sel(showTokens, 'none')}>None</option>
     <option value="today" ${sel(showTokens, 'today')}>Today only</option>
@@ -1784,7 +1784,7 @@ Choose what to show in the VS Code status bar toolbar. You can show token counts
   </select>
 </div>
 <div style="display: flex; align-items: center; gap: 12px;">
-  <label style="color: #ccc; min-width: 160px; font-size: 13px;">💰 Estimated cost (USD):</label>
+  <label style="min-width: 175px; font-size: 13px;">💰 Estimated cost (USD):</label>
   <select id="select-show-cost" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
     <option value="none" ${sel(showCost, 'none')}>None (hidden)</option>
     <option value="today" ${sel(showCost, 'today')}>Today only</option>
@@ -1795,22 +1795,22 @@ Choose what to show in the VS Code status bar toolbar. You can show token counts
   </select>
 </div>
 </div>
-<p style="color: #888; font-size: 11px; margin-top: 12px;">Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing). Changes apply to the status bar immediately.</p>
+<p class="hint">Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing). Changes apply to the status bar immediately.</p>
 </div>
 <div class="backend-card">
-<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">💰 Monthly Budget</h4>
-<p style="color: #ccc; margin-bottom: 16px;">
+<h4>💰 Monthly Budget</h4>
+<p>
 Set a monthly AI spend budget in USD to get visual alerts on the status bar. The bar turns yellow at 75%, orange at 90%, and red at 100% of your budget. Set to 0 to disable.
 </p>
 <div style="display: flex; align-items: center; gap: 12px;">
-  <label style="color: #ccc; min-width: 160px; font-size: 13px;">💵 Monthly budget (USD):</label>
+  <label style="min-width: 175px; font-size: 13px;">💵 Monthly budget (USD):</label>
   <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
 </div>
-<p style="color: #888; font-size: 11px; margin-top: 12px;">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
+<p class="hint">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
 </div>
 <div class="backend-card">
-<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🔢 Number Formatting</h4>
-<p style="color: #ccc; margin-bottom: 12px;">
+<h4>🔢 Number Formatting</h4>
+<p>
 Token counts can be shown in compact format using K/M suffixes (e.g. <strong>1.5K</strong>, <strong>1.2M</strong>)
 for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,200,000</strong>) for precision.
 </p>

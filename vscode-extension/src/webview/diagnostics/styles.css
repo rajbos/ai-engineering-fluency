@@ -510,6 +510,42 @@ background-position: center;
 	background: var(--list-hover-bg);
 }
 
+.backend-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	padding: 16px 20px;
+	margin-bottom: 16px;
+}
+
+.backend-card h4 {
+	color: var(--text-primary);
+	font-size: 15px;
+	font-weight: 600;
+	margin-top: 0;
+	margin-bottom: 10px;
+	padding-bottom: 8px;
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.backend-card p {
+	color: var(--text-secondary);
+	font-size: 13px;
+	line-height: 1.5;
+	margin-bottom: 14px;
+}
+
+.backend-card p:last-child {
+	margin-bottom: 0;
+}
+
+.backend-card p.hint {
+	color: var(--text-muted, #888);
+	font-size: 11px;
+	margin-top: 10px;
+	margin-bottom: 0;
+}
+
 .info-box {
 	background: var(--list-active-bg);
 	border: 1px solid var(--border-color);
