@@ -44,6 +44,12 @@ interface CascadeTrajectoryStep {
 	type: string;
 	metadata?: {
 		requestedModelUid?: string;
+		// Token usage lives on CORTEX_STEP_TYPE_PLANNER_RESPONSE steps (string-encoded ints).
+		// cumulativeTokensAtStep is the running total for the trajectory, so the maximum
+		// across planner responses is the session's total token count.
+		cumulativeTokensAtStep?: string;
+		inputTokens?: string;
+		cacheReadTokens?: string;
 		responseDimensionGroups?: Array<{
 			title: string;
 			dimensions: Array<{
@@ -63,16 +69,22 @@ interface GetCascadeTrajectoryStepsResponse {
 export class WindsurfDataAccess {
 	private credentials: WindsurfCredentials | null = null;
 	private readonly extensionUri: vscode.Uri;
+	private log: (msg: string) => void = (msg) => console.log(msg);
+	private sessionCache: { sessions: SessionFileDetails[]; expiresAt: number } | null = null;
+	private static readonly SESSION_CACHE_TTL_MS = 15_000;
 
-	constructor(extensionUri: vscode.Uri) {
+	constructor(extensionUri: vscode.Uri, log?: (msg: string) => void) {
 		this.extensionUri = extensionUri;
+		if (log) { this.log = log; }
 	}
 
 	/**
 	 * Check if the extension is running inside Windsurf.
 	 */
 	isRunningInWindsurf(): boolean {
-		return vscode.env.appName.toLowerCase().includes('windsurf');
+		const appName = vscode.env.appName.toLowerCase();
+		this.log(`[Windsurf] appName="${vscode.env.appName}" → isWindsurf=${appName.includes('windsurf')}`);
+		return appName.includes('windsurf');
 	}
 
 	/**
@@ -157,33 +169,29 @@ export class WindsurfDataAccess {
 	 */
 	async getCredentials(): Promise<WindsurfCredentials | null> {
 		if (!this.isRunningInWindsurf()) {
-			console.log('[Windsurf] Not running in Windsurf environment');
+			this.log('[Windsurf] Not running in Windsurf environment — skipping credential capture');
 			return null;
 		}
 
 		// Return cached credentials if available
 		if (this.credentials) {
-			console.log('[Windsurf] Using cached credentials');
-			// Validate credentials before returning
 			if (await this.validateCredentials(this.credentials)) {
 				return this.credentials;
 			} else {
-				console.log('[Windsurf] Cached credentials invalid, clearing...');
-				// Clear invalid credentials
+				this.log('[Windsurf] Cached credentials invalid, clearing...');
 				this.credentials = null;
 			}
 		}
 
-		// Try multiple credential capture methods
-		console.log('[Windsurf] Attempting credential capture...');
+		this.log('[Windsurf] Attempting credential capture...');
 		this.credentials = await this.captureCredentials();
-		
-		// Fallback: try alternative methods if primary fails
+
 		if (!this.credentials) {
-			console.log('[Windsurf] Primary capture failed, trying alternative methods...');
+			this.log('[Windsurf] Primary capture failed, trying alternative methods...');
 			this.credentials = await this.captureCredentialsAlternative();
 		}
-		
+
+		this.log(`[Windsurf] Credential capture result: ${this.credentials ? `port=${this.credentials.port}` : 'failed'}`);
 		return this.credentials;
 	}
 
@@ -496,33 +504,49 @@ export class WindsurfDataAccess {
 	}
 
 	/**
-	 * Extract token usage from Cascade trajectory steps.
+	 * Count the number of real user turns in a trajectory. Windsurf's `stepCount`
+	 * counts every internal agent step (model calls, tool runs, etc.); the actual
+	 * number of user messages is the count of CORTEX_STEP_TYPE_USER_INPUT steps.
 	 */
-	extractTokenUsage(steps: CascadeTrajectoryStep[]): { inputTokens: number; outputTokens: number; cachedTokens: number } {
+	countUserTurns(steps: CascadeTrajectoryStep[]): number {
+		return steps.reduce((n, s) => n + (s.type === 'CORTEX_STEP_TYPE_USER_INPUT' ? 1 : 0), 0);
+	}
+
+	/**
+	 * Extract token usage from Cascade trajectory steps.
+	 *
+	 * Token usage is reported on CORTEX_STEP_TYPE_PLANNER_RESPONSE steps via
+	 * string-encoded `metadata.cumulativeTokensAtStep` / `inputTokens` /
+	 * `cacheReadTokens` fields (NOT on USER_INPUT steps, and NOT in the
+	 * 'Token Usage' dimension group, which Windsurf no longer emits).
+	 *
+	 * `cumulativeTokensAtStep` is the running total for the whole trajectory, so the
+	 * maximum across planner responses is the session's total token count. `inputTokens`
+	 * and `cacheReadTokens` are per-step, so they are summed for an input breakdown.
+	 */
+	extractTokenUsage(steps: CascadeTrajectoryStep[]): { totalTokens: number; inputTokens: number; cachedTokens: number } {
+		let totalTokens = 0;
 		let inputTokens = 0;
-		let outputTokens = 0;
 		let cachedTokens = 0;
 
+		const parse = (value: string | undefined): number => {
+			if (!value || !/^\d+$/.test(value)) { return 0; }
+			const n = Number(value);
+			return Number.isSafeInteger(n) ? n : 0;
+		};
+
 		for (const step of steps) {
-			if (step.type !== 'CORTEX_STEP_TYPE_USER_INPUT') {continue;}
-			
-			for (const group of step.metadata?.responseDimensionGroups ?? []) {
-				if (group.title !== 'Token Usage') {continue;}
-				
-				for (const dim of group.dimensions) {
-					const value = dim.cumulativeMetric?.value ?? 0;
-					if (dim.uid === 'input_tokens') {
-						inputTokens += value;
-					} else if (dim.uid === 'output_tokens') {
-						outputTokens += value;
-					} else if (dim.uid === 'cached_input_tokens') {
-						cachedTokens += value;
-					}
-				}
-			}
+			if (step.type !== 'CORTEX_STEP_TYPE_PLANNER_RESPONSE') { continue; }
+			const meta = step.metadata;
+			if (!meta) { continue; }
+
+			const cumulative = parse(meta.cumulativeTokensAtStep);
+			if (cumulative > totalTokens) { totalTokens = cumulative; }
+			inputTokens += parse(meta.inputTokens);
+			cachedTokens += parse(meta.cacheReadTokens);
 		}
 
-		return { inputTokens, outputTokens, cachedTokens };
+		return { totalTokens, inputTokens, cachedTokens };
 	}
 
 	/**
@@ -595,89 +619,139 @@ export class WindsurfDataAccess {
 	}
 
 	/**
-	 * New method to test if there's a binding issue with getWindsurfSessions
+	 * Returns the later of two ISO timestamps, ignoring missing/unparseable values.
+	 * Used so an actively-running session is bucketed by its most recent activity
+	 * (lastModifiedTime advances as the agent works, even when lastUserInputTime is stale).
+	 */
+	private pickLatestTimestamp(...candidates: Array<string | undefined>): string | undefined {
+		let best: string | undefined;
+		let bestMs = -Infinity;
+		for (const c of candidates) {
+			if (!c) { continue; }
+			const ms = Date.parse(c);
+			if (Number.isNaN(ms)) { continue; }
+			if (ms > bestMs) { bestMs = ms; best = c; }
+		}
+		return best;
+	}
+
+	/**
+	 * API-based session discovery (requires running inside Windsurf with credentials).
 	 */
 	async getWindsurfSessionsV2(): Promise<SessionFileDetails[]> {
-		// Add logging to confirm method is reached
-		console.log('[Windsurf] getWindsurfSessionsV2() ENTRY POINT');
-		
+		this.log('[Windsurf] getWindsurfSessionsV2() ENTRY POINT');
+
 		try {
-			console.log('[Windsurf] getWindsurfSessionsV2() called');
-			console.log('[Windsurf] === STARTING SESSION DISCOVERY ===');
+			this.log('[Windsurf] === STARTING API SESSION DISCOVERY ===');
 			const sessions: SessionFileDetails[] = [];
-			
-			// Check if Windsurf is enabled in configuration
-			console.log('[Windsurf] About to get configuration...');
-			const config = vscode.workspace.getConfiguration('copilotTokenTracker');
-			console.log('[Windsurf] Got configuration object');
+
+			const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 			const windsurfEnabled = config.get<boolean>('windsurf.enabled', true);
-			console.log(`[Windsurf] Configuration check - enabled: ${windsurfEnabled}`);
-			
+			this.log(`[Windsurf] enabled=${windsurfEnabled}, isRunningInWindsurf=${this.isRunningInWindsurf()}`);
+
 			if (!windsurfEnabled) {
-				console.log('[Windsurf] Windsurf integration disabled in configuration');
+				this.log('[Windsurf] Windsurf integration disabled in configuration');
 				return [];
 			}
-			
-			console.log('[Windsurf] Fetching trajectories...');
+
+			this.log('[Windsurf] Fetching trajectories via API...');
 			const trajectories = await this.getAllCascadeTrajectories();
-			console.log(`[Windsurf] Got trajectories: ${trajectories ? 'YES' : 'NO'}`);
-			
+			this.log(`[Windsurf] Got trajectories: ${trajectories ? 'YES' : 'NO'}`);
+
 			if (!trajectories || !trajectories.trajectorySummaries) {
-				console.log('[Windsurf] No trajectories available');
+				this.log('[Windsurf] No trajectories available from API');
 				return [];
 			}
-			
+
 			const trajectoryIds = Object.keys(trajectories.trajectorySummaries);
-			console.log(`[Windsurf] Found ${trajectoryIds.length} trajectory summaries`);
-			
-			// Process each trajectory
+			this.log(`[Windsurf] Found ${trajectoryIds.length} trajectory summaries`);
+
 			for (const trajectoryId of trajectoryIds) {
-				console.log(`[Windsurf] Processing trajectory: ${trajectoryId}`);
 				const summary = trajectories.trajectorySummaries[trajectoryId];
-				
-				// For now, use stepCount as a proxy for activity (since we don't have token data in the summary)
 				const activityScore = summary.stepCount || 0;
-				console.log(`[Windsurf] Trajectory ${trajectoryId}: ${activityScore} steps`);
-				
+				const lastInteraction = this.pickLatestTimestamp(summary.lastUserInputTime, summary.lastModifiedTime);
+				const utcDayKey = lastInteraction ? lastInteraction.slice(0, 10) : '(none)';
 				if (activityScore === 0) {
-					console.log(`[Windsurf] Skipping trajectory ${trajectoryId} - no steps`);
+					this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=0 → SKIPPED`);
 					continue;
 				}
-				
-				// Create a session file details object for Windsurf sessions
-				const sessionFile: SessionFileDetails = {
+
+				// Fetch the trajectory steps to derive REAL token counts and user-turn
+				// counts. `stepCount` counts every internal agent step, and tokens were
+				// previously a rough `stepCount * 100` estimate — both massively overstate
+				// reality. The steps API exposes per-turn token usage and the actual user
+				// messages (CORTEX_STEP_TYPE_USER_INPUT).
+				let interactions = 1;
+				let tokens = 0;
+				let usedRealData = false;
+				try {
+					const stepsResponse = await this.getCascadeTrajectorySteps(trajectoryId);
+					const steps = stepsResponse?.steps;
+					if (steps && steps.length > 0) {
+						const usage = this.extractTokenUsage(steps);
+						const userTurns = this.countUserTurns(steps);
+						interactions = Math.max(1, userTurns);
+						tokens = usage.totalTokens;
+						usedRealData = true;
+						const partial = steps.length < activityScore;
+						this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} stepsReturned=${steps.length}${partial ? ' (PARTIAL — token/turn counts are a lower bound)' : ''} userTurns=${userTurns} tokens(total=${usage.totalTokens}, input=${usage.inputTokens}, cached=${usage.cachedTokens}) → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
+					}
+				} catch (stepError) {
+					this.log(`[Windsurf] trajectory ${trajectoryId}: failed to fetch steps (${stepError}); no token data`);
+				}
+				if (!usedRealData) {
+					this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} (no steps returned) → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
+				}
+
+				sessions.push({
 					file: `windsurf://trajectory/${trajectoryId}`,
 					modified: summary.lastModifiedTime || new Date().toISOString(),
-					size: activityScore, // Use stepCount as size proxy
-					interactions: activityScore, // Use stepCount as interactions
-					tokens: activityScore * 100, // Rough token estimate
-					contextReferences: { file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0, byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {} }, // Default values
+					size: activityScore,
+					interactions,
+					tokens,
+					contextReferences: { file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0, byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {} },
 					firstInteraction: summary.createdTime,
-					lastInteraction: summary.lastUserInputTime || summary.lastModifiedTime,
+					lastInteraction: lastInteraction || summary.lastModifiedTime,
 					editorSource: 'windsurf',
 					editorName: 'Windsurf',
 					title: summary.summary || `Windsurf Session ${trajectoryId}`
-				};
-				
-				console.log(`[Windsurf] Added session: ${sessionFile.file} (${activityScore} steps)`);
-				sessions.push(sessionFile);
+				});
 			}
-			
-			console.log(`[Windsurf] === SESSION DISCOVERY COMPLETE ===`);
-			console.log(`[Windsurf] Returning ${sessions.length} sessions`);
+
+			this.log(`[Windsurf] === API DISCOVERY COMPLETE — ${sessions.length} sessions ===`);
 			return sessions;
-			
 		} catch (error) {
-			console.error('[Windsurf] Exception in getWindsurfSessionsV2():', error);
+			this.log(`[Windsurf] Exception in getWindsurfSessionsV2(): ${error}`);
 			return [];
 		}
 	}
 
 	/**
-	 * Process all Windurf trajectories and return session details.
+	 * Process all Windsurf trajectories and return session details.
+	 * Tries the API first (full token data), falls back to .pb file metadata when API is unavailable.
 	 */
 	async getWindsurfSessions(): Promise<SessionFileDetails[]> {
-		return this.getWindsurfSessionsV2();
+		this.log('[Windsurf] getWindsurfSessions() called');
+		const now = Date.now();
+		if (this.sessionCache && this.sessionCache.expiresAt > now) {
+			this.log(`[Windsurf] Returning ${this.sessionCache.sessions.length} cached session(s)`);
+			return this.sessionCache.sessions;
+		}
+		const sessions = await this.discoverWindsurfSessions();
+		this.sessionCache = { sessions, expiresAt: now + WindsurfDataAccess.SESSION_CACHE_TTL_MS };
+		return sessions;
+	}
+
+	private async discoverWindsurfSessions(): Promise<SessionFileDetails[]> {
+		const apiSessions = await this.getWindsurfSessionsV2();
+		if (apiSessions.length > 0) {
+			this.log(`[Windsurf] API returned ${apiSessions.length} session(s)`);
+			return apiSessions;
+		}
+		this.log('[Windsurf] API returned no sessions — falling back to .pb file discovery');
+		const fileSessions = await this.getWindsurfCascadeSessionFiles();
+		this.log(`[Windsurf] File-based discovery found ${fileSessions.length} session(s)`);
+		return fileSessions;
 	}
 
 	/**
@@ -694,7 +768,7 @@ export class WindsurfDataAccess {
 			
 			// Check if Windsurf is enabled in configuration
 			console.log('[Windsurf] About to get configuration...');
-			const config = vscode.workspace.getConfiguration('copilotTokenTracker');
+			const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 			console.log('[Windsurf] Got configuration object');
 			const windsurfEnabled = config.get<boolean>('windsurf.enabled', true);
 			console.log(`[Windsurf] Configuration check - enabled: ${windsurfEnabled}`);
@@ -734,8 +808,8 @@ export class WindsurfDataAccess {
 
 				console.log(`[Windsurf] Found ${steps.steps.length} steps for trajectory ${cascadeId}`);
 				const tokenUsage = this.extractTokenUsage(steps.steps);
-				const totalTokens = tokenUsage.inputTokens + tokenUsage.outputTokens;
-				console.log(`[Windsurf] Token usage for ${cascadeId}: input=${tokenUsage.inputTokens}, output=${tokenUsage.outputTokens}, total=${totalTokens}`);
+				const totalTokens = tokenUsage.totalTokens;
+				console.log(`[Windsurf] Token usage for ${cascadeId}: total=${totalTokens}, input=${tokenUsage.inputTokens}, cached=${tokenUsage.cachedTokens}`);
 				
 				if (totalTokens === 0) {
 					console.log(`[Windsurf] Skipping trajectory ${cascadeId} - no tokens found`);
@@ -881,7 +955,7 @@ export class WindsurfDataAccess {
 		}
 
 		// Configuration checks
-		const config = vscode.workspace.getConfiguration('copilotTokenTracker');
+		const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 		diagnostics.configuration = {
 			enabled: config.get<boolean>('windsurf.enabled', true),
 		};

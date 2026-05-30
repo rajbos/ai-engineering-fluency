@@ -913,6 +913,7 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
  */
 export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);
+	if (lowerPath.startsWith('windsurf://')) { return 'Windsurf'; }
 	return detectToolEditorFromPath(filePath, lowerPath, isOpenCodeSessionFile) ??
 		detectVSCodeVariantFromPath(lowerPath) ??
 		'Unknown';
@@ -940,6 +941,7 @@ function detectIDEEditorSource(lowerPath: string): string | undefined {
  */
 export function detectEditorSource(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);
+	if (lowerPath.startsWith('windsurf://')) { return 'Windsurf'; }
 	if (lowerPath.includes('/.copilot/jb/')) { return 'JetBrains'; }
 	if (lowerPath.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
 	if (lowerPath.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }

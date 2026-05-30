@@ -1,0 +1,100 @@
+/**
+ * Unit tests for Windsurf (Cascade) token / user-turn extraction
+ * (src/windsurf.ts).
+ *
+ * Token usage lives on CORTEX_STEP_TYPE_PLANNER_RESPONSE steps as string-encoded
+ * integers (cumulativeTokensAtStep / inputTokens / cacheReadTokens). User turns are
+ * the count of CORTEX_STEP_TYPE_USER_INPUT steps. These tests pin that behaviour.
+ */
+import test from 'node:test';
+import * as assert from 'node:assert/strict';
+import * as vscode from 'vscode';
+
+import { WindsurfDataAccess } from '../../src/windsurf';
+
+const windsurf = new WindsurfDataAccess(vscode.Uri.file('/mock/ext') as any);
+
+const plannerStep = (meta: Record<string, string>) => ({
+	type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE',
+	metadata: meta,
+});
+const userStep = () => ({ type: 'CORTEX_STEP_TYPE_USER_INPUT', metadata: {} });
+const otherStep = (type: string) => ({ type, metadata: {} });
+
+// ----- extractTokenUsage -----
+
+test('extractTokenUsage: totalTokens is the max cumulativeTokensAtStep across planner steps', () => {
+	const steps = [
+		userStep(),
+		plannerStep({ cumulativeTokensAtStep: '4200', inputTokens: '4000', cacheReadTokens: '100' }),
+		otherStep('CORTEX_STEP_TYPE_TOOL_CALL'),
+		plannerStep({ cumulativeTokensAtStep: '10417', inputTokens: '8717', cacheReadTokens: '1152' }),
+	] as any;
+
+	const usage = windsurf.extractTokenUsage(steps);
+	assert.equal(usage.totalTokens, 10417);
+	assert.equal(usage.inputTokens, 4000 + 8717);
+	assert.equal(usage.cachedTokens, 100 + 1152);
+});
+
+test('extractTokenUsage: ignores non-planner steps entirely', () => {
+	const steps = [
+		userStep(),
+		otherStep('CORTEX_STEP_TYPE_RETRIEVE_MEMORY'),
+		otherStep('CORTEX_STEP_TYPE_USER_INPUT'),
+	] as any;
+
+	const usage = windsurf.extractTokenUsage(steps);
+	assert.deepEqual(usage, { totalTokens: 0, inputTokens: 0, cachedTokens: 0 });
+});
+
+test('extractTokenUsage: tolerates planner steps missing some token fields', () => {
+	const steps = [
+		plannerStep({ cumulativeTokensAtStep: '11027' }), // no inputTokens / cacheReadTokens
+		plannerStep({ inputTokens: '500' }), // no cumulativeTokensAtStep
+	] as any;
+
+	const usage = windsurf.extractTokenUsage(steps);
+	assert.equal(usage.totalTokens, 11027);
+	assert.equal(usage.inputTokens, 500);
+	assert.equal(usage.cachedTokens, 0);
+});
+
+test('extractTokenUsage: rejects malformed / non-integer strings instead of partial-parsing', () => {
+	const steps = [
+		plannerStep({ cumulativeTokensAtStep: '123abc', inputTokens: '1.2e4', cacheReadTokens: '-50' }),
+		plannerStep({ cumulativeTokensAtStep: '9000' }),
+	] as any;
+
+	const usage = windsurf.extractTokenUsage(steps);
+	// '123abc', '1.2e4' and '-50' are all rejected (no silent parseInt truncation / negatives)
+	assert.equal(usage.totalTokens, 9000);
+	assert.equal(usage.inputTokens, 0);
+	assert.equal(usage.cachedTokens, 0);
+});
+
+test('extractTokenUsage: handles missing metadata and empty input', () => {
+	assert.deepEqual(windsurf.extractTokenUsage([]), { totalTokens: 0, inputTokens: 0, cachedTokens: 0 });
+	const steps = [{ type: 'CORTEX_STEP_TYPE_PLANNER_RESPONSE' }] as any;
+	assert.deepEqual(windsurf.extractTokenUsage(steps), { totalTokens: 0, inputTokens: 0, cachedTokens: 0 });
+});
+
+// ----- countUserTurns -----
+
+test('countUserTurns: counts only CORTEX_STEP_TYPE_USER_INPUT steps', () => {
+	const steps = [
+		userStep(),
+		plannerStep({ cumulativeTokensAtStep: '100' }),
+		otherStep('CORTEX_STEP_TYPE_TOOL_CALL'),
+		userStep(),
+		userStep(),
+	] as any;
+
+	assert.equal(windsurf.countUserTurns(steps), 3);
+});
+
+test('countUserTurns: returns 0 when there are no user-input steps', () => {
+	const steps = [plannerStep({ cumulativeTokensAtStep: '100' }), otherStep('CORTEX_STEP_TYPE_TOOL_CALL')] as any;
+	assert.equal(windsurf.countUserTurns(steps), 0);
+	assert.equal(windsurf.countUserTurns([]), 0);
+});

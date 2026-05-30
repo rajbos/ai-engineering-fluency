@@ -926,7 +926,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.claudeDesktopCowork = dataAccess.claudeDesktopCowork;
 		this.mistralVibe = dataAccess.mistralVibe;
 		this.geminiCli = dataAccess.geminiCli;
-		this.windsurf = new WindsurfDataAccess(extensionUri);
+		this.windsurf = new WindsurfDataAccess(extensionUri, (m) => this.log(m));
 		this.ecosystems = buildAdapterRegistry({
 			...dataAccess,
 			estimateTokens: (t, m) => this.estimateTokensFromText(t, m),
@@ -3201,11 +3201,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// Handle Windsurf virtual sessions
 			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
 				const session = await this.windsurf.resolveSession(sessionFile);
+				const lastInteraction = session?.lastInteraction ?? null;
+				// Windsurf's API gives no per-day breakdown, so attribute the session's
+				// activity to its last-activity day. Without this, computeDailyRollups
+				// falls back to firstInteraction (the trajectory's createdTime, which can
+				// be months old for a long-lived session) and computeLastActivityKey then
+				// buckets the session by creation date instead of recent activity.
+				const dailyInteractions: { [utcDayKey: string]: number } = {};
+				if (lastInteraction) {
+					const d = new Date(lastInteraction);
+					if (!isNaN(d.getTime())) {
+						dailyInteractions[d.toISOString().slice(0, 10)] = Math.max(1, session?.interactions ?? 1);
+					}
+				}
 				return {
 					title: session?.title,
 					firstInteraction: session?.firstInteraction ?? null,
-					lastInteraction: session?.lastInteraction ?? null,
-					dailyInteractions: {},
+					lastInteraction,
+					dailyInteractions,
 				};
 			}
 
@@ -3362,6 +3375,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async preloadSessionFileContent(sessionFilePath: string): Promise<{ preloadedContent: string | undefined; preloadedParsedJson: any | undefined }> {
 		const isSpecialSession = this.findEcosystem(sessionFilePath) !== null;
 		if (isSpecialSession) { return { preloadedContent: undefined, preloadedParsedJson: undefined }; }
+		// Windsurf sessions use virtual paths (windsurf://trajectory/...) — no file to read
+		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return { preloadedContent: undefined, preloadedParsedJson: undefined }; }
 		const preloadedContent = await fs.promises.readFile(sessionFilePath, 'utf8');
 		let preloadedParsedJson: any | undefined;
 		const isPlainJson = !sessionFilePath.endsWith('.jsonl') && !_isJsonlContent(preloadedContent) && !_isUuidPointerFile(preloadedContent);
