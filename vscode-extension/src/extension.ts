@@ -372,6 +372,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
 
+	// --- Multi-window refresh coordination ---
+	// When several VS Code/Codium windows are open, only the window that holds the
+	// refresh leader lock performs the heavy discover+parse pass and publishes a
+	// shared snapshot. Follower windows warm their cache from that snapshot and skip
+	// parsing, except for a small budget of newly-changed files so the actively-used
+	// window still shows fresh data (the "hybrid" freshness policy).
+	private static readonly FOLLOWER_MISS_BUDGET = 25;
+	// Bounded retry chain a follower uses to pick up the leader's snapshot when it
+	// started before any snapshot existed (cold simultaneous start).
+	private static readonly FOLLOWER_RESYNC_MAX_RETRIES = 4;
+	private static readonly FOLLOWER_RESYNC_DELAY_MS = 15 * 1000;
+	private _followerResyncTimer: NodeJS.Timeout | undefined;
+	private _refreshHeartbeat: NodeJS.Timeout | undefined;
+
 	// Flag to track if details panel is currently showing the loading screen
 	private _detailsPanelIsLoading = false;
 
@@ -1525,7 +1539,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async _preloadSessionFiles(
 		cutoffMs: number,
 		progressCallback?: (completed: number, total: number) => void,
-		editorSet?: Set<string>
+		editorSet?: Set<string>,
+		missBudget?: { remaining: number }
 	): Promise<{ sessionFiles: string[]; preloaded: SessionFilePreload[] }> {
 		// --- Streaming pipeline: overlap discovery with parsing ---
 		// Discovery pushes file batches into a shared queue as each adapter completes.
@@ -1576,7 +1591,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					continue;
 				}
 				const sessionFile = queue[readIndex++];
-				try { await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded); } catch { /* skip files that fail to stat/parse */ }
+				try { await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget); } catch { /* skip files that fail to stat/parse */ }
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
 			}
@@ -1602,13 +1617,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return { sessionFiles, preloaded };
 	}
 
-	private async processPreloadQueueFile(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[]): Promise<void> {
+	private async processPreloadQueueFile(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
 		const fileStats = await this.statSessionFile(sessionFile);
 		const mtime = fileStats.mtime.getTime();
 		const fileSize = fileStats.size;
 		if (mtime < cutoffMs) { return; }
 		const cachedData = this.getCachedSessionData(sessionFile);
 		const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+		// Follower mode (missBudget defined): avoid the N-windows-parse-everything
+		// stampede. Serve cache hits freely, but only parse a bounded number of
+		// cache-miss files; skip the rest until the leader publishes a snapshot.
+		if (!wasCached && missBudget) {
+			if (missBudget.remaining <= 0) { return; }
+			missBudget.remaining--;
+		}
 		const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
 		const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile, fileStats) : undefined;
 		preloaded.push({ sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload);
@@ -1619,58 +1641,142 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async _runUpdateTokenStats(silent: boolean): Promise<DetailedStats | undefined> {
+		// Warm the in-memory cache from any newer snapshot another window published,
+		// so most files become cache hits and parsing is skipped.
+		try { await this.cacheManager.loadSharedSnapshotIfChanged(); }
+		catch (err) { this.warn(`Failed to warm cache from shared snapshot: ${err}`); }
+
+		// Elect a refresh leader. The single window in a lone-window setup always
+		// wins, so its behaviour is unchanged. With multiple windows, only the leader
+		// performs the heavy parse and publishes the snapshot; followers parse at most
+		// a small budget of newly-changed files and reload the leader's snapshot.
+		let isLeader = false;
+		try { isLeader = await this.cacheManager.acquireRefreshLock(); }
+		catch (err) { this.warn(`Failed to acquire refresh lock, proceeding as leader: ${err}`); isLeader = true; }
+		this.startRefreshHeartbeat(isLeader);
+
 		try {
-			this.log('Updating token stats...');
-
-			const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());
-			const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
-
-			this._loadingEditors = [];
-			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
-			if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('discovering'); }
-
-			// Streaming pipeline: discovery and parsing run concurrently.
-			// Workers start processing files as each adapter batch arrives.
-			const discoveredEditorSet = new Set<string>();
-			const progressCallback = this.buildProgressCallback(silent, () =>
-				[...discoveredEditorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
-			);
-			const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet);
-
-			this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
-			if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
-
-			const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
-			this.lastDailyStats = dailyStats;
-			this.mergeIntoFullDailyStats(dailyStats);
-
-			this.updateStatusBarAndTooltip(detailedStats);
-
-			this.updateDetailsPanelIfOpen(detailedStats, silent);
-			this.updateChartPanelIfOpen(silent);
-			await this.updateAnalysisPanelIfOpen(silent, preloaded);
-			await this.computeAndUploadFluencyScore(silent, preloaded);
-			this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
-
-			this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
-			this.lastDetailedStats = detailedStats;
-
-			void (async () => {
-				try { await this.saveCacheToStorage(); }
-				catch (err) { this.warn(`Failed to save cache: ${err}`); }
-			})();
-
-			if (!this.lastFullDailyStats && !this.chartPanel) {
-				void this.calculateDailyStats(365, sessionFiles);
-			}
-
-			return detailedStats;
+			return await this._runRefreshCore(silent, isLeader);
 		} catch (error) {
 			this.error('Error updating token stats:', error);
 			this.setStatusBarText('$(error) Token Error');
 			this.statusBarItem.tooltip = 'Error calculating token usage';
 			return undefined;
+		} finally {
+			this.stopRefreshHeartbeat();
+			if (isLeader) {
+				try { await this.cacheManager.releaseRefreshLock(); }
+				catch (err) { this.warn(`Failed to release refresh lock: ${err}`); }
+			}
 		}
+	}
+
+	/** Core discover → parse → compute → render → persist pass for one refresh. */
+	private async _runRefreshCore(silent: boolean, isLeader: boolean): Promise<DetailedStats | undefined> {
+		this.log(isLeader ? 'Updating token stats (leader)...' : 'Updating token stats (follower)...');
+
+		const { last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(new Date());
+		const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
+
+		this._loadingEditors = [];
+		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
+		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('discovering'); }
+
+		// Streaming pipeline: discovery and parsing run concurrently.
+		// Workers start processing files as each adapter batch arrives.
+		const discoveredEditorSet = new Set<string>();
+		const progressCallback = this.buildProgressCallback(silent, () =>
+			[...discoveredEditorSet].map(name => ({ icon: this.getEditorIconForLoader(name), name }))
+		);
+		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
+		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
+
+		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
+		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
+
+		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
+		this.lastDailyStats = dailyStats;
+		this.mergeIntoFullDailyStats(dailyStats);
+
+		this.updateStatusBarAndTooltip(detailedStats);
+
+		this.updateDetailsPanelIfOpen(detailedStats, silent);
+		this.updateChartPanelIfOpen(silent);
+		await this.updateAnalysisPanelIfOpen(silent, preloaded);
+		await this.computeAndUploadFluencyScore(silent, preloaded);
+		this.updateEnvironmentalPanelIfOpen(detailedStats, silent);
+
+		this.log(`Updated stats - Today: ${detailedStats.today.tokens}, Last 30 Days: ${detailedStats.last30Days.tokens}`);
+		this.lastDetailedStats = detailedStats;
+
+		this.persistRefreshResult(isLeader);
+
+		if (!this.lastFullDailyStats && !this.chartPanel) {
+			void this.calculateDailyStats(365, sessionFiles);
+		}
+
+		return detailedStats;
+	}
+
+	/**
+	 * Persist results after a refresh. Only the leader publishes the shared
+	 * snapshot (so a follower's partial cache can never regress it); a follower
+	 * instead schedules a bounded resync to pick up the leader's snapshot.
+	 */
+	private persistRefreshResult(isLeader: boolean): void {
+		if (isLeader) {
+			void (async () => {
+				try { await this.saveCacheToStorage(); }
+				catch (err) { this.warn(`Failed to save cache: ${err}`); }
+			})();
+		} else {
+			this.scheduleFollowerResync();
+		}
+	}
+
+	/**
+	 * Start (leader) or clear (follower) the periodic heartbeat that renews the
+	 * refresh leader lock so a legitimately long parse is not treated as stale by
+	 * another window.
+	 */
+	private startRefreshHeartbeat(isLeader: boolean): void {
+		this.stopRefreshHeartbeat();
+		if (!isLeader) { return; }
+		this._refreshHeartbeat = setInterval(() => {
+			void this.cacheManager.renewRefreshLock();
+		}, 30 * 1000);
+	}
+
+	private stopRefreshHeartbeat(): void {
+		if (this._refreshHeartbeat) {
+			clearInterval(this._refreshHeartbeat);
+			this._refreshHeartbeat = undefined;
+		}
+	}
+
+	/**
+	 * Bounded retry chain for a follower window that started before a snapshot
+	 * existed. Periodically reloads the shared snapshot; once the leader publishes
+	 * fresher data, triggers a single recompute and stops. Capped to avoid looping.
+	 */
+	private scheduleFollowerResync(retriesLeft: number = CopilotTokenTracker.FOLLOWER_RESYNC_MAX_RETRIES): void {
+		if (this._followerResyncTimer) { return; }
+		if (retriesLeft <= 0) { return; }
+		this._followerResyncTimer = setTimeout(() => {
+			this._followerResyncTimer = undefined;
+			void (async () => {
+				let merged = 0;
+				try { merged = await this.cacheManager.loadSharedSnapshotIfChanged(); }
+				catch { /* best-effort */ }
+				if (merged > 0) {
+					// Leader published fresher data — recompute once with the warm cache.
+					void this.updateTokenStats(true, true);
+					return;
+				}
+				this.scheduleFollowerResync(retriesLeft - 1);
+			})();
+		}, CopilotTokenTracker.FOLLOWER_RESYNC_DELAY_MS);
+		if (typeof this._followerResyncTimer.unref === 'function') { this._followerResyncTimer.unref(); }
 	}
 
 	private buildProgressCallback(silent: boolean, getEditors?: () => { icon: string; name: string }[]): ((completed: number, total: number) => void) | undefined {
@@ -7354,6 +7460,14 @@ ${this.getLoadingHtmlScript()}
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
     }
+    this.stopRefreshHeartbeat();
+    if (this._followerResyncTimer) {
+      clearTimeout(this._followerResyncTimer);
+      this._followerResyncTimer = undefined;
+    }
+    // Release the refresh leader lock if this window held it, so another window can
+    // take over promptly instead of waiting for the stale-lock timeout.
+    void this.cacheManager.releaseRefreshLock().catch(() => { /* best-effort */ });
     if (this.detailsPanel) {
       this.detailsPanel.dispose();
     }
