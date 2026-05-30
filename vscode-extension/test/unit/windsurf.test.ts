@@ -98,3 +98,71 @@ test('countUserTurns: returns 0 when there are no user-input steps', () => {
 	assert.equal(windsurf.countUserTurns(steps), 0);
 	assert.equal(windsurf.countUserTurns([]), 0);
 });
+
+// ----- getAllTrajectorySteps (step_offset pagination) -----
+
+/**
+ * Test double that serves canned step pages keyed by offset, recording the offsets
+ * requested. Lets us exercise the pagination loop without a live Windsurf API.
+ */
+class PagingWindsurf extends WindsurfDataAccess {
+	requestedOffsets: number[] = [];
+	constructor(private pages: Array<Array<{ type: string }>>, private ignoreOffset = false) {
+		super(vscode.Uri.file('/mock/ext') as any);
+	}
+	async getCascadeTrajectorySteps(_cascadeId: string, stepOffset = 0): Promise<any> {
+		this.requestedOffsets.push(stepOffset);
+		if (this.ignoreOffset) {
+			// Simulate a server that ignores step_offset and always returns page 0.
+			return { steps: this.pages[0] };
+		}
+		// Find the page whose starting index matches the requested offset.
+		let acc = 0;
+		for (const page of this.pages) {
+			if (acc === stepOffset) { return { steps: page }; }
+			acc += page.length;
+		}
+		return { steps: [] };
+	}
+}
+
+test('getAllTrajectorySteps: accumulates all pages via increasing step_offset', async () => {
+	const pages = [
+		[{ type: 'A' }, { type: 'B' }, { type: 'C' }],
+		[{ type: 'D' }, { type: 'E' }],
+		[{ type: 'F' }],
+	];
+	const wd = new PagingWindsurf(pages);
+	const all = await wd.getAllTrajectorySteps('cid', 6);
+	assert.equal(all.length, 6);
+	assert.deepEqual(all.map((s) => (s as any).type), ['A', 'B', 'C', 'D', 'E', 'F']);
+	assert.deepEqual(wd.requestedOffsets, [0, 3, 5]);
+});
+
+test('getAllTrajectorySteps: stops once expectedCount is reached', async () => {
+	const pages = [
+		[{ type: 'A' }, { type: 'B' }],
+		[{ type: 'C' }, { type: 'D' }],
+	];
+	const wd = new PagingWindsurf(pages);
+	const all = await wd.getAllTrajectorySteps('cid', 2);
+	assert.equal(all.length, 2); // does not fetch the second page
+	assert.deepEqual(wd.requestedOffsets, [0]);
+});
+
+test('getAllTrajectorySteps: guards against a server that ignores step_offset (no duplicate accumulation)', async () => {
+	const pages = [[{ type: 'A' }, { type: 'B' }]];
+	const wd = new PagingWindsurf(pages, /* ignoreOffset */ true);
+	const all = await wd.getAllTrajectorySteps('cid', 10);
+	// Without the guard this would loop to maxPages accumulating duplicates; the
+	// repeated-first-step guard stops after the second identical page.
+	assert.equal(all.length, 2);
+	assert.deepEqual(all.map((s) => (s as any).type), ['A', 'B']);
+});
+
+test('getAllTrajectorySteps: returns empty when the first page is empty', async () => {
+	const wd = new PagingWindsurf([[]]);
+	const all = await wd.getAllTrajectorySteps('cid', 0);
+	assert.equal(all.length, 0);
+});
+

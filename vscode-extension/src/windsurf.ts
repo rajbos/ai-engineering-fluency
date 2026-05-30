@@ -462,14 +462,16 @@ export class WindsurfDataAccess {
 	}
 
 	/**
-	 * Get detailed steps for a specific Cascade trajectory.
+	 * Get a single (size-capped) page of steps for a Cascade trajectory, starting at
+	 * `stepOffset`. The server caps each response by payload size (not a fixed count),
+	 * so callers must page through with `getAllTrajectorySteps` to get the full list.
 	 */
-	async getCascadeTrajectorySteps(cascadeId: string): Promise<GetCascadeTrajectoryStepsResponse | null> {
+	async getCascadeTrajectorySteps(cascadeId: string, stepOffset = 0): Promise<GetCascadeTrajectoryStepsResponse | null> {
 		const credentials = await this.getCredentials();
 		if (!credentials) {return null;}
 
 		try {
-			const response = await this.makeApiCall('GetCascadeTrajectorySteps', { cascade_id: cascadeId }, credentials);
+			const response = await this.makeApiCall('GetCascadeTrajectorySteps', { cascade_id: cascadeId, step_offset: stepOffset }, credentials);
 			
 			if (response.statusCode !== 200) {
 				throw new Error(`API call failed with status ${response.statusCode}`);
@@ -483,6 +485,35 @@ export class WindsurfDataAccess {
 			this.credentials = null;
 			return null;
 		}
+	}
+
+	/**
+	 * Fetch ALL steps for a trajectory by paging through `step_offset`.
+	 *
+	 * GetCascadeTrajectorySteps caps each response by payload size (e.g. 75 of 665 steps
+	 * for a large session), which would otherwise undercount user turns and tokens. The
+	 * request supports a `step_offset` field (see GetCascadeTrajectoryStepsRequest in the
+	 * Windsurf language-server proto), so we accumulate pages until we have `expectedCount`
+	 * steps or a page comes back empty.
+	 */
+	async getAllTrajectorySteps(cascadeId: string, expectedCount: number): Promise<CascadeTrajectoryStep[]> {
+		const all: CascadeTrajectoryStep[] = [];
+		const maxPages = 100; // safety valve against an unexpected non-advancing server
+		let prevFirstSignature: string | undefined;
+		for (let page = 0; page < maxPages; page++) {
+			const response = await this.getCascadeTrajectorySteps(cascadeId, all.length);
+			const batch = response?.steps;
+			if (!batch || batch.length === 0) { break; }
+			// Guard: if step_offset were ignored, every page would repeat the same first step.
+			// Detect that and stop rather than accumulating duplicates (which would inflate
+			// the user-turn / token counts).
+			const firstSignature = JSON.stringify(batch[0]).slice(0, 200);
+			if (page > 0 && firstSignature === prevFirstSignature) { break; }
+			prevFirstSignature = firstSignature;
+			all.push(...batch);
+			if (expectedCount > 0 && all.length >= expectedCount) { break; }
+		}
+		return all;
 	}
 
 	/**
@@ -676,25 +707,26 @@ export class WindsurfDataAccess {
 					continue;
 				}
 
-				// Fetch the trajectory steps to derive REAL token counts and user-turn
-				// counts. `stepCount` counts every internal agent step, and tokens were
-				// previously a rough `stepCount * 100` estimate — both massively overstate
-				// reality. The steps API exposes per-turn token usage and the actual user
-				// messages (CORTEX_STEP_TYPE_USER_INPUT).
+				// Derive REAL token counts and user-turn counts. `stepCount` counts every
+				// internal agent step (model calls, tool runs), and tokens were previously a
+				// rough `stepCount * 100` estimate — both massively overstate reality.
+				//
+				// Turn counting uses CORTEX_STEP_TYPE_USER_INPUT steps. We page through the full
+				// step list via step_offset so large sessions are not undercounted by the
+				// per-response size cap.
 				let interactions = 1;
 				let tokens = 0;
 				let usedRealData = false;
 				try {
-					const stepsResponse = await this.getCascadeTrajectorySteps(trajectoryId);
-					const steps = stepsResponse?.steps;
-					if (steps && steps.length > 0) {
+					const steps = await this.getAllTrajectorySteps(trajectoryId, activityScore);
+					if (steps.length > 0) {
 						const usage = this.extractTokenUsage(steps);
-						const userTurns = this.countUserTurns(steps);
-						interactions = Math.max(1, userTurns);
+						const stepTurns = this.countUserTurns(steps);
+						interactions = Math.max(1, stepTurns);
 						tokens = usage.totalTokens;
 						usedRealData = true;
 						const partial = steps.length < activityScore;
-						this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} stepsReturned=${steps.length}${partial ? ' (PARTIAL — token/turn counts are a lower bound)' : ''} userTurns=${userTurns} tokens(total=${usage.totalTokens}, input=${usage.inputTokens}, cached=${usage.cachedTokens}) → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
+						this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} stepsFetched=${steps.length}${partial ? ' (PARTIAL steps)' : ''} userTurns=${stepTurns} tokens(total=${usage.totalTokens}, input=${usage.inputTokens}, cached=${usage.cachedTokens}) → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
 					}
 				} catch (stepError) {
 					this.log(`[Windsurf] trajectory ${trajectoryId}: failed to fetch steps (${stepError}); no token data`);
