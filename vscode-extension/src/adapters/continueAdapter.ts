@@ -24,22 +24,22 @@ export class ContinueAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = this.continue_.getTokensFromContinueSession(sessionFile);
+		const result = await this.continue_.getTokensFromContinueSession(sessionFile);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		return Promise.resolve(this.continue_.countContinueInteractions(sessionFile));
+		return await this.continue_.countContinueInteractions(sessionFile);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return Promise.resolve(this.continue_.getContinueModelUsage(sessionFile));
+		return await this.continue_.getContinueModelUsage(sessionFile);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		const meta = this.continue_.getContinueSessionMeta(sessionFile);
+		const meta = await this.continue_.getContinueSessionMeta(sessionFile);
 		const sessionId = this.continue_.getContinueSessionId(sessionFile);
-		const indexEntry = this.continue_.readSessionsIndex().get(sessionId);
+		const indexEntry = (await this.continue_.readSessionsIndex()).get(sessionId);
 		let firstInteraction: string | null = null;
 		let lastInteraction: string | null = null;
 		if (indexEntry?.dateCreated) {
@@ -71,7 +71,7 @@ export class ContinueAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 		const candidatePaths = this.getCandidatePaths();
 		const sessionFiles: string[] = [];
 		try {
-			const files = this.continue_.getContinueSessionFiles();
+			const files = await this.continue_.getContinueSessionFiles();
 			if (files.length > 0) {
 				log(`📄 Found ${files.length} session file(s) in Continue (~/.continue/sessions)`);
 				sessionFiles.push(...files);
@@ -88,7 +88,7 @@ export class ContinueAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const turns: ChatTurn[] = [];
-		const continueTurns = this.continue_.buildContinueTurns(sessionFile);
+		const continueTurns = await this.continue_.buildContinueTurns(sessionFile);
 		const emptyContextRefs = createEmptyContextRefs();
 		for (const ct of continueTurns) {
 			turns.push({
@@ -111,8 +111,8 @@ export class ContinueAdapter implements IEcosystemAdapter, IDiscoverableEcosyste
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
 		const analysis = createEmptySessionUsageAnalysis();
-		const turns = this.continue_.buildContinueTurns(sessionFile);
-		const meta = this.continue_.getContinueSessionMeta(sessionFile);
+		const turns = await this.continue_.buildContinueTurns(sessionFile);
+		const meta = await this.continue_.getContinueSessionMeta(sessionFile);
 		const models: string[] = [];
 		for (const turn of turns) {
 			analysis.modeUsage.ask++;

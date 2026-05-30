@@ -66,18 +66,20 @@ export class CacheManager {
 		this.policy.evict(this.sessionFileCache);
 	}
 
-	clearExpiredCache(): void {
-		// Remove cache entries for files that no longer exist
+	async clearExpiredCache(): Promise<void> {
+		// Remove cache entries for files that no longer exist (async to avoid blocking the event loop)
 		const filesToCheck = Array.from(this.sessionFileCache.keys());
-		for (const filePath of filesToCheck) {
-			try {
-				if (!fs.existsSync(filePath)) {
-					this.sessionFileCache.delete(filePath);
-				}
-			} catch (error) {
-				// File access error, remove from cache
-				this.sessionFileCache.delete(filePath);
-			}
+		const BATCH_SIZE = 50;
+		for (let i = 0; i < filesToCheck.length; i += BATCH_SIZE) {
+			await Promise.all(
+				filesToCheck.slice(i, i + BATCH_SIZE).map(async (filePath) => {
+					try {
+						await fs.promises.access(filePath);
+					} catch {
+						this.sessionFileCache.delete(filePath);
+					}
+				})
+			);
 		}
 	}
 

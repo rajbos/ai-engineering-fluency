@@ -64,19 +64,19 @@ return path.dirname(metaJsonPath);
  * Discover all Mistral Vibe sessions by scanning the session log directory.
  * Returns an array of meta.json paths, one per session.
  */
-discoverSessions(): string[] {
+async discoverSessions(): Promise<string[]> {
 const sessionLogDir = this.getSessionLogDir();
-if (!fs.existsSync(sessionLogDir)) {
-return [];
-}
 try {
-const entries = fs.readdirSync(sessionLogDir, { withFileTypes: true });
+const entries = await fs.promises.readdir(sessionLogDir, { withFileTypes: true });
 const sessions: string[] = [];
 for (const entry of entries) {
 if (!entry.isDirectory()) { continue; }
 const metaPath = path.join(sessionLogDir, entry.name, 'meta.json');
-if (fs.existsSync(metaPath)) {
+try {
+await fs.promises.access(metaPath);
 sessions.push(metaPath);
+} catch {
+// meta.json missing — skip
 }
 }
 return sessions;
@@ -89,9 +89,9 @@ return [];
  * Read session metadata from meta.json.
  * Returns the parsed object or null on failure.
  */
-readSessionMeta(metaJsonPath: string): any | null {
+async readSessionMeta(metaJsonPath: string): Promise<any | null> {
 try {
-const content = fs.readFileSync(metaJsonPath, 'utf8');
+const content = await fs.promises.readFile(metaJsonPath, 'utf8');
 return JSON.parse(content);
 } catch {
 return null;
@@ -102,13 +102,10 @@ return null;
  * Read all messages from messages.jsonl for a session.
  * Returns an array of parsed message objects.
  */
-readSessionMessages(metaJsonPath: string): any[] {
+async readSessionMessages(metaJsonPath: string): Promise<any[]> {
 const messagesPath = path.join(this.getSessionDir(metaJsonPath), 'messages.jsonl');
-if (!fs.existsSync(messagesPath)) {
-return [];
-}
 try {
-const content = fs.readFileSync(messagesPath, 'utf8');
+const content = await fs.promises.readFile(messagesPath, 'utf8');
 const lines = content.trim().split('\n');
 const messages: any[] = [];
 for (const line of lines) {
@@ -129,8 +126,8 @@ return [];
  * Get actual token counts from a session's meta.json stats field.
  * Mistral Vibe stores session_prompt_tokens and session_completion_tokens in stats.
  */
-getTokensFromSession(metaJsonPath: string): { tokens: number; thinkingTokens: number } {
-const meta = this.readSessionMeta(metaJsonPath);
+async getTokensFromSession(metaJsonPath: string): Promise<{ tokens: number; thinkingTokens: number }> {
+const meta = await this.readSessionMeta(metaJsonPath);
 if (!meta?.stats) {
 return { tokens: 0, thinkingTokens: 0 };
 }
@@ -142,8 +139,8 @@ return { tokens: promptTokens + completionTokens, thinkingTokens: 0 };
 /**
  * Count user interactions (number of non-injected user-role messages) in a session.
  */
-countInteractions(metaJsonPath: string): number {
-const messages = this.readSessionMessages(metaJsonPath);
+async countInteractions(metaJsonPath: string): Promise<number> {
+const messages = await this.readSessionMessages(metaJsonPath);
 return messages.filter(m => m.role === 'user' && m.injected !== true).length;
 }
 
@@ -153,8 +150,8 @@ return messages.filter(m => m.role === 'user' && m.injected !== true).length;
  * The model is from config.active_model (single model per session).
  * We attribute all tokens to that model.
  */
-getModelUsage(metaJsonPath: string): ModelUsage {
-const meta = this.readSessionMeta(metaJsonPath);
+async getModelUsage(metaJsonPath: string): Promise<ModelUsage> {
+const meta = await this.readSessionMeta(metaJsonPath);
 if (!meta) {
 return {};
 }
@@ -173,13 +170,13 @@ return {
  * Get session metadata: title, timestamps, model.
  * Timestamps are ISO 8601 strings in meta.json (no epoch conversion needed).
  */
-getSessionMeta(metaJsonPath: string): {
+async getSessionMeta(metaJsonPath: string): Promise<{
 title: string | undefined;
 firstInteraction: string | null;
 lastInteraction: string | null;
 model: string | undefined;
-} {
-const meta = this.readSessionMeta(metaJsonPath);
+}> {
+const meta = await this.readSessionMeta(metaJsonPath);
 if (!meta) {
 return { title: undefined, firstInteraction: null, lastInteraction: null, model: undefined };
 }
@@ -198,19 +195,19 @@ model: meta.config?.active_model || undefined,
  * Model usage: attributed to config.active_model.
  * Interactions: count of non-injected user-role messages.
  */
-getSessionData(metaJsonPath: string): {
+async getSessionData(metaJsonPath: string): Promise<{
 tokens: number;
 interactions: number;
 modelUsage: ModelUsage & { [key: string]: { inputTokens: number; outputTokens: number; interactions?: number } };
 timestamp: number;
-} {
-const meta = this.readSessionMeta(metaJsonPath);
+}> {
+const meta = await this.readSessionMeta(metaJsonPath);
 if (!meta) {
 return { tokens: 0, interactions: 0, modelUsage: {}, timestamp: 0 };
 }
-const { tokens } = this.getTokensFromSession(metaJsonPath);
-const interactions = this.countInteractions(metaJsonPath);
-const baseModelUsage = this.getModelUsage(metaJsonPath);
+const { tokens } = await this.getTokensFromSession(metaJsonPath);
+const interactions = await this.countInteractions(metaJsonPath);
+const baseModelUsage = await this.getModelUsage(metaJsonPath);
 const modelUsage: any = {};
 for (const [model, usage] of Object.entries(baseModelUsage)) {
 modelUsage[model] = { ...usage, interactions };

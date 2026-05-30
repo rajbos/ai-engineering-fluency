@@ -57,11 +57,16 @@ export class ContinueDataAccess {
 	 * Get all Continue session file paths.
 	 * Excludes the index file (sessions.json).
 	 */
-	getContinueSessionFiles(): string[] {
+	async getContinueSessionFiles(): Promise<string[]> {
 		const sessionsDir = this.getContinueSessionsDir();
-		if (!fs.existsSync(sessionsDir)) { return []; }
 		try {
-			return fs.readdirSync(sessionsDir)
+			await fs.promises.access(sessionsDir);
+		} catch {
+			return [];
+		}
+		try {
+			const entries = await fs.promises.readdir(sessionsDir);
+			return entries
 				.filter(f => f.endsWith('.json') && f !== 'sessions.json')
 				.map(f => path.join(sessionsDir, f));
 		} catch {
@@ -69,9 +74,9 @@ export class ContinueDataAccess {
 		}
 	}
 
-	private readSessionFile(sessionFilePath: string): any | null {
+	private async readSessionFile(sessionFilePath: string): Promise<any | null> {
 		try {
-			const content = fs.readFileSync(sessionFilePath, 'utf8');
+			const content = await fs.promises.readFile(sessionFilePath, 'utf8');
 			return JSON.parse(content);
 		} catch {
 			return null;
@@ -94,8 +99,8 @@ export class ContinueDataAccess {
 	 *   log.completion = full completion text returned by the model
 	 * Token counts are estimated from text length (~4 chars/token).
 	 */
-	getTokensFromContinueSession(sessionFilePath: string): { tokens: number; thinkingTokens: number } {
-		const session = this.readSessionFile(sessionFilePath);
+	async getTokensFromContinueSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
+		const session = await this.readSessionFile(sessionFilePath);
 		if (!session || !Array.isArray(session.history)) {
 			return { tokens: 0, thinkingTokens: 0 };
 		}
@@ -114,8 +119,8 @@ export class ContinueDataAccess {
 	/**
 	 * Count user interactions (user messages) in a Continue session.
 	 */
-	countContinueInteractions(sessionFilePath: string): number {
-		const session = this.readSessionFile(sessionFilePath);
+	async countContinueInteractions(sessionFilePath: string): Promise<number> {
+		const session = await this.readSessionFile(sessionFilePath);
 		if (!session || !Array.isArray(session.history)) { return 0; }
 		return session.history.filter((item: any) => item.message?.role === 'user').length;
 	}
@@ -124,8 +129,8 @@ export class ContinueDataAccess {
 	 * Get per-model token usage from a Continue session.
 	 * Reads modelTitle from each promptLog entry, falls back to session.chatModelTitle.
 	 */
-	getContinueModelUsage(sessionFilePath: string): ModelUsage {
-		const session = this.readSessionFile(sessionFilePath);
+	async getContinueModelUsage(sessionFilePath: string): Promise<ModelUsage> {
+		const session = await this.readSessionFile(sessionFilePath);
 		if (!session || !Array.isArray(session.history)) { return {}; }
 		const modelUsage: ModelUsage = {};
 		for (const item of session.history) {
@@ -145,8 +150,8 @@ export class ContinueDataAccess {
 	/**
 	 * Read session metadata (title, model, workspace) from a Continue session file.
 	 */
-	getContinueSessionMeta(sessionFilePath: string): { title?: string; model?: string; workspaceDirectory?: string; mode?: string } | null {
-		const session = this.readSessionFile(sessionFilePath);
+	async getContinueSessionMeta(sessionFilePath: string): Promise<{ title?: string; model?: string; workspaceDirectory?: string; mode?: string } | null> {
+		const session = await this.readSessionFile(sessionFilePath);
 		if (!session) { return null; }
 		return {
 			title: session.title as string | undefined,
@@ -160,11 +165,11 @@ export class ContinueDataAccess {
 	 * Read the sessions.json index and return a map of sessionId -> {dateCreated, title, workspaceDirectory}.
 	 * dateCreated is stored as a string of Unix ms in the index.
 	 */
-	readSessionsIndex(): Map<string, { dateCreated?: number; title?: string; workspaceDirectory?: string }> {
+	async readSessionsIndex(): Promise<Map<string, { dateCreated?: number; title?: string; workspaceDirectory?: string }>> {
 		const indexPath = path.join(this.getContinueSessionsDir(), 'sessions.json');
 		const result = new Map<string, { dateCreated?: number; title?: string; workspaceDirectory?: string }>();
 		try {
-			const content = fs.readFileSync(indexPath, 'utf8');
+			const content = await fs.promises.readFile(indexPath, 'utf8');
 			const entries: any[] = JSON.parse(content);
 			if (!Array.isArray(entries)) { return result; }
 			for (const entry of entries) {
@@ -207,8 +212,8 @@ export class ContinueDataAccess {
 	 * Build chat turns from a Continue session's history array.
 	 * Returns an array of turn objects for the log viewer.
 	 */
-	buildContinueTurns(sessionFilePath: string): ContinueTurn[] {
-		const session = this.readSessionFile(sessionFilePath);
+	async buildContinueTurns(sessionFilePath: string): Promise<ContinueTurn[]> {
+		const session = await this.readSessionFile(sessionFilePath);
 		if (!session || !Array.isArray(session.history)) { return []; }
 
 		const history: any[] = session.history;

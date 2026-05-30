@@ -36,16 +36,16 @@ return fs.promises.stat(sessionFile);
 }
 
 async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-const result = this.antigravity.estimateTokensFromAntigravitySession(sessionFile, this.estimateTokens);
+const result = await this.antigravity.estimateTokensFromAntigravitySession(sessionFile, this.estimateTokens);
 return { ...result, actualTokens: 0 }; // actualTokens stays 0 — these are estimates, not API counts
 }
 
 async countInteractions(sessionFile: string): Promise<number> {
-return Promise.resolve(this.antigravity.countAntigravityInteractions(sessionFile));
+return this.antigravity.countAntigravityInteractions(sessionFile);
 }
 
 async getModelUsage(_sessionFile: string): Promise<ModelUsage> {
-return Promise.resolve({});
+return {};
 }
 
 async getMeta(sessionFile: string): Promise<{
@@ -54,7 +54,7 @@ firstInteraction: string | null;
 lastInteraction: string | null;
 workspacePath?: string;
 }> {
-return Promise.resolve(this.antigravity.getAntigravitySessionMeta(sessionFile));
+return this.antigravity.getAntigravitySessionMeta(sessionFile);
 }
 
 getEditorRoot(_sessionFile: string): string {
@@ -62,7 +62,7 @@ return this.antigravity.getAntigravityBrainDir();
 }
 
 async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
-return Promise.resolve(this.antigravity.buildAntigravityTurns(sessionFile));
+return this.antigravity.buildAntigravityTurns(sessionFile);
 }
 
 async discover(log: (msg: string) => void): Promise<DiscoveryResult> {
@@ -74,7 +74,7 @@ if (inspector.url()) {
 log(`🔍 [Antigravity] Checking brain dir: ${brainDir}`);
 }
 try {
-const files = this.antigravity.getAntigravitySessionFiles();
+const files = await this.antigravity.getAntigravitySessionFiles();
 if (inspector.url()) {
 log(`🔍 [Antigravity] Found ${files.length} transcript(s)`);
 }
@@ -100,7 +100,7 @@ source: 'Antigravity (brain/)',
 
 async analyzeUsage(sessionFile: string, _ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
 const analysis = createEmptySessionUsageAnalysis();
-const session = this.antigravity.readAntigravitySession(sessionFile);
+const session = await this.antigravity.readAntigravitySession(sessionFile);
 
 // Count each USER_INPUT as one CLI interaction.
 analysis.modeUsage.cli += session.userEntries.length;

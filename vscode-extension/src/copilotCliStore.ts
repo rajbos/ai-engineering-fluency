@@ -64,8 +64,108 @@ export function isCliStoreTurn(obj: unknown): obj is CliStoreTurn {
 		&& (r['timestamp'] === null || typeof r['timestamp'] === 'string');
 }
 
+type CliStoreDbCacheEntry = { db: SqlDatabase; mtimeMs: number; size: number };
+
 export class CopilotCliStoreAccess {
 	private _sqlJsModule: SqlJsStatic | null = null;
+	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
+	private _dbCache: Map<string, CliStoreDbCacheEntry> = new Map();
+	private _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
+
+	dispose(): void {
+		for (const entry of this._dbCache.values()) {
+			try { entry.db.close(); } catch { /* ignore */ }
+		}
+		this._dbCache.clear();
+		this._dbCacheInflight.clear();
+		this._sqlJsInitPromise = null;
+	}
+
+	private closeDb(db: SqlDatabase): void {
+		try { db.close(); } catch { /* ignore */ }
+	}
+
+	private isMissingFileError(error: unknown): boolean {
+		const code = (error as NodeJS.ErrnoException)?.code;
+		return code === 'ENOENT' || code === 'ENOTDIR';
+	}
+
+	private async statDb(dbPath: string): Promise<fs.Stats | null> {
+		try {
+			return await fs.promises.stat(dbPath);
+		} catch (error) {
+			if (this.isMissingFileError(error) && this._dbCache.has(dbPath)) {
+				this.closeDb(this._dbCache.get(dbPath)!.db);
+				this._dbCache.delete(dbPath);
+			}
+			return null;
+		}
+	}
+
+	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
+		const entry = this._dbCache.get(dbPath);
+		return !!entry && entry.mtimeMs === stats.mtimeMs && entry.size === stats.size;
+	}
+
+	private getDbCacheKey(dbPath: string, stats: fs.Stats): string {
+		return `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+	}
+
+	private sameDbStats(left: fs.Stats, right: fs.Stats): boolean {
+		return left.mtimeMs === right.mtimeMs && left.size === right.size;
+	}
+
+	private async refreshDb(dbPath: string, stats: fs.Stats): Promise<SqlDatabase | null> {
+		let db: SqlDatabase;
+		try {
+			const SQL = await this.initSqlJs();
+			const buffer = await fs.promises.readFile(dbPath);
+			db = new SQL.Database(buffer);
+		} catch {
+			return this._dbCache.get(dbPath)?.db ?? null;
+		}
+
+		const currentStats = await this.statDb(dbPath);
+		if (!currentStats || !this.sameDbStats(stats, currentStats)) {
+			this.closeDb(db);
+			return this._dbCache.get(dbPath)?.db ?? null;
+		}
+
+		const existing = this._dbCache.get(dbPath);
+		if (existing) { this.closeDb(existing.db); }
+		this._dbCache.set(dbPath, { db, mtimeMs: stats.mtimeMs, size: stats.size });
+		return db;
+	}
+
+	/**
+	 * Returns a cached SQL.Database instance for the session-store.db path,
+	 * re-opening only when the file's mtime or size changes.
+	 *
+	 * Uses single-flight deduplication to prevent concurrent callers from each
+	 * re-reading the DB file and leaving instances unclosed.
+	 */
+	private async getDb(dbPath: string): Promise<SqlDatabase | null> {
+		const stats = await this.statDb(dbPath);
+		if (!stats) { return this._dbCache.get(dbPath)?.db ?? null; }
+
+		if (this.isCachedDbCurrent(dbPath, stats)) {
+			return this._dbCache.get(dbPath)!.db;
+		}
+
+		const cacheKey = this.getDbCacheKey(dbPath, stats);
+		const inflight = this._dbCacheInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const createDbPromise = this.refreshDb(dbPath, stats);
+		this._dbCacheInflight.set(cacheKey, createDbPromise);
+		try {
+			return await createDbPromise;
+		} finally {
+			if (this._dbCacheInflight.get(cacheKey) === createDbPromise) {
+				this._dbCacheInflight.delete(cacheKey);
+			}
+		}
+	}
 
 	/** Absolute path to ~/.copilot/session-store.db. */
 	getDbPath(): string {
@@ -105,14 +205,22 @@ export class CopilotCliStoreAccess {
 	/** Lazily initialise and cache the sql.js WASM module. */
 	async initSqlJs(): Promise<SqlJsStatic> {
 		if (this._sqlJsModule) { return this._sqlJsModule; }
-		const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
-		let wasmBinary: Uint8Array | undefined;
-		if (fs.existsSync(wasmPath)) {
-			wasmBinary = fs.readFileSync(wasmPath);
+		if (!this._sqlJsInitPromise) {
+			this._sqlJsInitPromise = (async () => {
+				const wasmPath = path.join(__dirname, 'sql-wasm.wasm');
+				let wasmBinary: Uint8Array | undefined;
+				try {
+					wasmBinary = await fs.promises.readFile(wasmPath);
+				} catch { /* WASM file not present — proceed without pre-loaded binary */ }
+				const module = await initSqlJs(wasmBinary ? { wasmBinary } : undefined);
+				this._sqlJsModule = module;
+				return module;
+			})().catch(err => {
+				this._sqlJsInitPromise = null;
+				throw err;
+			});
 		}
-		const sqlJs = await initSqlJs(wasmBinary ? { wasmBinary } : undefined);
-		this._sqlJsModule = sqlJs;
-		return sqlJs;
+		return this._sqlJsInitPromise;
 	}
 
 	/**
@@ -122,20 +230,14 @@ export class CopilotCliStoreAccess {
 	 */
 	async discoverNewSessions(knownUuids: Set<string>): Promise<string[]> {
 		const dbPath = this.getDbPath();
-		if (!fs.existsSync(dbPath)) { return []; }
+		const db = await this.getDb(dbPath);
+		if (!db) { return []; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec('SELECT id FROM sessions ORDER BY updated_at DESC');
-				if (result.length === 0) { return []; }
-				return result[0].values
-					.map(row => row[0] as string)
-					.filter(id => !knownUuids.has(id));
-			} finally {
-				db.close();
-			}
+			const result = db.exec('SELECT id FROM sessions ORDER BY updated_at DESC');
+			if (result.length === 0) { return []; }
+			return result[0].values
+				.map(row => row[0] as string)
+				.filter(id => !knownUuids.has(id));
 		} catch {
 			return [];
 		}
@@ -145,26 +247,21 @@ export class CopilotCliStoreAccess {
 	async readSession(virtualPath: string): Promise<CliStoreSession | null> {
 		const dbPath = this.getDbPathFromVirtual(virtualPath);
 		const sessionId = this.getSessionId(virtualPath);
-		if (!sessionId || !fs.existsSync(dbPath)) { return null; }
+		if (!sessionId) { return null; }
+		const db = await this.getDb(dbPath);
+		if (!db) { return null; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec(
-					'SELECT id, repository, branch, summary, created_at, updated_at FROM sessions WHERE id = ?',
-					[sessionId],
-				);
-				if (result.length === 0 || result[0].values.length === 0) { return null; }
-				const cols = result[0].columns;
-				const row = result[0].values[0];
-				const obj: Record<string, unknown> = {};
-				cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
-				if (!isCliStoreSession(obj)) { return null; }
-				return obj;
-			} finally {
-				db.close();
-			}
+			const result = db.exec(
+				'SELECT id, repository, branch, summary, created_at, updated_at FROM sessions WHERE id = ?',
+				[sessionId],
+			);
+			if (result.length === 0 || result[0].values.length === 0) { return null; }
+			const cols = result[0].columns;
+			const row = result[0].values[0];
+			const obj: Record<string, unknown> = {};
+			cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+			if (!isCliStoreSession(obj)) { return null; }
+			return obj;
 		} catch {
 			return null;
 		}
@@ -174,30 +271,25 @@ export class CopilotCliStoreAccess {
 	async getTurns(virtualPath: string): Promise<CliStoreTurn[]> {
 		const dbPath = this.getDbPathFromVirtual(virtualPath);
 		const sessionId = this.getSessionId(virtualPath);
-		if (!sessionId || !fs.existsSync(dbPath)) { return []; }
+		if (!sessionId) { return []; }
+		const db = await this.getDb(dbPath);
+		if (!db) { return []; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec(
-					'SELECT session_id, turn_index, user_message, assistant_response, timestamp FROM turns WHERE session_id = ? ORDER BY turn_index ASC',
-					[sessionId],
-				);
-				if (result.length === 0) { return []; }
-				const cols = result[0].columns;
-				const turns: CliStoreTurn[] = [];
-				for (const row of result[0].values) {
-					const obj: Record<string, unknown> = {};
-					cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
-					if (isCliStoreTurn(obj)) {
-						turns.push(obj);
-					}
+			const result = db.exec(
+				'SELECT session_id, turn_index, user_message, assistant_response, timestamp FROM turns WHERE session_id = ? ORDER BY turn_index ASC',
+				[sessionId],
+			);
+			if (result.length === 0) { return []; }
+			const cols = result[0].columns;
+			const turns: CliStoreTurn[] = [];
+			for (const row of result[0].values) {
+				const obj: Record<string, unknown> = {};
+				cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+				if (isCliStoreTurn(obj)) {
+					turns.push(obj);
 				}
-				return turns;
-			} finally {
-				db.close();
 			}
+			return turns;
 		} catch {
 			return [];
 		}
@@ -207,21 +299,16 @@ export class CopilotCliStoreAccess {
 	async countTurns(virtualPath: string): Promise<number> {
 		const dbPath = this.getDbPathFromVirtual(virtualPath);
 		const sessionId = this.getSessionId(virtualPath);
-		if (!sessionId || !fs.existsSync(dbPath)) { return 0; }
+		if (!sessionId) { return 0; }
+		const db = await this.getDb(dbPath);
+		if (!db) { return 0; }
 		try {
-			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
-			const db = new SQL.Database(buffer);
-			try {
-				const result = db.exec(
-					'SELECT COUNT(*) FROM turns WHERE session_id = ?',
-					[sessionId],
-				);
-				if (result.length === 0 || result[0].values.length === 0) { return 0; }
-				return (result[0].values[0][0] as number) || 0;
-			} finally {
-				db.close();
-			}
+			const result = db.exec(
+				'SELECT COUNT(*) FROM turns WHERE session_id = ?',
+				[sessionId],
+			);
+			if (result.length === 0 || result[0].values.length === 0) { return 0; }
+			return (result[0].values[0][0] as number) || 0;
 		} catch {
 			return 0;
 		}

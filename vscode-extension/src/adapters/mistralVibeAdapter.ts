@@ -24,20 +24,20 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = this.mistralVibe.getTokensFromSession(sessionFile);
+		const result = await this.mistralVibe.getTokensFromSession(sessionFile);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		return Promise.resolve(this.mistralVibe.countInteractions(sessionFile));
+		return this.mistralVibe.countInteractions(sessionFile);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return Promise.resolve(this.mistralVibe.getModelUsage(sessionFile));
+		return this.mistralVibe.getModelUsage(sessionFile);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		const meta = this.mistralVibe.getSessionMeta(sessionFile);
+		const meta = await this.mistralVibe.getSessionMeta(sessionFile);
 		return {
 			title: meta.title,
 			firstInteraction: meta.firstInteraction,
@@ -53,7 +53,7 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 		const candidatePaths = this.getCandidatePaths();
 		const sessionFiles: string[] = [];
 		try {
-			const files = this.mistralVibe.discoverSessions();
+			const files = await this.mistralVibe.discoverSessions();
 			if (files.length > 0) {
 				log(`📄 Found ${files.length} session file(s) in Mistral Vibe (~/.vibe/logs/session)`);
 				sessionFiles.push(...files);
@@ -70,9 +70,9 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const turns: ChatTurn[] = [];
-		const messages = this.mistralVibe.readSessionMessages(sessionFile);
-		const sessionMeta = this.mistralVibe.getSessionMeta(sessionFile);
-		const tokenData = this.mistralVibe.getTokensFromSession(sessionFile);
+		const messages = await this.mistralVibe.readSessionMessages(sessionFile);
+		const sessionMeta = await this.mistralVibe.getSessionMeta(sessionFile);
+		const tokenData = await this.mistralVibe.getTokensFromSession(sessionFile);
 		const model: string = sessionMeta.model || 'devstral';
 		const userMsgIndices = this.findUserMessageIndices(messages);
 
@@ -149,8 +149,8 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
 		const analysis = createEmptySessionUsageAnalysis();
-		const messages = this.mistralVibe.readSessionMessages(sessionFile);
-		const meta = this.mistralVibe.getSessionMeta(sessionFile);
+		const messages = await this.mistralVibe.readSessionMessages(sessionFile);
+		const meta = await this.mistralVibe.getSessionMeta(sessionFile);
 		const model = meta.model || 'devstral';
 		const models: string[] = [];
 		for (const msg of messages) {

@@ -162,14 +162,15 @@ return slashIdx !== -1 ? afterBrain.substring(0, slashIdx) : afterBrain;
 /**
  * Discover all Antigravity transcript files under the brain directory.
  */
-getAntigravitySessionFiles(): string[] {
+async getAntigravitySessionFiles(): Promise<string[]> {
 const brainDir = this.getAntigravityBrainDir();
-if (!fs.existsSync(brainDir)) {
+const sessionFiles: string[] = [];
+let sessionDirs: fs.Dirent[];
+try {
+sessionDirs = await fs.promises.readdir(brainDir, { withFileTypes: true });
+} catch {
 return [];
 }
-const sessionFiles: string[] = [];
-try {
-const sessionDirs = fs.readdirSync(brainDir, { withFileTypes: true });
 for (const sessionDir of sessionDirs) {
 if (!sessionDir.isDirectory()) { continue; }
 const transcriptPath = path.join(
@@ -180,16 +181,13 @@ sessionDir.name,
 'transcript.jsonl',
 );
 try {
-const stat = fs.statSync(transcriptPath);
+const stat = await fs.promises.stat(transcriptPath);
 if (stat.size > 0) {
 sessionFiles.push(transcriptPath);
 }
 } catch {
 // transcript.jsonl does not exist for this session — skip.
 }
-}
-} catch {
-return [];
 }
 return sessionFiles;
 }
@@ -198,7 +196,7 @@ return sessionFiles;
  * Read and parse an Antigravity transcript.jsonl file.
  * Returns a parsed session with user and model entries separated.
  */
-readAntigravitySession(filePath: string): AntigravityParsedSession {
+async readAntigravitySession(filePath: string): Promise<AntigravityParsedSession> {
 const sessionId = this.getSessionIdFromPath(filePath);
 const userEntries: AntigravityEntry[] = [];
 const modelEntries: AntigravityEntry[] = [];
@@ -206,7 +204,7 @@ const allEntries: AntigravityEntry[] = [];
 
 let rawContent: string;
 try {
-rawContent = fs.readFileSync(filePath, 'utf8');
+rawContent = await fs.promises.readFile(filePath, 'utf8');
 } catch {
 return { sessionId, userEntries, modelEntries, allEntries };
 }
@@ -244,11 +242,11 @@ return { sessionId, userEntries, modelEntries, allEntries };
  * Uses user message text for input and model response text for output.
  * Since Antigravity doesn't persist token counts, this is a best-effort estimate.
  */
-estimateTokensFromAntigravitySession(
+async estimateTokensFromAntigravitySession(
 filePath: string,
 estimateTokens: (text: string, model?: string) => number
-): { tokens: number; thinkingTokens: number } {
-const session = this.readAntigravitySession(filePath);
+): Promise<{ tokens: number; thinkingTokens: number }> {
+const session = await this.readAntigravitySession(filePath);
 let inputTokens = 0;
 let outputTokens = 0;
 let thinkingTokens = 0;
@@ -269,8 +267,8 @@ return { tokens: inputTokens + outputTokens + thinkingTokens, thinkingTokens };
 /**
  * Count the number of user interactions (USER_INPUT entries) in a session.
  */
-countAntigravityInteractions(filePath: string): number {
-const session = this.readAntigravitySession(filePath);
+async countAntigravityInteractions(filePath: string): Promise<number> {
+const session = await this.readAntigravitySession(filePath);
 return session.userEntries.length;
 }
 
@@ -289,12 +287,12 @@ return {};
  * First interaction: created_at of first entry.
  * Last interaction: created_at of last entry.
  */
-getAntigravitySessionMeta(filePath: string): {
+async getAntigravitySessionMeta(filePath: string): Promise<{
 title: string | undefined;
 firstInteraction: string | null;
 lastInteraction: string | null;
-} {
-const session = this.readAntigravitySession(filePath);
+}> {
+const session = await this.readAntigravitySession(filePath);
 const all = session.allEntries;
 
 let title: string | undefined;
@@ -322,8 +320,8 @@ return { title, firstInteraction, lastInteraction };
  * Because there are no token counts, inputTokensEstimate and outputTokensEstimate
  * are always 0.
  */
-buildAntigravityTurns(filePath: string): { turns: ChatTurn[]; actualTokens?: number } {
-const session = this.readAntigravitySession(filePath);
+async buildAntigravityTurns(filePath: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
+const session = await this.readAntigravitySession(filePath);
 const allEntries = session.allEntries;
 const turns: ChatTurn[] = [];
 let turnNumber = 0;
@@ -357,8 +355,8 @@ return { turns };
 /**
  * Count the total number of tool calls across all entries in a session.
  */
-countToolCalls(filePath: string): number {
-const session = this.readAntigravitySession(filePath);
+async countToolCalls(filePath: string): Promise<number> {
+const session = await this.readAntigravitySession(filePath);
 let total = 0;
 for (const entry of session.allEntries) {
 if (Array.isArray(entry.tool_calls)) {

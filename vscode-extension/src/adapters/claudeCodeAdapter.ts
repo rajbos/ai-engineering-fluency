@@ -56,20 +56,20 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = this.claudeCode.getTokensFromClaudeCodeSession(sessionFile);
+		const result = await this.claudeCode.getTokensFromClaudeCodeSession(sessionFile);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		return Promise.resolve(this.claudeCode.countClaudeCodeInteractions(sessionFile));
+		return await this.claudeCode.countClaudeCodeInteractions(sessionFile);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return Promise.resolve(this.claudeCode.getClaudeCodeModelUsage(sessionFile));
+		return await this.claudeCode.getClaudeCodeModelUsage(sessionFile);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		const meta = this.claudeCode.getClaudeCodeSessionMeta(sessionFile);
+		const meta = await this.claudeCode.getClaudeCodeSessionMeta(sessionFile);
 		return {
 			title: meta?.title,
 			firstInteraction: meta?.firstInteraction || null,
@@ -86,7 +86,7 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		const candidatePaths = this.getCandidatePaths();
 		const sessionFiles: string[] = [];
 		try {
-			const files = this.claudeCode.getClaudeCodeSessionFiles();
+			const files = await this.claudeCode.getClaudeCodeSessionFiles();
 			if (files.length > 0) {
 				log(`📄 Found ${files.length} session file(s) in Claude Code (~/.claude/projects)`);
 				sessionFiles.push(...files);

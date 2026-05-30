@@ -31,20 +31,20 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = this.claudeDesktopCowork.getTokensFromCoworkSession(sessionFile);
+		const result = await this.claudeDesktopCowork.getTokensFromCoworkSession(sessionFile);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		return Promise.resolve(this.claudeDesktopCowork.countCoworkInteractions(sessionFile));
+		return await this.claudeDesktopCowork.countCoworkInteractions(sessionFile);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return Promise.resolve(this.claudeDesktopCowork.getCoworkModelUsage(sessionFile));
+		return await this.claudeDesktopCowork.getCoworkModelUsage(sessionFile);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		const meta = this.claudeDesktopCowork.getCoworkSessionMeta(sessionFile);
+		const meta = await this.claudeDesktopCowork.getCoworkSessionMeta(sessionFile);
 		return {
 			title: meta?.title,
 			firstInteraction: meta?.firstInteraction || null,
@@ -61,7 +61,7 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 		const candidatePaths = this.getCandidatePaths();
 		const sessionFiles: string[] = [];
 		try {
-			const files = this.claudeDesktopCowork.getCoworkSessionFiles();
+			const files = await this.claudeDesktopCowork.getCoworkSessionFiles();
 			if (files.length > 0) {
 				log(`📄 Found ${files.length} session file(s) in Claude Desktop Cowork`);
 				sessionFiles.push(...files);
@@ -79,7 +79,7 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const turns: ChatTurn[] = [];
-		const events = this.claudeDesktopCowork.readCoworkEvents(sessionFile);
+		const events = await this.claudeDesktopCowork.readCoworkEvents(sessionFile);
 		let currentUserEvent: any = null;
 		const pendingAssistantEvents: any[] = [];
 

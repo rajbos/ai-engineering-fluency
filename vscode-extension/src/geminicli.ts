@@ -118,26 +118,31 @@ export function normalizeGeminiModelId(model: string): string {
 
 // ── getGeminiCliSessionFiles helpers ────────────────────────────────────────
 
-function _ggcsfCollectChatFiles(chatsDir: string): string[] {
+async function _ggcsfCollectChatFiles(chatsDir: string): Promise<string[]> {
 	const files: string[] = [];
 	try {
-		const entries = fs.readdirSync(chatsDir, { withFileTypes: true });
+		const entries = await fs.promises.readdir(chatsDir, { withFileTypes: true });
 		for (const entry of entries) {
 			if (entry.isDirectory()) { continue; }
 			if (!entry.name.startsWith('session-') || !entry.name.endsWith('.jsonl')) { continue; }
 			const fullPath = path.join(chatsDir, entry.name);
 			try {
-				if (fs.statSync(fullPath).size > 0) { files.push(fullPath); }
+				const st = await fs.promises.stat(fullPath);
+				if (st.size > 0) { files.push(fullPath); }
 			} catch { /* ignore individual stat failures */ }
 		}
 	} catch { /* ignore unreadable chats dirs */ }
 	return files;
 }
 
-function _ggcsfCollectProjectFiles(tmpDir: string, projectDir: fs.Dirent): string[] {
+async function _ggcsfCollectProjectFiles(tmpDir: string, projectDir: fs.Dirent): Promise<string[]> {
 	if (!projectDir.isDirectory()) { return []; }
 	const chatsDir = path.join(tmpDir, projectDir.name, 'chats');
-	if (!fs.existsSync(chatsDir)) { return []; }
+	try {
+		await fs.promises.access(chatsDir);
+	} catch {
+		return [];
+	}
 	return _ggcsfCollectChatFiles(chatsDir);
 }
 
@@ -163,6 +168,9 @@ function _rgsBuildHeader(parsed: any): GeminiCliSessionHeader {
 }
 
 export class GeminiCliDataAccess {
+	private _projectsIndexCache: { map: Map<string, string>; mtimeMs: number; size: number } | null = null;
+	private _projectsIndexInflight: Map<string, Promise<Map<string, string>>> = new Map();
+
 	getGeminiDataDir(): string {
 		return path.join(os.homedir(), '.gemini');
 	}
@@ -187,25 +195,33 @@ export class GeminiCliDataAccess {
 			&& normalized.endsWith('.jsonl');
 	}
 
-	private collectSessionFilesFromChatDir(chatsDir: string): string[] {
+	private async collectSessionFilesFromChatDir(chatsDir: string): Promise<string[]> {
 		const files: string[] = [];
 		try {
-			const chatEntries = fs.readdirSync(chatsDir, { withFileTypes: true });
+			const chatEntries = await fs.promises.readdir(chatsDir, { withFileTypes: true });
 			for (const entry of chatEntries) {
 				if (entry.isDirectory() || !entry.name.startsWith('session-') || !entry.name.endsWith('.jsonl')) { continue; }
 				const fullPath = path.join(chatsDir, entry.name);
-				try { if (fs.statSync(fullPath).size > 0) { files.push(fullPath); } } catch { /* skip */ }
+				try {
+					const st = await fs.promises.stat(fullPath);
+					if (st.size > 0) { files.push(fullPath); }
+				} catch { /* skip */ }
 			}
 		} catch { /* ignore unreadable chat directories */ }
 		return files;
 	}
 
-	getGeminiCliSessionFiles(): string[] {
+	async getGeminiCliSessionFiles(): Promise<string[]> {
 		const tmpDir = this.getGeminiTmpDir();
-		if (!fs.existsSync(tmpDir)) { return []; }
 		try {
-			const projectDirs = fs.readdirSync(tmpDir, { withFileTypes: true });
-			return projectDirs.flatMap(dir => _ggcsfCollectProjectFiles(tmpDir, dir));
+			await fs.promises.access(tmpDir);
+		} catch {
+			return [];
+		}
+		try {
+			const projectDirs = await fs.promises.readdir(tmpDir, { withFileTypes: true });
+			const results = await Promise.all(projectDirs.map(dir => _ggcsfCollectProjectFiles(tmpDir, dir)));
+			return results.flat();
 		} catch {
 			return [];
 		}
@@ -269,7 +285,7 @@ export class GeminiCliDataAccess {
 		}
 	}
 
-	readGeminiCliSession(sessionFilePath: string): GeminiCliParsedSession {
+	async readGeminiCliSession(sessionFilePath: string): Promise<GeminiCliParsedSession> {
 		const state: RgsState = {
 			header: null,
 			latestHeaderUpdate: undefined,
@@ -279,7 +295,7 @@ export class GeminiCliDataAccess {
 			assistantRecords: new Map<string, GeminiCliAssistantRecord>(),
 		};
 
-		for (const [i, line] of this.readJsonlLines(sessionFilePath).entries()) {
+		for (const [i, line] of (await this.readJsonlLines(sessionFilePath)).entries()) {
 			let parsed: any;
 			try { parsed = JSON.parse(line); } catch { continue; }
 			this._rgsDispatchLine(parsed, i, state);
@@ -292,7 +308,7 @@ export class GeminiCliDataAccess {
 		state.userRecords.sort(compareByTimestampThenLine);
 		const dedupedAssistants = Array.from(state.assistantRecords.values()).sort(compareByTimestampThenLine);
 		const projectBucket = this.getProjectBucketFromPath(sessionFilePath) || state.header?.projectHash;
-		const workspacePath = this.resolveWorkspacePath(projectBucket, state.header?.projectHash);
+		const workspacePath = await this.resolveWorkspacePath(projectBucket, state.header?.projectHash);
 
 		return {
 			header: state.header,
@@ -358,8 +374,8 @@ export class GeminiCliDataAccess {
 		return isNonEmptyString(parsed.id) ? counter : counter + 1;
 	}
 
-	getTokensFromGeminiCliSession(sessionFilePath: string): { tokens: number; thinkingTokens: number } {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	async getTokensFromGeminiCliSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		let totalTokens = 0;
 		let thinkingTokens = 0;
 
@@ -372,12 +388,12 @@ export class GeminiCliDataAccess {
 		return { tokens: totalTokens, thinkingTokens };
 	}
 
-	countGeminiCliInteractions(sessionFilePath: string): number {
-		return this.readGeminiCliSession(sessionFilePath).userRecords.length;
+	async countGeminiCliInteractions(sessionFilePath: string): Promise<number> {
+		return (await this.readGeminiCliSession(sessionFilePath)).userRecords.length;
 	}
 
-	getGeminiCliModelUsage(sessionFilePath: string): ModelUsage {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	async getGeminiCliModelUsage(sessionFilePath: string): Promise<ModelUsage> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		const modelUsage: ModelUsage = {};
 
 		for (const assistant of session.assistantRecords) {
@@ -398,13 +414,13 @@ export class GeminiCliDataAccess {
 		return modelUsage;
 	}
 
-	getGeminiCliSessionMeta(sessionFilePath: string): {
+	async getGeminiCliSessionMeta(sessionFilePath: string): Promise<{
 		title: string | undefined;
 		firstInteraction: string | null;
 		lastInteraction: string | null;
 		workspacePath?: string;
-	} {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	}> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		const timestamps: number[] = [];
 
 		const pushTimestamp = (value: string | undefined): void => {
@@ -455,8 +471,8 @@ export class GeminiCliDataAccess {
 		return { assistantContents, toolCalls, model, inputTokens, outputTokens, thinkingTokens, toolTokens, cachedTokens, totalTokens };
 	}
 
-	buildGeminiCliTurns(sessionFilePath: string): { turns: ChatTurn[]; actualTokens: number } {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	async buildGeminiCliTurns(sessionFilePath: string): Promise<{ turns: ChatTurn[]; actualTokens: number }> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		const groups = this.groupConversationTurns(session);
 		const turns: ChatTurn[] = [];
 		let sessionActualTokens = 0;
@@ -508,8 +524,8 @@ export class GeminiCliDataAccess {
 		return tokenData.total;
 	}
 
-	getGeminiCliDailyFractions(sessionFilePath: string): Record<string, number> {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	async getGeminiCliDailyFractions(sessionFilePath: string): Promise<Record<string, number>> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		const dateKeys = session.userRecords
 			.map(record => this.toLocalDayKey(record.timestamp))
 			.filter((value): value is string => !!value);
@@ -543,9 +559,9 @@ export class GeminiCliDataAccess {
 		return fractions;
 	}
 
-	private readJsonlLines(sessionFilePath: string): string[] {
+	private async readJsonlLines(sessionFilePath: string): Promise<string[]> {
 		try {
-			return fs.readFileSync(sessionFilePath, 'utf8')
+			return (await fs.promises.readFile(sessionFilePath, 'utf8'))
 				.split(/\r?\n/)
 				.map(line => line.trim())
 				.filter(line => line.length > 0);
@@ -570,8 +586,8 @@ export class GeminiCliDataAccess {
 		return undefined;
 	}
 
-	private resolveWorkspacePath(projectBucket?: string, projectHash?: string): string | undefined {
-		const projectsIndex = this.readGeminiProjectsIndex();
+	private async resolveWorkspacePath(projectBucket?: string, projectHash?: string): Promise<string | undefined> {
+		const projectsIndex = await this.readGeminiProjectsIndex();
 		if (projectBucket && projectsIndex.has(projectBucket)) {
 			return projectsIndex.get(projectBucket);
 		}
@@ -581,32 +597,56 @@ export class GeminiCliDataAccess {
 		return undefined;
 	}
 
-	private readGeminiProjectsIndex(): Map<string, string> {
-		const mappings = new Map<string, string>();
+	private async readGeminiProjectsIndex(): Promise<Map<string, string>> {
 		const projectsPath = this.getGeminiProjectsPath();
-		if (!fs.existsSync(projectsPath)) {
-			return mappings;
-		}
 
+		let stats: fs.Stats | null;
 		try {
-			const raw = JSON.parse(fs.readFileSync(projectsPath, 'utf8'));
-			if (Array.isArray(raw)) {
-				for (const entry of raw) {
-					this.addProjectMapping(mappings, undefined, entry);
-				}
-				return mappings;
-			}
-
-			if (raw && typeof raw === 'object') {
-				for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-					this.addProjectMapping(mappings, key, value);
-				}
-			}
+			stats = await fs.promises.stat(projectsPath);
 		} catch {
-			// Ignore malformed projects.json files.
+			return new Map();
 		}
 
-		return mappings;
+		const cache = this._projectsIndexCache;
+		if (cache && cache.mtimeMs === stats.mtimeMs && cache.size === stats.size) {
+			return cache.map;
+		}
+
+		const cacheKey = `${stats.mtimeMs}:${stats.size}`;
+		const inflight = this._projectsIndexInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const readPromise = (async (): Promise<Map<string, string>> => {
+			const mappings = new Map<string, string>();
+			try {
+				const raw = JSON.parse(await fs.promises.readFile(projectsPath, 'utf8'));
+				if (Array.isArray(raw)) {
+					for (const entry of raw) {
+						this.addProjectMapping(mappings, undefined, entry);
+					}
+				} else if (raw && typeof raw === 'object') {
+					for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+						this.addProjectMapping(mappings, key, value);
+					}
+				}
+			} catch {
+				// Ignore malformed projects.json files.
+			}
+			const currentStats = await fs.promises.stat(projectsPath).catch(() => null);
+			if (currentStats && currentStats.mtimeMs === stats!.mtimeMs && currentStats.size === stats!.size) {
+				this._projectsIndexCache = { map: mappings, mtimeMs: stats!.mtimeMs, size: stats!.size };
+			}
+			return mappings;
+		})();
+
+		this._projectsIndexInflight.set(cacheKey, readPromise);
+		try {
+			return await readPromise;
+		} finally {
+			if (this._projectsIndexInflight.get(cacheKey) === readPromise) {
+				this._projectsIndexInflight.delete(cacheKey);
+			}
+		}
 	}
 
 	private applyStringValueMapping(mappings: Map<string, string>, keyHint: string | undefined, value: string): void {

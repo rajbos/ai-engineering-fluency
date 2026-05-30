@@ -1611,12 +1611,41 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const cachedData = this.getCachedSessionData(sessionFile);
 		const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
 		const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-		const details = sessionData.interactions > 0 ? await this.getSessionFileDetails(sessionFile, fileStats) : undefined;
+		// Avoid the expensive full getSessionFileDetails parse (which calls _reconstructJsonlStateAsync
+		// for delta-based .jsonl files) during the hot preloading loop. Use the detail cache when
+		// already populated (e.g. warm run), or fall back to a lightweight stub built from sessionData.
+		// The details panel fetches full details on demand; repository is not needed for stats.
+		const details = sessionData.interactions > 0
+			? ((await this.getSessionFileDetailsFromCache(sessionFile, fileStats)) ?? this.buildMinimalPreloadDetails(sessionFile, fileStats, sessionData))
+			: undefined;
 		preloaded.push({ sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload);
 		if (!wasCached) {
 			// Yield after CPU-intensive cache-miss work to keep VS Code responsive
 			await new Promise(r => setImmediate(r));
 		}
+	}
+
+	/**
+	 * Build a lightweight SessionFileDetails stub from already-computed sessionData.
+	 * Used during preloading to avoid re-parsing files just to extract repository info.
+	 * The full parse (including repository) is deferred to the details panel on demand.
+	 */
+	private buildMinimalPreloadDetails(sessionFile: string, stat: import('fs').Stats, sessionData: SessionFileCache): SessionFileDetails {
+		const details: SessionFileDetails = {
+			file: sessionFile,
+			size: stat.size,
+			modified: stat.mtime.toISOString(),
+			interactions: sessionData.interactions,
+			tokens: sessionData.actualTokens || sessionData.tokens || 0,
+			contextReferences: sessionData.usageAnalysis?.contextReferences ?? this.createEmptyContextRefs(),
+			firstInteraction: sessionData.firstInteraction ?? null,
+			lastInteraction: sessionData.lastInteraction ?? null,
+			editorSource: this.detectEditorSource(sessionFile),
+			title: sessionData.title,
+			repository: sessionData.repository,
+		};
+		this.enrichDetailsWithEditorInfo(sessionFile, details);
+		return details;
 	}
 
 	private async _runUpdateTokenStats(silent: boolean): Promise<DetailedStats | undefined> {
@@ -2087,7 +2116,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async loadSessionDataStandalone(fileLoadCutoffMs: number, progressCallback?: (completed: number, total: number) => void): Promise<({ sessionFile: string; sessionData: SessionFileCache; details: SessionFileDetails; mtime: number; wasCached: boolean } | null | undefined)[]> {
-		this.cacheManager.clearExpiredCache();
+		void this.cacheManager.clearExpiredCache();
 		const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
 		this.log(`📊 Analyzing ${sessionFiles.length} session file(s)...`);
 		if (sessionFiles.length === 0) { this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?'); }
@@ -3676,7 +3705,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		this.setDetailsTimestamps(details, timestamps, stat);
-		if (allContentReferences.length > 0) { details.repository = await this.extractRepositoryFromContentReferences(allContentReferences); }
+		// Use '' as a "checked but not found" sentinel so warm-cache runs don't re-parse this file.
+		details.repository = allContentReferences.length > 0
+			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
+			: '';
 		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
 		return details;
 	}
@@ -3697,7 +3729,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			details.title = trimmed.length > 60 ? trimmed.slice(0, 60) + '…' : trimmed;
 		}
 		this.setDetailsTimestamps(details, timestamps, stat);
-		if (allContentReferences.length > 0) { details.repository = await this.extractRepositoryFromContentReferences(allContentReferences); }
+		details.repository = allContentReferences.length > 0
+			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
+			: '';
 		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
 		return details;
 	}
@@ -3744,7 +3778,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		this.setDetailsTimestamps(details, timestamps, stat);
-		if (allContentReferences.length > 0) { details.repository = await this.extractRepositoryFromContentReferences(allContentReferences); }
+		details.repository = allContentReferences.length > 0
+			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
+			: '';
 	}
 
 	private processJsonRequest(request: any, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): void {

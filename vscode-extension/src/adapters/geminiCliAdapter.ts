@@ -33,20 +33,20 @@ export class GeminiCliAdapter implements IEcosystemAdapter, IDiscoverableEcosyst
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = this.geminiCli.getTokensFromGeminiCliSession(sessionFile);
+		const result = await this.geminiCli.getTokensFromGeminiCliSession(sessionFile);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		return Promise.resolve(this.geminiCli.countGeminiCliInteractions(sessionFile));
+		return await this.geminiCli.countGeminiCliInteractions(sessionFile);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return Promise.resolve(this.geminiCli.getGeminiCliModelUsage(sessionFile));
+		return await this.geminiCli.getGeminiCliModelUsage(sessionFile);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		return Promise.resolve(this.geminiCli.getGeminiCliSessionMeta(sessionFile));
+		return await this.geminiCli.getGeminiCliSessionMeta(sessionFile);
 	}
 
 	getEditorRoot(_sessionFile: string): string {
@@ -58,7 +58,7 @@ export class GeminiCliAdapter implements IEcosystemAdapter, IDiscoverableEcosyst
 		const sessionFiles: string[] = [];
 
 		try {
-			const files = this.geminiCli.getGeminiCliSessionFiles();
+			const files = await this.geminiCli.getGeminiCliSessionFiles();
 			if (files.length > 0) {
 				log(`📄 Found ${files.length} session file(s) in Gemini CLI (~/.gemini/tmp/*/chats)`);
 				sessionFiles.push(...files);
@@ -79,16 +79,16 @@ export class GeminiCliAdapter implements IEcosystemAdapter, IDiscoverableEcosyst
 	}
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
-		return Promise.resolve(this.geminiCli.buildGeminiCliTurns(sessionFile));
+		return await this.geminiCli.buildGeminiCliTurns(sessionFile);
 	}
 
 	async getDailyFractions(sessionFile: string): Promise<Record<string, number>> {
-		return Promise.resolve(this.geminiCli.getGeminiCliDailyFractions(sessionFile));
+		return await this.geminiCli.getGeminiCliDailyFractions(sessionFile);
 	}
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
 		const analysis = createEmptySessionUsageAnalysis();
-		const session = this.geminiCli.readGeminiCliSession(sessionFile);
+		const session = await this.geminiCli.readGeminiCliSession(sessionFile);
 		const models: string[] = [];
 
 		analysis.modeUsage.cli += session.userRecords.length;

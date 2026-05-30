@@ -1102,9 +1102,9 @@ export function analyzeRequestContext(request: unknown, refs: ContextReferenceUs
  * Read Claude Code session events from a JSONL file for usage analysis.
  * Lightweight: only used internally by analyzeSessionUsage.
  */
-export function readClaudeCodeEventsForAnalysis(sessionFilePath: string): any[] {
+export async function readClaudeCodeEventsForAnalysis(sessionFilePath: string): Promise<any[]> {
 	try {
-		const content = fs.readFileSync(sessionFilePath, 'utf8');
+		const content = await fs.promises.readFile(sessionFilePath, 'utf8');
 		const lines = content.trim().split('\n');
 		const events: unknown[] = [];
 		for (const line of lines) {

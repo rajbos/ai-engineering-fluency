@@ -109,39 +109,45 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Get all Cowork session JSONL file paths.
 	 * Walks the nested directory structure: <base>/<app>/<machine>/<session>/.claude/projects/<hash>/<uuid>.jsonl
 	 */
-	getCoworkSessionFiles(): string[] {
+	async getCoworkSessionFiles(): Promise<string[]> {
 		const baseDir = this.getCoworkBaseDir();
-		if (!baseDir || !fs.existsSync(baseDir)) { return []; }
+		if (!baseDir) { return []; }
+		try {
+			await fs.promises.access(baseDir);
+		} catch {
+			return [];
+		}
 		const results: string[] = [];
 		try {
-			this.walkForJsonlFiles(baseDir, results, 0, 8);
+			await this.walkForJsonlFiles(baseDir, results, 0, 8);
 		} catch {
 			// Ignore top-level errors
 		}
 		return results;
 	}
 
-	private walkForJsonlFiles(dir: string, results: string[], depth: number, maxDepth: number): void {
+	private async walkForJsonlFiles(dir: string, results: string[], depth: number, maxDepth: number): Promise<void> {
 		if (depth > maxDepth) { return; }
 		let entries: fs.Dirent[];
 		try {
-			entries = fs.readdirSync(dir, { withFileTypes: true });
+			entries = await fs.promises.readdir(dir, { withFileTypes: true });
 		} catch {
 			return;
 		}
 		for (const entry of entries) {
-			this.processWalkEntry(entry, dir, results, depth, maxDepth);
+			await this.processWalkEntry(entry, dir, results, depth, maxDepth);
 		}
 	}
 
-	private processWalkEntry(entry: fs.Dirent, dir: string, results: string[], depth: number, maxDepth: number): void {
+	private async processWalkEntry(entry: fs.Dirent, dir: string, results: string[], depth: number, maxDepth: number): Promise<void> {
 		const fullPath = path.join(dir, entry.name);
 		if (entry.isDirectory()) {
 			if (entry.name === 'agent') { return; }
-			this.walkForJsonlFiles(fullPath, results, depth + 1, maxDepth);
+			await this.walkForJsonlFiles(fullPath, results, depth + 1, maxDepth);
 		} else if (entry.name.endsWith('.jsonl') && entry.name !== 'audit.jsonl') {
 			try {
-				if (fs.statSync(fullPath).size > 0) { results.push(fullPath); }
+				const st = await fs.promises.stat(fullPath);
+				if (st.size > 0) { results.push(fullPath); }
 			} catch {
 				// Ignore inaccessible files
 			}
@@ -152,9 +158,9 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Parse all JSONL events from a Cowork session file.
 	 * Public so extension.ts can use it for log viewer turn building.
 	 */
-	readCoworkEvents(sessionFilePath: string): any[] {
+	async readCoworkEvents(sessionFilePath: string): Promise<any[]> {
 		try {
-			const content = fs.readFileSync(sessionFilePath, 'utf8');
+			const content = await fs.promises.readFile(sessionFilePath, 'utf8');
 			const lines = content.trim().split('\n');
 			const events: any[] = [];
 			for (const line of lines) {
@@ -175,8 +181,8 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Get token counts from a Cowork session.
 	 * Uses actual Anthropic API counts; de-duplicates by requestId using only final events.
 	 */
-	getTokensFromCoworkSession(sessionFilePath: string): { tokens: number; thinkingTokens: number } {
-		const events = this.readCoworkEvents(sessionFilePath);
+	async getTokensFromCoworkSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
+		const events = await this.readCoworkEvents(sessionFilePath);
 		let totalInputTokens = 0;
 		let totalOutputTokens = 0;
 		const seenRequestIds = new Set<string>();
@@ -214,8 +220,8 @@ export class ClaudeDesktopCoworkDataAccess {
 	/**
 	 * Count user interactions in a Cowork session.
 	 */
-	countCoworkInteractions(sessionFilePath: string): number {
-		const events = this.readCoworkEvents(sessionFilePath);
+	async countCoworkInteractions(sessionFilePath: string): Promise<number> {
+		const events = await this.readCoworkEvents(sessionFilePath);
 		let count = 0;
 		for (const event of events) {
 			if (event.type === 'user' && !event.isSidechain && event.message?.role === 'user') {
@@ -236,8 +242,8 @@ export class ClaudeDesktopCoworkDataAccess {
 	/**
 	 * Get per-model token usage from a Cowork session.
 	 */
-	getCoworkModelUsage(sessionFilePath: string): ModelUsage {
-		const events = this.readCoworkEvents(sessionFilePath);
+	async getCoworkModelUsage(sessionFilePath: string): Promise<ModelUsage> {
+		const events = await this.readCoworkEvents(sessionFilePath);
 		const modelUsage: ModelUsage = {};
 		const seenRequestIds = new Set<string>();
 		for (const event of events) {
@@ -289,17 +295,17 @@ export class ClaudeDesktopCoworkDataAccess {
 	 * Read session metadata (title, timestamps, cwd) for a Cowork session.
 	 * The metadata comes from the sibling .json file alongside the session directory.
 	 */
-	getCoworkSessionMeta(sessionFilePath: string): {
+	async getCoworkSessionMeta(sessionFilePath: string): Promise<{
 		title?: string;
 		firstInteraction?: string;
 		lastInteraction?: string;
 		cwd?: string;
-	} | null {
+	} | null> {
 		const metaPath = this.getMetadataPathFromJsonl(sessionFilePath);
 		if (!metaPath) { return null; }
 
 		try {
-			const raw = fs.readFileSync(metaPath, 'utf8');
+			const raw = await fs.promises.readFile(metaPath, 'utf8');
 			const meta = JSON.parse(raw);
 
 			const firstInteraction = meta.createdAt

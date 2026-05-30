@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
-import { withErrorRecoverySync } from './utils/errors';
+import { withErrorRecovery } from './utils/errors';
 import { normalizePathForComparison } from './workspaceHelpers';
 
 /**
@@ -70,34 +70,45 @@ export class ClaudeCodeDataAccess {
 	/**
 	 * Get all Claude Code session file paths (top-level session files, excluding subagent files).
 	 */
-	getClaudeCodeSessionFiles(): string[] {
+	async getClaudeCodeSessionFiles(): Promise<string[]> {
 		const projectsDir = this.getClaudeCodeProjectsDir();
-		if (!fs.existsSync(projectsDir)) { return []; }
 		try {
-			const projectDirs = fs.readdirSync(projectsDir, { withFileTypes: true });
-			return projectDirs
-				.filter(d => d.isDirectory())
-				.flatMap(d => this.collectJsonlFilesFromProject(path.join(projectsDir, d.name)));
+			await fs.promises.access(projectsDir);
+		} catch {
+			return [];
+		}
+		try {
+			const projectDirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
+			const results = await Promise.all(
+				projectDirs
+					.filter(d => d.isDirectory())
+					.map(d => this.collectJsonlFilesFromProject(path.join(projectsDir, d.name)))
+			);
+			return results.flat();
 		} catch (err) {
 			console.error('[claudecode] Failed to read projects dir:', err);
 			return [];
 		}
 	}
 
-	private collectJsonlFilesFromProject(projectPath: string): string[] {
+	private async collectJsonlFilesFromProject(projectPath: string): Promise<string[]> {
 		try {
-			const entries = fs.readdirSync(projectPath, { withFileTypes: true });
-			return entries
-				.filter(e => !e.isDirectory() && e.name.endsWith('.jsonl'))
-				.flatMap(e => {
-					const fullPath = path.join(projectPath, e.name);
-					try {
-						return fs.statSync(fullPath).size > 0 ? [fullPath] : [];
-					} catch (err) {
-						console.error(`[claudecode] Failed to stat ${fullPath}:`, err);
-						return [];
-					}
-				});
+			const entries = await fs.promises.readdir(projectPath, { withFileTypes: true });
+			const results = await Promise.all(
+				entries
+					.filter(e => !e.isDirectory() && e.name.endsWith('.jsonl'))
+					.map(async e => {
+						const fullPath = path.join(projectPath, e.name);
+						try {
+							const st = await fs.promises.stat(fullPath);
+							return st.size > 0 ? [fullPath] : [];
+						} catch (err) {
+							console.error(`[claudecode] Failed to stat ${fullPath}:`, err);
+							return [] as string[];
+						}
+					})
+			);
+			return results.flat();
 		} catch (err) {
 			console.error(`[claudecode] Failed to read project dir ${projectPath}:`, err);
 			return [];
@@ -107,10 +118,10 @@ export class ClaudeCodeDataAccess {
 	/**
 	 * Parse a Claude Code session JSONL file and return all events.
 	 */
-	private readSessionEvents(sessionFilePath: string): any[] {
-		return withErrorRecoverySync(
-			() => {
-				const content = fs.readFileSync(sessionFilePath, 'utf8');
+	private async readSessionEvents(sessionFilePath: string): Promise<any[]> {
+		return withErrorRecovery(
+			async () => {
+				const content = await fs.promises.readFile(sessionFilePath, 'utf8');
 				const lines = content.trim().split('\n');
 				const events: any[] = [];
 				for (const line of lines) {
@@ -160,8 +171,8 @@ export class ClaudeCodeDataAccess {
 	 * Uses ACTUAL Anthropic API token counts from assistant event message.usage.
 	 * De-duplicates by message.id (last-wins) — see deduplicateAssistantEvents.
 	 */
-	getTokensFromClaudeCodeSession(sessionFilePath: string): { tokens: number; thinkingTokens: number } {
-		const events = this.readSessionEvents(sessionFilePath);
+	async getTokensFromClaudeCodeSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
+		const events = await this.readSessionEvents(sessionFilePath);
 		let totalInputTokens = 0;
 		let totalOutputTokens = 0;
 
@@ -183,8 +194,8 @@ export class ClaudeCodeDataAccess {
 	 * Count user interactions in a Claude Code session.
 	 * Counts user events that are not sidechain (main conversation only).
 	 */
-	countClaudeCodeInteractions(sessionFilePath: string): number {
-		const events = this.readSessionEvents(sessionFilePath);
+	async countClaudeCodeInteractions(sessionFilePath: string): Promise<number> {
+		const events = await this.readSessionEvents(sessionFilePath);
 		let count = 0;
 		for (const event of events) {
 			if (event.type === 'user' && !event.isSidechain && event.message?.role === 'user') {
@@ -209,8 +220,8 @@ export class ClaudeCodeDataAccess {
 	 * Uses the model field from assistant event message objects.
 	 * De-duplicates by message.id (last-wins) — see deduplicateAssistantEvents.
 	 */
-	getClaudeCodeModelUsage(sessionFilePath: string): ModelUsage {
-		const events = this.readSessionEvents(sessionFilePath);
+	async getClaudeCodeModelUsage(sessionFilePath: string): Promise<ModelUsage> {
+		const events = await this.readSessionEvents(sessionFilePath);
 		const modelUsage: ModelUsage = {};
 
 		for (const event of this.deduplicateAssistantEvents(events)) {
@@ -244,14 +255,14 @@ export class ClaudeCodeDataAccess {
 	/**
 	 * Read session metadata (title, timestamps, entrypoint) from a Claude Code session.
 	 */
-	getClaudeCodeSessionMeta(sessionFilePath: string): {
+	async getClaudeCodeSessionMeta(sessionFilePath: string): Promise<{
 		title?: string;
 		entrypoint?: string;
 		firstInteraction?: string;
 		lastInteraction?: string;
 		cwd?: string;
-	} | null {
-		const events = this.readSessionEvents(sessionFilePath);
+	} | null> {
+		const events = await this.readSessionEvents(sessionFilePath);
 		if (events.length === 0) { return null; }
 		const { title, entrypoint, cwd, timestamps } = this.extractMetaFieldsFromEvents(events);
 		let firstInteraction: string | undefined;

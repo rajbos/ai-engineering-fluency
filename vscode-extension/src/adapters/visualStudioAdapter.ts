@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import * as path from 'path';
+import { decodeMulti } from '@msgpack/msgpack';
 import type { ModelUsage, ChatTurn } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { VisualStudioDataAccess } from '../visualstudio';
@@ -34,21 +35,21 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = this.visualStudio.getTokenEstimates(sessionFile, this.estimateTokens);
+		const result = await this.visualStudio.getTokenEstimates(sessionFile, this.estimateTokens);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		const objects = this.visualStudio.decodeSessionFile(sessionFile);
-		return Promise.resolve(this.visualStudio.countInteractions(objects));
+		const objects = await this.visualStudio.decodeSessionFile(sessionFile);
+		return this.visualStudio.countInteractions(objects);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return Promise.resolve(this.visualStudio.getModelUsage(sessionFile, this.estimateTokens));
+		return this.visualStudio.getModelUsage(sessionFile, this.estimateTokens);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		const objects = this.visualStudio.decodeSessionFile(sessionFile);
+		const objects = await this.visualStudio.decodeSessionFile(sessionFile);
 		const title = this.visualStudio.getSessionTitle(objects);
 		const ts = this.visualStudio.getSessionTimestamps(objects);
 		const timestamps: number[] = [];
@@ -72,7 +73,7 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 		const candidatePaths = this.getCandidatePaths();
 		const sessionFiles: string[] = [];
 		try {
-			const sessions = this.visualStudio.discoverSessions();
+			const sessions = await this.visualStudio.discoverSessions();
 			if (sessions.length > 0) {
 				log(`📄 Found ${sessions.length} session file(s) in Visual Studio Copilot`);
 				sessionFiles.push(...sessions);
@@ -91,14 +92,19 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 	}
 
 	getRawFileContent(sessionFile: string): string {
-		const objects = this.visualStudio.decodeSessionFile(sessionFile);
-		const readable = objects.map((obj: any, i: number) => i === 0 ? obj : obj?.[1] ?? obj);
-		return JSON.stringify(readable, null, 2);
+		try {
+			const buf = fs.readFileSync(sessionFile);
+			const objects = buf.length >= 2 ? Array.from(decodeMulti(buf.slice(1)) as Iterable<any>) : [];
+			const readable = objects.map((obj: any, i: number) => i === 0 ? obj : obj?.[1] ?? obj);
+			return JSON.stringify(readable, null, 2);
+		} catch {
+			return '[]';
+		}
 	}
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const turns: ChatTurn[] = [];
-		const objects = this.visualStudio.decodeSessionFile(sessionFile);
+		const objects = await this.visualStudio.decodeSessionFile(sessionFile);
 		let turnNumber = 0;
 		for (let i = 1; i < objects.length; i += 2) {
 			const req = objects[i];
@@ -151,7 +157,7 @@ export class VisualStudioAdapter implements IEcosystemAdapter, IDiscoverableEcos
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
 		const analysis = createEmptySessionUsageAnalysis();
-		const objects = this.visualStudio.decodeSessionFile(sessionFile);
+		const objects = await this.visualStudio.decodeSessionFile(sessionFile);
 		const models: string[] = [];
 		for (let i = 1; i < objects.length; i++) {
 			const isRequest = i % 2 === 1;

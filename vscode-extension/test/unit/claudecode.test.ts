@@ -10,29 +10,29 @@ const claudeCode = new ClaudeCodeDataAccess();
 
 // ----- normalizeClaudeModelId -----
 
-test('normalizeClaudeModelId: converts hyphen version to dot notation', () => {
+test('normalizeClaudeModelId: converts hyphen version to dot notation', async () => {
 	assert.equal(normalizeClaudeModelId('claude-sonnet-4-6'), 'claude-sonnet-4.6');
 	assert.equal(normalizeClaudeModelId('claude-haiku-4-5'), 'claude-haiku-4.5');
 	assert.equal(normalizeClaudeModelId('claude-opus-4-6'), 'claude-opus-4.6');
 });
 
-test('normalizeClaudeModelId: strips date suffix and normalises version', () => {
+test('normalizeClaudeModelId: strips date suffix and normalises version', async () => {
 	assert.equal(normalizeClaudeModelId('claude-sonnet-4-5-20250929'), 'claude-sonnet-4.5');
 	assert.equal(normalizeClaudeModelId('claude-haiku-4-5-20250929'), 'claude-haiku-4.5');
 });
 
-test('normalizeClaudeModelId: is idempotent for already-dotted IDs', () => {
+test('normalizeClaudeModelId: is idempotent for already-dotted IDs', async () => {
 	assert.equal(normalizeClaudeModelId('claude-sonnet-4.6'), 'claude-sonnet-4.6');
 	assert.equal(normalizeClaudeModelId('claude-haiku-4.5'), 'claude-haiku-4.5');
 });
 
-test('normalizeClaudeModelId: does not transform legacy IDs like claude-3-5-sonnet-20241022', () => {
+test('normalizeClaudeModelId: does not transform legacy IDs like claude-3-5-sonnet-20241022', async () => {
 	// Legacy IDs have a different structure — do not alter them
 	const legacy = 'claude-3-5-sonnet-20241022';
 	assert.equal(normalizeClaudeModelId(legacy), legacy);
 });
 
-test('normalizeClaudeModelId: passes through non-Claude model IDs unchanged', () => {
+test('normalizeClaudeModelId: passes through non-Claude model IDs unchanged', async () => {
 	assert.equal(normalizeClaudeModelId('gpt-4o'), 'gpt-4o');
 	assert.equal(normalizeClaudeModelId('unknown'), 'unknown');
 	assert.equal(normalizeClaudeModelId(''), '');
@@ -40,18 +40,18 @@ test('normalizeClaudeModelId: passes through non-Claude model IDs unchanged', ()
 
 // ----- isClaudeCodeSessionFile -----
 
-test('isClaudeCodeSessionFile: recognises ~/.claude/projects paths', () => {
+test('isClaudeCodeSessionFile: recognises ~/.claude/projects paths', async () => {
 	const sessionPath = path.join(os.homedir(), '.claude', 'projects', 'home-user-code', 'abc123.jsonl');
 	assert.ok(claudeCode.isClaudeCodeSessionFile(sessionPath));
 });
 
-test('isClaudeCodeSessionFile: recognises Windows paths', () => {
+test('isClaudeCodeSessionFile: recognises Windows paths', async () => {
 	// Test backslash normalisation using the current home directory so the test passes on any OS
 	const sessionPath = `${os.homedir()}\\.claude\\projects\\c--Users-user-code\\abc123.jsonl`;
 	assert.ok(claudeCode.isClaudeCodeSessionFile(sessionPath));
 });
 
-test('isClaudeCodeSessionFile: rejects non-matching paths', () => {
+test('isClaudeCodeSessionFile: rejects non-matching paths', async () => {
 	assert.ok(!claudeCode.isClaudeCodeSessionFile('/home/user/.continue/sessions/abc.json'));
 	assert.ok(!claudeCode.isClaudeCodeSessionFile('/home/user/.claude/stats-cache.json'));
 	assert.ok(!claudeCode.isClaudeCodeSessionFile('/home/user/.claude/projects/hash/session.json'));
@@ -59,14 +59,14 @@ test('isClaudeCodeSessionFile: rejects non-matching paths', () => {
 
 // ----- getClaudeCodeSessionId -----
 
-test('getClaudeCodeSessionId: extracts UUID from filename', () => {
+test('getClaudeCodeSessionId: extracts UUID from filename', async () => {
 	const id = claudeCode.getClaudeCodeSessionId('/home/user/.claude/projects/hash/4817b4d3-a794-4be1-ac45-ea05f7dc9f00.jsonl');
 	assert.equal(id, '4817b4d3-a794-4be1-ac45-ea05f7dc9f00');
 });
 
 // ----- getProjectPathFromHash -----
 
-test('getProjectPathFromHash: Windows path reversal', () => {
+test('getProjectPathFromHash: Windows path reversal', async () => {
 	const original = os.platform();
 	// Test the logic directly (the method checks os.platform())
 	const result = claudeCode.getProjectPathFromHash('c--Users-RobBos-code-repos-myproject');
@@ -97,7 +97,7 @@ function cleanup(filePath: string) {
 	} catch { /* ignore */ }
 }
 
-test('getTokensFromClaudeCodeSession: counts actual API tokens', () => {
+test('getTokensFromClaudeCodeSession: counts actual API tokens', async () => {
 	const events = [
 		{
 			type: 'user',
@@ -128,7 +128,7 @@ test('getTokensFromClaudeCodeSession: counts actual API tokens', () => {
 
 	const filePath = createTempSession(events);
 	try {
-		const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+		const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
 		// input: 10 + 100 + 200 = 310, output: 50, total: 360
 		assert.equal(result.tokens, 360);
 		assert.equal(result.thinkingTokens, 0);
@@ -137,7 +137,7 @@ test('getTokensFromClaudeCodeSession: counts actual API tokens', () => {
 	}
 });
 
-test('getTokensFromClaudeCodeSession: de-duplicates streaming fragments by message.id (last-wins)', () => {
+test('getTokensFromClaudeCodeSession: de-duplicates streaming fragments by message.id (last-wins)', async () => {
 	const events = [
 		{
 			type: 'assistant',
@@ -167,7 +167,7 @@ test('getTokensFromClaudeCodeSession: de-duplicates streaming fragments by messa
 
 	const filePath = createTempSession(events);
 	try {
-		const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+		const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
 		// Last-wins on message.id: final event (20+100=120) supersedes streaming fragment
 		assert.equal(result.tokens, 120);
 	} finally {
@@ -175,7 +175,7 @@ test('getTokensFromClaudeCodeSession: de-duplicates streaming fragments by messa
 	}
 });
 
-test('countClaudeCodeInteractions: counts non-sidechain user text messages', () => {
+test('countClaudeCodeInteractions: counts non-sidechain user text messages', async () => {
 	const events = [
 		{
 			type: 'user',
@@ -205,7 +205,7 @@ test('countClaudeCodeInteractions: counts non-sidechain user text messages', () 
 
 	const filePath = createTempSession(events);
 	try {
-		const count = claudeCode.countClaudeCodeInteractions(filePath);
+		const count = await claudeCode.countClaudeCodeInteractions(filePath);
 		// Should count 2: first and second question (not tool_result, not sidechain)
 		assert.equal(count, 2);
 	} finally {
@@ -213,7 +213,7 @@ test('countClaudeCodeInteractions: counts non-sidechain user text messages', () 
 	}
 });
 
-test('getClaudeCodeModelUsage: aggregates per-model token usage', () => {
+test('getClaudeCodeModelUsage: aggregates per-model token usage', async () => {
 	const events = [
 		{
 			type: 'assistant',
@@ -246,7 +246,7 @@ test('getClaudeCodeModelUsage: aggregates per-model token usage', () => {
 
 	const filePath = createTempSession(events);
 	try {
-		const modelUsage = claudeCode.getClaudeCodeModelUsage(filePath);
+		const modelUsage = await claudeCode.getClaudeCodeModelUsage(filePath);
 		// Model IDs are normalised: hyphens in version → dots (claude-sonnet-4-6 → claude-sonnet-4.6)
 		assert.ok(modelUsage['claude-sonnet-4.6']);
 		assert.ok(modelUsage['claude-opus-4.6']);
@@ -261,7 +261,7 @@ test('getClaudeCodeModelUsage: aggregates per-model token usage', () => {
 	}
 });
 
-test('getClaudeCodeSessionMeta: extracts title and timestamps', () => {
+test('getClaudeCodeSessionMeta: extracts title and timestamps', async () => {
 	const events = [
 		{
 			type: 'user',
@@ -286,7 +286,7 @@ test('getClaudeCodeSessionMeta: extracts title and timestamps', () => {
 
 	const filePath = createTempSession(events);
 	try {
-		const meta = claudeCode.getClaudeCodeSessionMeta(filePath);
+		const meta = await claudeCode.getClaudeCodeSessionMeta(filePath);
 		assert.ok(meta);
 		assert.equal(meta!.title, 'Analyze repo extensions');
 		assert.equal(meta!.entrypoint, 'claude-vscode');
@@ -298,10 +298,10 @@ test('getClaudeCodeSessionMeta: extracts title and timestamps', () => {
 	}
 });
 
-test('getTokensFromClaudeCodeSession: returns zero for empty file', () => {
+test('getTokensFromClaudeCodeSession: returns zero for empty file', async () => {
 	const filePath = createTempSession([]);
 	try {
-		const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+		const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
 		assert.equal(result.tokens, 0);
 		assert.equal(result.thinkingTokens, 0);
 	} finally {
@@ -309,7 +309,7 @@ test('getTokensFromClaudeCodeSession: returns zero for empty file', () => {
 	}
 });
 
-test('getTokensFromClaudeCodeSession: skips non-assistant events', () => {
+test('getTokensFromClaudeCodeSession: skips non-assistant events', async () => {
 	const events = [
 		{ type: 'queue-operation', operation: 'enqueue', timestamp: '2026-03-27T22:47:30.985Z' },
 		{ type: 'file-history-snapshot', messageId: 'abc', snapshot: {} },
@@ -322,7 +322,7 @@ test('getTokensFromClaudeCodeSession: skips non-assistant events', () => {
 
 	const filePath = createTempSession(events);
 	try {
-		const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+		const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
 		assert.equal(result.tokens, 0);
 	} finally {
 		cleanup(filePath);
@@ -331,7 +331,7 @@ test('getTokensFromClaudeCodeSession: skips non-assistant events', () => {
 
 // ── Mutation-killing tests ──────────────────────────────────────────────
 
-test('getTokensFromClaudeCodeSession: handles non-numeric usage fields gracefully', () => {
+test('getTokensFromClaudeCodeSession: handles non-numeric usage fields gracefully', async () => {
         const events = [
                 {
                         type: 'assistant',
@@ -351,7 +351,7 @@ test('getTokensFromClaudeCodeSession: handles non-numeric usage fields gracefull
 
         const filePath = createTempSession(events);
         try {
-                const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+                const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
                 // Only cache_read_input_tokens (10) is numeric, rest default to 0
                 assert.equal(result.tokens, 10);
                 assert.equal(result.thinkingTokens, 0);
@@ -360,7 +360,7 @@ test('getTokensFromClaudeCodeSession: handles non-numeric usage fields gracefull
         }
 });
 
-test('getTokensFromClaudeCodeSession: handles missing usage object', () => {
+test('getTokensFromClaudeCodeSession: handles missing usage object', async () => {
         const events = [
                 {
                         type: 'assistant',
@@ -375,14 +375,14 @@ test('getTokensFromClaudeCodeSession: handles missing usage object', () => {
 
         const filePath = createTempSession(events);
         try {
-                const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+                const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
                 assert.equal(result.tokens, 0);
         } finally {
                 cleanup(filePath);
         }
 });
 
-test('getTokensFromClaudeCodeSession: last-wins on message.id correctly handles streaming fragments', () => {
+test('getTokensFromClaudeCodeSession: last-wins on message.id correctly handles streaming fragments', async () => {
         const events = [
                 {
                         type: 'assistant',
@@ -418,7 +418,7 @@ test('getTokensFromClaudeCodeSession: last-wins on message.id correctly handles 
 
         const filePath = createTempSession(events);
         try {
-                const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+                const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
                 // Last-wins: final event (stop_reason='end_turn', 20+100=120) supersedes earlier fragments
                 assert.equal(result.tokens, 120);
         } finally {
@@ -426,7 +426,7 @@ test('getTokensFromClaudeCodeSession: last-wins on message.id correctly handles 
         }
 });
 
-test('countClaudeCodeInteractions: counts string content messages', () => {
+test('countClaudeCodeInteractions: counts string content messages', async () => {
         const events = [
                 {
                         type: 'user',
@@ -442,14 +442,14 @@ test('countClaudeCodeInteractions: counts string content messages', () => {
 
         const filePath = createTempSession(events);
         try {
-                const count = claudeCode.countClaudeCodeInteractions(filePath);
+                const count = await claudeCode.countClaudeCodeInteractions(filePath);
                 assert.equal(count, 2);
         } finally {
                 cleanup(filePath);
         }
 });
 
-test('countClaudeCodeInteractions: does not count tool_result-only messages', () => {
+test('countClaudeCodeInteractions: does not count tool_result-only messages', async () => {
         const events = [
                 {
                         type: 'user',
@@ -465,14 +465,14 @@ test('countClaudeCodeInteractions: does not count tool_result-only messages', ()
 
         const filePath = createTempSession(events);
         try {
-                const count = claudeCode.countClaudeCodeInteractions(filePath);
+                const count = await claudeCode.countClaudeCodeInteractions(filePath);
                 assert.equal(count, 0);
         } finally {
                 cleanup(filePath);
         }
 });
 
-test('countClaudeCodeInteractions: does not count messages with text AND tool_result', () => {
+test('countClaudeCodeInteractions: does not count messages with text AND tool_result', async () => {
         const events = [
                 {
                         type: 'user',
@@ -489,7 +489,7 @@ test('countClaudeCodeInteractions: does not count messages with text AND tool_re
 
         const filePath = createTempSession(events);
         try {
-                const count = claudeCode.countClaudeCodeInteractions(filePath);
+                const count = await claudeCode.countClaudeCodeInteractions(filePath);
                 // Has text but also has tool_result → not a user interaction
                 assert.equal(count, 0);
         } finally {
@@ -497,17 +497,17 @@ test('countClaudeCodeInteractions: does not count messages with text AND tool_re
         }
 });
 
-test('countClaudeCodeInteractions: returns 0 for empty file', () => {
+test('countClaudeCodeInteractions: returns 0 for empty file', async () => {
         const filePath = createTempSession([]);
         try {
-                const count = claudeCode.countClaudeCodeInteractions(filePath);
+                const count = await claudeCode.countClaudeCodeInteractions(filePath);
                 assert.equal(count, 0);
         } finally {
                 cleanup(filePath);
         }
 });
 
-test('getClaudeCodeModelUsage: handles events without requestId', () => {
+test('getClaudeCodeModelUsage: handles events without requestId', async () => {
         const events = [
                 {
                         type: 'assistant',
@@ -521,7 +521,7 @@ test('getClaudeCodeModelUsage: handles events without requestId', () => {
 
         const filePath = createTempSession(events);
         try {
-                const modelUsage = claudeCode.getClaudeCodeModelUsage(filePath);
+                const modelUsage = await claudeCode.getClaudeCodeModelUsage(filePath);
                 assert.ok(modelUsage['claude-sonnet-4.6']);
                 assert.equal(modelUsage['claude-sonnet-4.6'].inputTokens, 10);
                 assert.equal(modelUsage['claude-sonnet-4.6'].outputTokens, 20);
@@ -530,7 +530,7 @@ test('getClaudeCodeModelUsage: handles events without requestId', () => {
         }
 });
 
-test('getClaudeCodeModelUsage: handles non-numeric usage fields', () => {
+test('getClaudeCodeModelUsage: handles non-numeric usage fields', async () => {
         const events = [
                 {
                         type: 'assistant',
@@ -550,7 +550,7 @@ test('getClaudeCodeModelUsage: handles non-numeric usage fields', () => {
 
         const filePath = createTempSession(events);
         try {
-                const modelUsage = claudeCode.getClaudeCodeModelUsage(filePath);
+                const modelUsage = await claudeCode.getClaudeCodeModelUsage(filePath);
                 assert.ok(modelUsage['claude-haiku-4.5']);
                 // input_tokens defaults to 0 (non-numeric), cache_creation defaults to 0, cache_read = 5
                 assert.equal(modelUsage['claude-haiku-4.5'].inputTokens, 5);
@@ -560,7 +560,7 @@ test('getClaudeCodeModelUsage: handles non-numeric usage fields', () => {
         }
 });
 
-test('getProjectPathFromHash: returns Unix-style path on non-Windows', () => {
+test('getProjectPathFromHash: returns Unix-style path on non-Windows', async () => {
         // The method uses os.platform() internally — test the output format
         const result = claudeCode.getProjectPathFromHash('home-user-repos-myproject');
         if (os.platform() !== 'win32') {
@@ -572,7 +572,7 @@ test('getProjectPathFromHash: returns Unix-style path on non-Windows', () => {
         }
 });
 
-test('getProjectPathFromHash: handles simple single-segment hash', () => {
+test('getProjectPathFromHash: handles simple single-segment hash', async () => {
         const result = claudeCode.getProjectPathFromHash('myproject');
         if (os.platform() !== 'win32') {
                 assert.equal(result, '/myproject');
@@ -581,17 +581,17 @@ test('getProjectPathFromHash: handles simple single-segment hash', () => {
         }
 });
 
-test('getClaudeCodeSessionMeta: returns null for empty file', () => {
+test('getClaudeCodeSessionMeta: returns null for empty file', async () => {
         const filePath = createTempSession([]);
         try {
-                const meta = claudeCode.getClaudeCodeSessionMeta(filePath);
+                const meta = await claudeCode.getClaudeCodeSessionMeta(filePath);
                 assert.equal(meta, null);
         } finally {
                 cleanup(filePath);
         }
 });
 
-test('getClaudeCodeSessionMeta: extracts timestamps without ai-title', () => {
+test('getClaudeCodeSessionMeta: extracts timestamps without ai-title', async () => {
         const events = [
                 {
                         type: 'user',
@@ -607,7 +607,7 @@ test('getClaudeCodeSessionMeta: extracts timestamps without ai-title', () => {
 
         const filePath = createTempSession(events);
         try {
-                const meta = claudeCode.getClaudeCodeSessionMeta(filePath);
+                const meta = await claudeCode.getClaudeCodeSessionMeta(filePath);
                 assert.ok(meta);
                 assert.equal(meta!.title, undefined);
                 assert.equal(meta!.firstInteraction, '2026-03-27T22:47:31.000Z');
@@ -619,7 +619,7 @@ test('getClaudeCodeSessionMeta: extracts timestamps without ai-title', () => {
 
 // ── message.id dedup — crashed sessions and no-requestId duplicates ──────
 
-test('getTokensFromClaudeCodeSession: crashed session uses partial tokens from last known event', () => {
+test('getTokensFromClaudeCodeSession: crashed session uses partial tokens from last known event', async () => {
         // Session crashed before stop_reason was written — only streaming fragments available.
         // last-wins on message.id means we use the last fragment's token counts (partial but better than 0).
         const events = [
@@ -645,7 +645,7 @@ test('getTokensFromClaudeCodeSession: crashed session uses partial tokens from l
 
         const filePath = createTempSession(events);
         try {
-                const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+                const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
                 // Last event wins: 15+40=55 (not 5+10+15+40=70)
                 assert.equal(result.tokens, 55);
         } finally {
@@ -653,7 +653,7 @@ test('getTokensFromClaudeCodeSession: crashed session uses partial tokens from l
         }
 });
 
-test('getTokensFromClaudeCodeSession: de-duplicates no-requestId events sharing a message.id', () => {
+test('getTokensFromClaudeCodeSession: de-duplicates no-requestId events sharing a message.id', async () => {
         // Events without requestId can still have duplicate message.ids (Claude Code write-on-append).
         // Previously these were double-counted because only requestId-based dedup existed.
         const events = [
@@ -688,7 +688,7 @@ test('getTokensFromClaudeCodeSession: de-duplicates no-requestId events sharing 
 
         const filePath = createTempSession(events);
         try {
-                const result = claudeCode.getTokensFromClaudeCodeSession(filePath);
+                const result = await claudeCode.getTokensFromClaudeCodeSession(filePath);
                 // msg_dup deduplicated to 60, msg_unique adds 25 → total 85 (not 60+60+25=145)
                 assert.equal(result.tokens, 85);
         } finally {
@@ -696,7 +696,7 @@ test('getTokensFromClaudeCodeSession: de-duplicates no-requestId events sharing 
         }
 });
 
-test('getClaudeCodeModelUsage: crashed session contributes partial tokens per model', () => {
+test('getClaudeCodeModelUsage: crashed session contributes partial tokens per model', async () => {
         const events = [
                 {
                         type: 'assistant',
@@ -720,7 +720,7 @@ test('getClaudeCodeModelUsage: crashed session contributes partial tokens per mo
 
         const filePath = createTempSession(events);
         try {
-                const modelUsage = claudeCode.getClaudeCodeModelUsage(filePath);
+                const modelUsage = await claudeCode.getClaudeCodeModelUsage(filePath);
                 // Last event wins: input=15+5+200=220, output=30, cacheCreation=5, cachedRead=200
                 assert.ok(modelUsage['claude-sonnet-4.6']);
                 assert.equal(modelUsage['claude-sonnet-4.6'].inputTokens, 220);
