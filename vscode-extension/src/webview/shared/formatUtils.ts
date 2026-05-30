@@ -39,6 +39,9 @@ export type EditorName =
 	| 'Mistral Vibe'
 	| 'Gemini CLI'
 	| 'Antigravity'
+	| 'JetBrains'
+	| 'Crush'
+	| 'Continue'
 	| 'Unknown';
 
 /**
@@ -63,6 +66,9 @@ export const EDITOR_ICON_MAP: Record<EditorName, string> = {
 	'Mistral Vibe': '🔥',
 	'Gemini CLI': '💎',
 	'Antigravity': '🚀',
+	'JetBrains': '🧩',
+	'Crush': '🦾',
+	'Continue': '▶️',
 	'Unknown': '❓'
 };
 
