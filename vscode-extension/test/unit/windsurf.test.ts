@@ -166,3 +166,55 @@ test('getAllTrajectorySteps: returns empty when the first page is empty', async 
 	assert.equal(all.length, 0);
 });
 
+// ----- buildModelUsage -----
+
+test('buildModelUsage: maps Windsurf input+cache into ModelUsage and derives output', () => {
+	// inputTokens is uncached; cachedTokens is cache reads; total excludes cache.
+	const usage = { totalTokens: 149612, inputTokens: 18141, cachedTokens: 1872656 };
+	const mu = windsurf.buildModelUsage(usage, 'claude-sonnet-4-5');
+	const entry = mu['Claude Sonnet 4.5'];
+	assert.ok(entry, 'expected the model display name as the key');
+	// ModelUsage.inputTokens is TOTAL input incl. cache reads.
+	assert.equal(entry.inputTokens, 18141 + 1872656);
+	assert.equal(entry.cachedReadTokens, 1872656);
+	// output = total - uncached input.
+	assert.equal(entry.outputTokens, 149612 - 18141);
+});
+
+test('buildModelUsage: clamps output to 0 when inputTokens exceeds totalTokens', () => {
+	const usage = { totalTokens: 100, inputTokens: 500, cachedTokens: 0 };
+	const mu = windsurf.buildModelUsage(usage, 'gpt-4o');
+	assert.equal(mu['GPT-4o'].outputTokens, 0);
+});
+
+test('buildModelUsage: falls back to a "Windsurf" key when the model UID is missing', () => {
+	const usage = { totalTokens: 10, inputTokens: 4, cachedTokens: 0 };
+	const mu = windsurf.buildModelUsage(usage, undefined);
+	assert.ok(mu['Windsurf'], 'expected a Windsurf fallback key');
+	assert.equal(mu['Windsurf'].outputTokens, 6);
+});
+
+// ----- countToolCalls -----
+
+test('countToolCalls: counts only action steps, grouped by friendly tool name', () => {
+	const steps = [
+		userStep(),
+		plannerStep({ cumulativeTokensAtStep: '100' }),
+		otherStep('CORTEX_STEP_TYPE_CODE_ACTION'),
+		otherStep('CORTEX_STEP_TYPE_CODE_ACTION'),
+		otherStep('CORTEX_STEP_TYPE_RUN_COMMAND'),
+		otherStep('CORTEX_STEP_TYPE_CHECKPOINT'), // not a tool
+		otherStep('CORTEX_STEP_TYPE_ERROR_MESSAGE'), // not a tool
+		otherStep('CORTEX_STEP_TYPE_GREP_SEARCH'),
+	] as any;
+
+	const result = windsurf.countToolCalls(steps);
+	assert.equal(result.total, 4);
+	assert.deepEqual(result.byTool, { 'Edit file': 2, 'Run command': 1, 'Grep search': 1 });
+});
+
+test('countToolCalls: returns an empty breakdown when there are no tool steps', () => {
+	const steps = [userStep(), plannerStep({ cumulativeTokensAtStep: '100' })] as any;
+	assert.deepEqual(windsurf.countToolCalls(steps), { total: 0, byTool: {} });
+});
+

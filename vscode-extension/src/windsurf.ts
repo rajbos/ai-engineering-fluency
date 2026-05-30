@@ -587,6 +587,7 @@ export class WindsurfDataAccess {
 		// Map Windsurf model UIDs to display names
 		const modelMap: { [key: string]: string } = {
 			'claude-sonnet-4': 'Claude Sonnet 4',
+			'claude-sonnet-4-5': 'Claude Sonnet 4.5',
 			'gpt-4o': 'GPT-4o',
 			'gpt-4o-mini': 'GPT-4o Mini',
 			'claude-3-5-sonnet-20241022': 'Claude 3.5 Sonnet',
@@ -594,6 +595,65 @@ export class WindsurfDataAccess {
 		};
 		
 		return modelMap[modelUid] || modelUid;
+	}
+
+	/**
+	 * Build a standard ModelUsage map for a Windsurf trajectory so the rest of the
+	 * extension (Today's Sessions breakdown, cost, model column) can treat it like
+	 * any other editor.
+	 *
+	 * Windsurf reports `inputTokens` (uncached input) and `cacheReadTokens` separately,
+	 * whereas the extension's ModelUsage.inputTokens means TOTAL input INCLUDING cache
+	 * reads — so the two are combined here and cachedReadTokens carries the cache portion.
+	 *
+	 * Output tokens are not reported directly. `cumulativeTokensAtStep` (the session
+	 * total) excludes cache reads (it is orders of magnitude smaller than the summed
+	 * cacheReadTokens), so it represents cumulative (uncached input + output). Output is
+	 * therefore derived as totalTokens - inputTokens, clamped at 0 to stay safe if that
+	 * assumption ever breaks.
+	 */
+	buildModelUsage(usage: { totalTokens: number; inputTokens: number; cachedTokens: number }, modelUid: string | undefined): ModelUsage {
+		const model = (modelUid ? this.getModelDisplayName(modelUid) : '') || 'Windsurf';
+		const outputTokens = Math.max(0, usage.totalTokens - usage.inputTokens);
+		return {
+			[model]: {
+				inputTokens: usage.inputTokens + usage.cachedTokens,
+				outputTokens,
+				cachedReadTokens: usage.cachedTokens,
+			},
+		};
+	}
+
+	/**
+	 * Map a Cascade step type to a friendly tool label, or undefined if the step is
+	 * not a tool invocation (planner responses, user inputs, checkpoints, etc.).
+	 */
+	private static readonly TOOL_STEP_LABELS: { [type: string]: string } = {
+		CORTEX_STEP_TYPE_CODE_ACTION: 'Edit file',
+		CORTEX_STEP_TYPE_RUN_COMMAND: 'Run command',
+		CORTEX_STEP_TYPE_VIEW_FILE: 'View file',
+		CORTEX_STEP_TYPE_GREP_SEARCH: 'Grep search',
+		CORTEX_STEP_TYPE_FIND: 'Find',
+		CORTEX_STEP_TYPE_LIST_DIRECTORY: 'List directory',
+		CORTEX_STEP_TYPE_TODO_LIST: 'Todo list',
+		CORTEX_STEP_TYPE_RETRIEVE_MEMORY: 'Retrieve memory',
+	};
+
+	/**
+	 * Count tool invocations in a trajectory, grouped by friendly tool name. Only
+	 * action steps (edits, commands, searches, etc.) are counted — planner responses,
+	 * user inputs, checkpoints and errors are not tools.
+	 */
+	countToolCalls(steps: CascadeTrajectoryStep[]): { total: number; byTool: { [tool: string]: number } } {
+		const byTool: { [tool: string]: number } = {};
+		let total = 0;
+		for (const step of steps) {
+			const label = WindsurfDataAccess.TOOL_STEP_LABELS[step.type];
+			if (!label) { continue; }
+			byTool[label] = (byTool[label] || 0) + 1;
+			total++;
+		}
+		return { total, byTool };
 	}
 
 	/**
@@ -699,55 +759,8 @@ export class WindsurfDataAccess {
 
 			for (const trajectoryId of trajectoryIds) {
 				const summary = trajectories.trajectorySummaries[trajectoryId];
-				const activityScore = summary.stepCount || 0;
-				const lastInteraction = this.pickLatestTimestamp(summary.lastUserInputTime, summary.lastModifiedTime);
-				const utcDayKey = lastInteraction ? lastInteraction.slice(0, 10) : '(none)';
-				if (activityScore === 0) {
-					this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=0 → SKIPPED`);
-					continue;
-				}
-
-				// Derive REAL token counts and user-turn counts. `stepCount` counts every
-				// internal agent step (model calls, tool runs), and tokens were previously a
-				// rough `stepCount * 100` estimate — both massively overstate reality.
-				//
-				// Turn counting uses CORTEX_STEP_TYPE_USER_INPUT steps. We page through the full
-				// step list via step_offset so large sessions are not undercounted by the
-				// per-response size cap.
-				let interactions = 1;
-				let tokens = 0;
-				let usedRealData = false;
-				try {
-					const steps = await this.getAllTrajectorySteps(trajectoryId, activityScore);
-					if (steps.length > 0) {
-						const usage = this.extractTokenUsage(steps);
-						const stepTurns = this.countUserTurns(steps);
-						interactions = Math.max(1, stepTurns);
-						tokens = usage.totalTokens;
-						usedRealData = true;
-						const partial = steps.length < activityScore;
-						this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} stepsFetched=${steps.length}${partial ? ' (PARTIAL steps)' : ''} userTurns=${stepTurns} tokens(total=${usage.totalTokens}, input=${usage.inputTokens}, cached=${usage.cachedTokens}) → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
-					}
-				} catch (stepError) {
-					this.log(`[Windsurf] trajectory ${trajectoryId}: failed to fetch steps (${stepError}); no token data`);
-				}
-				if (!usedRealData) {
-					this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} (no steps returned) → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
-				}
-
-				sessions.push({
-					file: `windsurf://trajectory/${trajectoryId}`,
-					modified: summary.lastModifiedTime || new Date().toISOString(),
-					size: activityScore,
-					interactions,
-					tokens,
-					contextReferences: { file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0, byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {} },
-					firstInteraction: summary.createdTime,
-					lastInteraction: lastInteraction || summary.lastModifiedTime,
-					editorSource: 'windsurf',
-					editorName: 'Windsurf',
-					title: summary.summary || `Windsurf Session ${trajectoryId}`
-				});
+				const session = await this.buildSessionFromTrajectory(trajectoryId, summary);
+				if (session) { sessions.push(session); }
 			}
 
 			this.log(`[Windsurf] === API DISCOVERY COMPLETE — ${sessions.length} sessions ===`);
@@ -756,6 +769,75 @@ export class WindsurfDataAccess {
 			this.log(`[Windsurf] Exception in getWindsurfSessionsV2(): ${error}`);
 			return [];
 		}
+	}
+
+	/**
+	 * Build a SessionFileDetails for a single Cascade trajectory: fetch its steps,
+	 * derive real token/turn/tool/model breakdowns, and shape it like any other editor's
+	 * session. Returns null for empty (stepCount=0) trajectories.
+	 */
+	private async buildSessionFromTrajectory(trajectoryId: string, summary: CascadeTrajectorySummary): Promise<SessionFileDetails | null> {
+		const activityScore = summary.stepCount || 0;
+		const lastInteraction = this.pickLatestTimestamp(summary.lastUserInputTime, summary.lastModifiedTime);
+		const utcDayKey = lastInteraction ? lastInteraction.slice(0, 10) : '(none)';
+		if (activityScore === 0) {
+			this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=0 → SKIPPED`);
+			return null;
+		}
+
+		// Derive REAL token counts and user-turn counts. `stepCount` counts every
+		// internal agent step (model calls, tool runs), and tokens were previously a
+		// rough `stepCount * 100` estimate — both massively overstate reality.
+		//
+		// Turn counting uses CORTEX_STEP_TYPE_USER_INPUT steps. We page through the full
+		// step list via step_offset so large sessions are not undercounted by the
+		// per-response size cap.
+		let interactions = 1;
+		let tokens = 0;
+		let usedRealData = false;
+		let modelUsage: ModelUsage | undefined;
+		let cachedTokens = 0;
+		let toolCalls: { total: number; byTool: { [tool: string]: number } } | undefined;
+		try {
+			const steps = await this.getAllTrajectorySteps(trajectoryId, activityScore);
+			if (steps.length > 0) {
+				const usage = this.extractTokenUsage(steps);
+				const stepTurns = this.countUserTurns(steps);
+				interactions = Math.max(1, stepTurns);
+				tokens = usage.totalTokens;
+				cachedTokens = usage.cachedTokens;
+				modelUsage = this.buildModelUsage(usage, summary.lastGeneratorModelUid);
+				toolCalls = this.countToolCalls(steps);
+				usedRealData = true;
+				const partial = steps.length < activityScore;
+				if (usage.inputTokens > usage.totalTokens) {
+					this.log(`[Windsurf] trajectory ${trajectoryId}: inputTokens(${usage.inputTokens}) > totalTokens(${usage.totalTokens}) — output clamped to 0 (cumulative-token assumption may have changed)`);
+				}
+				this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} stepsFetched=${steps.length}${partial ? ' (PARTIAL steps)' : ''} userTurns=${stepTurns} tokens(total=${usage.totalTokens}, input=${usage.inputTokens}, cached=${usage.cachedTokens}) tools=${toolCalls.total} → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
+			}
+		} catch (stepError) {
+			this.log(`[Windsurf] trajectory ${trajectoryId}: failed to fetch steps (${stepError}); no token data`);
+		}
+		if (!usedRealData) {
+			this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} (no steps returned) → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
+		}
+
+		return {
+			file: `windsurf://trajectory/${trajectoryId}`,
+			modified: summary.lastModifiedTime || new Date().toISOString(),
+			size: activityScore,
+			interactions,
+			tokens,
+			...(modelUsage ? { modelUsage } : {}),
+			...(cachedTokens ? { cachedTokens } : {}),
+			...(toolCalls ? { toolCalls } : {}),
+			contextReferences: { file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0, byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {} },
+			firstInteraction: summary.createdTime,
+			lastInteraction: lastInteraction || summary.lastModifiedTime,
+			editorSource: 'windsurf',
+			editorName: 'Windsurf',
+			title: summary.summary || `Windsurf Session ${trajectoryId}`
+		};
 	}
 
 	/**

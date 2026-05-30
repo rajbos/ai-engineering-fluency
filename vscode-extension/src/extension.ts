@@ -3367,9 +3367,40 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
 		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, modelUsage, dailyRollups, totalInteractions);
 
+		await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
+
 		const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups);
 		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
 		return sessionData;
+	}
+
+	/**
+	 * Windsurf sessions are discovered via the gRPC API (not a re-parseable file), so the
+	 * data layer pre-builds a ModelUsage map and tool-call breakdown. Fold those into the
+	 * resolved model usage / daily rollups / analysis so Today's Sessions shows real
+	 * input/output/cached tokens, models and cost instead of zeros.
+	 */
+	private async applyWindsurfBreakdown(
+		sessionFilePath: string,
+		resolvedModelUsage: ModelUsage,
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
+		usageAnalysis: SessionUsageAnalysis
+	): Promise<void> {
+		if (!this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return; }
+		const session = await this.windsurf.resolveSession(sessionFilePath);
+		if (!session) { return; }
+		if (session.modelUsage && Object.keys(session.modelUsage).length > 0) {
+			for (const [model, usage] of Object.entries(session.modelUsage)) {
+				resolvedModelUsage[model] = { ...usage };
+			}
+			// Windsurf has a single activity day; mirror the model usage onto its rollup
+			// so per-day model/cost aggregation matches the session totals.
+			for (const day of Object.keys(dailyRollups)) {
+				dailyRollups[day].modelUsage = session.modelUsage;
+				if (session.cachedTokens) { dailyRollups[day].cachedReadTokens = session.cachedTokens; }
+			}
+		}
+		if (session.toolCalls) { usageAnalysis.toolCalls = session.toolCalls; }
 	}
 
 	private async preloadSessionFileContent(sessionFilePath: string): Promise<{ preloadedContent: string | undefined; preloadedParsedJson: any | undefined }> {
@@ -4435,7 +4466,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
 				const session = await this.windsurf.resolveSession(sessionFilePath);
 				const tokens = session?.tokens ?? 0;
-				return { tokens, thinkingTokens: 0, actualTokens: tokens };
+				return { tokens, thinkingTokens: 0, actualTokens: tokens, cacheReadTokens: session?.cachedTokens };
 			}
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFilePath, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) { return { tokens: 0, thinkingTokens: 0, actualTokens: 0 }; }
