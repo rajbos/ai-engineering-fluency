@@ -23,13 +23,17 @@ test('extractDailyFractions: CLI JSONL — two messages on same day sum to 1.0',
 });
 
 test('extractDailyFractions: CLI JSONL — messages split across two days produce correct fractions', () => {
+	// Use noon UTC so local day matches calendar day for all common timezones (UTC-11 to UTC+11)
 	const lines = [
-		JSON.stringify({ type: 'user.message', timestamp: '2025-03-10T23:00:00Z' }),
-		JSON.stringify({ type: 'user.message', timestamp: '2025-03-11T01:00:00Z' }),
+		JSON.stringify({ type: 'user.message', timestamp: '2025-03-10T12:00:00Z' }),
+		JSON.stringify({ type: 'user.message', timestamp: '2025-03-11T12:00:00Z' }),
 	].join('\n');
 	const result = extractDailyFractions(lines, true, FALLBACK);
-	assert.equal(result['2025-03-10'], 0.5);
-	assert.equal(result['2025-03-11'], 0.5);
+	const keys = Object.keys(result).sort();
+	assert.equal(keys.length, 2, 'should have exactly 2 day keys');
+	for (const v of Object.values(result)) {
+		assert.ok(Math.abs(v - 0.5) < 1e-9, `each fraction should be 0.5, got ${v}`);
+	}
 });
 
 test('extractDailyFractions: CLI JSONL — falls back when no timestamps found', () => {
@@ -53,11 +57,14 @@ test('extractDailyFractions: CLI JSONL — ignores non-user.message events for t
 test('extractDailyFractions: delta JSONL — kind:0 initial state extracts request timestamps', () => {
 	const content = JSON.stringify({
 		kind: 0,
-		v: { requests: [{ timestamp: '2025-04-05T08:00:00Z' }, { timestamp: '2025-04-06T08:00:00Z' }] }
+		v: { requests: [{ timestamp: '2025-04-05T12:00:00Z' }, { timestamp: '2025-04-06T12:00:00Z' }] }
 	});
 	const result = extractDailyFractions(content, true, FALLBACK);
-	assert.equal(result['2025-04-05'], 0.5);
-	assert.equal(result['2025-04-06'], 0.5);
+	const keys = Object.keys(result).sort();
+	assert.equal(keys.length, 2, 'should have exactly 2 day keys');
+	for (const v of Object.values(result)) {
+		assert.ok(Math.abs(v - 0.5) < 1e-9, `each fraction should be 0.5, got ${v}`);
+	}
 });
 
 test('extractDailyFractions: delta JSONL — kind:2 batch append extracts timestamps', () => {
@@ -97,13 +104,16 @@ test('extractDailyFractions: delta JSONL — kind:1 timestamp update counts new 
 test('extractDailyFractions: JSON — extracts timestamps from requests array', () => {
 	const data = {
 		requests: [
-			{ timestamp: '2025-05-01T08:00:00Z' },
-			{ timestamp: '2025-05-02T08:00:00Z' },
+			{ timestamp: '2025-05-01T12:00:00Z' },
+			{ timestamp: '2025-05-02T12:00:00Z' },
 		]
 	};
 	const result = extractDailyFractions(JSON.stringify(data), false, FALLBACK);
-	assert.equal(result['2025-05-01'], 0.5);
-	assert.equal(result['2025-05-02'], 0.5);
+	const keys = Object.keys(result).sort();
+	assert.equal(keys.length, 2, 'should have exactly 2 day keys');
+	for (const v of Object.values(result)) {
+		assert.ok(Math.abs(v - 0.5) < 1e-9, `each fraction should be 0.5, got ${v}`);
+	}
 });
 
 test('extractDailyFractions: JSON — falls back to result.timestamp when timestamp missing', () => {

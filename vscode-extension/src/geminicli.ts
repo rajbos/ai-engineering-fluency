@@ -4,6 +4,7 @@ import * as path from 'path';
 import type { ChatTurn, ModelUsage, PromptTokenDetail } from './types';
 import { createEmptyContextRefs } from './tokenEstimation';
 import { normalizePathForComparison, normalizePath } from './workspaceHelpers';
+import { toLocalDayKey } from './utils/dayKeys';
 
 interface GeminiCliSessionHeader {
 	sessionId: string;
@@ -510,12 +511,12 @@ export class GeminiCliDataAccess {
 	getGeminiCliDailyFractions(sessionFilePath: string): Record<string, number> {
 		const session = this.readGeminiCliSession(sessionFilePath);
 		const dateKeys = session.userRecords
-			.map(record => this.toUtcDayKey(record.timestamp))
+			.map(record => this.toLocalDayKey(record.timestamp))
 			.filter((value): value is string => !!value);
 
 		if (dateKeys.length === 0) {
 			for (const assistant of session.assistantRecords) {
-				const dayKey = this.toUtcDayKey(assistant.timestamp);
+				const dayKey = this.toLocalDayKey(assistant.timestamp);
 				if (dayKey) {
 					dateKeys.push(dayKey);
 				}
@@ -523,9 +524,9 @@ export class GeminiCliDataAccess {
 		}
 
 		if (dateKeys.length === 0) {
-			const fallback = this.toUtcDayKey(session.header?.startTime)
-				?? this.toUtcDayKey(session.header?.lastUpdated)
-				?? new Date().toISOString().slice(0, 10);
+			const fallback = this.toLocalDayKey(session.header?.startTime)
+				?? this.toLocalDayKey(session.header?.lastUpdated)
+				?? toLocalDayKey(new Date());
 			return { [fallback]: 1.0 };
 		}
 
@@ -824,8 +825,8 @@ export class GeminiCliDataAccess {
 		return null;
 	}
 
-	private toUtcDayKey(timestamp: string | undefined): string | null {
+	private toLocalDayKey(timestamp: string | undefined): string | null {
 		const timeMs = parseTimestampMs(timestamp);
-		return timeMs !== null ? new Date(timeMs).toISOString().slice(0, 10) : null;
+		return timeMs !== null ? toLocalDayKey(new Date(timeMs)) : null;
 	}
 }

@@ -1,10 +1,10 @@
 /**
- * Shared per-UTC-day token attribution logic.
+ * Shared per-local-day token attribution logic.
  *
  * Extracts a fraction map (`Record<"YYYY-MM-DD", 0..1>`) from any supported session
  * file format. The fractions sum to 1.0 and represent how many interactions fell on
- * each calendar day (UTC), so callers can proportionally attribute session tokens to
- * the correct day rather than lumping everything on the file's mtime date.
+ * each calendar day (local time), so callers can proportionally attribute session tokens
+ * to the correct day rather than lumping everything on the file's mtime date.
  *
  * Supported formats:
  *   - Copilot CLI JSONL   (`type === "user.message"` events with `timestamp`)
@@ -12,7 +12,7 @@
  *   - VS Code JSON         (`requests[].timestamp`)
  */
 
-/** Strategy interface for extracting per-UTC-day interaction counts from session content. */
+/** Strategy interface for extracting per-local-day interaction counts from session content. */
 interface DailyFractionStrategy {
 	extractCounts(content: string): Record<string, number>;
 }
@@ -104,11 +104,14 @@ function parseAndValidateTimestamp(raw: unknown): Date | null {
 	return isNaN(date.getTime()) ? null : date;
 }
 
-/** Record a timestamp into a day-count map, ignoring null/undefined/invalid values. */
+/** Record a timestamp into a day-count map using local calendar day, ignoring null/undefined/invalid values. */
 function recordTimestamp(ts: unknown, dayCounts: Record<string, number>): void {
 	const date = parseAndValidateTimestamp(ts);
 	if (date !== null) {
-		const key = date.toISOString().slice(0, 10);
+		const y = date.getFullYear();
+		const m = String(date.getMonth() + 1).padStart(2, '0');
+		const d = String(date.getDate()).padStart(2, '0');
+		const key = `${y}-${m}-${d}`;
 		dayCounts[key] = (dayCounts[key] || 0) + 1;
 	}
 }
@@ -122,7 +125,10 @@ function recordTimestamp(ts: unknown, dayCounts: Record<string, number>): void {
  * @returns A `Record<"YYYY-MM-DD", number>` where values sum to 1.0.
  */
 export function extractDailyFractions(content: string, isJsonl: boolean, fallbackDate: Date): Record<string, number> {
-	const fallbackKey = fallbackDate.toISOString().slice(0, 10);
+	const fy = fallbackDate.getFullYear();
+	const fm = String(fallbackDate.getMonth() + 1).padStart(2, '0');
+	const fd = String(fallbackDate.getDate()).padStart(2, '0');
+	const fallbackKey = `${fy}-${fm}-${fd}`;
 	const strategy: DailyFractionStrategy = isJsonl
 		? new JsonlDailyFractionStrategy()
 		: new JsonDailyFractionStrategy();

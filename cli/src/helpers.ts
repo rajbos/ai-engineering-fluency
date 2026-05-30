@@ -14,6 +14,7 @@ import { resolveFileUri } from '../../vscode-extension/src/workspacePathResolver
 import { parseSessionFileContent } from '../../vscode-extension/src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost } from '../../vscode-extension/src/tokenEstimation';
 import { extractDailyFractions } from '../../vscode-extension/src/dailyAttribution';
+import { toLocalDayKey } from '../../vscode-extension/src/utils/dayKeys';
 import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix } from '../../vscode-extension/src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis } from '../../vscode-extension/src/usageAnalysis';
 import { withErrorRecovery } from '../../vscode-extension/src/utils/errors';
@@ -239,7 +240,7 @@ export async function processSessionFile(filePath: string): Promise<SessionData 
 				eco.countInteractions(filePath),
 				eco.getModelUsage(filePath),
 			]);
-			const mtimeDateKey = stats.mtime.toISOString().slice(0, 10);
+			const mtimeDateKey = toLocalDayKey(stats.mtime);
 			const ecoResult: SessionData = {
 				file: filePath,
 				tokens: tokenResult.actualTokens > 0 ? tokenResult.actualTokens : tokenResult.tokens,
@@ -334,22 +335,22 @@ export async function calculateDetailedStats(
 ): Promise<DetailedStats> {
 	const now = new Date();
 
-	// All period boundaries are UTC date keys (YYYY-MM-DD) to match the VS Code extension's behaviour.
-	const todayUtcKey = now.toISOString().slice(0, 10);
+	// All period boundaries use local calendar dates so that "today" reflects
+	// the user's local clock rather than resetting at UTC midnight.
+	const todayKey = toLocalDayKey(now);
 
-	const y = now.getUTCFullYear();
-	const m = now.getUTCMonth(); // 0-indexed
-	const monthStartKey = `${y}-${String(m + 1).padStart(2, '0')}-01`;
+	const y = now.getFullYear();
+	const m = now.getMonth(); // 0-indexed
+	const monthStartKey = toLocalDayKey(new Date(y, m, 1));
 
-	// Last month: the month before the current UTC month
-	const lmYear = m === 0 ? y - 1 : y;
-	const lmMonth = m === 0 ? 12 : m; // 1-indexed last month number
-	const lastMonthStartKey = `${lmYear}-${String(lmMonth).padStart(2, '0')}-01`;
+	// Last month: the month before the current local month
+	const lastMonthLastDay = new Date(y, m, 0); // day 0 = last day of previous month
+	const lastMonthStartKey = toLocalDayKey(new Date(lastMonthLastDay.getFullYear(), lastMonthLastDay.getMonth(), 1));
 	// lastMonthEndKey is the day before monthStartKey — string comparison handles this naturally
 	// (any date >= lastMonthStartKey && < monthStartKey is in last month)
 
-	const last30DaysDate = new Date(Date.UTC(y, m, now.getUTCDate() - 30));
-	const last30DaysStartKey = last30DaysDate.toISOString().slice(0, 10);
+	const last30DaysDate = new Date(y, m, now.getDate() - 30);
+	const last30DaysStartKey = toLocalDayKey(last30DaysDate);
 
 	const periods: {
 		today: PeriodStats;
@@ -386,7 +387,7 @@ export async function calculateDetailedStats(
 		let last30DaysFrac = 0;
 
 		for (const [dateKey, fraction] of Object.entries(data.dailyFractions)) {
-			if (dateKey === todayUtcKey) { todayFrac += fraction; }
+			if (dateKey === todayKey) { todayFrac += fraction; }
 			if (dateKey >= monthStartKey) { monthFrac += fraction; }
 			if (dateKey >= lastMonthStartKey && dateKey < monthStartKey) { lastMonthFrac += fraction; }
 			if (dateKey >= last30DaysStartKey) { last30DaysFrac += fraction; }
@@ -485,17 +486,17 @@ export async function calculateDailyStats(sessionFiles: string[]): Promise<{
 	allDaysMap: Map<string, DailyEntry>;
 }> {
 	const now = new Date();
-	const last30DaysDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30));
-	const last30DaysStartKey = last30DaysDate.toISOString().slice(0, 10);
-	const todayKey = now.toISOString().slice(0, 10);
+	const last30DaysDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+	const last30DaysStartKey = toLocalDayKey(last30DaysDate);
+	const todayKey = toLocalDayKey(now);
 
 	// Fill in all 31 days (today inclusive) with zeroes so the chart has continuous labels
 	const dailyMap = new Map<string, DailyEntry>();
 	const cursor = new Date(last30DaysDate);
-	while (cursor.toISOString().slice(0, 10) <= todayKey) {
-		const key = cursor.toISOString().slice(0, 10);
+	while (toLocalDayKey(cursor) <= todayKey) {
+		const key = toLocalDayKey(cursor);
 		dailyMap.set(key, { tokens: 0, sessions: 0, modelUsage: {}, editorUsage: {} });
-		cursor.setUTCDate(cursor.getUTCDate() + 1);
+		cursor.setDate(cursor.getDate() + 1);
 	}
 
 	// Full historical map (all time, no age filter) for weekly/monthly chart periods

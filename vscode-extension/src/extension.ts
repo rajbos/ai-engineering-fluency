@@ -185,6 +185,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 // --- Utilities ---
 import { getNonce, buildCspMeta } from './utils/webviewUtils';
 import { isGuidMcpTool } from './utils/toolUtils';
+import { toLocalDayKey } from './utils/dayKeys';
 import { determineOnboardingAction } from './onboarding';
 
 type LocalViewRegressionProbeResult = {
@@ -2106,16 +2107,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private fillMissingDailyStats(dailyStatsMap: Map<string, DailyTokenStats>, now: Date): DailyTokenStats[] {
-		const thirtyDaysAgo = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30));
-		const todayDate = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
+		const thirtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+		const todayKey = toLocalDayKey(now);
 		const existingDates = new Set(dailyStatsMap.keys());
 		const fillDate = new Date(thirtyDaysAgo);
-		while (fillDate <= todayDate) {
-			const dateKey = fillDate.toISOString().slice(0, 10);
+		while (toLocalDayKey(fillDate) <= todayKey) {
+			const dateKey = toLocalDayKey(fillDate);
 			if (!existingDates.has(dateKey)) {
 				dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
 			}
-			fillDate.setUTCDate(fillDate.getUTCDate() + 1);
+			fillDate.setDate(fillDate.getDate() + 1);
 		}
 		return Array.from(dailyStatsMap.values()).sort((a, b) => a.date.localeCompare(b.date));
 	}
@@ -2189,7 +2190,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private formatDateKey(date: Date): string {
-		return date.toISOString().slice(0, 10); // UTC-based YYYY-MM-DD key
+		return toLocalDayKey(date);
 	}
 
 	/**
@@ -2321,9 +2322,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  `lastFullDailyStats` and returns it. Zero-fill is handled per-period in buildChartData. */
 	private async calculateDailyStats(daysBack = 365, knownSessionFiles?: string[]): Promise<DailyTokenStats[]> {
 		const now = new Date();
-		const cutoffUtcStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - daysBack));
-		const cutoffUtcStartKey = cutoffUtcStart.toISOString().slice(0, 10);
-		const cutoffMs = cutoffUtcStart.getTime();
+		const cutoffStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - daysBack);
+		const cutoffStartKey = toLocalDayKey(cutoffStart);
+		const cutoffMs = cutoffStart.getTime();
 		const dailyStatsMap = new Map<string, DailyTokenStats>();
 
 		try {
@@ -2346,9 +2347,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 					const editorType = this.getEditorTypeFromPath(sessionFile);
 					const repository = sessionData.repository || 'Unknown';
 					if (sessionData.dailyRollups && Object.keys(sessionData.dailyRollups).length > 0) {
-						this.accumulateDailyRollups(dailyStatsMap, sessionData, editorType, repository, cutoffUtcStartKey);
+						this.accumulateDailyRollups(dailyStatsMap, sessionData, editorType, repository, cutoffStartKey);
 					} else {
-						this.accumulateSessionFallback(dailyStatsMap, sessionData, mtime, editorType, repository, cutoffUtcStartKey);
+						this.accumulateSessionFallback(dailyStatsMap, sessionData, mtime, editorType, repository, cutoffStartKey);
 					}
 				} catch (fileError) {
 					this.warn(`Error processing session file ${sessionFile} for daily stats: ${fileError}`);
@@ -2383,7 +2384,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const actualTokens = sessionData.actualTokens || 0;
 		const tokens = (actualTokens > 0 ? actualTokens : sessionData.tokens);
 		const lastActivity = sessionData.lastInteraction ? new Date(sessionData.lastInteraction) : new Date(mtime);
-		const dateKey = lastActivity.toISOString().slice(0, 10);
+		const dateKey = toLocalDayKey(lastActivity);
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
 		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage);
@@ -2615,7 +2616,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return Object.keys(sessionData.dailyRollups).sort().pop()!;
 		}
 		const lastActivity = sessionData.lastInteraction ? new Date(sessionData.lastInteraction) : new Date(mtime);
-		return lastActivity.toISOString().slice(0, 10);
+		return toLocalDayKey(lastActivity);
 	}
 
 	private collectTodaySessionInfo(
@@ -3029,7 +3030,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		title: string | undefined;
 		firstInteraction: string | null;
 		lastInteraction: string | null;
-		dailyInteractions: { [utcDayKey: string]: number };
+		dailyInteractions: { [localDayKey: string]: number };
 	}> {
 		let title: string | undefined;
 		const timestamps: number[] = [];
@@ -3065,9 +3066,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
 		}
 
-		const dailyInteractions: { [utcDayKey: string]: number } = {};
+		const dailyInteractions: { [localDayKey: string]: number } = {};
 		for (const ts of requestTimestamps) {
-			const dayKey = new Date(ts).toISOString().slice(0, 10);
+			const dayKey = toLocalDayKey(new Date(ts));
 			dailyInteractions[dayKey] = (dailyInteractions[dayKey] || 0) + 1;
 		}
 
@@ -3265,12 +3266,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private computeDailyRollups(
-		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [utcDayKey: string]: number } },
+		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [localDayKey: string]: number } },
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
 		modelUsage: ModelUsage,
 		interactions: number
-	): { dailyRollups: { [utcDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
-		const dailyRollups: { [utcDayKey: string]: DailyRollupEntry } = {};
+	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
+		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
 		const dailyInteractionMap = sessionMeta.dailyInteractions;
 		const totalInteractions = Object.values(dailyInteractionMap).reduce((a, b) => a + b, 0);
 
@@ -3286,12 +3287,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return { dailyRollups, totalInteractions };
 	}
 
-	private computeFallbackDailyRollup(dailyRollups: { [utcDayKey: string]: DailyRollupEntry }, firstInteraction: string | null, tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number }, modelUsage: ModelUsage, interactions: number): void {
+	private computeFallbackDailyRollup(dailyRollups: { [localDayKey: string]: DailyRollupEntry }, firstInteraction: string | null, tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number }, modelUsage: ModelUsage, interactions: number): void {
 		if (!tokenResult.tokens || !firstInteraction) { return; }
 		try {
 			const interactionDate = new Date(firstInteraction);
 			if (isNaN(interactionDate.getTime())) { return; }
-			const dayKey = interactionDate.toISOString().slice(0, 10);
+			const dayKey = toLocalDayKey(interactionDate);
 			const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
 			dailyRollups[dayKey] = { tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens || 0, thinkingTokens: tokenResult.thinkingTokens || 0, cachedReadTokens: 0, interactions: Math.max(1, interactions), modelUsage: dayModelUsage };
 		} catch { /* ignore */ }
@@ -6155,7 +6156,7 @@ ${hashtag}`;
       this.lastDailyStats = freshDailyStats;
       const cutoffDate = new Date();
       cutoffDate.setDate(cutoffDate.getDate() - lookbackDays);
-      const cutoffStr = cutoffDate.toISOString().slice(0, 10);
+      const cutoffStr = toLocalDayKey(cutoffDate);
       const inWindow = (this.lastDailyStats ?? []).filter(d => d.date >= cutoffStr);
       return { localTokens: inWindow.reduce((sum, d) => sum + d.tokens, 0), localInteractions: inWindow.reduce((sum, d) => sum + d.interactions, 0) };
     } catch { return { localTokens: undefined, localInteractions: undefined }; }

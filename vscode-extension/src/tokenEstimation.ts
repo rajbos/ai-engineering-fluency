@@ -3,6 +3,7 @@
  * Pure or near-pure functions extracted from CopilotTokenTracker for reusability.
  */
 import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator } from './types';
+import { toLocalDayKey } from './utils/dayKeys';
 
 /** Minimum request shape needed by getModelFromRequest. */
 interface ModelRequestSource {
@@ -484,7 +485,7 @@ function _ejtsHandleShutdown(event: Record<string, unknown>, state: EjtsState): 
 		shutdownTotal += _ejtsAccumulateModelMetrics(modelName, metrics, state);
 	}
 	if (shutdownTotal > 0 && event.timestamp) {
-		const dayKey = new Date(String(event.timestamp)).toISOString().slice(0, 10);
+		const dayKey = toLocalDayKey(new Date(String(event.timestamp)));
 		if (dayKey && dayKey !== 'Inval') {
 			state.dailyActualTokens[dayKey] = (state.dailyActualTokens[dayKey] || 0) + shutdownTotal;
 		}

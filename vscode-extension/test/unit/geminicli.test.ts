@@ -228,8 +228,13 @@ test('getGeminiCliDailyFractions: splits usage by user-turn day', () => {
 	const sessionFile = createTempGeminiSession(createSampleRecords());
 	try {
 		const dailyFractions = geminiCli.getGeminiCliDailyFractions(sessionFile);
-		assert.equal(dailyFractions['2026-05-03'], 0.5);
-		assert.equal(dailyFractions['2026-05-04'], 0.5);
+		// Timestamps '2026-05-03T15:01:31Z' and '2026-05-04T10:00:00Z' map to different
+		// local days in most timezones (UTC-10 to UTC+14). Check for 2 keys with 0.5 each.
+		const keys = Object.keys(dailyFractions).sort();
+		assert.equal(keys.length, 2, 'should have exactly 2 local day keys');
+		for (const v of Object.values(dailyFractions)) {
+			assert.ok(Math.abs(v - 0.5) < 1e-9, `each fraction should be 0.5, got ${v}`);
+		}
 	} finally {
 		cleanupSessionFile(sessionFile);
 	}

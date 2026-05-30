@@ -6,6 +6,7 @@
  */
 
 import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
+import { toLocalDayKey } from './utils/dayKeys';
 
 /**
  * Merges `source` model usage into `target` (in-place).
@@ -92,25 +93,27 @@ lastMonthStartMs: number;
 }
 
 /**
- * Computes the UTC date-range boundaries used for period attribution.
+ * Computes the local-calendar date-range boundaries used for period attribution.
  *
- * All calculations are UTC-based so they are unaffected by local timezone
- * offsets and DST transitions.
+ * All calculations use the local timezone so that "today", "this month", and
+ * "last 30 days" reflect the user's local clock rather than UTC. This prevents
+ * counters from resetting at UTC midnight for users in non-UTC timezones.
  */
 export function computeUtcDateRanges(now: Date): UtcDateRanges {
-const todayUtcKey = now.toISOString().slice(0, 10);
+const todayUtcKey = toLocalDayKey(now);
 
-const monthUtcStartKey = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString().slice(0, 10);
+const monthUtcStartKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), 1));
 
-const lastMonthLastDay = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 0));
-const lastMonthUtcEndKey = lastMonthLastDay.toISOString().slice(0, 10);
-const lastMonthUtcStartKey = new Date(Date.UTC(lastMonthLastDay.getUTCFullYear(), lastMonthLastDay.getUTCMonth(), 1)).toISOString().slice(0, 10);
+const lastMonthLastDay = new Date(now.getFullYear(), now.getMonth(), 0); // day 0 = last day of previous month
+const lastMonthUtcEndKey = toLocalDayKey(lastMonthLastDay);
+const lastMonthUtcStartKey = toLocalDayKey(new Date(lastMonthLastDay.getFullYear(), lastMonthLastDay.getMonth(), 1));
 
-const last30DaysUtcStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate() - 30));
-const last30DaysUtcStartKey = last30DaysUtcStart.toISOString().slice(0, 10);
-const last30DaysStartMs = last30DaysUtcStart.getTime();
+const last30DaysStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+const last30DaysUtcStartKey = toLocalDayKey(last30DaysStart);
+const last30DaysStartMs = last30DaysStart.getTime();
 
-const lastMonthStartMs = new Date(Date.UTC(lastMonthLastDay.getUTCFullYear(), lastMonthLastDay.getUTCMonth(), 1)).getTime();
+const lastMonthStart = new Date(lastMonthLastDay.getFullYear(), lastMonthLastDay.getMonth(), 1);
+const lastMonthStartMs = lastMonthStart.getTime();
 
 return {
 todayUtcKey,
@@ -214,7 +217,7 @@ function _apsProcessFallbackSession(sessionInput: SessionAggregateInput, ranges:
 	const { editorType, sessionData, mtime, lastInteraction } = sessionInput;
 	const repository = sessionData.repository || 'Unknown';
 	const lastActivity = lastInteraction ? new Date(lastInteraction) : new Date(mtime);
-	const lastActivityUtcKey = lastActivity.toISOString().slice(0, 10);
+	const lastActivityUtcKey = toLocalDayKey(lastActivity);
 	const inLast30Days = lastActivityUtcKey >= ranges.last30DaysUtcStartKey;
 	const inLastMonth = lastActivityUtcKey >= ranges.lastMonthUtcStartKey && lastActivityUtcKey <= ranges.lastMonthUtcEndKey;
 	if (!inLast30Days && !inLastMonth) { return true; }
@@ -368,7 +371,7 @@ function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulato
 	const thinking = sessionData.thinkingTokens || 0;
 	const cached = sessionData.cacheReadTokens || 0;
 	const lastActivity = lastInteraction ? new Date(lastInteraction) : new Date(mtime);
-	const lastActivityUtcKey = lastActivity.toISOString().slice(0, 10);
+	const lastActivityUtcKey = toLocalDayKey(lastActivity);
 	const inLast30Days = lastActivityUtcKey >= dates.last30DaysUtcStartKey;
 	const inLastMonth = lastActivityUtcKey >= dates.lastMonthUtcStartKey && lastActivityUtcKey <= dates.lastMonthUtcEndKey;
 	if (!inLast30Days && !inLastMonth) { return true; }

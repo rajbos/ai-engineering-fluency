@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
+import { toLocalDayKey } from './utils/dayKeys';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace
 // (made available by the /// <reference types="sql.js" /> directive above).
@@ -227,7 +228,7 @@ export class CopilotCliStoreAccess {
 	}
 
 	/**
-	 * Returns per-UTC-day fractions for accurate session attribution.
+	 * Returns per-local-day fractions for accurate session attribution.
 	 * Uses turn timestamps when available; falls back to a single entry at
 	 * the session's updated_at date.
 	 */
@@ -238,7 +239,7 @@ export class CopilotCliStoreAccess {
 		for (const turn of turns) {
 			if (!turn.timestamp) { continue; }
 			try {
-				const dateKey = new Date(turn.timestamp).toISOString().slice(0, 10);
+				const dateKey = toLocalDayKey(new Date(turn.timestamp));
 				counts[dateKey] = (counts[dateKey] || 0) + 1;
 				total++;
 			} catch { /* skip malformed timestamp */ }
@@ -247,8 +248,8 @@ export class CopilotCliStoreAccess {
 			// Fallback: use session updated_at
 			const session = await this.readSession(virtualPath);
 			const fallbackDate = session?.updated_at
-				? new Date(session.updated_at).toISOString().slice(0, 10)
-				: new Date().toISOString().slice(0, 10);
+				? toLocalDayKey(new Date(session.updated_at))
+				: toLocalDayKey(new Date());
 			return { [fallbackDate]: 1.0 };
 		}
 		const fractions: Record<string, number> = {};
