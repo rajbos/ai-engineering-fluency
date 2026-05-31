@@ -62,11 +62,16 @@ class TokenTrackerPanel(
      * Prefetches all CLI data (all --json + fluency --json in parallel) on a
      * background thread, then reloads [view] with the data pre-embedded.
      * Subsequent navigations use the warm cache — no spinner needed.
+     *
+     * [onComplete] is invoked on the EDT after the fetch finishes (success or
+     * failure), before the result is applied. Use it for cleanup such as
+     * resetting a timeout override.
      */
-    private fun prefetchAndLoadView(view: String) {
+    private fun prefetchAndLoadView(view: String, onComplete: (() -> Unit)? = null) {
         ApplicationManager.getApplication().executeOnPooledThread {
             val result = runCatching { CliBridge.prefetchAll() }
             ApplicationManager.getApplication().invokeLater {
+                onComplete?.invoke()
                 result.fold(
                     onSuccess = {
                         // Cache is now warm — load the current view with data embedded
@@ -187,13 +192,35 @@ class TokenTrackerPanel(
     }
 
     private fun showError(message: String) {
+        val isTimeout = message.contains("timed out", ignoreCase = true)
         val safe = message
             .replace("\\", "\\\\")
             .replace("'", "\\'")
             .replace("\n", "\\n")
             .replace("\r", "\\r")
+
+        // When the error is a timeout, define a JS helper for the retry buttons and
+        // render the buttons themselves inline in the overlay.
+        val retrySetup = if (isTimeout) """
+            window.__retryLoad = function(ext) {
+                window.chrome.webview.postMessage(JSON.stringify(
+                    ext ? {command:'retryWithExtendedTimeout'} : {command:'retry'}
+                ));
+            };
+        """.trimIndent() else ""
+
+        // Produces a JS string fragment ending with ' +' so it can be concatenated
+        // into the innerHTML assignment below; empty when not a timeout.
+        val retryBlock = if (isTimeout) """
+            '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center">' +
+            '<button onclick="__retryLoad(false)" style="padding:6px 14px;background:#0e639c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px">Retry</button>' +
+            '<button onclick="__retryLoad(true)" style="padding:6px 14px;background:#3a3d41;color:#ccc;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:12px">Wait longer (5 min)</button>' +
+            '</div>' +
+        """.trimIndent() else ""
+
         val js = """
             (function() {
+                $retrySetup
                 var overlay = document.getElementById('loading-overlay');
                 if (overlay) {
                     overlay.innerHTML =
@@ -202,6 +229,7 @@ class TokenTrackerPanel(
                         '<div style="font-size:12px;color:#999;max-width:480px;white-space:pre-wrap;word-break:break-word">' +
                             '$safe' +
                         '</div>' +
+                        $retryBlock
                         '<div style="margin-top:16px;font-size:12px">' +
                             'Something unexpected? <a href="https://github.com/rajbos/ai-engineering-fluency/issues" target="_blank" style="color:#4daafc;text-decoration:none">Report an issue</a>' +
                         '</div>';
@@ -225,6 +253,21 @@ class TokenTrackerPanel(
 
             when (command) {
                 "refresh" -> refreshStatsAsync()
+
+                "retry" -> {
+                    // Reload the spinner page and re-run the prefetch with the default timeout.
+                    CliBridge.invalidateCache()
+                    browser.loadHTML(WebviewResources.buildHtml(currentView, hostBridgeInjectFunction = hostBridge.inject("payload")))
+                    prefetchAndLoadView(currentView)
+                }
+
+                "retryWithExtendedTimeout" -> {
+                    // Use a 5-minute timeout for the next fetch, then reset to default.
+                    CliBridge.timeoutSeconds = 300L
+                    CliBridge.invalidateCache()
+                    browser.loadHTML(WebviewResources.buildHtml(currentView, hostBridgeInjectFunction = hostBridge.inject("payload")))
+                    prefetchAndLoadView(currentView, onComplete = { CliBridge.resetTimeout() })
+                }
 
                 "showDetails" -> navigateToView("details")
                 "showChart" -> navigateToView("chart")

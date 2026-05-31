@@ -29,7 +29,15 @@ import java.util.concurrent.TimeUnit
 object CliBridge {
 
     private val log = Logger.getInstance(CliBridge::class.java)
-    private const val CLI_TIMEOUT_SECONDS = 120L
+    private const val DEFAULT_TIMEOUT_SECONDS = 120L
+
+    /** Timeout used for CLI invocations; can be overridden (e.g. for "wait longer" retry). */
+    @Volatile var timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS
+
+    /** Resets [timeoutSeconds] back to the default (120 s). */
+    fun resetTimeout() {
+        timeoutSeconds = DEFAULT_TIMEOUT_SECONDS
+    }
 
     @Volatile private var cachedExePath: Path? = null
 
@@ -114,11 +122,11 @@ object CliBridge {
             process.errorStream.bufferedReader().use { stderrBuilder.append(it.readText()) }
         }, "cli-stderr-reader").apply { isDaemon = true; start() }
 
-        val finished = process.waitFor(CLI_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
         val elapsedMs = System.currentTimeMillis() - startMs
         if (!finished) {
             process.destroyForcibly()
-            throw IOException("CLI timed out after ${CLI_TIMEOUT_SECONDS}s")
+            throw IOException("CLI timed out after ${timeoutSeconds}s")
         }
 
         // Wait for reader threads to finish (they should complete almost
