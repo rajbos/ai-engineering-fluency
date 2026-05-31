@@ -4640,7 +4640,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			{
 				enableScripts: true,
 				retainContextWhenHidden: false,
-				localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist')]
+				localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist'), vscode.Uri.joinPath(this.extensionUri, 'media')]
 			}
 		);
 
@@ -6507,6 +6507,7 @@ ${hashtag}`;
 
   private getLoadingHtml(webview: vscode.Webview): string {
     const nonce = getNonce();
+    const iconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'robot-icon.png'));
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
@@ -6519,7 +6520,7 @@ ${this.getLoadingHtmlCssBase()}
 ${this.getLoadingHtmlCssSteps()}
 </style>
 </head>
-${this.getLoadingHtmlBody(nonce)}
+${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 </html>`;
   }
 
@@ -6575,12 +6576,15 @@ body {
 .pop { animation: pop-in 0.35s ease both; }`;
   }
 
-  private getLoadingHtmlBody(nonce: string): string {
+  private getLoadingHtmlBody(nonce: string, iconUri?: string): string {
+    const badgeIcon = iconUri
+      ? `<img src="${iconUri}" alt="" width="20" height="20" style="vertical-align:middle;margin-right:6px;border-radius:3px;" />`
+      : '🤖 ';
     return `<body>
 <div class="card">
     <div class="header-row">
         <div>
-            <div class="badge-label">🤖 Analyzing Your AI Activity</div>
+            <div class="badge-label">${badgeIcon}Analyzing Your AI Activity</div>
             <div class="title">Building Activity Index</div>
             <div class="subtitle" id="subtitle">Discovering session files...</div>
         </div>
