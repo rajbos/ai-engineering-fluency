@@ -3184,6 +3184,29 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return _extractRepositoryFromContentReferences(contentReferences);
 	}
 
+	/** Extract session metadata for a Windsurf virtual session. */
+	private async extractWindsurfSessionMetadata(sessionFile: string): Promise<{
+		title: string | undefined;
+		firstInteraction: string | null;
+		lastInteraction: string | null;
+		dailyInteractions: { [utcDayKey: string]: number };
+	}> {
+		const session = await this.windsurf.resolveSession(sessionFile);
+		const lastInteraction = session?.lastInteraction ?? null;
+		const dailyInteractions: { [utcDayKey: string]: number } = {};
+		if (lastInteraction) {
+			const d = new Date(lastInteraction);
+			if (!isNaN(d.getTime())) {
+				dailyInteractions[d.toISOString().slice(0, 10)] = Math.max(1, session?.interactions ?? 1);
+			}
+		}
+		return {
+			title: session?.title,
+			firstInteraction: session?.firstInteraction ?? null,
+			lastInteraction,
+			dailyInteractions,
+		};
+	}
 
 	private async extractSessionMetadata(sessionFile: string, preloadedContent?: string, preloadedParsedJson?: any): Promise<{
 		title: string | undefined;
@@ -3204,26 +3227,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			// Handle Windsurf virtual sessions
 			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
-				const session = await this.windsurf.resolveSession(sessionFile);
-				const lastInteraction = session?.lastInteraction ?? null;
-				// Windsurf's API gives no per-day breakdown, so attribute the session's
-				// activity to its last-activity day. Without this, computeDailyRollups
-				// falls back to firstInteraction (the trajectory's createdTime, which can
-				// be months old for a long-lived session) and computeLastActivityKey then
-				// buckets the session by creation date instead of recent activity.
-				const dailyInteractions: { [utcDayKey: string]: number } = {};
-				if (lastInteraction) {
-					const d = new Date(lastInteraction);
-					if (!isNaN(d.getTime())) {
-						dailyInteractions[d.toISOString().slice(0, 10)] = Math.max(1, session?.interactions ?? 1);
-					}
-				}
-				return {
-					title: session?.title,
-					firstInteraction: session?.firstInteraction ?? null,
-					lastInteraction,
-					dailyInteractions,
-				};
+				return this.extractWindsurfSessionMetadata(sessionFile);
 			}
 
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
@@ -3801,13 +3805,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const stat = existingStat ?? await this.statSessionFile(sessionFile);
 
 		const cachedDetails = await this.getSessionFileDetailsFromCache(sessionFile, stat);
-		if (cachedDetails) {
-			if (cachedDetails.repository === undefined && sessionFile.endsWith('.jsonl')) {
-				// Fall through to re-parse
-			} else {
-				this._cacheHits++;
-				return cachedDetails;
-			}
+		if (cachedDetails && !(cachedDetails.repository === undefined && sessionFile.endsWith('.jsonl'))) {
+			this._cacheHits++;
+			return cachedDetails;
 		}
 
 		this._cacheMisses++;
@@ -3826,17 +3826,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			// Handle Windsurf virtual sessions — resolve via API or .pb file metadata
 			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
-				const session = await this.windsurf.resolveSession(sessionFile);
-				if (session) {
-					details.title = session.title;
-					details.interactions = session.interactions;
-					details.editorSource = 'windsurf';
-					details.editorName = 'Windsurf';
-					details.firstInteraction = session.firstInteraction ?? stat.mtime.toISOString();
-					details.lastInteraction = session.lastInteraction ?? stat.mtime.toISOString();
-				}
-				await this.updateCacheWithSessionDetails(sessionFile, stat, details);
-				return details;
+				return this.processWindsurfSessionDetails(sessionFile, stat, details);
 			}
 
 			const fileContent = await fs.promises.readFile(sessionFile, 'utf8');
@@ -3852,7 +3842,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			const sessionContent = JSON.parse(fileContent);
 			if (sessionContent.customTitle) { details.title = sessionContent.customTitle; }
-			if (sessionContent.requests && Array.isArray(sessionContent.requests)) {
+			if (Array.isArray(sessionContent.requests)) {
 				await this.processJsonRequestsDetails(sessionContent.requests, sessionFile, stat, details);
 			}
 			await this.updateCacheWithSessionDetails(sessionFile, stat, details);
@@ -3860,6 +3850,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.warn(`Error analyzing session file details for ${sessionFile}: ${error}`);
 		}
 
+		return details;
+	}
+
+	private async processWindsurfSessionDetails(sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<SessionFileDetails> {
+		const session = await this.windsurf.resolveSession(sessionFile);
+		if (session) {
+			details.title = session.title;
+			details.interactions = session.interactions;
+			details.editorSource = 'windsurf';
+			details.editorName = 'Windsurf';
+			details.firstInteraction = session.firstInteraction ?? stat.mtime.toISOString();
+			details.lastInteraction = session.lastInteraction ?? stat.mtime.toISOString();
+		}
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
 		return details;
 	}
 
@@ -7974,8 +7978,58 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
   );
 }
 
+function formatWindsurfDiagnosticsContent(diagnostics: any): string {
+  return `# Windsurf Diagnostics Report
+
+Generated: ${new Date().toISOString()}
+
+## Environment
+- Running in Windsurf: ${diagnostics.environment.isRunningInWindsurf}
+- App Name: ${diagnostics.environment.appName}
+
+## Extension Status
+- Extension Found: ${diagnostics.extension.found}
+- Extension Active: ${diagnostics.extension.active}
+- Extension Version: ${diagnostics.extension.packageJSON}
+
+## Credentials
+- Available: ${diagnostics.credentials.available}
+- Port: ${diagnostics.credentials.port}
+- CSRF Token Length: ${diagnostics.credentials.csrfLength}
+
+## API Connectivity Test
+- Success: ${diagnostics.apiTest.success}
+- Status Code: ${diagnostics.apiTest.statusCode}
+- Error: ${diagnostics.apiTest.error || 'None'}
+
+## Configuration
+- Windsurf Integration Enabled: ${diagnostics.configuration.enabled}
+
+## Sessions
+- Available: ${diagnostics.sessions.available}
+- Count: ${diagnostics.sessions.count}
+- Error: ${diagnostics.sessions.error || 'None'}
+
+## Recommendations
+
+${!diagnostics.extension.found ? '- Install the Windsurf extension\n' : ''}${!diagnostics.extension.active ? '- Activate the Windsurf extension or restart Windsurf\n' : ''}${!diagnostics.credentials.available ? '- Check if Windsurf language server is running\n' : ''}${!diagnostics.apiTest.success ? `- API connectivity issue: ${diagnostics.apiTest.error}\n` : ''}${diagnostics.sessions.count === 0 && diagnostics.apiTest.success ? '- Windsurf is working correctly, but no chat sessions have been created yet. Try starting a chat session in Windsurf and then refresh the token tracker.\n' : ''}
+`;
+}
+
+async function handleWindsurfDiagnosticsCommand(tokenTracker: CopilotTokenTracker): Promise<void> {
+  try {
+    const diagnostics = await tokenTracker.windsurf.runDiagnostics();
+    const doc = await vscode.workspace.openTextDocument({
+      content: formatWindsurfDiagnosticsContent(diagnostics),
+      language: 'markdown'
+    });
+    await vscode.window.showTextDocument(doc);
+  } catch (error) {
+    vscode.window.showErrorMessage(`Failed to run Windsurf diagnostics: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 function registerDiagnosticAndAuthCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
-  // Register the show fluency level viewer command (debug-only)
   const showFluencyLevelViewerCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.showFluencyLevelViewer",
     async () => {
@@ -8031,56 +8085,7 @@ function registerDiagnosticAndAuthCommands(context: vscode.ExtensionContext, tok
     "copilot-token-tracker.checkWindsurfStatus",
     async () => {
       tokenTracker.log("Windsurf diagnostics command called");
-      try {
-        const diagnostics = await tokenTracker.windsurf.runDiagnostics();
-
-        const doc = await vscode.workspace.openTextDocument({
-          content: `# Windsurf Diagnostics Report
-
-Generated: ${new Date().toISOString()}
-
-## Environment
-- Running in Windsurf: ${diagnostics.environment.isRunningInWindsurf}
-- App Name: ${diagnostics.environment.appName}
-
-## Extension Status
-- Extension Found: ${diagnostics.extension.found}
-- Extension Active: ${diagnostics.extension.active}
-- Extension Version: ${diagnostics.extension.packageJSON}
-
-## Credentials
-- Available: ${diagnostics.credentials.available}
-- Port: ${diagnostics.credentials.port}
-- CSRF Token Length: ${diagnostics.credentials.csrfLength}
-
-## API Connectivity Test
-- Success: ${diagnostics.apiTest.success}
-- Status Code: ${diagnostics.apiTest.statusCode}
-- Error: ${diagnostics.apiTest.error || 'None'}
-
-## Configuration
-- Windsurf Integration Enabled: ${diagnostics.configuration.enabled}
-
-## Sessions
-- Available: ${diagnostics.sessions.available}
-- Count: ${diagnostics.sessions.count}
-- Error: ${diagnostics.sessions.error || 'None'}
-
-## Recommendations
-
-${!diagnostics.extension.found ? '- Install the Windsurf extension\n' : ''}
-${!diagnostics.extension.active ? '- Activate the Windsurf extension or restart Windsurf\n' : ''}
-${!diagnostics.credentials.available ? '- Check if Windsurf language server is running\n' : ''}
-${!diagnostics.apiTest.success ? `- API connectivity issue: ${diagnostics.apiTest.error}\n` : ''}
-${diagnostics.sessions.count === 0 && diagnostics.apiTest.success ? '- Windsurf is working correctly, but no chat sessions have been created yet. Try starting a chat session in Windsurf and then refresh the token tracker.\n' : ''}
-`,
-          language: 'markdown'
-        });
-
-        await vscode.window.showTextDocument(doc);
-      } catch (error) {
-        vscode.window.showErrorMessage(`Failed to run Windsurf diagnostics: ${error instanceof Error ? error.message : String(error)}`);
-      }
+      await handleWindsurfDiagnosticsCommand(tokenTracker);
     },
   );
 

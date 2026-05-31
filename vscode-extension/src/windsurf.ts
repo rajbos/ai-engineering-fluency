@@ -207,6 +207,49 @@ export class WindsurfDataAccess {
 		}
 	}
 
+	/** Wait for the Windsurf devClient to become ready (up to 10 attempts, 2 s apart). */
+	private async waitForDevClient(exports: any): Promise<any | null> {
+		console.log('[Windsurf] Waiting for devClient to be ready...');
+		for (let attempt = 0; attempt < 10; attempt++) {
+			const devClient = exports.devClient();
+			console.log(`[Windsurf] DevClient attempt ${attempt + 1}: ${!!devClient}`);
+			if (devClient) { return devClient; }
+			await new Promise(resolve => setTimeout(resolve, 2000));
+		}
+		return null;
+	}
+
+	/** Trigger devClient methods to cause HTTP requests so credentials can be intercepted. */
+	private async triggerDevClientForCsrf(devClient: any, hasCsrf: () => boolean): Promise<void> {
+		for (const method of Object.keys(devClient)) {
+			if (typeof devClient[method] !== 'function') { continue; }
+			console.log(`[Windsurf] Trying method: ${method}`);
+			try {
+				await Promise.race([
+					devClient[method]({}),
+					new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
+				]);
+			} catch (error) {
+				console.log(`[Windsurf] Method ${method} failed (expected): ${error instanceof Error ? error.message : String(error)}`);
+			}
+			if (hasCsrf()) { break; }
+		}
+	}
+
+	/** Search Windsurf extension exports for a port + CSRF token pair. */
+	private findCredentialsInExtensionExports(exports: any): WindsurfCredentials | null {
+		for (const key of Object.keys(exports)) {
+			const value = exports[key];
+			if (!value || typeof value !== 'object') { continue; }
+			if (!(value.port || value.token || value.csrf)) { continue; }
+			console.log(`[Windsurf] Found potential credentials in exports.${key}`);
+			const port = value.port || value.serverPort || value.languageServerPort;
+			const csrf = value.token || value.csrf || value.authToken;
+			if (port && csrf) { return { csrf: String(csrf), port: Number(port) }; }
+		}
+		return null;
+	}
+
 	/**
 	 * Capture credentials by monkey-patching http.ClientRequest.
 	 */
@@ -229,19 +272,11 @@ export class WindsurfDataAccess {
 		}
 
 		// 2. Wait for devClient to be ready
-		let devClient: any = null;
-		console.log('[Windsurf] Waiting for devClient to be ready...');
-		for (let attempt = 0; attempt < 10; attempt++) {
-			devClient = exports.devClient();
-			console.log(`[Windsurf] DevClient attempt ${attempt + 1}: ${!!devClient}`);
-			if (devClient) {break;}
-			await new Promise(resolve => setTimeout(resolve, 2000));
-		}
+		const devClient = await this.waitForDevClient(exports);
 		if (!devClient) {
 			console.warn('Windsurf devClient not ready after timeout');
 			return null;
 		}
-		
 		console.log(`[Windsurf] DevClient ready, available methods: ${Object.keys(devClient).filter(k => typeof devClient[k] === 'function').join(', ')}`);
 
 		// 3. Patch ClientRequest to intercept headers
@@ -279,23 +314,8 @@ export class WindsurfDataAccess {
 		try {
 			// 4. Trigger devClient method to cause HTTP request
 			console.log('[Windsurf] Triggering devClient methods to capture credentials...');
-			for (const method of Object.keys(devClient)) {
-				if (typeof devClient[method] !== 'function') {continue;}
-				console.log(`[Windsurf] Trying method: ${method}`);
-				try {
-					await Promise.race([
-						devClient[method]({}),
-						new Promise((_, rej) => setTimeout(() => rej(new Error('timeout')), 5000)),
-					]);
-				} catch (error) {
-					console.log(`[Windsurf] Method ${method} failed (expected): ${error instanceof Error ? error.message : String(error)}`);
-					// Expected - we only need the headers
-				}
-				if (csrf) {
-					console.log('[Windsurf] Credentials captured successfully!');
-					break;
-				}
-			}
+			await this.triggerDevClientForCsrf(devClient, () => !!csrf);
+			if (csrf) { console.log('[Windsurf] Credentials captured successfully!'); }
 		} finally {
 			// Always restore originals
 			http.ClientRequest.prototype.end = origEnd;
@@ -347,25 +367,9 @@ export class WindsurfDataAccess {
 		try {
 			const ext = vscode.extensions.getExtension('codeium.windsurf');
 			if (ext?.isActive && ext.exports) {
-				// Try to access internal configuration or state
-				const exports = ext.exports;
 				console.log('[Windsurf] Checking Windsurf extension exports for alternative access...');
-				
-				// Look for any configuration or state objects
-				for (const key of Object.keys(exports)) {
-					const value = exports[key];
-					if (value && typeof value === 'object') {
-						// Look for port or token in nested objects
-						if (value.port || value.token || value.csrf) {
-							console.log(`[Windsurf] Found potential credentials in exports.${key}`);
-							const port = value.port || value.serverPort || value.languageServerPort;
-							const csrf = value.token || value.csrf || value.authToken;
-							if (port && csrf) {
-								return { csrf: String(csrf), port: Number(port) };
-							}
-						}
-					}
-				}
+				const found = this.findCredentialsInExtensionExports(ext.exports);
+				if (found) { return found; }
 			}
 		} catch (error) {
 			console.log('[Windsurf] Alternative access failed:', error);
@@ -771,6 +775,36 @@ export class WindsurfDataAccess {
 		}
 	}
 
+	/** Fetch step data for a trajectory and return token/interaction counts. */
+	private async fetchTrajectoryStepData(
+		trajectoryId: string,
+		summary: CascadeTrajectorySummary,
+		activityScore: number,
+		lastInteraction: string | null | undefined,
+		utcDayKey: string,
+	): Promise<{ interactions: number; tokens: number; cachedTokens: number; usedRealData: boolean; modelUsage?: ModelUsage; toolCalls?: { total: number; byTool: { [tool: string]: number } } }> {
+		try {
+			const steps = await this.getAllTrajectorySteps(trajectoryId, activityScore);
+			if (steps.length === 0) { return { interactions: 1, tokens: 0, cachedTokens: 0, usedRealData: false }; }
+			const usage = this.extractTokenUsage(steps);
+			const stepTurns = this.countUserTurns(steps);
+			const interactions = Math.max(1, stepTurns);
+			const tokens = usage.totalTokens;
+			const cachedTokens = usage.cachedTokens;
+			const modelUsage = this.buildModelUsage(usage, summary.lastGeneratorModelUid);
+			const toolCalls = this.countToolCalls(steps);
+			const partial = steps.length < activityScore;
+			if (usage.inputTokens > usage.totalTokens) {
+				this.log(`[Windsurf] trajectory ${trajectoryId}: inputTokens(${usage.inputTokens}) > totalTokens(${usage.totalTokens}) — output clamped to 0`);
+			}
+			this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} stepsFetched=${steps.length}${partial ? ' (PARTIAL steps)' : ''} userTurns=${stepTurns} tokens(total=${usage.totalTokens}, input=${usage.inputTokens}, cached=${usage.cachedTokens}) tools=${toolCalls.total} → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
+			return { interactions, tokens, cachedTokens, usedRealData: true, modelUsage, toolCalls };
+		} catch (stepError) {
+			this.log(`[Windsurf] trajectory ${trajectoryId}: failed to fetch steps (${stepError}); no token data`);
+			return { interactions: 1, tokens: 0, cachedTokens: 0, usedRealData: false };
+		}
+	}
+
 	/**
 	 * Build a SessionFileDetails for a single Cascade trajectory: fetch its steps,
 	 * derive real token/turn/tool/model breakdowns, and shape it like any other editor's
@@ -791,46 +825,20 @@ export class WindsurfDataAccess {
 		//
 		// Turn counting uses CORTEX_STEP_TYPE_USER_INPUT steps. We page through the full
 		// step list via step_offset so large sessions are not undercounted by the
-		// per-response size cap.
-		let interactions = 1;
-		let tokens = 0;
-		let usedRealData = false;
-		let modelUsage: ModelUsage | undefined;
-		let cachedTokens = 0;
-		let toolCalls: { total: number; byTool: { [tool: string]: number } } | undefined;
-		try {
-			const steps = await this.getAllTrajectorySteps(trajectoryId, activityScore);
-			if (steps.length > 0) {
-				const usage = this.extractTokenUsage(steps);
-				const stepTurns = this.countUserTurns(steps);
-				interactions = Math.max(1, stepTurns);
-				tokens = usage.totalTokens;
-				cachedTokens = usage.cachedTokens;
-				modelUsage = this.buildModelUsage(usage, summary.lastGeneratorModelUid);
-				toolCalls = this.countToolCalls(steps);
-				usedRealData = true;
-				const partial = steps.length < activityScore;
-				if (usage.inputTokens > usage.totalTokens) {
-					this.log(`[Windsurf] trajectory ${trajectoryId}: inputTokens(${usage.inputTokens}) > totalTokens(${usage.totalTokens}) — output clamped to 0 (cumulative-token assumption may have changed)`);
-				}
-				this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} stepsFetched=${steps.length}${partial ? ' (PARTIAL steps)' : ''} userTurns=${stepTurns} tokens(total=${usage.totalTokens}, input=${usage.inputTokens}, cached=${usage.cachedTokens}) tools=${toolCalls.total} → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
-			}
-		} catch (stepError) {
-			this.log(`[Windsurf] trajectory ${trajectoryId}: failed to fetch steps (${stepError}); no token data`);
-		}
-		if (!usedRealData) {
-			this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} (no steps returned) → interactions=${interactions} tokens=${tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
+		const stepData = await this.fetchTrajectoryStepData(trajectoryId, summary, activityScore, lastInteraction, utcDayKey);
+		if (!stepData.usedRealData) {
+			this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} (no steps returned) → interactions=${stepData.interactions} tokens=${stepData.tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
 		}
 
 		return {
 			file: `windsurf://trajectory/${trajectoryId}`,
 			modified: summary.lastModifiedTime || new Date().toISOString(),
 			size: activityScore,
-			interactions,
-			tokens,
-			...(modelUsage ? { modelUsage } : {}),
-			...(cachedTokens ? { cachedTokens } : {}),
-			...(toolCalls ? { toolCalls } : {}),
+			interactions: stepData.interactions,
+			tokens: stepData.tokens,
+			...(stepData.modelUsage ? { modelUsage: stepData.modelUsage } : {}),
+			...(stepData.cachedTokens ? { cachedTokens: stepData.cachedTokens } : {}),
+			...(stepData.toolCalls ? { toolCalls: stepData.toolCalls } : {}),
 			contextReferences: { file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0, byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {} },
 			firstInteraction: summary.createdTime,
 			lastInteraction: lastInteraction || summary.lastModifiedTime,
@@ -868,143 +876,109 @@ export class WindsurfDataAccess {
 		return fileSessions;
 	}
 
+	/** Extract workspace and repository names from a trajectory summary. */
+	private extractWorkspaceInfoOriginal(summary: CascadeTrajectorySummary): { workspaceName: string; repositoryName: string } {
+		let workspaceName = 'Unknown';
+		let repositoryName = 'Unknown';
+		if (summary.workspaces && Array.isArray(summary.workspaces) && summary.workspaces.length > 0) {
+			const workspace = summary.workspaces[0];
+			if (workspace && typeof workspace === 'object') {
+				if (workspace.workspaceFolderAbsoluteUri && typeof workspace.workspaceFolderAbsoluteUri === 'string') {
+					const uriParts = workspace.workspaceFolderAbsoluteUri.split('/');
+					workspaceName = uriParts[uriParts.length - 1] || workspaceName;
+				}
+				if (workspace.repository?.computedName) {
+					repositoryName = String(workspace.repository.computedName);
+				}
+			}
+		}
+		return { workspaceName, repositoryName };
+	}
+
+	/** Process a single trajectory for the original debug method. Returns null if the trajectory should be skipped. */
+	private async processOriginalTrajectory(cascadeId: string, summary: CascadeTrajectorySummary): Promise<SessionFileDetails | null> {
+		if (!summary || typeof summary !== 'object') {
+			console.warn(`[Windsurf] Invalid trajectory summary for ${cascadeId}, skipping`);
+			return null;
+		}
+		console.log(`[Windsurf] Getting steps for trajectory ${cascadeId}...`);
+		const steps = await this.getCascadeTrajectorySteps(cascadeId);
+		if (!steps || !steps.steps) {
+			console.warn(`[Windsurf] No steps found for trajectory ${cascadeId}, skipping`);
+			return null;
+		}
+		console.log(`[Windsurf] Found ${steps.steps.length} steps for trajectory ${cascadeId}`);
+		const tokenUsage = this.extractTokenUsage(steps.steps);
+		const totalTokens = tokenUsage.totalTokens;
+		console.log(`[Windsurf] Token usage for ${cascadeId}: total=${totalTokens}, input=${tokenUsage.inputTokens}, cached=${tokenUsage.cachedTokens}`);
+		if (totalTokens === 0) {
+			console.log(`[Windsurf] Skipping trajectory ${cascadeId} - no tokens found`);
+			return null;
+		}
+		let createdDate: Date;
+		try {
+			createdDate = new Date(summary.createdTime);
+			if (isNaN(createdDate.getTime())) {
+				console.warn(`Invalid createdTime for trajectory ${cascadeId}: ${summary.createdTime}`);
+				return null;
+			}
+		} catch (error) {
+			console.warn(`Failed to parse createdTime for trajectory ${cascadeId}: ${error}`);
+			return null;
+		}
+		const { repositoryName } = this.extractWorkspaceInfoOriginal(summary);
+		return {
+			file: `windsurf://${cascadeId}`,
+			size: 0,
+			modified: summary.lastModifiedTime,
+			interactions: summary.stepCount,
+			tokens: totalTokens,
+			contextReferences: { file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0, byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {} },
+			firstInteraction: summary.createdTime,
+			lastInteraction: summary.lastUserInputTime || summary.lastModifiedTime,
+			editorSource: 'windsurf',
+			editorName: 'Windsurf',
+			title: summary.summary || `Cascade ${cascadeId}`,
+			repository: repositoryName,
+		};
+	}
+
 	/**
 	 * Original version (commented out for debugging)
 	 */
 	async getWindsurfSessionsOriginal(): Promise<SessionFileDetails[]> {
-		// Add logging outside try-catch to see if method is even reached
 		console.log('[Windsurf] getWindsurfSessions() ENTRY POINT');
-		
 		try {
-			console.log('[Windsurf] getWindsurfSessions() called');
 			console.log('[Windsurf] === STARTING SESSION DISCOVERY ===');
 			const sessions: SessionFileDetails[] = [];
-			
-			// Check if Windsurf is enabled in configuration
-			console.log('[Windsurf] About to get configuration...');
 			const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
-			console.log('[Windsurf] Got configuration object');
 			const windsurfEnabled = config.get<boolean>('windsurf.enabled', true);
 			console.log(`[Windsurf] Configuration check - enabled: ${windsurfEnabled}`);
 			if (!windsurfEnabled) {
 				console.log('[Windsurf] Integration is disabled in configuration');
 				return sessions;
 			}
-		
-		console.log('[Windsurf] Fetching trajectories...');
-		const trajectories = await this.getAllCascadeTrajectories();
-		if (!trajectories || !trajectories.trajectorySummaries) {
-			console.log('[Windsurf] No Cascade trajectories found or invalid response');
-			console.log('[Windsurf] This could mean:');
-			console.log('[Windsurf] 1. No chat sessions have been created yet');
-			console.log('[Windsurf] 2. The Windsurf language server is not running');
-			console.log('[Windsurf] 3. Credential capture failed');
-			console.log('[Windsurf] 4. API endpoints have changed');
-			return sessions;
-		}
-
-		console.log(`[Windsurf] Processing ${Object.keys(trajectories.trajectorySummaries).length} trajectories...`);
-		for (const [cascadeId, summary] of Object.entries(trajectories.trajectorySummaries)) {
-			console.log(`[Windsurf] Processing trajectory ${cascadeId}...`);
-			try {
-				// Validate summary data
-				if (!summary || typeof summary !== 'object') {
-					console.warn(`[Windsurf] Invalid trajectory summary for ${cascadeId}, skipping`);
-					continue;
-				}
-
-				console.log(`[Windsurf] Getting steps for trajectory ${cascadeId}...`);
-				const steps = await this.getCascadeTrajectorySteps(cascadeId);
-				if (!steps || !steps.steps) {
-					console.warn(`[Windsurf] No steps found for trajectory ${cascadeId}, skipping`);
-					continue;
-				}
-
-				console.log(`[Windsurf] Found ${steps.steps.length} steps for trajectory ${cascadeId}`);
-				const tokenUsage = this.extractTokenUsage(steps.steps);
-				const totalTokens = tokenUsage.totalTokens;
-				console.log(`[Windsurf] Token usage for ${cascadeId}: total=${totalTokens}, input=${tokenUsage.inputTokens}, cached=${tokenUsage.cachedTokens}`);
-				
-				if (totalTokens === 0) {
-					console.log(`[Windsurf] Skipping trajectory ${cascadeId} - no tokens found`);
-					continue;
-				} // Skip sessions with no tokens
-
-				// Validate and parse dates
-				let createdDate: Date;
+			console.log('[Windsurf] Fetching trajectories...');
+			const trajectories = await this.getAllCascadeTrajectories();
+			if (!trajectories || !trajectories.trajectorySummaries) {
+				console.log('[Windsurf] No Cascade trajectories found or invalid response');
+				return sessions;
+			}
+			console.log(`[Windsurf] Processing ${Object.keys(trajectories.trajectorySummaries).length} trajectories...`);
+			for (const [cascadeId, summary] of Object.entries(trajectories.trajectorySummaries)) {
+				console.log(`[Windsurf] Processing trajectory ${cascadeId}...`);
 				try {
-					createdDate = new Date(summary.createdTime);
-					if (isNaN(createdDate.getTime())) {
-						console.warn(`Invalid createdTime for trajectory ${cascadeId}: ${summary.createdTime}`);
-						continue;
+					const session = await this.processOriginalTrajectory(cascadeId, summary);
+					if (session) {
+						console.log(`[Windsurf] Successfully processed session ${cascadeId}: ${session.title} (${session.tokens} tokens)`);
+						sessions.push(session);
 					}
 				} catch (error) {
-					console.warn(`Failed to parse createdTime for trajectory ${cascadeId}: ${error}`);
-					continue;
+					console.error(`Failed to process Windsurf trajectory ${cascadeId}:`, error);
 				}
-				
-				const dateStr = createdDate.toISOString().split('T')[0]; // YYYY-MM-DD
-
-				// Extract workspace/repository info
-				let workspaceName = 'Unknown';
-				let repositoryName = 'Unknown';
-				
-				if (summary.workspaces && Array.isArray(summary.workspaces) && summary.workspaces.length > 0) {
-					const workspace = summary.workspaces[0];
-					if (workspace && typeof workspace === 'object') {
-						if (workspace.workspaceFolderAbsoluteUri && typeof workspace.workspaceFolderAbsoluteUri === 'string') {
-							const uriParts = workspace.workspaceFolderAbsoluteUri.split('/');
-							workspaceName = uriParts[uriParts.length - 1] || workspaceName;
-						}
-						if (workspace.repository && typeof workspace.repository === 'object' && workspace.repository.computedName) {
-							repositoryName = String(workspace.repository.computedName);
-						}
-					}
-				}
-
-				const session = {
-					file: `windsurf://${cascadeId}`,
-					size: 0, // API-based, no file size
-					modified: summary.lastModifiedTime,
-					interactions: summary.stepCount,
-					tokens: totalTokens,
-					contextReferences: {
-						file: 0,
-						selection: 0,
-						implicitSelection: 0,
-						symbol: 0,
-						codebase: 0,
-						workspace: 0,
-						terminal: 0,
-						vscode: 0,
-						terminalLastCommand: 0,
-						terminalSelection: 0,
-						clipboard: 0,
-						changes: 0,
-						outputPanel: 0,
-						problemsPanel: 0,
-						pullRequest: 0,
-						byKind: {},
-						copilotInstructions: 0,
-						agentsMd: 0,
-						byPath: {},
-					},
-					firstInteraction: summary.createdTime,
-					lastInteraction: summary.lastUserInputTime || summary.lastModifiedTime,
-					editorSource: 'windsurf',
-					editorName: 'Windsurf',
-					title: summary.summary || `Cascade ${cascadeId}`,
-					repository: repositoryName,
-				};
-				console.log(`[Windsurf] Successfully processed session ${cascadeId}: ${session.title} (${totalTokens} tokens)`);
-				sessions.push(session);
-			} catch (error) {
-				console.error(`Failed to process Windsurf trajectory ${cascadeId}:`, error);
 			}
-		}
-
-		console.log(`[Windsurf] Session processing complete. Returning ${sessions.length} sessions.`);
-		return sessions;
+			console.log(`[Windsurf] Session processing complete. Returning ${sessions.length} sessions.`);
+			return sessions;
 		} catch (error) {
 			console.error('[Windsurf] Error in getWindsurfSessions:', error);
 			return [];
@@ -1018,6 +992,27 @@ export class WindsurfDataAccess {
 		this.credentials = null;
 	}
 
+	/** Test API connectivity using GetProcesses. */
+	private async runApiConnectivityTest(credentials: WindsurfCredentials | null): Promise<{ success: boolean; statusCode?: number; error?: string }> {
+		if (!credentials) { return { success: false, error: 'No credentials available' }; }
+		try {
+			const response = await this.makeApiCall('GetProcesses', {}, credentials);
+			return { success: true, statusCode: response.statusCode };
+		} catch (error) {
+			return { success: false, error: error instanceof Error ? error.message : String(error) };
+		}
+	}
+
+	/** Return trajectory session count from the API. */
+	private async getSessionStats(): Promise<{ available: boolean; count?: number; error?: string }> {
+		try {
+			const trajectories = await this.getAllCascadeTrajectories();
+			return { available: !!trajectories, count: trajectories ? Object.keys(trajectories.trajectorySummaries).length : 0 };
+		} catch (error) {
+			return { available: false, error: error instanceof Error ? error.message : String(error) };
+		}
+	}
+
 	/**
 	 * Run diagnostics to help troubleshoot Windsurf session detection issues.
 	 */
@@ -1025,13 +1020,11 @@ export class WindsurfDataAccess {
 		console.log('[Windsurf] Running diagnostics...');
 		const diagnostics: { [key: string]: any } = {};
 
-		// Basic environment checks
 		diagnostics.environment = {
 			isRunningInWindsurf: this.isRunningInWindsurf(),
 			appName: vscode.env.appName,
 		};
 
-		// Extension checks
 		const ext = vscode.extensions.getExtension('codeium.windsurf');
 		diagnostics.extension = {
 			found: !!ext,
@@ -1039,7 +1032,6 @@ export class WindsurfDataAccess {
 			packageJSON: ext?.packageJSON?.version || 'unknown',
 		};
 
-		// Credential checks
 		const credentials = await this.getCredentials();
 		diagnostics.credentials = {
 			available: !!credentials,
@@ -1047,46 +1039,14 @@ export class WindsurfDataAccess {
 			csrfLength: credentials?.csrf?.length || 0,
 		};
 
-		// API connectivity test
-		if (credentials) {
-			try {
-				const response = await this.makeApiCall('GetProcesses', {}, credentials);
-				diagnostics.apiTest = {
-					success: true,
-					statusCode: response.statusCode,
-				};
-			} catch (error) {
-				diagnostics.apiTest = {
-					success: false,
-					error: error instanceof Error ? error.message : String(error),
-				};
-			}
-		} else {
-			diagnostics.apiTest = {
-				success: false,
-				error: 'No credentials available',
-			};
-		}
+		diagnostics.apiTest = await this.runApiConnectivityTest(credentials);
 
-		// Configuration checks
 		const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 		diagnostics.configuration = {
 			enabled: config.get<boolean>('windsurf.enabled', true),
 		};
 
-		// Try to get actual session count
-		try {
-			const trajectories = await this.getAllCascadeTrajectories();
-			diagnostics.sessions = {
-				available: !!trajectories,
-				count: trajectories ? Object.keys(trajectories.trajectorySummaries).length : 0,
-			};
-		} catch (error) {
-			diagnostics.sessions = {
-				available: false,
-				error: error instanceof Error ? error.message : String(error),
-			};
-		}
+		diagnostics.sessions = await this.getSessionStats();
 
 		console.log('[Windsurf] Diagnostics complete:', diagnostics);
 		return diagnostics;
