@@ -1,3 +1,4 @@
+// @ts-nocheck
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
@@ -10,6 +11,8 @@ import {
 	isStorageLocalAuthDisallowedByPolicyError,
 	redactSecretsInText,
 	safeStringifyError,
+	getErrorStatusCode,
+	getErrorCode,
 	withErrorHandling,
 	withErrorRecovery,
 	withErrorRecoverySync,
@@ -319,4 +322,59 @@ test('withErrorRecoveryResult captures non-Error thrown values', async () => {
 test('withErrorRecoveryResult works without context argument', async () => {
 	const result = await withErrorRecoveryResult(async () => { throw new Error('no-ctx'); });
 	assert.equal(result.ok, false);
+});
+
+
+// ── getErrorStatusCode ─────────────────────────────────────────────────────
+
+test('getErrorStatusCode: returns undefined for null and non-objects', () => {
+assert.equal(getErrorStatusCode(null), undefined);
+assert.equal(getErrorStatusCode(undefined), undefined);
+assert.equal(getErrorStatusCode('string error'), undefined);
+assert.equal(getErrorStatusCode(42), undefined);
+});
+
+test('getErrorStatusCode: returns undefined when statusCode is absent', () => {
+assert.equal(getErrorStatusCode({}), undefined);
+assert.equal(getErrorStatusCode(new Error('oops')), undefined);
+});
+
+test('getErrorStatusCode: returns statusCode when it is a number', () => {
+assert.equal(getErrorStatusCode({ statusCode: 404 }), 404);
+assert.equal(getErrorStatusCode({ statusCode: 401 }), 401);
+assert.equal(getErrorStatusCode({ statusCode: 500 }), 500);
+});
+
+test('getErrorStatusCode: returns undefined when statusCode is a string', () => {
+assert.equal(getErrorStatusCode({ statusCode: '404' }), undefined);
+});
+
+// ── getErrorCode ───────────────────────────────────────────────────────────
+
+test('getErrorCode: returns undefined for null and non-objects', () => {
+assert.equal(getErrorCode(null), undefined);
+assert.equal(getErrorCode(undefined), undefined);
+assert.equal(getErrorCode('string'), undefined);
+assert.equal(getErrorCode(42), undefined);
+});
+
+test('getErrorCode: returns undefined when code is absent', () => {
+assert.equal(getErrorCode({}), undefined);
+assert.equal(getErrorCode({ message: 'oops' }), undefined);
+});
+
+test('getErrorCode: returns string code', () => {
+assert.equal(getErrorCode({ code: 'NOT_FOUND' }), 'NOT_FOUND');
+assert.equal(getErrorCode({ code: 'REQUEST_DISALLOWED' }), 'REQUEST_DISALLOWED');
+});
+
+test('getErrorCode: returns numeric code', () => {
+assert.equal(getErrorCode({ code: 404 }), 404);
+assert.equal(getErrorCode({ code: 0 }), 0);
+});
+
+test('getErrorCode: returns undefined when code is boolean or object', () => {
+assert.equal(getErrorCode({ code: true }), undefined);
+assert.equal(getErrorCode({ code: null }), undefined);
+assert.equal(getErrorCode({ code: {} }), undefined);
 });

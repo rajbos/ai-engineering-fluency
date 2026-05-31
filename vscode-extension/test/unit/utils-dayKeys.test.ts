@@ -1,7 +1,8 @@
+// @ts-nocheck
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { toUtcDayKey, addDaysUtc, getDayKeysInclusive } from '../../src/utils/dayKeys';
+import { toLocalDayKey, toUtcDayKey, addDaysUtc, getDayKeysInclusive } from '../../src/utils/dayKeys';
 
 // ── toUtcDayKey ─────────────────────────────────────────────────────────
 
@@ -67,4 +68,39 @@ test('getDayKeysInclusive: returns empty when start > end', () => {
 test('getDayKeysInclusive: crosses month boundary', () => {
 	const keys = getDayKeysInclusive('2025-01-30', '2025-02-02');
 	assert.deepEqual(keys, ['2025-01-30', '2025-01-31', '2025-02-01', '2025-02-02']);
+});
+
+
+
+// ── toLocalDayKey ────────────────────────────────────────────────────────
+
+test('toLocalDayKey: formats a local date as YYYY-MM-DD', () => {
+const d = new Date(2025, 2, 15); // March 15, 2025 (month is 0-based)
+const result = toLocalDayKey(d);
+assert.equal(result, '2025-03-15');
+});
+
+test('toLocalDayKey: pads single-digit month and day with leading zero', () => {
+const d = new Date(2025, 0, 5); // January 5, 2025
+const result = toLocalDayKey(d);
+assert.equal(result, '2025-01-05');
+});
+
+test('toLocalDayKey: handles December 31', () => {
+const d = new Date(2025, 11, 31); // December 31, 2025
+const result = toLocalDayKey(d);
+assert.equal(result, '2025-12-31');
+});
+
+test('toLocalDayKey: handles January 1', () => {
+const d = new Date(2026, 0, 1); // January 1, 2026
+const result = toLocalDayKey(d);
+assert.equal(result, '2026-01-01');
+});
+
+test('toLocalDayKey: returns a string of exactly 10 characters', () => {
+const d = new Date(2024, 5, 8); // June 8, 2024
+const result = toLocalDayKey(d);
+assert.equal(result.length, 10);
+assert.match(result, /^\d{4}-\d{2}-\d{2}$/);
 });
