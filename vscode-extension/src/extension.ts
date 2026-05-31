@@ -392,10 +392,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Flag to track if details panel is currently showing the loading screen
 	private _detailsPanelIsLoading = false;
 
-	// Editor list captured during the last (or current) log analysis, used to render the loading tooltip SVG
+	// Editor list captured during the last (or current) log analysis, shown in the loading tooltip
 	private _loadingEditors: { icon: string; name: string }[] = [];
-	// Previous progress percentage used to animate the progress bar smoothly between tooltip updates
-	private _prevLoadingPercentage = 0;
+	// Last rendered loading-tooltip markdown value, used to skip redundant reassignments
+	private _lastLoadingTooltipValue = '';
 
 	// Cache mapping workspaceStorageId -> resolved workspace folder path (or undefined if not resolvable)
 	private _workspaceIdToFolderCache: Map<string, string | undefined> = new Map();
@@ -1723,8 +1723,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const fileLoadCutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 
 		this._loadingEditors = [];
+		this._lastLoadingTooltipValue = '';
 		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'discovering' });
-		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('discovering'); }
+		if (!silent) { this.setLoadingTooltip('discovering'); }
 
 		// Streaming pipeline: discovery and parsing run concurrently.
 		// Workers start processing files as each adapter batch arrives.
@@ -1736,7 +1737,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
 
 		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
-		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
+		if (!silent) { this.setLoadingTooltip('computing'); }
 
 		const { stats: detailedStats, dailyStats } = await this.calculateDetailedStats(undefined, preloaded);
 		this.lastDailyStats = dailyStats;
@@ -1827,6 +1828,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (silent) { return undefined; }
 		let parsingStepNotified = false;
 		let lastProgressSentMs = 0;
+		let lastTooltipMs = 0;
 		let lastPercentage = -1;
 		return (completed: number, total: number) => {
 			const percentage = Math.round((completed / total) * 100);
@@ -1842,20 +1844,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this._loadingEditors = editors;
 				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
 				this.sendLoadingPanelMessage(msg);
-				// Set the hover tooltip exactly once when parsing starts, using the
-				// indeterminate (self-animating SMIL) variant. The tooltip is never
-				// reassigned during parsing, so the hover popup no longer flickers on
-				// every progress redraw — the previous per-500ms reassignment forced
-				// VS Code to rebuild the hover and reload the data-URI <img>. The live
-				// climbing percentage stays visible in the status bar text instead.
-				// Skip entirely when the loading panel is already open — it shows progress itself.
-				if (!this._detailsPanelIsLoading) {
-					this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing');
-				}
+				if (!silent) { this.setLoadingTooltip('parsing', percentage); lastTooltipMs = Date.now(); }
 			}
-			// The hover popup intentionally stays put during parsing; only the live
-			// webview panel (if open) receives incremental progress updates.
 			const now = Date.now();
+			// Update the hover with the live percentage at most ~twice a second. The tooltip is
+			// now plain Markdown (no embedded data-URI image), so VS Code updates the text in
+			// place instead of reloading an image — which is what used to flash on every redraw.
+			// setLoadingTooltip also skips the reassignment entirely when the rendered text is
+			// unchanged, so a stalled percentage never re-triggers the hover.
+			if (!silent && (now - lastTooltipMs >= 500 || completed === total)) {
+				lastTooltipMs = now;
+				this.setLoadingTooltip('parsing', percentage);
+			}
 			if (now - lastProgressSentMs >= 500 || completed === total) {
 				lastProgressSentMs = now;
 				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
@@ -1892,139 +1892,87 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.updateStatusBarBackgroundColor(detailedStats);
 	}
 
+	private static readonly LOADING_STEPS = [
+		'Discovering session files', 'Checking cache',
+		'Parsing session logs', 'Computing statistics', 'Ready!',
+	];
+
+	/** Index of the active step (also the count of completed steps) for a loading phase. */
+	private loadingStepIndex(step: 'discovering' | 'parsing' | 'computing'): number {
+		return step === 'discovering' ? 0 : step === 'parsing' ? 2 : 3;
+	}
+
+	private loadingSubtitle(step: 'discovering' | 'parsing' | 'computing'): string {
+		if (step === 'discovering') { return 'Discovering session files…'; }
+		if (step === 'parsing') { return 'Parsing session files…'; }
+		return 'Computing statistics…';
+	}
+
+	/** Resolves the percentage label and progress bar for the current phase. */
+	private loadingProgress(step: 'discovering' | 'parsing' | 'computing', percentage?: number): { pctTxt: string; bar: string } {
+		if (step === 'computing') { return { pctTxt: '96%', bar: this.renderLoadingBar(96) }; }
+		if (percentage !== undefined && percentage > 0) { return { pctTxt: `${percentage}%`, bar: this.renderLoadingBar(percentage) }; }
+		return { pctTxt: '', bar: this.renderLoadingBar(undefined) };
+	}
+
+	/** Renders the step checklist with codicons: ✓ done, spinner active, ○ pending. */
+	private renderLoadingSteps(activeStep: number): string {
+		const lines: string[] = [];
+		const steps = CopilotTokenTracker.LOADING_STEPS;
+		for (let i = 0; i < steps.length; i++) {
+			const icon  = i < activeStep ? '$(check)' : i === activeStep ? '$(sync~spin)' : '$(circle-outline)';
+			const label = i === activeStep ? `**${steps[i]}**` : steps[i];
+			lines.push(`${icon} ${label}`);
+		}
+		return lines.join('  \n');
+	}
+
+	/**
+	 * Builds the status bar loading hover as native Markdown (no embedded data-URI image).
+	 * A Markdown/text tooltip is updated in place by VS Code, so the live percentage and step
+	 * list refresh without the image-reload flash that used to make the popup flicker on every
+	 * redraw. The exact percentage also stays visible in the status bar text.
+	 */
 	private buildLoadingTooltipMarkdown(step: 'discovering' | 'parsing' | 'computing', percentage?: number): vscode.MarkdownString {
-		const svg = this.generateLoadingSvg(step, this._loadingEditors, percentage, this._prevLoadingPercentage);
-		this._prevLoadingPercentage = percentage ?? this._prevLoadingPercentage;
-		const tooltip = new vscode.MarkdownString(`![Loading](data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)})`);
-		tooltip.isTrusted = true;
-		tooltip.supportThemeIcons = false;
-		return tooltip;
+		const { pctTxt, bar } = this.loadingProgress(step, percentage);
+		const md = new vscode.MarkdownString();
+		md.supportThemeIcons = true;
+		md.appendMarkdown(`**$(rocket) Analyzing your AI activity**\n\n`);
+		md.appendMarkdown(`### Building Activity Index${pctTxt ? `  —  ${pctTxt}` : ''}\n\n`);
+		md.appendMarkdown(`\`${bar}\`\n\n`);
+		md.appendMarkdown(`_${this.loadingSubtitle(step)}_\n\n`);
+
+		const editors = this._loadingEditors.slice(0, 6);
+		if (editors.length > 0) {
+			md.appendMarkdown(editors.map(e => `${e.icon} ${e.name}`).join(' · ') + '\n\n');
+		}
+
+		md.appendMarkdown('---\n\n');
+		md.appendMarkdown(this.renderLoadingSteps(this.loadingStepIndex(step)));
+		return md;
 	}
 
-	// eslint-disable-next-line max-lines-per-function, complexity, sonarjs/cognitive-complexity
-	private generateLoadingSvg(
-		step: 'discovering' | 'parsing' | 'computing',
-		editors: { icon: string; name: string }[],
-		percentage?: number,
-		prevPercentage?: number
-	): string {
-		const W = 440, P = 12;
-		const CARD  = '#24273a', FG  = '#cdd6f4';
-		const MUT  = '#9399b2', ACC   = '#89b4fa', OK  = '#a6e3a1';
-		const BRD  = '#313244';
-		const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
-		const esc  = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-		const doneUntil  = step === 'discovering' ? 0 : step === 'parsing' ? 2 : 3;
-		const activeStep = step === 'discovering' ? 0 : step === 'parsing' ? 2 : 3;
-		const STEPS = [
-			'Discovering session files', 'Checking cache',
-			'Parsing session logs',      'Computing statistics', 'Ready!',
-		];
-		const pct     = step === 'computing' ? 96 : (percentage ?? 0);
-		const pctTxt  = step === 'computing' ? '96%' : (percentage !== undefined && percentage > 0 ? `${percentage}%` : '–');
-		const subtitle =
-			step === 'discovering' ? 'Discovering session files...' :
-			step === 'parsing'     ? 'Parsing session files...'     :
-			                         'Computing statistics...';
-		const pills   = editors.slice(0, 6);
-
-		// Layout — always reserve pills row so height never changes between phases
-		const BY    = P + 13;
-		const TY    = BY + 20;
-		const SBY   = TY + 16;
-		const PRY   = SBY + 16;
-		const PRH   = 5;
-		const PIL_Y = PRY + PRH + 8;
-		const SBX_Y = PIL_Y + 34;  // 28px pills height + 6px gap, always reserved
-		const SBX_H = P + STEPS.length * 22 + 8;
-		const H     = SBX_Y + SBX_H + P;
-		const PW    = W - P * 2;
-
-		const o: string[] = [];
-		o.push(`<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}" viewBox="0 0 ${W} ${H}">`);
-		o.push(`<defs>
-  <linearGradient id="pg" x1="0" y1="0" x2="1" y2="0">
-    <stop offset="0%" stop-color="${ACC}"/>
-    <stop offset="100%" stop-color="${OK}"/>
-  </linearGradient>
-  <clipPath id="pclip"><rect x="${P}" y="${PRY}" width="${PW}" height="${PRH}" rx="2.5"/></clipPath>
-</defs>`);
-
-		// Badge
-		o.push(`<text x="${P}" y="${BY}" font-family="${FONT}" font-size="10" font-weight="700" letter-spacing="1.5" fill="${ACC}">🤖 ANALYZING YOUR AI ACTIVITY</text>`);
-
-		// Title + large pct display
-		o.push(`<text x="${P}" y="${TY}" font-family="${FONT}" font-size="17" font-weight="700" fill="${FG}">Building Activity Index</text>`);
-		o.push(`<text x="${W - P}" y="${TY}" text-anchor="end" font-family="${FONT}" font-size="26" font-weight="800" fill="${FG}">${esc(pctTxt)}</text>`);
-
-		// Subtitle
-		o.push(`<text x="${P}" y="${SBY}" font-family="${FONT}" font-size="11" fill="${MUT}">${esc(subtitle)}</text>`);
-
-		// Progress track
-		o.push(`<rect x="${P}" y="${PRY}" width="${PW}" height="${PRH}" rx="2.5" fill="${BRD}"/>`);
-
-		// Progress fill — shimmer (indeterminate) during discovering/early parsing, animated fill when progress is known
-		if (step !== 'computing' && pct === 0) {
-			const sw = Math.round(PW * 0.25);
-			o.push(`<rect y="${PRY}" width="${sw}" height="${PRH}" rx="2.5" fill="url(#pg)" clip-path="url(#pclip)">
-  <animate attributeName="x" from="${P - Math.round(PW * 0.35)}" to="${P + Math.round(PW * 1.1)}" dur="1.8s" repeatCount="indefinite" calcMode="ease-in-out"/>
-</rect>`);
-		} else {
-			const fw = Math.max(8, Math.round((pct / 100) * PW));
-			const prevFw = Math.max(8, Math.round(((prevPercentage ?? 0) / 100) * PW));
-			if (prevFw < fw) {
-				// Animate from previous width to current width so the bar grows smoothly
-				o.push(`<rect x="${P}" y="${PRY}" height="${PRH}" rx="2.5" fill="url(#pg)" width="${prevFw}">
-  <animate attributeName="width" from="${prevFw}" to="${fw}" dur="0.5s" fill="freeze" calcMode="spline" keySplines="0.25 0.46 0.45 0.94" keyTimes="0;1"/>
-</rect>`);
-			} else {
-				o.push(`<rect x="${P}" y="${PRY}" width="${fw}" height="${PRH}" rx="2.5" fill="url(#pg)"/>`);
-			}
-		}
-
-		// Editor pills
-		if (pills.length > 0) {
-			let px = P;
-			for (const ed of pills) {
-				const rawLbl = `${ed.icon} ${ed.name}`;
-				const pw2    = Math.min(Math.max([...rawLbl].length * 7 + 16, 64), 130);
-				if (px + pw2 > W - P) { break; }
-				o.push(`<rect x="${px}" y="${PIL_Y}" width="${pw2}" height="22" rx="11" fill="${CARD}" stroke="${BRD}"/>`);
-				o.push(`<text x="${px + pw2 / 2}" y="${PIL_Y + 15}" text-anchor="middle" font-family="${FONT}" font-size="10.5" fill="${FG}">${esc(rawLbl)}</text>`);
-				px += Math.round(pw2) + 6;
-			}
-		}
-
-		// Steps box
-		o.push(`<rect x="${P}" y="${SBX_Y}" width="${PW}" height="${SBX_H}" rx="8" fill="${CARD}" stroke="${BRD}"/>`);
-
-		const ICX = P + P + 4;
-		const LBX = ICX + 18;
-		let sy = SBX_Y + P + 8;
-		for (let i = 0; i < STEPS.length; i++) {
-			const done   = i < doneUntil;
-			const active = i === activeStep;
-			const col    = done ? OK : active ? ACC : MUT;
-			const wt     = active ? '600' : '400';
-			const lbl    = STEPS[i];
-
-			if (done) {
-				o.push(`<text x="${ICX}" y="${sy}" text-anchor="middle" font-family="monospace" font-size="13" fill="${OK}">✓</text>`);
-			} else if (active) {
-				// Spinning ↻ via SMIL animateTransform around the glyph centre
-				const cy = sy - 4;
-				o.push(`<text x="${ICX}" y="${sy}" text-anchor="middle" font-family="monospace" font-size="13" fill="${ACC}">↻<animateTransform attributeName="transform" type="rotate" values="0 ${ICX} ${cy};360 ${ICX} ${cy}" dur="0.75s" repeatCount="indefinite" additive="sum"/></text>`);
-			} else {
-				o.push(`<text x="${ICX}" y="${sy}" text-anchor="middle" font-size="13" fill="${MUT}">○</text>`);
-			}
-			o.push(`<text x="${LBX}" y="${sy}" font-family="${FONT}" font-size="12" font-weight="${wt}" fill="${col}">${esc(lbl)}</text>`);
-			sy += 22;
-		}
-
-		o.push('</svg>');
-		return o.join('');
+	/** Renders a fixed-width unicode progress bar. `undefined` yields an empty (indeterminate) track. */
+	private renderLoadingBar(pct?: number): string {
+		const width = 22;
+		if (pct === undefined) { return '░'.repeat(width); }
+		const filled = Math.max(0, Math.min(width, Math.round((pct / 100) * width)));
+		return '█'.repeat(filled) + '░'.repeat(width - filled);
 	}
+
+	/**
+	 * Assigns the loading tooltip, but only when the rendered Markdown actually changed and the
+	 * details panel isn't already showing its own loading UI. Skipping no-op reassignments keeps
+	 * VS Code from rebuilding the hover when nothing visible would change.
+	 */
+	private setLoadingTooltip(step: 'discovering' | 'parsing' | 'computing', percentage?: number): void {
+		if (this._detailsPanelIsLoading) { return; }
+		const md = this.buildLoadingTooltipMarkdown(step, percentage);
+		if (md.value === this._lastLoadingTooltipValue) { return; }
+		this._lastLoadingTooltipValue = md.value;
+		this.statusBarItem.tooltip = md;
+	}
+
 
 	private buildTooltipMarkdown(detailedStats: DetailedStats): vscode.MarkdownString {
 		const tooltip = new vscode.MarkdownString();
