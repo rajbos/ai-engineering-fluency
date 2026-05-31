@@ -1915,11 +1915,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const FONT = "-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif";
 		const esc  = (s: string) => s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 
-		const doneUntil  = step === 'discovering' ? 0 : step === 'parsing' ? 2 : 3;
-		const activeStep = step === 'discovering' ? 0 : step === 'parsing' ? 2 : 3;
+		const doneUntil  = step === 'discovering' ? 0 : step === 'parsing' ? 1 : 2;
+		const activeStep = step === 'discovering' ? 0 : step === 'parsing' ? 1 : 2;
 		const STEPS = [
-			'Discovering session files', 'Checking cache',
-			'Parsing session logs',      'Computing statistics', 'Ready!',
+			'Discovering session files',
+			'Parsing session logs', 'Computing statistics', 'Ready!',
 		];
 		const pct     = step === 'computing' ? 96 : (percentage ?? 0);
 		const pctTxt  = step === 'computing' ? '96%' : (percentage !== undefined && percentage > 0 ? `${percentage}%` : '–');
@@ -6603,7 +6603,7 @@ body {
     <div id="editors-row" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:14px;"></div>
     <div class="steps-box">
         <div class="step step-active" id="s-discover"><i class="step-ico"><span class="spin-ico">↻</span></i><span class="step-lbl">Discovering session files</span><span class="step-cnt" id="sc-discover"></span></div>
-        <div class="step" id="s-cache"><i class="step-ico">○</i><span class="step-lbl">Checking cache</span><span class="step-cnt"></span></div>
+
         <div class="step" id="s-parse"><i class="step-ico">○</i><span class="step-lbl">Parsing session logs</span><span class="step-cnt" id="sc-parse"></span></div>
         <div class="step" id="s-compute"><i class="step-ico">○</i><span class="step-lbl">Computing statistics</span><span class="step-cnt"></span></div>
         <div class="step" id="s-ready"><i class="step-ico">○</i><span class="step-lbl">Ready!</span><span class="step-cnt"></span></div>
@@ -6644,7 +6644,7 @@ ${this.getLoadingHtmlScript()}
     function enterParsing(total) {
         if (!parsingShown) {
             parsingShown = true;
-            setDone('s-discover'); setDone('s-cache'); setActive('s-parse');
+            setDone('s-discover'); setActive('s-parse');
             var chips = document.getElementById('chips'); if (chips) chips.style.display = 'flex';
         }
         if (total) { var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)'; }
