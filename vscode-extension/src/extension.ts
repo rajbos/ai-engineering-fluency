@@ -1858,7 +1858,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const now = Date.now();
 			if (now - lastProgressSentMs >= 500 || completed === total) {
 				lastProgressSentMs = now;
-				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
+				const editors = getEditors?.() ?? [];
+				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage, editors });
 			}
 		};
 	}
@@ -6671,6 +6672,9 @@ ${this.getLoadingHtmlScript()}
             // Receiving progress means parsing is underway — reconcile the checklist in case
             // the loadingStep 'parsing' transition was missed during webview startup.
             enterParsing(m.total);
+            // Editors are included in every progress tick so pills appear even when the
+            // one-time loadingStep 'parsing' message was dropped before the listener attached.
+            if (m.editors && m.editors.length > EDITORS.length) { EDITORS = m.editors; }
             var pct2 = document.getElementById('pct'); if (pct2) pct2.textContent = m.percentage + '%';
             var fill2 = document.getElementById('prog-fill'); if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (m.percentage < 3 ? 3 : m.percentage) + '%'; }
             var cd = document.getElementById('chip-done'); if (cd) cd.textContent = m.completed.toLocaleString();
