@@ -61,23 +61,31 @@ export function effectiveTokens(data: SessionData): number {
 	return data.actualTokens > 0 ? data.actualTokens : data.tokens;
 }
 
-/** Determine editor source from file path */
+/** Determine editor source from file path, returning the same friendly display names used by the VS Code extension. */
 export function getEditorSourceFromPath(filePath: string): string {
 	const normalized = normalizePathForComparison(filePath);
-	if (normalized.includes('/cursor/')) { return 'cursor'; }
-	if (normalized.includes('/code - insiders/')) { return 'vscode-insiders'; }
-	if (normalized.includes('/code - exploration/')) { return 'vscode-exploration'; }
-	if (normalized.includes('/vscodium/')) { return 'vscodium'; }
-	if (normalized.includes('/.copilot/')) { return 'copilot-cli'; }
-	if (normalized.includes('/.crush/crush.db#')) { return 'crush'; }
-	if (normalized.includes('/opencode/')) { return 'opencode'; }
-	if (normalized.includes('/local-agent-mode-sessions/')) { return 'claude-desktop-cowork'; }
-	if (normalized.includes('/.claude/projects/')) { return 'claude-code'; }
-	if (normalized.includes('/.vibe/logs/session/')) { return 'mistral-vibe'; }
-	if (normalized.includes('/.gemini/tmp/') && normalized.includes('/chats/session-') && normalized.endsWith('.jsonl')) { return 'gemini-cli'; }
-	if (normalized.includes('.vscode-server')) { return 'vscode-remote'; }
+	// JetBrains must be checked before the broad /.copilot/ check (both use /.copilot/).
+	if (normalized.includes('/.copilot/jb/')) { return 'JetBrains'; }
+	// Copilot CLI: check specific sub-paths to avoid misclassifying JetBrains or other /.copilot/ entries.
+	if (normalized.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
+	if (normalized.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
+	if (normalized.includes('/.crush/crush.db#')) { return 'Crush'; }
+	if (normalized.includes('/opencode/')) { return 'OpenCode'; }
+	if (normalized.includes('/.continue/sessions/')) { return 'Continue'; }
+	if (normalized.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
+	if (normalized.includes('/.claude/projects/')) { return 'Claude Code'; }
+	if (normalized.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
+	// Antigravity must be checked before Gemini CLI: both live under ~/.gemini/.
+	if (normalized.includes('/.gemini/antigravity/brain/')) { return 'Antigravity'; }
+	if (normalized.includes('/.gemini/tmp/') && normalized.includes('/chats/session-') && normalized.endsWith('.jsonl')) { return 'Gemini CLI'; }
+	if (normalized.includes('/cursor/')) { return 'Cursor'; }
+	if (normalized.includes('/code - insiders/')) { return 'VS Code Insiders'; }
+	if (normalized.includes('/code - exploration/')) { return 'VS Code Exploration'; }
+	if (normalized.includes('/vscodium/')) { return 'VSCodium'; }
+	if (normalized.includes('.vscode-server-insiders/')) { return 'VS Code Server (Insiders)'; }
+	if (normalized.includes('.vscode-server')) { return 'VS Code Server'; }
 	if (normalized.includes('/.vs/') && normalized.includes('/copilot-chat/')) { return 'Visual Studio'; }
-	return 'vscode';
+	return 'VS Code';
 }
 
 /**

@@ -92,6 +92,20 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - ESLint commands to identify violation candidates
 - Commit message and PR description templates
 
+### validate-editor-names
+
+**Purpose**: Verify that the CLI and VS Code extension always agree on editor display names, and every name has an icon in the webview icon map.
+
+**Use this skill when:**
+- Adding support for a new editor or AI coding tool
+- After modifying `getEditorSourceFromPath` in `cli/src/analysis.ts`
+- After modifying `getEditorTypeFromPath` in `vscode-extension/src/workspaceHelpers.ts`
+- After updating `EDITOR_ICON_MAP` in `formatUtils.ts`
+- When JetBrains or another CLI-based consumer shows raw editor keys instead of friendly names
+
+**Contents:**
+- `validate-editor-names.js` — dependency-free Node.js script that statically extracts path detection rules from both source files, runs 18 canonical test paths through the CLI rules, checks cross-function consistency, validates EDITOR_ICON_MAP coverage, and warns about ordering invariants (broad patterns shadowing specific ones)
+
 ### load-cache-data
 
 **Purpose**: Load and inspect the last 10 rows from the local session file cache to iterate with real data.

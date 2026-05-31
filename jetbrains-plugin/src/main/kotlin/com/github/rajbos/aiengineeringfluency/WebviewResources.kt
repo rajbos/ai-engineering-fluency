@@ -61,8 +61,8 @@ object WebviewResources {
         // Initial stats are an empty object; TokenTrackerPanel.refreshStatsAsync()
         // assigns the real value as soon as the CLI returns.
         // When initial data is provided, hide the loading overlay and show root immediately
-        val overlayStyle = if (initialStatsJson != null) "display: none" else
-            "display: flex; flex-direction: column; align-items: center; justify-content: center; height: calc(100vh - 32px); text-align: center"
+        val overlayDisplayStyle = if (initialStatsJson != null) "display: none"
+            else "display: flex; align-items: center; justify-content: center; min-height: calc(100vh - 32px); padding: 20px; box-sizing: border-box"
         val rootStyle = if (initialStatsJson != null) "" else "display: none"
 
         return """
@@ -86,13 +86,43 @@ object WebviewResources {
                     .tab-button[data-tab="repos"],
                     #tab-panel-health,
                     #tab-panel-repos { display: none !important; }
-                    #loading-overlay { $overlayStyle; }
+                    #loading-overlay { $overlayDisplayStyle; }
                     #root { $rootStyle; }
-                    .spinner { width: 32px; height: 32px; border: 3px solid #333; border-top: 3px solid #0078d4;
-                               border-radius: 50%; animation: spin 1s linear infinite; margin-bottom: 16px; }
+                    /* Loading card — mirrors VS Code's getLoadingHtml card design */
+                    .loading-card { width: 100%; max-width: 600px; background: var(--vscode-sideBar-background);
+                                    border: 1px solid var(--vscode-panel-border); border-radius: 16px;
+                                    padding: 24px 28px; box-shadow: 0 8px 32px rgba(0,0,0,0.3); }
+                    .loading-header-row { display: flex; justify-content: space-between; align-items: flex-start;
+                                         margin-bottom: 16px; gap: 16px; }
+                    .loading-badge-label { font-size: 11px; font-weight: 700; letter-spacing: 0.12em;
+                                           text-transform: uppercase; color: var(--vscode-textLink-foreground);
+                                           margin-bottom: 4px; }
+                    .loading-title { font-size: 20px; font-weight: 700; color: var(--vscode-editor-foreground);
+                                     margin-bottom: 4px; }
+                    .loading-subtitle { font-size: 12px; color: var(--vscode-descriptionForeground);
+                                        overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+                    .loading-elapsed { font-size: 28px; font-weight: 800; color: var(--vscode-editor-foreground);
+                                       line-height: 1; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+                    .loading-progress-wrap { margin-bottom: 16px; }
+                    .loading-progress-track { height: 6px; background: var(--vscode-panel-border);
+                                              border-radius: 3px; overflow: hidden; }
+                    .loading-progress-fill { height: 100%; border-radius: 3px; width: 25%; position: relative;
+                                             animation: loading-shimmer 1.8s ease-in-out infinite;
+                                             background: linear-gradient(90deg, transparent,
+                                               var(--vscode-textLink-foreground),
+                                               var(--vscode-terminal-ansiGreen), transparent); }
+                    @keyframes loading-shimmer { 0% { margin-left: -30%; } 100% { margin-left: 110%; } }
+                    .loading-steps-box { background: var(--vscode-editorWidget-background);
+                                         border: 1px solid var(--vscode-panel-border);
+                                         border-radius: 10px; padding: 14px 16px; margin-bottom: 14px; }
+                    .loading-step { display: flex; align-items: center; gap: 10px; padding: 5px 0;
+                                    color: var(--vscode-descriptionForeground); font-size: 13px; transition: color 0.25s; }
+                    .loading-step.step-done { color: var(--vscode-terminal-ansiGreen); }
+                    .loading-step.step-active { color: var(--vscode-textLink-foreground); font-weight: 600; }
+                    .loading-step-ico { width: 18px; text-align: center; flex-shrink: 0; font-style: normal; }
+                    .loading-spin-ico { display: inline-block; animation: spin 0.75s linear infinite; }
                     @keyframes spin { to { transform: rotate(360deg); } }
-                    .loading-title { font-size: 14px; font-weight: 600; margin-bottom: 6px; }
-                    .loading-detail { font-size: 12px; color: #999; }
+                    .loading-hint { font-size: 12px; color: var(--vscode-descriptionForeground); text-align: center; }
                     .repo-footer { position: fixed; bottom: 0; left: 0; right: 0; padding: 6px 16px;
                                    font-size: 11px; color: #666; text-align: center; background: #1e1e1e;
                                    border-top: 1px solid #333; }
@@ -140,10 +170,67 @@ object WebviewResources {
             </head>
             <body>
                 <div id="loading-overlay">
-                    <div class="spinner"></div>
-                    <div class="loading-title">Loading Copilot usage data&hellip;</div>
-                    <div class="loading-detail">Scanning session logs &mdash; this may take up to 2 minutes on the first run.</div>
+                    <div class="loading-card">
+                        <div class="loading-header-row">
+                            <div>
+                                <div class="loading-badge-label">&#x1F916; Analyzing Your AI Activity</div>
+                                <div class="loading-title">Building Activity Index</div>
+                                <div class="loading-subtitle" id="loading-subtitle">Discovering session files&hellip;</div>
+                            </div>
+                            <div class="loading-elapsed" id="loading-elapsed">0s</div>
+                        </div>
+                        <div class="loading-progress-wrap">
+                            <div class="loading-progress-track">
+                                <div class="loading-progress-fill" id="loading-prog-fill"></div>
+                            </div>
+                        </div>
+                        <div class="loading-steps-box">
+                            <div class="loading-step step-active" id="ls-discover">
+                                <i class="loading-step-ico"><span class="loading-spin-ico">&#x21BB;</span></i>
+                                <span>Discovering session files</span>
+                            </div>
+                            <div class="loading-step" id="ls-parse">
+                                <i class="loading-step-ico">&#x25CB;</i>
+                                <span>Parsing session logs</span>
+                            </div>
+                            <div class="loading-step" id="ls-compute">
+                                <i class="loading-step-ico">&#x25CB;</i>
+                                <span>Computing statistics</span>
+                            </div>
+                            <div class="loading-step" id="ls-ready">
+                                <i class="loading-step-ico">&#x25CB;</i>
+                                <span>Ready!</span>
+                            </div>
+                        </div>
+                        <div class="loading-hint">This may take up to 2 minutes on the first run.</div>
+                    </div>
                 </div>
+                <script>
+                (function () {
+                    var t0 = Date.now();
+                    setInterval(function () {
+                        var s = Math.floor((Date.now() - t0) / 1000);
+                        var el = document.getElementById('loading-elapsed');
+                        if (!el) return;
+                        el.textContent = s < 60 ? s + 's' : Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+                    }, 1000);
+                    function setDone(id) {
+                        var el = document.getElementById(id); if (!el) return;
+                        el.classList.remove('step-active'); el.classList.add('step-done');
+                        var ico = el.querySelector('.loading-step-ico'); if (ico) ico.innerHTML = '&#x2713;';
+                    }
+                    function setActive(id, text) {
+                        var el = document.getElementById(id); if (!el) return;
+                        el.classList.remove('step-done'); el.classList.add('step-active');
+                        var ico = el.querySelector('.loading-step-ico');
+                        if (ico) ico.innerHTML = '<span class="loading-spin-ico">&#x21BB;</span>';
+                        var sub = document.getElementById('loading-subtitle');
+                        if (sub && text) sub.textContent = text;
+                    }
+                    setTimeout(function () { setDone('ls-discover'); setActive('ls-parse', 'Parsing session logs\u2026'); }, 3000);
+                    setTimeout(function () { setDone('ls-parse'); setActive('ls-compute', 'Computing statistics\u2026'); }, 18000);
+                })();
+                </script>
                 <div id="root"></div>
                 <div class="repo-footer">
                     <a href="https://github.com/rajbos/ai-engineering-fluency" target="_blank">AI Engineering Fluency</a>
