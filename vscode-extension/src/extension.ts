@@ -1827,32 +1827,35 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (silent) { return undefined; }
 		let parsingStepNotified = false;
 		let lastProgressSentMs = 0;
-		let lastTooltipUpdatedMs = 0;
+		let lastPercentage = -1;
 		return (completed: number, total: number) => {
 			const percentage = Math.round((completed / total) * 100);
-			this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
+			// Only touch the status bar text when the rounded percentage actually changes,
+			// to avoid needless status-bar relayout on every callback.
+			if (percentage !== lastPercentage) {
+				lastPercentage = percentage;
+				this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
+			}
 			if (!parsingStepNotified) {
 				parsingStepNotified = true;
 				const editors = getEditors?.() ?? [];
 				this._loadingEditors = editors;
 				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
 				this.sendLoadingPanelMessage(msg);
-				// Update tooltip once when parsing starts (editors are now known).
-				// Skip entirely when the loading panel is already open — no need to double up.
+				// Set the hover tooltip exactly once when parsing starts, using the
+				// indeterminate (self-animating SMIL) variant. The tooltip is never
+				// reassigned during parsing, so the hover popup no longer flickers on
+				// every progress redraw — the previous per-500ms reassignment forced
+				// VS Code to rebuild the hover and reload the data-URI <img>. The live
+				// climbing percentage stays visible in the status bar text instead.
+				// Skip entirely when the loading panel is already open — it shows progress itself.
 				if (!this._detailsPanelIsLoading) {
-					this._prevLoadingPercentage = 0;
-					this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing', percentage > 0 ? percentage : undefined);
-					lastTooltipUpdatedMs = Date.now();
+					this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing');
 				}
 			}
-			// Time-based throttle: update tooltip at most once every 500 ms.
-			// This prevents jarring jumps at 10% boundaries and reduces tooltip flicker.
-			// Skip when the loading panel is open — the panel already shows progress.
+			// The hover popup intentionally stays put during parsing; only the live
+			// webview panel (if open) receives incremental progress updates.
 			const now = Date.now();
-			if (!this._detailsPanelIsLoading && percentage > 0 && (now - lastTooltipUpdatedMs) >= 500) {
-				lastTooltipUpdatedMs = now;
-				this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing', percentage);
-			}
 			if (now - lastProgressSentMs >= 500 || completed === total) {
 				lastProgressSentMs = now;
 				this.sendLoadingPanelMessage({ command: 'loadingProgress', completed, total, percentage });
