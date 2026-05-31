@@ -1012,3 +1012,698 @@ test('getResponseArray: returns empty array when response is []', () => {
         assert.ok(Array.isArray(result));
         assert.equal(result!.length, 0);
 });
+
+// ── applyDelta ──────────────────────────────────────────────────────────────
+
+import { applyDelta } from '../../src/tokenEstimation';
+
+test('applyDelta: kind:0 replaces the entire state with v', () => {
+        const initial = { requests: [{ id: 1 }] };
+        const result = applyDelta(initial, { kind: 0, v: { requests: [] } });
+        assert.deepEqual(result, { requests: [] });
+});
+
+test('applyDelta: kind:0 with null v replaces state with null', () => {
+        const result = applyDelta({ a: 1 }, { kind: 0, v: null });
+        assert.equal(result, null);
+});
+
+test('applyDelta: kind:1 sets a top-level field', () => {
+        const state = { name: 'old' };
+        const result = applyDelta(state, { kind: 1, k: ['name'], v: 'new' }) as Record<string, unknown>;
+        assert.equal(result.name, 'new');
+});
+
+test('applyDelta: kind:1 sets nested field via multi-segment path', () => {
+        const state = { a: { b: { c: 'original' } } };
+        const result = applyDelta(state, { kind: 1, k: ['a', 'b', 'c'], v: 'updated' }) as Record<string, unknown>;
+        const nested = (result.a as Record<string, unknown>).b as Record<string, unknown>;
+        assert.equal(nested.c, 'updated');
+});
+
+test('applyDelta: kind:1 creates intermediate objects when missing', () => {
+        const state = {};
+        const result = applyDelta(state, { kind: 1, k: ['x', 'y'], v: 42 }) as Record<string, unknown>;
+        assert.equal((result.x as Record<string, unknown>).y, 42);
+});
+
+test('applyDelta: kind:1 sets value on array container at numeric index', () => {
+        const state = { items: ['a', 'b', 'c'] };
+        const result = applyDelta(state, { kind: 1, k: ['items', '1'], v: 'B' }) as Record<string, unknown>;
+        assert.deepEqual(result.items, ['a', 'B', 'c']);
+});
+
+test('applyDelta: kind:2 appends a single value to an array', () => {
+        const state = { requests: [] };
+        const result = applyDelta(state, { kind: 2, k: ['requests'], v: { id: 1 } }) as Record<string, unknown>;
+        assert.deepEqual(result.requests, [{ id: 1 }]);
+});
+
+test('applyDelta: kind:2 spreads an array value into the target', () => {
+        const state = { items: [1] };
+        const result = applyDelta(state, { kind: 2, k: ['items'], v: [2, 3] }) as Record<string, unknown>;
+        assert.deepEqual(result.items, [1, 2, 3]);
+});
+
+test('applyDelta: kind:2 creates array when target does not exist', () => {
+        const state = {};
+        const result = applyDelta(state, { kind: 2, k: ['response'], v: { kind: 'text', value: 'hi' } }) as Record<string, unknown>;
+        assert.ok(Array.isArray(result.response));
+        assert.equal((result.response as unknown[]).length, 1);
+});
+
+test('applyDelta: kind:2 appends to nested path in existing array', () => {
+        const state = { requests: [{ response: [] }] };
+        const result = applyDelta(state, { kind: 2, k: ['requests', '0', 'response'], v: { kind: 'text' } }) as Record<string, unknown>;
+        const req = (result.requests as unknown[])[0] as Record<string, unknown>;
+        assert.equal((req.response as unknown[]).length, 1);
+});
+
+test('applyDelta: non-object delta returns state unchanged', () => {
+        const state = { a: 1 };
+        assert.deepEqual(applyDelta(state, 'not an object'), state);
+        assert.deepEqual(applyDelta(state, null), state);
+        assert.deepEqual(applyDelta(state, 42), state);
+});
+
+test('applyDelta: empty k array returns state unchanged', () => {
+        const state = { a: 1 };
+        const result = applyDelta(state, { kind: 1, k: [], v: 'x' });
+        assert.deepEqual(result, state);
+});
+
+test('applyDelta: non-array k returns state unchanged', () => {
+        const state = { a: 1 };
+        const result = applyDelta(state, { kind: 1, k: 'not-array', v: 'x' });
+        assert.deepEqual(result, state);
+});
+
+test('applyDelta: kind:2 on array container at numeric index', () => {
+        const state = { requests: [[]] };
+        const result = applyDelta(state, { kind: 2, k: ['requests', '0'], v: 'item' }) as Record<string, unknown>;
+        assert.deepEqual(result.requests, [['item']]);
+});
+
+test('applyDelta: kind:1 with null state creates new object', () => {
+        const result = applyDelta(null, { kind: 1, k: ['field'], v: 'value' }) as Record<string, unknown>;
+        assert.equal(result.field, 'value');
+});
+
+test('applyDelta: unknown kind returns root after traversal (no assignment)', () => {
+        const state = { a: 'original' };
+        const result = applyDelta(state, { kind: 99, k: ['a'], v: 'changed' }) as Record<string, unknown>;
+        // kind 99 is not handled — root is returned but nothing assigned
+        assert.ok(result !== null);
+});
+
+test('applyDelta: kind:2 reuses existing array at target slot', () => {
+        const state = { items: [1, 2] };
+        const result = applyDelta(state, { kind: 2, k: ['items'], v: 3 }) as Record<string, unknown>;
+        assert.deepEqual(result.items, [1, 2, 3]);
+});
+
+// ── buildReasoningEffortTimeline ────────────────────────────────────────────
+
+import { buildReasoningEffortTimeline } from '../../src/tokenEstimation';
+
+function makeModelWithEffort(effort: string): unknown {
+        return {
+                metadata: {
+                        configurationSchema: {
+                                properties: {
+                                        reasoningEffort: { default: effort }
+                                }
+                        }
+                }
+        };
+}
+
+test('buildReasoningEffortTimeline: empty lines returns empty state', () => {
+        const result = buildReasoningEffortTimeline([]);
+        assert.equal(result.defaultEffort, null);
+        assert.equal(result.switchCount, 0);
+        assert.equal(result.effortByRequestId.size, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:0 with selectedModel sets defaultEffort and currentEffort', () => {
+        const delta = {
+                kind: 0,
+                v: { inputState: { selectedModel: makeModelWithEffort('medium') } }
+        };
+        const result = buildReasoningEffortTimeline([JSON.stringify(delta)]);
+        assert.equal(result.defaultEffort, 'medium');
+        assert.equal(result.switchCount, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:0 without selectedModel leaves defaultEffort null', () => {
+        const delta = { kind: 0, v: { inputState: {} } };
+        const result = buildReasoningEffortTimeline([JSON.stringify(delta)]);
+        assert.equal(result.defaultEffort, null);
+});
+
+test('buildReasoningEffortTimeline: kind:1 switching effort increments switchCount', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const kind1 = { kind: 1, k: ['inputState', 'selectedModel'], v: makeModelWithEffort('high') };
+        const result = buildReasoningEffortTimeline([kind0, kind1].map(d => JSON.stringify(d)));
+        assert.equal(result.defaultEffort, 'medium');
+        assert.equal(result.switchCount, 1);
+});
+
+test('buildReasoningEffortTimeline: kind:1 with same effort does not increment switchCount', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const kind1 = { kind: 1, k: ['inputState', 'selectedModel'], v: makeModelWithEffort('medium') };
+        const result = buildReasoningEffortTimeline([kind0, kind1].map(d => JSON.stringify(d)));
+        assert.equal(result.switchCount, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:1 before any kind:0 does not increment switchCount', () => {
+        // currentEffort starts null; setting it to 'high' is not a switch
+        const kind1 = { kind: 1, k: ['inputState', 'selectedModel'], v: makeModelWithEffort('high') };
+        const result = buildReasoningEffortTimeline([JSON.stringify(kind1)]);
+        assert.equal(result.switchCount, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:1 with wrong path is ignored', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const kind1bad = { kind: 1, k: ['someOther', 'field'], v: makeModelWithEffort('high') };
+        const result = buildReasoningEffortTimeline([kind0, kind1bad].map(d => JSON.stringify(d)));
+        assert.equal(result.switchCount, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:2 maps requestId to current effort', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('low') } } };
+        const kind2 = { kind: 2, k: ['requests', 0], v: { requestId: 'req-abc', message: { text: 'hi' } } };
+        const result = buildReasoningEffortTimeline([kind0, kind2].map(d => JSON.stringify(d)));
+        assert.equal(result.effortByRequestId.get('req-abc'), 'low');
+});
+
+test('buildReasoningEffortTimeline: kind:2 without currentEffort does not add to map', () => {
+        // No kind:0, so currentEffort is null
+        const kind2 = { kind: 2, k: ['requests', 0], v: { requestId: 'req-xyz' } };
+        const result = buildReasoningEffortTimeline([JSON.stringify(kind2)]);
+        assert.equal(result.effortByRequestId.size, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:2 without requestId is skipped', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const kind2 = { kind: 2, k: ['requests', 0], v: { message: { text: 'no requestId here' } } };
+        const result = buildReasoningEffortTimeline([kind0, kind2].map(d => JSON.stringify(d)));
+        assert.equal(result.effortByRequestId.size, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:2 with non-string requestId is skipped', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const kind2 = { kind: 2, k: ['requests', 0], v: { requestId: 42 } };
+        const result = buildReasoningEffortTimeline([kind0, kind2].map(d => JSON.stringify(d)));
+        assert.equal(result.effortByRequestId.size, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:2 with non-requests k[0] is skipped', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const kind2 = { kind: 2, k: ['response', 0], v: { requestId: 'req-1' } };
+        const result = buildReasoningEffortTimeline([kind0, kind2].map(d => JSON.stringify(d)));
+        assert.equal(result.effortByRequestId.size, 0);
+});
+
+test('buildReasoningEffortTimeline: kind:2 with non-numeric k[1] is skipped', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const kind2 = { kind: 2, k: ['requests', 'bad'], v: { requestId: 'req-1' } };
+        const result = buildReasoningEffortTimeline([kind0, kind2].map(d => JSON.stringify(d)));
+        assert.equal(result.effortByRequestId.size, 0);
+});
+
+test('buildReasoningEffortTimeline: blank lines and invalid JSON are skipped', () => {
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const lines = ['', '   ', 'not valid json {{{', JSON.stringify(kind0)];
+        const result = buildReasoningEffortTimeline(lines);
+        assert.equal(result.defaultEffort, 'medium');
+});
+
+test('buildReasoningEffortTimeline: multiple effort switches tracked correctly', () => {
+        const lines = [
+                { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('low') } } },
+                { kind: 1, k: ['inputState', 'selectedModel'], v: makeModelWithEffort('medium') },
+                { kind: 1, k: ['inputState', 'selectedModel'], v: makeModelWithEffort('high') },
+        ].map(d => JSON.stringify(d));
+        const result = buildReasoningEffortTimeline(lines);
+        assert.equal(result.switchCount, 2);
+        assert.equal(result.defaultEffort, 'low');
+});
+
+// ── extractPerRequestUsageFromRawLines ──────────────────────────────────────
+
+import { extractPerRequestUsageFromRawLines } from '../../src/tokenEstimation';
+
+test('extractPerRequestUsageFromRawLines: returns empty map for empty input', () => {
+        const result = extractPerRequestUsageFromRawLines([]);
+        assert.equal(result.size, 0);
+});
+
+test('extractPerRequestUsageFromRawLines: returns empty map when no result lines', () => {
+        const lines = [
+                JSON.stringify({ type: 'user.message', data: { content: 'hi' } }),
+                JSON.stringify({ kind: 0, v: {} }),
+        ];
+        const result = extractPerRequestUsageFromRawLines(lines);
+        assert.equal(result.size, 0);
+});
+
+test('extractPerRequestUsageFromRawLines: extracts promptTokens + outputTokens from matching line', () => {
+        // Construct a raw line that contains the k pattern and token counts
+        // (This simulates a delta line that would fail JSON.parse but has regex-extractable data)
+        const line = '{"kind":1,"k":["requests",0,"result"],"v":{"promptTokens":150,"outputTokens":75}}';
+        const result = extractPerRequestUsageFromRawLines([line]);
+        assert.ok(result.has(0));
+        assert.equal(result.get(0)!.promptTokens, 150);
+        assert.equal(result.get(0)!.outputTokens, 75);
+});
+
+test('extractPerRequestUsageFromRawLines: extracts completionTokens fallback', () => {
+        const line = '{"kind":1,"k":["requests",2,"result"],"v":{"promptTokens":200,"completionTokens":100}}';
+        const result = extractPerRequestUsageFromRawLines([line]);
+        assert.ok(result.has(2));
+        assert.equal(result.get(2)!.promptTokens, 200);
+        assert.equal(result.get(2)!.outputTokens, 100);
+});
+
+test('extractPerRequestUsageFromRawLines: skips lines without "result" substring', () => {
+        const line = '{"kind":1,"k":["requests",0,"message"],"v":{"promptTokens":100,"outputTokens":50}}';
+        const result = extractPerRequestUsageFromRawLines([line]);
+        assert.equal(result.size, 0);
+});
+
+test('extractPerRequestUsageFromRawLines: skips lines with result but non-matching k pattern', () => {
+        const line = '{"kind":1,"k":["other",0,"result"],"v":{"promptTokens":100,"outputTokens":50}}';
+        const result = extractPerRequestUsageFromRawLines([line]);
+        assert.equal(result.size, 0);
+});
+
+test('extractPerRequestUsageFromRawLines: skips lines with result k pattern but no token counts', () => {
+        const line = '{"kind":1,"k":["requests",0,"result"],"v":{"someOtherField":42}}';
+        const result = extractPerRequestUsageFromRawLines([line]);
+        assert.equal(result.size, 0);
+});
+
+test('extractPerRequestUsageFromRawLines: extracts from multiple indices', () => {
+        const lines = [
+                '{"kind":1,"k":["requests",0,"result"],"v":{"promptTokens":100,"outputTokens":50}}',
+                '{"kind":1,"k":["requests",1,"result"],"v":{"promptTokens":200,"outputTokens":80}}',
+                '{"kind":1,"k":["requests",3,"result"],"v":{"promptTokens":300,"outputTokens":90}}',
+        ];
+        const result = extractPerRequestUsageFromRawLines(lines);
+        assert.equal(result.size, 3);
+        assert.equal(result.get(0)!.outputTokens, 50);
+        assert.equal(result.get(1)!.outputTokens, 80);
+        assert.equal(result.get(3)!.outputTokens, 90);
+});
+
+// ── EventJsonlTokenStrategy: ratio-based estimation ─────────────────────────
+
+test('EventJsonlTokenStrategy: uses high ratio (130x) when tool calls > 20', () => {
+        // 21 tool.execution_start + one assistant.message with real outputTokens, no session.shutdown
+        const lines = [
+                ...Array(21).fill(null).map(() => JSON.stringify({ type: 'tool.execution_start', data: {} })),
+                JSON.stringify({ type: 'assistant.message', data: { model: 'gpt-4o', outputTokens: 1000 } }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        // estimatedInput = Math.round(1000 * 130) = 130000; actualTokens = 131000
+        assert.equal(result.actualTokens, 131000);
+        assert.equal(result.cacheReadTokens, 130000);
+});
+
+test('EventJsonlTokenStrategy: uses medium ratio (50x) when tool calls > 5 and <= 20', () => {
+        const lines = [
+                ...Array(10).fill(null).map(() => JSON.stringify({ type: 'tool.execution_start', data: {} })),
+                JSON.stringify({ type: 'assistant.message', data: { model: 'gpt-4o', outputTokens: 1000 } }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        // estimatedInput = Math.round(1000 * 50) = 50000; actualTokens = 51000
+        assert.equal(result.actualTokens, 51000);
+        assert.equal(result.cacheReadTokens, 50000);
+});
+
+test('EventJsonlTokenStrategy: uses low ratio (10x) when tool calls <= 5', () => {
+        const lines = [
+                ...Array(3).fill(null).map(() => JSON.stringify({ type: 'tool.execution_start', data: {} })),
+                JSON.stringify({ type: 'assistant.message', data: { model: 'gpt-4o', outputTokens: 1000 } }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        // estimatedInput = Math.round(1000 * 10) = 10000; actualTokens = 11000
+        assert.equal(result.actualTokens, 11000);
+        assert.equal(result.cacheReadTokens, 10000);
+});
+
+test('EventJsonlTokenStrategy: exactly at MED threshold (5 tool calls) uses low ratio', () => {
+        // TOOL_CALLS_MED_THRESHOLD = 5; condition is > 5, so exactly 5 → low
+        const lines = [
+                ...Array(5).fill(null).map(() => JSON.stringify({ type: 'tool.execution_start', data: {} })),
+                JSON.stringify({ type: 'assistant.message', data: { model: 'gpt-4o', outputTokens: 1000 } }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 11000); // 10x ratio
+});
+
+test('EventJsonlTokenStrategy: exactly at HIGH threshold (20 tool calls) uses medium ratio', () => {
+        // TOOL_CALLS_HIGH_THRESHOLD = 20; condition is > 20, so exactly 20 → medium
+        const lines = [
+                ...Array(20).fill(null).map(() => JSON.stringify({ type: 'tool.execution_start', data: {} })),
+                JSON.stringify({ type: 'assistant.message', data: { model: 'gpt-4o', outputTokens: 1000 } }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 51000); // 50x ratio
+});
+
+test('EventJsonlTokenStrategy: ratio estimation skipped when session.shutdown provides actual tokens', () => {
+        const lines = [
+                ...Array(25).fill(null).map(() => JSON.stringify({ type: 'tool.execution_start', data: {} })),
+                JSON.stringify({ type: 'assistant.message', data: { model: 'gpt-4o', outputTokens: 1000 } }),
+                JSON.stringify({ type: 'session.shutdown', data: { modelMetrics: { 'gpt-4o': { usage: { inputTokens: 5000, outputTokens: 1000 } } } } }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        // session.shutdown overrides ratio estimation
+        assert.equal(result.actualTokens, 6000);
+});
+
+test('EventJsonlTokenStrategy: fallback event.content contributes to tokens', () => {
+        // An event with no known type but with a top-level content field
+        const lines = [
+                JSON.stringify({ content: 'fallback text content here' }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.ok(result.tokens > 0);
+});
+
+test('EventJsonlTokenStrategy: ratio estimation with zero real output skips estimation', () => {
+        // assistant.message with content (not outputTokens) → no cliRealOutputByModel → no ratio estimation
+        const lines = [
+                ...Array(25).fill(null).map(() => JSON.stringify({ type: 'tool.execution_start', data: {} })),
+                JSON.stringify({ type: 'assistant.message', data: { content: 'hello' } }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 0);
+});
+
+// ── DeltaTokenStrategy: regex fallback for parse-failed lines ────────────────
+
+test('DeltaTokenStrategy: uses regex fallback for lines that fail JSON.parse', () => {
+        // A line with the right k pattern and token counts but invalid JSON
+        const invalidLine = '{"kind":1,"k":["requests",0,"result"],"v":{"promptTokens":500,"outputTokens":250,INVALID}';
+        const result = new DeltaTokenStrategy().estimate([invalidLine]);
+        // The line fails JSON.parse, so parseFailedLines++ triggers regex fallback
+        assert.equal(result.actualTokens, 750);
+});
+
+test('DeltaTokenStrategy: regex fallback extracts completionTokens when outputTokens absent', () => {
+        const invalidLine = '{"kind":1,"k":["requests",0,"result"],"v":{"promptTokens":100,"completionTokens":40,INVALID}';
+        const result = new DeltaTokenStrategy().estimate([invalidLine]);
+        assert.equal(result.actualTokens, 140);
+});
+
+// ── getModelFromRequest: default fallback and details matching ─────────────
+
+test('getModelFromRequest: returns gpt-4 default when no model info', () => {
+        assert.equal(getModelFromRequest({}), 'gpt-4');
+        assert.equal(getModelFromRequest({ result: {} }), 'gpt-4');
+});
+
+test('getModelFromRequest: matches model from result.details via displayNames', () => {
+        const pricing = {
+                'gpt-4o': {
+                        inputCostPerMillion: 2.5,
+                        outputCostPerMillion: 10,
+                        displayNames: ['GPT-4o']
+                }
+        };
+        const req = { result: { details: 'Model: GPT-4o was used for this request' } };
+        assert.equal(getModelFromRequest(req, pricing), 'gpt-4o');
+});
+
+test('getModelFromRequest: longer displayName matched before shorter (no prefix collision)', () => {
+        const pricing = {
+                'gemini-3-pro': { inputCostPerMillion: 1, outputCostPerMillion: 2, displayNames: ['Gemini 3 Pro'] },
+                'gemini-3-pro-preview': { inputCostPerMillion: 1, outputCostPerMillion: 2, displayNames: ['Gemini 3 Pro (Preview)'] },
+        };
+        const req = { result: { details: 'Gemini 3 Pro (Preview) was used' } };
+        assert.equal(getModelFromRequest(req, pricing), 'gemini-3-pro-preview');
+});
+
+test('getModelFromRequest: result.details with no matching displayName falls back to gpt-4', () => {
+        const pricing = { 'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10, displayNames: ['GPT-4o'] } };
+        const req = { result: { details: 'Unknown model was used' } };
+        assert.equal(getModelFromRequest(req, pricing), 'gpt-4');
+});
+
+test('getModelFromRequest: strips copilot/ prefix from result.metadata.modelId', () => {
+        const req = { result: { metadata: { modelId: 'copilot/claude-sonnet-4.5' } } };
+        assert.equal(getModelFromRequest(req), 'claude-sonnet-4.5');
+});
+
+// ── selectTokenEstimationStrategy: format detection limit ──────────────────
+
+test('selectTokenEstimationStrategy: format detection stops after FORMAT_DETECTION_LINE_LIMIT non-empty lines', () => {
+        // 10 non-kind event lines (limit) + kind:0 line after → should use EventJsonlTokenStrategy
+        // because the kind:0 line is past the 10-line detection window
+        const lines = [
+                ...Array(10).fill(null).map(() => JSON.stringify({ type: 'user.message', data: { content: 'x' } })),
+                JSON.stringify({ kind: 0, v: {} }),
+        ];
+        const strategy = selectTokenEstimationStrategy(lines);
+        assert.ok(strategy instanceof EventJsonlTokenStrategy, 'should be event strategy when kind:0 is past limit');
+});
+
+test('selectTokenEstimationStrategy: detects delta format within first 10 non-empty lines', () => {
+        const lines = [
+                ...Array(5).fill(null).map(() => JSON.stringify({ type: 'user.message', data: { content: 'x' } })),
+                JSON.stringify({ kind: 0, v: {} }),
+        ];
+        const strategy = selectTokenEstimationStrategy(lines);
+        assert.ok(strategy instanceof DeltaTokenStrategy);
+});
+
+// ── isJsonlContent: additional edge cases ──────────────────────────────────
+
+test('isJsonlContent: returns false when both lines present but first does not end with }', () => {
+        const content = '{"a":1,\n"b":2}';
+        assert.equal(isJsonlContent(content), false);
+});
+
+test('isJsonlContent: returns false when second line does not start with {', () => {
+        const content = '{"a":1}\nnot-json';
+        assert.equal(isJsonlContent(content), false);
+});
+
+test('isJsonlContent: exactly 2 valid JSON object lines returns true', () => {
+        const content = '{"a":1}\n{"b":2}';
+        assert.equal(isJsonlContent(content), true);
+});
+
+// ── isUuidPointerFile: additional edge cases ────────────────────────────────
+
+test('isUuidPointerFile: returns false for UUID with extra text', () => {
+        assert.equal(isUuidPointerFile('550e8400-e29b-41d4-a716-446655440000 extra'), false);
+});
+
+test('isUuidPointerFile: returns false for short UUID (too few chars)', () => {
+        assert.equal(isUuidPointerFile('550e8400-e29b-41d4-a716'), false);
+});
+
+// ── calculateEstimatedCost: additional edge cases ───────────────────────────
+
+test('calculateEstimatedCost: clamps uncachedInput to 0 when cachedRead exceeds inputTokens', () => {
+        // Math.max(0, inputTokens - cachedRead) should not go negative
+        const modelUsage = { 'claude-x': { inputTokens: 100, outputTokens: 50, cachedReadTokens: 200 } };
+        const pricing = { 'claude-x': { inputCostPerMillion: 10, outputCostPerMillion: 20 } };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        // uncachedInput = max(0, 100 - 200 - 0) = 0
+        // cachedRead = 200 → 200/1M * 10 = 0.002 (uses inputCostPerMillion as fallback)
+        // output = 50/1M * 20 = 0.001
+        assert.ok(cost >= 0, 'cost should not be negative');
+});
+
+test('calculateEstimatedCost: skips model with no pricing entry and no fallback', () => {
+        // If neither exact model nor gpt-4o-mini fallback exists, model is skipped
+        const modelUsage = { 'exotic-model': { inputTokens: 1000000, outputTokens: 1000000 } };
+        const pricing = { 'some-other-model': { inputCostPerMillion: 1, outputCostPerMillion: 2 } };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        assert.equal(cost, 0);
+});
+
+test('calculateEstimatedCost: uses cachedInputCostPerMillion when present', () => {
+        const modelUsage = {
+                'model-a': { inputTokens: 1_000_000, outputTokens: 0, cachedReadTokens: 500_000 }
+        };
+        const pricing = {
+                'model-a': { inputCostPerMillion: 10, outputCostPerMillion: 20, cachedInputCostPerMillion: 2 }
+        };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        // uncached = 500_000 → 0.5 * 10 = 5.0
+        // cached read = 500_000 → 0.5 * 2 = 1.0
+        // output = 0
+        assert.ok(Math.abs(cost - 6.0) < 1e-9);
+});
+
+// ── getModelTier: additional edge cases ─────────────────────────────────────
+
+test('getModelTier: partial match where modelId includes key', () => {
+        const pricing = { 'claude': { inputCostPerMillion: 3, outputCostPerMillion: 15, multiplier: 1 } };
+        assert.equal(getModelTier('claude-sonnet-4.5', pricing), 'premium');
+});
+
+test('getModelTier: partial match where key includes modelId', () => {
+        const pricing = { 'claude-sonnet': { inputCostPerMillion: 3, outputCostPerMillion: 15, multiplier: 0 } };
+        assert.equal(getModelTier('claude', pricing), 'standard');
+});
+
+test('getModelTier: multiplier 0 returns standard (exact match)', () => {
+        const pricing = { 'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10, multiplier: 0 } };
+        assert.equal(getModelTier('gpt-4o', pricing), 'standard');
+});
+
+// ── EventJsonlTokenStrategy: session.shutdown without timestamp ─────────────
+
+test('EventJsonlTokenStrategy: session.shutdown without timestamp still accumulates actualTokens', () => {
+        const lines = [
+                JSON.stringify({
+                        type: 'session.shutdown',
+                        data: { modelMetrics: { 'gpt-4o': { usage: { inputTokens: 100, outputTokens: 200 } } } }
+                        // no timestamp field
+                }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 300);
+        assert.deepEqual(result.dailyActualTokens, {});
+});
+
+test('EventJsonlTokenStrategy: session.shutdown with zero total tokens does not add dailyActualTokens', () => {
+        // shutdownTotal > 0 guard: when both inputTokens and outputTokens are 0, no daily entry is added
+        const lines = [
+                JSON.stringify({
+                        type: 'session.shutdown',
+                        timestamp: '2025-03-15T10:00:00.000Z',
+                        data: { modelMetrics: { 'gpt-4o': { usage: { inputTokens: 0, outputTokens: 0 } } } }
+                }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 0);
+        assert.deepEqual(result.dailyActualTokens, {});
+});
+
+// ── getTotalTokensFromModelUsage: additional cases ──────────────────────────
+
+test('getTotalTokensFromModelUsage: single model returns correct sum', () => {
+        assert.equal(getTotalTokensFromModelUsage({ 'gpt-4o': { inputTokens: 1000, outputTokens: 500 } }), 1500);
+});
+
+test('getTotalTokensFromModelUsage: model with zero tokens contributes zero', () => {
+        assert.equal(getTotalTokensFromModelUsage({ 'empty': { inputTokens: 0, outputTokens: 0 } }), 0);
+});
+
+// ── extractAllTokensFromDebugLog: model breakdown ──────────────────────────
+
+test('extractAllTokensFromDebugLog: builds per-model breakdown correctly', () => {
+        const lines = [
+                JSON.stringify({ type: 'llm_request', attrs: { model: 'gpt-4o', inputTokens: 1000, outputTokens: 200, cachedTokens: 100 } }),
+                JSON.stringify({ type: 'llm_request', attrs: { model: 'claude', inputTokens: 500, outputTokens: 100, cachedTokens: 50 } }),
+                JSON.stringify({ type: 'llm_request', attrs: { model: 'gpt-4o', inputTokens: 800, outputTokens: 150 } }),
+        ].join('\n');
+        const result = extractAllTokensFromDebugLog(lines);
+        assert.ok(result);
+        assert.equal(result.modelTurns, 3);
+        assert.ok(result.modelBreakdown['gpt-4o']);
+        assert.equal(result.modelBreakdown['gpt-4o'].inputTokens, 1800);
+        assert.equal(result.modelBreakdown['gpt-4o'].outputTokens, 350);
+        assert.equal(result.modelBreakdown['gpt-4o'].cachedTokens, 100);
+        assert.ok(result.modelBreakdown['claude']);
+        assert.equal(result.modelBreakdown['claude'].inputTokens, 500);
+});
+
+test('extractAllTokensFromDebugLog: llm_request with empty model string is not added to breakdown', () => {
+        const lines = [
+                JSON.stringify({ type: 'llm_request', attrs: { model: '', inputTokens: 100 } }),
+        ].join('\n');
+        const result = extractAllTokensFromDebugLog(lines);
+        assert.ok(result);
+        assert.deepEqual(result.modelBreakdown, {});
+});
+
+// ── DeltaTokenStrategy: sub-agent token counting ────────────────────────────
+
+test('DeltaTokenStrategy: counts sub-agent tokens from reconstructed state', () => {
+        const subAgentItem = {
+                kind: 'toolInvocationSerialized',
+                toolSpecificData: {
+                        kind: 'subagent',
+                        modelName: 'claude-haiku',
+                        prompt: 'list all files in the repo',
+                        result: 'Found 42 files',
+                }
+        };
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [{ response: [subAgentItem] }] } }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.ok(result.tokens > 0, 'sub-agent prompt+result should contribute tokens');
+});
+
+test('DeltaTokenStrategy: sub-agent items in kind:2 are counted from final reconstructed state', () => {
+        // Sub-agent items in kind:2 delta are skipped during accumulation but ARE
+        // counted via _dtsExtractSubAgentTokens from the fully reconstructed state.
+        const subAgentItem = {
+                kind: 'toolInvocationSerialized',
+                toolSpecificData: { kind: 'subagent', prompt: 'a', result: 'b' }
+        };
+        const lines = [
+                JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [subAgentItem] }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        // prompt='a' (1 token) + result='b' (1 token) = 2 tokens from final state
+        assert.equal(result.tokens, 2);
+});
+
+// ── reconstructJsonlStateAsync ──────────────────────────────────────────────
+
+import { reconstructJsonlStateAsync } from '../../src/tokenEstimation';
+
+test('reconstructJsonlStateAsync: delta-based input sets isDeltaBased=true', async () => {
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [] } }),
+                JSON.stringify({ kind: 1, k: ['requests'], v: [] }),
+        ];
+        const { isDeltaBased } = await reconstructJsonlStateAsync(lines);
+        assert.equal(isDeltaBased, true);
+});
+
+test('reconstructJsonlStateAsync: non-delta input sets isDeltaBased=false', async () => {
+        const lines = [
+                JSON.stringify({ type: 'user.message', data: { content: 'hi' } }),
+        ];
+        const { isDeltaBased } = await reconstructJsonlStateAsync(lines);
+        assert.equal(isDeltaBased, false);
+});
+
+test('reconstructJsonlStateAsync: empty lines returns empty state', async () => {
+        const { sessionState, isDeltaBased } = await reconstructJsonlStateAsync([]);
+        assert.deepEqual(sessionState, {});
+        assert.equal(isDeltaBased, false);
+});
+
+test('reconstructJsonlStateAsync: reconstructs state from kind:0 and kind:1 deltas', async () => {
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [], title: 'session1' } }),
+                JSON.stringify({ kind: 1, k: ['title'], v: 'updated-title' }),
+        ];
+        const { sessionState } = await reconstructJsonlStateAsync(lines);
+        const state = sessionState as Record<string, unknown>;
+        assert.equal(state.title, 'updated-title');
+});
+
+test('reconstructJsonlStateAsync: skips invalid JSON lines without throwing', async () => {
+        const lines = [
+                JSON.stringify({ kind: 0, v: { x: 1 } }),
+                'not valid json',
+                JSON.stringify({ kind: 1, k: ['x'], v: 2 }),
+        ];
+        const { sessionState } = await reconstructJsonlStateAsync(lines);
+        const state = sessionState as Record<string, unknown>;
+        assert.equal(state.x, 2);
+});
