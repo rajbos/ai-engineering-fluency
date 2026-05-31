@@ -6637,26 +6637,40 @@ ${this.getLoadingHtmlScript()}
         el.classList.remove('step-done'); el.classList.add('step-active');
         var ico = el.querySelector('.step-ico'); if (ico) { ico.className = 'step-ico'; ico.innerHTML = '<span class="spin-ico">↻</span>'; }
     }
+    // Advance the checklist into the parsing phase. Idempotent: the step transition runs
+    // once even if it is triggered by a loadingProgress message because the one-time
+    // loadingStep 'parsing' was posted before this webview's listener was attached.
+    var parsingShown = false;
+    function enterParsing(total) {
+        if (!parsingShown) {
+            parsingShown = true;
+            setDone('s-discover'); setDone('s-cache'); setActive('s-parse');
+            var chips = document.getElementById('chips'); if (chips) chips.style.display = 'flex';
+        }
+        if (total) { var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)'; }
+    }
     window.addEventListener('message', function (ev) {
         var m = ev.data; if (!m) return;
         if (m.command === 'loadingStep') {
             if (m.step === 'discovering') { setActive('s-discover');
             } else if (m.step === 'parsing') {
-                var total = m.total || 0; setDone('s-discover');
+                var total = m.total || 0;
                 if (m.editors !== undefined) { EDITORS = m.editors; editorsSeen = 0; }
-                var sc = document.getElementById('sc-discover'); if (sc) sc.textContent = '(' + total + ' found)';
-                setDone('s-cache'); setActive('s-parse');
+                enterParsing(total);
                 var sub = document.getElementById('subtitle'); if (sub) sub.textContent = 'Parsing ' + total + ' session files...';
                 var bf = document.getElementById('badge-files'); if (bf) bf.textContent = total + ' files';
-                var chips = document.getElementById('chips'); if (chips) chips.style.display = 'flex';
                 var ct = document.getElementById('chip-total'); if (ct) ct.textContent = total.toLocaleString();
             } else if (m.step === 'computing') {
+                enterParsing(0);
                 setDone('s-parse'); setActive('s-compute');
                 var fill = document.getElementById('prog-fill'); if (fill) { fill.classList.remove('indeterminate'); fill.style.width = '96%'; }
                 var pct = document.getElementById('pct'); if (pct) pct.textContent = '96%';
                 var sub2 = document.getElementById('subtitle'); if (sub2) sub2.textContent = 'Computing statistics...';
             }
         } else if (m.command === 'loadingProgress') {
+            // Receiving progress means parsing is underway — reconcile the checklist in case
+            // the loadingStep 'parsing' transition was missed during webview startup.
+            enterParsing(m.total);
             var pct2 = document.getElementById('pct'); if (pct2) pct2.textContent = m.percentage + '%';
             var fill2 = document.getElementById('prog-fill'); if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (m.percentage < 3 ? 3 : m.percentage) + '%'; }
             var cd = document.getElementById('chip-done'); if (cd) cd.textContent = m.completed.toLocaleString();
