@@ -24,12 +24,14 @@ import * as path from 'path';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isDiscoverable } from './ecosystemAdapter';
 import { normalizePathForDedup } from './workspaceHelpers';
+import type { WindsurfDataAccess } from './windsurf';
 
 export interface SessionDiscoveryDeps {
 	log: (message: string) => void;
 	warn: (message: string) => void;
 	error: (message: string, error?: any) => void;
 	ecosystems: IEcosystemAdapter[];
+	windsurf?: WindsurfDataAccess;
 	sampleDataDirectoryOverride?: () => string | undefined;
 }
 
@@ -101,6 +103,15 @@ export class SessionDiscovery {
 					candidates.push({ path: cp.path, exists, source: cp.source });
 				}
 			} catch { /* ignore individual adapter errors */ }
+		}
+
+		if (this.deps.windsurf) {
+			const cascadeDir = this.deps.windsurf.getCascadeDir();
+			candidates.push({
+				path: cascadeDir,
+				exists: this.pathExistsWithLogging(cascadeDir, 'Windsurf Cascade'),
+				source: 'Windsurf Cascade',
+			});
 		}
 
 		return candidates;
@@ -182,6 +193,24 @@ export class SessionDiscovery {
 				seen.add(key); batch.push(f);
 			}
 			if (batch.length > 0) { allDeduped.push(...batch); if (onBatch) { onBatch(batch); } }
+		}
+		if (this.deps.windsurf) {
+			try {
+				const windsurfFiles = (await this.deps.windsurf.getWindsurfSessions()).map(session => session.file);
+				const batch = windsurfFiles.filter(f => {
+					const key = normalizePathForDedup(f);
+					if (seen.has(key)) { return false; }
+					seen.add(key);
+					return true;
+				});
+				if (batch.length > 0) {
+					allDeduped.push(...batch);
+					if (onBatch) { onBatch(batch); }
+				}
+			} catch (error) {
+				this.deps.warn(`Could not discover Windsurf sessions: ${error}`);
+				this._lastDiscoveryHadError = true;
+			}
 		}
 		const dupCount = results.reduce((n, r) => n + (r.status === 'fulfilled' ? r.value.sessionFiles.length : 0), 0) - allDeduped.length;
 		if (dupCount > 0) { this.deps.log(`🧹 Deduplicated ${dupCount} duplicate session path(s)`); }

@@ -82,6 +82,7 @@ Supported editors shown in the chart:
 - `Crush` — Terminal-based coding agent
 - `Claude Code` — Anthropic CLI/IDE extension (actual API token counts, no estimation)
 - `Gemini CLI` — Google's CLI coding agent (actual token counts from session JSONL)
+- `Windsurf` — Windsurf editor (running sessions discovered via Windsurf integration; file fallback available from local Cascade data)
 - `Visual Studio` — Visual Studio IDE (2022+); token counts are **estimated** from prompt and response text length
 
 ---
@@ -269,6 +270,7 @@ The extension uses intelligent caching to improve performance:
 - Premium Requests are not tracked.
 - Dev Containers: Copilot Chat session logs are written to the host machine's user profile (outside the container). The extension currently does not read from host paths, so token tracking will not work inside a Dev Container. Run VS Code locally (outside the container) or mount the host user data directories into the container at the expected locations.
 - Windows with WSL: The extension can only show information when VS Code, Copilot CLI, and OpenCode run in the same environment as the VS Code host. To track usage properly, either run VS Code from within WSL using the [Remote - WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) (recommended), or run all tools natively on Windows. See the [VS Code WSL documentation](https://code.visualstudio.com/docs/remote/wsl) for setup instructions.
+- Windsurf sessions are surfaced as virtual `windsurf://trajectory/...` entries. Their underlying `.pb` Cascade files are binary protobuf data, so the text log viewer reveals the backing file instead of rendering the session as plain text.
 
 > **⚠️ Warning**
 >

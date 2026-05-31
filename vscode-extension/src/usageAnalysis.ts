@@ -1778,6 +1778,9 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		if (eco && isAnalyzable(eco)) {
 			return eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
 		}
+		if (sessionFile.startsWith('windsurf://')) {
+			return analysis;
+		}
 
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
@@ -2110,6 +2113,9 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 	if (deps.ecosystems) {
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco) { return eco.getModelUsage(sessionFile); }
+	}
+	if (sessionFile.startsWith('windsurf://')) {
+		return modelUsage;
 	}
 	try {
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');

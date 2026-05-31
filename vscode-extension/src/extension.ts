@@ -66,6 +66,7 @@ import type { ClaudeDesktopCoworkDataAccess } from './claudedesktop';
 import type { MistralVibeDataAccess } from './mistralvibe';
 import type { GeminiCliDataAccess } from './geminicli';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
+import { WindsurfDataAccess } from './windsurf';
 import { getEcosystemDisplayName } from './ecosystemAdapter';
 import { buildAdapterRegistry, createDataAccessInstances } from './adapters';
 import { CopilotAppDataAccess } from './copilotAppData';
@@ -289,6 +290,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private claudeDesktopCowork!: ClaudeDesktopCoworkDataAccess;
 	private mistralVibe!: MistralVibeDataAccess;
 	private geminiCli!: GeminiCliDataAccess;
+	public windsurf!: WindsurfDataAccess;
 	private ecosystems!: IEcosystemAdapter[];
 	private cacheManager!: CacheManager;
 	private readonly copilotAppData = new CopilotAppDataAccess();
@@ -470,6 +472,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public async statSessionFile(sessionFile: string): Promise<import('fs').Stats> {
 		const eco = this.findEcosystem(sessionFile);
 		if (eco) { return eco.stat(sessionFile); }
+		if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
+			const session = await this.windsurf.resolveSession(sessionFile);
+			if (session) {
+				const baseStats = await fs.promises.stat(__filename);
+				Object.defineProperty(baseStats, 'mtime', { value: new Date(session.modified), writable: false });
+				Object.defineProperty(baseStats, 'size', { value: session.size, writable: false });
+				return baseStats;
+			}
+			return fs.promises.stat(__filename);
+		}
 		return fs.promises.stat(sessionFile);
 	}
 
@@ -914,6 +926,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.claudeDesktopCowork = dataAccess.claudeDesktopCowork;
 		this.mistralVibe = dataAccess.mistralVibe;
 		this.geminiCli = dataAccess.geminiCli;
+		this.windsurf = new WindsurfDataAccess(extensionUri, (m) => this.log(m));
 		this.ecosystems = buildAdapterRegistry({
 			...dataAccess,
 			estimateTokens: (t, m) => this.estimateTokensFromText(t, m),
@@ -926,6 +939,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			warn: (m) => this.warn(m),
 			error: (m, e) => this.error(m, e),
 			ecosystems: this.ecosystems,
+			windsurf: this.windsurf,
 			sampleDataDirectoryOverride: () => this.localRegressionSampleDataDir,
 		});
 	}
@@ -3047,6 +3061,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const eco = this.findEcosystem(sessionFile);
 			if (eco) { return eco.countInteractions(sessionFile); }
 
+			// Handle Windsurf sessions - API-based with interaction count, file-based fallback
+			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
+				const session = await this.windsurf.resolveSession(sessionFile);
+				return session?.interactions ?? 0;
+			}
+
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) { return 0; }
 
@@ -3176,6 +3196,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (eco) {
 				const meta = await eco.getMeta(sessionFile);
 				return { ...meta, dailyInteractions: {} };
+			}
+
+			// Handle Windsurf virtual sessions
+			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
+				const session = await this.windsurf.resolveSession(sessionFile);
+				const lastInteraction = session?.lastInteraction ?? null;
+				// Windsurf's API gives no per-day breakdown, so attribute the session's
+				// activity to its last-activity day. Without this, computeDailyRollups
+				// falls back to firstInteraction (the trajectory's createdTime, which can
+				// be months old for a long-lived session) and computeLastActivityKey then
+				// buckets the session by creation date instead of recent activity.
+				const dailyInteractions: { [utcDayKey: string]: number } = {};
+				if (lastInteraction) {
+					const d = new Date(lastInteraction);
+					if (!isNaN(d.getTime())) {
+						dailyInteractions[d.toISOString().slice(0, 10)] = Math.max(1, session?.interactions ?? 1);
+					}
+				}
+				return {
+					title: session?.title,
+					firstInteraction: session?.firstInteraction ?? null,
+					lastInteraction,
+					dailyInteractions,
+				};
 			}
 
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
@@ -3323,14 +3367,47 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
 		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, modelUsage, dailyRollups, totalInteractions);
 
+		await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
+
 		const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups);
 		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
 		return sessionData;
 	}
 
+	/**
+	 * Windsurf sessions are discovered via the gRPC API (not a re-parseable file), so the
+	 * data layer pre-builds a ModelUsage map and tool-call breakdown. Fold those into the
+	 * resolved model usage / daily rollups / analysis so Today's Sessions shows real
+	 * input/output/cached tokens, models and cost instead of zeros.
+	 */
+	private async applyWindsurfBreakdown(
+		sessionFilePath: string,
+		resolvedModelUsage: ModelUsage,
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
+		usageAnalysis: SessionUsageAnalysis
+	): Promise<void> {
+		if (!this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return; }
+		const session = await this.windsurf.resolveSession(sessionFilePath);
+		if (!session) { return; }
+		if (session.modelUsage && Object.keys(session.modelUsage).length > 0) {
+			for (const [model, usage] of Object.entries(session.modelUsage)) {
+				resolvedModelUsage[model] = { ...usage };
+			}
+			// Windsurf has a single activity day; mirror the model usage onto its rollup
+			// so per-day model/cost aggregation matches the session totals.
+			for (const day of Object.keys(dailyRollups)) {
+				dailyRollups[day].modelUsage = session.modelUsage;
+				if (session.cachedTokens) { dailyRollups[day].cachedReadTokens = session.cachedTokens; }
+			}
+		}
+		if (session.toolCalls) { usageAnalysis.toolCalls = session.toolCalls; }
+	}
+
 	private async preloadSessionFileContent(sessionFilePath: string): Promise<{ preloadedContent: string | undefined; preloadedParsedJson: any | undefined }> {
 		const isSpecialSession = this.findEcosystem(sessionFilePath) !== null;
 		if (isSpecialSession) { return { preloadedContent: undefined, preloadedParsedJson: undefined }; }
+		// Windsurf sessions use virtual paths (windsurf://trajectory/...) — no file to read
+		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) { return { preloadedContent: undefined, preloadedParsedJson: undefined }; }
 		const preloadedContent = await fs.promises.readFile(sessionFilePath, 'utf8');
 		let preloadedParsedJson: any | undefined;
 		const isPlainJson = !sessionFilePath.endsWith('.jsonl') && !_isJsonlContent(preloadedContent) && !_isUuidPointerFile(preloadedContent);
@@ -3565,6 +3642,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			details.editorName = getEcosystemDisplayName(eco, sessionFile);
 			return;
 		}
+		if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
+			details.editorName = 'Windsurf';
+			return;
+		}
 		try {
 			const parts = sessionFile.split(/[/\\]/);
 			const userIdx = parts.findIndex(p => p.toLowerCase() === 'user');
@@ -3738,6 +3819,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try {
 			const eco = this.findEcosystem(sessionFile);
 			if (eco) { return this.processEcosystemSessionDetails(eco, sessionFile, stat, details); }
+
+			// Handle Windsurf virtual sessions — resolve via API or .pb file metadata
+			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
+				const session = await this.windsurf.resolveSession(sessionFile);
+				if (session) {
+					details.title = session.title;
+					details.interactions = session.interactions;
+					details.editorSource = 'windsurf';
+					details.editorName = 'Windsurf';
+					details.firstInteraction = session.firstInteraction ?? stat.mtime.toISOString();
+					details.lastInteraction = session.lastInteraction ?? stat.mtime.toISOString();
+				}
+				await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+				return details;
+			}
 
 			const fileContent = await fs.promises.readFile(sessionFile, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) {
@@ -4367,6 +4463,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try {
 			const eco = this.findEcosystem(sessionFilePath);
 			if (eco) { return eco.getTokens(sessionFilePath); }
+			if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
+				const session = await this.windsurf.resolveSession(sessionFilePath);
+				const tokens = session?.tokens ?? 0;
+				return { tokens, thinkingTokens: 0, actualTokens: tokens, cacheReadTokens: session?.cachedTokens };
+			}
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFilePath, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) { return { tokens: 0, thinkingTokens: 0, actualTokens: 0 }; }
 			if (sessionFilePath.endsWith('.jsonl') || this.isJsonlContent(fileContent)) {
@@ -5103,6 +5204,19 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	}
 
 	public async showLogViewer(sessionFilePath: string): Promise<void> {
+		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
+			const trajectoryId = sessionFilePath.replace('windsurf://trajectory/', '');
+			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
+			vscode.window.showInformationMessage(
+				`Windsurf sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
+				'Reveal in Explorer'
+			).then(choice => {
+				if (choice === 'Reveal in Explorer') {
+					vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(pbPath));
+				}
+			});
+			return;
+		}
 		if (this.logViewerPanel) { this.logViewerPanel.dispose(); this.logViewerPanel = undefined; }
 		const logData = await this.getSessionLogData(sessionFilePath);
 		this.logViewerPanel = vscode.window.createWebviewPanel(
@@ -5208,6 +5322,21 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Does not modify the original file.
 	 */
 	public async showFormattedJsonlFile(sessionFilePath: string): Promise<void> {
+		// Windsurf sessions are binary protobuf files — open the real .pb file in the OS
+		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
+			const trajectoryId = sessionFilePath.replace('windsurf://trajectory/', '');
+			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
+			vscode.window.showInformationMessage(
+				`Windsurf sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
+				'Reveal in Explorer'
+			).then(choice => {
+				if (choice === 'Reveal in Explorer') {
+					vscode.commands.executeCommand('revealFileInOS', vscode.Uri.file(pbPath));
+				}
+			});
+			return;
+		}
+
 		try {
 			// Read the file content
 			const fileContent = await fs.promises.readFile(sessionFilePath, 'utf-8');
@@ -7869,12 +7998,68 @@ function registerDiagnosticAndAuthCommands(context: vscode.ExtensionContext, tok
     },
   );
 
-  // Register the GitHub sign out command
   const signOutGitHubCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.signOutGitHub",
     async () => {
       tokenTracker.log("GitHub sign out command called");
       await tokenTracker.signOutFromGitHub();
+    },
+  );
+
+  const windsurfDiagnosticsCommand = vscode.commands.registerCommand(
+    "copilot-token-tracker.checkWindsurfStatus",
+    async () => {
+      tokenTracker.log("Windsurf diagnostics command called");
+      try {
+        const diagnostics = await tokenTracker.windsurf.runDiagnostics();
+
+        const doc = await vscode.workspace.openTextDocument({
+          content: `# Windsurf Diagnostics Report
+
+Generated: ${new Date().toISOString()}
+
+## Environment
+- Running in Windsurf: ${diagnostics.environment.isRunningInWindsurf}
+- App Name: ${diagnostics.environment.appName}
+
+## Extension Status
+- Extension Found: ${diagnostics.extension.found}
+- Extension Active: ${diagnostics.extension.active}
+- Extension Version: ${diagnostics.extension.packageJSON}
+
+## Credentials
+- Available: ${diagnostics.credentials.available}
+- Port: ${diagnostics.credentials.port}
+- CSRF Token Length: ${diagnostics.credentials.csrfLength}
+
+## API Connectivity Test
+- Success: ${diagnostics.apiTest.success}
+- Status Code: ${diagnostics.apiTest.statusCode}
+- Error: ${diagnostics.apiTest.error || 'None'}
+
+## Configuration
+- Windsurf Integration Enabled: ${diagnostics.configuration.enabled}
+
+## Sessions
+- Available: ${diagnostics.sessions.available}
+- Count: ${diagnostics.sessions.count}
+- Error: ${diagnostics.sessions.error || 'None'}
+
+## Recommendations
+
+${!diagnostics.extension.found ? '- Install the Windsurf extension\n' : ''}
+${!diagnostics.extension.active ? '- Activate the Windsurf extension or restart Windsurf\n' : ''}
+${!diagnostics.credentials.available ? '- Check if Windsurf language server is running\n' : ''}
+${!diagnostics.apiTest.success ? `- API connectivity issue: ${diagnostics.apiTest.error}\n` : ''}
+${diagnostics.sessions.count === 0 && diagnostics.apiTest.success ? '- Windsurf is working correctly, but no chat sessions have been created yet. Try starting a chat session in Windsurf and then refresh the token tracker.\n' : ''}
+`,
+          language: 'markdown'
+        });
+
+        await vscode.window.showTextDocument(doc);
+      } catch (error) {
+        vscode.window.showErrorMessage(`Failed to run Windsurf diagnostics: ${error instanceof Error ? error.message : String(error)}`);
+      }
     },
   );
 
@@ -7885,6 +8070,7 @@ function registerDiagnosticAndAuthCommands(context: vscode.ExtensionContext, tok
     clearCacheCommand,
     authenticateGitHubCommand,
     signOutGitHubCommand,
+    windsurfDiagnosticsCommand,
   );
 }
 
