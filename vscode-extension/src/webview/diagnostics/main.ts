@@ -1675,8 +1675,52 @@ function handleDiagnosticDataError(message: DiagMessage): void {
   }
 }
 
+function sanitizeDetailedSessionFiles(input: unknown): SessionFileDetails[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input.map((item) => {
+    const sf = (item ?? {}) as Record<string, unknown>;
+    const contextRefs = (sf.contextReferences ?? {}) as Record<string, unknown>;
+    const parentInfo = sf.parentInfo && typeof sf.parentInfo === "object"
+      ? (sf.parentInfo as Record<string, unknown>)
+      : undefined;
+
+    return {
+      ...sf,
+      editorSource: String(sf.editorSource ?? ""),
+      title: String(sf.title ?? ""),
+      repository: String(sf.repository ?? ""),
+      sessionFile: String(sf.sessionFile ?? ""),
+      size: Number(sf.size ?? 0) || 0,
+      tokens: Number(sf.tokens ?? 0) || 0,
+      interactions: Number(sf.interactions ?? 0) || 0,
+      contextReferences: {
+        file: Number(contextRefs.file ?? 0) || 0,
+        symbol: Number(contextRefs.symbol ?? 0) || 0,
+        selection: Number(contextRefs.selection ?? 0) || 0,
+        implicitSelection: Number(contextRefs.implicitSelection ?? 0) || 0,
+        codebase: Number(contextRefs.codebase ?? 0) || 0,
+        workspace: Number(contextRefs.workspace ?? 0) || 0,
+        terminal: Number(contextRefs.terminal ?? 0) || 0,
+        vscode: Number(contextRefs.vscode ?? 0) || 0,
+        copilotInstructions: Number(contextRefs.copilotInstructions ?? 0) || 0,
+        agentsMd: Number(contextRefs.agentsMd ?? 0) || 0,
+      },
+      parentInfo: parentInfo
+        ? {
+            ...parentInfo,
+            name: String(parentInfo.name ?? ""),
+            sessionFile: parentInfo.sessionFile == null ? undefined : String(parentInfo.sessionFile),
+          }
+        : undefined,
+    } as SessionFileDetails;
+  });
+}
+
 function handleSessionFilesLoaded(message: DiagMessage): void {
-  storedDetailedFiles = message.detailedSessionFiles;
+  storedDetailedFiles = sanitizeDetailedSessionFiles(message.detailedSessionFiles);
   isLoading = false;
 
   const sessionsTab = document.querySelector('.tab[data-tab="sessions"]');
