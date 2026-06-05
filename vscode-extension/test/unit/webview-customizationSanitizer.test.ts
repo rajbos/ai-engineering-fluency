@@ -1,6 +1,17 @@
 import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { sanitizeCustomizationMatrix } from '../../src/webview/usage/customizationSanitizer';
+import type { WorkspaceCustomizationMatrix } from '../../src/types';
+
+// ── Compile-time schema parity guarantee ────────────────────────────────────────
+//
+// customizationSanitizer.ts imports WorkspaceCustomizationMatrix directly from types.ts
+// (the extension's canonical schema) and returns that exact type.  If anyone changes
+// the type in types.ts, this file will fail to compile unless the sanitizer is updated
+// to match — preventing the schema drift that caused issue #1332.
+//
+// The round-trip test below adds a runtime check: a valid WorkspaceCustomizationMatrix
+// fed through sanitizeCustomizationMatrix must come out unchanged.
 
 describe('sanitizeCustomizationMatrix', () => {
 	test('returns undefined for null / non-object input', () => {
@@ -174,5 +185,51 @@ describe('sanitizeCustomizationMatrix', () => {
 		});
 		assert.ok(result);
 		assert.deepEqual(result.customizationTypes, []);
+	});
+
+	// ── Schema parity round-trip ──────────────────────────────────────────────────
+	//
+	// This test verifies that a correctly-shaped WorkspaceCustomizationMatrix (the
+	// canonical type from types.ts that the extension sends) passes through
+	// sanitizeCustomizationMatrix unchanged.  If the sanitizer's internal field
+	// mapping ever drifts from the canonical type, deepEqual will catch it.
+	test('round-trip: valid WorkspaceCustomizationMatrix passes through unchanged', () => {
+		// This variable's type annotation is WorkspaceCustomizationMatrix from types.ts.
+		// If that interface gains or removes fields the sanitizer doesn't handle, the
+		// compile step will surface the mismatch before this test even runs.
+		const canonical: WorkspaceCustomizationMatrix = {
+			customizationTypes: [
+				{ id: 'copilot-instructions', icon: '📄', label: 'Copilot Instructions' },
+				{ id: 'agents-md', icon: '🤖', label: 'Agents MD' },
+			],
+			workspaces: [
+				{
+					workspacePath: '/home/user/project-a',
+					workspaceName: 'project-a',
+					sessionCount: 3,
+					interactionCount: 12,
+					typeStatuses: {
+						'copilot-instructions': '✅',
+						'agents-md': '❌',
+					},
+				},
+				{
+					workspacePath: '/home/user/project-b',
+					workspaceName: 'project-b',
+					sessionCount: 1,
+					interactionCount: 4,
+					typeStatuses: {
+						'copilot-instructions': '⚠️',
+						'agents-md': '✅',
+					},
+				},
+			],
+			totalWorkspaces: 2,
+			workspacesWithIssues: 1,
+		};
+
+		const result = sanitizeCustomizationMatrix(canonical);
+		assert.ok(result);
+		assert.deepEqual(result, canonical);
 	});
 });

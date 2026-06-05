@@ -861,6 +861,8 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 		// Sanitize customizationMatrix (avoid pass-through of untrusted nested fields)
 		const safeMatrix = sanitizeCustomizationMatrix(raw.customizationMatrix);
 		if (safeMatrix) {
+			// sanitizeCustomizationMatrix returns WorkspaceCustomizationMatrix from types.ts;
+			// the local WorkspaceCustomizationMatrix interface is structurally identical.
 			sanitized.customizationMatrix = safeMatrix as WorkspaceCustomizationMatrix;
 		}
 

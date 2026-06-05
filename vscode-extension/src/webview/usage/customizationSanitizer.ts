@@ -1,32 +1,16 @@
 /**
  * Pure data-sanitization helper for WorkspaceCustomizationMatrix objects received via postMessage.
  * Extracted into its own module (no DOM / CSS dependencies) so it can be unit-tested in Node.js.
+ *
+ * Types are imported directly from types.ts (the extension's canonical source), so any schema
+ * change there will cause an immediate compile error here — preventing schema drift.
  */
+import type { CustomizationTypeStatus, WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../types';
 
-export type CustomizationTypeStatus = '✅' | '⚠️' | '❌';
+// Re-export for consumers (tests etc.) so they don't need to depend on types.ts directly
+export type { CustomizationTypeStatus, WorkspaceCustomizationMatrix as SanitizedCustomizationMatrix, WorkspaceCustomizationRow as SanitizedCustomizationRow } from '../../types';
 
 const VALID_STATUSES = new Set<string>(['✅', '⚠️', '❌']);
-
-export interface SanitizedCustomizationType {
-	id: string;
-	icon: string;
-	label: string;
-}
-
-export interface SanitizedCustomizationRow {
-	workspacePath: string;
-	workspaceName: string;
-	sessionCount: number;
-	interactionCount: number;
-	typeStatuses: { [typeId: string]: CustomizationTypeStatus };
-}
-
-export interface SanitizedCustomizationMatrix {
-	customizationTypes: SanitizedCustomizationType[];
-	workspaces: SanitizedCustomizationRow[];
-	totalWorkspaces: number;
-	workspacesWithIssues: number;
-}
 
 function coerceNumber(value: unknown): number {
 	const n = Number(value);
@@ -37,11 +21,11 @@ function coerceNumber(value: unknown): number {
  * Sanitizes a raw (untrusted) customization matrix from postMessage.
  * Returns undefined when the input is not a valid object.
  */
-export function sanitizeCustomizationMatrix(rawMatrix: unknown): SanitizedCustomizationMatrix | undefined {
+export function sanitizeCustomizationMatrix(rawMatrix: unknown): WorkspaceCustomizationMatrix | undefined {
 	if (!rawMatrix || typeof rawMatrix !== 'object') { return undefined; }
 	const m = rawMatrix as Record<string, unknown>;
 
-	const customizationTypes: SanitizedCustomizationType[] = Array.isArray(m.customizationTypes)
+	const customizationTypes: WorkspaceCustomizationMatrix['customizationTypes'] = Array.isArray(m.customizationTypes)
 		? (m.customizationTypes as unknown[])
 			.filter((t): t is Record<string, unknown> => !!t && typeof t === 'object')
 			.map(t => ({
@@ -52,7 +36,7 @@ export function sanitizeCustomizationMatrix(rawMatrix: unknown): SanitizedCustom
 			.filter(t => t.id !== '')
 		: [];
 
-	const workspaces: SanitizedCustomizationRow[] = Array.isArray(m.workspaces)
+	const workspaces: WorkspaceCustomizationRow[] = Array.isArray(m.workspaces)
 		? (m.workspaces as unknown[])
 			.filter((w): w is Record<string, unknown> => !!w && typeof w === 'object')
 			.map(w => {
