@@ -231,7 +231,22 @@ type SessionFilePreload = {
 	details?: SessionFileDetails;
 };
 
-type StatusBarDisplaySetting = 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth';
+export type StatusBarDisplaySetting = 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth';
+
+/**
+ * Determines which secondary period section to show in the hover tooltip.
+ * Returns 'last30days' if either setting explicitly requests a rolling 30-day window
+ * (i.e. 'last30days' or 'both'), preserving backwards-compatible behaviour.
+ * Otherwise returns 'currentMonth' so users who opted into current-month views
+ * see a consistent tooltip.
+ */
+export function tooltipSecondaryPeriod(
+	tokensSetting: StatusBarDisplaySetting,
+	costSetting: StatusBarDisplaySetting,
+): 'last30days' | 'currentMonth' {
+	const usesLast30 = (s: StatusBarDisplaySetting) => s === 'last30days' || s === 'both';
+	return usesLast30(tokensSetting) || usesLast30(costSetting) ? 'last30days' : 'currentMonth';
+}
 
 // ── extension.ts module-level helpers ────────────────────────────────────────
 
@@ -2286,15 +2301,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.appendMarkdown(`| Average interactions/session :     | ${detailedStats.today.avgInteractionsPerSession} |\n`);
 		tooltip.appendMarkdown(`| Average tokens/session :            | ${detailedStats.today.avgTokensPerSession.toLocaleString()} |\n`);
 		tooltip.appendMarkdown('\n---\n');
-		tooltip.appendMarkdown(`📊 Last 30 Days  \n`);
+		const secondaryPeriod = tooltipSecondaryPeriod(this.getStatusBarShowTokensSetting(), this.getStatusBarShowCostSetting());
+		const secondaryStats = secondaryPeriod === 'currentMonth' ? detailedStats.month : detailedStats.last30Days;
+		const secondaryLabel = secondaryPeriod === 'currentMonth' ? '📅 Current Month' : '📊 Last 30 Days';
+		tooltip.appendMarkdown(`${secondaryLabel}  \n`);
 		tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
-		tooltip.appendMarkdown(`| Tokens :                | ${detailedStats.last30Days.tokens.toLocaleString()} |\n`);
-		tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(detailedStats.last30Days.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| CO₂ estimated :              | ${detailedStats.last30Days.co2.toFixed(2)} grams |\n`);
-		tooltip.appendMarkdown(`| Water estimated :           | ${detailedStats.last30Days.waterUsage.toFixed(3)} liters |\n`);
-		tooltip.appendMarkdown(`| Sessions :             | ${detailedStats.last30Days.sessions} |\n`);
-		tooltip.appendMarkdown(`| Average interactions/session :      | ${detailedStats.last30Days.avgInteractionsPerSession} |\n`);
-		tooltip.appendMarkdown(`| Average tokens/session :            | ${detailedStats.last30Days.avgTokensPerSession.toLocaleString()} |\n`);
+		tooltip.appendMarkdown(`| Tokens :                | ${secondaryStats.tokens.toLocaleString()} |\n`);
+		tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| CO₂ estimated :              | ${secondaryStats.co2.toFixed(2)} grams |\n`);
+		tooltip.appendMarkdown(`| Water estimated :           | ${secondaryStats.waterUsage.toFixed(3)} liters |\n`);
+		tooltip.appendMarkdown(`| Sessions :             | ${secondaryStats.sessions} |\n`);
+		tooltip.appendMarkdown(`| Average interactions/session :      | ${secondaryStats.avgInteractionsPerSession} |\n`);
+		tooltip.appendMarkdown(`| Average tokens/session :            | ${secondaryStats.avgTokensPerSession.toLocaleString()} |\n`);
 		tooltip.appendMarkdown('\n---\n');
 		const budget = this.getEffectiveMonthlyBudget();
 		if (budget > 0) {
