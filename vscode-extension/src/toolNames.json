@@ -818,4 +818,8 @@
   ,"microsoft_azure-devops-mcp_core_list_projects": "Azure DevOps Core List Projects"
   ,"microsoft_azure-devops-mcp_search_workitem": "Azure DevOps Search Work Item"
   ,"microsoft_azure-devops-mcp_wit_get_work_item": "Microsoft Azure DevOps MCP (Local): Get Work Item"
+  ,"mcp_com_microsoft_get_azure_bestpractices": "Microsoft Docs MCP: Get Azure Best Practices"
+  ,"mcp_github_enterp_create_branch": "GitHub MCP (Remote): Create Branch"
+  ,"mcp_github_enterp_get_latest_release": "GitHub MCP (Remote): Get Latest Release"
+  ,"mcp_github_enterp_pull_request_read": "GitHub MCP (Remote): Pull Request Read"
 }
