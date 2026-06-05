@@ -15,6 +15,10 @@
  *   - workspaceStorage/<hash>/github.copilot-chat/debug-logs/          (Linux case-sensitive variant)
  *   - workspaceStorage/<hash>/GitHub.copilot/debug-logs/               (unified extension debug logs)
  *   - workspaceStorage/<hash>/github.copilot/debug-logs/               (Linux case-sensitive variant)
+ *   - workspaceStorage/<hash>/GitHub.copilot-chat/transcripts/         (Copilot Chat ≥ v0.51.0 — new typed-event JSONL)
+ *   - workspaceStorage/<hash>/github.copilot-chat/transcripts/         (Linux case-sensitive variant)
+ *   - workspaceStorage/<hash>/GitHub.copilot/transcripts/              (unified extension, ≥ v0.51.0)
+ *   - workspaceStorage/<hash>/github.copilot/transcripts/              (Linux case-sensitive variant)
  *   - globalStorage/emptyWindowChatSessions/                           (legacy)
  *   - globalStorage/{GitHub,github}.copilot-chat/**                    (both casings, recursive)
  *   - globalStorage/{GitHub,github}.copilot/**                         (unified extension, both casings)
@@ -358,7 +362,7 @@ export class CopilotChatAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 		}
 
 		const EXT_FOLDERS = ['GitHub.copilot-chat', 'github.copilot-chat', 'GitHub.copilot', 'github.copilot'];
-		const SESSION_SUBDIRS = ['chatSessions', 'debug-logs'];
+		const SESSION_SUBDIRS = ['chatSessions', 'debug-logs', 'transcripts'];
 
 		// Scan a single leaf directory, collecting .json/.jsonl files into sessionFiles.
 		const scanLeafDir = async (dirPath: string) => {

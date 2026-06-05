@@ -80,6 +80,17 @@ test('isCopilotChatSessionPath: recognises debug-logs layout (both casings)', ()
     assert.ok(isCopilotChatSessionPath('/x/User/workspaceStorage/abc/github.copilot/debug-logs/s1.jsonl'));
 });
 
+test('isCopilotChatSessionPath: recognises transcripts layout (Copilot Chat ≥ v0.51.0, both casings)', () => {
+    assert.ok(isCopilotChatSessionPath('/x/User/workspaceStorage/abc/GitHub.copilot-chat/transcripts/s1.jsonl'));
+    assert.ok(isCopilotChatSessionPath('/x/User/workspaceStorage/abc/github.copilot-chat/transcripts/s1.jsonl'));
+    assert.ok(isCopilotChatSessionPath('/x/User/workspaceStorage/abc/GitHub.copilot/transcripts/s1.jsonl'));
+    assert.ok(isCopilotChatSessionPath('/x/User/workspaceStorage/abc/github.copilot/transcripts/s1.jsonl'));
+    // also .json extension
+    assert.ok(isCopilotChatSessionPath('/x/User/workspaceStorage/abc/GitHub.copilot-chat/transcripts/s1.json'));
+    // SSH-remote path shape
+    assert.ok(isCopilotChatSessionPath('/home/user/.vscode-server/data/User/workspaceStorage/abc1b2c3/GitHub.copilot-chat/transcripts/session.jsonl'));
+});
+
 test('isCopilotChatSessionPath: rejects non-session and unrelated paths', () => {
     assert.equal(isCopilotChatSessionPath('/x/User/globalStorage/GitHub.copilot-chat/embeddings.json'), false);
     assert.equal(isCopilotChatSessionPath('/x/User/globalStorage/GitHub.copilot-chat/foo/cache.json'), false);
@@ -230,4 +241,21 @@ test('CopilotChatAdapter.discover: finds session files in debug-logs directory',
     const sessionFile = path.join(debugLogsDir, 'session-debug.jsonl');
     assert.ok(isCopilotChatSessionPath(sessionFile),
         `isCopilotChatSessionPath should accept debug-logs path: ${sessionFile}`);
+});
+
+test('CopilotChatAdapter.discover: finds session files in transcripts directory (Copilot Chat ≥ v0.51.0)', async (t) => {
+    const tmp = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cca-transcripts-'));
+    t.after(async () => { await fs.promises.rm(tmp, { recursive: true, force: true }); });
+
+    // Build a minimal fake VS Code user layout with a transcripts directory
+    const wsHash = 'a1b2c3d4e5f6a1b2c3d4e5f6a1b2c3d4';
+    const transcriptsDir = path.join(tmp, 'workspaceStorage', wsHash, 'GitHub.copilot-chat', 'transcripts');
+    await fs.promises.mkdir(transcriptsDir, { recursive: true });
+    const sessionContent = '{"type":"session.start","data":{"selectedModel":"gpt-4o"}}\n{"type":"assistant.message","data":{"content":"Hello!"}}\n';
+    await fs.promises.writeFile(path.join(transcriptsDir, 'session.jsonl'), sessionContent);
+
+    // Verify isCopilotChatSessionPath accepts the file
+    const sessionFile = path.join(transcriptsDir, 'session.jsonl');
+    assert.ok(isCopilotChatSessionPath(sessionFile),
+        `isCopilotChatSessionPath should accept transcripts path: ${sessionFile}`);
 });

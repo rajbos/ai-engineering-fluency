@@ -25,6 +25,9 @@ export const WORKSPACE_EXTENSION_CHAT_SESSIONS_PATTERN = /\/workspaceStorage\/[^
 /** Matches workspaceStorage/<hash>/{copilot-extension}/debug-logs/<file>. */
 export const WORKSPACE_EXTENSION_DEBUG_LOGS_PATTERN = /\/workspaceStorage\/[^/]+\/(?:GitHub\.copilot-chat|github\.copilot-chat|GitHub\.copilot|github\.copilot)\/debug-logs\/[^/]+$/;
 
+/** Matches workspaceStorage/<hash>/{copilot-extension}/transcripts/<file> (Copilot Chat ≥ v0.51.0). */
+export const WORKSPACE_EXTENSION_TRANSCRIPTS_PATTERN = /\/workspaceStorage\/[^/]+\/(?:GitHub\.copilot-chat|github\.copilot-chat|GitHub\.copilot|github\.copilot)\/transcripts\/[^/]+$/;
+
 /** Matches globalStorage/emptyWindowChatSessions/<file>. */
 export const GLOBAL_EMPTY_WINDOW_CHAT_SESSIONS_PATTERN = /\/globalStorage\/emptyWindowChatSessions\/[^/]+$/;
 
@@ -91,6 +94,7 @@ export function isCopilotChatNonSessionFile(filename: string): boolean {
  * - `workspaceStorage/<hash>/chatSessions/<file>` — legacy per-workspace sessions.
  * - `workspaceStorage/<hash>/{extension}/chatSessions/<file>` — extension-namespaced workspace sessions.
  * - `workspaceStorage/<hash>/{extension}/debug-logs/<file>` — debug-log session files.
+ * - `workspaceStorage/<hash>/{extension}/transcripts/<file>` — typed-event JSONL sessions (Copilot Chat ≥ v0.51.0).
  * - `globalStorage/emptyWindowChatSessions/<file>` — sessions from editor windows with no open workspace.
  * - `globalStorage/{GitHub,github}.copilot[-chat]/**` — all global Copilot / Copilot-Chat storage,
  *   minus files matched by {@link isCopilotChatNonSessionFile}.
@@ -105,6 +109,8 @@ export function isCopilotChatSessionPath(filePath: string): boolean {
 	if (WORKSPACE_EXTENSION_CHAT_SESSIONS_PATTERN.test(norm)) { return true; }
 	// workspaceStorage/<hash>/{extension}/debug-logs/<file>
 	if (WORKSPACE_EXTENSION_DEBUG_LOGS_PATTERN.test(norm)) { return true; }
+	// workspaceStorage/<hash>/{extension}/transcripts/<file>  (Copilot Chat ≥ v0.51.0)
+	if (WORKSPACE_EXTENSION_TRANSCRIPTS_PATTERN.test(norm)) { return true; }
 	// globalStorage/emptyWindowChatSessions/<file>
 	if (GLOBAL_EMPTY_WINDOW_CHAT_SESSIONS_PATTERN.test(norm)) { return true; }
 	// globalStorage/{GitHub,github}.copilot-chat/** and {GitHub,github}.copilot/**
