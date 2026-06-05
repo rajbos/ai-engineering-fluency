@@ -11,6 +11,7 @@ import styles from './styles.css';
 import { getWindowData } from '../shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { getModelDisplayName } from '../shared/modelUtils';
+import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -858,33 +859,9 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 		};
 
 		// Sanitize customizationMatrix (avoid pass-through of untrusted nested fields)
-		if (raw.customizationMatrix && typeof raw.customizationMatrix === 'object'
-			&& Array.isArray(raw.customizationMatrix.workspaces)) {
-			const rawMatrix = raw.customizationMatrix as any;
-			const safeWorkspaces = rawMatrix.workspaces
-				.filter((w: any) => w && typeof w === 'object')
-				.map((w: any) => ({
-					workspacePath: typeof w.workspacePath === 'string' ? w.workspacePath : '',
-					repoName: typeof w.repoName === 'string' ? w.repoName : '',
-					hasCopilotInstructionsMd: !!w.hasCopilotInstructionsMd,
-					hasAgentsMd: !!w.hasAgentsMd,
-					hasCopilotSetupStepsMd: !!w.hasCopilotSetupStepsMd,
-					hasCustomChatmodes: !!w.hasCustomChatmodes,
-					hasCustomPrompts: !!w.hasCustomPrompts,
-					totalFiles: coerceNumber(w.totalFiles),
-					missingTypes: Array.isArray(w.missingTypes)
-						? w.missingTypes.filter((t: unknown) => typeof t === 'string')
-						: [],
-					extraTypes: Array.isArray(w.extraTypes)
-						? w.extraTypes.filter((t: unknown) => typeof t === 'string')
-						: [],
-				}));
-
-			sanitized.customizationMatrix = {
-				workspaces: safeWorkspaces,
-				totalWorkspaces: coerceNumber(rawMatrix.totalWorkspaces),
-				workspacesWithIssues: coerceNumber(rawMatrix.workspacesWithIssues),
-			} as WorkspaceCustomizationMatrix;
+		const safeMatrix = sanitizeCustomizationMatrix(raw.customizationMatrix);
+		if (safeMatrix) {
+			sanitized.customizationMatrix = safeMatrix as WorkspaceCustomizationMatrix;
 		}
 
 		// Validated pass-through for missedPotential (array of objects)
@@ -1250,9 +1227,10 @@ function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | nu
 			</div>`;
 	}
 	const workspaceRows = matrix.workspaces.map(ws => {
-		const hasNoCustomization = Object.values(ws.typeStatuses).every(s => s === '❌');
-		const typeCells = matrix.customizationTypes.map(type => {
-			const status = ws.typeStatuses[type.id] || '❓';
+		const statuses = ws.typeStatuses ?? {};
+		const hasNoCustomization = Object.values(statuses).every(s => s === '❌');
+		const typeCells = (matrix.customizationTypes ?? []).map(type => {
+			const status = statuses[type.id] || '❓';
 			const statusLabel =
 				status === '✅' ? 'Present and fresh'
 				: status === '⚠️' ? 'Present but stale'
@@ -1291,7 +1269,7 @@ function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | nu
 						<tr>
 							<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>
 							<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>
-							${matrix.customizationTypes.map(type => `
+							${(matrix.customizationTypes ?? []).map(type => `
 								<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);" title="${escapeHtml(type.label)}">
 									${escapeHtml(type.icon)}
 								</th>
@@ -1305,7 +1283,7 @@ function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | nu
 			</div>
 			<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
 				<div style="display: flex; gap: 16px; flex-wrap: wrap;">
-					${matrix.customizationTypes.map(type => `
+					${(matrix.customizationTypes ?? []).map(type => `
 						<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
 					`).join('')}
 				</div>
