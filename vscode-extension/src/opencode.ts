@@ -558,10 +558,11 @@ export class OpenCodeDataAccess {
 	async getOpenCodeSessionData(sessionFilePath: string): Promise<{ tokens: number; interactions: number; modelUsage: OpenCodeModelUsageWithInteractions; timestamp: number }> {
 		const messages = await this.getOpenCodeMessagesForSession(sessionFilePath);
 
-		// Get timestamp from the first message
+		// Use the first message's creation time as the session timestamp.
+		// Messages store their timestamp in the nested `time.created` field.
 		let timestamp = Date.now();
-		if (messages.length > 0 && messages[0].time_created) {
-			timestamp = messages[0].time_created;
+		if (messages.length > 0 && messages[0].time?.created) {
+			timestamp = messages[0].time.created;
 		}
 
 		const { tokens } = this.getTokensFromOpenCodeMessages(messages);
