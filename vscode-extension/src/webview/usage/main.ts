@@ -1599,6 +1599,17 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 		</div>`;
 }
 
+function updateTabButtonCount(insights: EvaluatedInsight[]): void {
+	const tabButton = document.querySelector<HTMLButtonElement>('.tab-button[data-tab="insights"]');
+	if (!tabButton) { return; }
+	const newCount = insights.filter(i => i.status === 'new').length;
+	const badgeHtml = newCount > 0
+		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>`
+		: '';
+	const titleOnly = '💡 Insights';
+	tabButton.innerHTML = titleOnly + badgeHtml;
+}
+
 function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
 	const container = document.getElementById('insights-container');
 	if (!container) { return; }
@@ -1624,6 +1635,7 @@ function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
 
 	container.innerHTML = forYouSection + allSection;
 	wireInsightCardButtons();
+	updateTabButtonCount(insights);
 }
 
 function wireInsightCardButtons(): void {
