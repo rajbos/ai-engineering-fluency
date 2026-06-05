@@ -21,7 +21,7 @@ export interface UriLike {
 	readonly scheme: string;
 }
 
-type OpenCodeDbCache = { db: SqlDatabase; mtimeMs: number; size: number; path: string };
+type OpenCodeDbCache = { db: SqlDatabase; mtimeMs: number; size: number; path: string; walMtimeMs: number };
 type OpenCodeModelUsageWithInteractions = {
 	[modelName: string]: ModelUsage[string] & { interactions?: number };
 };
@@ -135,25 +135,80 @@ export class OpenCodeDataAccess {
 		}
 	}
 
+	/** Returns the WAL file's mtime in milliseconds, or 0 if no WAL file exists. */
+	private getWalMtimeMs(dbPath: string): number {
+		try {
+			return fs.statSync(dbPath + '-wal').mtimeMs;
+		} catch {
+			return 0;
+		}
+	}
+
 	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
 		return this._dbCache?.path === dbPath
 			&& this._dbCache.mtimeMs === stats.mtimeMs
-			&& this._dbCache.size === stats.size;
+			&& this._dbCache.size === stats.size
+			&& this._dbCache.walMtimeMs === this.getWalMtimeMs(dbPath);
 	}
 
 	private getDbCacheKey(dbPath: string, stats: fs.Stats): string {
-		return `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+		return `${dbPath}:${stats.mtimeMs}:${stats.size}:wal${this.getWalMtimeMs(dbPath)}`;
 	}
 
 	private sameDbStats(left: fs.Stats, right: fs.Stats): boolean {
 		return left.mtimeMs === right.mtimeMs && left.size === right.size;
 	}
 
+	/**
+	 * When an active WAL file is present, sql.js cannot see uncommitted WAL frames because
+	 * it reads only the raw `.db` bytes. This method copies the DB + WAL to a temp location,
+	 * opens the copy with Node's built-in SQLite (available in Node.js 22+), forces a WAL
+	 * checkpoint to merge all frames into the temp DB file, and returns the resulting buffer
+	 * so that sql.js can load a fully up-to-date snapshot.
+	 *
+	 * Returns null when no WAL is present, when the WAL is empty, or when node:sqlite is
+	 * unavailable — in all those cases the caller falls back to reading the DB file directly.
+	 */
+	private async tryReadDbWithWal(dbPath: string): Promise<Buffer | null> {
+		const walPath = dbPath + '-wal';
+		let walSize: number;
+		try {
+			walSize = fs.statSync(walPath).size;
+		} catch {
+			return null; // No WAL file — no merge needed
+		}
+		if (walSize === 0) { return null; }
+
+		try {
+			const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+			const tmpDir = os.tmpdir();
+			const tmpDb = path.join(tmpDir, `opencode-wal-${Date.now()}.db`);
+			const tmpWal = tmpDb + '-wal';
+			const tmpShm = tmpDb + '-shm';
+			const shmPath = dbPath + '-shm';
+
+			fs.copyFileSync(dbPath, tmpDb);
+			fs.copyFileSync(walPath, tmpWal);
+			if (fs.existsSync(shmPath)) { fs.copyFileSync(shmPath, tmpShm); }
+
+			const nativeDb = new DatabaseSync(tmpDb);
+			nativeDb.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+			nativeDb.close();
+
+			const buffer = fs.readFileSync(tmpDb);
+			for (const f of [tmpDb, tmpWal, tmpShm]) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
+			return buffer;
+		} catch {
+			return null; // node:sqlite unavailable or copy failed — fall back to direct read
+		}
+	}
+
 	private async refreshOpenCodeDb(dbPath: string, stats: fs.Stats): Promise<SqlDatabase | null> {
 		let db: SqlDatabase;
 		try {
 			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
+			const walBuffer = await this.tryReadDbWithWal(dbPath);
+			const buffer = walBuffer ?? fs.readFileSync(dbPath);
 			db = new SQL.Database(buffer);
 		} catch {
 			return this.getCachedDbForPath(dbPath);
@@ -169,7 +224,7 @@ export class OpenCodeDataAccess {
 		}
 
 		this.closeDbCache();
-		this._dbCache = { db, path: dbPath, mtimeMs: stats.mtimeMs, size: stats.size };
+		this._dbCache = { db, path: dbPath, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs: this.getWalMtimeMs(dbPath) };
 		return db;
 	}
 

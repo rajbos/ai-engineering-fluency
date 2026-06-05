@@ -198,3 +198,64 @@ test('OpenCode DB cache does not install a DB if the file changes during refresh
 		harness.cleanup();
 	}
 });
+
+test('OpenCode DB cache is invalidated when WAL file appears', async () => {
+	const harness = createHarness();
+	const walPath = harness.dbPath + '-wal';
+	try {
+		// Initial read — no WAL, opens once
+		await harness.access.readOpenCodeDbMessages('ses_1');
+		assert.equal(harness.openAttempts, 1);
+
+		// WAL appears — cache key changes even though main DB is untouched
+		fs.writeFileSync(walPath, 'fake-wal-data');
+		await harness.access.readOpenCodeDbMessages('ses_1');
+
+		// tryReadDbWithWal falls back (not a real SQLite file), but re-open is triggered
+		assert.equal(harness.openAttempts, 2);
+	} finally {
+		try { fs.unlinkSync(walPath); } catch { /* ignore */ }
+		harness.cleanup();
+	}
+});
+
+test('OpenCode DB cache is invalidated when WAL file changes', async () => {
+	const harness = createHarness();
+	const walPath = harness.dbPath + '-wal';
+	try {
+		fs.writeFileSync(walPath, 'wal-v1');
+		const t1 = new Date(Date.UTC(2026, 0, 1, 0, 0, 10));
+		fs.utimesSync(walPath, t1, t1);
+
+		await harness.access.readOpenCodeDbMessages('ses_1');
+		assert.equal(harness.openAttempts, 1);
+
+		// Bump WAL mtime — cache key differs, re-open should happen
+		const t2 = new Date(Date.UTC(2026, 0, 1, 0, 0, 20));
+		fs.utimesSync(walPath, t2, t2);
+		await harness.access.readOpenCodeDbMessages('ses_1');
+
+		assert.equal(harness.openAttempts, 2);
+	} finally {
+		try { fs.unlinkSync(walPath); } catch { /* ignore */ }
+		harness.cleanup();
+	}
+});
+
+test('OpenCode DB cache is invalidated when WAL file disappears', async () => {
+	const harness = createHarness();
+	const walPath = harness.dbPath + '-wal';
+	try {
+		fs.writeFileSync(walPath, 'wal-data');
+		await harness.access.readOpenCodeDbMessages('ses_1');
+		assert.equal(harness.openAttempts, 1);
+
+		// WAL removed (checkpointed by OpenCode) — cache key changes, re-open
+		fs.unlinkSync(walPath);
+		await harness.access.readOpenCodeDbMessages('ses_1');
+		assert.equal(harness.openAttempts, 2);
+	} finally {
+		try { fs.unlinkSync(walPath); } catch { /* ignore */ }
+		harness.cleanup();
+	}
+});
