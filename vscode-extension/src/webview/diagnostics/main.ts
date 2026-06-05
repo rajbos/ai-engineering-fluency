@@ -1689,13 +1689,17 @@ function sanitizeDetailedSessionFiles(input: unknown): SessionFileDetails[] {
 
     return {
       ...sf,
+      file: String(sf.file ?? sf.sessionFile ?? ""),
       editorSource: String(sf.editorSource ?? ""),
       title: String(sf.title ?? ""),
       repository: String(sf.repository ?? ""),
       sessionFile: String(sf.sessionFile ?? ""),
       size: Number(sf.size ?? 0) || 0,
+      modified: String(sf.modified ?? ""),
       tokens: Number(sf.tokens ?? 0) || 0,
       interactions: Number(sf.interactions ?? 0) || 0,
+      firstInteraction: sf.firstInteraction == null ? null : String(sf.firstInteraction),
+      lastInteraction: sf.lastInteraction == null ? null : String(sf.lastInteraction),
       contextReferences: {
         file: Number(contextRefs.file ?? 0) || 0,
         symbol: Number(contextRefs.symbol ?? 0) || 0,
@@ -1705,8 +1709,21 @@ function sanitizeDetailedSessionFiles(input: unknown): SessionFileDetails[] {
         workspace: Number(contextRefs.workspace ?? 0) || 0,
         terminal: Number(contextRefs.terminal ?? 0) || 0,
         vscode: Number(contextRefs.vscode ?? 0) || 0,
+        terminalLastCommand: Number(contextRefs.terminalLastCommand ?? 0) || 0,
+        terminalSelection: Number(contextRefs.terminalSelection ?? 0) || 0,
+        clipboard: Number(contextRefs.clipboard ?? 0) || 0,
+        changes: Number(contextRefs.changes ?? 0) || 0,
+        outputPanel: Number(contextRefs.outputPanel ?? 0) || 0,
+        problemsPanel: Number(contextRefs.problemsPanel ?? 0) || 0,
+        pullRequest: Number(contextRefs.pullRequest ?? 0) || 0,
+        byKind: contextRefs.byKind && typeof contextRefs.byKind === "object"
+          ? (contextRefs.byKind as Record<string, number>)
+          : {},
         copilotInstructions: Number(contextRefs.copilotInstructions ?? 0) || 0,
         agentsMd: Number(contextRefs.agentsMd ?? 0) || 0,
+        byPath: contextRefs.byPath && typeof contextRefs.byPath === "object"
+          ? (contextRefs.byPath as Record<string, number>)
+          : {},
       },
       parentInfo: parentInfo
         ? {
@@ -2286,5 +2303,3 @@ async function bootstrap(): Promise<void> {
 }
 
 void bootstrap();
-
-
