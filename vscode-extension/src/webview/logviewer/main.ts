@@ -979,27 +979,7 @@ ${hasBreakdown ? `<div class="session-usage-breakdown">
  * Wires up all DOM event handlers after the layout has been injected into
  * `#root`. Must be called once immediately after `root.innerHTML` is set.
  */
-function wireUpEventHandlers(): void {
-document.getElementById('btn-raw')?.addEventListener('click', () => {
-vscode.postMessage({ command: 'openRawFile' });
-});
-document.getElementById('btn-diagnostics')?.addEventListener('click', () => {
-vscode.postMessage({ command: 'showDiagnostics' });
-});
-document.getElementById('btn-usage')?.addEventListener('click', () => {
-vscode.postMessage({ command: 'showUsageAnalysis' });
-});
-document.getElementById('btn-details')?.addEventListener('click', () => {
-vscode.postMessage({ command: 'showDetails' });
-});
-document.getElementById('file-link')?.addEventListener('click', (e) => {
-e.preventDefault();
-vscode.postMessage({ command: 'openRawFile' });
-});
-document.getElementById('open-file-link')?.addEventListener('click', () => {
-vscode.postMessage({ command: 'openRawFile' });
-});
-
+function wireUpToolCallHandlers(): void {
 // Wire tool call clicks after DOM render so listeners bind correctly
 document.querySelectorAll('.tool-call-link').forEach(link => {
 link.addEventListener('click', (e) => {
@@ -1058,6 +1038,33 @@ e.preventDefault();
 }
 });
 });
+}
+
+function wireUpEventHandlers(): void {
+document.getElementById('btn-raw')?.addEventListener('click', () => {
+vscode.postMessage({ command: 'openRawFile' });
+});
+document.getElementById('btn-diagnostics')?.addEventListener('click', () => {
+vscode.postMessage({ command: 'showDiagnostics' });
+});
+document.getElementById('btn-usage')?.addEventListener('click', () => {
+vscode.postMessage({ command: 'showUsageAnalysis' });
+});
+document.getElementById('btn-details')?.addEventListener('click', () => {
+vscode.postMessage({ command: 'showDetails' });
+});
+document.getElementById('btn-refresh-session')?.addEventListener('click', () => {
+vscode.postMessage({ command: 'refreshSession' });
+});
+document.getElementById('file-link')?.addEventListener('click', (e) => {
+e.preventDefault();
+vscode.postMessage({ command: 'openRawFile' });
+});
+document.getElementById('open-file-link')?.addEventListener('click', () => {
+vscode.postMessage({ command: 'openRawFile' });
+});
+
+wireUpToolCallHandlers();
 }
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
@@ -1285,6 +1292,7 @@ ${renderSessionActualUsage(
 <div class="turns-header">
 <span>📝</span>
 <span>Chat Turns (${data.turns.length})${data.title ? ` - ${escapeHtml(data.title)}` : ''}</span>
+<vscode-button id="btn-refresh-session" appearance="secondary" style="margin-left: auto;">🔄 Refresh</vscode-button>
 </div>
 
 <div class="turns-list">

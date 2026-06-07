@@ -312,6 +312,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Cache of the last diagnostic report text for copy/issue operations
 	private lastDiagnosticReport: string = '';
 	private logViewerPanel?: vscode.WebviewPanel;
+	private logViewerSessionFilePath: string = '';
+	private logViewerCurrentData?: SessionLogData;
 	public openCode!: OpenCodeDataAccess;
 	public crush!: CrushDataAccess;
 	public visualStudio!: VisualStudioDataAccess;
@@ -5671,31 +5673,50 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		}
 		if (this.logViewerPanel) { this.logViewerPanel.dispose(); this.logViewerPanel = undefined; }
 		const logData = await this.getSessionLogData(sessionFilePath);
+		this.logViewerSessionFilePath = sessionFilePath;
+		this.logViewerCurrentData = logData;
 		this.logViewerPanel = vscode.window.createWebviewPanel(
 			'copilotLogViewer', `Session: ${logData.title || path.basename(sessionFilePath)}`,
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: false },
 			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
 		this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, logData);
-		this.logViewerPanel.webview.onDidReceiveMessage(async (message) => { await this.handleLogViewerMessage(message, logData, sessionFilePath); });
+		this.logViewerPanel.webview.onDidReceiveMessage(async (message) => { await this.handleLogViewerMessage(message); });
 		this.logViewerPanel.onDidDispose(() => { this.logViewerPanel = undefined; });
 	}
 
-	private async handleLogViewerMessage(message: any, logData: SessionLogData, sessionFilePath: string): Promise<void> {
+	private async handleLogViewerMessage(message: any): Promise<void> {
 		if (await this.dispatchSharedCommand(message)) { return; }
+		const logData = this.logViewerCurrentData;
+		const sessionFilePath = this.logViewerSessionFilePath;
 		switch (message.command) {
 			case 'openRawFile':
 				await this.dispatch('openRawFile:logviewer', () => this.logViewerHandleOpenRawFile(sessionFilePath)); break;
 			case 'showToolCallPretty': {
+				if (!logData) { break; }
 				const { turnNumber, toolCallIdx } = message as { turnNumber: number; toolCallIdx: number };
 				try { await this.logViewerShowToolCallPretty(turnNumber, toolCallIdx, logData); }
 				catch (err) { this.error('showToolCallPretty: error', err); vscode.window.showErrorMessage('Could not open formatted tool call.'); }
 				break;
 			}
 			case 'revealToolCallSource': {
+				if (!logData) { break; }
 				const { turnNumber, toolCallIdx } = message as { turnNumber: number; toolCallIdx: number };
 				try { await this.logViewerRevealToolCallSource(turnNumber, toolCallIdx, logData, sessionFilePath); }
 				catch (err) { this.error('revealToolCallSource: error', err); vscode.window.showErrorMessage('Could not reveal tool call in file.'); }
+				break;
+			}
+			case 'refreshSession': {
+				try {
+					const newData = await this.getSessionLogData(sessionFilePath);
+					this.logViewerCurrentData = newData;
+					if (this.logViewerPanel) {
+						this.logViewerPanel.webview.html = this.getLogViewerHtml(this.logViewerPanel.webview, newData);
+					}
+				} catch (err) {
+					this.error('refreshSession: error', err);
+					vscode.window.showErrorMessage('Could not refresh session data.');
+				}
 				break;
 			}
 		}
