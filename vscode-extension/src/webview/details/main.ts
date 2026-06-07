@@ -331,6 +331,11 @@ function outputTokenCell(p: PeriodStats): string {
 	return hasActualTokens(p) ? formatCompact(sumOutputTokens(p)) : '—';
 }
 
+function totalTokenCell(p: PeriodStats): string {
+	const modelTotal = sumInputTokens(p) + sumOutputTokens(p);
+	return formatCompact(modelTotal > 0 ? modelTotal : p.tokens);
+}
+
 function buildCachedTokenRow(stats: DetailedStats): MetricRow[] {
 	if (!(stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)) {
 		return [];
@@ -347,7 +352,7 @@ function buildCopilotPlanRow(stats: DetailedStats): MetricRow[] {
 
 function buildMetricsRows(stats: DetailedStats, projections: Projections): MetricRow[] {
 	const rows: MetricRow[] = [
-		{ label: 'Tokens (input+output)', icon: '🟣', color: '#c37bff', today: formatCompact(stats.today.tokens), last30Days: formatCompact(stats.last30Days.tokens), month: formatCompact(stats.month.tokens), lastMonth: formatCompact(stats.lastMonth.tokens), projected: formatCompact(projections.projectedTokens) },
+		{ label: 'Tokens (input+output)', icon: '🟣', color: '#c37bff', today: totalTokenCell(stats.today), last30Days: totalTokenCell(stats.last30Days), month: totalTokenCell(stats.month), lastMonth: totalTokenCell(stats.lastMonth), projected: formatCompact(projections.projectedTokens) },
 		{ label: 'Input tokens', icon: '⬆️', color: '#c37bff', today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: '—' },
 		{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: outputTokenCell(stats.today), last30Days: outputTokenCell(stats.last30Days), month: outputTokenCell(stats.month), lastMonth: outputTokenCell(stats.lastMonth), projected: '—' },
 		...buildCachedTokenRow(stats),
