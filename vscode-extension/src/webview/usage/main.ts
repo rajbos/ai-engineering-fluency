@@ -1763,35 +1763,80 @@ function buildActivityTabPanelHtml(
 		</div>`;
 }
 
+interface ContextRefRow {
+	label: string;
+	title?: string;
+	last30: number;
+	today: number;
+}
+
+function renderContextRefTable(rows: ContextRefRow[], totalLast30: number, totalToday: number): string {
+	const bodyRows = rows
+		.slice()
+		.sort((a, b) => b.last30 - a.last30)
+		.map((row) => {
+			const titleAttr = row.title ? ` title="${escapeHtml(row.title)}"` : '';
+			const todayCell = row.today > 0
+				? `<td class="ctx-ref-num ctx-ref-today-active">${row.today}</td>`
+				: `<td class="ctx-ref-num ctx-ref-zero">${row.today}</td>`;
+			const last30Cell = row.last30 > 0
+				? `<td class="ctx-ref-num">${row.last30}</td>`
+				: `<td class="ctx-ref-num ctx-ref-zero">${row.last30}</td>`;
+			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${last30Cell}${todayCell}</tr>`;
+		})
+		.join('');
+	return `
+		<div class="ctx-ref-table-wrap">
+			<table class="ctx-ref-table">
+				<thead>
+					<tr>
+						<th class="ctx-ref-name">Reference</th>
+						<th class="ctx-ref-num">Last 30 Days</th>
+						<th class="ctx-ref-num">Today</th>
+					</tr>
+				</thead>
+				<tbody>
+					${bodyRows}
+				</tbody>
+				<tfoot>
+					<tr class="ctx-ref-total">
+						<td class="ctx-ref-name">📊 Total References</td>
+						<td class="ctx-ref-num">${totalLast30}</td>
+						<td class="ctx-ref-num">${totalToday}</td>
+					</tr>
+				</tfoot>
+			</table>
+		</div>`;
+}
+
 function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
 	const r = stats.last30Days.contextReferences;
 	const t = stats.today.contextReferences;
 	const c = (v: number | undefined): number => v || 0;
-	return `
-		<div class="stats-grid">
-			<div class="stat-card"><div class="stat-label">📄 #file</div><div class="stat-value">${r.file}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.file}</div></div>
-			<div class="stat-card"><div class="stat-label">✂️ #selection</div><div class="stat-value">${r.selection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.selection}</div></div>
-			<div class="stat-card" title="Text selected in your editor providing passive context to Copilot"><div class="stat-label">✨ Implicit Selection</div><div class="stat-value">${r.implicitSelection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.implicitSelection}</div></div>
-			<div class="stat-card"><div class="stat-label">🔤 #symbol</div><div class="stat-value">${r.symbol}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.symbol}</div></div>
-			<div class="stat-card"><div class="stat-label">🗂️ #codebase</div><div class="stat-value">${r.codebase}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.codebase}</div></div>
-			<div class="stat-card"><div class="stat-label">📁 @workspace</div><div class="stat-value">${r.workspace}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.workspace}</div></div>
-			<div class="stat-card"><div class="stat-label">💻 @terminal</div><div class="stat-value">${r.terminal}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.terminal}</div></div>
-			<div class="stat-card"><div class="stat-label">🔧 @vscode</div><div class="stat-value">${r.vscode}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.vscode}</div></div>
-			<div class="stat-card" title="Last command run in the terminal"><div class="stat-label">⌨️ #terminalLastCommand</div><div class="stat-value">${c(r.terminalLastCommand)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.terminalLastCommand)}</div></div>
-			<div class="stat-card" title="Selected terminal output"><div class="stat-label">🖱️ #terminalSelection</div><div class="stat-value">${c(r.terminalSelection)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.terminalSelection)}</div></div>
-			<div class="stat-card" title="Clipboard contents"><div class="stat-label">📋 #clipboard</div><div class="stat-value">${c(r.clipboard)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.clipboard)}</div></div>
-			<div class="stat-card" title="Uncommitted git changes"><div class="stat-label">📝 #changes</div><div class="stat-value">${c(r.changes)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.changes)}</div></div>
-			<div class="stat-card" title="Output panel contents"><div class="stat-label">📤 #outputPanel</div><div class="stat-value">${c(r.outputPanel)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.outputPanel)}</div></div>
-			<div class="stat-card" title="Problems panel contents"><div class="stat-label">⚠️ #problemsPanel</div><div class="stat-value">${c(r.problemsPanel)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.problemsPanel)}</div></div>
-			<div class="stat-card" title="Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary"><div class="stat-label">🔀 #pr</div><div class="stat-value">${c(r.pullRequest)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.pullRequest)}</div></div>
-			<div class="stat-card" title="Pasted images and vision context detected in session logs"><div class="stat-label">📷 Images</div><div class="stat-value">${c(r.byKind['copilot.image'])}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.byKind['copilot.image'])}</div></div>
-			<div class="stat-card" title=".github/prompts/ prompt file uses detected in session logs"><div class="stat-label">📋 Prompt Files</div><div class="stat-value">${c(r.byKind['promptFile'])}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.byKind['promptFile'])}</div></div>
-			<div class="stat-card" title="Total lines of code referenced via #file: range selections"><div class="stat-label">📐 Code Lines</div><div class="stat-value">${c(r.codeContextLines)}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.codeContextLines)}</div></div>
-			<div class="stat-card" title="Custom /command prompt uses detected in session logs"><div class="stat-label">🎯 Custom Prompts</div><div class="stat-value">${c(r.byKind['prompt'])}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${c(t.byKind['prompt'])}</div></div>
-			<div class="stat-card" title="copilot-instructions.md file references detected in session logs"><div class="stat-label">📋 Copilot Instructions</div><div class="stat-value">${r.copilotInstructions}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.copilotInstructions}</div></div>
-			<div class="stat-card" title="agents.md file references detected in session logs"><div class="stat-label">🤖 Agents.md</div><div class="stat-value">${r.agentsMd}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${t.agentsMd}</div></div>
-			<div class="stat-card" style="background: var(--list-active-bg); border: 2px solid var(--border-color); color: var(--list-active-fg);"><div class="stat-label" style="color: var(--list-active-fg); opacity: 0.85;">📊 Total References</div><div class="stat-value" style="color: var(--list-active-fg);">${last30DaysTotalRefs}</div><div style="font-size: 10px; color: var(--list-active-fg); opacity: 0.75; margin-top: 4px;">Today: ${todayTotalRefs}</div></div>
-		</div>`;
+	const rows: ContextRefRow[] = [
+		{ label: '📄 #file', last30: r.file, today: t.file },
+		{ label: '✂️ #selection', last30: r.selection, today: t.selection },
+		{ label: '✨ Implicit Selection', title: 'Text selected in your editor providing passive context to Copilot', last30: r.implicitSelection, today: t.implicitSelection },
+		{ label: '🔤 #symbol', last30: r.symbol, today: t.symbol },
+		{ label: '🗂️ #codebase', last30: r.codebase, today: t.codebase },
+		{ label: '📁 @workspace', last30: r.workspace, today: t.workspace },
+		{ label: '💻 @terminal', last30: r.terminal, today: t.terminal },
+		{ label: '🔧 @vscode', last30: r.vscode, today: t.vscode },
+		{ label: '⌨️ #terminalLastCommand', title: 'Last command run in the terminal', last30: c(r.terminalLastCommand), today: c(t.terminalLastCommand) },
+		{ label: '🖱️ #terminalSelection', title: 'Selected terminal output', last30: c(r.terminalSelection), today: c(t.terminalSelection) },
+		{ label: '📋 #clipboard', title: 'Clipboard contents', last30: c(r.clipboard), today: c(t.clipboard) },
+		{ label: '📝 #changes', title: 'Uncommitted git changes', last30: c(r.changes), today: c(t.changes) },
+		{ label: '📤 #outputPanel', title: 'Output panel contents', last30: c(r.outputPanel), today: c(t.outputPanel) },
+		{ label: '⚠️ #problemsPanel', title: 'Problems panel contents', last30: c(r.problemsPanel), today: c(t.problemsPanel) },
+		{ label: '🔀 #pr', title: 'Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary', last30: c(r.pullRequest), today: c(t.pullRequest) },
+		{ label: '📷 Images', title: 'Pasted images and vision context detected in session logs', last30: c(r.byKind['copilot.image']), today: c(t.byKind['copilot.image']) },
+		{ label: '📋 Prompt Files', title: '.github/prompts/ prompt file uses detected in session logs', last30: c(r.byKind['promptFile']), today: c(t.byKind['promptFile']) },
+		{ label: '📐 Code Lines', title: 'Total lines of code referenced via #file: range selections', last30: c(r.codeContextLines), today: c(t.codeContextLines) },
+		{ label: '🎯 Custom Prompts', title: 'Custom /command prompt uses detected in session logs', last30: c(r.byKind['prompt']), today: c(t.byKind['prompt']) },
+		{ label: '📋 Copilot Instructions', title: 'copilot-instructions.md file references detected in session logs', last30: r.copilotInstructions, today: t.copilotInstructions },
+		{ label: '🤖 Agents.md', title: 'agents.md file references detected in session logs', last30: r.agentsMd, today: t.agentsMd },
+	];
+	return renderContextRefTable(rows, last30DaysTotalRefs, todayTotalRefs);
 }
 
 function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {

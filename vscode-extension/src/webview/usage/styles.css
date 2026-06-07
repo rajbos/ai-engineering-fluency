@@ -137,15 +137,84 @@ body {
 	color: var(--text-primary);
 }
 
+.ctx-ref-table-wrap {
+	margin-bottom: 16px;
+	overflow-x: auto;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	box-shadow: 0 2px 4px var(--shadow-color);
+}
+
+.ctx-ref-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.ctx-ref-table th,
+.ctx-ref-table td {
+	padding: 8px 14px;
+	text-align: left;
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.ctx-ref-table thead th {
+	background: var(--bg-tertiary);
+	color: var(--text-secondary);
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	position: sticky;
+	top: 0;
+}
+
+.ctx-ref-table tbody tr:hover {
+	background: var(--list-hover-bg);
+}
+
+.ctx-ref-table .ctx-ref-name {
+	color: var(--text-primary);
+	white-space: nowrap;
+}
+
+.ctx-ref-table .ctx-ref-num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+	color: var(--text-primary);
+	width: 110px;
+}
+
+.ctx-ref-table .ctx-ref-zero {
+	color: var(--text-muted);
+	font-weight: 400;
+}
+
+.ctx-ref-table .ctx-ref-today-active {
+	color: var(--link-color);
+}
+
+.ctx-ref-table tfoot .ctx-ref-total td {
+	background: var(--list-active-bg);
+	color: var(--list-active-fg);
+	font-weight: 700;
+	border-bottom: none;
+	border-top: 2px solid var(--border-color);
+}
+
+.ctx-ref-table tfoot .ctx-ref-total .ctx-ref-num {
+	color: var(--list-active-fg);
+}
+
+
 .bar-chart {
 	background: var(--list-hover-bg);
 	border: 1px solid var(--border-color);
 	border-radius: 6px;
 	padding: 12px;
 	margin-bottom: 12px;
-}
-
-.bar-item {
+}.bar-item {
 	margin-bottom: 8px;
 }
 
