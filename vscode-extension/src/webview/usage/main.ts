@@ -1827,7 +1827,7 @@ function renderContextRefTable(
 						<th class="ctx-ref-num">This Month</th>
 						<th class="ctx-ref-num">Last Month</th>
 						<th class="ctx-ref-num">Last 30 Days</th>
-						<th class="ctx-ref-spark">Trend</th>
+						<th class="ctx-ref-spark" title="Trend: Last Month → This Month → Today">Trend</th>
 					</tr>
 				</thead>
 				<tbody>
