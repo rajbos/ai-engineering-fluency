@@ -1795,7 +1795,7 @@ function renderContextRefTable(
 		.sort((a, b) => b.last30 - a.last30)
 		.map((row) => {
 			const titleAttr = row.title ? ` title="${escapeHtml(row.title)}"` : '';
-			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${numCell(row.last30)}${numCell(row.month)}${numCell(row.lastMonth)}${numCell(row.today, row.today > 0 ? 'ctx-ref-today-active' : '')}</tr>`;
+			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${numCell(row.today, row.today > 0 ? 'ctx-ref-today-active' : '')}${numCell(row.month)}${numCell(row.lastMonth)}${numCell(row.last30)}</tr>`;
 		})
 		.join('');
 	return `
@@ -1804,10 +1804,10 @@ function renderContextRefTable(
 				<thead>
 					<tr>
 						<th class="ctx-ref-name">Reference</th>
-						<th class="ctx-ref-num">Last 30 Days</th>
+						<th class="ctx-ref-num">Today</th>
 						<th class="ctx-ref-num">This Month</th>
 						<th class="ctx-ref-num">Last Month</th>
-						<th class="ctx-ref-num">Today</th>
+						<th class="ctx-ref-num">Last 30 Days</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -1816,10 +1816,10 @@ function renderContextRefTable(
 				<tfoot>
 					<tr class="ctx-ref-total">
 						<td class="ctx-ref-name">📊 Total References</td>
-						<td class="ctx-ref-num">${totals.last30}</td>
+						<td class="ctx-ref-num">${totals.today}</td>
 						<td class="ctx-ref-num">${totals.month}</td>
 						<td class="ctx-ref-num">${totals.lastMonth}</td>
-						<td class="ctx-ref-num">${totals.today}</td>
+						<td class="ctx-ref-num">${totals.last30}</td>
 					</tr>
 				</tfoot>
 			</table>
