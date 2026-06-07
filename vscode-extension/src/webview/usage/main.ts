@@ -1325,6 +1325,60 @@ function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | nu
 		</div>`;
 }
 
+/** Renders a compact three-period model cost breakdown for the Activity tab. */
+function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
+	const p30 = stats.last30Days.modelSwitching;
+	const today = stats.today.modelSwitching;
+	// Only show if we have any request data
+	if ((p30.totalRequests ?? 0) === 0 && (today.totalRequests ?? 0) === 0) { return ''; }
+
+	function renderCostPeriod(ms: ModelSwitchingAnalysis): string {
+		const total = ms.totalRequests ?? 0;
+		if (total === 0) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+		const buckets: { label: string; count: number; color: string }[] = [
+			{ label: '💚 Low cost', count: ms.lowCostRequests ?? 0, color: '#4ade80' },
+			{ label: '🔵 Medium cost', count: ms.mediumCostRequests ?? 0, color: 'var(--link-color)' },
+			{ label: '💸 High cost', count: ms.highCostRequests ?? 0, color: 'var(--warning-fg)' },
+			{ label: '❓ Unknown', count: ms.unknownRequests ?? 0, color: 'var(--text-muted)' },
+		].filter(b => b.count > 0);
+		const rows = buckets.map(b => {
+			const pct = total > 0 ? Math.round((b.count / total) * 100) : 0;
+			return `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+				<span style="width: 90px; font-size: 12px; font-weight: 600; color: ${b.color};">${b.label}</span>
+				<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
+					<div style="width: ${pct}%; background: ${b.color}; height: 100%; border-radius: 4px;"></div>
+				</div>
+				<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${formatNumber(b.count)} <span style="color: var(--text-secondary); font-weight: 400;">(${pct}%)</span></span>
+			</div>`;
+		}).join('');
+		const mixedNote = (ms.mixedCostSessions ?? 0) > 0
+			? `<div style="font-size: 11px; color: var(--link-color); margin-top: 6px;">🔀 ${formatNumber(ms.mixedCostSessions)} mixed-cost session${ms.mixedCostSessions !== 1 ? 's' : ''}</div>`
+			: '';
+		return `${rows}<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${formatNumber(total)} total requests</div>${mixedNote}`;
+	}
+
+	return `
+		<!-- Model Cost Section -->
+		<div class="section">
+			<div class="section-title"><span>💰</span><span>Model Cost Usage</span></div>
+			<div class="section-subtitle">Request distribution across cost levels — low (&lt;$2/M tokens), medium ($2–5/M), high (≥$5/M)</div>
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					${renderCostPeriod(today)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					${renderCostPeriod(p30)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					${renderCostPeriod(stats.month.modelSwitching)}
+				</div>
+			</div>
+		</div>`;
+}
+
 function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
 	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.month.thinkingEffortUsage;
 	if (!effortData) { return ''; }
@@ -1775,6 +1829,7 @@ function buildActivityTabPanelHtml(
 	todayTotalRefs: number,
 	last30DaysTotalRefs: number,
 ): string {
+	const modelCostHtml = buildModelCostSectionHtml(stats);
 	return `
 		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
 			${sessionsSummaryHtml}
@@ -1789,6 +1844,7 @@ function buildActivityTabPanelHtml(
 			</div>
 			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
 			${multiModelHtml}
+			${modelCostHtml}
 			${thinkingEffortHtml}
 		</div>`;
 }
