@@ -20,6 +20,7 @@ interface SegmentCacheFile {
 	updatedAt: string;
 	formatted: string;
 	todayTokens: number;
+	thisMonthTokens: number;
 	last30DaysTokens: number;
 }
 
@@ -34,6 +35,7 @@ function readSegmentCache(ttlMinutes: number): SegmentCacheFile | null {
 			typeof data.formatted !== 'string' ||
 			typeof data.updatedAt !== 'string' ||
 			typeof data.todayTokens !== 'number' ||
+			typeof data.thisMonthTokens !== 'number' ||
 			typeof data.last30DaysTokens !== 'number'
 		) {
 			return null;
@@ -87,11 +89,13 @@ export const segmentCommand = new Command('segment')
 		// (The preAction hook in cli.ts has already loaded the session file cache)
 		const files = await discoverSessionFiles();
 		let todayTokens = 0;
+		let thisMonthTokens = 0;
 		let last30DaysTokens = 0;
 
 		if (files.length > 0) {
 			const stats = await calculateDetailedStats(files);
 			todayTokens = stats.today.tokens;
+			thisMonthTokens = stats.month.tokens;
 			last30DaysTokens = stats.last30Days.tokens;
 		}
 
@@ -100,17 +104,19 @@ export const segmentCommand = new Command('segment')
 				updatedAt: new Date().toISOString(),
 				formatted: '',
 				todayTokens,
+				thisMonthTokens,
 				last30DaysTokens,
 			});
 			return;
 		}
 
-		const formatted = `${formatTokens(todayTokens)} today · ${formatTokens(last30DaysTokens)} 30d`;
+		const formatted = `${formatTokens(todayTokens)} today · ${formatTokens(thisMonthTokens)} month · ${formatTokens(last30DaysTokens)} 30d`;
 
 		writeSegmentCache({
 			updatedAt: new Date().toISOString(),
 			formatted,
 			todayTokens,
+			thisMonthTokens,
 			last30DaysTokens,
 		});
 

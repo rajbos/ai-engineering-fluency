@@ -27,6 +27,7 @@ import {
 	isUuidPointerFile,
 	getModelFromRequest,
 	getModelTier,
+	getModelCostBucket,
 	estimateTokensFromText,
 	extractPerRequestUsageFromRawLines,
 	createEmptyContextRefs,
@@ -710,6 +711,18 @@ function _muaMergeTierModels(period: UsageAnalysisPeriod, ms: SessionModelSwitch
 	}
 }
 
+function _muaMergeCostModels(period: UsageAnalysisPeriod, ms: SessionModelSwitching): void {
+	for (const model of (ms.costBuckets?.low ?? [])) {
+		if (!period.modelSwitching.lowCostModels.includes(model)) { period.modelSwitching.lowCostModels.push(model); }
+	}
+	for (const model of (ms.costBuckets?.medium ?? [])) {
+		if (!period.modelSwitching.mediumCostModels.includes(model)) { period.modelSwitching.mediumCostModels.push(model); }
+	}
+	for (const model of (ms.costBuckets?.high ?? [])) {
+		if (!period.modelSwitching.highCostModels.includes(model)) { period.modelSwitching.highCostModels.push(model); }
+	}
+}
+
 /** Recalculate aggregate model-switching statistics from the accumulated modelsPerSession array. */
 function _muaUpdateModelSwitchingStats(period: UsageAnalysisPeriod): void {
 	const counts = period.modelSwitching.modelsPerSession;
@@ -727,7 +740,9 @@ function _muaMergeModelSwitching(period: UsageAnalysisPeriod, analysis: SessionU
 			uniqueModels: [], modelCount: 0, switchCount: 0,
 			tiers: { standard: [], premium: [], unknown: [] },
 			hasMixedTiers: false, standardRequests: 0, premiumRequests: 0,
-			unknownRequests: 0, totalRequests: 0
+			unknownRequests: 0, totalRequests: 0,
+			costBuckets: { low: [], medium: [], high: [], unknown: [] },
+			hasMixedCosts: false, lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0,
 		};
 	}
 	if (analysis.modelSwitching.modelCount <= 0) { return; }
@@ -735,10 +750,15 @@ function _muaMergeModelSwitching(period: UsageAnalysisPeriod, analysis: SessionU
 	period.modelSwitching.totalSessions++;
 	period.modelSwitching.modelsPerSession.push(ms.modelCount);
 	_muaMergeTierModels(period, ms);
+	_muaMergeCostModels(period, ms);
 	if (ms.hasMixedTiers) { period.modelSwitching.mixedTierSessions++; }
+	if (ms.hasMixedCosts) { period.modelSwitching.mixedCostSessions++; }
 	period.modelSwitching.standardRequests += ms.standardRequests || 0;
 	period.modelSwitching.premiumRequests += ms.premiumRequests || 0;
 	period.modelSwitching.unknownRequests += ms.unknownRequests || 0;
+	period.modelSwitching.lowCostRequests += ms.lowCostRequests || 0;
+	period.modelSwitching.mediumCostRequests += ms.mediumCostRequests || 0;
+	period.modelSwitching.highCostRequests += ms.highCostRequests || 0;
 	period.modelSwitching.totalRequests += ms.totalRequests || 0;
 	_muaUpdateModelSwitchingStats(period);
 }
@@ -846,6 +866,27 @@ function _muaAccumulateTierModels(
 	for (const model of tiers.unknown) {
 		if (!period.modelSwitching.unknownModels.includes(model)) {
 			period.modelSwitching.unknownModels.push(model);
+		}
+	}
+}
+
+function _muaAccumulateCostModels(
+	period: UsageAnalysisPeriod,
+	costBuckets: { low?: string[]; medium?: string[]; high?: string[] }
+): void {
+	for (const model of costBuckets.low ?? []) {
+		if (!period.modelSwitching.lowCostModels.includes(model)) {
+			period.modelSwitching.lowCostModels.push(model);
+		}
+	}
+	for (const model of costBuckets.medium ?? []) {
+		if (!period.modelSwitching.mediumCostModels.includes(model)) {
+			period.modelSwitching.mediumCostModels.push(model);
+		}
+	}
+	for (const model of costBuckets.high ?? []) {
+		if (!period.modelSwitching.highCostModels.includes(model)) {
+			period.modelSwitching.highCostModels.push(model);
 		}
 	}
 }
@@ -1150,6 +1191,7 @@ export async function readClaudeCodeEventsForAnalysis(sessionFilePath: string): 
 	}
 }
 
+// eslint-disable-next-line sonarjs/cognitive-complexity
 export function applyModelTierClassification(
 	modelPricing: { [key: string]: ModelPricing },
 	uniqueModels: string[],
@@ -1167,19 +1209,39 @@ export function applyModelTierClassification(
 	}
 	analysis.modelSwitching.tiers = { standard, premium, unknown };
 	analysis.modelSwitching.hasMixedTiers = standard.length > 0 && premium.length > 0;
+	const costBuckets = { low: [] as string[], medium: [] as string[], high: [] as string[], unknown: [] as string[] };
+	for (const model of uniqueModels) {
+		const bucket = getModelCostBucket(model, modelPricing);
+		if (bucket === 'low') { costBuckets.low.push(model); }
+		else if (bucket === 'medium') { costBuckets.medium.push(model); }
+		else if (bucket === 'high') { costBuckets.high.push(model); }
+		else { costBuckets.unknown.push(model); }
+	}
+	analysis.modelSwitching.costBuckets = costBuckets;
+	const nonUnknownBuckets = [costBuckets.low, costBuckets.medium, costBuckets.high].filter(b => b.length > 0).length;
+	analysis.modelSwitching.hasMixedCosts = nonUnknownBuckets >= 2;
 	let stdReq = 0, premReq = 0, unkReq = 0;
+	let lowReq = 0, medReq = 0, highReq = 0;
 	for (const model of allModelRequests) {
 		const tier = getModelTier(model, modelPricing);
 		if (tier === 'standard') { stdReq++; }
 		else if (tier === 'premium') { premReq++; }
 		else { unkReq++; }
+		const bucket = getModelCostBucket(model, modelPricing);
+		if (bucket === 'low') { lowReq++; }
+		else if (bucket === 'medium') { medReq++; }
+		else if (bucket === 'high') { highReq++; }
 	}
 	analysis.modelSwitching.standardRequests = stdReq;
 	analysis.modelSwitching.premiumRequests = premReq;
 	analysis.modelSwitching.unknownRequests = unkReq;
+	analysis.modelSwitching.lowCostRequests = lowReq;
+	analysis.modelSwitching.mediumCostRequests = medReq;
+	analysis.modelSwitching.highCostRequests = highReq;
 }
 
 type TierCounts = { standard: number; premium: number; unknown: number };
+type CostCounts = { low: number; medium: number; high: number; unknown: number };
 
 function _cmsIncrementTierCount(model: string, tierCounts: TierCounts, modelPricing: { [key: string]: ModelPricing }): void {
 	const tier = getModelTier(model, modelPricing);
@@ -1188,11 +1250,26 @@ function _cmsIncrementTierCount(model: string, tierCounts: TierCounts, modelPric
 	else { tierCounts.unknown++; }
 }
 
+function _cmsIncrementCostCount(model: string, costCounts: CostCounts, modelPricing: { [key: string]: ModelPricing }): void {
+	const bucket = getModelCostBucket(model, modelPricing);
+	if (bucket === 'low') { costCounts.low++; }
+	else if (bucket === 'medium') { costCounts.medium++; }
+	else if (bucket === 'high') { costCounts.high++; }
+	else { costCounts.unknown++; }
+}
+
 function _cmsApplyTierCounts(tierCounts: TierCounts, analysis: SessionUsageAnalysis): void {
 	analysis.modelSwitching.standardRequests = tierCounts.standard;
 	analysis.modelSwitching.premiumRequests = tierCounts.premium;
 	analysis.modelSwitching.unknownRequests = tierCounts.unknown;
 	analysis.modelSwitching.totalRequests = tierCounts.standard + tierCounts.premium + tierCounts.unknown;
+}
+
+function _cmsApplyCostCounts(costCounts: CostCounts, analysis: SessionUsageAnalysis): void {
+	analysis.modelSwitching.lowCostRequests = costCounts.low;
+	analysis.modelSwitching.mediumCostRequests = costCounts.medium;
+	analysis.modelSwitching.highCostRequests = costCounts.high;
+	analysis.modelSwitching.totalRequests = costCounts.low + costCounts.medium + costCounts.high + costCounts.unknown;
 }
 
 function _cmsClassifyModels(uniqueModels: string[], modelPricing: { [key: string]: ModelPricing }): { standard: string[]; premium: string[]; unknown: string[] } {
@@ -1211,14 +1288,17 @@ function _cmsCountJsonRequests(sessionContent: ParsedSessionJson, analysis: Sess
 	let previousModel: string | null = null;
 	let switchCount = 0;
 	const tierCounts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
+	const costCounts: CostCounts = { low: 0, medium: 0, high: 0, unknown: 0 };
 	for (const requestRaw of sessionContent.requests) {
 		const currentModel = getModelFromRequest(requestRaw as SessionRequestRaw, modelPricing);
 		if (previousModel && currentModel !== previousModel) { switchCount++; }
 		previousModel = currentModel;
 		_cmsIncrementTierCount(currentModel, tierCounts, modelPricing);
+		_cmsIncrementCostCount(currentModel, costCounts, modelPricing);
 	}
 	analysis.modelSwitching.switchCount = switchCount;
 	_cmsApplyTierCounts(tierCounts, analysis);
+	_cmsApplyCostCounts(costCounts, analysis);
 }
 
 type CmsEvent = JsonlEventRaw & { type?: string; data?: { selectedModel?: string; newModel?: string }; model?: string };
@@ -1257,35 +1337,42 @@ function _cmsGetJsonlRequestModel(request: unknown, defaultModel: string, modelP
 	return defaultModel;
 }
 
-function _cmsCountEventRequests(event: CmsEvent, tierCounts: TierCounts, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): void {
+function _cmsCountEventRequests(event: CmsEvent, tierCounts: TierCounts, costCounts: CostCounts, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): void {
 	if (event.type === 'user.message') {
-		_cmsIncrementTierCount(event.model || defaultModel, tierCounts, modelPricing);
+		const model = event.model || defaultModel;
+		_cmsIncrementTierCount(model, tierCounts, modelPricing);
+		_cmsIncrementCostCount(model, costCounts, modelPricing);
 		return;
 	}
 	if (event.kind !== 2 || event.k?.[0] !== 'requests' || !Array.isArray(event.v)) { return; }
 	for (const request of event.v as unknown[]) {
-		_cmsIncrementTierCount(_cmsGetJsonlRequestModel(request, defaultModel, modelPricing), tierCounts, modelPricing);
+		const model = _cmsGetJsonlRequestModel(request, defaultModel, modelPricing);
+		_cmsIncrementTierCount(model, tierCounts, modelPricing);
+		_cmsIncrementCostCount(model, costCounts, modelPricing);
 	}
 }
 
 function _cmsCountJsonlRequests(lines: string[], analysis: SessionUsageAnalysis, modelPricing: { [key: string]: ModelPricing }): void {
 	const tierCounts: TierCounts = { standard: 0, premium: 0, unknown: 0 };
+	const costCounts: CostCounts = { low: 0, medium: 0, high: 0, unknown: 0 };
 	let defaultModel = 'unknown';
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
 		try {
 			const event = JSON.parse(line) as CmsEvent;
 			defaultModel = _cmsExtractDefaultModel(event, defaultModel);
-			_cmsCountEventRequests(event, tierCounts, defaultModel, modelPricing);
+			_cmsCountEventRequests(event, tierCounts, costCounts, defaultModel, modelPricing);
 		} catch { /* skip malformed lines */ }
 	}
 	_cmsApplyTierCounts(tierCounts, analysis);
+	_cmsApplyCostCounts(costCounts, analysis);
 }
 
 /**
  * Calculate model switching statistics for a session file.
  * This method updates the analysis.modelSwitching field in place.
  */
+// eslint-disable-next-line complexity, sonarjs/cognitive-complexity
 export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'warn' | 'modelPricing' | 'tokenEstimators' | 'ecosystems'>, sessionFile: string, analysis: SessionUsageAnalysis, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<void> {
 	try {
 		// Use non-cached method to avoid circular dependency
@@ -1299,6 +1386,17 @@ export async function calculateModelSwitching(deps: Pick<UsageAnalysisDeps, 'war
 		const tiers = _cmsClassifyModels(uniqueModels, deps.modelPricing);
 		analysis.modelSwitching.tiers = tiers;
 		analysis.modelSwitching.hasMixedTiers = tiers.standard.length > 0 && tiers.premium.length > 0;
+		const costBuckets = { low: [] as string[], medium: [] as string[], high: [] as string[], unknown: [] as string[] };
+		for (const model of uniqueModels) {
+			const bucket = getModelCostBucket(model, deps.modelPricing);
+			if (bucket === 'low') { costBuckets.low.push(model); }
+			else if (bucket === 'medium') { costBuckets.medium.push(model); }
+			else if (bucket === 'high') { costBuckets.high.push(model); }
+			else { costBuckets.unknown.push(model); }
+		}
+		analysis.modelSwitching.costBuckets = costBuckets;
+		const nonUnknownBuckets = [costBuckets.low, costBuckets.medium, costBuckets.high].filter(b => b.length > 0).length;
+		analysis.modelSwitching.hasMixedCosts = nonUnknownBuckets >= 2;
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 		// Check if this is a UUID-only file (new Copilot CLI format)
 		if (isUuidPointerFile(fileContent)) {
@@ -1495,6 +1593,11 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 			premiumRequests: 0,
 			unknownRequests: 0,
 			totalRequests: 0,
+			costBuckets: { low: [], medium: [], high: [], unknown: [] },
+			hasMixedCosts: false,
+			lowCostRequests: 0,
+			mediumCostRequests: 0,
+			highCostRequests: 0,
 		},
 	};
 }

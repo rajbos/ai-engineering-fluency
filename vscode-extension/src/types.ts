@@ -262,6 +262,11 @@ export interface SessionUsageAnalysis {
     premiumRequests: number;
     unknownRequests: number;
     totalRequests: number;
+    costBuckets: { low: string[]; medium: string[]; high: string[]; unknown: string[] };
+    hasMixedCosts: boolean;
+    lowCostRequests: number;
+    mediumCostRequests: number;
+    highCostRequests: number;
   };
   thinkingEffort?: ThinkingEffortUsage;
   editScope?: EditScopeUsage;
@@ -369,6 +374,13 @@ export interface ModelSwitchingAnalysis {
   premiumRequests: number; // Count of requests using premium models
   unknownRequests: number; // Count of requests using unknown tier models
   totalRequests: number; // Total requests across all tiers
+  lowCostModels: string[];
+  mediumCostModels: string[];
+  highCostModels: string[];
+  mixedCostSessions: number;
+  lowCostRequests: number;
+  mediumCostRequests: number;
+  highCostRequests: number;
 }
 
 export interface MissedPotentialWorkspace {

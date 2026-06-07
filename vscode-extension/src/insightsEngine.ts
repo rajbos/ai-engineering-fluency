@@ -682,8 +682,8 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		title: '💰 Most of your requests use cost-intensive models',
 		buildBody: (ctx) => {
 			const ms = ctx.last30Days.modelSwitching;
-			const pct = ms.totalRequests > 0 ? Math.round((ms.premiumRequests / ms.totalRequests) * 100) : 0;
-			const models = ms.premiumModels.slice(0, 3).join(', ');
+			const pct = ms.totalRequests > 0 ? Math.round((ms.highCostRequests / ms.totalRequests) * 100) : 0;
+			const models = ms.highCostModels.slice(0, 3).join(', ');
 			return `${pct}% of your ${ms.totalRequests.toLocaleString()} requests over the last 30 days used higher-cost models${models ? ` (${models})` : ''}. ` +
 				`For routine tasks like quick questions, summaries, or boilerplate, lighter models often perform just as well at a fraction of the cost. ` +
 				`Reserve the heavier models for complex multi-step reasoning, architecture decisions, or subtle bugs.`;
@@ -691,7 +691,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		appliesTo: (ctx) => {
 			const ms = ctx.last30Days.modelSwitching;
 			return ms.totalRequests >= 20
-				&& (ms.premiumRequests / ms.totalRequests) > 0.70;
+				&& (ms.highCostRequests / ms.totalRequests) > 0.70;
 		},
 		weight: 45,
 	},

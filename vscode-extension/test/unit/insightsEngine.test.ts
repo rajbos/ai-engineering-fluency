@@ -25,6 +25,8 @@ function emptyPeriod(): UsageAnalysisPeriod {
 			maxModelsPerSession: 0, minModelsPerSession: 0, switchingFrequency: 0,
 			standardModels: [], premiumModels: [], unknownModels: [], mixedTierSessions: 0,
 			standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0,
+			lowCostModels: [], mediumCostModels: [], highCostModels: [], mixedCostSessions: 0,
+			lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0,
 		},
 		repositories: [], repositoriesWithCustomization: [],
 		editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0 },

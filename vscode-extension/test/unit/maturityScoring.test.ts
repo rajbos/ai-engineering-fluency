@@ -22,8 +22,9 @@ function emptyFd() {
         ctxTerminalLastCommand: 0, ctxTerminalSelection: 0,
         ctxByKind: {} as Record<string, number>,
         mcpTotal: 0, mcpByServer: {} as Record<string, number>,
-        mixedTierSessions: 0, switchingFreqSum: 0, switchingFreqCount: 0,
+        mixedTierSessions: 0, mixedCostSessions: 0, switchingFreqSum: 0, switchingFreqCount: 0,
         standardModels: new Set<string>(), premiumModels: new Set<string>(),
+        lowCostModels: new Set<string>(), mediumCostModels: new Set<string>(), highCostModels: new Set<string>(),
         multiFileEdits: 0, filesPerEditSum: 0, filesPerEditCount: 0,
         editsAgentCount: 0, workspaceAgentCount: 0,
         repositories: new Set<string>(), repositoriesWithCustomization: new Set<string>(),
@@ -50,6 +51,8 @@ function emptyPeriod(): UsageAnalysisPeriod {
             maxModelsPerSession: 0, minModelsPerSession: 0, switchingFrequency: 0,
             standardModels: [], premiumModels: [], unknownModels: [], mixedTierSessions: 0,
             standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0,
+            lowCostModels: [], mediumCostModels: [], highCostModels: [], mixedCostSessions: 0,
+            lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0,
         },
         repositories: [], repositoriesWithCustomization: [],
         editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0 },
@@ -134,7 +137,7 @@ test('PE: avgTurns >= 5 boosts to at least Stage 3', () => {
 
 test('PE: model switching alone boosts to at least Stage 3', () => {
     const fd = emptyFd();
-    fd.mixedTierSessions = 1;
+    fd.mixedCostSessions = 1;
     const pe = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Prompt Engineering')!;
     assert.ok(pe.stage >= 3, `expected >= 3, got ${pe.stage}`);
 });
@@ -253,8 +256,9 @@ test('CU: 1 customized repo raises to Stage 2', () => {
 
 test('CU: 5+ unique models boosts to at least Stage 3', () => {
     const fd = emptyFd();
-    fd.standardModels = new Set(['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo']);
-    fd.premiumModels = new Set(['claude-sonnet', 'o1-preview']);
+    fd.lowCostModels = new Set(['gpt-4o-mini']);
+    fd.mediumCostModels = new Set(['gpt-4o', 'gpt-4-turbo', 'claude-sonnet']);
+    fd.highCostModels = new Set(['o1-preview']);
     const cu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Customization')!;
     assert.ok(cu.stage >= 3, `expected >= 3, got ${cu.stage}`);
 });

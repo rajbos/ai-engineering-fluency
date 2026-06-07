@@ -30,6 +30,7 @@ function Set-PoshContext {
     try {
         $data   = ai-engineering-fluency usage --json | ConvertFrom-Json
         $today  = [int]$data.today.tokens
+        $month  = [int]$data.month.tokens
         $days30 = [int]$data.last30Days.tokens
 
         function Format-Tokens([long]$n) {
@@ -40,11 +41,13 @@ function Set-PoshContext {
         }
 
         $env:COPILOT_TOKENS_TODAY   = Format-Tokens $today
+        $env:COPILOT_TOKENS_MONTH   = Format-Tokens $month
         $env:COPILOT_TOKENS_30D     = Format-Tokens $days30
         $env:COPILOT_TOKEN_LAST_RUN = [DateTime]::UtcNow.ToString("o")
     }
     catch {
         $env:COPILOT_TOKENS_TODAY = "?"
+        $env:COPILOT_TOKENS_MONTH = "?"
         $env:COPILOT_TOKENS_30D   = "?"
     }
 }
