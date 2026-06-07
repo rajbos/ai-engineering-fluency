@@ -6,8 +6,8 @@ on:
     paths:
         - .github/workflows/check-models.yml
         - .github/prompts/sync-models.prompt.md
-        - src/tokenEstimators.json
-        - src/modelPricing.json
+        - vscode-extension/src/tokenEstimators.json
+        - vscode-extension/src/modelPricing.json
         
   schedule:
     - cron: '11 17 * * 1' # Run every Monday at 5:11 PM UTC
@@ -77,8 +77,8 @@ jobs:
           PROMPT=$(cat .github/prompts/sync-models.prompt.md)
           
           # Get the paths to relevant files
-          ESTIMATORS_PATH="${GITHUB_WORKSPACE}/src/tokenEstimators.json"
-          PRICING_PATH="${GITHUB_WORKSPACE}/src/modelPricing.json"
+          ESTIMATORS_PATH="${GITHUB_WORKSPACE}/vscode-extension/src/tokenEstimators.json"
+          PRICING_PATH="${GITHUB_WORKSPACE}/vscode-extension/src/modelPricing.json"
           
           # Create the full prompt with context
           {
@@ -107,12 +107,12 @@ jobs:
       - name: Check for changes
         id: changes
         run: |
-          if git diff --quiet src/tokenEstimators.json src/modelPricing.json; then
+          if git diff --quiet vscode-extension/src/tokenEstimators.json vscode-extension/src/modelPricing.json; then
             echo "No changes detected in model data files"
             echo "changed=false" >> "$GITHUB_OUTPUT"
           else
             # Check if the only change is the lastUpdated date in modelPricing.json
-            DIFF_OUTPUT=$(git diff src/modelPricing.json)
+            DIFF_OUTPUT=$(git diff vscode-extension/src/modelPricing.json)
             
             # Count the number of changed lines (lines starting with +/- but not +++ or ---)
             CHANGED_LINES=$(echo "$DIFF_OUTPUT" | grep -cE '^[+-][^+-]' || true)
@@ -122,7 +122,7 @@ jobs:
               # Check if all changed lines contain "lastUpdated"
               if ! echo "$DIFF_OUTPUT" | grep -E '^[+-][^+-]' | grep -qv '"lastUpdated"'; then
                 # Verify no changes to tokenEstimators.json
-                if git diff --quiet src/tokenEstimators.json; then
+                if git diff --quiet vscode-extension/src/tokenEstimators.json; then
                   echo "Only lastUpdated date changed - skipping PR creation"
                   echo "changed=false" >> "$GITHUB_OUTPUT"
                   exit 0
@@ -140,13 +140,13 @@ jobs:
         with:
           branch: sync-copilot-models
           add-paths: |
-            src/tokenEstimators.json
-            src/modelPricing.json
+            vscode-extension/src/tokenEstimators.json
+            vscode-extension/src/modelPricing.json
           commit-message: |
             chore: sync model data with GitHub Copilot documentation
             
-            This commit automatically updates src/tokenEstimators.json and
-            src/modelPricing.json with new models found in the official
+            This commit automatically updates vscode-extension/src/tokenEstimators.json and
+            vscode-extension/src/modelPricing.json with new models found in the official
             GitHub Copilot documentation.
             
             Source: https://docs.github.com/en/copilot/reference/ai-models/supported-models
@@ -156,8 +156,8 @@ jobs:
             found in the [GitHub Copilot documentation](https://docs.github.com/en/copilot/reference/ai-models/supported-models).
             
             **Updated Files:**
-            - `src/tokenEstimators.json` - Character-to-token ratio estimators
-            - `src/modelPricing.json` - Model pricing data
+            - `vscode-extension/src/tokenEstimators.json` - Character-to-token ratio estimators
+            - `vscode-extension/src/modelPricing.json` - Model pricing data
             
             **⚠️ Note:** New pricing entries are set to `0.00` by default and require manual verification.
             Please verify pricing data before merging.
