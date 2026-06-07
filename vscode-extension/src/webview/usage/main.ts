@@ -70,6 +70,7 @@ type UsageAnalysisStats = {
 	today: UsageAnalysisPeriod;
 	last30Days: UsageAnalysisPeriod;
 	month: UsageAnalysisPeriod;
+	lastMonth: UsageAnalysisPeriod;
 	locale?: string;
 	lastUpdated: string;
 	customizationMatrix?: WorkspaceCustomizationMatrix | null;
@@ -847,6 +848,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			today: sanitizePeriod(raw.today),
 			last30Days: sanitizePeriod(raw.last30Days),
 			month: sanitizePeriod(raw.month),
+			lastMonth: sanitizePeriod(raw.lastMonth),
 			lastUpdated: typeof raw.lastUpdated === 'string' ? raw.lastUpdated : '',
 			backendConfigured: !!raw.backendConfigured,
 			locale: typeof raw.locale === 'string' ? raw.locale : undefined,
@@ -1763,26 +1765,37 @@ function buildActivityTabPanelHtml(
 		</div>`;
 }
 
+interface ContextRefDescriptor {
+	label: string;
+	title?: string;
+	get: (cr: ContextReferenceUsage) => number;
+}
+
 interface ContextRefRow {
 	label: string;
 	title?: string;
 	last30: number;
+	month: number;
+	lastMonth: number;
 	today: number;
 }
 
-function renderContextRefTable(rows: ContextRefRow[], totalLast30: number, totalToday: number): string {
+function numCell(value: number, extraClass = ''): string {
+	const zeroClass = value > 0 ? '' : ' ctx-ref-zero';
+	const cls = `ctx-ref-num${extraClass ? ' ' + extraClass : ''}${zeroClass}`;
+	return `<td class="${cls}">${value}</td>`;
+}
+
+function renderContextRefTable(
+	rows: ContextRefRow[],
+	totals: { last30: number; month: number; lastMonth: number; today: number },
+): string {
 	const bodyRows = rows
 		.slice()
 		.sort((a, b) => b.last30 - a.last30)
 		.map((row) => {
 			const titleAttr = row.title ? ` title="${escapeHtml(row.title)}"` : '';
-			const todayCell = row.today > 0
-				? `<td class="ctx-ref-num ctx-ref-today-active">${row.today}</td>`
-				: `<td class="ctx-ref-num ctx-ref-zero">${row.today}</td>`;
-			const last30Cell = row.last30 > 0
-				? `<td class="ctx-ref-num">${row.last30}</td>`
-				: `<td class="ctx-ref-num ctx-ref-zero">${row.last30}</td>`;
-			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${last30Cell}${todayCell}</tr>`;
+			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${numCell(row.last30)}${numCell(row.month)}${numCell(row.lastMonth)}${numCell(row.today, row.today > 0 ? 'ctx-ref-today-active' : '')}</tr>`;
 		})
 		.join('');
 	return `
@@ -1792,6 +1805,8 @@ function renderContextRefTable(rows: ContextRefRow[], totalLast30: number, total
 					<tr>
 						<th class="ctx-ref-name">Reference</th>
 						<th class="ctx-ref-num">Last 30 Days</th>
+						<th class="ctx-ref-num">This Month</th>
+						<th class="ctx-ref-num">Last Month</th>
 						<th class="ctx-ref-num">Today</th>
 					</tr>
 				</thead>
@@ -1801,8 +1816,10 @@ function renderContextRefTable(rows: ContextRefRow[], totalLast30: number, total
 				<tfoot>
 					<tr class="ctx-ref-total">
 						<td class="ctx-ref-name">📊 Total References</td>
-						<td class="ctx-ref-num">${totalLast30}</td>
-						<td class="ctx-ref-num">${totalToday}</td>
+						<td class="ctx-ref-num">${totals.last30}</td>
+						<td class="ctx-ref-num">${totals.month}</td>
+						<td class="ctx-ref-num">${totals.lastMonth}</td>
+						<td class="ctx-ref-num">${totals.today}</td>
 					</tr>
 				</tfoot>
 			</table>
@@ -1810,33 +1827,48 @@ function renderContextRefTable(rows: ContextRefRow[], totalLast30: number, total
 }
 
 function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
-	const r = stats.last30Days.contextReferences;
-	const t = stats.today.contextReferences;
 	const c = (v: number | undefined): number => v || 0;
-	const rows: ContextRefRow[] = [
-		{ label: '📄 #file', last30: r.file, today: t.file },
-		{ label: '✂️ #selection', last30: r.selection, today: t.selection },
-		{ label: '✨ Implicit Selection', title: 'Text selected in your editor providing passive context to Copilot', last30: r.implicitSelection, today: t.implicitSelection },
-		{ label: '🔤 #symbol', last30: r.symbol, today: t.symbol },
-		{ label: '🗂️ #codebase', last30: r.codebase, today: t.codebase },
-		{ label: '📁 @workspace', last30: r.workspace, today: t.workspace },
-		{ label: '💻 @terminal', last30: r.terminal, today: t.terminal },
-		{ label: '🔧 @vscode', last30: r.vscode, today: t.vscode },
-		{ label: '⌨️ #terminalLastCommand', title: 'Last command run in the terminal', last30: c(r.terminalLastCommand), today: c(t.terminalLastCommand) },
-		{ label: '🖱️ #terminalSelection', title: 'Selected terminal output', last30: c(r.terminalSelection), today: c(t.terminalSelection) },
-		{ label: '📋 #clipboard', title: 'Clipboard contents', last30: c(r.clipboard), today: c(t.clipboard) },
-		{ label: '📝 #changes', title: 'Uncommitted git changes', last30: c(r.changes), today: c(t.changes) },
-		{ label: '📤 #outputPanel', title: 'Output panel contents', last30: c(r.outputPanel), today: c(t.outputPanel) },
-		{ label: '⚠️ #problemsPanel', title: 'Problems panel contents', last30: c(r.problemsPanel), today: c(t.problemsPanel) },
-		{ label: '🔀 #pr', title: 'Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary', last30: c(r.pullRequest), today: c(t.pullRequest) },
-		{ label: '📷 Images', title: 'Pasted images and vision context detected in session logs', last30: c(r.byKind['copilot.image']), today: c(t.byKind['copilot.image']) },
-		{ label: '📋 Prompt Files', title: '.github/prompts/ prompt file uses detected in session logs', last30: c(r.byKind['promptFile']), today: c(t.byKind['promptFile']) },
-		{ label: '📐 Code Lines', title: 'Total lines of code referenced via #file: range selections', last30: c(r.codeContextLines), today: c(t.codeContextLines) },
-		{ label: '🎯 Custom Prompts', title: 'Custom /command prompt uses detected in session logs', last30: c(r.byKind['prompt']), today: c(t.byKind['prompt']) },
-		{ label: '📋 Copilot Instructions', title: 'copilot-instructions.md file references detected in session logs', last30: r.copilotInstructions, today: t.copilotInstructions },
-		{ label: '🤖 Agents.md', title: 'agents.md file references detected in session logs', last30: r.agentsMd, today: t.agentsMd },
+	const descriptors: ContextRefDescriptor[] = [
+		{ label: '📄 #file', get: (cr) => cr.file },
+		{ label: '✂️ #selection', get: (cr) => cr.selection },
+		{ label: '✨ Implicit Selection', title: 'Text selected in your editor providing passive context to Copilot', get: (cr) => cr.implicitSelection },
+		{ label: '🔤 #symbol', get: (cr) => cr.symbol },
+		{ label: '🗂️ #codebase', get: (cr) => cr.codebase },
+		{ label: '📁 @workspace', get: (cr) => cr.workspace },
+		{ label: '💻 @terminal', get: (cr) => cr.terminal },
+		{ label: '🔧 @vscode', get: (cr) => cr.vscode },
+		{ label: '⌨️ #terminalLastCommand', title: 'Last command run in the terminal', get: (cr) => c(cr.terminalLastCommand) },
+		{ label: '🖱️ #terminalSelection', title: 'Selected terminal output', get: (cr) => c(cr.terminalSelection) },
+		{ label: '📋 #clipboard', title: 'Clipboard contents', get: (cr) => c(cr.clipboard) },
+		{ label: '📝 #changes', title: 'Uncommitted git changes', get: (cr) => c(cr.changes) },
+		{ label: '📤 #outputPanel', title: 'Output panel contents', get: (cr) => c(cr.outputPanel) },
+		{ label: '⚠️ #problemsPanel', title: 'Problems panel contents', get: (cr) => c(cr.problemsPanel) },
+		{ label: '🔀 #pr', title: 'Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary', get: (cr) => c(cr.pullRequest) },
+		{ label: '📷 Images', title: 'Pasted images and vision context detected in session logs', get: (cr) => c(cr.byKind['copilot.image']) },
+		{ label: '📋 Prompt Files', title: '.github/prompts/ prompt file uses detected in session logs', get: (cr) => c(cr.byKind['promptFile']) },
+		{ label: '📐 Code Lines', title: 'Total lines of code referenced via #file: range selections', get: (cr) => c(cr.codeContextLines) },
+		{ label: '🎯 Custom Prompts', title: 'Custom /command prompt uses detected in session logs', get: (cr) => c(cr.byKind['prompt']) },
+		{ label: '📋 Copilot Instructions', title: 'copilot-instructions.md file references detected in session logs', get: (cr) => cr.copilotInstructions },
+		{ label: '🤖 Agents.md', title: 'agents.md file references detected in session logs', get: (cr) => cr.agentsMd },
 	];
-	return renderContextRefTable(rows, last30DaysTotalRefs, todayTotalRefs);
+	const r = stats.last30Days.contextReferences;
+	const m = stats.month.contextReferences;
+	const lm = stats.lastMonth.contextReferences;
+	const t = stats.today.contextReferences;
+	const rows: ContextRefRow[] = descriptors.map((d) => ({
+		label: d.label,
+		title: d.title,
+		last30: d.get(r),
+		month: d.get(m),
+		lastMonth: d.get(lm),
+		today: d.get(t),
+	}));
+	return renderContextRefTable(rows, {
+		last30: last30DaysTotalRefs,
+		month: getTotalContextRefs(m),
+		lastMonth: getTotalContextRefs(lm),
+		today: todayTotalRefs,
+	});
 }
 
 function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
@@ -1989,7 +2021,8 @@ function renderLayout(stats: UsageAnalysisStats): void {
 			<div class="stats-grid">
 				<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
 				<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
-				<div class="stat-card"><div class="stat-label">📅 Previous Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📅 This Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📅 Last Month Sessions</div><div class="stat-value">${formatNumber(stats.lastMonth.sessions)}</div></div>
 			</div>
 		</div>`;
 

@@ -2358,7 +2358,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			void this.analysisPanel.webview.postMessage({
 				command: 'updateStats',
 				data: {
-					today: analysisStats.today, last30Days: analysisStats.last30Days, month: analysisStats.month,
+					today: analysisStats.today, last30Days: analysisStats.last30Days, month: analysisStats.month, lastMonth: analysisStats.lastMonth,
 					locale: analysisStats.locale, customizationMatrix: analysisStats.customizationMatrix || null,
 					missedPotential: analysisStats.missedPotential || [],
 					lastUpdated: analysisStats.lastUpdated.toISOString(), backendConfigured: this.isBackendConfigured(),
@@ -2971,7 +2971,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return this.lastUsageAnalysisStats;
 		}
 		const now = new Date();
-		const { todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
+		const { todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysStartMs, lastMonthStartMs } = computeUtcDateRanges(now);
 		const cutoffMs = Math.min(last30DaysStartMs, lastMonthStartMs);
 		this.log('🔍 [Usage Analysis] Starting calculation...');
 		this._cacheHits = 0;
@@ -2979,6 +2979,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const todayStats = this.createEmptyUsagePeriod();
 		const last30DaysStats = this.createEmptyUsagePeriod();
 		const monthStats = this.createEmptyUsagePeriod();
+		const lastMonthStats = this.createEmptyUsagePeriod();
 		const todaySessionsList: TodaySessionSummary[] = [];
 		const workspaceSessionCounts = new Map<string, number>();
 		const workspaceInteractionCounts = new Map<string, number>();
@@ -2988,7 +2989,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._customizationFilesCache.clear();
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
-			const periods = { todayStats, last30DaysStats, monthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey };
+			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
 			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
 			this.deduplicateWorkspacePaths(workspaceSessionCounts, workspaceInteractionCounts);
@@ -3002,6 +3003,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			today: todayStats,
 			last30Days: last30DaysStats,
 			month: monthStats,
+			lastMonth: lastMonthStats,
 			locale: Intl.DateTimeFormat().resolvedOptions().locale,
 			lastUpdated: now,
 			customizationMatrix: this._lastCustomizationMatrix,
@@ -3179,7 +3181,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private aggregateSessionFileIntoStats(
 		r: { sessionFile: string; sessionData: SessionFileCache; mtime: number },
-		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string },
+		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
 		wsMaps: { workspaceSessionCounts: Map<string, number>; workspaceInteractionCounts: Map<string, number>; unresolvedWorkspaceIds: Set<string>; unresolvedWorkspaceInteractionCounts: Map<string, number> },
 		todaySessionsList: TodaySessionSummary[]
 	): void {
@@ -3188,15 +3190,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (interactions === 0) { return; }
 		const analysis = sessionData.usageAnalysis || this.buildDefaultSessionAnalysis();
 		const lastActivityUtcKey = this.computeLastActivityKey(sessionData, mtime);
-		if (lastActivityUtcKey < periods.last30DaysUtcStartKey) { return; }
-		periods.last30DaysStats.sessions++;
-		this.mergeUsageAnalysis(periods.last30DaysStats, analysis);
-		this.trackWorkspaceForSession(sessionFile, interactions,
-			wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
-			wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
+		const inLast30Days = lastActivityUtcKey >= periods.last30DaysUtcStartKey;
+		const inLastMonth = lastActivityUtcKey >= periods.lastMonthUtcStartKey && lastActivityUtcKey <= periods.lastMonthUtcEndKey;
+		// month-to-date is always a subset of last 30 days, so this guard also covers it.
+		if (!inLast30Days && !inLastMonth) { return; }
+		if (inLast30Days) {
+			periods.last30DaysStats.sessions++;
+			this.mergeUsageAnalysis(periods.last30DaysStats, analysis);
+			this.trackWorkspaceForSession(sessionFile, interactions,
+				wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
+				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
+		}
 		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
 			periods.monthStats.sessions++;
 			this.mergeUsageAnalysis(periods.monthStats, analysis);
+		}
+		if (inLastMonth) {
+			periods.lastMonthStats.sessions++;
+			this.mergeUsageAnalysis(periods.lastMonthStats, analysis);
 		}
 		if (lastActivityUtcKey === periods.todayUtcKey) {
 			periods.todayStats.sessions++;
@@ -3207,7 +3218,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private aggregateUsageFileResults(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
-		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string },
+		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
 		wsMaps: { workspaceSessionCounts: Map<string, number>; workspaceInteractionCounts: Map<string, number>; unresolvedWorkspaceIds: Set<string>; unresolvedWorkspaceInteractionCounts: Map<string, number> },
 		todaySessionsList: TodaySessionSummary[], totalFiles: number
 	): void {
@@ -5356,7 +5367,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			void this.analysisPanel.webview.postMessage({
 				command: 'updateStats',
 				data: {
-					today: analysisStats.today, last30Days: analysisStats.last30Days, month: analysisStats.month,
+					today: analysisStats.today, last30Days: analysisStats.last30Days, month: analysisStats.month, lastMonth: analysisStats.lastMonth,
 					locale: analysisStats.locale, customizationMatrix: analysisStats.customizationMatrix || null,
 					missedPotential: analysisStats.missedPotential || [], lastUpdated: analysisStats.lastUpdated.toISOString(),
 					backendConfigured: this.isBackendConfigured(),
@@ -8053,6 +8064,7 @@ ${this.getLoadingHtmlScript()}
       today: stats.today,
       last30Days: stats.last30Days,
       month: stats.month,
+      lastMonth: stats.lastMonth,
       locale: detectedLocale,
       customizationMatrix: stats.customizationMatrix || null,
       missedPotential: stats.missedPotential || [],

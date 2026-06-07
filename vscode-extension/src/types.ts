@@ -400,7 +400,10 @@ export interface TodaySessionSummary {
 export interface UsageAnalysisStats {
 today: UsageAnalysisPeriod;
 last30Days: UsageAnalysisPeriod;
+/** Current calendar month-to-date. */
 month: UsageAnalysisPeriod;
+/** Previous calendar month (full month). */
+lastMonth: UsageAnalysisPeriod;
 locale?: string;
 lastUpdated: Date;
 customizationMatrix?: WorkspaceCustomizationMatrix;
