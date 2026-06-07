@@ -300,7 +300,7 @@ function _scdlDistributeToDays(
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 57; // Fix output token counting: use tool.execution_complete events
+	private static readonly CACHE_VERSION = 58; // Track session.truncation events as a negative signal
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 
@@ -3127,11 +3127,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return toLocalDayKey(lastActivity);
 	}
 
-	private collectTodaySessionInfo(
-		sessionData: SessionFileCache, sessionFile: string,
-		analysis: SessionUsageAnalysis, interactions: number, mtime: number
-	): TodaySessionSummary {
-		const modelUsage = sessionData.modelUsage || {};
+	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {
 		let inputTok = 0, outputTok = 0, cachedTok = 0;
 		for (const usage of Object.values(modelUsage)) {
 			inputTok += usage.inputTokens || 0;
@@ -3141,6 +3137,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (sessionData.debugLogInputTokens !== undefined) { inputTok = sessionData.debugLogInputTokens; }
 		if (sessionData.debugLogOutputTokens !== undefined) { outputTok = sessionData.debugLogOutputTokens; }
 		if (sessionData.cacheReadTokens !== undefined) { cachedTok = sessionData.cacheReadTokens; }
+		return { inputTok, outputTok, cachedTok };
+	}
+
+	private collectTodaySessionInfo(
+		sessionData: SessionFileCache, sessionFile: string,
+		analysis: SessionUsageAnalysis, interactions: number, mtime: number
+	): TodaySessionSummary {
+		const modelUsage = sessionData.modelUsage || {};
+		const { inputTok, outputTok, cachedTok } = this._resolveSessionModelTokens(sessionData, modelUsage);
 		return {
 			title: sessionData.title || null, filePath: sessionFile, interactions,
 			toolCalls: analysis.toolCalls.total, inputTokens: inputTok, outputTokens: outputTok,
@@ -3149,6 +3154,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			estimatedCost: sessionData.copilotExactCostDollars ?? this.calculateEstimatedCost(modelUsage),
 			editor: this.detectEditorSource(sessionFile), models: Object.keys(modelUsage),
 			lastActivity: sessionData.lastInteraction || new Date(mtime).toISOString(),
+			...(sessionData.truncationCount ? { truncationCount: sessionData.truncationCount } : {}),
 		};
 	}
 
@@ -3792,7 +3798,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private buildOptionalSessionFields(
-		tokenResult: { thinkingTokens?: number; copilotNanoAiu?: number },
+		tokenResult: { thinkingTokens?: number; copilotNanoAiu?: number; truncationCount?: number; messagesRemovedByTruncation?: number },
 		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
 		finalCacheReadTokens: number | undefined,
 		copilotExactCostDollars: number | undefined,
@@ -3808,6 +3814,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(hasDebugLog ? { debugLogInputTokens: debugLogTokens!.inputTokens, debugLogOutputTokens: debugLogTokens!.outputTokens } : {}),
 			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
 			...(copilotExactCostDollars !== undefined ? { copilotExactCostDollars } : {}),
+			...(tokenResult.truncationCount ? { truncationCount: tokenResult.truncationCount, messagesRemovedByTruncation: tokenResult.messagesRemovedByTruncation } : {}),
 			...(hasEditScope ? {
 				linesAdded: usageAnalysis!.editScope!.linesAdded,
 				linesRemoved: usageAnalysis!.editScope!.linesRemoved ?? 0,
@@ -4571,6 +4578,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(sessionCache?.debugLogInputTokens !== undefined ? { debugLogInputTokens: sessionCache.debugLogInputTokens } : {}),
 			...(sessionCache?.debugLogOutputTokens !== undefined ? { debugLogOutputTokens: sessionCache.debugLogOutputTokens } : {}),
 			...(sessionCache?.modelTurns !== undefined ? { modelTurns: sessionCache.modelTurns } : {}),
+			...(sessionCache?.truncationCount ? { truncationCount: sessionCache.truncationCount, messagesRemovedByTruncation: sessionCache.messagesRemovedByTruncation } : {}),
 		};
 	}
 
@@ -5010,7 +5018,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return 0;
 	}
 
-	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number } {
+	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number } {
 		return _estimateTokensFromJsonlSession(fileContent);
 	}
 

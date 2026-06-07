@@ -115,6 +115,16 @@ body {
 	box-shadow: 0 6px 16px rgb(0, 0, 0, 0.4), 0 2px 4px rgb(0, 0, 0, 0.2);
 }
 
+.summary-card--warning {
+	border-color: var(--vscode-editorWarning-foreground, #d7a73b);
+	background: color-mix(in srgb, var(--vscode-editorWarning-foreground, #d7a73b) 8%, var(--bg-secondary));
+}
+
+.summary-card--warning .summary-label,
+.summary-card--warning .summary-value {
+	color: var(--vscode-editorWarning-foreground, #d7a73b);
+}
+
 .filename-link {
 	cursor: pointer;
 	color: var(--link-color);

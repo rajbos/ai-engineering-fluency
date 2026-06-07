@@ -277,6 +277,10 @@ export type TokenEstimationResult = {
 	dailyActualTokens: Record<string, number>;
 	/** Exact GitHub Copilot billing amount in nano-AI-units (0 when unavailable). Divide by 1e11 for USD. */
 	copilotNanoAiu: number;
+	/** Number of session.truncation events where at least one message was removed (breaking prompt cache). */
+	truncationCount?: number;
+	/** Total messages removed across all truncation events in this session. */
+	messagesRemovedByTruncation?: number;
 };
 
 /**
@@ -462,6 +466,10 @@ interface EjtsState {
 	dailyActualTokens: Record<string, number>;
 	/** Sum of totalNanoAiu from all session.shutdown events (exact Copilot billing). */
 	cliTotalNanoAiu: number;
+	/** Count of session.truncation events where at least one message was removed. */
+	truncationCount: number;
+	/** Total messages removed across all session.truncation events. */
+	messagesRemovedByTruncation: number;
 }
 
 /** Accumulate one model's metrics from a session.shutdown event into state. Returns the total tokens added. */
@@ -504,6 +512,16 @@ function _ejtsHandleShutdown(event: Record<string, unknown>, state: EjtsState): 
 		if (dayKey && dayKey !== 'Inval') {
 			state.dailyActualTokens[dayKey] = (state.dailyActualTokens[dayKey] || 0) + shutdownTotal;
 		}
+	}
+}
+
+/** Handle a session.truncation event — count events where messages were removed (prompt cache break). */
+function _ejtsHandleTruncation(event: Record<string, unknown>, state: EjtsState): void {
+	const data = event.data as Record<string, unknown> | undefined;
+	const removed = typeof data?.messagesRemovedDuringTruncation === 'number' ? data.messagesRemovedDuringTruncation : 0;
+	if (removed > 0) {
+		state.truncationCount++;
+		state.messagesRemovedByTruncation += removed;
 	}
 }
 
@@ -593,6 +611,8 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 			totalEstToolCalls: 0,
 			dailyActualTokens: {},
 			cliTotalNanoAiu: 0,
+			truncationCount: 0,
+			messagesRemovedByTruncation: 0,
 		};
 
 		for (const line of lines) {
@@ -600,6 +620,7 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 			try {
 				const event = JSON.parse(line) as Record<string, unknown>;
 				if (event.type === 'session.shutdown') { _ejtsHandleShutdown(event, state); }
+				else if (event.type === 'session.truncation') { _ejtsHandleTruncation(event, state); }
 				_ejtsHandleEventType(event, state);
 			} catch { /* skip invalid lines */ }
 		}
@@ -615,6 +636,7 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 			modelUsage: state.cliShutdownModelUsage ?? {},
 			dailyActualTokens: state.dailyActualTokens,
 			copilotNanoAiu: state.cliTotalNanoAiu,
+			...(state.truncationCount > 0 ? { truncationCount: state.truncationCount, messagesRemovedByTruncation: state.messagesRemovedByTruncation } : {}),
 		};
 	}
 }

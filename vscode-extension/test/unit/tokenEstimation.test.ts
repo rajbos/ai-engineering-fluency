@@ -1707,3 +1707,96 @@ test('reconstructJsonlStateAsync: skips invalid JSON lines without throwing', as
         const state = sessionState as Record<string, unknown>;
         assert.equal(state.x, 2);
 });
+
+// ── EventJsonlTokenStrategy: session.truncation event parsing ─────────────
+
+test('estimateTokensFromJsonlSession: session.truncation with removed messages increments truncationCount', () => {
+	const events = [
+		JSON.stringify({ type: 'user.message', data: { content: 'hello' } }),
+		JSON.stringify({
+			type: 'session.truncation',
+			data: {
+				tokenLimit: 128000,
+				preTruncationTokensInMessages: 13863,
+				preTruncationMessagesLength: 9,
+				postTruncationTokensInMessages: 8000,
+				postTruncationMessagesLength: 5,
+				tokensRemovedDuringTruncation: 5863,
+				messagesRemovedDuringTruncation: 4,
+				performedBy: 'BasicTruncator',
+			},
+		}),
+	].join('\n');
+	const result = estimateTokensFromJsonlSession(events);
+	assert.equal(result.truncationCount, 1, 'should count one truncation event');
+	assert.equal(result.messagesRemovedByTruncation, 4, 'should track messages removed');
+});
+
+test('estimateTokensFromJsonlSession: session.truncation with zero removed messages does not increment truncationCount', () => {
+	const events = [
+		JSON.stringify({
+			type: 'session.truncation',
+			data: {
+				tokenLimit: 128000,
+				preTruncationTokensInMessages: 13863,
+				preTruncationMessagesLength: 9,
+				postTruncationTokensInMessages: 13863,
+				postTruncationMessagesLength: 9,
+				tokensRemovedDuringTruncation: 0,
+				messagesRemovedDuringTruncation: 0,
+				performedBy: 'BasicTruncator',
+			},
+		}),
+	].join('\n');
+	const result = estimateTokensFromJsonlSession(events);
+	assert.equal(result.truncationCount, undefined, 'should not count truncation when no messages removed');
+	assert.equal(result.messagesRemovedByTruncation, undefined, 'should not track messages when none removed');
+});
+
+test('estimateTokensFromJsonlSession: multiple session.truncation events accumulate correctly', () => {
+	const makeTruncation = (removed: number) => JSON.stringify({
+		type: 'session.truncation',
+		data: { messagesRemovedDuringTruncation: removed, tokensRemovedDuringTruncation: removed * 100 },
+	});
+	const events = [
+		makeTruncation(3),  // should count
+		makeTruncation(0),  // should not count (no messages removed)
+		makeTruncation(2),  // should count
+	].join('\n');
+	const result = estimateTokensFromJsonlSession(events);
+	assert.equal(result.truncationCount, 2, 'should count only events where messages were removed');
+	assert.equal(result.messagesRemovedByTruncation, 5, 'should sum all removed messages');
+});
+
+test('estimateTokensFromJsonlSession: session.truncation missing data does not count', () => {
+	const events = [
+		JSON.stringify({ type: 'session.truncation' }),
+	].join('\n');
+	const result = estimateTokensFromJsonlSession(events);
+	assert.equal(result.truncationCount, undefined, 'missing data should not count as truncation');
+});
+
+test('estimateTokensFromJsonlSession: session.truncation with non-numeric messagesRemoved does not count', () => {
+	const events = [
+		JSON.stringify({
+			type: 'session.truncation',
+			data: { messagesRemovedDuringTruncation: 'lots' },
+		}),
+	].join('\n');
+	const result = estimateTokensFromJsonlSession(events);
+	assert.equal(result.truncationCount, undefined, 'non-numeric messagesRemoved should not count');
+});
+
+test('estimateTokensFromJsonlSession: truncation events do not affect token counts', () => {
+	const userOnly = JSON.stringify({ type: 'user.message', data: { content: 'hello world' } });
+	const withTruncation = [
+		JSON.stringify({ type: 'user.message', data: { content: 'hello world' } }),
+		JSON.stringify({
+			type: 'session.truncation',
+			data: { messagesRemovedDuringTruncation: 5 },
+		}),
+	].join('\n');
+	const resultA = estimateTokensFromJsonlSession(userOnly);
+	const resultB = estimateTokensFromJsonlSession(withTruncation);
+	assert.equal(resultA.tokens, resultB.tokens, 'truncation events should not affect estimated token counts');
+});

@@ -90,6 +90,10 @@ debugLogInputTokens?: number;
 debugLogOutputTokens?: number;
 /** Number of LLM API calls made during the session (from debug log). >1 means agent-mode multi-call session. */
 modelTurns?: number;
+/** Number of session.truncation events where messages were removed (breaking prompt cache). */
+truncationCount?: number;
+/** Total messages removed across all truncation events. */
+messagesRemovedByTruncation?: number;
 compactNumbers?: boolean;
 };
 
@@ -821,6 +825,19 @@ function buildSubAgentsCard(data: SessionLogData, stats: SummaryStats): string {
 </div>`;
 }
 
+function buildTruncationCard(data: SessionLogData): string {
+	if ((data.truncationCount ?? 0) <= 0) { return ''; }
+	const removed = data.messagesRemovedByTruncation ?? 0;
+	const sub = removed > 0
+		? `${removed} message${removed !== 1 ? 's' : ''} dropped — prompt cache broken`
+		: 'Context window truncated';
+	return `<div class="summary-card summary-card--warning" title="The AI dropped earlier messages to fit within the context window. This breaks prompt cache efficiency and may affect response quality.">
+<div class="summary-label">⚠️ Context Truncated</div>
+<div class="summary-value">${data.truncationCount}</div>
+<div class="summary-sub">${sub}</div>
+</div>`;
+}
+
 function buildFileNameCard(data: SessionLogData): string {
 	const isOpenCode = data.file.includes('opencode.db#ses_');
 	const displayName = escapeHtml(truncateText(getFileName(data.file), 30));
@@ -858,6 +875,7 @@ ${buildCachedTokensCard(data)}
 ${buildThinkingTokensCard(data, stats)}
 ${buildEffortCard(stats)}
 ${buildSubAgentsCard(data, stats)}
+${buildTruncationCard(data)}
 ${buildHierarchyCard(data)}
 <div class="summary-card">
 <div class="summary-label">🔧 Tool Calls</div>

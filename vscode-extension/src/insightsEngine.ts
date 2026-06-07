@@ -788,6 +788,29 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		},
 		weight: 42,
 	},
+
+	// ── Context-window health ─────────────────────────────────────────────────
+	{
+		id: 'session-context-truncated',
+		category: 'context',
+		severity: 'opportunity',
+		title: '⚠️ Context window was truncated in a session today',
+		buildBody: (ctx) => {
+			const truncated = (ctx.todaySessions ?? []).filter(s => (s.truncationCount ?? 0) > 0);
+			const count = truncated.length;
+			const totalRemoved = truncated.reduce((sum, s) => sum + (s.truncationCount ?? 0), 0);
+			const sessionWord = count === 1 ? 'session' : 'sessions';
+			const truncationWord = totalRemoved === 1 ? 'truncation event' : 'truncation events';
+			return `${count} of your ${sessionWord} today had ${totalRemoved} ${truncationWord} where the AI dropped earlier messages to fit within the context window. ` +
+				`This breaks the prompt cache (increasing latency and cost) and may have caused responses to lose track of earlier context. ` +
+				`To avoid truncation: start a new session when switching tasks, use /compact before the context fills, or break large tasks into smaller focused sessions.`;
+		},
+		appliesTo: (ctx) => {
+			return (ctx.todaySessions ?? []).some(s => (s.truncationCount ?? 0) > 0);
+		},
+		weight: 75,
+		allowToast: true,
+	},
 ];
 
 // ---------------------------------------------------------------------------

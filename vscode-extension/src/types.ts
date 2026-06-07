@@ -216,6 +216,10 @@ export interface SessionFileCache {
   debugLogChecked?: boolean; // Sentinel: true means we already looked for a debug log and found none
   /** Exact GitHub Copilot billing for this session in USD (from session.shutdown.totalNanoAiu or debug log copilotUsageNanoAiu). */
   copilotExactCostDollars?: number;
+  /** Number of session.truncation events where messages were removed (breaking prompt cache). 0 or absent means no truncation. */
+  truncationCount?: number;
+  /** Total messages removed across all truncation events. Absent when truncationCount is 0 or unavailable. */
+  messagesRemovedByTruncation?: number;
   /** Per-UTC-day token/interaction breakdown (keyed by YYYY-MM-DD UTC). Used for consistent daily stats. */
   dailyRollups?: { [utcDayKey: string]: DailyRollupEntry };
   linesAdded?: number;
@@ -407,6 +411,8 @@ export interface TodaySessionSummary {
   editor: string;
   models: string[];
   lastActivity: string;
+  /** Number of truncation events where messages were removed in this session. 0 or absent means no truncation. */
+  truncationCount?: number;
 }
 
 export interface UsageAnalysisStats {
@@ -575,6 +581,10 @@ export interface SessionLogData {
   debugLogOutputTokens?: number;
   /** Number of LLM API calls made during the session (from debug log). >1 means agent-mode multi-call session. */
   modelTurns?: number;
+  /** Number of session.truncation events where messages were removed (breaking prompt cache). 0 or absent means no truncation. */
+  truncationCount?: number;
+  /** Total messages removed across all truncation events. Absent when truncationCount is 0. */
+  messagesRemovedByTruncation?: number;
 }
 
 // ---------------------------------------------------------------------------
