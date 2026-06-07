@@ -3785,6 +3785,31 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return { preloadedContent, preloadedParsedJson };
 	}
 
+	private buildOptionalSessionFields(
+		tokenResult: { thinkingTokens?: number; copilotNanoAiu?: number },
+		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
+		finalCacheReadTokens: number | undefined,
+		copilotExactCostDollars: number | undefined,
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
+		usageAnalysis: SessionUsageAnalysis,
+	): Partial<SessionFileCache> {
+		const hasDebugLog = !!debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0;
+		const hasEditScope = usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0;
+		return {
+			thinkingTokens: tokenResult.thinkingTokens,
+			...(finalCacheReadTokens ? { cacheReadTokens: finalCacheReadTokens } : {}),
+			...(debugLogTokens?.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
+			...(hasDebugLog ? { debugLogInputTokens: debugLogTokens!.inputTokens, debugLogOutputTokens: debugLogTokens!.outputTokens } : {}),
+			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
+			...(copilotExactCostDollars !== undefined ? { copilotExactCostDollars } : {}),
+			...(hasEditScope ? {
+				linesAdded: usageAnalysis!.editScope!.linesAdded,
+				linesRemoved: usageAnalysis!.editScope!.linesRemoved ?? 0,
+				...(usageAnalysis!.editScope!.languageUsage ? { languageUsage: usageAnalysis!.editScope!.languageUsage } : {}),
+			} : {}),
+		};
+	}
+
 	private buildSessionDataObject(
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; cacheReadTokens?: number; copilotNanoAiu?: number },
 		interactions: number,
@@ -3798,25 +3823,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
 		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
 	): SessionFileCache {
-		const hasDebugLog = debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0;
-		const hasEditScope = usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0;
 		const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
 		const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
+		const optionals = this.buildOptionalSessionFields(tokenResult, debugLogTokens, finalCacheReadTokens, copilotExactCostDollars, dailyRollups, usageAnalysis);
 		return {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
-			lastInteraction: sessionMeta.lastInteraction, thinkingTokens: tokenResult.thinkingTokens,
-			actualTokens: resolvedActualTokens,
-			...(finalCacheReadTokens ? { cacheReadTokens: finalCacheReadTokens } : {}),
-			...(debugLogTokens?.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
-			...(hasDebugLog ? { debugLogInputTokens: debugLogTokens!.inputTokens, debugLogOutputTokens: debugLogTokens!.outputTokens } : {}),
-			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
-			...(copilotExactCostDollars !== undefined ? { copilotExactCostDollars } : {}),
-			...(hasEditScope ? {
-				linesAdded: usageAnalysis!.editScope!.linesAdded,
-				linesRemoved: usageAnalysis!.editScope!.linesRemoved ?? 0,
-				...(usageAnalysis!.editScope!.languageUsage ? { languageUsage: usageAnalysis!.editScope!.languageUsage } : {}),
-			} : {}),
+			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens,
+			...optionals,
 		};
 	}
 
@@ -3849,41 +3863,79 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return supplemented;
 	}
 
+	private buildDailyRollupEntry(
+		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
+		fraction: number,
+		interactions: number,
+		modelUsage: ModelUsage,
+		totalNanoAiu: number,
+	): DailyRollupEntry {
+		const dayModelUsage = this.scaledModelUsage(modelUsage, fraction);
+		const dayExactCost = totalNanoAiu > 0 ? totalNanoAiu * NANO_AIU_TO_DOLLARS * fraction : undefined;
+		return {
+			tokens: Math.round(tokenResult.tokens * fraction),
+			actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction),
+			thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction),
+			cachedReadTokens: 0,
+			interactions,
+			modelUsage: dayModelUsage,
+			...(dayExactCost !== undefined ? { copilotExactCostDollars: dayExactCost } : {}),
+		};
+	}
+
+	private computeRollupsFromFractions(
+		fractions: Record<string, number>,
+		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
+		modelUsage: ModelUsage,
+		interactions: number,
+		totalNanoAiu: number,
+	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
+		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
+		const totalFracInteractions = Math.max(1, interactions);
+		for (const [dayKey, fraction] of Object.entries(fractions)) {
+			const dayInteractions = Math.max(1, Math.round(totalFracInteractions * fraction));
+			dailyRollups[dayKey] = this.buildDailyRollupEntry(tokenResult, fraction, dayInteractions, modelUsage, totalNanoAiu);
+		}
+		return { dailyRollups, totalInteractions: totalFracInteractions };
+	}
+
+	private computeRollupsFromInteractionCounts(
+		interactionMap: { [localDayKey: string]: number },
+		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
+		modelUsage: ModelUsage,
+		totalNanoAiu: number,
+	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
+		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
+		const totalInteractions = Object.values(interactionMap).reduce((a, b) => a + b, 0);
+		for (const [dayKey, dayInteractionCount] of Object.entries(interactionMap)) {
+			const fraction = dayInteractionCount / totalInteractions;
+			dailyRollups[dayKey] = this.buildDailyRollupEntry(tokenResult, fraction, dayInteractionCount, modelUsage, totalNanoAiu);
+		}
+		return { dailyRollups, totalInteractions };
+	}
+
 	private computeDailyRollups(
 		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
 		modelUsage: ModelUsage,
 		interactions: number
 	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
-		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
 		const totalNanoAiu = tokenResult.copilotNanoAiu ?? 0;
 
 		// Prefer pre-computed fractions from ecosystem adapters (e.g. getDailyFractions()),
 		// which have accurate per-request timestamps. Fall back to dailyInteractions counts.
 		if (sessionMeta.dailyFractions && Object.keys(sessionMeta.dailyFractions).length > 0) {
-			const totalFracInteractions = Math.max(1, interactions);
-			for (const [dayKey, fraction] of Object.entries(sessionMeta.dailyFractions)) {
-				const dayModelUsage = this.scaledModelUsage(modelUsage, fraction);
-				const dayInteractions = Math.max(1, Math.round(totalFracInteractions * fraction));
-				const dayExactCost = totalNanoAiu > 0 ? totalNanoAiu * NANO_AIU_TO_DOLLARS * fraction : undefined;
-				dailyRollups[dayKey] = { tokens: Math.round(tokenResult.tokens * fraction), actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction), thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction), cachedReadTokens: 0, interactions: dayInteractions, modelUsage: dayModelUsage, ...(dayExactCost !== undefined ? { copilotExactCostDollars: dayExactCost } : {}) };
-			}
-			return { dailyRollups, totalInteractions: totalFracInteractions };
+			return this.computeRollupsFromFractions(sessionMeta.dailyFractions, tokenResult, modelUsage, interactions, totalNanoAiu);
 		}
 
 		const dailyInteractionMap = sessionMeta.dailyInteractions;
 		const totalInteractions = Object.values(dailyInteractionMap).reduce((a, b) => a + b, 0);
-
 		if (totalInteractions > 0) {
-			for (const [dayKey, dayInteractionCount] of Object.entries(dailyInteractionMap)) {
-				const fraction = dayInteractionCount / totalInteractions;
-				const dayModelUsage = this.scaledModelUsage(modelUsage, fraction);
-				const dayExactCost = totalNanoAiu > 0 ? totalNanoAiu * NANO_AIU_TO_DOLLARS * fraction : undefined;
-				dailyRollups[dayKey] = { tokens: Math.round(tokenResult.tokens * fraction), actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction), thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction), cachedReadTokens: 0, interactions: dayInteractionCount, modelUsage: dayModelUsage, ...(dayExactCost !== undefined ? { copilotExactCostDollars: dayExactCost } : {}) };
-			}
-		} else {
-			this.computeFallbackDailyRollup(dailyRollups, sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
+			return this.computeRollupsFromInteractionCounts(dailyInteractionMap, tokenResult, modelUsage, totalNanoAiu);
 		}
+
+		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
+		this.computeFallbackDailyRollup(dailyRollups, sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
 		return { dailyRollups, totalInteractions };
 	}
 

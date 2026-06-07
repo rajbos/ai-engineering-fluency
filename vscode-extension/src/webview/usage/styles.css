@@ -212,6 +212,7 @@ body {
 	text-align: center;
 	padding: 4px 8px;
 	vertical-align: middle;
+	color: var(--text-primary);
 }
 
 
