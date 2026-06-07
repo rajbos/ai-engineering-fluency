@@ -865,4 +865,10 @@
   ,"mcp_tavily_tavily-search": "Tavily Tavily-Search"
   ,"mcp_tavily_tavily_research": "Tavily Tavily-Research"
   ,"session_store_sql": "SQL Session Store"
+  ,"azure-advisor": "Azure Advisor"
+  ,"azure-devops-core_list_projects": "Azure DevOps Core List Projects"
+  ,"azure-devops-wit_work_item": "Azure DevOps Work Item"
+  ,"azure-devops-wit_work_item_write": "Azure DevOps Work Item Write"
+  ,"azure-group_resource_list": "Azure Group Resource List"
+  ,"azure-sql": "Azure SQL"
 }
