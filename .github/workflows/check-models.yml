@@ -60,9 +60,6 @@ jobs:
             exit 1
           fi
 
-      - name: Install dependencies
-        run: npm ci
-        
       - name: Check Copilot CLI version
         env:
           GH_TOKEN: ${{ secrets.GH_PAT }}
