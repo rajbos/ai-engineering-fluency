@@ -17,6 +17,9 @@ type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
 	standardRequests: number;
 	premiumRequests: number;
+	highCostRequests: number;
+	lowCostRequests: number;
+	mediumCostRequests: number;
 	unknownRequests: number;
 	totalRequests: number;
 };
@@ -390,11 +393,13 @@ return `
 // ─── Multi-model period helper ──────────────────────────────────────────────────
 
 /** Renders one column of the Multi-Model Usage section for a single time period. */
+// eslint-disable-next-line max-lines-per-function
 function renderMultiModelPeriod(
 title: string,
 switching: ModelSwitchingAnalysis,
-allStandardModels: readonly string[],
-allPremiumModels: readonly string[],
+allLowCostModels: readonly string[],
+allMediumCostModels: readonly string[],
+allHighCostModels: readonly string[],
 allUnknownModels: readonly string[],
 ): string {
 return `
@@ -416,53 +421,65 @@ return `
 </div>
 </div>
 <div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Tier:</div>
-<div style="min-height: 90px;">
-${allStandardModels.length > 0 ? `
+<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>
+<div style="min-height: 110px;">
+${allLowCostModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
-<span style="color: var(--link-color);">\u{1F535} Standard:</span>
-<span style="font-size: 11px; color: var(--text-primary);">${allStandardModels.map(escapeHtml).join(', ')}</span>
+<span style="color: #4ade80;">💚 Low cost:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allLowCostModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-${allPremiumModels.length > 0 ? `
+${allMediumCostModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
-<span style="color: var(--warning-fg);">\u2B50 Premium:</span>
-<span style="font-size: 11px; color: var(--text-primary);">${allPremiumModels.map(escapeHtml).join(', ')}</span>
+<span style="color: var(--link-color);">🟡 Medium cost:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allMediumCostModels.map(escapeHtml).join(', ')}</span>
+</div>
+` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
+${allHighCostModels.length > 0 ? `
+<div style="margin-bottom: 6px;">
+<span style="color: var(--warning-fg);">💸 High cost:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allHighCostModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
 ${allUnknownModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
-<span style="color: var(--text-muted);">\u2753 Unknown:</span>
+<span style="color: var(--text-muted);">❓ Unknown:</span>
 <span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : ''}
 </div>
 ${switching.totalRequests > 0 ? `
-<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 65px;">
+<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 85px;">
 <div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
-${switching.standardRequests > 0 ? `
+${switching.lowCostRequests > 0 ? `
 <div style="margin-bottom: 4px; font-size: 11px;">
-<span style="color: var(--link-color);">\u{1F535} Standard: </span>
-<span style="color: var(--text-primary);">${formatNumber(switching.standardRequests)} (${formatPercent((switching.standardRequests / switching.totalRequests) * 100)})</span>
+<span style="color: #4ade80;">💚 Low cost: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.lowCostRequests)} (${formatPercent((switching.lowCostRequests / switching.totalRequests) * 100)})</span>
 </div>
 ` : ''}
-${switching.premiumRequests > 0 ? `
+${switching.mediumCostRequests > 0 ? `
 <div style="margin-bottom: 4px; font-size: 11px;">
-<span style="color: var(--warning-fg);">\u2B50 Premium: </span>
-<span style="color: var(--text-primary);">${formatNumber(switching.premiumRequests)} (${formatPercent((switching.premiumRequests / switching.totalRequests) * 100)})</span>
+<span style="color: var(--link-color);">🟡 Medium cost: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.mediumCostRequests)} (${formatPercent((switching.mediumCostRequests / switching.totalRequests) * 100)})</span>
+</div>
+` : ''}
+${switching.highCostRequests > 0 ? `
+<div style="margin-bottom: 4px; font-size: 11px;">
+<span style="color: var(--warning-fg);">💸 High cost: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.highCostRequests)} (${formatPercent((switching.highCostRequests / switching.totalRequests) * 100)})</span>
 </div>
 ` : ''}
 ${switching.unknownRequests > 0 ? `
 <div style="margin-bottom: 4px; font-size: 11px;">
-<span style="color: var(--text-muted);">\u2753 Unknown: </span>
+<span style="color: var(--text-muted);">❓ Unknown: </span>
 <span style="color: var(--text-primary);">${formatNumber(switching.unknownRequests)} (${formatPercent((switching.unknownRequests / switching.totalRequests) * 100)})</span>
 </div>
 ` : ''}
 </div>
 ` : ''}
-${switching.mixedTierSessions > 0 ? `
+${switching.mixedCostSessions > 0 ? `
 <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-<span style="font-size: 11px; color: var(--link-color);">\u{1F500} Mixed tier sessions: ${formatNumber(switching.mixedTierSessions)}</span>
+<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed cost sessions: ${formatNumber(switching.mixedCostSessions)}</span>
 </div>
 ` : ''}
 </div>
@@ -801,7 +818,7 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 			byServer: mcpTools.byServer ?? {},
 			byTool: mcpTools.byTool ?? {},
 		},
-		modelSwitching: p.modelSwitching ?? {
+		modelSwitching: {
 			modelsPerSession: [],
 			totalSessions: 0,
 			averageModelsPerSession: 0,
@@ -812,10 +829,18 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 			premiumModels: [],
 			unknownModels: [],
 			mixedTierSessions: 0,
+			lowCostModels: [],
+			mediumCostModels: [],
+			highCostModels: [],
+			mixedCostSessions: 0,
 			standardRequests: 0,
 			premiumRequests: 0,
+			lowCostRequests: 0,
+			mediumCostRequests: 0,
+			highCostRequests: 0,
 			unknownRequests: 0,
 			totalRequests: 0,
+			...(p.modelSwitching ?? {}),
 		},
 		thinkingEffortUsage: p.thinkingEffortUsage,
 	};
@@ -1353,7 +1378,9 @@ function buildUsageAllKeysSets(stats: UsageAnalysisStats): {
 	allMcpToolKeys: string[];
 	allMcpServerKeys: string[];
 	allStandardModels: string[];
-	allPremiumModels: string[];
+	allHighCostModels: string[];
+	allLowCostModels: string[];
+	allMediumCostModels: string[];
 	allUnknownModels: string[];
 } {
 	return {
@@ -1361,7 +1388,9 @@ function buildUsageAllKeysSets(stats: UsageAnalysisStats): {
 		allMcpToolKeys: [...new Set([...Object.keys(stats.today.mcpTools.byTool), ...Object.keys(stats.last30Days.mcpTools.byTool), ...Object.keys(stats.month.mcpTools.byTool)])],
 		allMcpServerKeys: [...new Set([...Object.keys(stats.today.mcpTools.byServer), ...Object.keys(stats.last30Days.mcpTools.byServer), ...Object.keys(stats.month.mcpTools.byServer)])],
 		allStandardModels: [...new Set([...stats.today.modelSwitching.standardModels, ...stats.last30Days.modelSwitching.standardModels, ...stats.month.modelSwitching.standardModels])],
-		allPremiumModels: [...new Set([...stats.today.modelSwitching.premiumModels, ...stats.last30Days.modelSwitching.premiumModels, ...stats.month.modelSwitching.premiumModels])],
+		allHighCostModels: [...new Set([...stats.today.modelSwitching.highCostModels, ...stats.last30Days.modelSwitching.highCostModels, ...stats.month.modelSwitching.highCostModels])],
+		allLowCostModels: [...new Set([...stats.today.modelSwitching.lowCostModels, ...stats.last30Days.modelSwitching.lowCostModels, ...stats.month.modelSwitching.lowCostModels])],
+		allMediumCostModels: [...new Set([...stats.today.modelSwitching.mediumCostModels, ...stats.last30Days.modelSwitching.mediumCostModels, ...stats.month.modelSwitching.mediumCostModels])],
 		allUnknownModels: [...new Set([...stats.today.modelSwitching.unknownModels, ...stats.last30Days.modelSwitching.unknownModels, ...stats.month.modelSwitching.unknownModels])],
 	};
 }
@@ -1668,8 +1697,9 @@ function buildUsageRootHtml(
 	allToolKeys: string[],
 	allMcpToolKeys: string[],
 	allMcpServerKeys: string[],
-	allStandardModels: string[],
-	allPremiumModels: string[],
+	allHighCostModels: string[],
+	allLowCostModels: string[],
+	allMediumCostModels: string[],
 	allUnknownModels: string[],
 ): string {
 	return `
@@ -1713,7 +1743,7 @@ function buildUsageRootHtml(
 
 			${buildSessionsTabPanelHtml(stats)}
 			${buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs)}
-			${buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allStandardModels, allPremiumModels, allUnknownModels)}
+			${buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels)}
 			${buildHealthTabPanelHtml(customizationHtml, stats)}
 			${buildReposAndAgentTabPanelsHtml()}
 			${buildInsightsTabPanelHtml(stats.insights ?? [])}
@@ -1864,8 +1894,9 @@ function buildToolsTabPanelHtml(
 	allToolKeys: string[],
 	allMcpToolKeys: string[],
 	allMcpServerKeys: string[],
-	allStandardModels: string[],
-	allPremiumModels: string[],
+	allHighCostModels: string[],
+	allLowCostModels: string[],
+	allMediumCostModels: string[],
 	allUnknownModels: string[],
 ): string {
 	return `
@@ -1905,9 +1936,9 @@ function buildToolsTabPanelHtml(
 				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
 				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
 				<div class="three-column">
-					${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
-					${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
-					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allStandardModels, allPremiumModels, allUnknownModels)}
+					${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
+					${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
+					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
 				</div>
 			</div>
 		</div>`;
@@ -1959,8 +1990,9 @@ function renderLayout(stats: UsageAnalysisStats): void {
 		allKeys.allToolKeys,
 		allKeys.allMcpToolKeys,
 		allKeys.allMcpServerKeys,
-		allKeys.allStandardModels,
-		allKeys.allPremiumModels,
+		allKeys.allHighCostModels,
+		allKeys.allLowCostModels,
+		allKeys.allMediumCostModels,
 		allKeys.allUnknownModels,
 	);
 

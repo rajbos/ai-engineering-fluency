@@ -36,4 +36,15 @@ export type ModelSwitchingAnalysis = {
 	premiumModels: string[];
 	unknownModels: string[];
 	mixedTierSessions: number;
+	lowCostModels: string[];
+	mediumCostModels: string[];
+	highCostModels: string[];
+	mixedCostSessions: number;
+	lowCostRequests?: number;
+	mediumCostRequests?: number;
+	highCostRequests?: number;
+	standardRequests?: number;
+	premiumRequests?: number;
+	unknownRequests?: number;
+	totalRequests?: number;
 };

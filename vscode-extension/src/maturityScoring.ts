@@ -157,8 +157,8 @@ function countNonAutoTools(byTool: Record<string, number>): number {
 	return Object.keys(byTool).filter(t => !AUTOMATIC_TOOL_SET.has(t.toLowerCase()) && !t.startsWith('__slash__')).length;
 }
 
-function _peHasModelSwitching(mixedTierSessions: number, switchingFrequency: number): boolean {
-	return mixedTierSessions > 0 || switchingFrequency > 0;
+function _peHasModelSwitching(mixedTierSessions: number, mixedCostSessions: number, switchingFrequency: number): boolean {
+	return mixedTierSessions > 0 || mixedCostSessions > 0 || switchingFrequency > 0;
 }
 function _peHasAgentMode(agentCount: number, cliCount: number): boolean {
 	return agentCount > 0 || cliCount > 0;
@@ -212,8 +212,9 @@ export type CfstmFd = {
 	ctxTerminalLastCommand: number; ctxTerminalSelection: number;
 	ctxByKind: Record<string, number>;
 	mcpTotal: number; mcpByServer: Record<string, number>;
-	mixedTierSessions: number; switchingFreqSum: number; switchingFreqCount: number;
+	mixedTierSessions: number; mixedCostSessions: number; switchingFreqSum: number; switchingFreqCount: number;
 	standardModels: Set<string>; premiumModels: Set<string>;
+	lowCostModels: Set<string>; mediumCostModels: Set<string>; highCostModels: Set<string>;
 	multiFileEdits: number; filesPerEditSum: number; filesPerEditCount: number;
 	editsAgentCount: number; workspaceAgentCount: number;
 	repositories: Set<string>; repositoriesWithCustomization: Set<string>;
@@ -237,7 +238,7 @@ function _cfstmComputeDerived(fd: CfstmFd, dashboardSessions: number): CfstmDeri
 	return {
 		totalInteractions,
 		avgTurnsPerSession,
-		hasModelSwitching: fd.mixedTierSessions > 0 || switchingFrequency > 0,
+		hasModelSwitching: fd.mixedTierSessions > 0 || fd.mixedCostSessions > 0 || switchingFrequency > 0,
 		hasAgentMode: (fd.agentModeCount + fd.cliModeCount) > 0,
 		nonAutoToolCount: countNonAutoTools(fd.toolCallsByTool),
 		avgFilesPerSession: fd.filesPerEditCount > 0 ? fd.filesPerEditSum / fd.filesPerEditCount : 0,
@@ -277,7 +278,7 @@ function _cfstmScorePromptEng(fd: CfstmFd, d: CfstmDerived): { stage: Stage; tip
 	if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage2MinInteractions) { peStage = promoteStage(peStage, 2); }
 	if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage3MinInteractions && (usedSlashCommands.length >= STAGE_THRESHOLDS.promptEngineering.stage3MinSlashCommands || hasAgentMode)) { peStage = promoteStage(peStage, 3); }
 	if (totalInteractions >= STAGE_THRESHOLDS.promptEngineering.stage4MinInteractions && hasAgentMode && (hasModelSwitching || usedSlashCommands.length >= STAGE_THRESHOLDS.promptEngineering.stage4MinSlashCommands)) { peStage = 4; }
-	if (hasModelSwitching && fd.mixedTierSessions > 0) { peStage = promoteStage(peStage, 3); }
+	if (hasModelSwitching && (fd.mixedTierSessions > 0 || fd.mixedCostSessions > 0)) { peStage = promoteStage(peStage, 3); }
 	return { stage: peStage, tips: _cfstmPeTips(peStage, hasAgentMode, usedSlashCommands, hasModelSwitching) };
 }
 
@@ -405,7 +406,7 @@ function _cfstmScoreCustomization(fd: CfstmFd): { stage: Stage; tips: string[] }
 	const totalRepos = fd.repositories.size;
 	const reposWithCustomization = fd.repositoriesWithCustomization.size;
 	const customizationRate = totalRepos > 0 ? reposWithCustomization / totalRepos : 0;
-	const uniqueModels = new Set([...fd.standardModels, ...fd.premiumModels]);
+	const uniqueModels = new Set([...fd.standardModels, ...fd.premiumModels, ...fd.lowCostModels, ...fd.mediumCostModels, ...fd.highCostModels]);
 	const cuStage = _cfstmComputeCustomStage(reposWithCustomization, customizationRate, uniqueModels);
 	return { stage: cuStage, tips: _cfstmBuildCustomTips(cuStage, reposWithCustomization, totalRepos) };
 }
@@ -448,7 +449,7 @@ function _speComputeEvidence(p: UsageAnalysisPeriod): SpeResult {
 	const usedSlashCommands = getUsedSlashCommands(p.toolCalls.byTool);
 	if (usedSlashCommands.length > 0) { evidence.push(`Used slash commands: /${usedSlashCommands.join(', /')}`); }
 
-	const hasModelSwitching = _peHasModelSwitching(p.modelSwitching.mixedTierSessions, p.modelSwitching.switchingFrequency);
+	const hasModelSwitching = _peHasModelSwitching(p.modelSwitching.mixedTierSessions, p.modelSwitching.mixedCostSessions, p.modelSwitching.switchingFrequency);
 	const hasAgentMode = _peHasAgentMode(p.modeUsage.agent, p.modeUsage.cli);
 
 	if (_peQualifiesForStage3(totalInteractions, usedSlashCommands, hasAgentMode)) { stage = 3; }
@@ -456,7 +457,7 @@ function _speComputeEvidence(p: UsageAnalysisPeriod): SpeResult {
 
 	if (hasModelSwitching) {
 		evidence.push(`Switched models in ${Math.round(p.modelSwitching.switchingFrequency)}% of sessions`);
-		if (stage < 4) { if (p.modelSwitching.mixedTierSessions > 0) { stage = promoteStage(stage, 3); } }
+		if (stage < 4) { if (p.modelSwitching.mixedTierSessions > 0 || p.modelSwitching.mixedCostSessions > 0) { stage = promoteStage(stage, 3); } }
 	}
 	return { stage, evidence, usedSlashCommands, hasModelSwitching, hasAgentMode };
 }
@@ -742,7 +743,7 @@ function _scoreCustomization(p: UsageAnalysisPeriod, lastCustomizationMatrix: Wo
 	const totalRepos = matrix?.totalWorkspaces ?? 0;
 	const reposWithCustomization = totalRepos - (matrix?.workspacesWithIssues ?? 0);
 	const customizationRate = totalRepos > 0 ? (reposWithCustomization / totalRepos) : 0;
-	const uniqueModels = [...new Set([...p.modelSwitching.standardModels, ...p.modelSwitching.premiumModels])];
+	const uniqueModels = [...new Set([...p.modelSwitching.standardModels, ...p.modelSwitching.premiumModels, ...p.modelSwitching.lowCostModels, ...p.modelSwitching.mediumCostModels, ...p.modelSwitching.highCostModels])];
 	const stage = _cuComputeStage(customizationRate, reposWithCustomization, uniqueModels.length, T);
 
 	if (totalRepos > 0) { evidence.push(`Worked in ${totalRepos} repositor${totalRepos === 1 ? 'y' : 'ies'}`); }
@@ -857,8 +858,9 @@ type FluencyInputData = {
 	ctxTerminalLastCommand: number; ctxTerminalSelection: number;
 	ctxByKind: Record<string, number>;
 	mcpTotal: number; mcpByServer: Record<string, number>;
-	mixedTierSessions: number; switchingFreqSum: number; switchingFreqCount: number;
+	mixedTierSessions: number; mixedCostSessions: number; switchingFreqSum: number; switchingFreqCount: number;
 	standardModels: Set<string>; premiumModels: Set<string>;
+	lowCostModels: Set<string>; mediumCostModels: Set<string>; highCostModels: Set<string>;
 	multiFileEdits: number; filesPerEditSum: number; filesPerEditCount: number;
 	editsAgentCount: number; workspaceAgentCount: number;
 	repositories: Set<string>; repositoriesWithCustomization: Set<string>;
@@ -886,7 +888,7 @@ function _calcFluencyPE(fd: FluencyInputData, cv: FluencyVars): FluencyStageResu
 	if (cv.totalInteractions >= T.stage2MinInteractions) { stage = promoteStage(stage, 2); }
 	if (_peQualifiesForStage3(cv.totalInteractions, cv.usedSlashCommands, cv.hasAgentMode)) { stage = promoteStage(stage, 3); }
 	if (_peQualifiesForStage4(cv.totalInteractions, cv.hasAgentMode, cv.hasModelSwitching, cv.usedSlashCommands)) { stage = 4; }
-	if (cv.hasModelSwitching && fd.mixedTierSessions > 0) { stage = promoteStage(stage, 3); }
+	if (cv.hasModelSwitching && (fd.mixedTierSessions > 0 || fd.mixedCostSessions > 0)) { stage = promoteStage(stage, 3); }
 	return { stage, tips: _buildPeTips(stage, cv.hasAgentMode, cv.hasModelSwitching, cv.usedSlashCommands) };
 }
 
@@ -987,7 +989,7 @@ function _calcFluencyCu(fd: FluencyInputData, cv: FluencyVars): FluencyStageResu
 	const totalRepos = fd.repositories.size;
 	const reposWithCustomization = fd.repositoriesWithCustomization.size;
 	const customizationRate = totalRepos > 0 ? reposWithCustomization / totalRepos : 0;
-	const uniqueModels = new Set([...fd.standardModels, ...fd.premiumModels]);
+	const uniqueModels = new Set([...fd.standardModels, ...fd.premiumModels, ...fd.lowCostModels, ...fd.mediumCostModels, ...fd.highCostModels]);
 	const stage = _cuComputeStage(customizationRate, reposWithCustomization, uniqueModels.size, T);
 	const uncustomized = totalRepos - reposWithCustomization;
 	const tips: string[] = [];
@@ -1029,7 +1031,7 @@ export function calculateFluencyScoreForTeamMember(fd: FluencyInputData, dashboa
 	const cv: FluencyVars = {
 		totalInteractions,
 		avgTurnsPerSession,
-		hasModelSwitching: fd.mixedTierSessions > 0 || switchingFrequency > 0,
+		hasModelSwitching: fd.mixedTierSessions > 0 || fd.mixedCostSessions > 0 || switchingFrequency > 0,
 		hasAgentMode: (fd.agentModeCount + fd.cliModeCount) > 0,
 		nonAutoToolCount: countNonAutoTools(fd.toolCallsByTool),
 		avgFilesPerSession: fd.filesPerEditCount > 0 ? fd.filesPerEditSum / fd.filesPerEditCount : 0,

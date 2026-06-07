@@ -3028,7 +3028,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 				modelsPerSession: [], totalSessions: 0, averageModelsPerSession: 0,
 				maxModelsPerSession: 0, minModelsPerSession: 0, switchingFrequency: 0,
 				standardModels: [], premiumModels: [], unknownModels: [], mixedTierSessions: 0,
-				standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0
+				standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0,
+				lowCostModels: [], mediumCostModels: [], highCostModels: [], mixedCostSessions: 0,
+				lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0
 			},
 			repositories: [],
 			repositoriesWithCustomization: [],
@@ -3084,7 +3086,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			modelSwitching: {
 				uniqueModels: [], modelCount: 0, switchCount: 0,
 				tiers: { standard: [], premium: [], unknown: [] }, hasMixedTiers: false,
-				standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0
+				standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0,
+				costBuckets: { low: [], medium: [], high: [], unknown: [] }, hasMixedCosts: false,
+				lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0
 			}
 		};
 	}
@@ -3774,6 +3778,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return { preloadedContent, preloadedParsedJson };
 	}
 
+	// eslint-disable-next-line complexity
 	private buildSessionDataObject(
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; cacheReadTokens?: number; copilotNanoAiu?: number },
 		interactions: number,
@@ -3838,6 +3843,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return supplemented;
 	}
 
+	// eslint-disable-next-line sonarjs/cognitive-complexity
 	private computeDailyRollups(
 		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
@@ -3986,7 +3992,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 				standardRequests: 0,
 				premiumRequests: 0,
 				unknownRequests: 0,
-				totalRequests: 0
+				totalRequests: 0,
+				costBuckets: { low: [], medium: [], high: [], unknown: [] },
+				hasMixedCosts: false,
+				lowCostRequests: 0,
+				mediumCostRequests: 0,
+				highCostRequests: 0
 			}
 		};
 
@@ -4001,8 +4012,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 				standardRequests: 0,
 				premiumRequests: 0,
 				unknownRequests: 0,
-				totalRequests: 0
+				totalRequests: 0,
+				costBuckets: { low: [], medium: [], high: [], unknown: [] },
+				hasMixedCosts: false,
+				lowCostRequests: 0,
+				mediumCostRequests: 0,
+				highCostRequests: 0
 			};
+		} else {
+			analysis.modelSwitching.costBuckets ??= { low: [], medium: [], high: [], unknown: [] };
+			analysis.modelSwitching.hasMixedCosts ??= false;
+			analysis.modelSwitching.lowCostRequests ??= 0;
+			analysis.modelSwitching.mediumCostRequests ??= 0;
+			analysis.modelSwitching.highCostRequests ??= 0;
 		}
 
 		return analysis;
@@ -4161,7 +4183,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {}
 			},
 			mcpTools: { total: 0, byServer: {}, byTool: {} },
-			modelSwitching: { uniqueModels: [], modelCount: 0, switchCount: 0, tiers: { standard: [], premium: [], unknown: [] }, hasMixedTiers: false, standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0 }
+			modelSwitching: { uniqueModels: [], modelCount: 0, switchCount: 0, tiers: { standard: [], premium: [], unknown: [] }, hasMixedTiers: false, standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0, costBuckets: { low: [], medium: [], high: [], unknown: [] }, hasMixedCosts: false, lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0 }
 		};
 	}
 
@@ -6719,7 +6741,7 @@ ${hashtag}`;
   }
 
   private createUserFluencyAccumulator(): any {
-    return { askModeCount: 0, editModeCount: 0, agentModeCount: 0, planModeCount: 0, customAgentModeCount: 0, cliModeCount: 0, toolCallsTotal: 0, toolCallsByTool: {}, ctxFile: 0, ctxSelection: 0, ctxSymbol: 0, ctxCodebase: 0, ctxWorkspace: 0, ctxTerminal: 0, ctxVscode: 0, ctxClipboard: 0, ctxChanges: 0, ctxProblemsPanel: 0, ctxOutputPanel: 0, ctxTerminalLastCommand: 0, ctxTerminalSelection: 0, ctxByKind: {}, mcpTotal: 0, mcpByServer: {}, mixedTierSessions: 0, switchingFreqSum: 0, switchingFreqCount: 0, standardModels: new Set(), premiumModels: new Set(), multiFileEdits: 0, filesPerEditSum: 0, filesPerEditCount: 0, editsAgentCount: 0, workspaceAgentCount: 0, repositories: new Set(), repositoriesWithCustomization: new Set(), applyRateSum: 0, applyRateCount: 0, multiTurnSessions: 0, turnsPerSessionSum: 0, turnsPerSessionCount: 0, sessionCount: 0, durationMsSum: 0, durationMsCount: 0 };
+    return { askModeCount: 0, editModeCount: 0, agentModeCount: 0, planModeCount: 0, customAgentModeCount: 0, cliModeCount: 0, toolCallsTotal: 0, toolCallsByTool: {}, ctxFile: 0, ctxSelection: 0, ctxSymbol: 0, ctxCodebase: 0, ctxWorkspace: 0, ctxTerminal: 0, ctxVscode: 0, ctxClipboard: 0, ctxChanges: 0, ctxProblemsPanel: 0, ctxOutputPanel: 0, ctxTerminalLastCommand: 0, ctxTerminalSelection: 0, ctxByKind: {}, mcpTotal: 0, mcpByServer: {}, mixedTierSessions: 0, mixedCostSessions: 0, switchingFreqSum: 0, switchingFreqCount: 0, standardModels: new Set(), premiumModels: new Set(), lowCostModels: new Set(), mediumCostModels: new Set(), highCostModels: new Set(), multiFileEdits: 0, filesPerEditSum: 0, filesPerEditCount: 0, editsAgentCount: 0, workspaceAgentCount: 0, repositories: new Set(), repositoriesWithCustomization: new Set(), applyRateSum: 0, applyRateCount: 0, multiTurnSessions: 0, turnsPerSessionSum: 0, turnsPerSessionCount: 0, sessionCount: 0, durationMsSum: 0, durationMsCount: 0 };
   }
 
   private accumulateEntityJsonFields(entity: any, fd: any): void {
@@ -6769,14 +6791,19 @@ ${hashtag}`;
     } catch { /* ignore */ }
   }
 
+  // eslint-disable-next-line complexity
   private accumulateModelSwitchingJson(entity: any, fd: any): void {
     if (!entity.modelSwitchingJson) { return; }
     try {
       const ms = JSON.parse(entity.modelSwitchingJson);
       fd.mixedTierSessions += ms.mixedTierSessions ?? 0;
+      fd.mixedCostSessions += ms.mixedCostSessions ?? 0;
       if (typeof ms.switchingFrequency === "number") { fd.switchingFreqSum += ms.switchingFrequency; fd.switchingFreqCount++; }
       for (const m of ms.standardModels ?? []) { fd.standardModels.add(m as string); }
       for (const m of ms.premiumModels ?? []) { fd.premiumModels.add(m as string); }
+      for (const m of ms.lowCostModels ?? []) { fd.lowCostModels.add(m as string); }
+      for (const m of ms.mediumCostModels ?? []) { fd.mediumCostModels.add(m as string); }
+      for (const m of ms.highCostModels ?? []) { fd.highCostModels.add(m as string); }
     } catch { /* ignore */ }
   }
 

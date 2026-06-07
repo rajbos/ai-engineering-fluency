@@ -1069,6 +1069,30 @@ export function getModelTier(modelId: string, modelPricing: { [key: string]: Mod
 	return 'unknown';
 }
 
+function _costBucketFromPricing(pricing: ModelPricing): 'low' | 'medium' | 'high' | 'unknown' {
+	const costPerM = pricing.copilotPricing?.inputCostPerMillion ?? null;
+	if (costPerM !== null) {
+		if (costPerM < 2) { return 'low'; }
+		if (costPerM < 5) { return 'medium'; }
+		return 'high';
+	}
+	if (typeof pricing.multiplier === 'number') {
+		if (pricing.multiplier === 0) { return 'low'; }
+		if (pricing.multiplier <= 1) { return 'medium'; }
+		return 'high';
+	}
+	return 'unknown';
+}
+
+export function getModelCostBucket(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): 'low' | 'medium' | 'high' | 'unknown' {
+	const pricingInfo = modelPricing[modelId];
+	if (pricingInfo) { return _costBucketFromPricing(pricingInfo); }
+	for (const [key, value] of Object.entries(modelPricing)) {
+		if (modelId.includes(key) || key.includes(modelId)) { return _costBucketFromPricing(value); }
+	}
+	return 'unknown';
+}
+
 /**
  * Calculate estimated cost in USD based on model usage.
  * Applies cache-aware pricing when cachedReadTokens / cacheCreationTokens breakdowns

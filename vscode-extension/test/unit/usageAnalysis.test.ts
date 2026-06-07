@@ -45,6 +45,9 @@ function emptyAnalysis(): SessionUsageAnalysis {
             tiers: { standard: [], premium: [], unknown: [] },
             hasMixedTiers: false,
             standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0,
+            costBuckets: { low: [], medium: [], high: [], unknown: [] },
+            hasMixedCosts: false,
+            lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0,
         },
     };
 }
@@ -61,6 +64,8 @@ function emptyPeriod(): UsageAnalysisPeriod {
             maxModelsPerSession: 0, minModelsPerSession: 0, switchingFrequency: 0,
             standardModels: [], premiumModels: [], unknownModels: [], mixedTierSessions: 0,
             standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0,
+            lowCostModels: [], mediumCostModels: [], highCostModels: [], mixedCostSessions: 0,
+            lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0,
         },
         repositories: [], repositoriesWithCustomization: [],
         editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0 },
@@ -89,7 +94,7 @@ function makeMockDeps(overrides: Partial<{
                 toolCalls: { total: 0, byTool: {} },
                 mcpTools: { total: 0, byServer: {}, byTool: {} },
                 contextReferences: { total: 0, byType: {}, byRepository: {} },
-                modelSwitching: { uniqueModels: [], modelCount: 0, switchCount: 0, totalRequests: 0, hasMixedTiers: false, tiers: { standard: [], premium: [], unknown: [] }, standardRequests: 0, premiumRequests: 0, unknownRequests: 0 },
+                modelSwitching: { uniqueModels: [], modelCount: 0, switchCount: 0, totalRequests: 0, hasMixedTiers: false, tiers: { standard: [], premium: [], unknown: [] }, standardRequests: 0, premiumRequests: 0, unknownRequests: 0, costBuckets: { low: [], medium: [], high: [], unknown: [] }, hasMixedCosts: false, lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0 },
             }),
         });
     }
@@ -195,15 +200,27 @@ test('mergeUsageAnalysis: tracks mixed-tier sessions when modelCount > 0', () =>
     a.modelSwitching.tiers.premium = ['claude-sonnet'];
     a.modelSwitching.standardRequests = 3;
     a.modelSwitching.premiumRequests = 2;
+    a.modelSwitching.lowCostRequests = 1;
+    a.modelSwitching.mediumCostRequests = 3;
+    a.modelSwitching.highCostRequests = 1;
+    a.modelSwitching.hasMixedCosts = true;
+    a.modelSwitching.costBuckets.low = ['gpt-4o-mini'];
+    a.modelSwitching.costBuckets.medium = ['claude-sonnet'];
     a.modelSwitching.totalRequests = 5;
     mergeUsageAnalysis(period, a);
 
     assert.equal(period.modelSwitching.mixedTierSessions, 1);
+    assert.equal(period.modelSwitching.mixedCostSessions, 1);
     assert.equal(period.modelSwitching.totalSessions, 1);
     assert.ok(period.modelSwitching.standardModels.includes('gpt-4o-mini'));
     assert.ok(period.modelSwitching.premiumModels.includes('claude-sonnet'));
+    assert.ok(period.modelSwitching.lowCostModels.includes('gpt-4o-mini'));
+    assert.ok(period.modelSwitching.mediumCostModels.includes('claude-sonnet'));
     assert.equal(period.modelSwitching.standardRequests, 3);
     assert.equal(period.modelSwitching.premiumRequests, 2);
+    assert.equal(period.modelSwitching.lowCostRequests, 1);
+    assert.equal(period.modelSwitching.mediumCostRequests, 3);
+    assert.equal(period.modelSwitching.highCostRequests, 1);
 });
 
 test('mergeUsageAnalysis: sessions with modelCount=0 do not affect switching stats', () => {
@@ -912,9 +929,14 @@ test('calculateModelSwitching: two models from different tiers sets hasMixedTier
     await calculateModelSwitching(deps, FAKE_JSON_PATH, analysis, content);
     assert.equal(analysis.modelSwitching.modelCount, 2);
     assert.ok(analysis.modelSwitching.hasMixedTiers, 'should detect mixed tiers');
+    assert.ok(analysis.modelSwitching.hasMixedCosts, 'should detect mixed costs');
     assert.equal(analysis.modelSwitching.switchCount, 1);
     assert.equal(analysis.modelSwitching.standardRequests, 1);
     assert.equal(analysis.modelSwitching.premiumRequests, 1);
+    assert.equal(analysis.modelSwitching.lowCostRequests, 1);
+    assert.equal(analysis.modelSwitching.mediumCostRequests, 1);
+    assert.deepEqual(analysis.modelSwitching.costBuckets.low, ['gpt-4o']);
+    assert.deepEqual(analysis.modelSwitching.costBuckets.medium, ['claude-sonnet-4.5']);
 });
 
 // ---------------------------------------------------------------------------
