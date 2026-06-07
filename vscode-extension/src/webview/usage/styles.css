@@ -207,6 +207,22 @@ body {
 	color: var(--list-active-fg);
 }
 
+.ctx-ref-table .ctx-ref-spark {
+	width: 68px;
+	text-align: center;
+	padding: 4px 8px;
+	vertical-align: middle;
+}
+
+.ctx-ref-table thead .ctx-ref-spark {
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	color: var(--text-secondary);
+	text-align: center;
+}
+
 
 .bar-chart {
 	background: var(--list-hover-bg);

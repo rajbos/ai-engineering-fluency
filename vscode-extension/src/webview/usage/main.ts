@@ -1786,6 +1786,25 @@ function numCell(value: number, extraClass = ''): string {
 	return `<td class="${cls}">${value}</td>`;
 }
 
+function sparklineCell(lastMonth: number, month: number, today: number): string {
+	const W = 60, H = 20, PAD = 2;
+	const values = [lastMonth, month, today];
+	const max = Math.max(...values);
+	// Flat line at the bottom when all zeros
+	const points = values.map((v, i) => {
+		const x = PAD + i * ((W - PAD * 2) / (values.length - 1));
+		const y = max === 0 ? H - PAD : PAD + (1 - v / max) * (H - PAD * 2);
+		return `${x.toFixed(1)},${y.toFixed(1)}`;
+	}).join(' ');
+	const isFlat = max === 0;
+	const color = isFlat ? 'var(--text-muted)' : today >= month && month >= lastMonth ? 'var(--link-color)' : today <= month && month <= lastMonth ? '#f87171' : 'var(--text-secondary)';
+	return `<td class="ctx-ref-spark"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${values.map((v, i) => {
+		const x = PAD + i * ((W - PAD * 2) / (values.length - 1));
+		const y = max === 0 ? H - PAD : PAD + (1 - v / max) * (H - PAD * 2);
+		return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="${color}"/>`;
+	}).join('')}</svg></td>`;
+}
+
 function renderContextRefTable(
 	rows: ContextRefRow[],
 	totals: { last30: number; month: number; lastMonth: number; today: number },
@@ -1795,7 +1814,7 @@ function renderContextRefTable(
 		.sort((a, b) => b.last30 - a.last30)
 		.map((row) => {
 			const titleAttr = row.title ? ` title="${escapeHtml(row.title)}"` : '';
-			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${numCell(row.today, row.today > 0 ? 'ctx-ref-today-active' : '')}${numCell(row.month)}${numCell(row.lastMonth)}${numCell(row.last30)}</tr>`;
+			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${numCell(row.today, row.today > 0 ? 'ctx-ref-today-active' : '')}${numCell(row.month)}${numCell(row.lastMonth)}${numCell(row.last30)}${sparklineCell(row.lastMonth, row.month, row.today)}</tr>`;
 		})
 		.join('');
 	return `
@@ -1808,6 +1827,7 @@ function renderContextRefTable(
 						<th class="ctx-ref-num">This Month</th>
 						<th class="ctx-ref-num">Last Month</th>
 						<th class="ctx-ref-num">Last 30 Days</th>
+						<th class="ctx-ref-spark">Trend</th>
 					</tr>
 				</thead>
 				<tbody>
@@ -1820,6 +1840,7 @@ function renderContextRefTable(
 						<td class="ctx-ref-num">${totals.month}</td>
 						<td class="ctx-ref-num">${totals.lastMonth}</td>
 						<td class="ctx-ref-num">${totals.last30}</td>
+						<td class="ctx-ref-spark">${sparklineCell(totals.lastMonth, totals.month, totals.today).replace(/^<td[^>]*>/, '').replace(/<\/td>$/, '')}</td>
 					</tr>
 				</tfoot>
 			</table>
