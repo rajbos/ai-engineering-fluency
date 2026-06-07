@@ -374,6 +374,9 @@ function getEditorBadgeClass(editor: string): string {
   if (lower.includes("crush")) {
     return "editor-badge editor-badge-crush";
   }
+  if (lower.includes("cursor")) {
+    return "editor-badge editor-badge-cursor";
+  }
   // Exact match required: 'copilot' contains the substring 'pi' and would false-positive.
   if (lower === 'pi') {
     return "editor-badge editor-badge-pi";

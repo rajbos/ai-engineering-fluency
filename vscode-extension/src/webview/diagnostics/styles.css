@@ -496,6 +496,13 @@ color: #58a6ff;
 border: 1px solid #1f6feb;
 }
 
+/* Cursor: dark theme matching Cursor's brand (charcoal + bright white) */
+.editor-badge-cursor {
+	background: #1a1a2e;
+	color: #ffffff;
+	border: 1px solid #4a4a8a;
+}
+
 .session-folders-table {
 	margin-top: 16px;
 	margin-bottom: 16px;

@@ -24,6 +24,7 @@ import { MistralVibeDataAccess } from '../mistralvibe';
 import { GeminiCliDataAccess } from '../geminicli';
 import { AntigravityDataAccess } from '../antigravity';
 import { PiDataAccess } from '../pi';
+import { CursorDataAccess } from '../cursor';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
 import { CrushAdapter } from './crushAdapter';
@@ -35,6 +36,7 @@ import { MistralVibeAdapter } from './mistralVibeAdapter';
 import { GeminiCliAdapter } from './geminiCliAdapter';
 import { AntigravityAdapter } from './antigravityAdapter';
 import { PiAdapter } from './piAdapter';
+import { CursorAdapter } from './cursorAdapter';
 import { CopilotChatAdapter } from './copilotChatAdapter';
 import { CopilotCliAdapter } from './copilotCliAdapter';
 import { JetBrainsAdapter } from './jetbrainsAdapter';
@@ -51,6 +53,7 @@ mistralVibe: MistralVibeDataAccess;
 geminiCli: GeminiCliDataAccess;
 antigravity: AntigravityDataAccess;
 pi: PiDataAccess;
+cursor: CursorDataAccess;
 /** Estimates token count from raw text for a given model. */
 estimateTokens: (text: string, model?: string) => number;
 /** Returns true when the tool name identifies an MCP server tool. */
@@ -87,6 +90,7 @@ mistralVibe: new MistralVibeDataAccess(),
 geminiCli: new GeminiCliDataAccess(),
 antigravity: new AntigravityDataAccess(),
 pi: new PiDataAccess(),
+cursor: new CursorDataAccess(extensionUri),
 };
 }
 
@@ -116,6 +120,7 @@ new MistralVibeAdapter(deps.mistralVibe),
 new AntigravityAdapter(deps.antigravity, deps.estimateTokens),
 new GeminiCliAdapter(deps.geminiCli),
 new PiAdapter(deps.pi),
+new CursorAdapter(deps.cursor),
 // Copilot Chat / CLI adapters: discovery-only. Their handles() returns
 // false so processSessionFile() falls through to the shared parser path
 // for VS Code Copilot Chat and CLI files. See issue #654.

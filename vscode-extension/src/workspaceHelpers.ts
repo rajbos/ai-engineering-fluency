@@ -888,6 +888,8 @@ function detectToolEditorFromPath(
 	if (lowerPath.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
 	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Cursor virtual paths must be checked before the generic /cursor/ match in detectVSCodeVariantFromPath.
+	if (lowerPath.includes('/cursor/user/globalstorage/state.vscdb#')) { return 'Cursor'; }
 	if (lowerPath.includes('/.pi/agent/sessions/')) { return 'Pi'; }
 	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
