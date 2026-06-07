@@ -864,4 +864,5 @@
   ,"mcp_tavily_tavily-extract": "Tavily Tavily-Extract"
   ,"mcp_tavily_tavily-search": "Tavily Tavily-Search"
   ,"mcp_tavily_tavily_research": "Tavily Tavily-Research"
+  ,"session_store_sql": "SQL Session Store"
 }
