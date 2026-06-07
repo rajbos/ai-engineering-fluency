@@ -263,6 +263,10 @@ sessions: number;
 interactions: number;
 modelUsage: ModelUsage;
 editorUsage: EditorUsage;
+/** Sum of exact Copilot billing costs (in USD) for sessions that have nanoAiu data. */
+exactCopilotCostDollars: number;
+/** Model usage for sessions that do NOT have exact nanoAiu billing data (used as fallback for Copilot cost estimate). */
+modelUsageNoExact: ModelUsage;
 }
 
 /** Result returned by `aggregatePeriodStats`. */
@@ -287,6 +291,8 @@ sessions: 0,
 interactions: 0,
 modelUsage: {},
 editorUsage: {},
+exactCopilotCostDollars: 0,
+modelUsageNoExact: {},
 };
 }
 
@@ -313,12 +319,17 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	addModelUsage(entry.modelUsage, modelUsage);
 }
 
-function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: number, actual: number, thinking: number, cached: number, interactions: number, countSession: boolean, editorType: string, modelUsage: ModelUsage): void {
+function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: number, actual: number, thinking: number, cached: number, interactions: number, countSession: boolean, editorType: string, modelUsage: ModelUsage, copilotExactCostDollars?: number): void {
 	acc.tokens += tokens; acc.estimatedTokens += estimated; acc.actualTokens += actual;
 	acc.thinkingTokens += thinking; acc.cachedTokens += cached; acc.interactions += interactions;
 	if (countSession) { acc.sessions += 1; }
 	addEditorUsage(acc.editorUsage, editorType, tokens);
 	addModelUsage(acc.modelUsage, modelUsage);
+	if (copilotExactCostDollars !== undefined) {
+		acc.exactCopilotCostDollars += copilotExactCostDollars;
+	} else {
+		addModelUsage(acc.modelUsageNoExact, modelUsage);
+	}
 }
 
 function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLast30Days: boolean; addedToMonth: boolean; addedToLastMonth: boolean; addedToToday: boolean }, acc: PeriodAccumulators, dates: UtcDateRanges, editorType: string, dailyStatsMap: Map<string, DailyTokenStats>, repository: string): void {
@@ -331,18 +342,18 @@ function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLas
 	if (inLast30Days) {
 		const entry = getOrCreateDailyEntry(dailyStatsMap, dayKey);
 		addToDailyEntry(entry, dayTokens, dayInteractions, editorType, repository, dayRollup.modelUsage);
-		accumulatePeriod(acc.last30DaysStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLast30Days, editorType, dayRollup.modelUsage);
+		accumulatePeriod(acc.last30DaysStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLast30Days, editorType, dayRollup.modelUsage, dayRollup.copilotExactCostDollars);
 		flags.addedToLast30Days = true;
 	}
 	if (dayKey >= dates.monthUtcStartKey) {
-		accumulatePeriod(acc.monthStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToMonth, editorType, dayRollup.modelUsage);
+		accumulatePeriod(acc.monthStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToMonth, editorType, dayRollup.modelUsage, dayRollup.copilotExactCostDollars);
 		flags.addedToMonth = true;
 		if (dayKey === dates.todayUtcKey) {
-			accumulatePeriod(acc.todayStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToToday, editorType, dayRollup.modelUsage);
+			accumulatePeriod(acc.todayStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToToday, editorType, dayRollup.modelUsage, dayRollup.copilotExactCostDollars);
 			flags.addedToToday = true;
 		}
 	} else if (inLastMonth) {
-		accumulatePeriod(acc.lastMonthStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLastMonth, editorType, dayRollup.modelUsage);
+		accumulatePeriod(acc.lastMonthStats, dayTokens, dayRollup.tokens, dayRollup.actualTokens, dayRollup.thinkingTokens, cached, dayInteractions, !flags.addedToLastMonth, editorType, dayRollup.modelUsage, dayRollup.copilotExactCostDollars);
 		flags.addedToLastMonth = true;
 	}
 }
@@ -379,15 +390,15 @@ function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulato
 		const dailyEntry = getOrCreateDailyEntry(dailyStatsMap, lastActivityUtcKey);
 		addToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage);
 		if (sessionData.linesAdded !== undefined) { attributeLocToDay(dailyEntry, sessionData, editorType, repository); }
-		accumulatePeriod(acc.last30DaysStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage);
+		accumulatePeriod(acc.last30DaysStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 	}
 	if (lastActivityUtcKey >= dates.monthUtcStartKey) {
-		accumulatePeriod(acc.monthStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage);
+		accumulatePeriod(acc.monthStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 		if (lastActivityUtcKey === dates.todayUtcKey) {
-			accumulatePeriod(acc.todayStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage);
+			accumulatePeriod(acc.todayStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 		}
 	} else if (inLastMonth) {
-		accumulatePeriod(acc.lastMonthStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage);
+		accumulatePeriod(acc.lastMonthStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 	}
 	return false;
 }

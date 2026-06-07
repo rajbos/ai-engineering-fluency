@@ -104,6 +104,7 @@ import {
   buildReasoningEffortTimeline as _buildReasoningEffortTimeline,
   extractAllTokensFromDebugLog as _extractAllTokensFromDebugLog,
   extractResponseItemText as _extractResponseItemText,
+  NANO_AIU_TO_DOLLARS,
 } from './tokenEstimation';
 import { SessionDiscovery } from './sessionDiscovery';
 
@@ -2639,7 +2640,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				modelUsage: todayStats.modelUsage, editorUsage: todayStats.editorUsage,
 				co2: todayCo2, treesEquivalent: todayCo2 / this.co2AbsorptionPerTreePerYear,
 				waterUsage: todayWater, estimatedCost: this.calculateEstimatedCost(todayStats.modelUsage),
-				estimatedCostCopilot: this.calculateEstimatedCost(todayStats.modelUsage, 'copilot'),
+				estimatedCostCopilot: todayStats.exactCopilotCostDollars + this.calculateEstimatedCost(todayStats.modelUsageNoExact, 'copilot'),
 				...(todayStats.cachedTokens > 0 ? { cachedTokens: todayStats.cachedTokens } : {})
 			},
 			month: {
@@ -2651,7 +2652,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				modelUsage: monthStats.modelUsage, editorUsage: monthStats.editorUsage,
 				co2: monthCo2, treesEquivalent: monthCo2 / this.co2AbsorptionPerTreePerYear,
 				waterUsage: monthWater, estimatedCost: this.calculateEstimatedCost(monthStats.modelUsage),
-				estimatedCostCopilot: this.calculateEstimatedCost(monthStats.modelUsage, 'copilot'),
+				estimatedCostCopilot: monthStats.exactCopilotCostDollars + this.calculateEstimatedCost(monthStats.modelUsageNoExact, 'copilot'),
 				...(monthStats.cachedTokens > 0 ? { cachedTokens: monthStats.cachedTokens } : {})
 			},
 			lastMonth: {
@@ -2663,7 +2664,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				modelUsage: lastMonthStats.modelUsage, editorUsage: lastMonthStats.editorUsage,
 				co2: lastMonthCo2, treesEquivalent: lastMonthCo2 / this.co2AbsorptionPerTreePerYear,
 				waterUsage: lastMonthWater, estimatedCost: this.calculateEstimatedCost(lastMonthStats.modelUsage),
-				estimatedCostCopilot: this.calculateEstimatedCost(lastMonthStats.modelUsage, 'copilot'),
+				estimatedCostCopilot: lastMonthStats.exactCopilotCostDollars + this.calculateEstimatedCost(lastMonthStats.modelUsageNoExact, 'copilot'),
 				...(lastMonthStats.cachedTokens > 0 ? { cachedTokens: lastMonthStats.cachedTokens } : {})
 			},
 			last30Days: {
@@ -2675,7 +2676,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				modelUsage: last30DaysStats.modelUsage, editorUsage: last30DaysStats.editorUsage,
 				co2: last30DaysCo2, treesEquivalent: last30DaysCo2 / this.co2AbsorptionPerTreePerYear,
 				waterUsage: last30DaysWater, estimatedCost: this.calculateEstimatedCost(last30DaysStats.modelUsage),
-				estimatedCostCopilot: this.calculateEstimatedCost(last30DaysStats.modelUsage, 'copilot'),
+				estimatedCostCopilot: last30DaysStats.exactCopilotCostDollars + this.calculateEstimatedCost(last30DaysStats.modelUsageNoExact, 'copilot'),
 				...(last30DaysStats.cachedTokens > 0 ? { cachedTokens: last30DaysStats.cachedTokens } : {})
 			},
 			lastUpdated: now
@@ -3137,7 +3138,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			toolCalls: analysis.toolCalls.total, inputTokens: inputTok, outputTokens: outputTok,
 			thinkingTokens: sessionData.thinkingTokens || 0, cachedTokens: cachedTok,
 			totalTokens: sessionData.actualTokens || sessionData.tokens || 0,
-			estimatedCost: this.calculateEstimatedCost(modelUsage),
+			estimatedCost: sessionData.copilotExactCostDollars ?? this.calculateEstimatedCost(modelUsage),
 			editor: this.detectEditorSource(sessionFile), models: Object.keys(modelUsage),
 			lastActivity: sessionData.lastInteraction || new Date(mtime).toISOString(),
 		};
@@ -3774,7 +3775,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private buildSessionDataObject(
-		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; cacheReadTokens?: number },
+		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; cacheReadTokens?: number; copilotNanoAiu?: number },
 		interactions: number,
 		resolvedModelUsage: ModelUsage,
 		mtime: number,
@@ -3783,11 +3784,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		sessionMeta: { title?: string; firstInteraction: string | null; lastInteraction: string | null },
 		resolvedActualTokens: number | undefined,
 		finalCacheReadTokens: number | undefined,
-		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number } | null | undefined,
+		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
 		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
 	): SessionFileCache {
 		const hasDebugLog = debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0;
 		const hasEditScope = usageAnalysis?.editScope?.linesAdded !== undefined && usageAnalysis.editScope.linesAdded > 0;
+		const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
+		const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
 		return {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
@@ -3797,6 +3800,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(debugLogTokens?.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
 			...(hasDebugLog ? { debugLogInputTokens: debugLogTokens!.inputTokens, debugLogOutputTokens: debugLogTokens!.outputTokens } : {}),
 			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
+			...(copilotExactCostDollars !== undefined ? { copilotExactCostDollars } : {}),
 			...(hasEditScope ? {
 				linesAdded: usageAnalysis!.editScope!.linesAdded,
 				linesRemoved: usageAnalysis!.editScope!.linesRemoved ?? 0,
@@ -3827,6 +3831,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(debugLogTokens.modelTurns ? { modelTurns: debugLogTokens.modelTurns } : {}),
 			debugLogInputTokens: debugLogTokens.inputTokens,
 			debugLogOutputTokens: debugLogTokens.outputTokens,
+			...(debugLogTokens.copilotNanoAiu > 0 ? { copilotExactCostDollars: debugLogTokens.copilotNanoAiu * NANO_AIU_TO_DOLLARS } : {}),
 		};
 		this.setCachedSessionData(sessionFilePath, supplemented, fileSize);
 		this._cacheHits++;
@@ -3835,11 +3840,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private computeDailyRollups(
 		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
-		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
+		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
 		modelUsage: ModelUsage,
 		interactions: number
 	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
 		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
+		const totalNanoAiu = tokenResult.copilotNanoAiu ?? 0;
 
 		// Prefer pre-computed fractions from ecosystem adapters (e.g. getDailyFractions()),
 		// which have accurate per-request timestamps. Fall back to dailyInteractions counts.
@@ -3848,7 +3854,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			for (const [dayKey, fraction] of Object.entries(sessionMeta.dailyFractions)) {
 				const dayModelUsage = this.scaledModelUsage(modelUsage, fraction);
 				const dayInteractions = Math.max(1, Math.round(totalFracInteractions * fraction));
-				dailyRollups[dayKey] = { tokens: Math.round(tokenResult.tokens * fraction), actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction), thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction), cachedReadTokens: 0, interactions: dayInteractions, modelUsage: dayModelUsage };
+				const dayExactCost = totalNanoAiu > 0 ? totalNanoAiu * NANO_AIU_TO_DOLLARS * fraction : undefined;
+				dailyRollups[dayKey] = { tokens: Math.round(tokenResult.tokens * fraction), actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction), thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction), cachedReadTokens: 0, interactions: dayInteractions, modelUsage: dayModelUsage, ...(dayExactCost !== undefined ? { copilotExactCostDollars: dayExactCost } : {}) };
 			}
 			return { dailyRollups, totalInteractions: totalFracInteractions };
 		}
@@ -3860,7 +3867,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			for (const [dayKey, dayInteractionCount] of Object.entries(dailyInteractionMap)) {
 				const fraction = dayInteractionCount / totalInteractions;
 				const dayModelUsage = this.scaledModelUsage(modelUsage, fraction);
-				dailyRollups[dayKey] = { tokens: Math.round(tokenResult.tokens * fraction), actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction), thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction), cachedReadTokens: 0, interactions: dayInteractionCount, modelUsage: dayModelUsage };
+				const dayExactCost = totalNanoAiu > 0 ? totalNanoAiu * NANO_AIU_TO_DOLLARS * fraction : undefined;
+				dailyRollups[dayKey] = { tokens: Math.round(tokenResult.tokens * fraction), actualTokens: Math.round((tokenResult.actualTokens || 0) * fraction), thinkingTokens: Math.round((tokenResult.thinkingTokens || 0) * fraction), cachedReadTokens: 0, interactions: dayInteractionCount, modelUsage: dayModelUsage, ...(dayExactCost !== undefined ? { copilotExactCostDollars: dayExactCost } : {}) };
 			}
 		} else {
 			this.computeFallbackDailyRollup(dailyRollups, sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
@@ -4915,7 +4923,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return 0;
 	}
 
-	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number } {
+	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number } {
 		return _estimateTokensFromJsonlSession(fileContent);
 	}
 
@@ -4929,7 +4937,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * When found, sums `inputTokens`, `outputTokens`, and `cachedTokens` across every
 	 * `llm_request` event to give true totals for agent-mode multi-call sessions.
 	 */
-	private async readTokensFromDebugLog(sessionFilePath: string): Promise<{ inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null> {
+	private async readTokensFromDebugLog(sessionFilePath: string): Promise<{ inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>; copilotNanoAiu: number } | null> {
 		const norm = _normalizePath(sessionFilePath);
 		const sessionId = path.basename(sessionFilePath, path.extname(sessionFilePath));
 		// Only process UUID-named session files (e.g. e84b3e82-c1fb-43de-8f52-367f4c74826a)

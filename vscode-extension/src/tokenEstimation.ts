@@ -259,6 +259,14 @@ export function extractResponseItemText(item: unknown): { text: string; isThinki
 	return { text: '', isThinking: false };
 }
 
+/**
+ * Conversion factor from GitHub Copilot nano-AI-units (nanoAiu) to US dollars.
+ * GitHub Copilot billing reports costs in nano-AI-units; dividing by 1e11 gives USD.
+ * Verified: `session.shutdown.totalNanoAiu / NANO_AIU_TO_DOLLARS` matches
+ * manual calculation using modelPricing.json rates for the session's token counts.
+ */
+export const NANO_AIU_TO_DOLLARS = 1 / 1e11;
+
 /** Return type for all token estimation strategies. */
 export type TokenEstimationResult = {
 	tokens: number;
@@ -267,6 +275,8 @@ export type TokenEstimationResult = {
 	cacheReadTokens: number;
 	modelUsage: ModelUsage;
 	dailyActualTokens: Record<string, number>;
+	/** Exact GitHub Copilot billing amount in nano-AI-units (0 when unavailable). Divide by 1e11 for USD. */
+	copilotNanoAiu: number;
 };
 
 /**
@@ -433,6 +443,7 @@ export class DeltaTokenStrategy implements TokenEstimationStrategy {
 			cacheReadTokens: 0,
 			modelUsage: {},
 			dailyActualTokens: {},
+			copilotNanoAiu: 0,
 		};
 	}
 }
@@ -449,6 +460,8 @@ interface EjtsState {
 	cliRealOutputByModel: { [model: string]: number } | null;
 	totalEstToolCalls: number;
 	dailyActualTokens: Record<string, number>;
+	/** Sum of totalNanoAiu from all session.shutdown events (exact Copilot billing). */
+	cliTotalNanoAiu: number;
 }
 
 /** Accumulate one model's metrics from a session.shutdown event into state. Returns the total tokens added. */
@@ -484,6 +497,8 @@ function _ejtsHandleShutdown(event: Record<string, unknown>, state: EjtsState): 
 	for (const [modelName, metrics] of Object.entries(data.modelMetrics) as [string, ShutdownModelMetrics][]) {
 		shutdownTotal += _ejtsAccumulateModelMetrics(modelName, metrics, state);
 	}
+	const nanoAiu = typeof data.totalNanoAiu === 'number' ? data.totalNanoAiu : 0;
+	if (nanoAiu > 0) { state.cliTotalNanoAiu += nanoAiu; }
 	if (shutdownTotal > 0 && event.timestamp) {
 		const dayKey = toLocalDayKey(new Date(String(event.timestamp)));
 		if (dayKey && dayKey !== 'Inval') {
@@ -577,6 +592,7 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 			cliRealOutputByModel: null,
 			totalEstToolCalls: 0,
 			dailyActualTokens: {},
+			cliTotalNanoAiu: 0,
 		};
 
 		for (const line of lines) {
@@ -598,6 +614,7 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 			cacheReadTokens: state.cliCacheReadTokens,
 			modelUsage: state.cliShutdownModelUsage ?? {},
 			dailyActualTokens: state.dailyActualTokens,
+			copilotNanoAiu: state.cliTotalNanoAiu,
 		};
 	}
 }
@@ -666,6 +683,7 @@ interface EatdlAcc {
 	cachedTokens: number;
 	modelTurns: number;
 	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
+	copilotNanoAiu: number;
 }
 
 /** Process one llm_request event into the accumulator. */
@@ -675,9 +693,11 @@ function _eatdlProcessLlmRequest(event: Record<string, unknown>, acc: EatdlAcc):
 	const inp = typeof attrs?.inputTokens === 'number' ? attrs.inputTokens : 0;
 	const out = typeof attrs?.outputTokens === 'number' ? attrs.outputTokens : 0;
 	const cached = typeof attrs?.cachedTokens === 'number' ? attrs.cachedTokens : 0;
+	const nanoAiu = typeof attrs?.copilotUsageNanoAiu === 'number' ? attrs.copilotUsageNanoAiu : 0;
 	acc.inputTokens += inp;
 	acc.outputTokens += out;
 	acc.cachedTokens += cached;
+	acc.copilotNanoAiu += nanoAiu;
 	const model = typeof attrs?.model === 'string' && attrs.model ? attrs.model : '';
 	if (!model) { return; }
 	const entry = acc.modelBreakdown[model] ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
@@ -726,8 +746,9 @@ export function extractAllTokensFromDebugLog(content: string): {
 	cachedTokens: number;
 	modelTurns: number;
 	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
+	copilotNanoAiu: number;
 } | null {
-	const acc: EatdlAcc = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, modelTurns: 0, modelBreakdown: {} };
+	const acc: EatdlAcc = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, modelTurns: 0, modelBreakdown: {}, copilotNanoAiu: 0 };
 	for (const line of content.split(/\r?\n/)) {
 		if (!line.trim()) { continue; }
 		try {

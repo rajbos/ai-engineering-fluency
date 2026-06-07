@@ -191,6 +191,8 @@ export interface DailyRollupEntry {
   cachedReadTokens?: number;
   interactions: number;
   modelUsage: ModelUsage;
+  /** Per-day share of the session's exact Copilot billing (in USD). Set when session has nanoAiu data. */
+  copilotExactCostDollars?: number;
 }
 
 export interface SessionFileCache {
@@ -212,6 +214,8 @@ export interface SessionFileCache {
   debugLogInputTokens?: number; // Input token total from debug log (sum across all llm_request events)
   debugLogOutputTokens?: number; // Output token total from debug log (sum across all llm_request events)
   debugLogChecked?: boolean; // Sentinel: true means we already looked for a debug log and found none
+  /** Exact GitHub Copilot billing for this session in USD (from session.shutdown.totalNanoAiu or debug log copilotUsageNanoAiu). */
+  copilotExactCostDollars?: number;
   /** Per-UTC-day token/interaction breakdown (keyed by YYYY-MM-DD UTC). Used for consistent daily stats. */
   dailyRollups?: { [utcDayKey: string]: DailyRollupEntry };
   linesAdded?: number;
