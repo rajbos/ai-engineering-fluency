@@ -29,7 +29,7 @@ import { normalizePathForComparison } from './utils/pathUtils';
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 type SqlDatabase = initSqlJs.Database;
 
-type CursorDbCacheEntry = { db: SqlDatabase; mtimeMs: number; size: number };
+type CursorDbCacheEntry = { db: SqlDatabase; mtimeMs: number; size: number; walMtimeMs: number };
 
 interface CursorComposerData {
 	composerId: string;
@@ -142,6 +142,10 @@ export class CursorDataAccess {
 
 	// ── DB caching ────────────────────────────────────────────────────────────
 
+	private getWalMtimeMs(dbPath: string): number {
+		try { return fs.statSync(dbPath + '-wal').mtimeMs; } catch { return 0; }
+	}
+
 	private statDb(dbPath: string): fs.Stats | null {
 		try {
 			return fs.statSync(dbPath);
@@ -157,14 +161,48 @@ export class CursorDataAccess {
 
 	private isCachedDbCurrent(dbPath: string, stats: fs.Stats): boolean {
 		const entry = this._dbCache.get(dbPath);
-		return !!entry && entry.mtimeMs === stats.mtimeMs && entry.size === stats.size;
+		return !!entry && entry.mtimeMs === stats.mtimeMs && entry.size === stats.size
+			&& entry.walMtimeMs === this.getWalMtimeMs(dbPath);
+	}
+
+	/**
+	 * When an active WAL file is present, sql.js cannot see uncommitted WAL frames.
+	 * Copies the DB + WAL to a temp location, uses node:sqlite to checkpoint the WAL,
+	 * and returns the merged buffer for sql.js. Falls back to null if unavailable.
+	 */
+	private async tryReadDbWithWal(dbPath: string): Promise<Buffer | null> {
+		const walPath = dbPath + '-wal';
+		let walSize: number;
+		try { walSize = fs.statSync(walPath).size; } catch { return null; }
+		if (walSize === 0) { return null; }
+		try {
+			const { DatabaseSync } = require('node:sqlite') as typeof import('node:sqlite');
+			const tmpDir = os.tmpdir();
+			const tmpDb = path.join(tmpDir, `cursor-wal-${Date.now()}.db`);
+			const tmpWal = tmpDb + '-wal';
+			const tmpShm = tmpDb + '-shm';
+			const shmPath = dbPath + '-shm';
+			fs.copyFileSync(dbPath, tmpDb);
+			fs.copyFileSync(walPath, tmpWal);
+			if (fs.existsSync(shmPath)) { fs.copyFileSync(shmPath, tmpShm); }
+			const nativeDb = new DatabaseSync(tmpDb);
+			nativeDb.exec('PRAGMA wal_checkpoint(TRUNCATE);');
+			nativeDb.close();
+			const buffer = fs.readFileSync(tmpDb);
+			for (const f of [tmpDb, tmpWal, tmpShm]) { try { fs.unlinkSync(f); } catch { /* ignore */ } }
+			return buffer;
+		} catch {
+			return null;
+		}
 	}
 
 	private async refreshDb(dbPath: string, stats: fs.Stats): Promise<SqlDatabase | null> {
+		const walMtimeMs = this.getWalMtimeMs(dbPath);
 		let db: SqlDatabase;
 		try {
 			const SQL = await this.initSqlJs();
-			const buffer = fs.readFileSync(dbPath);
+			const walBuffer = await this.tryReadDbWithWal(dbPath);
+			const buffer = walBuffer ?? fs.readFileSync(dbPath);
 			db = new SQL.Database(buffer);
 		} catch {
 			return this._dbCache.get(dbPath)?.db ?? null;
@@ -178,7 +216,7 @@ export class CursorDataAccess {
 
 		const existing = this._dbCache.get(dbPath);
 		if (existing) { try { existing.db.close(); } catch { /* ignore */ } }
-		this._dbCache.set(dbPath, { db, mtimeMs: stats.mtimeMs, size: stats.size });
+		this._dbCache.set(dbPath, { db, mtimeMs: stats.mtimeMs, size: stats.size, walMtimeMs });
 		return db;
 	}
 
@@ -188,7 +226,7 @@ export class CursorDataAccess {
 		if (this.isCachedDbCurrent(dbPath, stats)) {
 			return this._dbCache.get(dbPath)!.db;
 		}
-		const cacheKey = `${dbPath}:${stats.mtimeMs}:${stats.size}`;
+		const cacheKey = `${dbPath}:${stats.mtimeMs}:${stats.size}:wal${this.getWalMtimeMs(dbPath)}`;
 		const inflight = this._dbCacheInflight.get(cacheKey);
 		if (inflight) { return inflight; }
 		const promise = this.refreshDb(dbPath, stats);
