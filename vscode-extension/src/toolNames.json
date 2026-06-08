@@ -871,4 +871,6 @@
   ,"azure-devops-wit_work_item_write": "Azure DevOps Work Item Write"
   ,"azure-group_resource_list": "Azure Group Resource List"
   ,"azure-sql": "Azure SQL"
+  ,"ScheduleWakeup": "Scheduled Wakeup"
+  ,"mcp__ccd_session__spawn_task": "Spawn Task"
 }
