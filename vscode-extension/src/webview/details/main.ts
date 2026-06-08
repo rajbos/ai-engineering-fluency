@@ -749,7 +749,7 @@ const toolsList = document.createElement('ul');
 toolsList.className = 'empty-state-steps';
 const toolsTexts = [
 '�� VS Code / VS Code Insiders / VSCodium — GitHub Copilot Chat extension',
-'⚡ Cursor, 🌊 Windsurf — built-in AI chat',
+'🖱️ Cursor, 🌊 Windsurf — built-in AI chat',
 '🖥️ Visual Studio 2022+ — GitHub Copilot Chat extension',
 '🟢 OpenCode, 🦀 Crush — terminal-based coding agents',
 '🤖 Claude Code — Anthropic\'s CLI coding agent',
