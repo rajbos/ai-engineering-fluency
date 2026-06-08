@@ -24,7 +24,7 @@ import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 import type { UriLike } from './opencode';
-import { normalizePath } from './utils/pathUtils';
+import { normalizePathForComparison } from './utils/pathUtils';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 type SqlDatabase = initSqlJs.Database;
@@ -95,7 +95,7 @@ export class CursorDataAccess {
 	 * Virtual paths contain `state.vscdb#` with a UUID composer ID.
 	 */
 	isCursorSessionFile(filePath: string): boolean {
-		const normalized = normalizePath(filePath);
+		const normalized = normalizePathForComparison(filePath);
 		return normalized.includes('/cursor/user/globalstorage/state.vscdb#');
 	}
 
