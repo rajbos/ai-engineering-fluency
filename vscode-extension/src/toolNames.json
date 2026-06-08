@@ -873,4 +873,8 @@
   ,"azure-sql": "Azure SQL"
   ,"ScheduleWakeup": "Scheduled Wakeup"
   ,"mcp__ccd_session__spawn_task": "Spawn Task"
+  ,"mcp_figma_mcp_ser_get_design_context": "Figma MCP (Local): Get Design Context"
+  ,"mcp_figma_mcp_ser_get_libraries": "Figma MCP (Local): Get Libraries"
+  ,"mcp_figma_mcp_ser_get_metadata": "Figma MCP (Local): Get Metadata"
+  ,"mcp_figma_mcp_ser_search_design_system": "Figma MCP (Local): Search Design System"
 }
