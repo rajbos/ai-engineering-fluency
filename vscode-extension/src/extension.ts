@@ -13,6 +13,7 @@ import customizationPatternsData from './customizationPatterns.json';
 import copilotPlansData from './copilotPlans.json';
 import * as packageJson from '../package.json';
 import { getToolFamilies, DEFAULT_TOOL_FAMILIES } from './toolFamilies';
+import { getEditorIconByName } from './editorIcons';
 
 // --- Core types ---
 import type {
@@ -2126,15 +2127,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Maps known editor display names to emoji icons for the loader animation. */
 	private getEditorIconForLoader(editorName: string): string {
-		const map: Record<string, string> = {
-			'VS Code': '💙', 'VS Code Insiders': '💚', 'VS Code Exploration': '🧪',
-			'VS Code Server': '☁️', 'VS Code Server (Insiders)': '☁️', 'VSCodium': '🔷',
-			'Cursor': '🖱️', 'Copilot CLI': '🤖', 'OpenCode': '🟢', 'Visual Studio': '🪟',
-			'Claude Code': '🟠', 'Claude Desktop Cowork': '🟠', 'Mistral Vibe': '🔥',
-			'Gemini CLI': '💎', 'Antigravity': '🚀', 'JetBrains': '🧩',
-			'Crush': '🦾', 'Continue': '▶️', 'Pi': 'π',
-		};
-		return map[editorName] ?? '📝';
+		return getEditorIconByName(editorName);
 	}
 
 	private mergeIntoFullDailyStats(dailyStats: DailyTokenStats[]): void {

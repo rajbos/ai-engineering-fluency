@@ -1,6 +1,7 @@
 // @ts-ignore
 import tokenEstimatorsJson from '../../tokenEstimators.json';
 import type { TokenEstimator } from '../../types';
+import { EDITOR_ICON_MAP as _EDITOR_ICON_MAP, getEditorIconByName } from '../../editorIcons';
 
 const tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsJson.estimators;
 let currentLocale: string | undefined;
@@ -23,63 +24,21 @@ export function setCompactNumbers(enabled: boolean): void {
 }
 
 /** Union of all known editor display names that have explicit icon mappings. */
-export type EditorName =
-	| 'VS Code'
-	| 'VS Code Insiders'
-	| 'VS Code Exploration'
-	| 'VS Code Server'
-	| 'VS Code Server (Insiders)'
-	| 'VSCodium'
-	| 'Cursor'
-	| 'Copilot CLI'
-	| 'OpenCode'
-	| 'Visual Studio'
-	| 'Claude Code'
-	| 'Claude Desktop Cowork'
-	| 'Mistral Vibe'
-	| 'Gemini CLI'
-	| 'Antigravity'
-	| 'JetBrains'
-	| 'Crush'
-	| 'Continue'
-	| 'Pi'
-	| 'Unknown';
+export type EditorName = keyof typeof _EDITOR_ICON_MAP;
 
 /**
- * Maps known editor display names to their representative emoji icons.
- *
- * Icon format: a single Unicode emoji character (e.g. '💙', '⚡').
- * Editors not present in this map fall back to '📝' in {@link getEditorIcon}.
+ * Re-export canonical map for callers that need the full record.
+ * The authoritative source is `src/editorIcons.ts`.
  */
-export const EDITOR_ICON_MAP: Record<EditorName, string> = {
-	'VS Code': '💙',
-	'VS Code Insiders': '💚',
-	'VS Code Exploration': '🧪',
-	'VS Code Server': '☁️',
-	'VS Code Server (Insiders)': '☁️',
-	'VSCodium': '🔷',
-	'Cursor': '🖱️',
-	'Copilot CLI': '🤖',
-	'OpenCode': '🟢',
-	'Visual Studio': '🪟',
-	'Claude Code': '🟠',
-	'Claude Desktop Cowork': '🟠',
-	'Mistral Vibe': '🔥',
-	'Gemini CLI': '💎',
-	'Antigravity': '🚀',
-	'JetBrains': '🧩',
-	'Crush': '🦾',
-	'Continue': '▶️',
-	'Pi': 'π',
-	'Unknown': '❓'
-};
+export const EDITOR_ICON_MAP: Record<string, string> = _EDITOR_ICON_MAP;
 
 /**
  * Returns an icon for a given editor name.
- * Falls back to '📝' for editors not present in {@link EDITOR_ICON_MAP}.
+ * Falls back to '📝' for editors not present in the map.
+ * Delegates to the canonical {@link getEditorIconByName} in `src/editorIcons.ts`.
  */
 export function getEditorIcon(editor: string): string {
-	return EDITOR_ICON_MAP[editor as EditorName] || '📝';
+	return getEditorIconByName(editor);
 }
 
 /**
