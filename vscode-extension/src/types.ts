@@ -585,6 +585,12 @@ export interface SessionLogData {
   truncationCount?: number;
   /** Total messages removed across all truncation events. Absent when truncationCount is 0. */
   messagesRemovedByTruncation?: number;
+  /**
+   * Optional editor-specific note injected by the adapter/backend.
+   * When present the log viewer renders an info panel at the top of the page
+   * listing the items as bullet points alongside the editor name and icon.
+   */
+  editorNote?: { items: string[] };
 }
 
 // ---------------------------------------------------------------------------

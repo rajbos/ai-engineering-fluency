@@ -4560,11 +4560,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	): SessionLogData {
 		const editorName = details.editorName || (eco && sessionFile ? getEcosystemDisplayName(eco, sessionFile) : details.editorSource);
 		const actualTokens = ecoActualTokens ?? sessionCache?.actualTokens ?? 0;
+		const editorNote = editorName === 'Cursor' ? {
+			items: [
+				'Token counts reflect the context window size at the last request (contextTokensUsed), not cumulative per-turn billing.',
+				'Output tokens are not stored locally — Cursor proxies all AI calls through its backend.',
+				'Per-turn input/output token breakdown is unavailable (shown as 0).',
+				'For accurate billing data, check the Cursor dashboard at cursor.com/settings.',
+			],
+		} : undefined;
 		return {
 			file: details.file, title: details.title || null, editorSource: details.editorSource,
 			editorName, size: details.size, modified: details.modified, interactions: details.interactions,
 			contextReferences: details.contextReferences, firstInteraction: details.firstInteraction,
 			lastInteraction: details.lastInteraction, turns, usageAnalysis, actualTokens,
+			...(editorNote ? { editorNote } : {}),
 			...(details.parentInfo ? { parentInfo: details.parentInfo } : {}),
 			...(details.childInfo ? { childInfo: details.childInfo, totalChildCount: details.totalChildCount } : {}),
 			...this.buildLogDataCacheFields(sessionCache, subAgentsStarted),

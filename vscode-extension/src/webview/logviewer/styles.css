@@ -18,6 +18,69 @@ body {
 	margin: 0 auto;
 }
 
+/* ── Editor info panel ────────────────────────────────────────────────────── */
+.editor-info-panel {
+	background: color-mix(in srgb, var(--vscode-editorInfo-foreground, #3794ff) 8%, var(--bg-secondary));
+	border: 1px solid color-mix(in srgb, var(--vscode-editorInfo-foreground, #3794ff) 40%, transparent);
+	border-left: 4px solid var(--vscode-editorInfo-foreground, #3794ff);
+	border-radius: 8px;
+	padding: 14px 18px;
+	margin-bottom: 20px;
+}
+
+.editor-info-header {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 10px;
+	font-weight: 600;
+	font-size: 14px;
+}
+
+.editor-info-icon {
+	font-size: 18px;
+}
+
+.editor-info-name {
+	color: var(--text-primary);
+}
+
+.editor-info-badge {
+	margin-left: auto;
+	font-size: 11px;
+	font-weight: 500;
+	color: var(--vscode-editorInfo-foreground, #3794ff);
+	background: color-mix(in srgb, var(--vscode-editorInfo-foreground, #3794ff) 15%, transparent);
+	border: 1px solid color-mix(in srgb, var(--vscode-editorInfo-foreground, #3794ff) 30%, transparent);
+	border-radius: 4px;
+	padding: 2px 8px;
+	text-transform: uppercase;
+	letter-spacing: 0.04em;
+}
+
+.editor-info-list {
+	list-style: none;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.editor-info-list li {
+	font-size: 13px;
+	color: var(--text-secondary);
+	padding-left: 1em;
+	position: relative;
+}
+
+.editor-info-list li::before {
+	content: '⚠';
+	position: absolute;
+	left: 0;
+	color: color-mix(in srgb, var(--vscode-editorWarning-foreground, #cca700) 80%, transparent);
+	font-size: 10px;
+	top: 3px;
+}
+
 /* Mode/model bar improvements */
 .mode-bar-group {
 	background: var(--bg-secondary);

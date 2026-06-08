@@ -1,6 +1,6 @@
 // Log Viewer webview - displays session file details and chat turns
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
-import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
@@ -94,6 +94,8 @@ modelTurns?: number;
 truncationCount?: number;
 /** Total messages removed across all truncation events. */
 messagesRemovedByTruncation?: number;
+/** Optional editor-specific note. When present, an info panel is rendered at the top of the viewer. */
+editorNote?: { items: string[] };
 compactNumbers?: boolean;
 };
 
@@ -694,12 +696,16 @@ function buildEditorModeCard(data: SessionLogData, stats: SummaryStats): string 
 function buildEstimatedTokensCard(data: SessionLogData, stats: SummaryStats): string {
 	const isJetBrains = data.editorName === 'JetBrains';
 	const isAntigravity = data.editorName === 'Antigravity';
+	const isCursor = data.editorName === 'Cursor';
 	const titleAttr = isJetBrains
 		? ` title="JetBrains: only user messages + assistant text are persisted in the session log, so this is an estimate of those alone. Actual API token counts and thinking tokens are not available."`
-		: isAntigravity ? ` title="Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally."` : '';
-	const suffix = (isJetBrains || isAntigravity) ? ' ⓘ' : '';
+		: isAntigravity ? ` title="Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally."`
+		: isCursor ? ` title="Cursor: shows the context window size at the last request (contextTokensUsed). This is a snapshot, not cumulative per-turn billing. Output tokens are not stored locally."` : '';
+	const suffix = (isJetBrains || isAntigravity || isCursor) ? ' ⓘ' : '';
 	const sub = isJetBrains ? 'User + assistant text only (no API counts, no thinking)'
-		: isAntigravity ? 'Estimated from transcript content' : 'Input + Output estimated from text';
+		: isAntigravity ? 'Estimated from transcript content'
+		: isCursor ? 'Context window at last request (snapshot, not cumulative)'
+		: 'Input + Output estimated from text';
 	return `<div class="summary-card"${titleAttr}>
 <div class="summary-label">📊 Estimated Tokens${suffix}</div>
 <div class="summary-value">${formatCompact(stats.totalTokens)}</div>
@@ -850,6 +856,25 @@ function buildFileNameCard(data: SessionLogData): string {
 <div class="summary-label">📁 File Name</div>
 <div class="summary-value" style="font-size: 16px;">${valueHtml}</div>
 <div class="summary-sub">${sub}</div>
+</div>`;
+}
+
+/**
+ * Renders the optional editor info panel at the very top of the log viewer.
+ * Only shown when `data.editorNote` is present (injected by the adapter/backend
+ * to communicate data-availability limitations or editor-specific notes).
+ */
+function renderEditorInfoPanel(data: SessionLogData): string {
+	if (!data.editorNote?.items?.length) { return ''; }
+	const icon = getEditorIcon(data.editorName);
+	const items = data.editorNote.items.map(i => `<li>${escapeHtml(i)}</li>`).join('');
+	return `<div class="editor-info-panel">
+<div class="editor-info-header">
+<span class="editor-info-icon">${icon}</span>
+<span class="editor-info-name">${escapeHtml(data.editorName)}</span>
+<span class="editor-info-badge">ℹ️ Data Availability</span>
+</div>
+<ul class="editor-info-list">${items}</ul>
 </div>`;
 }
 
@@ -1087,7 +1112,14 @@ wireUpToolCallHandlers();
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
 
-function renderTurnCard(turn: ChatTurn, isJetBrains = false, isAntigravity = false): string {
+function getTurnTokenAttrs(isJetBrains: boolean, isAntigravity: boolean, isCursor: boolean): { tooltip: string; suffix: string } {
+if (isJetBrains) { return { tooltip: ` title="JetBrains: estimated from user message + assistant text only. Actual API counts and thinking tokens are not available."`, suffix: ' ⓘ' }; }
+if (isAntigravity) { return { tooltip: ` title="Antigravity: estimated from transcript content. Actual API counts are not stored locally."`, suffix: ' ⓘ' }; }
+if (isCursor) { return { tooltip: ` title="Cursor: per-turn token counts are not stored locally. Output tokens are unavailable and input tokens require the full context window."`, suffix: ' ⓘ' }; }
+return { tooltip: '', suffix: '' };
+}
+
+function renderTurnCard(turn: ChatTurn, isJetBrains = false, isAntigravity = false, isCursor = false): string {
 const totalTokens    = turn.inputTokensEstimate + turn.outputTokensEstimate + turn.thinkingTokensEstimate;
 const hasThinking    = turn.thinkingTokensEstimate > 0;
 const hasActualUsage = !!turn.actualUsage;
@@ -1109,6 +1141,8 @@ ${turn.mcpTools.map(mcp => `
 </div>
 ` : '';
 
+const { tooltip: tokenTooltip, suffix: tokenSuffix } = getTurnTokenAttrs(isJetBrains, isAntigravity, isCursor);
+
 return `
 <div class="turn-card" data-turn="${turn.turnNumber}">
 <div class="turn-header">
@@ -1117,7 +1151,7 @@ return `
 <span class="turn-mode" style="background: ${getModeColor(turn.mode)};">${getModeIcon(turn.mode)} ${turn.mode}</span>
 ${turn.model ? renderTurnModelBadge(turn.model) : ''}
 ${turn.thinkingEffort ? `<span class="turn-effort">💡 ${escapeHtml(getEffortDisplayName(turn.thinkingEffort))}</span>` : ''}
-${totalTokens > 0 ? `<span class="turn-tokens"${isJetBrains ? ` title="JetBrains: estimated from user message + assistant text only. Actual API counts and thinking tokens are not available."` : isAntigravity ? ` title="Antigravity: estimated from transcript content. Actual API counts are not stored locally."` : ''}>📊 ${formatCompact(totalTokens)} tokens (↑${turn.inputTokensEstimate} ↓${turn.outputTokensEstimate})${(isJetBrains || isAntigravity) ? ' ⓘ' : ''}</span>` : ''}
+${totalTokens > 0 ? `<span class="turn-tokens"${tokenTooltip}>📊 ${formatCompact(totalTokens)} tokens (↑${turn.inputTokensEstimate} ↓${turn.outputTokensEstimate})${tokenSuffix}</span>` : ''}
 ${hasThinking ? `<span class="turn-tokens" style="color: #a78bfa;">🧠 ${formatCompact(turn.thinkingTokensEstimate)} thinking</span>` : ''}
 ${hasActualUsage ? `<span class="turn-tokens" style="color: #22c55e;">✓ ${formatCompact(turn.actualUsage!.promptTokens + turn.actualUsage!.completionTokens)} actual</span>` : ''}
 ${contextHeaderHtml}
@@ -1299,6 +1333,8 @@ function renderLayout(data: SessionLogData): void {
 <style>${styles}</style>
 
 <div class="container">
+${renderEditorInfoPanel(data)}
+
 ${renderSummaryCards(data, summaryStats)}
 
 ${renderSessionActualUsage(
@@ -1315,7 +1351,7 @@ ${renderSessionActualUsage(
 
 <div class="turns-list">
 ${data.turns.length > 0 
-? data.turns.map(turn => renderTurnCard(turn, data.editorName === 'JetBrains', data.editorName === 'Antigravity')).join('')
+? data.turns.map(turn => renderTurnCard(turn, data.editorName === 'JetBrains', data.editorName === 'Antigravity', data.editorName === 'Cursor')).join('')
 : '<div class="empty-state">No chat turns found in this session.</div>'
 }
 </div>
