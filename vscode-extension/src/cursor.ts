@@ -44,6 +44,14 @@ interface CursorComposerData {
 	fullConversationHeadersOnly?: Array<{ type?: number; bubbleId?: string }>;
 }
 
+export interface CursorBubble {
+	bubbleId: string;
+	type: number; // 1 = user, 2 = assistant
+	text?: string;
+	createdAt?: string;
+	capabilityType?: number;
+}
+
 export class CursorDataAccess {
 	private _sqlJsModule: SqlJsStatic | null = null;
 	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
@@ -262,6 +270,39 @@ export class CursorDataAccess {
 		} catch {
 			return null;
 		}
+	}
+
+	/**
+	 * Read bubble data for a set of bubble IDs within a session.
+	 * Each bubble holds the actual message text (user or assistant).
+	 */
+	async readBubbles(virtualPath: string, bubbleIds: string[]): Promise<Map<string, CursorBubble>> {
+		if (bubbleIds.length === 0) { return new Map(); }
+		const dbPath = this.getDbPathFromVirtual(virtualPath);
+		const composerId = this.getComposerIdFromVirtual(virtualPath);
+		if (!composerId) { return new Map(); }
+		const db = await this.getDb(dbPath);
+		if (!db) { return new Map(); }
+		const map = new Map<string, CursorBubble>();
+		try {
+			const placeholders = bubbleIds.map(() => '?').join(',');
+			const keys = bubbleIds.map(id => `bubbleId:${composerId}:${id}`);
+			const result = db.exec(
+				`SELECT key, value FROM cursorDiskKV WHERE key IN (${placeholders})`,
+				keys
+			);
+			if (result.length === 0) { return map; }
+			for (const row of result[0].values) {
+				const key = row[0] as string;
+				const raw = row[1] as string;
+				const bubbleId = key.replace(`bubbleId:${composerId}:`, '');
+				try {
+					const bubble = JSON.parse(raw) as CursorBubble;
+					map.set(bubbleId, bubble);
+				} catch { /* ignore malformed entries */ }
+			}
+		} catch { /* ignore DB errors */ }
+		return map;
 	}
 
 	/**

@@ -66,30 +66,56 @@ export class CursorAdapter implements IEcosystemAdapter, IDiscoverableEcosystem,
 		return [{ path: this.cursor.getCursorDbPath(), source: 'Cursor (state.vscdb)' }];
 	}
 
+	private collectAssistantText(
+		headers: Array<{ type?: number; bubbleId?: string }>,
+		startIndex: number,
+		bubbleMap: Map<string, import('../cursor').CursorBubble>
+	): string {
+		const texts: string[] = [];
+		let j = startIndex;
+		while (j < headers.length && headers[j].type !== 1) {
+			const bid = headers[j].bubbleId;
+			const ab = bid ? bubbleMap.get(bid) : undefined;
+			if (ab?.text) { texts.push(ab.text); }
+			j++;
+		}
+		return texts.join('\n\n');
+	}
+
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const data = await this.cursor.readComposerData(sessionFile);
 		if (!data?.fullConversationHeadersOnly) { return { turns: [] }; }
 
 		const headers = data.fullConversationHeadersOnly;
-		const userHeaders = headers.filter(h => h.type === 1);
-		const numTurns = userHeaders.length;
 		const contextTokens = typeof data.contextTokensUsed === 'number' ? data.contextTokensUsed : 0;
-		const perTurnInput = numTurns > 0 ? Math.round(contextTokens / numTurns) : 0;
+		const model = data.modelConfig?.modelName || null;
 
-		const turns: ChatTurn[] = userHeaders.map((h, idx) => ({
-			turnNumber: idx + 1,
-			timestamp: null,
-			mode: 'agent' as const,
-			userMessage: '',
-			assistantResponse: '',
-			model: data.modelConfig?.modelName || null,
-			toolCalls: [],
-			contextReferences: createEmptyContextRefs(),
-			mcpTools: [],
-			inputTokensEstimate: perTurnInput,
-			outputTokensEstimate: 0,
-			thinkingTokensEstimate: 0,
-		}));
+		const allBubbleIds = headers.map(h => h.bubbleId).filter((id): id is string => !!id);
+		const bubbleMap = await this.cursor.readBubbles(sessionFile, allBubbleIds);
+
+		const turns: ChatTurn[] = [];
+		let turnNumber = 0;
+		for (let i = 0; i < headers.length; i++) {
+			const h = headers[i];
+			if (h.type !== 1) { continue; }
+			turnNumber++;
+
+			const userBubble = h.bubbleId ? bubbleMap.get(h.bubbleId) : undefined;
+			turns.push({
+				turnNumber,
+				timestamp: userBubble?.createdAt ?? null,
+				mode: 'agent' as const,
+				userMessage: userBubble?.text ?? '',
+				assistantResponse: this.collectAssistantText(headers, i + 1, bubbleMap),
+				model,
+				toolCalls: [],
+				contextReferences: createEmptyContextRefs(),
+				mcpTools: [],
+				inputTokensEstimate: 0,
+				outputTokensEstimate: 0,
+				thinkingTokensEstimate: 0,
+			});
+		}
 
 		return { turns, actualTokens: contextTokens };
 	}
