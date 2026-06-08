@@ -58,7 +58,7 @@ export const EDITOR_ICON_MAP: Record<EditorName, string> = {
 	'VS Code Server': '☁️',
 	'VS Code Server (Insiders)': '☁️',
 	'VSCodium': '🔷',
-	'Cursor': '⚡',
+	'Cursor': '🖱️',
 	'Copilot CLI': '🤖',
 	'OpenCode': '🟢',
 	'Visual Studio': '🪟',
