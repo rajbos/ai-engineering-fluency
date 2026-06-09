@@ -5398,7 +5398,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				}
 				break;
 			case 'insightAction':
-					await this.dispatch('insightAction', () => this.handleInsightAction(message));
+					await this.dispatch(`insightAction:${message.id ?? ''}`, () => this.handleInsightAction(message));
 					break;
 		}
 	}
@@ -5434,14 +5434,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.context.globalState.update('insights.state', this._insightStateBag);
 		// Push refreshed state back to the webview
 		if (this.analysisPanel && this.lastUsageAnalysisStats) {
-			const cadenceDays = vscode.workspace.getConfiguration('aiEngineeringFluency').get<number>('insights.cadenceDays', 2);
-			const ctx = {
-				today: this.lastUsageAnalysisStats.today,
-				last30Days: this.lastUsageAnalysisStats.last30Days,
-				missedPotential: this.lastUsageAnalysisStats.missedPotential ?? [],
-				customizationMatrix: this.lastUsageAnalysisStats.customizationMatrix,
-			};
-			const evaluated = _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
+			const evaluated = this.buildCurrentInsights(this.lastUsageAnalysisStats);
 			void this.analysisPanel.webview.postMessage({ command: 'updateInsights', insights: evaluated });
 		}
 	}
