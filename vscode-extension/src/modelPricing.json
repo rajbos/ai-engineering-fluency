@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-06-03",
+    "lastUpdated": "2026-06-09",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -11,9 +11,9 @@
       },
       {
         "name": "Mistral AI API Pricing",
-        "url": "https://pricepertoken.com/pricing-page/provider/mistral-ai",
-        "retrievedDate": "2026-05-06",
-        "note": "Cross-referenced with https://openrouter.ai/mistralai and https://ai-pricing.info/mistral"
+        "url": "https://openrouter.ai/api/v1/models",
+        "retrievedDate": "2026-06-09",
+        "note": "Filtered for Mistral models"
       },
       {
         "name": "Anthropic Claude Pricing",
@@ -845,8 +845,8 @@
       ]
     },
     "mistral-large-latest": {
-      "inputCostPerMillion": 0.5,
-      "outputCostPerMillion": 1.5,
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 6.0,
       "category": "Mistral models",
       "tier": "unknown",
       "multiplier": 1,
@@ -885,8 +885,8 @@
       ]
     },
     "mistral-medium-latest": {
-      "inputCostPerMillion": 1.5,
-      "outputCostPerMillion": 7.5,
+      "inputCostPerMillion": 0.4,
+      "outputCostPerMillion": 2.0,
       "category": "Mistral models",
       "tier": "unknown",
       "multiplier": 1,
@@ -1082,6 +1082,126 @@
       "multiplier": 0.0,
       "displayNames": [
         "MAI-Code-1-Flash"
+      ]
+    },
+    "devstral-2512": {
+      "inputCostPerMillion": 0.4,
+      "outputCostPerMillion": 2.0,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Devstral 2 2512"
+      ]
+    },
+    "ministral-14b-2512": {
+      "inputCostPerMillion": 0.2,
+      "outputCostPerMillion": 0.2,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Ministral 3 14B 2512"
+      ]
+    },
+    "ministral-8b-2512": {
+      "inputCostPerMillion": 0.15,
+      "outputCostPerMillion": 0.15,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Ministral 3 8B 2512"
+      ]
+    },
+    "ministral-3b-2512": {
+      "inputCostPerMillion": 0.1,
+      "outputCostPerMillion": 0.1,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Ministral 3 3B 2512"
+      ]
+    },
+    "voxtral-small-24b-2507": {
+      "inputCostPerMillion": 0.1,
+      "outputCostPerMillion": 0.3,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Voxtral Small 24B 2507"
+      ]
+    },
+    "dolphin-mistral-24b-venice-edition:free": {
+      "inputCostPerMillion": 0.0,
+      "outputCostPerMillion": 0.0,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Venice: Uncensored (free)"
+      ]
+    },
+    "mistral-small-3.2-24b-instruct": {
+      "inputCostPerMillion": 0.075,
+      "outputCostPerMillion": 0.2,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Mistral Small 3.2 24B"
+      ]
+    },
+    "mistral-small-3.1-24b-instruct": {
+      "inputCostPerMillion": 0.351,
+      "outputCostPerMillion": 0.555,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Mistral Small 3.1 24B"
+      ]
+    },
+    "mistral-saba": {
+      "inputCostPerMillion": 0.2,
+      "outputCostPerMillion": 0.6,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Saba"
+      ]
+    },
+    "mistral-small-24b-instruct-2501": {
+      "inputCostPerMillion": 0.05,
+      "outputCostPerMillion": 0.08,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Mistral Small 3"
+      ]
+    },
+    "mixtral-8x22b-instruct": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 6.0,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral: Mixtral 8x22B Instruct"
+      ]
+    },
+    "mistral-large": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 6.0,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "multiplier": 1,
+      "displayNames": [
+        "Mistral Large"
       ]
     }
   }
