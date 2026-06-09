@@ -9,6 +9,11 @@ import {
 	BackendSyncError,
 	isAzurePolicyDisallowedError,
 	isStorageLocalAuthDisallowedByPolicyError,
+	isAuthError,
+	isNotFoundError,
+	isConflictError,
+	isRetryableError,
+	isNetworkError,
 	redactSecretsInText,
 	safeStringifyError,
 	getErrorStatusCode,
@@ -377,4 +382,121 @@ test('getErrorCode: returns undefined when code is boolean or object', () => {
 assert.equal(getErrorCode({ code: true }), undefined);
 assert.equal(getErrorCode({ code: null }), undefined);
 assert.equal(getErrorCode({ code: {} }), undefined);
+});
+
+// ── isAuthError tests ─────────────────────────────────────────────────────
+
+test('isAuthError: returns true for statusCode 403', () => {
+assert.equal(isAuthError({ statusCode: 403 }), true);
+});
+
+test('isAuthError: returns true for AUTHORIZATION_PERMISSION_MISMATCH code', () => {
+assert.equal(isAuthError({ code: 'AuthorizationPermissionMismatch' }), true);
+});
+
+test('isAuthError: returns true when message contains 403', () => {
+assert.equal(isAuthError({ message: 'Error 403 Forbidden' } as any), true);
+});
+
+test('isAuthError: returns true when message contains Forbidden', () => {
+assert.equal(isAuthError({ message: 'Access Forbidden' } as any), true);
+});
+
+test('isAuthError: returns false for non-auth errors', () => {
+assert.equal(isAuthError({ statusCode: 404 }), false);
+assert.equal(isAuthError({ message: 'Not found' } as any), false);
+assert.equal(isAuthError(null), false);
+assert.equal(isAuthError(undefined), false);
+});
+
+// ── isNotFoundError tests ─────────────────────────────────────────────────
+
+test('isNotFoundError: returns true for statusCode 404', () => {
+assert.equal(isNotFoundError({ statusCode: 404 }), true);
+});
+
+test('isNotFoundError: returns true when message contains 404', () => {
+assert.equal(isNotFoundError({ message: 'Error 404 not found' } as any), true);
+});
+
+test('isNotFoundError: returns true when message contains NotFound', () => {
+assert.equal(isNotFoundError({ message: 'Resource NotFound' } as any), true);
+});
+
+test('isNotFoundError: returns false for non-404 errors', () => {
+assert.equal(isNotFoundError({ statusCode: 200 }), false);
+assert.equal(isNotFoundError({ statusCode: 500 }), false);
+assert.equal(isNotFoundError(null), false);
+});
+
+// ── isConflictError tests ─────────────────────────────────────────────────
+
+test('isConflictError: returns true for statusCode 409', () => {
+assert.equal(isConflictError({ statusCode: 409 }), true);
+});
+
+test('isConflictError: returns true for TABLE_ALREADY_EXISTS code', () => {
+assert.equal(isConflictError({ code: 'TableAlreadyExists' }), true);
+});
+
+test('isConflictError: returns true for numeric 409 code', () => {
+assert.equal(isConflictError({ code: 409 }), true);
+});
+
+test('isConflictError: returns false for non-conflict errors', () => {
+assert.equal(isConflictError({ statusCode: 200 }), false);
+assert.equal(isConflictError({ code: 'SomethingElse' }), false);
+assert.equal(isConflictError(null), false);
+});
+
+// ── isRetryableError tests ────────────────────────────────────────────────
+
+test('isRetryableError: returns true for TOO_MANY_REQUESTS (429)', () => {
+assert.equal(isRetryableError({ statusCode: 429 }), true);
+});
+
+test('isRetryableError: returns true for SERVICE_UNAVAILABLE (503)', () => {
+assert.equal(isRetryableError({ statusCode: 503 }), true);
+});
+
+test('isRetryableError: returns true for ETIMEDOUT code', () => {
+assert.equal(isRetryableError({ code: 'ETIMEDOUT' }), true);
+});
+
+test('isRetryableError: returns false for non-retryable errors', () => {
+assert.equal(isRetryableError({ statusCode: 400 }), false);
+assert.equal(isRetryableError({ code: 'ECONNREFUSED' }), false);
+assert.equal(isRetryableError(null), false);
+});
+
+// ── isNetworkError tests ──────────────────────────────────────────────────
+
+test('isNetworkError: returns true for ENOTFOUND code', () => {
+assert.equal(isNetworkError({ code: 'ENOTFOUND' }), true);
+});
+
+test('isNetworkError: returns true for ETIMEDOUT code', () => {
+assert.equal(isNetworkError({ code: 'ETIMEDOUT' }), true);
+});
+
+test('isNetworkError: returns true for ECONNREFUSED code', () => {
+assert.equal(isNetworkError({ code: 'ECONNREFUSED' }), true);
+});
+
+test('isNetworkError: returns true when message contains ENOTFOUND', () => {
+assert.equal(isNetworkError({ message: 'DNS lookup ENOTFOUND' } as any), true);
+});
+
+test('isNetworkError: returns true when message contains ETIMEDOUT', () => {
+assert.equal(isNetworkError({ message: 'Connection ETIMEDOUT' } as any), true);
+});
+
+test('isNetworkError: returns true when message contains ECONNREFUSED', () => {
+assert.equal(isNetworkError({ message: 'Connection ECONNREFUSED' } as any), true);
+});
+
+test('isNetworkError: returns false for non-network errors', () => {
+assert.equal(isNetworkError({ statusCode: 404 }), false);
+assert.equal(isNetworkError({ code: 'NOT_FOUND' }), false);
+assert.equal(isNetworkError(null), false);
 });

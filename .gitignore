@@ -36,3 +36,5 @@ jetbrains-plugin/.gradle/
 **/.idea/
 # IntelliJ sandbox directories
 **/idea-sandbox/
+.claude/scheduled_tasks.lock
+
