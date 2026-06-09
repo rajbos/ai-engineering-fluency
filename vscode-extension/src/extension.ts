@@ -4570,7 +4570,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(editorNote ? { editorNote } : {}),
 			...(details.parentInfo ? { parentInfo: details.parentInfo } : {}),
 			...(details.childInfo ? { childInfo: details.childInfo, totalChildCount: details.totalChildCount } : {}),
-			...this.buildLogDataCacheFields(sessionCache, subAgentsStarted),
+			...this.buildLogDataCacheFields(sessionCache, subAgentsStarted ?? ((details.totalChildCount ?? 0) > 0 ? details.totalChildCount : undefined)),
 		};
 	}
 
