@@ -217,3 +217,27 @@ test('PiAdapter.buildTurns: falls back to per-turn default when assistant usage 
     assert.equal(turns[0].inputTokensEstimate, 0);
     assert.equal(turns[0].outputTokensEstimate, 0);
 });
+
+// ---------------------------------------------------------------------------
+// PiDataAccess.getParentSessionPath
+// ---------------------------------------------------------------------------
+
+test('PiDataAccess.getParentSessionPath: returns null for root session (no parentSession field)', async () => {
+    const file = await writeTempSession([makeSessionLine('s1')]);
+    const pi = new PiDataAccess();
+    const result = await pi.getParentSessionPath(file);
+    assert.equal(result, null);
+});
+
+test('PiDataAccess.getParentSessionPath: returns path when parentSession is set in header', async () => {
+    const parentPath = '/home/user/.pi/agent/sessions/2026-01-01T00-00-00-000Z_parent.jsonl';
+    const sessionLine = JSON.stringify({
+        type: 'session', version: 3, id: 'child-id',
+        timestamp: '2026-01-01T01:00:00.000Z', cwd: '/home/user/project',
+        parentSession: parentPath,
+    });
+    const file = await writeTempSession([sessionLine]);
+    const pi = new PiDataAccess();
+    const result = await pi.getParentSessionPath(file);
+    assert.equal(result, parentPath);
+});

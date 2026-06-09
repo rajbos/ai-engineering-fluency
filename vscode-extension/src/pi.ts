@@ -117,6 +117,17 @@ return lines.find(l => l.type === 'session') ?? null;
 }
 
 /**
+ * Returns the file path of the parent session if this session was spawned
+ * by a parent pi session (i.e. it has a `parentSession` field in its header).
+ * Returns null for root sessions.
+ */
+async getParentSessionPath(filePath: string): Promise<string | null> {
+const header = await this.readSession(filePath);
+const parent = header?.parentSession;
+return typeof parent === 'string' && parent.length > 0 ? parent : null;
+}
+
+/**
  * Read all message events from a Pi session file.
  * Returns the array of events with type === 'message'.
  */
