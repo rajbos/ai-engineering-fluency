@@ -5,9 +5,8 @@ on:
     # Run daily at 09:15 UTC, after the model data update
     - cron: '15 9 * * *'
   workflow_dispatch:
+  
   push:
-    branches:
-      - main
     paths:
       - .github/workflows/update-mistral-pricing.yml
       - scripts/update-mistral-pricing.py
