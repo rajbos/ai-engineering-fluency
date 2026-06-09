@@ -5451,6 +5451,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					missedPotential: analysisStats.missedPotential || [], lastUpdated: analysisStats.lastUpdated.toISOString(),
 					backendConfigured: this.isBackendConfigured(),
 					currentWorkspacePaths: vscode.workspace.workspaceFolders?.map(f => f.uri.fsPath) ?? [],
+					todaySessions: analysisStats.todaySessions || [],
 					insights: this.buildCurrentInsights(analysisStats),
 				},
 			});
