@@ -104,7 +104,10 @@ return result;
 private buildTurn(userEvent: any, assistantEvents: any[], turnNumber: number, perTurnInput: number, perTurnOutput: number): ChatTurn {
 const userText = this.extractUserText(userEvent.message?.content);
 const { assistantText, toolCalls, model } = this.processAssistantEvents(assistantEvents);
-const lastUsage = assistantEvents[assistantEvents.length - 1]?.message?.usage;
+// Sum all assistant events' usage — agentic sessions make many API calls per turn,
+// each with its own (growing) context window; taking only the last under-counts heavily.
+const totalInput = assistantEvents.reduce((sum, e) => sum + (e.message?.usage?.input ?? 0), 0);
+const totalOutput = assistantEvents.reduce((sum, e) => sum + (e.message?.usage?.output ?? 0), 0);
 return {
 turnNumber,
 timestamp: userEvent.timestamp ?? null,
@@ -115,8 +118,8 @@ model,
 toolCalls,
 contextReferences: createEmptyContextRefs(),
 mcpTools: [],
-inputTokensEstimate: lastUsage ? (lastUsage.input ?? 0) : perTurnInput,
-outputTokensEstimate: lastUsage ? (lastUsage.output ?? 0) : perTurnOutput,
+inputTokensEstimate: totalInput > 0 ? totalInput : perTurnInput,
+outputTokensEstimate: totalOutput > 0 ? totalOutput : perTurnOutput,
 thinkingTokensEstimate: 0,
 };
 }
