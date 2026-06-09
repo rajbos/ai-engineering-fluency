@@ -3,8 +3,9 @@ import * as assert from 'node:assert/strict';
 import {
     calculateFluencyScoreForTeamMember,
     calculateMaturityScores,
+    getFluencyLevelData,
 } from '../../src/maturityScoring';
-import type { UsageAnalysisStats, UsageAnalysisPeriod } from '../../src/types';
+import type { UsageAnalysisStats, UsageAnalysisPeriod, WorkspaceCustomizationMatrix } from '../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -359,4 +360,658 @@ test('calculateMaturityScores: passes useCache flag to stats callback', async ()
         return emptyStats();
     }, false);
     assert.equal(capturedFlag, false);
+});
+
+// ---------------------------------------------------------------------------
+// calculateMaturityScores — Prompt Engineering via period data
+// ---------------------------------------------------------------------------
+
+test('calculateMaturityScores: PE conversation patterns (multiTurnSessions) populate evidence', async () => {
+    const stats = emptyStats();
+    stats.last30Days.conversationPatterns.multiTurnSessions = 5;
+    stats.last30Days.conversationPatterns.avgTurnsPerSession = 3.5;
+    stats.last30Days.sessions = 10;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const pe = result.categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe.stage >= 2, `expected PE >= 2 with avgTurns 3.5, got ${pe.stage}`);
+    assert.ok(pe.evidence.some(e => e.includes('multi-turn')), 'evidence should mention multi-turn sessions');
+});
+
+test('calculateMaturityScores: PE avgTurns >= 5 boosts to at least Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.conversationPatterns.avgTurnsPerSession = 5.0;
+    stats.last30Days.conversationPatterns.multiTurnSessions = 3;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const pe = result.categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe.stage >= 3, `expected PE >= 3 with avgTurns 5.0, got ${pe.stage}`);
+});
+
+test('calculateMaturityScores: PE Stage 4 (100+ interactions, agent, model switching)', async () => {
+    const stats = emptyStats();
+    stats.last30Days.modeUsage.agent = 100;
+    stats.last30Days.modelSwitching.mixedTierSessions = 2;
+    stats.last30Days.modelSwitching.switchingFrequency = 50;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const pe = result.categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.equal(pe.stage, 4);
+});
+
+test('calculateMaturityScores: PE model switching alone boosts to Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.modelSwitching.mixedTierSessions = 1;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const pe = result.categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe.stage >= 3, `expected PE >= 3 with mixedTierSessions=1, got ${pe.stage}`);
+});
+
+test('calculateMaturityScores: PE with CLI interactions includes evidence', async () => {
+    const stats = emptyStats();
+    stats.last30Days.modeUsage.cli = 10;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const pe = result.categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe.evidence.some(e => e.includes('CLI')), 'evidence should mention CLI interactions');
+});
+
+test('calculateMaturityScores: PE with slash commands shows evidence', async () => {
+    const stats = emptyStats();
+    stats.last30Days.modeUsage.ask = 30;
+    stats.last30Days.toolCalls.byTool = { explain: 2, fix: 1 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const pe = result.categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe.evidence.some(e => e.includes('slash commands')), 'evidence should mention slash commands');
+});
+
+// ---------------------------------------------------------------------------
+// calculateMaturityScores — Context Engineering via period data
+// ---------------------------------------------------------------------------
+
+test('calculateMaturityScores: CE image booster → Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.contextReferences.file = 1;
+    stats.last30Days.contextReferences.byKind = { 'copilot.image': 2 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ce = result.categories.find(c => c.category === 'Context Engineering')!;
+    assert.ok(ce.stage >= 3, `expected CE >= 3 with image refs, got ${ce.stage}`);
+    assert.ok(ce.evidence.some(e => e.includes('image')), 'evidence should mention image references');
+});
+
+test('calculateMaturityScores: CE prompt file booster → Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.contextReferences.byKind = { promptFile: 3 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ce = result.categories.find(c => c.category === 'Context Engineering')!;
+    assert.ok(ce.stage >= 3, `expected CE >= 3 with promptFile refs, got ${ce.stage}`);
+});
+
+test('calculateMaturityScores: CE Stage 4 (5+ ref types, 30+ total refs)', async () => {
+    const stats = emptyStats();
+    stats.last30Days.contextReferences.file = 10;
+    stats.last30Days.contextReferences.selection = 5;
+    stats.last30Days.contextReferences.symbol = 5;
+    stats.last30Days.contextReferences.codebase = 5;
+    stats.last30Days.contextReferences.workspace = 5;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ce = result.categories.find(c => c.category === 'Context Engineering')!;
+    assert.equal(ce.stage, 4);
+});
+
+test('calculateMaturityScores: CE Stage 4 tip shown when specialized items used', async () => {
+    const stats = emptyStats();
+    stats.last30Days.contextReferences.file = 4;
+    stats.last30Days.contextReferences.selection = 3;
+    stats.last30Days.contextReferences.codebase = 2;
+    stats.last30Days.contextReferences.byKind = { 'copilot.image': 1, '#changes': 1 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ce = result.categories.find(c => c.category === 'Context Engineering')!;
+    assert.ok(ce.tips.length > 0);
+});
+
+test('calculateMaturityScores: CE evidence includes various ref types', async () => {
+    const stats = emptyStats();
+    stats.last30Days.contextReferences.terminal = 3;
+    stats.last30Days.contextReferences.vscode = 2;
+    stats.last30Days.contextReferences.clipboard = 1;
+    stats.last30Days.contextReferences.changes = 1;
+    stats.last30Days.contextReferences.problemsPanel = 1;
+    stats.last30Days.contextReferences.terminalLastCommand = 1;
+    stats.last30Days.contextReferences.terminalSelection = 1;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ce = result.categories.find(c => c.category === 'Context Engineering')!;
+    assert.ok(ce.evidence.length > 0);
+});
+
+// ---------------------------------------------------------------------------
+// calculateMaturityScores — Agentic via period data
+// ---------------------------------------------------------------------------
+
+test('calculateMaturityScores: AG with editScope (multiFileEdits) → Stage 2', async () => {
+    const stats = emptyStats();
+    stats.last30Days.editScope.multiFileEdits = 5;
+    stats.last30Days.editScope.singleFileEdits = 2;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.stage >= 2, `expected AG >= 2 with multiFileEdits, got ${ag.stage}`);
+    assert.ok(ag.evidence.some(e => e.includes('multi-file')), 'evidence should mention multi-file edits');
+});
+
+test('calculateMaturityScores: AG avgFilesPerSession ≥ 3 → Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.editScope.avgFilesPerSession = 3.5;
+    stats.last30Days.editScope.multiFileEdits = 2;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.stage >= 3, `expected AG >= 3 with avgFilesPerSession=3.5, got ${ag.stage}`);
+});
+
+test('calculateMaturityScores: AG multi-file Stage 4 (20+ multiFileEdits, avgFiles >= 3)', async () => {
+    const stats = emptyStats();
+    stats.last30Days.editScope.multiFileEdits = 20;
+    stats.last30Days.editScope.avgFilesPerSession = 3.5;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.equal(ag.stage, 4);
+});
+
+test('calculateMaturityScores: AG multiAgentParentSessions=1 → Stage 3', async () => {
+    const stats = emptyStats();
+    (stats.last30Days as UsageAnalysisPeriod & { multiAgentParentSessions?: number }).multiAgentParentSessions = 1;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.stage >= 3, `expected AG >= 3 with 1 multi-agent session, got ${ag.stage}`);
+    assert.ok(ag.evidence.some(e => e.includes('multi-agent')), 'evidence should mention multi-agent orchestration');
+});
+
+test('calculateMaturityScores: AG multiAgentParentSessions=3 → Stage 4', async () => {
+    const stats = emptyStats();
+    (stats.last30Days as UsageAnalysisPeriod & { multiAgentParentSessions?: number }).multiAgentParentSessions = 3;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.equal(ag.stage, 4);
+});
+
+test('calculateMaturityScores: AG editsAgent sessions provide evidence', async () => {
+    const stats = emptyStats();
+    stats.last30Days.agentTypes.editsAgent = 5;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.stage >= 2, 'editsAgent sessions should push to at least Stage 2');
+    assert.ok(ag.evidence.some(e => e.includes('edits agent')), 'evidence should mention edits agent');
+});
+
+// ---------------------------------------------------------------------------
+// calculateMaturityScores — Tool Usage via period data
+// ---------------------------------------------------------------------------
+
+test('calculateMaturityScores: TU workspaceAgent → Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.agentTypes.workspaceAgent = 3;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const tu = result.categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.stage >= 3, `expected TU >= 3 with workspaceAgent, got ${tu.stage}`);
+    assert.ok(tu.evidence.some(e => e.includes('@workspace')), 'evidence should mention @workspace agent');
+});
+
+test('calculateMaturityScores: TU 2 advanced tools → Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.toolCalls.byTool = { github_pull_request: 2, run_in_terminal: 3 };
+    stats.last30Days.toolCalls.total = 5;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const tu = result.categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.stage >= 3, `expected TU >= 3 with 2 advanced tools, got ${tu.stage}`);
+});
+
+test('calculateMaturityScores: TU automatic-only tools reported but stay Stage 1', async () => {
+    const stats = emptyStats();
+    // Only automatic tools (reading files etc.)
+    stats.last30Days.toolCalls.byTool = { read_file: 10, list_directory: 5 };
+    stats.last30Days.toolCalls.total = 15;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const tu = result.categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.evidence.some(e => e.includes('automatic')), 'evidence should note automatic tools');
+});
+
+test('calculateMaturityScores: TU single MCP server → Stage 3 but not Stage 4', async () => {
+    const stats = emptyStats();
+    stats.last30Days.mcpTools.total = 3;
+    stats.last30Days.mcpTools.byServer = { 'GitHub MCP': 3 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const tu = result.categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.stage >= 3 && tu.stage < 4, `expected TU == 3 with 1 MCP server, got ${tu.stage}`);
+    assert.ok(tu.evidence.some(e => e.includes('MCP')), 'evidence should mention MCP tool calls');
+});
+
+// ---------------------------------------------------------------------------
+// calculateMaturityScores — Customization via period data + matrix
+// ---------------------------------------------------------------------------
+
+test('calculateMaturityScores: CU Stage 3 via customization rate (30%+, 2+ repos)', async () => {
+    const matrix: WorkspaceCustomizationMatrix = {
+        customizationTypes: [{ id: 'instructions', icon: '📝', label: 'Instructions' }],
+        workspaces: [],
+        totalWorkspaces: 5,
+        workspacesWithIssues: 3,  // 2 of 5 have customization → 40% rate
+    };
+    const result = await calculateMaturityScores(matrix, async () => emptyStats());
+    const cu = result.categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 3);
+    assert.ok(cu.evidence.some(e => e.includes('repositor')), 'evidence should mention repositories');
+});
+
+test('calculateMaturityScores: CU Stage 4 via customization rate (70%+, 3+ repos)', async () => {
+    const matrix: WorkspaceCustomizationMatrix = {
+        customizationTypes: [{ id: 'instructions', icon: '📝', label: 'Instructions' }],
+        workspaces: [],
+        totalWorkspaces: 4,
+        workspacesWithIssues: 1,  // 3 of 4 customized → 75% rate
+    };
+    const result = await calculateMaturityScores(matrix, async () => emptyStats());
+    const cu = result.categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 4);
+    assert.ok(cu.tips.some(t => t.includes('repo')), 'Stage 4 tips should mention repos');
+});
+
+test('calculateMaturityScores: CU Stage 4 all repos customized → "all repos" tip', async () => {
+    const matrix: WorkspaceCustomizationMatrix = {
+        customizationTypes: [{ id: 'instructions', icon: '📝', label: 'Instructions' }],
+        workspaces: [],
+        totalWorkspaces: 3,
+        workspacesWithIssues: 0,  // 3 of 3 customized → 100%
+    };
+    const result = await calculateMaturityScores(matrix, async () => emptyStats());
+    const cu = result.categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 4);
+    assert.ok(cu.tips.some(t => t.toLowerCase().includes('all repos')), 'tip should say all repos customized');
+});
+
+test('calculateMaturityScores: CU Stage 4 with uncustomized repos shows prioritized missing repos tip', async () => {
+    const matrix: WorkspaceCustomizationMatrix = {
+        customizationTypes: [{ id: 'instructions', icon: '📝', label: 'Instructions' }],
+        workspaces: [
+            {
+                workspaceName: 'my-repo', workspacePath: '/home/user/my-repo',
+                sessionCount: 10, interactionCount: 50,
+                typeStatuses: { instructions: '❌' },
+            },
+        ],
+        totalWorkspaces: 5,
+        workspacesWithIssues: 1,  // 4 of 5 customized → 80% → Stage 4
+    };
+    const result = await calculateMaturityScores(matrix, async () => emptyStats());
+    const cu = result.categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 4);
+    // Should show tip about uncustomized repos since workspacesWithIssues = 1
+    assert.ok(cu.tips.some(t => t.includes('repo') && t.includes('miss')), 'tip should mention missing repos');
+});
+
+test('calculateMaturityScores: CU unique models boost to Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.modelSwitching.standardModels = ['gpt-4o', 'gpt-4o-mini', 'gemini-pro'];
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const cu = result.categories.find(c => c.category === 'Customization')!;
+    assert.ok(cu.stage >= 3, `expected CU >= 3 with 3 unique models, got ${cu.stage}`);
+    assert.ok(cu.evidence.some(e => e.includes('model')), 'evidence should mention models used');
+});
+
+// ---------------------------------------------------------------------------
+// calculateMaturityScores — Workflow Integration via period data
+// ---------------------------------------------------------------------------
+
+test('calculateMaturityScores: WI apply rate ≥ 50 → Stage 2 boost', async () => {
+    const stats = emptyStats();
+    stats.last30Days.applyUsage.totalCodeBlocks = 10;
+    stats.last30Days.applyUsage.totalApplies = 8;
+    stats.last30Days.applyUsage.applyRate = 80;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const wi = result.categories.find(c => c.category === 'Workflow Integration')!;
+    assert.ok(wi.stage >= 2, `expected WI >= 2 with 80% apply rate, got ${wi.stage}`);
+    assert.ok(wi.evidence.some(e => e.includes('apply rate')), 'evidence should mention apply rate');
+});
+
+test('calculateMaturityScores: WI session duration included in evidence', async () => {
+    const stats = emptyStats();
+    stats.last30Days.sessionDuration.avgDurationMs = 5 * 60 * 1000; // 5 minutes
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const wi = result.categories.find(c => c.category === 'Workflow Integration')!;
+    assert.ok(wi.evidence.some(e => e.includes('min session')), 'evidence should mention session duration');
+});
+
+test('calculateMaturityScores: WI Stage 4 (15+ sessions, 2+ modes, 20+ ctx refs)', async () => {
+    const stats = emptyStats();
+    stats.last30Days.sessions = 15;
+    stats.last30Days.modeUsage.ask = 10;
+    stats.last30Days.modeUsage.agent = 5;
+    stats.last30Days.contextReferences.file = 20;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const wi = result.categories.find(c => c.category === 'Workflow Integration')!;
+    assert.equal(wi.stage, 4);
+});
+
+test('calculateMaturityScores: WI CLI as third mode counts toward modesUsed', async () => {
+    const stats = emptyStats();
+    stats.last30Days.sessions = 5;
+    stats.last30Days.modeUsage.ask = 5;
+    stats.last30Days.modeUsage.agent = 5;
+    stats.last30Days.modeUsage.cli = 5;
+    stats.last30Days.contextReferences.file = 5;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const wi = result.categories.find(c => c.category === 'Workflow Integration')!;
+    assert.ok(wi.stage >= 3, `expected WI >= 3 with 3 modes, got ${wi.stage}`);
+    assert.ok(wi.evidence.some(e => e.includes('modes')), 'evidence should mention modes used');
+});
+
+// ---------------------------------------------------------------------------
+// calculateFluencyScoreForTeamMember — edge cases for _calcFluency* helpers
+// ---------------------------------------------------------------------------
+
+test('AG (team): editsAgentCount > 0 boosts to at least Stage 2', () => {
+    const fd = emptyFd();
+    fd.editsAgentCount = 1;
+    const ag = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.stage >= 2, `expected AG >= 2 with editsAgentCount=1, got ${ag.stage}`);
+});
+
+test('AG (team): multiFileEdits ≥ 20 + avgFilesPerSession ≥ 3 → Stage 4', () => {
+    const fd = emptyFd();
+    fd.multiFileEdits = 20;
+    fd.filesPerEditSum = 70; fd.filesPerEditCount = 20; // avg = 3.5
+    const ag = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Agentic')!;
+    assert.equal(ag.stage, 4);
+});
+
+test('TU (team): workspaceAgentCount > 0 → at least Stage 3', () => {
+    const fd = emptyFd();
+    fd.workspaceAgentCount = 2;
+    const tu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.stage >= 3, `expected TU >= 3 with workspaceAgentCount=2, got ${tu.stage}`);
+});
+
+test('TU (team): 2 advanced tools → Stage 3', () => {
+    const fd = emptyFd();
+    fd.toolCallsByTool = { github_pull_request: 2, run_in_terminal: 1 };
+    const tu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.stage >= 3, `expected TU >= 3 with 2 advanced tools, got ${tu.stage}`);
+});
+
+test('TU (team): single MCP server tip says "Add more MCP servers"', () => {
+    const fd = emptyFd();
+    fd.mcpTotal = 3;
+    fd.mcpByServer = { 'GitHub MCP': 3 };
+    const tu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.tips.some((t: string) => t.toLowerCase().includes('more mcp')), 'tip should suggest adding more MCP servers');
+});
+
+test('TU (team): MCP present but zero servers → tip to explore MCP', () => {
+    const fd = emptyFd();
+    fd.mcpTotal = 0;
+    fd.mcpByServer = {};
+    const tu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.tips.some((t: string) => t.toLowerCase().includes('mcp')), 'tip should mention MCP setup');
+});
+
+test('CU (team): Stage 4 + uncustomized repos → tip mentions uncustomized count', () => {
+    const fd = emptyFd();
+    fd.repositories = new Set(['owner/a', 'owner/b', 'owner/c', 'owner/d']);
+    fd.repositoriesWithCustomization = new Set(['owner/a', 'owner/b', 'owner/c']); // 75% → Stage 4
+    const cu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 4);
+    assert.ok(cu.tips.some((t: string) => t.includes('1') && t.toLowerCase().includes('miss')), 'tip should mention 1 missing repo');
+});
+
+test('CU (team): Stage 4 all customized → "all repos customized" tip', () => {
+    const fd = emptyFd();
+    fd.repositories = new Set(['owner/a', 'owner/b', 'owner/c']);
+    fd.repositoriesWithCustomization = new Set(['owner/a', 'owner/b', 'owner/c']); // 100% → Stage 4
+    const cu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 4);
+    assert.ok(cu.tips.some((t: string) => t.toLowerCase().includes('all repos')), 'tip should say all repos customized');
+});
+
+test('WI (team): apply rate ≥ 50 boosts to at least Stage 2', () => {
+    const fd = emptyFd();
+    fd.applyRateSum = 80; fd.applyRateCount = 1; // avg apply rate = 80
+    const wi = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Workflow Integration')!;
+    assert.ok(wi.stage >= 2, `expected WI >= 2 with 80% apply rate, got ${wi.stage}`);
+});
+
+test('WI (team): context refs ≥ 20 → at least Stage 3', () => {
+    const fd = emptyFd();
+    fd.ctxFile = 20;
+    const wi = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Workflow Integration')!;
+    assert.ok(wi.stage >= 3, `expected WI >= 3 with 20 ctx refs, got ${wi.stage}`);
+});
+
+test('CE (team): 2 specialized items (changes+clipboard) → Stage 4 gap tip generated', () => {
+    const fd = emptyFd();
+    // Use direct ctxChanges/ctxClipboard (the specialized items checks use fd.ctxChanges, not byKind)
+    fd.ctxChanges = 1; fd.ctxClipboard = 1;
+    fd.ctxFile = 3; fd.ctxSelection = 2;
+    // specializedUsedCount = 2 → enters gap-tip branch; stage < 4 (not enough types/refs)
+    const ce = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Context Engineering')!;
+    assert.ok(ce.stage < 4, 'stage should still be < 4');
+    assert.ok(ce.tips.length > 0, 'tips should be generated');
+});
+
+test('CE (team): promptFile in ctxByKind boosts to at least Stage 3', () => {
+    const fd = emptyFd();
+    fd.ctxByKind = { promptFile: 2 };
+    const ce = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Context Engineering')!;
+    assert.ok(ce.stage >= 3, `expected CE >= 3 with promptFile refs, got ${ce.stage}`);
+});
+
+test('PE (team): Claude slash commands (__slash__ prefix) count for Stage 3', () => {
+    const fd = emptyFd();
+    fd.askModeCount = 30;
+    fd.toolCallsByTool = { __slash__review: 1, __slash__bug: 1 };
+    const pe = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe.stage >= 3, `expected PE >= 3 with Claude slash commands, got ${pe.stage}`);
+});
+
+test('PE (team): switchingFrequency via switchingFreqSum/Count enables Stage 4 with agent mode', () => {
+    const fd = emptyFd();
+    fd.agentModeCount = 100;
+    fd.switchingFreqSum = 100; fd.switchingFreqCount = 2; // avg = 50% → hasModelSwitching=true
+    fd.mixedTierSessions = 1; // needed for the mixedTierSessions stage-3 boost path
+    const pe = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.equal(pe.stage, 4, `expected PE = 4 with switchingFrequency + agent mode, got ${pe.stage}`);
+});
+
+test('PE (team): Stage 4 with slash commands as alternative to model switching', () => {
+    const fd = emptyFd();
+    fd.agentModeCount = 100;
+    // 3 slash commands, no model switching
+    fd.toolCallsByTool = { explain: 2, fix: 1, tests: 1 };
+    const pe = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.equal(pe.stage, 4);
+});
+
+// ---------------------------------------------------------------------------
+// calculateMaturityScores — additional branch coverage
+// ---------------------------------------------------------------------------
+
+test('calculateMaturityScores: PE tip "Explore more slash commands" when agent+switching but few slash cmds', async () => {
+    const stats = emptyStats();
+    stats.last30Days.modeUsage.agent = 20;
+    stats.last30Days.modelSwitching.mixedTierSessions = 1;
+    // Only 1 slash command (< 3 needed for that tip path), not enough total for Stage 4
+    stats.last30Days.toolCalls.byTool = { fix: 1 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const pe = result.categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe.stage >= 3, `expected PE >= 3 with agent+switching, got ${pe.stage}`);
+    assert.ok(pe.tips.some(t => t.toLowerCase().includes('slash')), 'tips should suggest slash commands');
+});
+
+test('calculateMaturityScores: PE no conversationPatterns guard does not crash', async () => {
+    const stats = emptyStats();
+    // Simulate a period without conversationPatterns (guard path)
+    const periodWithoutPatterns = { ...stats.last30Days, conversationPatterns: undefined as any };
+    const result = await calculateMaturityScores(undefined, async () => ({
+        ...stats, last30Days: periodWithoutPatterns,
+    }));
+    const pe = result.categories.find(c => c.category === 'Prompt Engineering')!;
+    assert.ok(pe !== undefined);
+});
+
+test('calculateMaturityScores: CE specialized items (changes+clipboard) in period → Stage 4 tip with gap', async () => {
+    const stats = emptyStats();
+    // 2 specialized items used via direct period refs (not byKind)
+    stats.last30Days.contextReferences.changes = 2;
+    stats.last30Days.contextReferences.clipboard = 1;
+    stats.last30Days.contextReferences.file = 3;
+    stats.last30Days.contextReferences.selection = 2;
+    // stage < 4 (only 4 ref types, 5 total refs) → _buildCeStage4Tip fires
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ce = result.categories.find(c => c.category === 'Context Engineering')!;
+    assert.ok(ce.stage < 4, 'should not reach Stage 4 yet');
+    assert.ok(ce.tips.some(t => t.toLowerCase().includes('stage 4')), 'tips should mention Stage 4 requirements');
+});
+
+test('calculateMaturityScores: CE all 10 specialized items used → tip without gap listing', async () => {
+    const stats = emptyStats();
+    // All specialized items used, but not enough total refs for Stage 4
+    stats.last30Days.contextReferences.changes = 1;
+    stats.last30Days.contextReferences.problemsPanel = 1;
+    stats.last30Days.contextReferences.outputPanel = 1;
+    stats.last30Days.contextReferences.terminalLastCommand = 1;
+    stats.last30Days.contextReferences.terminalSelection = 1;
+    stats.last30Days.contextReferences.clipboard = 1;
+    stats.last30Days.contextReferences.vscode = 1;
+    stats.last30Days.contextReferences.byKind = { 'copilot.image': 1, promptFile: 1, prompt: 1 };
+    stats.last30Days.contextReferences.file = 1;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ce = result.categories.find(c => c.category === 'Context Engineering')!;
+    assert.ok(ce.stage >= 3, 'image/promptFile boosters should reach at least Stage 3');
+});
+
+test('calculateMaturityScores: AG Stage 4 via 50+ agent interactions + 5 non-auto tools', async () => {
+    const stats = emptyStats();
+    stats.last30Days.modeUsage.agent = 50;
+    stats.last30Days.toolCalls.byTool = {
+        run_in_terminal: 5, github_pull_request: 4, editFiles: 3, listFiles: 2, myTool: 1
+    };
+    stats.last30Days.toolCalls.total = 15;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.equal(ag.stage, 4);
+});
+
+test('calculateMaturityScores: AG with edit mode interactions adds evidence', async () => {
+    const stats = emptyStats();
+    stats.last30Days.modeUsage.edit = 5;
+    stats.last30Days.toolCalls.total = 3;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.evidence.some(e => e.includes('edit-mode')), 'evidence should include edit-mode interactions');
+});
+
+test('calculateMaturityScores: TU 2+ MCP servers → Stage 4 (period-based)', async () => {
+    const stats = emptyStats();
+    stats.last30Days.mcpTools.total = 5;
+    stats.last30Days.mcpTools.byServer = { 'GitHub MCP': 3, 'Jira MCP': 2 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const tu = result.categories.find(c => c.category === 'Tool Usage')!;
+    assert.equal(tu.stage, 4);
+});
+
+test('calculateMaturityScores: TU byServer has entries but total=0 → tip for existing MCP', async () => {
+    const stats = emptyStats();
+    // Inconsistent state: byServer populated but total=0 → MCP block won't fire
+    stats.last30Days.mcpTools.total = 0;
+    stats.last30Days.mcpTools.byServer = { 'GitHub MCP': 0 };
+    stats.last30Days.toolCalls.byTool = { run_in_terminal: 1 }; // 1 non-auto tool → Stage 2
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const tu = result.categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.stage < 3, `expected TU < 3 (MCP block didn't fire), got ${tu.stage}`);
+    assert.ok(tu.tips.some(t => t.toLowerCase().includes('github integrations')), 'tip should mention GitHub integrations when MCP server in byServer but total=0');
+});
+
+test('calculateMaturityScores: CU Stage 4 via 5+ unique models + 3+ customized repos', async () => {
+    const matrix: WorkspaceCustomizationMatrix = {
+        customizationTypes: [{ id: 'instructions', icon: '📝', label: 'Instructions' }],
+        workspaces: [],
+        totalWorkspaces: 4,
+        workspacesWithIssues: 1,  // 3 of 4 customized → 75% → meets rate threshold
+    };
+    const stats = emptyStats();
+    stats.last30Days.modelSwitching.standardModels = ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'o1'];
+    stats.last30Days.modelSwitching.premiumModels = ['claude-sonnet'];
+    const result = await calculateMaturityScores(matrix, async () => stats);
+    const cu = result.categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 4);
+    assert.ok(cu.evidence.some(e => e.includes('models')), 'evidence should mention models');
+});
+
+test('calculateMaturityScores: CU Stage 2 evidence (some customization, not Stage 3)', async () => {
+    const matrix: WorkspaceCustomizationMatrix = {
+        customizationTypes: [{ id: 'instructions', icon: '📝', label: 'Instructions' }],
+        workspaces: [],
+        totalWorkspaces: 5,
+        workspacesWithIssues: 4,  // 1 of 5 customized → 20% → Stage 2 only
+    };
+    const result = await calculateMaturityScores(matrix, async () => emptyStats());
+    const cu = result.categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 2);
+    assert.ok(cu.evidence.some(e => e.includes('custom instructions')), 'evidence should mention custom instructions');
+});
+
+test('calculateMaturityScores: WI stage < 3, few context refs → explicit context tip shown', async () => {
+    const stats = emptyStats();
+    stats.last30Days.sessions = 5;
+    stats.last30Days.modeUsage.ask = 5; // single mode, modesUsed = 1 < 2
+    stats.last30Days.contextReferences.file = 2; // below hasExplicitContextMinRefs (10)
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const wi = result.categories.find(c => c.category === 'Workflow Integration')!;
+    assert.ok(wi.stage < 3, `expected WI < 3 with single mode, got ${wi.stage}`);
+    assert.ok(wi.tips.some(t => t.toLowerCase().includes('context references')), 'tip should suggest using explicit context refs');
+});
+
+test('CU (team): Stage 3 with uncustomized repos → "add to remaining" tip', () => {
+    const fd = emptyFd();
+    // 3 repos, 2 customized → 66.7% ≥ 30%, 2 ≥ 2 → Stage 3. uncustomized = 1
+    fd.repositories = new Set(['owner/a', 'owner/b', 'owner/c']);
+    fd.repositoriesWithCustomization = new Set(['owner/a', 'owner/b']);
+    const cu = calculateFluencyScoreForTeamMember(fd, 0).categories.find(c => c.category === 'Customization')!;
+    assert.equal(cu.stage, 3);
+    assert.ok(cu.tips.some((t: string) => t.includes('remaining')), 'tip should mention remaining repos');
+});
+
+// ---------------------------------------------------------------------------
+// getFluencyLevelData
+// ---------------------------------------------------------------------------
+
+test('getFluencyLevelData: returns categories and isDebugMode flag', () => {
+    const result = getFluencyLevelData(false);
+    assert.equal(result.isDebugMode, false);
+    assert.ok(Array.isArray(result.categories), 'categories should be an array');
+    assert.ok(result.categories.length > 0, 'should have at least one category');
+});
+
+test('getFluencyLevelData: isDebugMode=true is reflected', () => {
+    const result = getFluencyLevelData(true);
+    assert.equal(result.isDebugMode, true);
+});
+
+// ---------------------------------------------------------------------------
+// Additional branch coverage — period-based scoring
+// ---------------------------------------------------------------------------
+
+test('calculateMaturityScores: WI apply rate < 50 does NOT boost to Stage 2', async () => {
+    const stats = emptyStats();
+    stats.last30Days.applyUsage.totalCodeBlocks = 10;
+    stats.last30Days.applyUsage.totalApplies = 3;
+    stats.last30Days.applyUsage.applyRate = 30;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const wi = result.categories.find(c => c.category === 'Workflow Integration')!;
+    assert.ok(wi.evidence.some(e => e.includes('apply rate')), 'evidence should include apply rate even below 50%');
+});
+
+test('calculateMaturityScores: TU 2 servers in byServer but total=0 → "multiple MCP" tip', async () => {
+    const stats = emptyStats();
+    // 2 entries in byServer but total = 0 → MCP scoring block skipped, mcpServers.length=2, stage<4
+    stats.last30Days.mcpTools.total = 0;
+    stats.last30Days.mcpTools.byServer = { 'GitHub MCP': 0, 'Jira MCP': 0 };
+    stats.last30Days.toolCalls.byTool = { run_in_terminal: 1 }; // 1 non-auto tool → Stage 2
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const tu = result.categories.find(c => c.category === 'Tool Usage')!;
+    assert.ok(tu.stage < 4, `expected TU < 4 (no MCP total), got ${tu.stage}`);
+    assert.ok(tu.tips.some(t => t.toLowerCase().includes('multiple mcp')), 'tip should mention multiple MCP servers');
 });

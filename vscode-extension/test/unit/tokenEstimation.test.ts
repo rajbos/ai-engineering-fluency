@@ -1104,6 +1104,15 @@ test('applyDelta: kind:2 on array container at numeric index', () => {
         assert.deepEqual(result.requests, [['item']]);
 });
 
+test('applyDelta: kind:2 with numeric last segment creates new array when slot is undefined', () => {
+        // Lines 953-955: current is an array but current[idx] is not yet an array → create new []
+        const state = { requests: [] }; // requests[0] is undefined, not an array
+        const result = applyDelta(state, { kind: 2, k: ['requests', '0'], v: 'first' }) as Record<string, unknown>;
+        // A fresh [] was created at requests[0], then 'first' was appended
+        assert.ok(Array.isArray((result.requests as unknown[])[0]));
+        assert.deepEqual((result.requests as unknown[])[0], ['first']);
+});
+
 test('applyDelta: kind:1 with null state creates new object', () => {
         const result = applyDelta(null, { kind: 1, k: ['field'], v: 'value' }) as Record<string, unknown>;
         assert.equal(result.field, 'value');
@@ -1799,4 +1808,143 @@ test('estimateTokensFromJsonlSession: truncation events do not affect token coun
 	const resultA = estimateTokensFromJsonlSession(userOnly);
 	const resultB = estimateTokensFromJsonlSession(withTruncation);
 	assert.equal(resultA.tokens, resultB.tokens, 'truncation events should not affect estimated token counts');
+});
+
+test('reconstructJsonlStateAsync: blank lines are silently skipped', async () => {
+        // Lines 597-599: if (!line.trim()) { continue; }
+        const lines = [
+                '',
+                '   ',
+                JSON.stringify({ kind: 0, v: { requests: [], title: 'blank-skip-test' } }),
+        ];
+        const { sessionState, isDeltaBased } = await reconstructJsonlStateAsync(lines);
+        assert.equal((sessionState as Record<string, unknown>).title, 'blank-skip-test');
+        assert.equal(isDeltaBased, true);
+});
+
+// ── DeltaTokenStrategy: incremental response item edge cases ────────────────
+
+test('DeltaTokenStrategy: blank lines in estimate input are silently skipped', () => {
+        // Lines 342-344: if (!line.trim()) { continue; }
+        const validLine = JSON.stringify({ kind: 0, v: { requests: [] } });
+        const result = new DeltaTokenStrategy().estimate(['', '   ', validLine]);
+        assert.equal(result.tokens, 0);
+        assert.equal(result.actualTokens, 0);
+});
+
+test('DeltaTokenStrategy: kind:2 response item with no extractable text is skipped', () => {
+        // _dtsAddResponseItemTokens: if (!text) { return; }  (lines 308-310)
+        // toolInvocationSerialized with no text fields — extractResponseItemText returns ''
+        const noTextItem = { kind: 'toolInvocationSerialized', toolId: 'read' };
+        const lines = [
+                JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [noTextItem] }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.equal(result.tokens, 0);
+});
+
+test('DeltaTokenStrategy: kind:2 response item with non-thinking text adds to totalTokens', () => {
+        // _dtsAddResponseItemTokens: else branch (isThinking=false, text non-empty) (lines 314-316)
+        const textItem = { kind: 'markdownContent', value: 'non-thinking response content' };
+        const lines = [
+                JSON.stringify({ kind: 2, k: ['requests', 0, 'response'], v: [textItem] }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.ok(result.tokens > 0, 'non-thinking text should contribute to tokens');
+        assert.equal(result.thinkingTokens, 0, 'thinkingTokens should be zero for non-thinking response');
+});
+
+// ── EventJsonlTokenStrategy: session.shutdown edge cases ────────────────────
+
+test('EventJsonlTokenStrategy: session.shutdown without modelMetrics is silently ignored', () => {
+        // _ejtsHandleShutdown: if (!data?.modelMetrics) { return; }  (lines 406-408)
+        const lines = [
+                JSON.stringify({ type: 'session.shutdown', data: {} }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 0);
+});
+
+test('EventJsonlTokenStrategy: session.shutdown model entry without usage field contributes zero actual tokens', () => {
+        // _ejtsAccumulateModelMetrics: if (!usage) { return 0; }  (lines 381-383)
+        const lines = [
+                JSON.stringify({
+                        type: 'session.shutdown',
+                        data: { modelMetrics: { 'gpt-4o': {} } }, // model entry with no usage
+                }),
+        ];
+        const result = new EventJsonlTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 0);
+});
+
+// ── buildReasoningEffortTimeline: _bretExtractEffortFromModel guard clauses ─
+
+test('buildReasoningEffortTimeline: kind:0 selectedModel without metadata leaves defaultEffort null', () => {
+        // _bretExtractEffortFromModel: !metadata → return null  (lines 697-700)
+        const delta = { kind: 0, v: { inputState: { selectedModel: {} } } };
+        const result = buildReasoningEffortTimeline([JSON.stringify(delta)]);
+        assert.equal(result.defaultEffort, null);
+});
+
+test('buildReasoningEffortTimeline: kind:0 selectedModel without configurationSchema leaves defaultEffort null', () => {
+        // _bretExtractEffortFromModel: !schema → return null  (lines 701-704)
+        const delta = { kind: 0, v: { inputState: { selectedModel: { metadata: {} } } } };
+        const result = buildReasoningEffortTimeline([JSON.stringify(delta)]);
+        assert.equal(result.defaultEffort, null);
+});
+
+test('buildReasoningEffortTimeline: kind:0 selectedModel without properties leaves defaultEffort null', () => {
+        // _bretExtractEffortFromModel: !props → return null  (lines 705-710)
+        const delta = { kind: 0, v: { inputState: { selectedModel: { metadata: { configurationSchema: {} } } } } };
+        const result = buildReasoningEffortTimeline([JSON.stringify(delta)]);
+        assert.equal(result.defaultEffort, null);
+});
+
+test('buildReasoningEffortTimeline: kind:0 selectedModel without reasoningEffort property leaves defaultEffort null', () => {
+        // _bretExtractEffortFromModel: !re → return null  (lines 711-715)
+        const delta = { kind: 0, v: { inputState: { selectedModel: { metadata: { configurationSchema: { properties: {} } } } } } };
+        const result = buildReasoningEffortTimeline([JSON.stringify(delta)]);
+        assert.equal(result.defaultEffort, null);
+});
+
+test('buildReasoningEffortTimeline: kind:2 with null v is skipped', () => {
+        // _bretHandleKind2: !req || typeof req !== 'object' → return  (lines 750-752)
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const kind2 = { kind: 2, k: ['requests', 0], v: null };
+        const result = buildReasoningEffortTimeline([kind0, kind2].map(d => JSON.stringify(d)));
+        assert.equal(result.effortByRequestId.size, 0);
+});
+
+test('buildReasoningEffortTimeline: event with non-numeric kind string is skipped', () => {
+        // Lines 772-774: typeof delta.kind !== 'number' → continue
+        const kind0 = { kind: 0, v: { inputState: { selectedModel: makeModelWithEffort('medium') } } };
+        const stringKindEvent = { kind: 'user.message', data: { content: 'hello' } };
+        const result = buildReasoningEffortTimeline([kind0, stringKindEvent].map(d => JSON.stringify(d)));
+        assert.equal(result.defaultEffort, 'medium');
+        // defaultEffort was set from kind:0 — the string-kind event was silently ignored
+});
+
+// ── DeltaTokenStrategy: _dtsExtractFromResult fallback zero return ───────────
+
+test('DeltaTokenStrategy: request result with no recognized token fields contributes zero actual tokens', () => {
+        // _dtsExtractFromResult: return 0 fallback (line 225)
+        // result object exists but has none of promptTokens/outputTokens/metadata/usage
+        const lines = [
+                JSON.stringify({ kind: 0, v: { requests: [{ result: { unexpectedField: 'no tokens here' } }] } }),
+        ];
+        const result = new DeltaTokenStrategy().estimate(lines);
+        assert.equal(result.actualTokens, 0);
+});
+
+// ── reconstructJsonlStateAsync: event-loop yield ─────────────────────────────
+
+test('reconstructJsonlStateAsync: yields to event loop every yieldInterval delta lines', async () => {
+        // Lines 611-612: await new Promise(resolve => setTimeout(resolve, 0))
+        // yieldInterval=1 forces yield at every delta line after index 0
+        const lines = [
+                JSON.stringify({ kind: 0, v: { title: 'session' } }),
+                JSON.stringify({ kind: 1, k: ['title'], v: 'updated' }),
+        ];
+        const { sessionState } = await reconstructJsonlStateAsync(lines, 1);
+        assert.equal((sessionState as Record<string, unknown>).title, 'updated');
 });
