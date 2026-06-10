@@ -4495,7 +4495,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Extract full session log data including chat turns for the log viewer.
 	 */
 	private async getSessionLogData(sessionFile: string): Promise<SessionLogData> {
-		const details = await this.getSessionFileDetails(sessionFile);
+		// Use pre-enriched details from the diagnostics cache when available — it carries
+		// hierarchy data (parentInfo, childInfo) populated by enrichSessionHierarchy /
+		// enrichPiSessionHierarchy during the background load.
+		const cached = this.diagnosticsCachedFiles.find(f => f.file === sessionFile);
+		const details = cached ?? await this.getSessionFileDetails(sessionFile);
 		let subAgentsStarted: number | undefined;
 		let turns: ChatTurn[] = [];
 
