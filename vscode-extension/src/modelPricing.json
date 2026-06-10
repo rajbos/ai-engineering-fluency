@@ -1085,8 +1085,8 @@
       ]
     },
     "claude-fable-5": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 10.0,
+      "outputCostPerMillion": 50.0,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 0.0,
