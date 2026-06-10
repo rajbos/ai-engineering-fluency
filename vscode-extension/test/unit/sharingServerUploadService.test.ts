@@ -217,7 +217,9 @@ test('uploadRollups: strips trailing slash from endpoint URL', async () => {
 	);
 	
 	assert.equal(mockFetchCalls.length, 1);
-	assert.ok(mockFetchCalls[0].url.includes('https://server.example.com/api/upload'));
+	const requestUrl = new URL(mockFetchCalls[0].url);
+	assert.equal(requestUrl.origin, 'https://server.example.com');
+	assert.equal(requestUrl.pathname, '/api/upload');
 	assert.ok(!mockFetchCalls[0].url.includes('//api'));
 });
 
