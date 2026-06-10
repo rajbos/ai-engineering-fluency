@@ -6,11 +6,11 @@
 # the VS Code extension by shipping the compiled webview bundles. For Visual
 # Studio those bundles are committed to the repo under:
 #
-#   visualstudio-extension/src/CopilotTokenTracker/webview/*.js
+#   visualstudio-extension/src/AIEngineeringFluency/webview/*.js
 #
 # These files are NOT hand-written source — they are minified esbuild output
 # copied verbatim from `vscode-extension/dist/webview/` (see the
-# `CopyWebviewBundles` target in CopilotTokenTracker.csproj and the
+# `CopyWebviewBundles` target in AIEngineeringFluency.csproj and the
 # `sync-host-views` skill). The authoritative TypeScript source they are built
 # from lives in `vscode-extension/src/webview/**` and IS analyzed by CodeQL.
 #
@@ -22,4 +22,4 @@
 # is still scanned, excluding the generated copies does not reduce coverage of
 # hand-written code — it only stops duplicate, spurious alerts on build output.
 paths-ignore:
-  - 'visualstudio-extension/src/CopilotTokenTracker/webview/**'
+  - 'visualstudio-extension/src/AIEngineeringFluency/webview/**'
