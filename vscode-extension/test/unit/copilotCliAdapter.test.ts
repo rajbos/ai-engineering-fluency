@@ -23,7 +23,21 @@ const adapter = new CopilotCliAdapter();
 
 test('CopilotCliAdapter: id and displayName are stable', () => {
     assert.equal(adapter.id, 'copilotcli');
-    assert.equal(adapter.displayName, 'GitHub Copilot CLI');
+    assert.equal(adapter.displayName, 'Copilot CLI');
+});
+
+test('CopilotCliAdapter.getDisplayName: returns MS Scout label for tracked Scout sessions', () => {
+    const scoutSessionId = '11111111-1111-1111-1111-111111111111';
+    const scoutVirtualPath = path.join(os.homedir(), '.copilot', `session-store.db#${scoutSessionId}`);
+    const scoutSessionIds = (adapter as unknown as { _scoutSessionIds: Set<string> })._scoutSessionIds;
+
+    scoutSessionIds.add(scoutSessionId);
+    try {
+        assert.equal(adapter.getDisplayName(scoutVirtualPath), 'MS Scout (Copilot CLI)');
+        assert.equal(adapter.getDisplayName(path.join(os.homedir(), '.copilot', 'session-store.db#other-session')), 'Copilot CLI');
+    } finally {
+        scoutSessionIds.delete(scoutSessionId);
+    }
 });
 
 test('CopilotCliAdapter: implements IDiscoverableEcosystem', () => {
