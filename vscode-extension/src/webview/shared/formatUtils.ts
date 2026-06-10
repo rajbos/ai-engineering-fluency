@@ -1,9 +1,9 @@
-// @ts-ignore
-import tokenEstimatorsJson from '../../tokenEstimators.json';
 import type { TokenEstimator } from '../../types';
 import { EDITOR_ICON_MAP as _EDITOR_ICON_MAP, getEditorIconByName } from '../../editorIcons';
+import { getWindowData } from './dataLoader';
 
-const tokenEstimators: Record<string, TokenEstimator> = tokenEstimatorsJson.estimators;
+const _estimatorsData = getWindowData<{ estimators: Record<string, number> }>('__TOKEN_ESTIMATORS__');
+const tokenEstimators: Record<string, TokenEstimator> = _estimatorsData?.estimators ?? {};
 let currentLocale: string | undefined;
 let compactNumbersEnabled = true;
 

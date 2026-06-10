@@ -293,12 +293,12 @@ function getEffortDisplayName(level: string): string {
 	return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
-import toolNames from '../../toolNames.json';
-import automaticToolIds from '../../automaticTools.json';
 import { resolveGuidMcpToolName, isGuidMcpTool } from '../../utils/toolUtils';
 
-let TOOL_NAME_MAP: { [key: string]: string } | null = toolNames || null;
-const AUTOMATIC_TOOL_SET_WV = new Set<string>((automaticToolIds as string[]).map(id => id.toLowerCase()));
+// Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
+const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
+const _automaticToolIds = getWindowData<string[]>('__AUTOMATIC_TOOLS__') ?? [];
+const AUTOMATIC_TOOL_SET_WV = new Set<string>(_automaticToolIds.map(id => id.toLowerCase()));
 
 function lookupToolName(id: string): string {
 	if (!TOOL_NAME_MAP) {

@@ -32,8 +32,9 @@ namespace CopilotTokenTracker.WebBridge
             string themeCss;
             try   { themeCss = BuildThemeCss(); }
             catch { themeCss = BuildFallbackThemeCss(); }
-            var globalKey = ViewToGlobalKey(view);
-            var vsHideJs  = BuildVsHideScript(view);
+            var globalKey  = ViewToGlobalKey(view);
+            var vsHideJs   = BuildVsHideScript(view);
+            var jsonGlobals = BuildJsonGlobalsScript();
 
             // Prevent </script> injection in the JSON payload (OWASP XSS defence)
             var safeJson = statsJson.Replace("<", "\\u003c").Replace(">", "\\u003e");
@@ -68,6 +69,7 @@ html, body {{ margin: 0; padding: 0; height: 100%; overflow: auto; }}
 <script>
 window.{globalKey} = {safeJson};
 </script>
+{jsonGlobals}
 </head>
 <body>
 <div id=""root""></div>
@@ -281,6 +283,47 @@ html, body {{
                 "maturity"      => "__INITIAL_MATURITY__",
                 _               => "__INITIAL_DETAILS__",
             };
+
+        /// <summary>
+        /// Reads the JSON config sidecar files from the installed webview directory and
+        /// returns an inline &lt;script&gt; block that sets the corresponding window globals.
+        /// The webview bundles read these globals instead of bundling the JSON inline.
+        /// Falls back gracefully if any file is missing (e.g. first run before build).
+        /// </summary>
+        private static string BuildJsonGlobalsScript()
+        {
+            try
+            {
+                var webviewDir = Path.Combine(
+                    Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!,
+                    "webview");
+
+                var entries = new (string file, string key)[]
+                {
+                    ("tokenEstimators.json", "__TOKEN_ESTIMATORS__"),
+                    ("modelPricing.json",    "__MODEL_PRICING__"),
+                    ("toolNames.json",       "__TOOL_NAMES__"),
+                    ("automaticTools.json",  "__AUTOMATIC_TOOLS__"),
+                };
+
+                var sb = new System.Text.StringBuilder("<script>\n");
+                foreach (var (file, key) in entries)
+                {
+                    var filePath = Path.Combine(webviewDir, file);
+                    if (!File.Exists(filePath)) { continue; }
+                    var content = File.ReadAllText(filePath)
+                        .Replace("<", "\\u003c")
+                        .Replace(">", "\\u003e");
+                    sb.AppendLine($"window.{key} = {content};");
+                }
+                sb.Append("</script>");
+                return sb.ToString();
+            }
+            catch
+            {
+                return "<!-- JSON config globals unavailable -->";
+            }
+        }
 
         private static string LoadShim()
         {

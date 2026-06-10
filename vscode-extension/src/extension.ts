@@ -9,6 +9,7 @@ import * as childProcess from 'child_process';
 import tokenEstimatorsData from './tokenEstimators.json';
 import modelPricingData from './modelPricing.json';
 import toolNamesData from './toolNames.json';
+import automaticToolsData from './automaticTools.json';
 import customizationPatternsData from './customizationPatterns.json';
 import copilotPlansData from './copilotPlans.json';
 import * as packageJson from '../package.json';
@@ -677,6 +678,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private getLocalViewRegressionProbeScript(viewId: string, nonce: string): string {
 		return createViewRegressionProbeScript(nonce, this.consumeLocalViewRegressionProbe(viewId));
+	}
+
+	/**
+	 * Returns a <script> block that injects the JSON config files as window globals,
+	 * so the webview bundles no longer need to bundle them inline.
+	 * All views receive all four globals; the small extra payload is negligible.
+	 */
+	private getJsonConfigScript(nonce: string): string {
+		const estimators = JSON.stringify(tokenEstimatorsData).replace(/</g, '\\u003c');
+		const pricing    = JSON.stringify(modelPricingData).replace(/</g, '\\u003c');
+		const tools      = JSON.stringify(toolNamesData).replace(/</g, '\\u003c');
+		const autoTools  = JSON.stringify(automaticToolsData).replace(/</g, '\\u003c');
+		return `<script nonce="${nonce}">` +
+			`window.__TOKEN_ESTIMATORS__=${estimators};` +
+			`window.__MODEL_PRICING__=${pricing};` +
+			`window.__TOOL_NAMES__=${tools};` +
+			`window.__AUTOMATIC_TOOLS__=${autoTools};` +
+			`</script>`;
 	}
 
 	private handleLocalViewRegressionMessage(message: any): boolean {
@@ -5249,6 +5268,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		<body>
 			<div id="root"></div>
 			<script nonce="${nonce}">window.__INITIAL_ENVIRONMENTAL__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
 			${this.extensionPointButtonsScript(nonce)}
 			${this.getLocalViewRegressionProbeScript('environmental', nonce)}
 			<script nonce="${nonce}" src="${scriptUri}"></script>
@@ -5961,6 +5981,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		<body>
 			<div id="root"></div>
 			<script nonce="${nonce}">window.__INITIAL_LOGDATA__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
 			${this.extensionPointButtonsScript(nonce)}
 			<script nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
@@ -6443,6 +6464,7 @@ ${hashtag}`;
 	<body>
 		<div id="root"></div>
 		<script nonce="${nonce}">window.__INITIAL_FLUENCY_LEVEL_DATA__ = ${initialData};</script>
+		${this.getJsonConfigScript(nonce)}
 		${this.extensionPointButtonsScript(nonce)}
 		${this.getLocalViewRegressionProbeScript('fluency-level-viewer', nonce)}
 		<script nonce="${nonce}" src="${scriptUri}"></script>
@@ -6504,6 +6526,7 @@ ${hashtag}`;
 		<body>
 			<div id="root"></div>
 			<script nonce="${nonce}">window.__INITIAL_MATURITY__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
 			${this.extensionPointButtonsScript(nonce)}
 			${this.getLocalViewRegressionProbeScript('maturity', nonce)}
 			<script nonce="${nonce}" src="${scriptUri}"></script>
@@ -7014,6 +7037,7 @@ ${hashtag}`;
 			<div id="root"></div>
 			${configScript}
 			${initialDataScript}
+			${this.getJsonConfigScript(nonce)}
 			${this.extensionPointButtonsScript(nonce)}
 			<script nonce="${nonce}" src="${scriptUri}"></script>
 		</body>
@@ -7278,6 +7302,7 @@ ${this.getLoadingHtmlScript()}
 		<body>
 			<div id="root"></div>
 			<script nonce="${nonce}">window.__INITIAL_DETAILS__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
 			${this.extensionPointButtonsScript(nonce)}
 			${this.getLocalViewRegressionProbeScript('details', nonce)}
 			<script nonce="${nonce}" src="${scriptUri}"></script>
@@ -8113,6 +8138,7 @@ ${this.getLoadingHtmlScript()}
 		<body>
 			<div id="root"></div>
 			<script nonce="${nonce}">window.__INITIAL_DIAGNOSTICS__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
 			${this.extensionPointButtonsScript(nonce)}
 			${this.getLocalViewRegressionProbeScript('diagnostics', nonce)}
 			<script nonce="${nonce}" src="${scriptUri}"></script>
@@ -8199,6 +8225,7 @@ ${this.getLoadingHtmlScript()}
 		<body>
 			<div id="root"></div>
 			<script nonce="${nonce}">window.__INITIAL_CHART__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
 			${this.extensionPointButtonsScript(nonce)}
 			${this.getLocalViewRegressionProbeScript('chart', nonce)}
 			<script nonce="${nonce}" src="${scriptUri}"></script>
@@ -8265,6 +8292,7 @@ ${this.getLoadingHtmlScript()}
 		<body>
 			<div id="root"></div>
 			<script nonce="${nonce}">window.__INITIAL_USAGE__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
 			${this.extensionPointButtonsScript(nonce)}
 			${this.getLocalViewRegressionProbeScript('usage', nonce)}
 			<script nonce="${nonce}" src="${scriptUri}"></script>

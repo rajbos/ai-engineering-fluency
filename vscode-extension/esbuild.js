@@ -74,6 +74,18 @@ async function main() {
 		await webviewCtx.dispose();
 	}
 
+	// Copy JSON config files to dist/webview/ so the VS extension can read them as runtime sidecars
+	const jsonConfigFiles = ['tokenEstimators.json', 'modelPricing.json', 'toolNames.json', 'automaticTools.json'];
+	const webviewDistDir = path.join(__dirname, 'dist', 'webview');
+	fs.mkdirSync(webviewDistDir, { recursive: true });
+	for (const file of jsonConfigFiles) {
+		const jsonSrc = path.join(__dirname, 'src', file);
+		const jsonDst = path.join(webviewDistDir, file);
+		if (fs.existsSync(jsonSrc)) {
+			fs.copyFileSync(jsonSrc, jsonDst);
+		}
+	}
+
 	// Copy sql.js WASM file to dist/ for OpenCode SQLite support
 	const wasmSrc = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
 	const wasmDst = path.join(__dirname, 'dist', 'sql-wasm.wasm');

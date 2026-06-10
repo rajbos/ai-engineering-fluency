@@ -4,9 +4,6 @@ import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumb
 import { el, createButton } from '../shared/domUtils';
 import { BUTTONS } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
-// Token estimators loaded from JSON
-// @ts-ignore
-import tokenEstimatorsJson from '../../tokenEstimators.json';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';

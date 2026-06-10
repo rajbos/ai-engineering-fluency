@@ -1,12 +1,12 @@
-// @ts-ignore — resolved by esbuild at bundle time
-import modelPricingJson from '../../modelPricing.json';
+import { getWindowData } from './dataLoader';
 
 type PricingEntry = { displayNames?: string[] };
 
-// Build display name map from pricing JSON (first displayName = canonical friendly name).
+// Build display name map from pricing JSON injected by the extension host as window.__MODEL_PRICING__.
 // This is the single source of truth so it stays in sync with the nightly JSON refresh.
+const _pricingData = getWindowData<{ pricing: Record<string, PricingEntry> }>('__MODEL_PRICING__');
 const _modelNames: Record<string, string> = {};
-for (const [modelId, pricing] of Object.entries(modelPricingJson.pricing as Record<string, PricingEntry>)) {
+for (const [modelId, pricing] of Object.entries((_pricingData?.pricing ?? {}) as Record<string, PricingEntry>)) {
     if (pricing.displayNames && pricing.displayNames.length > 0) {
         _modelNames[modelId] = pricing.displayNames[0];
     }

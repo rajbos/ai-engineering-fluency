@@ -163,10 +163,10 @@ interface Window { __INITIAL_LOGDATA__?: SessionLogData; }
 const vscode = acquireVsCodeApi();
 const initialData = getWindowData<SessionLogData>('__INITIAL_LOGDATA__');
 
-import toolNames from '../../toolNames.json';
 import { resolveGuidMcpToolName } from '../../utils/toolUtils';
 
-let TOOL_NAME_MAP: { [key: string]: string } | null = toolNames || null;
+// Tool name map is injected by the extension host as window.__TOOL_NAMES__
+const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
 
 // ── Module-level constants ────────────────────────────────────────────────────
 

@@ -323,3 +323,13 @@ try {
 // imported extension code) prevent the process from exiting after tests.
 // The timer is unref()'d so it won't keep the process alive on its own.
 setTimeout(() => process.exit(process.exitCode ?? 0), 30_000).unref();
+
+// Set up a minimal browser-like `window` global so webview utilities that
+// call getWindowData() (modelUtils, formatUtils, etc.) work in Node.js tests.
+// We populate the JSON config globals so tests that exercise model/estimator
+// lookups get the real data rather than empty fallbacks.
+(global as any).window = (global as any).window ?? {};
+(global as any).window.__TOKEN_ESTIMATORS__ = require('../../src/tokenEstimators.json');
+(global as any).window.__MODEL_PRICING__    = require('../../src/modelPricing.json');
+(global as any).window.__TOOL_NAMES__       = require('../../src/toolNames.json');
+(global as any).window.__AUTOMATIC_TOOLS__  = require('../../src/automaticTools.json');
