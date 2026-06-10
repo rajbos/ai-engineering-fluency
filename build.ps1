@@ -1,4 +1,4 @@
-#!/usr/bin/env pwsh
+﻿#!/usr/bin/env pwsh
 <#
 .SYNOPSIS
     Root build orchestrator for the Copilot Token Tracker mono-repo.
@@ -120,7 +120,7 @@ function Build-VisualStudio {
 
     # Copy compiled webview bundles into the VS extension project
     $webviewSrc = Join-Path $PSScriptRoot 'vscode-extension' 'dist' 'webview'
-    $webviewDst = Join-Path $PSScriptRoot 'visualstudio-extension' 'src' 'CopilotTokenTracker' 'webview'
+    $webviewDst = Join-Path $PSScriptRoot 'visualstudio-extension' 'src' 'AIEngineeringFluency' 'webview'
     if (-not (Test-Path $webviewDst)) { New-Item -ItemType Directory -Path $webviewDst -Force | Out-Null }
     foreach ($bundle in @('details', 'chart', 'usage', 'diagnostics', 'environmental', 'maturity')) {
         $src = Join-Path $webviewSrc "$bundle.js"
@@ -136,7 +136,7 @@ function Build-VisualStudio {
 
     # Copy the CLI exe and its runtime assets into the VS extension project
     $cliExe = Join-Path $PSScriptRoot 'cli' 'dist' 'copilot-token-tracker.exe'
-    $vsCliDir = Join-Path $PSScriptRoot 'visualstudio-extension' 'src' 'CopilotTokenTracker' 'cli-bundle'
+    $vsCliDir = Join-Path $PSScriptRoot 'visualstudio-extension' 'src' 'AIEngineeringFluency' 'cli-bundle'
     if (-not (Test-Path $vsCliDir)) { New-Item -ItemType Directory -Path $vsCliDir -Force | Out-Null }
     Copy-Item $cliExe (Join-Path $vsCliDir 'copilot-token-tracker.exe') -Force
     # sql.js WASM binary is loaded at runtime from the same directory as the exe
@@ -167,20 +167,20 @@ function Build-VisualStudio {
     switch ($Target) {
         'build'   {
             # Restore SDK-style test project (needs dotnet restore, not nuget restore)
-            dotnet restore "$PSScriptRoot/visualstudio-extension/src/CopilotTokenTracker.Tests/CopilotTokenTracker.Tests.csproj"
+            dotnet restore "$PSScriptRoot/visualstudio-extension/src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj"
             & $msbuild $sln /p:Configuration=Release /t:Build   /v:minimal
         }
         'package' { & $msbuild $sln /p:Configuration=Release /t:Rebuild /v:minimal }
         'test'    {
             # 1. Restore SDK-style test project first, then build the full solution with MSBuild
-            dotnet restore "$PSScriptRoot/visualstudio-extension/src/CopilotTokenTracker.Tests/CopilotTokenTracker.Tests.csproj"
+            dotnet restore "$PSScriptRoot/visualstudio-extension/src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj"
             & $msbuild $sln /p:Configuration=Release /t:Build /v:minimal
             if ($LASTEXITCODE -ne 0) { throw "MSBuild failed before running tests" }
 
             # 2. Run tests with dotnet test --no-build (avoids re-invoking VSSDK build targets)
             Push-Location "$PSScriptRoot/visualstudio-extension"
             try {
-                $testProj = "src/CopilotTokenTracker.Tests/CopilotTokenTracker.Tests.csproj"
+                $testProj = "src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj"
                 dotnet test $testProj `
                     --no-build `
                     --configuration Release `

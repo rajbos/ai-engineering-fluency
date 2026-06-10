@@ -1,4 +1,4 @@
-name: Visual Studio Extension - Build & Package
+﻿name: Visual Studio Extension - Build & Package
 
 on:
   push:
@@ -114,7 +114,7 @@ jobs:
       - name: Copy CLI exe + wasm to cli-bundle/
         shell: pwsh
         run: |
-          $vsCliDir = "visualstudio-extension\src\CopilotTokenTracker\cli-bundle"
+          $vsCliDir = "visualstudio-extension\src\AIEngineeringFluency\cli-bundle"
           New-Item -ItemType Directory -Path $vsCliDir -Force | Out-Null
           Copy-Item "cli\dist\copilot-token-tracker.exe" "$vsCliDir\copilot-token-tracker.exe" -Force
           Copy-Item "cli\dist\sql-wasm.wasm"             "$vsCliDir\sql-wasm.wasm"             -Force
@@ -130,7 +130,7 @@ jobs:
         shell: pwsh
         run: |
           $src = "vscode-extension\dist\webview"
-          $dst = "visualstudio-extension\src\CopilotTokenTracker\webview"
+          $dst = "visualstudio-extension\src\AIEngineeringFluency\webview"
           if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
           Copy-Item $src $dst -Recurse -Force
           Write-Host "✅ Copied webview bundles:"
@@ -143,22 +143,22 @@ jobs:
 
       - name: Restore NuGet packages
         working-directory: visualstudio-extension
-        run: nuget restore CopilotTokenTracker.sln
+        run: nuget restore AIEngineeringFluency.sln
 
       - name: Restore test project (SDK-style)
         working-directory: visualstudio-extension
-        run: dotnet restore src/CopilotTokenTracker.Tests/CopilotTokenTracker.Tests.csproj
+        run: dotnet restore src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj
 
       - name: Build solution (Release)
         working-directory: visualstudio-extension
-        run: msbuild CopilotTokenTracker.sln /p:Configuration=Release /t:Build /v:minimal
+        run: msbuild AIEngineeringFluency.sln /p:Configuration=Release /t:Build /v:minimal
 
       # ── Run unit tests with coverage ──────────────────────────────────────
 
       - name: Run unit tests with coverage
         working-directory: visualstudio-extension
         run: >-
-          dotnet test src/CopilotTokenTracker.Tests/CopilotTokenTracker.Tests.csproj
+          dotnet test src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj
           --no-build
           --configuration Release
           --logger "trx;LogFileName=test-results.trx"

@@ -1,4 +1,4 @@
-name: Extensions - Release
+﻿name: Extensions - Release
 
 on:
   push:
@@ -621,7 +621,7 @@ jobs:
     - name: Copy CLI exe + wasm to cli-bundle/
       shell: pwsh
       run: |
-        $vsCliDir = "visualstudio-extension\src\CopilotTokenTracker\cli-bundle"
+        $vsCliDir = "visualstudio-extension\src\AIEngineeringFluency\cli-bundle"
         New-Item -ItemType Directory -Path $vsCliDir -Force | Out-Null
         Copy-Item "cli\dist\copilot-token-tracker.exe" "$vsCliDir\copilot-token-tracker.exe" -Force
         Copy-Item "cli\dist\sql-wasm.wasm"             "$vsCliDir\sql-wasm.wasm"             -Force
@@ -637,7 +637,7 @@ jobs:
       shell: pwsh
       run: |
         $src = "vscode-extension\dist\webview"
-        $dst = "visualstudio-extension\src\CopilotTokenTracker\webview"
+        $dst = "visualstudio-extension\src\AIEngineeringFluency\webview"
         if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
         Copy-Item $src $dst -Recurse -Force
         Write-Host "✅ Copied webview bundles"
@@ -649,11 +649,11 @@ jobs:
 
     - name: Restore NuGet packages
       working-directory: visualstudio-extension
-      run: nuget restore CopilotTokenTracker.sln
+      run: nuget restore AIEngineeringFluency.sln
 
     - name: Build solution (Release)
       working-directory: visualstudio-extension
-      run: msbuild CopilotTokenTracker.sln /p:Configuration=Release /t:Build /v:minimal
+      run: msbuild AIEngineeringFluency.sln /p:Configuration=Release /t:Build /v:minimal
 
     # ── Collect the produced .vsix ─────────────────────────────────────────
 
@@ -699,7 +699,7 @@ jobs:
       shell: pwsh
       run: |
         # Read local version from the vsixmanifest
-        $manifestPath = "visualstudio-extension/src/CopilotTokenTracker/source.extension.vsixmanifest"
+        $manifestPath = "visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest"
         [xml]$manifest = Get-Content $manifestPath
         $localVersion = $manifest.PackageManifest.Metadata.Identity.Version
         $extensionId  = $manifest.PackageManifest.Metadata.Identity.Id  # AIEngineeringFluency.VS.RobBos

@@ -1,0 +1,16 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <Nullable>enable</Nullable>
+    <AssemblyName>AIEngineeringFluencyRunner</AssemblyName>
+    <RootNamespace>AIEngineeringFluencyRunner</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\AIEngineeringFluency\AIEngineeringFluency.csproj" />
+  </ItemGroup>
+
+</Project>
