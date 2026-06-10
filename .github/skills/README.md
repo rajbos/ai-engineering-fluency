@@ -124,6 +124,23 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - Cache validation and lifecycle documentation
 - Integration with the extension's token tracking
 
+### sync-host-views
+
+**Purpose**: Keep the Visual Studio and JetBrains webview views (screens) in sync with the VS Code views, while preserving the exact set of views each host ships. New VS Code views are detected and surfaced for a human decision — never auto-added.
+
+**Use this skill when:**
+- After building or updating the VS Code webviews (`vscode-extension/esbuild.js` `entryPoints`)
+- Before a Visual Studio or JetBrains release, to ensure their shipped screens are current
+- When a host shows stale screens, or you suspect VS Code added a screen the hosts are missing
+- After changing the host include lists (`CopilotTokenTracker.csproj`, `jetbrains-plugin/build.gradle.kts`)
+
+**Contents:**
+- `sync-host-views.js` — dependency-free Node.js detector that parses the canonical view set from `esbuild.js` and compares it to the Visual Studio (`csproj` + committed `webview/*.js`) and JetBrains (`build.gradle.kts`) host lists
+- Classifies each view as tracked / NEW (ask the user) / orphan; checks committed VS bundles for staleness vs `dist/webview` (sha256)
+- `--refresh` copies only already-tracked bundles into the Visual Studio `webview/` folder (never adds a view); `--json` for CI
+- Exit codes: `0` in sync · `1` mechanical drift · `2` config error · `3` NEW views (human decision required)
+- Workflow for refreshing existing screens and the ask-before-adding procedure for new screens, including the navigation wiring needed in each host
+
 ## Using Agent Skills
 
 ### In VS Code
