@@ -444,6 +444,13 @@ body {
 	white-space: nowrap;
 }
 
+/* MS Scout: Microsoft brand blue on dark navy */
+.editor-badge-ms-scout {
+	background: #001a2e;
+	color: #0078d4;
+	border: 1px solid #0078d4;
+}
+
 .editor-badge-crush {
 	background: #3d0a4f;
 	color: #ff3dff;

@@ -28,11 +28,21 @@ type SqlDatabase = initSqlJs.Database;
 
 export interface CliStoreSession {
 	id: string;
+	cwd: string | null;
 	repository: string | null;
 	branch: string | null;
 	summary: string | null;
 	created_at: string | null;
 	updated_at: string | null;
+}
+
+/**
+ * Returns true when the session's cwd indicates it was created by Microsoft Scout.
+ * Scout stores sessions under Documents\Microsoft Scout (or Documents/Microsoft Scout).
+ */
+export function isMicrosoftScoutCwd(cwd: string | null | undefined): boolean {
+	if (!cwd) { return false; }
+	return cwd.replace(/\\/g, '/').toLowerCase().includes('/microsoft scout');
 }
 
 export interface CliStoreTurn {
@@ -47,6 +57,7 @@ export function isCliStoreSession(obj: unknown): obj is CliStoreSession {
 	if (typeof obj !== 'object' || obj === null) { return false; }
 	const r = obj as Record<string, unknown>;
 	return typeof r['id'] === 'string'
+		&& (r['cwd'] === null || typeof r['cwd'] === 'string')
 		&& (r['repository'] === null || typeof r['repository'] === 'string')
 		&& (r['branch'] === null || typeof r['branch'] === 'string')
 		&& (r['summary'] === null || typeof r['summary'] === 'string')
@@ -243,6 +254,25 @@ export class CopilotCliStoreAccess {
 		}
 	}
 
+	/**
+	 * Discover all session IDs and their cwd values, excluding `knownUuids`.
+	 * Used to identify Microsoft Scout sessions at discovery time.
+	 */
+	async discoverNewSessionsWithCwd(knownUuids: Set<string>): Promise<{ id: string; cwd: string | null }[]> {
+		const dbPath = this.getDbPath();
+		const db = await this.getDb(dbPath);
+		if (!db) { return []; }
+		try {
+			const result = db.exec('SELECT id, cwd FROM sessions ORDER BY updated_at DESC');
+			if (result.length === 0) { return []; }
+			return result[0].values
+				.filter(row => !knownUuids.has(row[0] as string))
+				.map(row => ({ id: row[0] as string, cwd: (row[1] as string | null) ?? null }));
+		} catch {
+			return [];
+		}
+	}
+
 	/** Read session metadata for a virtual session path. */
 	async readSession(virtualPath: string): Promise<CliStoreSession | null> {
 		const dbPath = this.getDbPathFromVirtual(virtualPath);
@@ -252,7 +282,7 @@ export class CopilotCliStoreAccess {
 		if (!db) { return null; }
 		try {
 			const result = db.exec(
-				'SELECT id, repository, branch, summary, created_at, updated_at FROM sessions WHERE id = ?',
+				'SELECT id, cwd, repository, branch, summary, created_at, updated_at FROM sessions WHERE id = ?',
 				[sessionId],
 			);
 			if (result.length === 0 || result[0].values.length === 0) { return null; }

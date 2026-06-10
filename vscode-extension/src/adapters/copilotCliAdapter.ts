@@ -24,7 +24,7 @@ import type {
 	CandidatePath,
 	UsageAnalysisAdapterContext,
 } from '../ecosystemAdapter';
-import { CopilotCliStoreAccess } from '../copilotCliStore';
+import { CopilotCliStoreAccess, isMicrosoftScoutCwd } from '../copilotCliStore';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
 import { normalizePath } from '../utils/pathUtils';
@@ -38,9 +38,24 @@ export function getCopilotCliSessionStateDir(): string {
 
 export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'copilotcli';
-	readonly displayName = 'GitHub Copilot CLI';
+	readonly displayName = 'Copilot CLI';
 
 	private readonly store = new CopilotCliStoreAccess();
+	/** UUIDs of sessions discovered to have been created by Microsoft Scout. */
+	private readonly _scoutSessionIds = new Set<string>();
+
+	/**
+	 * Returns the per-session display name.
+	 * Sessions whose cwd is under Documents\Microsoft Scout are shown as
+	 * "MS Scout (Copilot CLI)" to distinguish them from regular CLI sessions.
+	 */
+	getDisplayName(sessionFile: string): string {
+		const sessionId = this.store.getSessionId(sessionFile);
+		if (sessionId && this._scoutSessionIds.has(sessionId)) {
+			return 'MS Scout (Copilot CLI)';
+		}
+		return 'Copilot CLI';
+	}
 
 	/**
 	 * Returns true only for session-store.db virtual paths.
@@ -213,10 +228,15 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 
 		// Also discover DB-only sessions (no matching events.jsonl)
 		try {
-			const dbOnlyIds = await this.store.discoverNewSessions(knownUuids);
-			if (dbOnlyIds.length > 0) {
-				log(`📄 Found ${dbOnlyIds.length} chat-only session(s) in Copilot CLI session-store.db`);
-				sessionFiles.push(...dbOnlyIds.map(id => this.store.virtualPath(id)));
+			const dbOnlySessions = await this.store.discoverNewSessionsWithCwd(knownUuids);
+			if (dbOnlySessions.length > 0) {
+				log(`📄 Found ${dbOnlySessions.length} chat-only session(s) in Copilot CLI session-store.db`);
+				for (const { id, cwd } of dbOnlySessions) {
+					if (isMicrosoftScoutCwd(cwd)) {
+						this._scoutSessionIds.add(id);
+					}
+					sessionFiles.push(this.store.virtualPath(id));
+				}
 			}
 		} catch (e) {
 			log(`Could not read Copilot CLI session-store.db: ${e}`);

@@ -15,6 +15,7 @@ export const EDITOR_ICON_MAP: Record<string, string> = {
 	'VSCodium': '🔷',
 	'Cursor': '🖱️',
 	'Copilot CLI': '🤖',
+	'MS Scout (Copilot CLI)': '🔭',
 	'OpenCode': '🟢',
 	'Visual Studio': '🪟',
 	'Claude Code': '🟠',

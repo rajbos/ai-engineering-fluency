@@ -355,6 +355,10 @@ function getRepoDisplayName(repoUrl: string): string {
 
 function getEditorBadgeClass(editor: string): string {
   const lower = editor.toLowerCase();
+  // MS Scout must be checked before generic 'copilot' to avoid misclassification.
+  if (lower.includes("ms scout") || lower.includes("microsoft scout")) {
+    return "editor-badge editor-badge-ms-scout";
+  }
   if (lower.includes("visual studio")) {
     return "editor-badge editor-badge-vs";
   }
