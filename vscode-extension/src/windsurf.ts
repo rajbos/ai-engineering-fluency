@@ -71,6 +71,7 @@ export class WindsurfDataAccess {
 	private readonly extensionUri: vscode.Uri;
 	private log: (msg: string) => void = (msg) => console.log(msg);
 	private sessionCache: { sessions: SessionFileDetails[]; expiresAt: number } | null = null;
+	private _sessionFetchInFlight: Promise<SessionFileDetails[]> | null = null;
 	private static readonly SESSION_CACHE_TTL_MS = 15_000;
 
 	constructor(extensionUri: vscode.Uri, log?: (msg: string) => void) {
@@ -853,15 +854,22 @@ export class WindsurfDataAccess {
 	 * Tries the API first (full token data), falls back to .pb file metadata when API is unavailable.
 	 */
 	async getWindsurfSessions(): Promise<SessionFileDetails[]> {
-		this.log('[Windsurf] getWindsurfSessions() called');
 		const now = Date.now();
 		if (this.sessionCache && this.sessionCache.expiresAt > now) {
-			this.log(`[Windsurf] Returning ${this.sessionCache.sessions.length} cached session(s)`);
 			return this.sessionCache.sessions;
 		}
-		const sessions = await this.discoverWindsurfSessions();
-		this.sessionCache = { sessions, expiresAt: now + WindsurfDataAccess.SESSION_CACHE_TTL_MS };
-		return sessions;
+		// Coalesce concurrent cache-miss calls into a single fetch.
+		if (!this._sessionFetchInFlight) {
+			this.log('[Windsurf] getWindsurfSessions() fetching sessions (cache miss)');
+			this._sessionFetchInFlight = this.discoverWindsurfSessions()
+				.then(sessions => {
+					this.sessionCache = { sessions, expiresAt: Date.now() + WindsurfDataAccess.SESSION_CACHE_TTL_MS };
+					this.log(`[Windsurf] getWindsurfSessions() cached ${sessions.length} session(s)`);
+					return sessions;
+				})
+				.finally(() => { this._sessionFetchInFlight = null; });
+		}
+		return this._sessionFetchInFlight;
 	}
 
 	private async discoverWindsurfSessions(): Promise<SessionFileDetails[]> {

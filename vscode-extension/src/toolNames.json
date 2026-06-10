@@ -888,4 +888,6 @@
   ,"invoke_canvas_action": "Canvas Action"
   ,"list_canvas_capabilities": "List Canvas Capabilities"
   ,"open_canvas": "Open Canvas"
+  ,"subagent": "Subagent"
+  ,"workiq_search_files": "WorkIQ Search Files"
 }
