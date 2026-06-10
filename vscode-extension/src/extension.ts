@@ -7886,12 +7886,16 @@ ${this.getLoadingHtmlScript()}
       pathToDetails.set(norm(details.file), details);
     }
 
-    // Read each session header in parallel to discover parent links.
+    // Discover parent links.
+    // Primary: path-based detection (pi nests child sessions under {parentId}/{hash}/run-N/session.jsonl).
+    // Fallback: header-based parentSession field (future pi versions may use this).
     const parentByChild = new Map<string, string>();     // normChildPath → normParentPath
     const childrenByParent = new Map<string, string[]>(); // normParentPath → normChildPaths[]
     await Promise.all(piFiles.map(async (details) => {
       try {
-        const rawParent = await pi.getParentSessionPath(details.file);
+        const rawParent =
+          pi.getParentSessionPathFromFilePath(details.file) ??
+          await pi.getParentSessionPath(details.file);
         if (!rawParent) { return; }
         const normChild = norm(details.file);
         const normParent = norm(rawParent);

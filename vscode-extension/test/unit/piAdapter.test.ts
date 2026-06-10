@@ -241,3 +241,50 @@ test('PiDataAccess.getParentSessionPath: returns path when parentSession is set 
     const result = await pi.getParentSessionPath(file);
     assert.equal(result, parentPath);
 });
+
+// ---------------------------------------------------------------------------
+// PiDataAccess.getParentSessionPathFromFilePath (path-based detection)
+// ---------------------------------------------------------------------------
+
+test('PiDataAccess.getParentSessionPathFromFilePath: returns null for top-level timestamp-named session', () => {
+    const pi = new PiDataAccess();
+    // Top-level sessions have timestamp names, not 'session.jsonl'
+    const topLevel = path.join(os.homedir(), '.pi', 'agent', 'sessions', '--cwd--', '2026-01-01T00-00-00-000Z_abc.jsonl');
+    assert.equal(pi.getParentSessionPathFromFilePath(topLevel), null);
+});
+
+test('PiDataAccess.getParentSessionPathFromFilePath: derives parent path for nested session.jsonl', () => {
+    const pi = new PiDataAccess();
+    const base = path.join(os.homedir(), '.pi', 'agent', 'sessions', '--cwd--');
+    const parentFile = path.join(base, '2026-01-01T00-00-00-000Z_abc.jsonl');
+    const childFile  = path.join(base, '2026-01-01T00-00-00-000Z_abc', 'deadbeef', 'run-0', 'session.jsonl');
+    assert.equal(pi.getParentSessionPathFromFilePath(childFile), parentFile);
+});
+
+// ---------------------------------------------------------------------------
+// PiDataAccess.discoverSessions — recursive discovery
+// ---------------------------------------------------------------------------
+
+test('PiDataAccess.discoverSessions: discovers nested child session.jsonl files', async () => {
+    // Build a fake sessions dir that mirrors the real pi layout:
+    //   sessions/{cwdDir}/2026-01-01T_abc.jsonl           ← top-level
+    //   sessions/{cwdDir}/2026-01-01T_abc/deadbeef/run-0/session.jsonl  ← child
+    const tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'pi-discover-'));
+    const cwdDir = path.join(tmpRoot, '--cwd--');
+    const parentFile = path.join(cwdDir, '2026-01-01T00-00-00-000Z_abc.jsonl');
+    const childDir   = path.join(cwdDir, '2026-01-01T00-00-00-000Z_abc', 'deadbeef', 'run-0');
+    const childFile  = path.join(childDir, 'session.jsonl');
+
+    fs.mkdirSync(childDir, { recursive: true });
+    fs.writeFileSync(parentFile, makeSessionLine('parent') + '\n');
+    fs.writeFileSync(childFile, makeSessionLine('child') + '\n');
+
+    // Override the config dir so PiDataAccess scans our temp directory
+    const pi = new PiDataAccess();
+    // @ts-ignore — override private getConfigDir for test
+    pi.getConfigDir = () => tmpRoot;
+
+    const files = await pi.discoverSessions();
+    assert.ok(files.includes(parentFile), 'top-level session should be discovered');
+    assert.ok(files.includes(childFile),  'nested child session should be discovered');
+});
