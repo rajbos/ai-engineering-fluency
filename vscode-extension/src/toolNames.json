@@ -890,4 +890,6 @@
   ,"open_canvas": "Open Canvas"
   ,"subagent": "Subagent"
   ,"workiq_search_files": "WorkIQ Search Files"
+  ,"workiq_get_email": "Workiq Get Email"
+  ,"workiq_list_emails": "Workiq List Emails"
 }
