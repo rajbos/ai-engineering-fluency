@@ -361,7 +361,9 @@ test('uploadFluencyScore: strips trailing slash from endpoint URL', async () => 
 	);
 	
 	assert.equal(mockFetchCalls.length, 1);
-	assert.ok(mockFetchCalls[0].url.includes('https://server.example.com/api/fluency-score'));
+	const calledUrl = new URL(mockFetchCalls[0].url);
+	assert.equal(calledUrl.origin, 'https://server.example.com');
+	assert.equal(calledUrl.pathname, '/api/fluency-score');
 });
 
 test('uploadFluencyScore: sends score as JSON body', async () => {
