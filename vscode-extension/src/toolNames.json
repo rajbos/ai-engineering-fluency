@@ -892,4 +892,6 @@
   ,"workiq_search_files": "WorkIQ Search Files"
   ,"workiq_get_email": "Workiq Get Email"
   ,"workiq_list_emails": "Workiq List Emails"
+  ,"github_text_search": "GitHub MCP (Local): Text Search"
+  ,"mcp_azure_mcp_ser_search": "Azure MCP (Remote): Search"
 }
