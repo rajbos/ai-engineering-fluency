@@ -1,0 +1,25 @@
+# CodeQL configuration
+#
+# Purpose: exclude committed *generated* build artifacts from analysis.
+#
+# The Visual Studio extension and JetBrains plugin host the same webview UI as
+# the VS Code extension by shipping the compiled webview bundles. For Visual
+# Studio those bundles are committed to the repo under:
+#
+#   visualstudio-extension/src/CopilotTokenTracker/webview/*.js
+#
+# These files are NOT hand-written source — they are minified esbuild output
+# copied verbatim from `vscode-extension/dist/webview/` (see the
+# `CopyWebviewBundles` target in CopilotTokenTracker.csproj and the
+# `sync-host-views` skill). The authoritative TypeScript source they are built
+# from lives in `vscode-extension/src/webview/**` and IS analyzed by CodeQL.
+#
+# Scanning the minified copies produces false positives that do not exist in the
+# source: esbuild inlines every module into a single IIFE, which defeats CodeQL's
+# inter-procedural taint tracking and reports flows (e.g. js/xss into innerHTML)
+# even though the source escapes every interpolated value via `escapeHtml`
+# (vscode-extension/src/webview/shared/formatUtils.ts). Because the real source
+# is still scanned, excluding the generated copies does not reduce coverage of
+# hand-written code — it only stops duplicate, spurious alerts on build output.
+paths-ignore:
+  - 'visualstudio-extension/src/CopilotTokenTracker/webview/**'
