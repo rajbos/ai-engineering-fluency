@@ -59,7 +59,7 @@ try {
 const cwdDirs = await fs.promises.readdir(sessionsDir, { withFileTypes: true });
 for (const cwdDir of cwdDirs) {
 if (!cwdDir.isDirectory()) { continue; }
-await this.collectSessionFilesInDir(path.join(sessionsDir, cwdDir.name), results);
+await this.collectSessionFilesInDir(path.join(sessionsDir, cwdDir.name), results, 4);
 }
 } catch {
 // Directory does not exist or is inaccessible
@@ -67,12 +67,15 @@ await this.collectSessionFilesInDir(path.join(sessionsDir, cwdDir.name), results
 return results;
 }
 
-private async collectSessionFilesInDir(dirPath: string, results: string[]): Promise<void> {
+private async collectSessionFilesInDir(dirPath: string, results: string[], maxDepth: number): Promise<void> {
+if (maxDepth <= 0) { return; }
 try {
 const files = await fs.promises.readdir(dirPath, { withFileTypes: true });
 for (const file of files) {
 if (file.isFile() && file.name.endsWith('.jsonl')) {
 results.push(path.join(dirPath, file.name));
+} else if (file.isDirectory()) {
+await this.collectSessionFilesInDir(path.join(dirPath, file.name), results, maxDepth - 1);
 }
 }
 } catch {
@@ -114,6 +117,36 @@ return parsed;
 async readSession(filePath: string): Promise<any | null> {
 const lines = await this.readLines(filePath);
 return lines.find(l => l.type === 'session') ?? null;
+}
+
+/**
+ * Returns the file path of the parent session if this session was spawned
+ * by a parent pi session (i.e. it has a `parentSession` field in its header).
+ * Returns null for root sessions.
+ */
+async getParentSessionPath(filePath: string): Promise<string | null> {
+const header = await this.readSession(filePath);
+const parent = header?.parentSession;
+return typeof parent === 'string' && parent.length > 0 ? parent : null;
+}
+
+/**
+ * Derives the parent session file path from the child session's file path.
+ *
+ * Pi child sessions follow this directory layout:
+ *   {sessionsDir}/{cwdDir}/{timestamp_parentId}/{childHash}/run-{N}/session.jsonl
+ *
+ * The parent's JSONL file is:
+ *   {sessionsDir}/{cwdDir}/{timestamp_parentId}.jsonl
+ *
+ * Returns null if the file does not match the child-session naming pattern.
+ */
+getParentSessionPathFromFilePath(filePath: string): string | null {
+// Child sessions are always named 'session.jsonl'; top-level sessions use timestamp names.
+if (path.basename(filePath) !== 'session.jsonl') { return null; }
+// Go up: run-N → childHash → timestamp_parentId → add .jsonl
+const derivedParent = path.dirname(path.dirname(path.dirname(filePath))) + '.jsonl';
+return this.isPiSessionFile(derivedParent) ? derivedParent : null;
 }
 
 /**

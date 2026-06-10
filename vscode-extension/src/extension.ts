@@ -82,6 +82,7 @@ import { WindsurfDataAccess } from './windsurf';
 import { getEcosystemDisplayName } from './ecosystemAdapter';
 import { buildAdapterRegistry, createDataAccessInstances } from './adapters';
 import { CopilotAppDataAccess } from './copilotAppData';
+import { PiDataAccess } from './pi';
 import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from './jetbrains';
@@ -4494,7 +4495,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * Extract full session log data including chat turns for the log viewer.
 	 */
 	private async getSessionLogData(sessionFile: string): Promise<SessionLogData> {
-		const details = await this.getSessionFileDetails(sessionFile);
+		// Use pre-enriched details from the diagnostics cache when available — it carries
+		// hierarchy data (parentInfo, childInfo) populated by enrichSessionHierarchy /
+		// enrichPiSessionHierarchy during the background load.
+		const cached = this.diagnosticsCachedFiles.find(f => f.file === sessionFile);
+		const details = cached ?? await this.getSessionFileDetails(sessionFile);
 		let subAgentsStarted: number | undefined;
 		let turns: ChatTurn[] = [];
 
@@ -4569,7 +4574,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(editorNote ? { editorNote } : {}),
 			...(details.parentInfo ? { parentInfo: details.parentInfo } : {}),
 			...(details.childInfo ? { childInfo: details.childInfo, totalChildCount: details.totalChildCount } : {}),
-			...this.buildLogDataCacheFields(sessionCache, subAgentsStarted),
+			...this.buildLogDataCacheFields(sessionCache, subAgentsStarted ?? ((details.totalChildCount ?? 0) > 0 ? details.totalChildCount : undefined)),
 		};
 	}
 
@@ -7794,6 +7799,7 @@ ${this.getLoadingHtmlScript()}
       } catch { /* Skip inaccessible files */ }
     }
     await this.enrichSessionHierarchy(detailedSessionFiles);
+    await this.enrichPiSessionHierarchy(detailedSessionFiles);
     await this.sendBgLoadResults(panel, detailedSessionFiles, initialCacheHits, initialCacheMisses);
   }
 
@@ -7856,6 +7862,73 @@ ${this.getLoadingHtmlScript()}
         }
       }
     } catch { /* hierarchy is optional — never surface errors */ }
+  }
+
+  /**
+   * Enrich Pi sessions in `files` with parent/child hierarchy data derived from
+   * the `parentSession` field in each session's JSONL header.
+   * All other session types are left untouched.
+   * Errors are suppressed — hierarchy is an optional enrichment.
+   */
+  private async enrichPiSessionHierarchy(files: SessionFileDetails[]): Promise<void> {
+    const pi = new PiDataAccess();
+    const piFiles = files.filter(f => pi.isPiSessionFile(f.file));
+    if (piFiles.length === 0) { return; }
+
+    // Normalise a path for platform-independent comparison.
+    const norm = (p: string) => _normalizePath(p);
+
+    // Build normalised-path → SessionFileDetails map.
+    const pathToDetails = new Map<string, SessionFileDetails>();
+    for (const details of piFiles) {
+      pathToDetails.set(norm(details.file), details);
+    }
+
+    // Discover parent links.
+    // Primary: path-based detection (pi nests child sessions under {parentId}/{hash}/run-N/session.jsonl).
+    // Fallback: header-based parentSession field (future pi versions may use this).
+    const parentByChild = new Map<string, string>();     // normChildPath → normParentPath
+    const childrenByParent = new Map<string, string[]>(); // normParentPath → normChildPaths[]
+    await Promise.all(piFiles.map(async (details) => {
+      try {
+        const rawParent =
+          pi.getParentSessionPathFromFilePath(details.file) ??
+          await pi.getParentSessionPath(details.file);
+        if (!rawParent) { return; }
+        const normChild = norm(details.file);
+        const normParent = norm(rawParent);
+        parentByChild.set(normChild, normParent);
+        if (!childrenByParent.has(normParent)) { childrenByParent.set(normParent, []); }
+        childrenByParent.get(normParent)!.push(normChild);
+      } catch { /* skip unreadable sessions */ }
+    }));
+
+    // Apply parentInfo to child sessions.
+    for (const [normChild, normParent] of parentByChild) {
+      const childDetails = pathToDetails.get(normChild);
+      if (!childDetails) { continue; }
+      const parentDetails = pathToDetails.get(normParent);
+      childDetails.parentInfo = {
+        uuid: normParent,
+        name: parentDetails?.title ?? path.basename(path.dirname(normParent)),
+        sessionFile: parentDetails?.file,
+      } satisfies SessionRelationRef;
+    }
+
+    // Apply childInfo to parent sessions.
+    for (const [normParent, normChildren] of childrenByParent) {
+      const parentDetails = pathToDetails.get(normParent);
+      if (!parentDetails) { continue; }
+      parentDetails.childInfo = normChildren.map(nc => {
+        const childDetails = pathToDetails.get(nc);
+        return {
+          uuid: nc,
+          name: childDetails?.title ?? path.basename(path.dirname(nc)),
+          sessionFile: childDetails?.file,
+        } satisfies SessionRelationRef;
+      });
+      parentDetails.totalChildCount = normChildren.length;
+    }
   }
 
   private async sortSessionFilesByMtime(sessionFiles: string[]): Promise<string[]> {
