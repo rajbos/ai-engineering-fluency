@@ -52,6 +52,8 @@
     <Compile Include="CopilotTokenTrackerPackage.cs" />
     <Compile Include="Commands\ShowTokenTrackerCommand.cs" />
     <Compile Include="Commands\ToolbarInfoCommand.cs" />
+    <Compile Include="Options\ExtensionSettings.cs" />
+    <Compile Include="Options\OptionsPage.cs" />
     <Compile Include="Data\Models.cs" />
     <Compile Include="Data\CliBridge.cs" />
     <Compile Include="Data\StatsBuilder.cs" />
@@ -150,6 +152,19 @@
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\environmental.js" />
       <_WebviewBundle Include="..\..\..\vscode-extension\dist\webview\maturity.js" />
     </ItemGroup>
+    <!--
+      Warn loudly when the freshly-built bundles are absent. Without this, the Copy below
+      silently no-ops (ContinueOnError) and the VSIX ships the committed webview\*.js, which
+      can be weeks out of date — the root cause of missing icons / friendly model names /
+      "Other models" grouping in past releases. Build vscode-extension first (npm run package)
+      or use ./build.ps1 -Project visualstudio, which rebuilds the bundles automatically.
+    -->
+    <Warning
+      Condition="!Exists('..\..\..\vscode-extension\dist\webview\details.js')"
+      Text="vscode-extension/dist/webview bundles not found — packaging the committed (possibly STALE) webview\*.js. Run 'npm run package' in vscode-extension/ or build via ./build.ps1 -Project visualstudio." />
+    <Warning
+      Condition="!Exists('$(MSBuildProjectDirectory)\cli-bundle\copilot-token-tracker.exe')"
+      Text="cli-bundle/copilot-token-tracker.exe not found — the VSIX will have NO bundled CLI and will show empty/zero usage data. Run ./build.ps1 -Project visualstudio to build and copy the CLI exe." />
     <MakeDir Directories="$(MSBuildProjectDirectory)\webview" />
     <Copy SourceFiles="@(_WebviewBundle)" DestinationFolder="$(MSBuildProjectDirectory)\webview\" SkipUnchangedFiles="true" ContinueOnError="true" />
     <Message Importance="high" Text="Copied webview bundles from vscode-extension/dist/webview/ — rebuild vscode-extension if they are missing." />

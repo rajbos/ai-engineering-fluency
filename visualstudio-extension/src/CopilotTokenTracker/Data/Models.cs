@@ -24,6 +24,9 @@ namespace CopilotTokenTracker.Data
 
         [JsonPropertyName("backendConfigured")]
         public bool BackendConfigured { get; set; }
+
+        [JsonPropertyName("compactNumbers")]
+        public bool CompactNumbers { get; set; } = true;
     }
 
     // ── Per-period aggregated statistics ────────────────────────────────────────
@@ -117,6 +120,9 @@ namespace CopilotTokenTracker.Data
 
         [JsonPropertyName("backendConfigured")]
         public bool BackendConfigured { get; set; }
+
+        [JsonPropertyName("compactNumbers")]
+        public bool CompactNumbers { get; set; } = true;
     }
 
     internal sealed class EnvironmentalPeriod

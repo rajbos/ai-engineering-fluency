@@ -73,8 +73,11 @@ namespace CopilotTokenTracker.Commands
                 else
                 {
                     var today  = FormatTokenCount(stats.Today.Tokens);
-                    var last30 = FormatTokenCount(stats.Last30Days.Tokens);
-                    text = $"AI Engineering Fluency: {today} ({stats.Today.Tokens:N0}) | {last30} ({stats.Last30Days.Tokens:N0})";
+                    var useMonth = Options.ExtensionSettings.ToolbarComparisonPeriod == Options.ComparisonPeriod.CurrentMonth;
+                    var secondaryStats = useMonth ? stats.Month : stats.Last30Days;
+                    var secondaryLabel = useMonth ? "month" : "30d";
+                    var secondary = FormatTokenCount(secondaryStats.Tokens);
+                    text = $"AI Engineering Fluency: {today} ({stats.Today.Tokens:N0}) | {secondaryLabel} {secondary} ({secondaryStats.Tokens:N0})";
                 }
 
                 await _package.JoinableTaskFactory.SwitchToMainThreadAsync(_package.DisposalToken);

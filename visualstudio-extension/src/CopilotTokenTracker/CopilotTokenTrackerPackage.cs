@@ -25,6 +25,7 @@ namespace CopilotTokenTracker
         Transient       = false)]
     [ProvideAutoLoad(VSConstants.UICONTEXT.NoSolution_string, PackageAutoLoadFlags.BackgroundLoad)]
     [ProvideAutoLoad(UIContextGuids80.SolutionExists, PackageAutoLoadFlags.BackgroundLoad)]
+    [ProvideOptionPage(typeof(Options.OptionsPage), "AI Engineering Fluency", "General", 0, 0, supportsAutomation: true)]
     public sealed class CopilotTokenTrackerPackage : AsyncPackage
     {
         /// <summary>Package identity GUID — must match source.extension.vsixmanifest and .vsct.</summary>
@@ -41,6 +42,10 @@ namespace CopilotTokenTracker
                 // Initialize logging
                 Utilities.OutputLogger.Initialize(this);
                 Utilities.OutputLogger.Log("=== AI Engineering Fluency Extension Starting ===");
+
+                // Seed user settings from the Tools > Options page so the WebView control
+                // and toolbar command can read them via the static ExtensionSettings holder.
+                SeedSettings();
                 Utilities.OutputLogger.Log($"Package GUID: {PackageGuidString}");
                 Utilities.OutputLogger.Log($"Visual Studio Version: {this.ApplicationRegistryRoot}");
 
@@ -63,6 +68,28 @@ namespace CopilotTokenTracker
             {
                 Utilities.OutputLogger.LogError("Failed to initialize extension", ex);
                 throw;
+            }
+        }
+
+        /// <summary>
+        /// Loads the Options page from storage and mirrors its values into
+        /// <see cref="Options.ExtensionSettings"/>. Safe to fail — defaults are used.
+        /// </summary>
+        private void SeedSettings()
+        {
+            try
+            {
+                if (GetDialogPage(typeof(Options.OptionsPage)) is Options.OptionsPage page)
+                {
+                    page.Apply();
+                    Utilities.OutputLogger.Log(
+                        $"Settings seeded: compactNumbers={Options.ExtensionSettings.CompactNumbers}, " +
+                        $"toolbarPeriod={Options.ExtensionSettings.ToolbarComparisonPeriod}");
+                }
+            }
+            catch (Exception ex)
+            {
+                Utilities.OutputLogger.LogWarning($"Could not seed settings: {ex.Message}");
             }
         }
 

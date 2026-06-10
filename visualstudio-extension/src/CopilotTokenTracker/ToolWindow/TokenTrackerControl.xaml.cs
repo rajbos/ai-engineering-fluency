@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Reflection;
+using System.Linq;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
@@ -77,6 +79,13 @@ namespace CopilotTokenTracker.ToolWindow
 
                 // Handle navigation commands posted by JS (e.g. tab switches)
                 WebView.CoreWebView2.WebMessageReceived += OnWebMessageReceived;
+
+                // Open external http(s) links (e.g. the "create an issue" repo link and
+                // social-share targets) in the user's system browser instead of inside the
+                // tool window. Covers both target=_blank/window.open (NewWindowRequested) and
+                // plain top-level anchor navigations (NavigationStarting).
+                WebView.CoreWebView2.NewWindowRequested   += OnNewWindowRequested;
+                WebView.CoreWebView2.NavigationStarting   += OnNavigationStarting;
 
                 _webViewReady       = true;
                 WebView.Visibility  = Visibility.Visible;
@@ -211,7 +220,7 @@ namespace CopilotTokenTracker.ToolWindow
                 case "chart":
                 {
                     var raw = await CliBridge.GetChartDataJsonAsync();
-                    if (!string.IsNullOrWhiteSpace(raw)) { return raw!; }
+                    if (!string.IsNullOrWhiteSpace(raw)) { return InjectCompactNumbers(raw!); }
                     // Fallback: empty chart payload
                     return JsonSerializer.Serialize(new
                     {
@@ -249,6 +258,7 @@ namespace CopilotTokenTracker.ToolWindow
                 case "environmental":
                 {
                     var envStats = await StatsBuilder.BuildEnvironmentalAsync();
+                    envStats.CompactNumbers = Options.ExtensionSettings.CompactNumbers;
                     return JsonSerializer.Serialize(envStats, serOpts);
                 }
                 case "maturity":
@@ -262,12 +272,37 @@ namespace CopilotTokenTracker.ToolWindow
                     {
                         LastUpdated = DateTime.UtcNow.ToString("o"),
                     };
+                    stats.CompactNumbers = Options.ExtensionSettings.CompactNumbers;
                     return JsonSerializer.Serialize(stats, serOpts);
                 }
             }
         }
 
         // ── Loading overlay & navigation ──────────────────────────────────────
+
+        /// <summary>
+        /// Adds (or overrides) the top-level <c>compactNumbers</c> flag on a raw JSON object
+        /// string emitted by the CLI, so settings honour the user's preference for views whose
+        /// payload is passed through verbatim (e.g. chart). Falls back to the original string
+        /// when the JSON cannot be parsed.
+        /// </summary>
+        private static string InjectCompactNumbers(string rawJson)
+        {
+            try
+            {
+                if (JsonNode.Parse(rawJson) is JsonObject obj)
+                {
+                    obj["compactNumbers"] = Options.ExtensionSettings.CompactNumbers;
+                    return obj.ToJsonString();
+                }
+            }
+            catch (JsonException)
+            {
+                // Malformed JSON — return as-is so the webview still renders something.
+            }
+            return rawJson;
+        }
+
 
         /// <summary>
         /// Injects a full-page spinner overlay into the currently visible WebView page.
@@ -312,6 +347,57 @@ namespace CopilotTokenTracker.ToolWindow
         }
 
         // ── Incoming messages from JS ──────────────────────────────────────────
+
+        /// <summary>Virtual host the bundled webview assets are served from.</summary>
+        private const string VirtualHost = "copilot-tracker.local";
+
+        /// <summary>
+        /// Opens target=_blank / window.open links in the system browser rather than a popup.
+        /// </summary>
+        private void OnNewWindowRequested(object? sender, CoreWebView2NewWindowRequestedEventArgs e)
+        {
+            e.Handled = true;
+            OpenInBrowser(e.Uri);
+        }
+
+        /// <summary>
+        /// Intercepts top-level anchor navigations to external pages and opens them in the
+        /// system browser, keeping the tool window on the dashboard. Navigations to the bundled
+        /// virtual host (and non-http schemes used by NavigateToString) are allowed through.
+        /// </summary>
+        private void OnNavigationStarting(object? sender, CoreWebView2NavigationStartingEventArgs e)
+        {
+            var uri = e.Uri ?? string.Empty;
+            if (!uri.StartsWith("http://", StringComparison.OrdinalIgnoreCase) &&
+                !uri.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+            {
+                return; // about:, data:, etc. — let WebView2 handle it
+            }
+            if (uri.IndexOf(VirtualHost, StringComparison.OrdinalIgnoreCase) >= 0)
+            {
+                return; // our own bundle assets
+            }
+            e.Cancel = true;
+            OpenInBrowser(uri);
+        }
+
+        /// <summary>Launches <paramref name="url"/> in the default system browser.</summary>
+        private static void OpenInBrowser(string url)
+        {
+            if (string.IsNullOrWhiteSpace(url)) { return; }
+            try
+            {
+                System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(url)
+                {
+                    UseShellExecute = true,
+                });
+                Utilities.OutputLogger.Log($"Opened external link: {url}");
+            }
+            catch (Exception ex)
+            {
+                Utilities.OutputLogger.LogWarning($"Failed to open external link '{url}': {ex.Message}");
+            }
+        }
 
         private void OnWebMessageReceived(object? sender, CoreWebView2WebMessageReceivedEventArgs e)
         {
@@ -359,6 +445,18 @@ namespace CopilotTokenTracker.ToolWindow
                             await NavigateToViewAsync("maturity");
                             break;
 
+                        case "shareToLinkedIn":
+                            await ShareFluencyScoreAsync("linkedin");
+                            break;
+
+                        case "shareToBluesky":
+                            await ShareFluencyScoreAsync("bluesky");
+                            break;
+
+                        case "shareToMastodon":
+                            await ShareFluencyScoreAsync("mastodon");
+                            break;
+
                         case "showDashboard":
                             // Dashboard view not yet implemented — fall back to details
                             await NavigateToViewAsync("details");
@@ -380,6 +478,58 @@ namespace CopilotTokenTracker.ToolWindow
                 });
             }
             catch (Exception parseEx) { Utilities.OutputLogger.LogWarning($"OnWebMessageReceived: malformed message — {parseEx.Message}"); }
+        }
+
+        /// <summary>
+        /// Replicates the VS Code "share fluency score" flow: builds a summary from the cached
+        /// maturity data, copies it to the clipboard, and opens the target platform's compose /
+        /// share page in the system browser for the user to paste into.
+        /// </summary>
+        private async Task ShareFluencyScoreAsync(string platform)
+        {
+            const string marketplaceUrl = "https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency";
+            const string hashtag = "#CopilotFluencyScore";
+
+            var maturity = await CliBridge.GetMaturityAsync();
+            var overall  = string.IsNullOrEmpty(maturity?.OverallLabel) ? "Stage 1: AI Skeptic" : maturity!.OverallLabel;
+            var categoryScores = maturity?.Categories != null
+                ? string.Join("\n", maturity.Categories.Select(c => $"{c.Icon} {c.Category}: Stage {c.Stage}"))
+                : string.Empty;
+
+            var shareText =
+                "🎯 My AI Engineering Fluency Score\n\n" +
+                $"Overall: {overall}\n\n" +
+                (string.IsNullOrEmpty(categoryScores) ? string.Empty : categoryScores + "\n\n") +
+                "Track your Copilot usage and level up your AI-assisted development skills!\n\n" +
+                $"Get the extension: {marketplaceUrl}\n\n" +
+                hashtag;
+
+            string shareUrl;
+            string platformName;
+            switch (platform)
+            {
+                case "linkedin":
+                    shareUrl     = $"https://www.linkedin.com/sharing/share-offsite/?url={Uri.EscapeDataString(marketplaceUrl)}";
+                    platformName = "LinkedIn";
+                    break;
+                case "bluesky":
+                    shareUrl     = "https://bsky.app/intent/compose";
+                    platformName = "Bluesky";
+                    break;
+                case "mastodon":
+                    shareUrl     = "https://mastodon.social/share";
+                    platformName = "Mastodon";
+                    break;
+                default:
+                    return;
+            }
+
+            await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync();
+            try { System.Windows.Clipboard.SetText(shareText); }
+            catch (Exception ex) { Utilities.OutputLogger.LogWarning($"Clipboard copy failed: {ex.Message}"); }
+
+            OpenInBrowser(shareUrl);
+            Utilities.OutputLogger.Log($"Shared fluency score to {platformName} (text copied to clipboard)");
         }
     }
 }
