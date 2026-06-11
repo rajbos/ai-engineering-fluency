@@ -330,6 +330,11 @@ function outputTokenCell(p: PeriodStats): string {
 
 function totalTokenCell(p: PeriodStats): string {
 	const modelTotal = sumInputTokens(p) + sumOutputTokens(p);
+	// When actual tokens (from debug logs) are available, prefer p.tokens — it
+	// captures every llm_request event including those without model attribution,
+	// matching the value shown in the status bar. Otherwise prefer modelTotal
+	// (per-request API data), then fall back to the text-based estimate.
+	if ((p.actualTokens ?? 0) > 0) { return formatCompact(p.tokens); }
 	return formatCompact(modelTotal > 0 ? modelTotal : p.tokens);
 }
 
