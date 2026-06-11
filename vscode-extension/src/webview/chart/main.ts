@@ -43,6 +43,7 @@ type ChartPeriodData = {
 	totalLinesAdded?: number;
 	totalLinesRemoved?: number;
 	avgLocPerPeriod?: number;
+	editorCostDatasets?: ModelDataset[];
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
@@ -149,7 +150,7 @@ function getRollingLabel(): string {
 function getChartTitle(): string {
 	const periodMeta = PERIOD_LABELS[currentPeriod];
 	if (currentMetric === 'cost') {
-		let titleText = periodMeta.costTitle;
+		let titleText = currentSplit === 'editor' ? periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Editor') : periodMeta.costTitle;
 		if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
 			titleText += ` (${getRollingLabel()})`;
 		}
@@ -195,7 +196,7 @@ const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countL
 };
 
 function isComboSupported(metric: string, split: string): boolean {
-	if (metric === 'cost') { return split === 'total'; }
+	if (metric === 'cost') { return split === 'total' || split === 'editor'; }
 	if (metric === 'output') { return split !== 'model'; }
 	return split !== 'language';
 }
@@ -516,8 +517,8 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 
 async function switchMetric(metric: typeof currentMetric, data: InitialChartData): Promise<void> {
 	if (currentMetric === metric) { return; }
-	// When switching to cost, force split to total (only supported combo)
-	if (metric === 'cost') { currentSplit = 'total'; }
+	// When switching to cost, keep the editor split if active; otherwise fall back to total
+	if (metric === 'cost' && currentSplit !== 'editor') { currentSplit = 'total'; }
 	// When switching to output, disable unsupported splits
 	if (metric === 'output' && currentSplit === 'model') { currentSplit = 'total'; }
 	// When switching to tokens, disable language split
@@ -540,7 +541,7 @@ async function switchMetric(metric: typeof currentMetric, data: InitialChartData
 }
 
 function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
-	return (metric === 'cost' && split === 'total') ||
+	return (metric === 'cost' && (split === 'total' || split === 'editor')) ||
 		(metric === 'output' && split !== 'model') ||
 		(metric === 'tokens' && split !== 'language');
 }
@@ -625,7 +626,7 @@ function updateSplitButtonStates(): void {
 	splits.forEach(({ id, split }) => {
 		const btn = document.getElementById(id) as HTMLButtonElement | null;
 		if (!btn) { return; }
-		const supported = (currentMetric === 'cost' && split === 'total') ||
+		const supported = (currentMetric === 'cost' && (split === 'total' || split === 'editor')) ||
 			(currentMetric === 'output' && split !== 'model') ||
 			(currentMetric === 'tokens' && split !== 'language');
 		btn.disabled = !supported;
@@ -744,6 +745,35 @@ function buildCostDataset(isRolling: boolean, rollingLabel: string, costData: nu
 		fill: isRolling ? false : undefined,
 		yAxisID: 'y' as const,
 	};
+}
+
+function buildCostEditorViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = (period.editorCostDatasets ?? []) as ModelDataset[];
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: datasets as any },
+		options: {
+			...baseOptions,
+			plugins: {
+				...baseOptions.plugins,
+				legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
+				tooltip: {
+					...baseOptions.plugins.tooltip,
+					callbacks: {
+						label: (ctx: any) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
+						footer: (items: any[]) => {
+							const total = items.reduce((sum: number, i: any) => sum + (Number(i.parsed.y) || 0), 0);
+							return `Total: $${total.toFixed(4)}`;
+						}
+					}
+				}
+			},
+			scales: {
+				x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (USD)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } }
+			}
+		}
+	} as ChartConfig;
 }
 
 function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors, monthlyBudget = 0): ChartConfig {
@@ -897,15 +927,25 @@ function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptio
 	};
 }
 
+function resolveChartView(metric: typeof currentMetric, split: typeof currentSplit): string {
+	if (metric === 'tokens') {
+		if (split === 'model') { return 'model'; }
+		if (split === 'editor') { return 'editor'; }
+		if (split === 'repository') { return 'repository'; }
+		return 'total';
+	}
+	if (metric === 'cost') { return split === 'editor' ? 'cost-editor' : 'cost'; }
+	return `output-${split}`;
+}
+
 function createConfig(data: InitialChartData): ChartConfig {
 	const period = getActivePeriodData(data);
-	const view = currentMetric === 'tokens'
-		? (currentSplit === 'model' ? 'model' : currentSplit === 'editor' ? 'editor' : currentSplit === 'repository' ? 'repository' : 'total')
-		: currentMetric === 'cost' ? 'cost' : `output-${currentSplit}`;
+	const view = resolveChartView(currentMetric, currentSplit);
 	const c = getChartColors();
 	const baseOptions = buildBaseOptions(c);
 	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
 	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c, data.monthlyBudget ?? 0); }
+	if (view === 'cost-editor') { return buildCostEditorViewConfig(period, baseOptions, c); }
 	if (view.startsWith('output-')) { return buildOutputViewConfig(view, period, baseOptions, c); }
 	return buildStackedViewConfig(view, period, baseOptions, c);
 }

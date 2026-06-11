@@ -119,6 +119,12 @@ export interface DailyTokenStats {
   languageUsage?: LanguageUsage;
   linesAdded?: number;
   linesRemoved?: number;
+  /**
+   * Per-editor model usage breakdown — used to compute accurate cost-by-editor charts.
+   * Each key is an editor display name (e.g. "VS Code", "Claude Code"); the value is the
+   * model usage aggregated from all sessions of that editor type on that day.
+   */
+  editorModelUsage?: { [editor: string]: ModelUsage };
 }
 
 /** Aggregated data for one time window (day/week/month) in the chart. */
@@ -150,6 +156,12 @@ export interface ChartPeriodData {
   totalLinesAdded?: number;
   totalLinesRemoved?: number;
   avgLocPerPeriod?: number;
+  /**
+   * Cost datasets split by editor/hosting surface — one dataset per editor type.
+   * Each dataset's `data` array aligns with `labels`; values are estimated costs in USD.
+   * Computed from per-day `editorModelUsage` using the appropriate pricing source for each editor.
+   */
+  editorCostDatasets?: object[];
 }
 
 /** Shape of the data payload sent to the chart webview (via window.__INITIAL_CHART__ or postMessage). */

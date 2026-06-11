@@ -2927,6 +2927,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		entry.repositoryUsage[repository].tokens += tokens;
 		entry.repositoryUsage[repository].sessions += 1;
 		addModelUsage(entry.modelUsage, modelUsage);
+		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
+		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
+		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
 	}
 
 	private addLocToDailyEntry(entry: DailyTokenStats, linesAdded: number, linesRemoved: number, editorType: string, repository: string, languageUsage?: any): void {

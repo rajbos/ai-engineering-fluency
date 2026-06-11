@@ -160,6 +160,9 @@ function _apsBumpDailyEntry(entry: DailyTokenStats, tokens: number, interactions
 	entry.repositoryUsage[repository].tokens += tokens;
 	entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);
+	if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
+	if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
+	addModelUsage(entry.editorModelUsage[editorType], modelUsage);
 }
 
 function _apsBumpPeriod(acc: PeriodAccumulator, f: ApsDayFields, freshSession: boolean): void {
@@ -317,6 +320,9 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
 	entry.repositoryUsage[repository].tokens += tokens; entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);
+	if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
+	if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
+	addModelUsage(entry.editorModelUsage[editorType], modelUsage);
 }
 
 function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: number, actual: number, thinking: number, cached: number, interactions: number, countSession: boolean, editorType: string, modelUsage: ModelUsage, copilotExactCostDollars?: number): void {
