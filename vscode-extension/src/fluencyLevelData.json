@@ -135,7 +135,7 @@
         "thresholds": [
           "Zero agent-mode interactions",
           "No tool calls executed",
-          "Not using edit mode or multi-file capabilities"
+          "Not using multi-file or agentic capabilities"
         ],
         "tips": [
           "Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) — it can run terminal commands, edit files, and explore your codebase autonomously — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)",
@@ -148,12 +148,11 @@
         "description": "Beginning to explore agent mode",
         "thresholds": [
           "At least 1 agent-mode interaction OR",
-          "Using edit mode OR",
           "At least 1 multi-file edit session"
         ],
         "tips": [
           "Use [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-step tasks; let it chain tools like file search, terminal, and code edits — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)",
-          "Try edit mode for focused code changes"
+          "Use agent mode for focused, multi-step code changes"
         ]
       },
       {

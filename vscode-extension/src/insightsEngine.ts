@@ -348,10 +348,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			const sessions = ctx.last30Days.sessions;
 			const m = ctx.last30Days.modeUsage;
 			if ((m.ask ?? 0) > 0.85 * sessions) {
-				return 'You mostly use Ask mode. Try Edit mode for making code changes directly.';
-			}
-			if ((m.edit ?? 0) > 0.85 * sessions) {
-				return 'You mostly use Edit mode. Ask mode is great for questions and exploration.';
+				return 'You mostly use Ask mode. Try Agent mode for making code changes directly — it can edit files, run terminal commands, and iterate across your whole codebase autonomously.';
 			}
 			return 'You haven\'t tried Agent mode yet. It handles multi-step tasks autonomously — great for refactoring, adding tests, or implementing features.';
 		},
@@ -359,8 +356,8 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			const sessions = ctx.last30Days.sessions;
 			if (sessions < 10) { return false; }
 			const m = ctx.last30Days.modeUsage;
+			if ((m.agent ?? 0) > 0.85 * sessions) { return false; }
 			return (m.ask ?? 0) > 0.85 * sessions
-				|| (m.edit ?? 0) > 0.85 * sessions
 				|| ((m.agent ?? 0) === 0 && sessions >= 15);
 		},
 		weight: 50,
@@ -778,7 +775,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		buildBody: (ctx) => {
 			const es = ctx.last30Days.editScope;
 			return `You've made ${es.singleFileEdits} edit-mode sessions over the last 30 days, all touching a single file. ` +
-				`For refactors that span multiple files — renaming a type, extracting a module, updating API contracts — switch to Agent mode (or Edit mode with multiple files selected). ` +
+				`For refactors that span multiple files — renaming a type, extracting a module, updating API contracts — switch to Agent mode. ` +
 				`It can make changes consistently across your whole codebase without you opening each file manually.`;
 		},
 		appliesTo: (ctx) => {
