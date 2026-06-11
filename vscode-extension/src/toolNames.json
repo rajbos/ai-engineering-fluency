@@ -897,4 +897,9 @@
   ,"azure_mcp-documentation": "Azure MCP Documentation"
   ,"mcp_azure_mcp_ser_get_azure_bestpractices": "Serena MCP: Get Azure Best Practices"
   ,"find": "Find"
+  ,"get-syntax-docs-mermaid": "Mermaid Syntax Docs"
+  ,"mermaid-chart": "Mermaid Chart"
+  ,"mermaid-diagram-preview": "Mermaid Diagram Preview"
+  ,"mermaid-diagram-validator": "Mermaid Diagram Validator"
+  ,"sonarqube_list_potential_security_issues": "SonarQube List Potential Security Issues"
 }
