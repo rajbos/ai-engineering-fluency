@@ -1954,6 +1954,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			editorSource: this.detectEditorSource(sessionFile),
 			title: sessionData.title,
 			repository: sessionData.repository,
+			...(sessionData.modelUsage && Object.keys(sessionData.modelUsage).length > 0 ? { modelUsage: sessionData.modelUsage } : {}),
 		};
 		this.enrichDetailsWithEditorInfo(sessionFile, details);
 		return details;
@@ -4181,7 +4182,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			lastInteraction: lastInteraction,
 			editorSource: this.detectEditorSource(sessionFile),
 			title: cached.title,
-			repository: cached.repository
+			repository: cached.repository,
+			...(cached.modelUsage && Object.keys(cached.modelUsage).length > 0 ? { modelUsage: cached.modelUsage } : {}),
 		};
 
 		// Add editor root and name

@@ -330,6 +330,11 @@ function outputTokenCell(p: PeriodStats): string {
 
 function totalTokenCell(p: PeriodStats): string {
 	const modelTotal = sumInputTokens(p) + sumOutputTokens(p);
+	// When actual tokens (from debug logs) are available, prefer p.tokens — it
+	// captures every llm_request event including those without model attribution,
+	// matching the value shown in the status bar. Otherwise prefer modelTotal
+	// (per-request API data), then fall back to the text-based estimate.
+	if ((p.actualTokens ?? 0) > 0) { return formatCompact(p.tokens); }
 	return formatCompact(modelTotal > 0 ? modelTotal : p.tokens);
 }
 
@@ -337,7 +342,7 @@ function buildCachedTokenRow(stats: DetailedStats): MetricRow[] {
 	if (!(stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)) {
 		return [];
 	}
-	return [{ label: 'Cached tokens', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }];
+	return [{ label: 'Cached tokens', labelTooltip: 'Cache-read tokens — already included in "Input tokens" above, shown separately because they are billed at a lower rate.', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }];
 }
 
 function buildCopilotPlanRow(stats: DetailedStats): MetricRow[] {
@@ -349,8 +354,8 @@ function buildCopilotPlanRow(stats: DetailedStats): MetricRow[] {
 
 function buildMetricsRows(stats: DetailedStats, projections: Projections): MetricRow[] {
 	const rows: MetricRow[] = [
-		{ label: 'Tokens (input+output)', icon: '🟣', color: '#c37bff', today: totalTokenCell(stats.today), last30Days: totalTokenCell(stats.last30Days), month: totalTokenCell(stats.month), lastMonth: totalTokenCell(stats.lastMonth), projected: formatCompact(projections.projectedTokens) },
-		{ label: 'Input tokens', icon: '⬆️', color: '#c37bff', today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: '—' },
+		{ label: 'Total tokens', labelTooltip: 'All LLM API tokens counted across every call in this period — matches the status bar. When debug logs are available this is the definitive total; otherwise it falls back to per-model attribution or the text-based estimate.', icon: '🟣', color: '#c37bff', today: totalTokenCell(stats.today), last30Days: totalTokenCell(stats.last30Days), month: totalTokenCell(stats.month), lastMonth: totalTokenCell(stats.lastMonth), projected: formatCompact(projections.projectedTokens) },
+		{ label: 'Input tokens', labelTooltip: 'Total prompt tokens sent to the model, including any cache-read tokens (shown separately below).', icon: '⬆️', color: '#c37bff', today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: '—' },
 		{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: outputTokenCell(stats.today), last30Days: outputTokenCell(stats.last30Days), month: outputTokenCell(stats.month), lastMonth: outputTokenCell(stats.lastMonth), projected: '—' },
 		...buildCachedTokenRow(stats),
 		{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), month: formatCompact(stats.month.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },

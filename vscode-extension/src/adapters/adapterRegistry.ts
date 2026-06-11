@@ -112,7 +112,7 @@ deps.isMcpTool,
 deps.extractMcpServerName,
 deps.estimateTokens
 ),
-new ClaudeCodeAdapter(deps.claudeCode),
+new ClaudeCodeAdapter(deps.claudeCode, deps.isMcpTool, deps.extractMcpServerName, deps.estimateTokens),
 new MistralVibeAdapter(deps.mistralVibe),
 // Antigravity must come before GeminiCliAdapter because both live under ~/.gemini/
 // and the Gemini CLI path check would not match Antigravity paths, but we place

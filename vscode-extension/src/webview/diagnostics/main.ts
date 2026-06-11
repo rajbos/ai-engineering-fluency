@@ -40,6 +40,8 @@ type SessionFileDetails = {
   parentInfo?: { uuid: string; name: string; sessionFile?: string } | null;
   childInfo?: Array<{ uuid: string; name: string; sessionFile?: string }>;
   totalChildCount?: number;
+  /** Per-model input/output token breakdown (when model attribution data is available). */
+  modelUsage?: { [model: string]: { inputTokens: number; outputTokens: number } };
 };
 
 type CacheInfo = {
@@ -170,6 +172,7 @@ let currentSortDirection: "asc" | "desc" = "desc";
 let currentEditorFilter: string | null = null; // null = show all
 let currentContextRefFilter: keyof ContextReferenceUsage | null = null; // null = show all
 let hideEmptySessions = true; // hide sessions with 0 interactions by default
+let showOnlyUnattributed = false; // filter to only sessions with unattributed tokens
 
 // Tool analysis table sort state
 let toolSortColumn: "tool" | "calls" | "total" | "avg" = "avg";
@@ -479,11 +482,20 @@ function safeText(value: unknown): string {
 type ContextRefCounts = { file: number; symbol: number; selection: number; implicitSelection: number; codebase: number; workspace: number; terminal: number; vscode: number; copilotInstructions: number; agentsMd: number };
 type FilteredSessionResult = { filteredFiles: SessionFileDetails[]; zeroInteractionCount: number };
 
+/** Returns the number of tokens not attributed to any model (i.e. missing from modelUsage). */
+function getUnattributedTokens(sf: SessionFileDetails): number {
+  const tokens = sf.tokens || 0;
+  if (tokens === 0 || !sf.modelUsage) { return 0; }
+  const attributed = Object.values(sf.modelUsage).reduce((s, m) => s + m.inputTokens + m.outputTokens, 0);
+  return attributed > 0 ? Math.max(0, tokens - attributed) : 0;
+}
+
 function applySessionFilters(detailedFiles: SessionFileDetails[]): FilteredSessionResult {
   let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => sf.editorSource === currentEditorFilter) : detailedFiles;
   if (currentContextRefFilter) {
     filteredFiles = filteredFiles.filter((sf) => { const value = sf.contextReferences[currentContextRefFilter!]; return typeof value === "number" && value > 0; });
   }
+  if (showOnlyUnattributed) { filteredFiles = filteredFiles.filter(sf => getUnattributedTokens(sf) > 1000); }
   const zeroInteractionCount = filteredFiles.filter(sf => sf.interactions === 0).length;
   if (hideEmptySessions && zeroInteractionCount === filteredFiles.length && filteredFiles.length > 0) { hideEmptySessions = false; }
   if (hideEmptySessions) { filteredFiles = filteredFiles.filter(sf => sf.interactions > 0); }
@@ -507,8 +519,12 @@ function buildEditorPanelsHtml(detailedFiles: SessionFileDetails[], editorStats:
   </div>`;
 }
 
-function buildSessionSummaryCardsHtml(filteredFiles: SessionFileDetails[], totalInteractions: number, totalTokens: number, totalContextRefs: number, agg: ContextRefCounts, zeroInteractionCount: number): string {
+function buildSessionSummaryCardsHtml(filteredFiles: SessionFileDetails[], allFiles: SessionFileDetails[], totalInteractions: number, totalTokens: number, totalContextRefs: number, agg: ContextRefCounts, zeroInteractionCount: number): string {
   const mkRef = (key: keyof ContextRefCounts, icon: string, label: string) => agg[key] > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === key ? "active" : ""}" data-ref-type="${key}">${icon} ${label} ${agg[key]}</div>` : "";
+  const unattributedCount = allFiles.filter(sf => getUnattributedTokens(sf) > 1000).length;
+  const unattributedCheckbox = unattributedCount > 0
+    ? `<label class="empty-sessions-toggle" title="Sessions where some debug-log tokens cannot be assigned to a specific model — may indicate incomplete model attribution in the debug log"><input type="checkbox" id="show-only-unattributed" ${showOnlyUnattributed ? 'checked' : ''}>⚠️ Show only sessions with unattributed tokens<span class="hidden-count">(${unattributedCount} session${unattributedCount === 1 ? '' : 's'})</span></label>`
+    : '';
   return `<div class="summary-cards">
     <div class="summary-card"><div class="summary-label">📁 ${currentEditorFilter ? "Filtered" : "Total"} Sessions</div><div class="summary-value">${filteredFiles.length}</div></div>
     <div class="summary-card"><div class="summary-label">💬 Interactions</div><div class="summary-value">${totalInteractions}</div></div>
@@ -516,7 +532,7 @@ function buildSessionSummaryCardsHtml(filteredFiles: SessionFileDetails[], total
     <div class="summary-card"><div class="summary-label">🔗 Context References</div><div class="summary-value">${safeText(totalContextRefs)}</div><div class="summary-sub">${totalContextRefs === 0 ? "None" : ""}${mkRef("file","","#file")}${mkRef("symbol","","#sym")}${mkRef("implicitSelection","","implicit")}${mkRef("copilotInstructions","📋","instructions")}${mkRef("agentsMd","🤖","agents")}${mkRef("workspace","","@workspace")}${mkRef("vscode","","@vscode")}</div></div>
     <div class="summary-card"><div class="summary-label">📅 Time Range</div><div class="summary-value">Last 14 days</div></div>
   </div>
-  <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ''}</label></div>`;
+  <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ''}</label>${unattributedCheckbox}</div>`;
 }
 
 function buildHierarchyBadgesHtml(sf: SessionFileDetails): string {
@@ -536,6 +552,14 @@ function buildHierarchyBadgesHtml(sf: SessionFileDetails): string {
   return html ? `<div class="session-hierarchy-badges">${html}</div>` : '';
 }
 
+/** Returns a warning badge HTML string when the session has significant unattributed tokens. */
+function buildUnattributedBadge(sf: SessionFileDetails): string {
+  const unattributed = getUnattributedTokens(sf);
+  if (unattributed <= 1000) { return ''; }
+  const pct = Math.round(unattributed / (sf.tokens || 1) * 100);
+  return ` <span title="⚠️ ${unattributed.toLocaleString()} tokens (~${pct}%) not attributed to any model — debug log events without a model field" style="color:#f59e0b; cursor:help; font-size:0.9em;">⚠️</span>`;
+}
+
 function buildSessionTableHtml(sortedFiles: SessionFileDetails[]): string {
   const rows = sortedFiles.map((sf, idx) => {
     const editorLabel = sf.editorName || sf.editorSource;
@@ -547,7 +571,7 @@ function buildSessionTableHtml(sortedFiles: SessionFileDetails[]): string {
     const repoTitle = sf.repository ? escapeHtml(sf.repository) : (sf.file.includes('session-store.db') ? 'Chat session — no workspace connected' : 'No repository detected');
     const isUnknownEditor = (sf.editorName || sf.editorSource || "Unknown") === "Unknown";
     const rowClass = isChild ? ' class="child-session-row"' : '';
-    return `<tr${rowClass}><td>${idx + 1}</td><td><span class="${getEditorBadgeClass(editorLabel)}" title="${escapeHtml(sf.editorSource)}">${getEditorIcon(editorLabel)} ${escapeHtml(editorLabel)}</span></td><td class="session-title" title="${sf.title ? escapeHtml(sf.title) : "Empty session"}">${hierarchyBadges}${titleHtml}</td><td class="repository-cell" title="${repoTitle}">${repoLabel}</td><td>${formatFileSize(sf.size)}</td><td title="${Number(sf.tokens || 0).toLocaleString()} tokens">${formatTokenCount(sf.tokens)}</td><td>${sanitizeNumber(sf.interactions)}</td><td title="${escapeHtml(getContextRefsSummary(sf.contextReferences))}">${sanitizeNumber(getTotalContextRefs(sf.contextReferences))}</td><td>${formatDate(sf.lastInteraction)}</td><td><a href="#" class="view-formatted-link" data-file="${encodeURIComponent(sf.file)}" title="View formatted JSONL file">📄 View</a>${isUnknownEditor ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.file)}" title="Report this unknown path so we can add editor support">📢 Report</a>` : ""}</td></tr>`;
+    return `<tr${rowClass}><td>${idx + 1}</td><td><span class="${getEditorBadgeClass(editorLabel)}" title="${escapeHtml(sf.editorSource)}">${getEditorIcon(editorLabel)} ${escapeHtml(editorLabel)}</span></td><td class="session-title" title="${sf.title ? escapeHtml(sf.title) : "Empty session"}">${hierarchyBadges}${titleHtml}</td><td class="repository-cell" title="${repoTitle}">${repoLabel}</td><td>${formatFileSize(sf.size)}</td><td title="${Number(sf.tokens || 0).toLocaleString()} tokens">${formatTokenCount(sf.tokens)}${buildUnattributedBadge(sf)}</td><td>${sanitizeNumber(sf.interactions)}</td><td title="${escapeHtml(getContextRefsSummary(sf.contextReferences))}">${sanitizeNumber(getTotalContextRefs(sf.contextReferences))}</td><td>${formatDate(sf.lastInteraction)}</td><td><a href="#" class="view-formatted-link" data-file="${encodeURIComponent(sf.file)}" title="View formatted JSONL file">📄 View</a>${isUnknownEditor ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.file)}" title="Report this unknown path so we can add editor support">📢 Report</a>` : ""}</td></tr>`;
   }).join("");
   return `<div class="table-container"><table class="session-table"><thead><tr><th>#</th><th>Editor</th><th>Title</th><th>Repository</th><th class="sortable" data-sort="size">Size${getSortIndicator("size")}</th><th class="sortable" data-sort="tokens">Tokens${getSortIndicator("tokens")}</th><th class="sortable" data-sort="interactions">Interactions${getSortIndicator("interactions")}</th><th class="sortable" data-sort="contextRefs">Context Refs${getSortIndicator("contextRefs")}</th><th class="sortable" data-sort="lastInteraction">Last Interaction${getSortIndicator("lastInteraction")}</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
 }
@@ -566,7 +590,7 @@ function renderSessionTable(
   const totalContextRefs = filteredFiles.reduce((sum, sf) => sum + getTotalContextRefs(sf.contextReferences), 0);
   const agg = aggregateContextRefs(filteredFiles);
   const sortedFiles = sortSessionFiles(filteredFiles);
-  return `${buildEditorPanelsHtml(detailedFiles, editorStats, editors)}${buildSessionSummaryCardsHtml(filteredFiles, totalInteractions, totalTokens, totalContextRefs, agg, zeroInteractionCount)}${buildSessionTableHtml(sortedFiles)}`;
+  return `${buildEditorPanelsHtml(detailedFiles, editorStats, editors)}${buildSessionSummaryCardsHtml(filteredFiles, detailedFiles, totalInteractions, totalTokens, totalContextRefs, agg, zeroInteractionCount)}${buildSessionTableHtml(sortedFiles)}`;
 }
 
 function counterRow(key: string, label: string, value: number): string {
@@ -1171,6 +1195,16 @@ function setupContextRefFilterHandlers(): void {
   });
 }
 
+function setupUnattributedFilterHandler(): void {
+  const checkbox = document.getElementById("show-only-unattributed") as HTMLInputElement | null;
+  if (checkbox) {
+    checkbox.addEventListener("change", () => {
+      showOnlyUnattributed = checkbox.checked;
+      reRenderTable();
+    });
+  }
+}
+
 function setupZeroInteractionFilterHandler(): void {
   const checkbox = document.getElementById("hide-empty-sessions") as HTMLInputElement | null;
   if (checkbox) {
@@ -1268,6 +1302,7 @@ function reRenderTable(): void {
       setupEditorFilterHandlers();
       setupContextRefFilterHandlers();
       setupZeroInteractionFilterHandler();
+      setupUnattributedFilterHandler();
       setupFileLinks();
     }
   }
@@ -2320,6 +2355,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupEditorFilterHandlers();
   setupContextRefFilterHandlers();
   setupZeroInteractionFilterHandler();
+  setupUnattributedFilterHandler();
   setupBackendButtonHandlers();
   setupSubtabHandlers();
   setupFileLinks();
