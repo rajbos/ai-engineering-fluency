@@ -894,4 +894,6 @@
   ,"workiq_list_emails": "Workiq List Emails"
   ,"github_text_search": "GitHub MCP (Local): Text Search"
   ,"mcp_azure_mcp_ser_search": "Azure MCP (Remote): Search"
+  ,"azure_mcp-documentation": "Azure MCP Documentation"
+  ,"mcp_azure_mcp_ser_get_azure_bestpractices": "Serena: Get Azure Best Practices"
 }
