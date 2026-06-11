@@ -507,10 +507,10 @@ export interface SessionFileDetails {
    * children fall outside the loaded 14-day diagnostic window.
    */
   totalChildCount?: number;
-  // Windsurf-only: pre-built token/model/tool breakdown derived from the
-  // trajectory steps (the gRPC API gives no per-day file we can re-parse later,
-  // so the data layer maps it into the extension's standard shapes up front).
-  modelUsage?: ModelUsage; // per-model input/output/cached token breakdown
+  // Per-model input/output/cached token breakdown.
+  // Populated for all sessions where cached ModelUsage is available; always
+  // present for Windsurf (derived from trajectory steps via the gRPC API).
+  modelUsage?: ModelUsage;
   cachedTokens?: number;   // session-level cache-read tokens
   toolCalls?: { total: number; byTool: { [tool: string]: number } }; // tool invocation breakdown
 }
