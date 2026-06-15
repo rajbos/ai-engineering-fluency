@@ -1736,9 +1736,11 @@ function buildUnusedMcpHtml(underusedMcpServers: ToolCurationAnalysis['underused
 			🔌 MCP Servers in Last ${windowDays} Days (${allServers.length})
 		</summary>
 		<style>#mcp-hide-toggle:checked ~ .mcp-table-wrap .mcp-has-usage { display: none; }</style>
-		<input type="checkbox" id="mcp-hide-toggle" checked style="vertical-align:middle; margin:8px 4px 0 0; cursor:pointer;">
-		<label for="mcp-hide-toggle" style="font-size:12px; color:var(--text-primary); cursor:pointer; user-select:none; vertical-align:middle;">Hide servers with usage</label>
-		<span style="font-size:11px; color:var(--text-secondary); margin-left:8px;">${unusedCount} with no usage · ${usedCount} with usage</span>
+		<div style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+			<input type="checkbox" id="mcp-hide-toggle" checked style="margin:0; cursor:pointer; flex-shrink:0;">
+			<label for="mcp-hide-toggle" style="font-size:12px; color:var(--text-primary); cursor:pointer; user-select:none;">Hide servers with usage</label>
+			<span style="font-size:11px; color:var(--text-secondary);">${unusedCount} with no usage · ${usedCount} with usage</span>
+		</div>
 		<div class="mcp-table-wrap" style="margin-top:8px; overflow-x:auto;">
 			<table style="width:100%; border-collapse:collapse; font-size:12px;">
 				<thead><tr style="border-bottom:1px solid var(--border-color);">
@@ -1835,78 +1837,12 @@ function buildBuiltinToolsHtml(builtinTools: AvailableToolEntry[], bloat: ToolCu
 	</details>`;
 }
 
-function buildRecommendationsHtml(recommendations: ToolCurationAnalysis['recommendations']): string {
-	if (recommendations.length === 0) { return ''; }
-
-	const typeConfig: Record<string, { icon: string; label: string; accent: string; actionLabel?: string; actionCmd?: string }> = {
-		'disable-mcp-server': { icon: '🔌', label: 'Disable MCP Server', accent: '#f87171', actionLabel: 'Change Tools', actionCmd: 'openToolPicker' },
-		'disable-extension':  { icon: '🧩', label: 'Manage Extension',   accent: '#fb923c', actionLabel: 'Manage Extension' },
-		'refine-skill':       { icon: '✏️', label: 'Refine Skill',        accent: '#60a5fa' },
-		'remove-skill':       { icon: '🗑️', label: 'Remove Skill',        accent: '#fbbf24' },
-	};
-
-	// Group by type, preserving a stable order
-	const typeOrder = ['disable-mcp-server', 'disable-extension', 'refine-skill', 'remove-skill'];
-	const grouped = new Map<string, typeof recommendations>();
-	for (const r of recommendations) {
-		if (!grouped.has(r.type)) { grouped.set(r.type, []); }
-		grouped.get(r.type)!.push(r);
-	}
-	// Sort each group highest-savings first
-	for (const [, items] of grouped) {
-		items.sort((a, b) => (b.estimatedTokenSavings ?? 0) - (a.estimatedTokenSavings ?? 0));
-	}
-
-	const groups = [...typeOrder, ...[...grouped.keys()].filter(k => !typeOrder.includes(k))]
-		.filter(type => grouped.has(type))
-		.map(type => {
-			const items = grouped.get(type)!;
-			const cfg = typeConfig[type] ?? { icon: '💡', label: type, accent: '#fbbf24' };
-			const groupSavings = items.reduce((s, r) => s + (r.estimatedTokenSavings ?? 0), 0);
-			const groupBadge = groupSavings > 0
-				? `<span style="margin-left:6px;font-size:10px;color:#4ade80;font-weight:600;">↓ ~${groupSavings >= 1000 ? Math.round(groupSavings / 1000) + 'K' : groupSavings} tokens</span>`
-				: '';
-			const rows = items.map(r => {
-				let actionBtn = '';
-				if (cfg.actionLabel && cfg.actionCmd) {
-					actionBtn = ` <button class="curation-file-btn" data-command="${escapeHtml(cfg.actionCmd)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;">${escapeHtml(cfg.actionLabel)}</button>`;
-				} else if (type === 'disable-extension' && cfg.actionLabel) {
-					actionBtn = ` <button class="curation-file-btn" data-command="manageExtension" data-extension-id="${escapeHtml(r.target)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;">${escapeHtml(cfg.actionLabel)}</button>`;
-				}
-				const savings = r.estimatedTokenSavings
-					? `<span style="margin-left:6px;font-size:11px;color:var(--text-secondary);font-style:italic;">saves ~${r.estimatedTokenSavings.toLocaleString()} tokens</span>`
-					: '';
-				return `<li style="padding:3px 0;font-size:12px;color:var(--text-primary);">${escapeHtml(r.reason)}${savings}${actionBtn}</li>`;
-			}).join('');
-
-			return `<div style="margin-bottom:10px;">
-				<div style="font-size:12px;font-weight:600;color:${cfg.accent};margin-bottom:4px;">${cfg.icon} ${escapeHtml(cfg.label)}${groupBadge}</div>
-				<ul style="margin:0;padding-left:20px;line-height:1.7;">${rows}</ul>
-			</div>`;
-		}).join('');
-
-	const totalSavings = recommendations.reduce((s, r) => s + (r.estimatedTokenSavings ?? 0), 0);
-	const totalBadge = totalSavings > 0
-		? `<span style="margin-left:8px;font-size:10px;color:#4ade80;font-weight:600;">↓ ~${totalSavings >= 1000 ? Math.round(totalSavings / 1000) + 'K' : totalSavings} tokens total</span>`
-		: '';
-
-	return `<details style="margin-top:14px;" open>
-		<summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-primary);padding:6px 0;">
-			💬 Recommendations (${recommendations.length})${totalBadge}
-		</summary>
-		<div style="margin-top:8px;padding-left:4px;">
-			${groups}
-		</div>
-	</details>`;
-}
-
 function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefined): string {
 	if (!curation || curation.availableTools.length === 0) { return ''; }
 
-	const { availableTools, unusedTools, underusedMcpServers, estimatedPromptBloat, recommendations, windowDays } = curation;
+	const { availableTools, unusedTools, underusedMcpServers, estimatedPromptBloat, windowDays } = curation;
 	const unusedSkills = unusedTools.filter(t => t.source === 'skill');
 	const builtinTools = availableTools.filter(t => t.source === 'builtin');
-	const recsHtml = recommendations.length > 0 ? buildRecommendationsHtml(recommendations) : '';
 
 	return `
 		<!-- Tool Curation Section -->
@@ -1917,7 +1853,6 @@ function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefi
 			${buildUnusedMcpHtml(underusedMcpServers, estimatedPromptBloat, windowDays)}
 			${buildBuiltinToolsHtml(builtinTools, estimatedPromptBloat)}
 			${buildUnusedSkillsHtml(unusedSkills)}
-			${recsHtml}
 		</div>`;
 }
 
