@@ -1835,21 +1835,63 @@ function buildBuiltinToolsHtml(builtinTools: AvailableToolEntry[], bloat: ToolCu
 	</details>`;
 }
 
+function buildRecommendationsHtml(recommendations: ToolCurationAnalysis['recommendations']): string {
+	if (recommendations.length === 0) { return ''; }
+
+	const typeConfig: Record<string, { icon: string; label: string; bg: string; border: string; accent: string; actionLabel?: string; actionCmd?: string }> = {
+		'disable-mcp-server': { icon: '🔌', label: 'Disable MCP Server', bg: 'rgba(239,68,68,0.07)',    border: 'rgba(239,68,68,0.3)',    accent: '#f87171', actionLabel: 'Change Tools',      actionCmd: 'openToolPicker' },
+		'disable-extension':  { icon: '🧩', label: 'Manage Extension',   bg: 'rgba(251,146,60,0.07)',  border: 'rgba(251,146,60,0.3)',  accent: '#fb923c', actionLabel: 'Manage Extension' },
+		'refine-skill':       { icon: '✏️', label: 'Refine Skill',        bg: 'rgba(96,165,250,0.07)',  border: 'rgba(96,165,250,0.3)',  accent: '#60a5fa' },
+		'remove-skill':       { icon: '🗑️', label: 'Remove Skill',        bg: 'rgba(251,191,36,0.07)', border: 'rgba(251,191,36,0.25)', accent: '#fbbf24' },
+	};
+
+	// Sort highest token savings first
+	const sorted = [...recommendations].sort((a, b) => (b.estimatedTokenSavings ?? 0) - (a.estimatedTokenSavings ?? 0));
+
+	const cards = sorted.map(r => {
+		const cfg = typeConfig[r.type] ?? { icon: '💡', label: r.type, bg: 'rgba(251,191,36,0.07)', border: 'rgba(251,191,36,0.25)', accent: '#fbbf24' };
+		const savingsBadge = r.estimatedTokenSavings
+			? `<span style="display:inline-flex;align-items:center;gap:3px;padding:2px 7px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:10px;font-size:10px;color:#4ade80;font-weight:600;white-space:nowrap;">↓ ~${r.estimatedTokenSavings.toLocaleString()} tokens</span>`
+			: '';
+		let actionBtn = '';
+		if (cfg.actionLabel && cfg.actionCmd) {
+			actionBtn = `<button class="curation-file-btn" data-command="${escapeHtml(cfg.actionCmd)}" style="background:none;border:1px solid ${cfg.border};border-radius:4px;padding:3px 10px;cursor:pointer;color:${cfg.accent};font-size:11px;">${escapeHtml(cfg.actionLabel)}</button>`;
+		} else if (r.type === 'disable-extension' && cfg.actionLabel) {
+			actionBtn = `<button class="curation-file-btn" data-command="manageExtension" data-extension-id="${escapeHtml(r.target)}" style="background:none;border:1px solid ${cfg.border};border-radius:4px;padding:3px 10px;cursor:pointer;color:${cfg.accent};font-size:11px;">${escapeHtml(cfg.actionLabel)}</button>`;
+		}
+		return `<div style="padding:12px 14px;background:${cfg.bg};border:1px solid ${cfg.border};border-radius:7px;display:flex;flex-direction:column;gap:6px;">
+			<div style="display:flex;align-items:center;gap:7px;flex-wrap:wrap;">
+				<span style="font-size:15px;flex-shrink:0;">${cfg.icon}</span>
+				<span style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.06em;color:${cfg.accent};">${escapeHtml(cfg.label)}</span>
+				${savingsBadge}
+			</div>
+			<div style="font-size:12px;color:var(--text-primary);line-height:1.55;padding-left:22px;">${escapeHtml(r.reason)}</div>
+			${actionBtn ? `<div style="padding-left:22px;margin-top:2px;">${actionBtn}</div>` : ''}
+		</div>`;
+	}).join('');
+
+	const totalSavings = recommendations.reduce((s, r) => s + (r.estimatedTokenSavings ?? 0), 0);
+	const totalBadge = totalSavings > 0
+		? `<span style="margin-left:8px;padding:2px 8px;background:rgba(74,222,128,0.1);border:1px solid rgba(74,222,128,0.3);border-radius:10px;font-size:10px;color:#4ade80;font-weight:600;">↓ ~${totalSavings >= 1000 ? Math.round(totalSavings / 1000) + 'K' : totalSavings} tokens total</span>`
+		: '';
+
+	return `<details style="margin-top:14px;" open>
+		<summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-primary);padding:6px 0;list-style:none;display:flex;align-items:center;gap:6px;">
+			<span>💬</span><span>Recommendations (${recommendations.length})</span>${totalBadge}
+		</summary>
+		<div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:10px;">
+			${cards}
+		</div>
+	</details>`;
+}
+
 function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefined): string {
 	if (!curation || curation.availableTools.length === 0) { return ''; }
 
 	const { availableTools, unusedTools, underusedMcpServers, estimatedPromptBloat, recommendations, windowDays } = curation;
 	const unusedSkills = unusedTools.filter(t => t.source === 'skill');
 	const builtinTools = availableTools.filter(t => t.source === 'builtin');
-	const recsHtml = recommendations.length > 0 ? `
-		<div style="margin-top:14px;">
-			<div style="font-size:12px; font-weight:600; color:var(--text-primary); margin-bottom:8px; text-transform:uppercase; letter-spacing:0.04em;">💬 Recommendations</div>
-			${recommendations.slice(0, 5).map(r => `
-			<div style="display:flex; align-items:flex-start; gap:8px; margin-bottom:8px; padding:10px 12px; background:rgba(251,191,36,0.07); border:1px solid rgba(251,191,36,0.25); border-radius:6px;">
-				<span style="font-size:14px; margin-top:1px; flex-shrink:0;">→</span>
-				<div style="font-size:12px; color:var(--text-primary); line-height:1.5;">${escapeHtml(r.reason)}${r.estimatedTokenSavings ? `<span style="margin-left:6px; font-size:11px; color:var(--text-secondary); font-style:italic;">saves ~${r.estimatedTokenSavings.toLocaleString()} tokens/interaction</span>` : ''}</div>
-			</div>`).join('')}
-		</div>` : '';
+	const recsHtml = recommendations.length > 0 ? buildRecommendationsHtml(recommendations) : '';
 
 	return `
 		<!-- Tool Curation Section -->
