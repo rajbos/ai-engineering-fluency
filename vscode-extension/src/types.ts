@@ -162,6 +162,13 @@ export interface ChartPeriodData {
    * Computed from per-day `editorModelUsage` using the appropriate pricing source for each editor.
    */
   editorCostDatasets?: object[];
+  /**
+   * Cost datasets split by billing provider — one dataset per provider group.
+   * Groups: "GitHub Copilot" (all Copilot surfaces), "Anthropic" (Claude Code, etc.),
+   * "Google" (Gemini CLI, etc.), "Mistral AI", "OpenAI", etc.
+   * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
+   */
+  billingGroupCostDatasets?: object[];
 }
 
 /** Shape of the data payload sent to the chart webview (via window.__INITIAL_CHART__ or postMessage). */
