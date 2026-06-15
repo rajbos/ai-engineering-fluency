@@ -537,7 +537,9 @@
     "sql.js": "1.14.1"
   },
   "overrides": {
+    "@babel/core": ">=7.29.6",
     "diff": ">=8.0.3",
+    "dompurify": ">=3.4.9",
     "fast-uri": ">=3.1.2",
     "qs": ">=6.15.2",
     "serialize-javascript": ">=7.0.3",
