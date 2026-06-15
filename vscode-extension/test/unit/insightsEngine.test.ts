@@ -2,7 +2,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../src/insightsEngine';
 import type { InsightContext } from '../../src/insightsEngine';
-import type { UsageAnalysisPeriod } from '../../src/types';
+import type { ToolCurationAnalysis, UsageAnalysisPeriod } from '../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -122,4 +122,71 @@ test('auto-compaction-pattern: body mentions /compact and /new', () => {
 	assert.ok(insight);
 	assert.ok(insight!.body.includes('/compact'), 'body should mention /compact');
 	assert.ok(insight!.body.includes('/new'), 'body should mention /new');
+});
+
+// ---------------------------------------------------------------------------
+// high-prompt-bloat insight tests
+// ---------------------------------------------------------------------------
+
+const HIGH_PROMPT_BLOAT_ID = 'high-prompt-bloat';
+
+function makeCurationAnalysis(totalTokens: number, unusedToolCount: number): ToolCurationAnalysis {
+	return {
+		windowDays: 30,
+		availableTools: [],
+		usedTools: [],
+		unusedTools: Array.from({ length: unusedToolCount }, (_, i) => ({
+			name: `tool-${i}`,
+			description: 'test tool',
+			source: 'mcp' as const,
+		})),
+		underusedMcpServers: [],
+		estimatedPromptBloat: { totalTokens, byServer: {} },
+		recommendations: [],
+	};
+}
+
+test('high-prompt-bloat: insight exists in INSIGHT_CATALOG', () => {
+	const def = INSIGHT_CATALOG.find(d => d.id === HIGH_PROMPT_BLOAT_ID);
+	assert.ok(def, 'high-prompt-bloat should be in INSIGHT_CATALOG');
+});
+
+test('high-prompt-bloat: does NOT fire when curationAnalysis is absent', () => {
+	const ctx = makeCtx();
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === HIGH_PROMPT_BLOAT_ID);
+	assert.equal(insight, undefined);
+});
+
+test('high-prompt-bloat: does NOT fire when totalTokens <= 2500', () => {
+	const ctx: InsightContext = { ...makeCtx(), curationAnalysis: makeCurationAnalysis(2500, 3) };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === HIGH_PROMPT_BLOAT_ID);
+	assert.equal(insight, undefined);
+});
+
+test('high-prompt-bloat: fires when totalTokens > 2500', () => {
+	const ctx: InsightContext = { ...makeCtx(), curationAnalysis: makeCurationAnalysis(2501, 3) };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === HIGH_PROMPT_BLOAT_ID);
+	assert.ok(insight, 'insight should fire when totalTokens > 2500');
+});
+
+test('high-prompt-bloat: body includes token count', () => {
+	const ctx: InsightContext = { ...makeCtx(), curationAnalysis: makeCurationAnalysis(5000, 2) };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === HIGH_PROMPT_BLOAT_ID);
+	assert.ok(insight);
+	assert.ok(insight!.body.includes('5'), 'body should mention the token count (5000)');
+	assert.ok(/extra tokens/.test(insight!.body), 'body should mention extra tokens');
+});
+
+test('high-prompt-bloat: has severity=opportunity', () => {
+	const def = INSIGHT_CATALOG.find(d => d.id === HIGH_PROMPT_BLOAT_ID);
+	assert.equal(def?.severity, 'opportunity');
+});
+
+test('high-prompt-bloat: has category=tools', () => {
+	const def = INSIGHT_CATALOG.find(d => d.id === HIGH_PROMPT_BLOAT_ID);
+	assert.equal(def?.category, 'tools');
 });

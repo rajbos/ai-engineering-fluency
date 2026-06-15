@@ -856,6 +856,26 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		weight: 70,
 	},
 	{
+		id: 'high-prompt-bloat',
+		category: 'tools',
+		severity: 'opportunity',
+		title: '💡 Unused tools are adding significant prompt overhead',
+		buildBody: (ctx) => {
+			const tokens = ctx.curationAnalysis?.estimatedPromptBloat.totalTokens ?? 0;
+			const unusedCount = ctx.curationAnalysis?.unusedTools.length ?? 0;
+			return `Your unused tools are adding an estimated ~${tokens.toLocaleString()} extra tokens to every prompt. ` +
+				`${unusedCount} tool${unusedCount !== 1 ? 's' : ''} (MCP servers and/or skills) ${unusedCount !== 1 ? 'were' : 'was'} not used in the last ${ctx.curationAnalysis?.windowDays ?? 30} days but ${unusedCount !== 1 ? 'are' : 'is'} still injected into each interaction. ` +
+				`Removing or disabling them can meaningfully reduce your prompt size, lower latency, and cut costs.`;
+		},
+		actionLabel: 'View Tool Curation',
+		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		appliesTo: (ctx) => {
+			if (!ctx.curationAnalysis) { return false; }
+			return ctx.curationAnalysis.estimatedPromptBloat.totalTokens > 2500;
+		},
+		weight: 65,
+	},
+	{
 		id: 'stale-skills',
 		category: 'customization',
 		severity: 'tip',
