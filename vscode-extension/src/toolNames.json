@@ -902,4 +902,8 @@
   ,"mermaid-diagram-preview": "Mermaid Diagram Preview"
   ,"mermaid-diagram-validator": "Mermaid Diagram Validator"
   ,"sonarqube_list_potential_security_issues": "SonarQube List Potential Security Issues"
+  ,"m_filesystem_tree": "File System Tree"
+  ,"m_get_settings": "Get Settings"
+  ,"m_get_skill": "Get Skill"
+  ,"m_list_skills": "List Skills"
 }
