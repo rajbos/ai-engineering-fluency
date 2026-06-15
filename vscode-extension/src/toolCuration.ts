@@ -495,7 +495,13 @@ export function analyzeToolCuration(
 			// Disabled extension-contributed servers don't consume prompt budget — don't count
 			// them as "unused" or include them in bloat estimates.
 			if (t.enabled === false) { return false; }
-			return (usagePeriod.mcpTools.byServer[t.server] ?? 0) < MCP_SERVER_USE_THRESHOLD;
+			// Stub entries (name === `mcp__<server>`) represent the whole server — use server-level count.
+			// Per-tool entries (name === `mcp__<server>__<tool>`) support exact per-tool matching.
+			const isStub = t.name === `mcp__${t.server}`;
+			if (isStub) {
+				return (usagePeriod.mcpTools.byServer[t.server] ?? 0) < MCP_SERVER_USE_THRESHOLD;
+			}
+			return !usedNames.has(t.name);
 		}
 		return !usedNames.has(t.name);
 	});

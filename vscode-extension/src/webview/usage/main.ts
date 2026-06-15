@@ -3208,9 +3208,6 @@ async function bootstrap(): Promise<void> {
 		// Stats will arrive via the updateStats message; the module-level listener will call renderLayout then.
 		return;
 	}
-	console.log('[Usage Analysis] Browser default locale:', Intl.DateTimeFormat().resolvedOptions().locale);
-	console.log('[Usage Analysis] Received locale from extension:', initialData.locale);
-	console.log('[Usage Analysis] Test format 1234567.89 with received locale:', new Intl.NumberFormat(initialData.locale).format(1234567.89));
 	setFormatLocale(initialData.locale);
 	use24HourTime = initialData.use24HourTime !== false;
 	renderLayout(initialData);
