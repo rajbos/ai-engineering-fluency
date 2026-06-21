@@ -1,0 +1,41 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    "lib": ["ES2022"],
+    "types": ["node"],
+    "sourceMap": true,
+    "rootDir": "..",
+    "outDir": "dist",
+    "strict": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "declaration": false,
+    "skipLibCheck": true
+  },
+  "include": [
+    "src/**/*.ts",
+    "../vscode-extension/src/types.ts",
+    "../vscode-extension/src/cachePolicy.ts",
+    "../vscode-extension/src/sessionDiscovery.ts",
+    "../vscode-extension/src/sessionParser.ts",
+    "../vscode-extension/src/dailyAttribution.ts",
+    "../vscode-extension/src/tokenEstimation.ts",
+    "../vscode-extension/src/workspaceHelpers.ts",
+    "../vscode-extension/src/statsHelpers.ts",
+    "../vscode-extension/src/adapters/**/*.ts",
+    "../vscode-extension/src/modelPricing.json",
+    "../vscode-extension/src/toolCuration.ts",
+    "../vscode-extension/src/maturityScoring.ts",
+    "../vscode-extension/src/toolFamilies.ts",
+    "../cli/src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "../vscode-extension/node_modules",
+    "../vscode-extension/src/extension.ts",
+    "../vscode-extension/src/webview/**/*.ts"
+  ]
+}
