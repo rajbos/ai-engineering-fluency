@@ -1,6 +1,9 @@
 ﻿out
 dist
 node_modules
+desktop/.dev-profile
+desktop/electron-stdout.log
+desktop/electron-stderr.log
 .vscode-test/
 *.vsix
 *.backup
