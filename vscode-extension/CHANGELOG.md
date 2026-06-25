@@ -4,6 +4,47 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.0]
+
+<!-- Release notes generated using configuration in .github/release.yml at vscode/v0.12.0 -->
+
+## What's Changed
+### Changes
+* fix: square VS extension icon and absolute image URLs for marketplace by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1389
+* feat(visualstudio): progressive tab preloading — show details view immediately, load others in background by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1390
+* feat: Add Microsoft Scout editor support by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1391
+* feat: externalize JSON config files from webview bundles by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1393
+* Bring Visual Studio extension to parity with VS Code extension by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1392
+* feat: add 2 friendly tool name(s) from issue #1387 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1388
+* rename: CopilotTokenTracker → AIEngineeringFluency in VS extension by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1394
+* feat: add 2 friendly tool name(s) from issue #1396 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1397
+* feat: add 1 friendly tool name(s) from issue #1399 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1400
+* fix: align details view total tokens with status bar by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1401
+* fix: add buildTurns() to ClaudeCodeAdapter — fixes empty chat turns in session detail by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1402
+* codecoverage by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1406
+* feat: add 5 friendly tool name(s) from issue #1403 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1404
+* pi chaining by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1405
+* fix: remove Edit mode references from tips and fluency level data by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1408
+* fix: add credentials check to sharing server cleanup workflow by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1409
+* fix: update sync-host-views skill paths after CopilotTokenTracker rename by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1398
+* feat: add 4 friendly tool name(s) from issue #1411 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1419
+* Add Tool Curation feature for analyzing tool usage by @jessehouwing in https://github.com/rajbos/ai-engineering-fluency/pull/1410
+* Add high-prompt-bloat insight for tool curation savings > 2.5k tokens by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1420
+* fix: address Dependabot security alerts via npm overrides by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1422
+* feat: add cost split by editor and billing provider by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1412
+* chore: bump VS Code extension version to 0.12.0 by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1423
+### 📦 GitHub Actions Dependencies
+* github-actions(deps): bump gradle/actions from 6.1.0 to 6.2.0 in the minor-and-patch-updates group by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1416
+### 📦 Other Dependencies
+* chore(deps-dev): bump shell-quote from 1.8.3 to 1.8.4 in /vscode-extension in the npm_and_yarn group across 1 directory by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1385
+* chore(deps-dev): bump @types/node from 25.9.2 to 25.9.3 in /cli by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1395
+* chore(deps-dev): bump esbuild from 0.28.0 to 0.28.1 in /cli by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1413
+* chore(deps-dev): bump the npm_and_yarn group across 2 directories with 1 update by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1415
+* chore(deps): bump the npm_and_yarn group across 1 directory with 2 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1418
+
+
+**Full Changelog**: https://github.com/rajbos/ai-engineering-fluency/compare/vscode/v0.11.7...vscode/v0.12.0
+
 ### Features
 - Tool Curation tab: analyze tool usage patterns, identify unused or underused tools (#1410)
 - Per-provider budget costs in status bar tooltip (#1412)
