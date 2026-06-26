@@ -76,12 +76,27 @@ regenerated with:
 npx electron scripts/generate-icon.js
 ```
 
-## Known limitations
+## Type checking
 
-- **`check-types`** type-checks the desktop sources together with the imported
-  `cli/` and `vscode-extension/` source trees, which carry their own
-  `tsconfig`/`lib`/dependency setups (DOM globals, `chalk`, `sql.js` types). As a
-  result `tsc --noEmit` reports errors that originate in those packages, not in
-  the desktop app. The authoritative build gate is `npm run build` (esbuild,
-  which follows only the real import graph). A fully green `check-types` would
-  require splitting these into TypeScript project references.
+`npm run check-types` (`tsc --noEmit`) is a real, passing gate on the desktop
+app's own TypeScript. `tsconfig.json` lists only `src/**/*.ts` as inputs and lets
+`tsc` follow the actual import graph into `../cli` and `../vscode-extension`, so
+those sibling sources are checked exactly as the desktop app consumes them — not
+by globbing whole sibling trees (which previously dragged in unrelated CLI
+command/test files with their own dependencies and pre-existing errors). `DOM` is
+added to `lib` because some transitively-imported webview helpers (e.g.
+`shared/dataLoader`) reference `window`.
+
+Run it from `desktop/` after installing dependencies in the sibling packages so
+their types (`chalk`, `sql.js`, `@types/node`) resolve:
+
+```sh
+(cd ../cli && npm install)
+(cd ../vscode-extension && npm install)
+npm install
+npm run check-types
+```
+
+The authoritative build gate remains `npm run build` (esbuild, which follows only
+the real import graph). `check-types` is the stricter companion that also reports
+type errors in every file it touches.

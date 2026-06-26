@@ -223,7 +223,16 @@ export class CopilotCliStoreAccess {
 				try {
 					wasmBinary = await fs.promises.readFile(wasmPath);
 				} catch { /* WASM file not present — proceed without pre-loaded binary */ }
-				const module = await initSqlJs(wasmBinary ? { wasmBinary } : undefined);
+				// sql.js's EmscriptenModule types `wasmBinary` as `ArrayBuffer`, but it
+				// also accepts a `Uint8Array`/`Buffer` view at runtime. Depending on the
+				// resolved `@types/node` version, `readFile` returns `Buffer` or
+				// `Uint8Array<ArrayBufferLike>`, neither of which is structurally
+				// assignable to `ArrayBuffer`. Pass the config via a typed cast so the
+				// type-check is stable across packages that import this module.
+				const sqlConfig: Partial<EmscriptenModule> | undefined = wasmBinary
+					? { wasmBinary: wasmBinary as unknown as ArrayBuffer }
+					: undefined;
+				const module = await initSqlJs(sqlConfig);
 				this._sqlJsModule = module;
 				return module;
 			})().catch(err => {
