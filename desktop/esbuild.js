@@ -105,15 +105,15 @@ async function main() {
 
 /**
  * The desktop app does not build its own panel UI — it reuses the IIFE bundles
- * and toolkit produced by the VS Code extension. If those artifacts are missing
+ * produced by the VS Code extension (each bundle already includes the
+ * vscode-elements web components it uses). If those artifacts are missing
  * (e.g. a fresh checkout where only the desktop app was built), build the
  * extension automatically so `npm run build` is self-sufficient instead of
  * silently producing an app with blank panels.
  */
-function ensureWebviewBundles(extWebviewDir, toolkitSrc) {
+function ensureWebviewBundles(extWebviewDir) {
   const missing = WEBVIEW_BUNDLES
     .map((b) => path.join(extWebviewDir, b))
-    .concat(toolkitSrc)
     .filter((p) => !fs.existsSync(p));
   if (missing.length === 0) { return; }
 
@@ -137,17 +137,13 @@ function ensureWebviewBundles(extWebviewDir, toolkitSrc) {
 
 function copyStaticAssets(distDir, webviewDir) {
   const extWebviewDir = path.join(__dirname, '..', 'vscode-extension', 'dist', 'webview');
-  const toolkitSrc = path.join(__dirname, '..', 'vscode-extension', 'dist', 'toolkit', 'toolkit.js');
 
-  ensureWebviewBundles(extWebviewDir, toolkitSrc);
+  ensureWebviewBundles(extWebviewDir);
 
   for (const bundle of WEBVIEW_BUNDLES) {
     fs.copyFileSync(path.join(extWebviewDir, bundle), path.join(webviewDir, bundle));
     console.log(`Copied ${bundle}`);
   }
-
-  fs.copyFileSync(toolkitSrc, path.join(webviewDir, 'toolkit.js'));
-  console.log('Copied toolkit.js');
 
   const wasmSrc = fs.existsSync(path.join(__dirname, '..', 'cli', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'))
     ? path.join(__dirname, '..', 'cli', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')

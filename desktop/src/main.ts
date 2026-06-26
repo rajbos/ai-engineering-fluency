@@ -63,7 +63,7 @@ let isRefreshing = false;
 // Static asset path
 // ---------------------------------------------------------------------------
 
-/** Directory from which IIFE webview bundles and toolkit are served. */
+/** Directory from which the IIFE webview bundles are served. */
 function getWebviewDir(): string {
     return path.join(__dirname, 'webview');
 }
@@ -347,7 +347,6 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
 <body>
     <div id="root"></div>
     <script>${themeScript}${initialDataScript}${JSON_CONFIG_SCRIPT}</script>
-    <script src="app://static/toolkit.js"></script>
     <script src="app://static/${scriptFile}"></script>
 </body>
 </html>`;

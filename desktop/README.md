@@ -9,9 +9,10 @@ Fluency Score, Scoring Guide, Diagnostics) outside of VS Code.
 The desktop app does **not** reimplement the UI. It reuses the existing
 artifacts from the other packages in this repo:
 
-- **Webview bundles** — the IIFE panel bundles and `toolkit.js` are copied from
+- **Webview bundles** — the IIFE panel bundles are copied from
   `../vscode-extension/dist/webview/` at build time (see
-  [`esbuild.js`](esbuild.js) → `copyStaticAssets`).
+  [`esbuild.js`](esbuild.js) → `copyStaticAssets`). Each bundle already includes
+  the `vscode-elements` web components it uses, so no separate toolkit is loaded.
 - **Stats logic** — `src/main.ts` imports session discovery and stat
   calculations directly from `../cli/src/helpers` and
   `../vscode-extension/src/`.
@@ -29,9 +30,9 @@ npm run build
 ```
 
 The desktop build depends on the extension's webview bundles
-(`../vscode-extension/dist/webview/*.js` and `dist/toolkit/toolkit.js`). If those
-are missing, `esbuild.js` builds the extension automatically before continuing,
-so a fresh checkout works with a single `npm run build`.
+(`../vscode-extension/dist/webview/*.js`). If those are missing, `esbuild.js`
+builds the extension automatically before continuing, so a fresh checkout works
+with a single `npm run build`.
 
 That auto-build requires the extension's dependencies to be installed. If it
 cannot complete it fails with a clear error rather than silently producing an app
