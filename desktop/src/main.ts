@@ -379,6 +379,30 @@ function buildLoadingHtml(): string {
 </html>`;
 }
 
+function buildErrorHtml(panel: string, err: unknown): string {
+    const message = err instanceof Error ? (err.stack || err.message) : String(err);
+    const escaped = message.replace(/&/g, '&amp;').replace(/</g, '&lt;');
+    return `<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
+    <title>Error</title>
+    <style>
+        ${VSCODE_DARK_VARS}${VSCODE_LIGHT_VARS}
+        body { margin: 0; padding: 24px; background: var(--vscode-editor-background);
+               color: var(--vscode-editor-foreground); font-family: -apple-system, 'Segoe UI', sans-serif; }
+        h2 { font-weight: 400; color: var(--vscode-errorForeground); }
+        pre { white-space: pre-wrap; font-size: 12px; opacity: 0.8; }
+    </style>
+</head>
+<body>
+    <h2>Couldn't load the “${panel}” view</h2>
+    <pre>${escaped}</pre>
+</body>
+</html>`;
+}
+
 // ---------------------------------------------------------------------------
 // Protocol handler
 // ---------------------------------------------------------------------------
@@ -389,8 +413,17 @@ function registerProtocol(): void {
 
         if (url.host === 'panel') {
             const panel = url.pathname.slice(1) as PanelId;
-            const html = await buildPanelHtml(panel);
-            return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+            try {
+                const html = await buildPanelHtml(panel);
+                return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+            } catch (err) {
+                // Surface failures instead of leaving a blank window.
+                console.error(`[panel:${panel}] failed to build:`, err);
+                return new Response(buildErrorHtml(panel, err), {
+                    status: 500,
+                    headers: { 'Content-Type': 'text/html; charset=utf-8' },
+                });
+            }
         }
 
         if (url.host === 'static') {
@@ -487,7 +520,8 @@ function updateTrayMenu(t: Tray): void {
         { label: 'Usage Analysis', click: () => showPanel('usage') },
         { label: 'Fluency Score', click: () => showPanel('maturity') },
         { label: 'Scoring Guide', click: () => showPanel('fluency-level-viewer') },
-        { label: 'Diagnostics', click: () => showPanel('diagnostics') },
+        // Diagnostics is hidden for now — its panel renders without the in-app
+        // navigation, leaving no way back out.
         { type: 'separator' },
         {
             label: 'Refresh',
@@ -549,7 +583,8 @@ function registerIpcHandlers(): void {
                 break;
 
             case 'showDiagnostics':
-                showPanel('diagnostics');
+                // Hidden for now: the Diagnostics panel has no in-app navigation
+                // back out, so ignore requests to open it from panel buttons.
                 break;
 
             case 'showMaturity':
@@ -644,12 +679,19 @@ app.whenReady().then(async () => {
     mainWindow = createWindow();
     tray = createTray();
 
-    // Begin loading stats in the background; show loading page in the meantime
+    // Warm the caches in the background, showing the loading page meanwhile.
+    // Detailed stats power Details/Chart/Environmental; usage stats power Usage
+    // Analysis and Fluency Score. Both are expensive (tens of seconds over large
+    // histories) and run synchronously, so pre-warm BOTH at startup — otherwise
+    // the first open of Usage Analysis / Fluency Score freezes the UI mid-click
+    // and looks like the panel never loads.
     getStats().then(() => {
         if (mainWindow && !mainWindow.isDestroyed()) {
             mainWindow.loadURL(`app://panel/${currentPanel}`);
         }
-    });
+        // Continue warming usage stats so those panels open instantly too.
+        return getUsageStats();
+    }).catch(() => { /* surfaced per-panel via the error page */ });
 
     setupAutoUpdater();
 
