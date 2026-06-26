@@ -3,7 +3,11 @@
     "module": "ESNext",
     "moduleResolution": "bundler",
     "target": "ES2022",
-    "lib": ["ES2022"],
+    // The desktop main/preload run in Electron's Node process, but the desktop
+    // app transitively imports vscode-extension webview helpers (e.g.
+    // shared/dataLoader) that reference `window`. Including DOM lets those
+    // shared sources type-check without pulling in their own tsconfig.
+    "lib": ["ES2022", "DOM"],
     "types": ["node"],
     "sourceMap": true,
     "rootDir": "..",
@@ -14,28 +18,17 @@
     "declaration": false,
     "skipLibCheck": true
   },
+  // Only the desktop sources are listed here. tsc follows the real import graph
+  // into ../cli and ../vscode-extension, so those packages' sources are checked
+  // exactly as the desktop app uses them — instead of globbing whole sibling
+  // trees (which dragged in unrelated CLI command/test files with their own
+  // deps and pre-existing errors). This keeps `check-types` a meaningful gate
+  // on the desktop app's own type-correctness.
   "include": [
-    "src/**/*.ts",
-    "../vscode-extension/src/types.ts",
-    "../vscode-extension/src/cachePolicy.ts",
-    "../vscode-extension/src/sessionDiscovery.ts",
-    "../vscode-extension/src/sessionParser.ts",
-    "../vscode-extension/src/dailyAttribution.ts",
-    "../vscode-extension/src/tokenEstimation.ts",
-    "../vscode-extension/src/workspaceHelpers.ts",
-    "../vscode-extension/src/statsHelpers.ts",
-    "../vscode-extension/src/adapters/**/*.ts",
-    "../vscode-extension/src/modelPricing.json",
-    "../vscode-extension/src/toolCuration.ts",
-    "../vscode-extension/src/maturityScoring.ts",
-    "../vscode-extension/src/toolFamilies.ts",
-    "../cli/src/**/*.ts"
+    "src/**/*.ts"
   ],
   "exclude": [
     "node_modules",
-    "dist",
-    "../vscode-extension/node_modules",
-    "../vscode-extension/src/extension.ts",
-    "../vscode-extension/src/webview/**/*.ts"
+    "dist"
   ]
 }
