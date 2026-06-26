@@ -46,6 +46,11 @@ protocol.registerSchemesAsPrivileged([
 
 type PanelId = 'details' | 'environmental' | 'chart' | 'usage' | 'diagnostics' | 'maturity' | 'fluency-level-viewer';
 
+// Mirrors build.appId in package.json. Used as the Windows AppUserModelID so the
+// OS associates the taskbar button (and its icon) with this app rather than the
+// generic electron.exe identity it would otherwise inherit when run unpackaged.
+const APP_ID = 'com.rajbos.ai-engineering-fluency';
+
 let mainWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let currentPanel: PanelId = 'details';
@@ -582,14 +587,56 @@ function setupAutoUpdater(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Application menu
+// ---------------------------------------------------------------------------
+
+/**
+ * Build a trimmed-down menu bar. We drop Electron's default Edit menu and the
+ * Reload / Force Reload items (this is a read-only data viewer — they only cause
+ * confusion), but keep the Zoom controls, which are genuinely useful. Developer
+ * tools stay available in unpackaged (dev) builds only.
+ */
+function buildAppMenu(): Menu {
+    const viewSubmenu: Electron.MenuItemConstructorOptions[] = [
+        { role: 'resetZoom' },
+        { role: 'zoomIn' },
+        { role: 'zoomOut' },
+        { type: 'separator' },
+        { role: 'togglefullscreen' },
+    ];
+    if (!app.isPackaged) {
+        viewSubmenu.push({ type: 'separator' }, { role: 'toggleDevTools' });
+    }
+
+    return Menu.buildFromTemplate([
+        {
+            label: 'File',
+            submenu: [
+                // The window 'close' handler hides to tray, so an explicit Quit
+                // must flag a real quit first (same as the tray's Quit item).
+                { label: 'Quit', accelerator: 'CmdOrCtrl+Q', click: () => { isQuitting = true; app.quit(); } },
+            ],
+        },
+        { label: 'View', submenu: viewSubmenu },
+        { role: 'windowMenu' },
+    ]);
+}
+
+// ---------------------------------------------------------------------------
 // App lifecycle
 // ---------------------------------------------------------------------------
 
 let isQuitting = false;
 
 app.whenReady().then(async () => {
+    // Set the AppUserModelID early so Windows shows our taskbar icon/identity.
+    if (process.platform === 'win32') {
+        app.setAppUserModelId(APP_ID);
+    }
+
     registerProtocol();
     registerIpcHandlers();
+    Menu.setApplicationMenu(buildAppMenu());
 
     // Pre-load the cache so the first panel render is fast
     await loadCache();
