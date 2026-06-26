@@ -33,11 +33,15 @@
   "build": {
     "appId": "com.rajbos.ai-engineering-fluency",
     "productName": "AI Engineering Fluency",
+    "directories": {
+      "output": "release"
+    },
     "files": [
       "dist/**/*",
       "node_modules/**/*"
     ],
     "win": {
+      "icon": "assets/icon.png",
       "target": [
         {
           "target": "nsis",
@@ -71,7 +75,7 @@
     }
   },
   "allowScripts": {
-    "electron@36.9.5": true,
+    "electron@42.4.1": true,
     "esbuild@0.25.12": true
   }
 }

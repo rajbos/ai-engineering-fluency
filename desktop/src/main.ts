@@ -63,11 +63,13 @@ function getWebviewDir(): string {
     return path.join(__dirname, 'webview');
 }
 
-/** Resolve the app icon, preferring a packaged asset then falling back to the extension's icon. */
+/** Resolve the app icon, preferring the dist-bundled icon then falling back to source assets. */
 function resolveAppIcon(): string {
     const candidates = [
+        // Bundled into dist/ by esbuild — the only path that exists in a packaged build.
+        path.join(__dirname, 'tray-icon.png'),
+        // Dev fallbacks: the generated source asset, then the extension's robot icon.
         path.join(__dirname, '..', 'assets', 'tray-icon.png'),
-        path.join(__dirname, '..', '..', 'assets', 'robot-icon-16.png'),
         path.join(__dirname, '..', '..', 'vscode-extension', 'media', 'robot-icon.png'),
     ];
     return candidates.find(fs.existsSync) ?? candidates[candidates.length - 1];

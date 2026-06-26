@@ -1,10 +1,16 @@
 const esbuild = require('esbuild');
 const fs = require('fs');
 const path = require('path');
-const { spawn } = require('child_process');
+const { spawn, spawnSync } = require('child_process');
 
 const production = process.argv.includes('--production');
 const watchMode = process.argv.includes('--watch');
+
+// Webview bundles owned by the VS Code extension that the desktop app reuses.
+const WEBVIEW_BUNDLES = [
+  'details.js', 'environmental.js', 'chart.js', 'usage.js',
+  'diagnostics.js', 'maturity.js', 'fluency-level-viewer.js',
+];
 
 async function main() {
   const distDir = path.join(__dirname, 'dist');
@@ -97,28 +103,51 @@ async function main() {
   console.log('[watch] watching src/ for changes — Ctrl+C to stop');
 }
 
+/**
+ * The desktop app does not build its own panel UI — it reuses the IIFE bundles
+ * and toolkit produced by the VS Code extension. If those artifacts are missing
+ * (e.g. a fresh checkout where only the desktop app was built), build the
+ * extension automatically so `npm run build` is self-sufficient instead of
+ * silently producing an app with blank panels.
+ */
+function ensureWebviewBundles(extWebviewDir, toolkitSrc) {
+  const missing = WEBVIEW_BUNDLES
+    .map((b) => path.join(extWebviewDir, b))
+    .concat(toolkitSrc)
+    .filter((p) => !fs.existsSync(p));
+  if (missing.length === 0) { return; }
+
+  const extDir = path.join(__dirname, '..', 'vscode-extension');
+  console.log(`Webview bundles missing (${missing.length}) — building vscode-extension first…`);
+  const result = spawnSync(process.execPath, [path.join(extDir, 'esbuild.js')], {
+    cwd: extDir,
+    stdio: 'inherit',
+  });
+
+  const stillMissing = missing.filter((p) => !fs.existsSync(p));
+  if (result.status !== 0 || stillMissing.length > 0) {
+    throw new Error(
+      'Failed to build the vscode-extension webview bundles automatically.\n' +
+      'Build it manually first:\n' +
+      '  cd ../vscode-extension && npm install && npm run compile\n' +
+      (stillMissing.length ? `Still missing: ${stillMissing.join(', ')}` : ''),
+    );
+  }
+}
+
 function copyStaticAssets(distDir, webviewDir) {
   const extWebviewDir = path.join(__dirname, '..', 'vscode-extension', 'dist', 'webview');
-  for (const bundle of [
-    'details.js', 'environmental.js', 'chart.js', 'usage.js',
-    'diagnostics.js', 'maturity.js', 'fluency-level-viewer.js',
-  ]) {
-    const src = path.join(extWebviewDir, bundle);
-    if (fs.existsSync(src)) {
-      fs.copyFileSync(src, path.join(webviewDir, bundle));
-      console.log(`Copied ${bundle}`);
-    } else {
-      console.warn(`Warning: ${src} not found — run the vscode-extension build first`);
-    }
+  const toolkitSrc = path.join(__dirname, '..', 'vscode-extension', 'dist', 'toolkit', 'toolkit.js');
+
+  ensureWebviewBundles(extWebviewDir, toolkitSrc);
+
+  for (const bundle of WEBVIEW_BUNDLES) {
+    fs.copyFileSync(path.join(extWebviewDir, bundle), path.join(webviewDir, bundle));
+    console.log(`Copied ${bundle}`);
   }
 
-  const toolkitSrc = path.join(__dirname, '..', 'vscode-extension', 'dist', 'toolkit', 'toolkit.js');
-  if (fs.existsSync(toolkitSrc)) {
-    fs.copyFileSync(toolkitSrc, path.join(webviewDir, 'toolkit.js'));
-    console.log('Copied toolkit.js');
-  } else {
-    console.warn('Warning: toolkit.js not found — run the vscode-extension build first');
-  }
+  fs.copyFileSync(toolkitSrc, path.join(webviewDir, 'toolkit.js'));
+  console.log('Copied toolkit.js');
 
   const wasmSrc = fs.existsSync(path.join(__dirname, '..', 'cli', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm'))
     ? path.join(__dirname, '..', 'cli', 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm')
@@ -126,6 +155,14 @@ function copyStaticAssets(distDir, webviewDir) {
   if (fs.existsSync(wasmSrc)) {
     fs.copyFileSync(wasmSrc, path.join(distDir, 'sql-wasm.wasm'));
     console.log('Copied sql-wasm.wasm');
+  }
+
+  // App icon — copied into dist/ so the packaged app (which only ships dist/**)
+  // can load it for the window/tray at runtime.
+  const iconSrc = path.join(__dirname, 'assets', 'tray-icon.png');
+  if (fs.existsSync(iconSrc)) {
+    fs.copyFileSync(iconSrc, path.join(distDir, 'tray-icon.png'));
+    console.log('Copied tray-icon.png');
   }
 }
 

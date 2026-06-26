@@ -4,6 +4,7 @@ node_modules
 desktop/.dev-profile
 desktop/electron-stdout.log
 desktop/electron-stderr.log
+desktop/release
 .vscode-test/
 *.vsix
 *.backup
