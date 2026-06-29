@@ -45,7 +45,7 @@
 
         /* Link colors */
         --link-color: var(--vscode-foreground);
-        --link-hover-color: var(--vscode-editor-background);
+        --link-hover-color: var(--vscode-textLink-activeForeground);
 
         /* Status colors */
         --error-fg: var(--vscode-errorForeground);
@@ -90,17 +90,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] {
 
 /* Base resets */
 body {
-        font-family: var(--vscode-editor-font-family), "JetBrains Mono", "Fira Code", monospace !important;
-        text-transform: uppercase;
+        font-family: var(--vscode-editor-font-family), "JetBrains Mono", "Fira Code", monospace;
         background-color: var(--bg-primary);
         color: var(--text-primary);
-}
-
-button {
-        border-radius: 0 !important;
-        text-transform: uppercase;
-        font-weight: 900;
-        letter-spacing: 1px;
 }
 
 /* GLOBAL BUTTON ROW NAVIGATION - INDUSTRIAL TAB BAR */
