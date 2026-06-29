@@ -978,4 +978,5 @@
   ,"mcp_jira_getAccessibleAtlassianResources": "JIRA MCP (Remote): Get Accessible Atlassian Resources"
   ,"mcp_jira_getConfluencePage": "JIRA MCP (Remote): Get Confluence Page"
   ,"mcp_jira_getJiraIssue": "JIRA MCP (Remote): Get Jira Issue"
+  ,"mcp__scheduled-tasks__create_scheduled_task": "MCP  Scheduled Tasks  Create Scheduled Task"
 }
