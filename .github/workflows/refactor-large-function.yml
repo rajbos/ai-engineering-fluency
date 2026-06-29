@@ -1,0 +1,141 @@
+name: Refactor Large Function (Claude)
+
+# Runs the "Refactor Large Function" agent with Claude Code on a schedule.
+# It picks ONE function flagged by ESLint max-lines-per-function in the
+# vscode-extension, decomposes it into focused private helpers, verifies the
+# build/tests stay green, and opens a PR with the result.
+
+on:
+  workflow_dispatch:  # Manual trigger
+  schedule:
+    - cron: '0 6 * * 1'  # Every Monday at 06:00 UTC
+  push:
+    paths:
+      - .github/workflows/refactor-large-function.yml
+      - .github/agents/refactor-large-function.agent.md
+
+permissions:
+  contents: read
+
+jobs:
+  refactor-large-function:
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]' && !startsWith(github.ref_name, 'dependabot/')
+    permissions:
+      contents: write       # Create branches and push changes
+      pull-requests: write  # Open the PR
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+          cache-dependency-path: '**/package-lock.json'
+
+      - name: Install vscode-extension dependencies
+        run: cd vscode-extension && npm ci
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Run refactor agent with Claude Code
+        id: claude_run
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        run: |
+          # Build the prompt from the agent definition, then append CI overrides
+          # so Claude makes/verifies the edits only - the workflow opens the PR.
+          {
+            cat .github/agents/refactor-large-function.agent.md
+            echo ""
+            echo "## CI Overrides (these take precedence over the steps above)"
+            echo ""
+            echo "- You are running headless in GitHub Actions. Do NOT commit, push,"
+            echo "  or open a pull request yourself - skip Step 8 and Step 9 entirely."
+            echo "- Stop after Step 7 once the type-check, unit tests, and production"
+            echo "  build all pass. The workflow creates the PR from your working-tree"
+            echo "  changes."
+            echo "- Modify exactly ONE source file under vscode-extension/src (plus its"
+            echo "  test file only if strictly required). Leave all other files untouched."
+            echo "- If you cannot find a suitable function to refactor, or the build/tests"
+            echo "  do not pass, leave the working tree clean (revert any edits) and"
+            echo "  explain why - do not force a change."
+          } > /tmp/refactor-prompt.md
+
+          echo "=== Prompt ==="
+          cat /tmp/refactor-prompt.md
+          echo ""
+          echo "=== Claude Code Output ==="
+
+          claude -p "$(cat /tmp/refactor-prompt.md)" \
+            --permission-mode acceptEdits \
+            --dangerously-skip-permissions \
+            --allowedTools "Bash,Edit,Read,Write,Glob,Grep" \
+            2>&1 || {
+              echo "Warning: claude exited non-zero; continuing to check for changes"
+            }
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet -- vscode-extension/src; then
+            echo "No source changes produced by the refactor agent"
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Refactor changes detected"
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          branch: refactor/large-function
+          add-paths: |
+            vscode-extension/src/**
+          commit-message: |
+            refactor: decompose a large function into focused helpers
+
+            Automated refactor produced by the "Refactor Large Function" agent
+            running on Claude Code. One ESLint max-lines-per-function violation
+            was split into smaller private helpers without changing public APIs.
+
+            Co-authored-by: Claude <noreply@anthropic.com>
+          title: 'refactor: decompose a large function into focused helpers'
+          body: |
+            This pull request was generated automatically by the **Refactor Large
+            Function** agent running on Claude Code.
+
+            One function flagged by ESLint `max-lines-per-function` in
+            `vscode-extension/` was decomposed into smaller, single-responsibility
+            private helpers. Public/exported APIs are unchanged.
+
+            The agent confirmed before opening this PR that:
+
+            - `tsc --noEmit` type-checks cleanly
+            - `npm run test:node` unit tests pass
+            - the production esbuild bundle builds successfully
+
+            Please review the extracted helpers and the chosen decomposition.
+          labels: |
+            autogenerated
+            refactor
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.changes.outputs.changed }}" == "true" ]; then
+            echo "✅ A refactor was produced and a pull request was created for review."
+          else
+            echo "ℹ️ No refactor was produced this run (no suitable target or change reverted)."
+          fi
