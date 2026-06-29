@@ -30,10 +30,7 @@
 	font-weight: 600;
 }
 
-.button-row {
-	display: flex;
-	gap: 8px;
-}
+
 
 .debug-badge {
 	display: inline-block;

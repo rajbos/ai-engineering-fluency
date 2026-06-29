@@ -1,90 +1,191 @@
 /**
- * Shared theme variables for all webview panels
- * Uses VS Code theme tokens for automatic light/dark theme support
+ * Shared theme variables for all webview panels - INDUSTRIAL REDUX
+ * Stripped bare. High contrast. Brutal.
  */
 
 :root {
-	/* VS Code base colors */
-	--bg-primary: var(--vscode-editor-background);
-	--bg-secondary: var(--vscode-sideBar-background);
-	--bg-tertiary: var(--vscode-editorWidget-background);
-	--text-primary: var(--vscode-editor-foreground);
-	--text-secondary: var(--vscode-descriptionForeground);
-	--text-muted: var(--vscode-disabledForeground);
-	--border-color: var(--vscode-panel-border);
-	--border-subtle: var(--vscode-widget-border);
-	
-	/* Button colors */
-	--button-bg: var(--vscode-button-background);
-	--button-fg: var(--vscode-button-foreground);
-	--button-hover-bg: var(--vscode-button-hoverBackground);
-	--button-secondary-bg: var(--vscode-button-secondaryBackground);
-	--button-secondary-fg: var(--vscode-button-secondaryForeground);
-	--button-secondary-hover-bg: var(--vscode-button-secondaryHoverBackground);
-	
-	/* Input colors */
-	--input-bg: var(--vscode-input-background);
-	--input-fg: var(--vscode-input-foreground);
-	--input-border: var(--vscode-input-border);
-	
-	/* List/card colors */
-	--list-hover-bg: var(--vscode-list-hoverBackground);
-	--list-active-bg: var(--vscode-list-activeSelectionBackground);
-	--list-active-fg: var(--vscode-list-activeSelectionForeground);
-	--list-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
-	
-	/* Alternating row colors for better readability */
-	--row-alternate-bg: var(--vscode-list-inactiveSelectionBackground);
-	
-	/* Badge colors */
-	--badge-bg: var(--vscode-badge-background);
-	--badge-fg: var(--vscode-badge-foreground);
-	
-	/* Focus colors */
-	--focus-border: var(--vscode-focusBorder);
-	
-	/* Link colors */
-	--link-color: var(--vscode-textLink-foreground);
-	--link-hover-color: var(--vscode-textLink-activeForeground);
-	
-	/* Status colors */
-	--error-fg: var(--vscode-errorForeground);
-	--warning-fg: var(--vscode-editorWarning-foreground);
-	--success-fg: var(--vscode-terminal-ansiGreen);
+        /* VS Code base colors - forced to stark contrasts */
+        --bg-primary: var(--vscode-editor-background);
+        --bg-secondary: transparent;
+        --bg-tertiary: transparent;
+        --text-primary: var(--vscode-editor-foreground);
+        --text-secondary: var(--vscode-foreground);
+        --text-muted: var(--vscode-descriptionForeground);
+        --border-color: var(--vscode-foreground);
+        --border-subtle: var(--vscode-panel-border);
 
-	/* Stage accent colors — dark theme defaults */
-	--stage-1-color: #93c5fd;
-	--stage-2-color: #a78bfa;
-	--stage-3-color: #3b82f6;
-	--stage-4-color: #22d3ee;
+        /* Button colors - high contrast, no subtle grays */
+        --button-bg: var(--vscode-foreground);
+        --button-fg: var(--vscode-editor-background);
+        --button-hover-bg: var(--vscode-editor-background);
+        --button-secondary-bg: transparent;
+        --button-secondary-fg: var(--vscode-foreground);
+        --button-secondary-hover-bg: var(--vscode-foreground);
 
-	/* Stage progress pip empty fill */
-	--stage-pip-empty-bg: rgba(128, 128, 128, 0.2);
+        /* Input colors */
+        --input-bg: transparent;
+        --input-fg: var(--vscode-foreground);
+        --input-border: var(--vscode-foreground);
 
-	/* Semantic muted foreground */
-	--fg-muted: var(--vscode-disabledForeground);
-	
-	/* Shadow for cards */
-	--shadow-color: rgb(0, 0, 0, 0.16);
-	--shadow-hover-color: rgb(0, 0, 0, 0.24);
+        /* List/card colors */
+        --list-hover-bg: var(--vscode-editor-background);
+        --list-active-bg: var(--vscode-foreground);
+        --list-active-fg: var(--vscode-editor-background);
+        --list-inactive-bg: transparent;
+
+        /* Alternating row colors for better readability - dropped for harsh outlines */
+        --row-alternate-bg: transparent;
+
+        /* Badge colors */
+        --badge-bg: var(--vscode-foreground);
+        --badge-fg: var(--vscode-editor-background);
+
+        /* Focus colors */
+        --focus-border: var(--vscode-foreground);
+
+        /* Link colors */
+        --link-color: var(--vscode-foreground);
+        --link-hover-color: var(--vscode-editor-background);
+
+        /* Status colors */
+        --error-fg: var(--vscode-errorForeground);
+        --warning-fg: var(--vscode-editorWarning-foreground);
+        --success-fg: var(--vscode-terminal-ansiGreen);
+
+        /* Stage accent colors — stark neon equivalents */
+        --stage-1-color: #ff00ff; /* Magenta */
+        --stage-2-color: #00ffff; /* Cyan */
+        --stage-3-color: #ffff00; /* Yellow */
+        --stage-4-color: #00ff00; /* Green */
+
+        /* Stage progress pip empty fill */
+        --stage-pip-empty-bg: transparent;
+
+        /* Semantic muted foreground */
+        --fg-muted: var(--vscode-descriptionForeground);
+
+        /* Shadow for cards - HARD shadows */
+        --shadow-color: var(--vscode-foreground);
+        --shadow-hover-color: var(--vscode-foreground);
 }
 
-/* Light theme adjustments */
+/* Light theme adjustments - same extreme outline logic */
 body[data-vscode-theme-kind="vscode-light"],
 body[data-vscode-theme-kind="vscode-high-contrast-light"] {
-	--shadow-color: rgb(0, 0, 0, 0.08);
-	--shadow-hover-color: rgb(0, 0, 0, 0.12);
-	/* Stage colors darkened for readable contrast on light backgrounds */
-	--stage-1-color: #1d6fa4;
-	--stage-2-color: #7c3aed;
-	--stage-3-color: #2563eb;
-	--stage-4-color: #0891b2;
-	--stage-pip-empty-bg: rgba(0, 0, 0, 0.12);
+        --shadow-color: var(--vscode-foreground);
+        --shadow-hover-color: var(--vscode-foreground);
+        --stage-1-color: #d100d1;
+        --stage-2-color: #008787;
+        --stage-3-color: #b5b500;
+        --stage-4-color: #00a300;
+        --stage-pip-empty-bg: transparent;
 }
 
 /* High contrast mode adjustments */
 body[data-vscode-theme-kind="vscode-high-contrast"],
 body[data-vscode-theme-kind="vscode-high-contrast-light"] {
-	--border-color: var(--vscode-contrastBorder);
-	--border-subtle: var(--vscode-contrastBorder);
+        --border-color: var(--vscode-contrastBorder);
+        --border-subtle: var(--vscode-contrastBorder);
+}
+
+/* Base resets */
+body {
+        font-family: var(--vscode-editor-font-family), "JetBrains Mono", "Fira Code", monospace !important;
+        text-transform: uppercase;
+        background-color: var(--bg-primary);
+        color: var(--text-primary);
+}
+
+button {
+        border-radius: 0 !important;
+        text-transform: uppercase;
+        font-weight: 900;
+        letter-spacing: 1px;
+}
+
+/* GLOBAL BUTTON ROW NAVIGATION - INDUSTRIAL TAB BAR */
+.button-row {
+    display: flex;
+    gap: 0 !important; /* Force flush blocks */
+    flex-wrap: wrap; /* Let it wrap so no scrollbars appear */
+    border: 3px solid var(--vscode-foreground);
+    background-color: var(--vscode-editor-background);
+    margin-bottom: 2rem;
+    box-shadow: 4px 4px 0 var(--vscode-panel-border);
+}
+
+.button-row > * {
+    flex-grow: 1; /* Stretch to fill */
+    flex-shrink: 1;
+    flex-basis: auto;
+    text-align: center;
+}
+
+.button-row vscode-button,
+.button-row button,
+.button-row .nav-button {
+    border-radius: 0 !important;
+    border: none !important;
+    border-right: 2px solid var(--vscode-foreground) !important;
+    font-family: inherit;
+    font-weight: 900;
+    text-transform: uppercase;
+    background-color: var(--vscode-editor-background) !important;
+    color: var(--vscode-foreground) !important;
+    padding: 12px 16px !important;
+    cursor: pointer;
+    box-shadow: none !important;
+    letter-spacing: 1px;
+    transition: transform 0.1s, background-color 0.1s;
+    height: auto !important; /* Override vscode-button strict heights */
+    border-bottom: 3px solid transparent !important;
+}
+
+.button-row vscode-button::part(control),
+.button-row button::part(control) {
+    background-color: var(--vscode-editor-background) !important;
+    color: var(--vscode-foreground) !important;
+}
+
+.button-row vscode-button:hover::part(control),
+.button-row button:hover::part(control) {
+    background-color: var(--vscode-foreground) !important;
+    color: var(--vscode-editor-background) !important;
+}
+
+.button-row > *:last-child,
+.button-row vscode-button:last-child,
+.button-row button:last-child {
+    border-right: none !important;
+}
+
+.button-row vscode-button:hover,
+.button-row button:hover,
+.button-row .nav-button:hover {
+    background-color: var(--vscode-foreground) !important;
+    color: var(--vscode-editor-background) !important;
+    border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important; /* Cyber/Industrial Accent indicator */
+}
+
+/* Ensure global layout containers give flex elements enough space */
+.header {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-end;
+    margin-bottom: 2rem;
+    flex-wrap: nowrap;
+    white-space: nowrap;
+    gap: 15px;
+    border-bottom: 4px solid var(--vscode-foreground);
+    padding-bottom: 1rem;
+}
+
+.title {
+    font-size: 28px;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: 2px;
+    color: var(--vscode-foreground);
+    text-shadow: 2px 2px 0 var(--vscode-panel-border);
+    white-space: nowrap;
 }

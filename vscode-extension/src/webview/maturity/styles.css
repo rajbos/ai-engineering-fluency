@@ -49,11 +49,7 @@ body {
 	letter-spacing: 0.2px;
 }
 
-.button-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-}
+
 
 /* Overall stage banner */
 .stage-banner {
