@@ -980,4 +980,6 @@
   ,"mcp_jira_getJiraIssue": "JIRA MCP (Remote): Get Jira Issue"
   ,"mcp__scheduled-tasks__create_scheduled_task": "Scheduled Tasks MCP: Create Scheduled Task"
   ,"dart_format": "Dart Format"
+  ,"Monitor": "Monitor"
+  ,"SendMessage": "Send Message"
 }
