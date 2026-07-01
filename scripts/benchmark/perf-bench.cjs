@@ -104,18 +104,38 @@ try {
 }
 
 const jsonl = buildJsonlSession(2500);
-const text = buildText(60000);
 const benchmarks = {};
 
-const b1 = bench(() => mod.estimateTokensFromJsonlSession && mod.estimateTokensFromJsonlSession(jsonl), 5, 51);
+// Per-session parse + token-count over ~2500 JSONL lines — the dominant cost when
+// the extension processes a session file.
+const b1 = bench(() => mod.estimateTokensFromJsonlSession && mod.estimateTokensFromJsonlSession(jsonl), 10, 51);
 if (b1 && typeof mod.estimateTokensFromJsonlSession === 'function') {
   b1.inputBytes = Buffer.byteLength(jsonl);
   benchmarks.estimateTokensFromJsonlSession = b1;
 }
 
-const b2 = bench(() => mod.estimateTokensFromText && mod.estimateTokensFromText(text, 'gpt-4', {}), 5, 51);
+// estimateTokensFromText is O(1) in the text length but is called for every message
+// part / response item / tool result across all sessions on each refresh — so the
+// realistic hot cost is high call frequency, not large input. We benchmark many small
+// calls with a realistic multi-entry estimators map (a single call on a big string is
+// too cheap to measure and would sit below the noise floor). A stable estimators object
+// reference matches production, where entries are precomputed and cached per reference.
+const ESTIMATORS = {
+  'gpt-4': 4, 'gpt-4o': 3.8, 'gpt-3.5-turbo': 4, 'o1-preview': 3.9,
+  'claude-3-5-sonnet': 3.5, 'claude-3-opus': 3.6, 'claude-3-haiku': 3.7,
+  'gemini-1.5-pro': 3.8, 'gemini-1.5-flash': 3.9, 'llama-3.1': 4.1,
+};
+const MODELS = ['gpt-4o', 'claude-3-5-sonnet', 'gemini-1.5-flash', 'unknown-model', 'llama-3.1-70b'];
+const PART_TEXT = buildText(200);
+const TEXT_CALLS = 50000;
+const b2 = bench(() => {
+  if (!mod.estimateTokensFromText) return;
+  for (let i = 0; i < TEXT_CALLS; i++) {
+    mod.estimateTokensFromText(PART_TEXT, MODELS[i % MODELS.length], ESTIMATORS);
+  }
+}, 10, 31);
 if (b2 && typeof mod.estimateTokensFromText === 'function') {
-  b2.inputBytes = Buffer.byteLength(text);
+  b2.calls = TEXT_CALLS;
   benchmarks.estimateTokensFromText = b2;
 }
 

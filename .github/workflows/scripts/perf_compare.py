@@ -66,8 +66,10 @@ def main() -> int:
         lines += [
             "**Verdict:** PASS",
             "",
-            "Performance could not be measured for this changeset (no comparable "
-            "benchmark results on both sides). No regression flagged.",
+            "Performance could not be measured for this changeset — no comparable "
+            "benchmark results on both sides (a base or PR build/benchmark may have "
+            "failed, or the benchmarked functions were absent). No regression flagged; "
+            "review manually if this change touches a hot path.",
             "",
             "## Findings",
             "",
@@ -98,11 +100,11 @@ def main() -> int:
                 + (f" Investigate changes to `{src}`." if src else "")
             )
             status = f"{HIGH if sev == HIGH else MEDIUM} +{pct:.1f}%"
-        elif pct < -threshold:
+        elif pct < -threshold and not below_floor:
             improved.append(f"- **`{name}`** — {abs(pct):.1f}% faster (base {fmt(b)}ms → PR {fmt(h)}ms). Nice.")
             status = f"{GREEN} {pct:.1f}%"
         else:
-            note = " (below noise floor)" if below_floor and pct > threshold else ""
+            note = " (below noise floor)" if below_floor and abs(pct) > threshold else ""
             status = f"{pct:+.1f}%{note}"
         rows.append((name, b, h, pct, status))
 

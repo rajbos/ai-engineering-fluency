@@ -47,6 +47,11 @@ env:
   # to be stricter. Sub-millisecond benchmarks are ignored regardless (noise).
   PERF_REGRESSION_THRESHOLD: "20"
 
+  # Benchmarks whose base median is below this many milliseconds are treated as
+  # noise and never flagged (in either direction) — at that scale scheduler
+  # jitter dominates. Change it here in one place.
+  PERF_MIN_ABS_MS: "1"
+
 jobs:
   # ── Agent 1 ──────────────────────────────────────────────────────────────
   code-quality:
@@ -240,28 +245,40 @@ jobs:
             pr/vscode-extension/package-lock.json
             base/vscode-extension/package-lock.json
 
+      # Builds are non-fatal: a flaky npm ci or a base/PR compile error degrades to
+      # the documented "could not measure → PASS" outcome instead of failing the job
+      # and silently dropping the Performance row from the combined report. Real
+      # compile errors are still caught by the CI build workflow.
       - name: Build PR head
         working-directory: pr/vscode-extension
+        continue-on-error: true
         run: npm ci && npm run compile-tests
 
       - name: Build base
         working-directory: base/vscode-extension
+        continue-on-error: true
         run: npm ci && npm run compile-tests
 
       - name: Run benchmarks (PR and base)
+        if: always()
         run: |
-          node pr/scripts/benchmark/perf-bench.cjs pr/vscode-extension perf-head.json
-          node pr/scripts/benchmark/perf-bench.cjs base/vscode-extension perf-base.json
+          # perf-bench.cjs writes an empty result if a build is missing, so a failed
+          # build above produces "no comparable benchmarks" rather than a crash.
+          node pr/scripts/benchmark/perf-bench.cjs pr/vscode-extension perf-head.json || true
+          node pr/scripts/benchmark/perf-bench.cjs base/vscode-extension perf-base.json || true
 
       - name: Compare and write findings
+        if: always()
         env:
           PERF_BASE_FILE: perf-base.json
           PERF_HEAD_FILE: perf-head.json
           OUTPUT_FILE: findings/performance.md
           PERF_REGRESSION_THRESHOLD: ${{ env.PERF_REGRESSION_THRESHOLD }}
+          PERF_MIN_ABS_MS: ${{ env.PERF_MIN_ABS_MS }}
         run: python3 pr/.github/workflows/scripts/perf_compare.py
 
       - name: Upload findings
+        if: always()
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: findings-performance

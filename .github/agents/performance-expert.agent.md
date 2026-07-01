@@ -63,6 +63,12 @@ Timings are **measured, not guessed.** In CI the workflow:
 3. Takes the **median of repeated runs** (with warmup) to damp noise.
 4. Compares medians and applies the threshold above.
 
+Because CI runners are shared and the base and PR are timed in **separate processes in a fixed
+order**, some run-to-run variance is unavoidable — this is not a lab benchmark. The tolerant
+default threshold, the sub-millisecond floor, the warmup, and the median-of-N together keep that
+variance from producing false flags. Treat a result that only just crosses the threshold as a
+prompt to re-run or profile locally, not as proof of a regression.
+
 The flag is produced by `perf_compare.py`, not by a language model — you do not ask an LLM to do
 arithmetic on noisy timings. Your job as the agent is to make that measured result actionable.
 
