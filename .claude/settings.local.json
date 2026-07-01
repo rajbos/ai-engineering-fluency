@@ -1,7 +1,10 @@
 {
   "permissions": {
     "allow": [
-      "Bash(xargs grep:*)"
+      "Bash(xargs grep:*)",
+      "Bash(npm ci *)",
+      "Bash(node_modules/.bin/eslint src *)",
+      "Bash(node -e ' *)"
     ]
   }
 }
