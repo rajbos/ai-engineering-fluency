@@ -712,8 +712,8 @@ const ESTIMATED_TOKENS_NOTES: Record<string, { title: string; sub: string }> = {
 		sub: 'Context window at last request (snapshot, not cumulative)',
 	},
 	Eclipse: {
-		title: 'Eclipse: only user messages + assistant text are persisted in the conversation file. The Context Window breakdown Eclipse shows (system instructions, tool definitions, tool results) is computed live and never written to disk, so this estimate covers message text only and will be lower than the context usage Eclipse displays.',
-		sub: 'User + assistant text only (Context Window not stored)',
+		title: 'Eclipse: only user/assistant message text plus reasoning (thinkingBlock) text is persisted in the conversation file. The Context Window breakdown Eclipse shows (system instructions, tool definitions, tool results) is computed live and never written to disk, so this estimate covers message + thinking text only and will be lower than the context usage Eclipse displays.',
+		sub: 'Message + thinking text only (Context Window not stored)',
 	},
 };
 
@@ -1128,14 +1128,15 @@ wireUpToolCallHandlers();
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
 
-function getTurnTokenAttrs(isJetBrains: boolean, isAntigravity: boolean, isCursor: boolean): { tooltip: string; suffix: string } {
+function getTurnTokenAttrs(isJetBrains: boolean, isAntigravity: boolean, isCursor: boolean, isEclipse: boolean): { tooltip: string; suffix: string } {
 if (isJetBrains) { return { tooltip: ` title="JetBrains: estimated from user message + assistant text only. Actual API counts and thinking tokens are not available."`, suffix: ' ⓘ' }; }
 if (isAntigravity) { return { tooltip: ` title="Antigravity: estimated from transcript content. Actual API counts are not stored locally."`, suffix: ' ⓘ' }; }
 if (isCursor) { return { tooltip: ` title="Cursor: per-turn token counts are not stored locally. Output tokens are unavailable and input tokens require the full context window."`, suffix: ' ⓘ' }; }
+if (isEclipse) { return { tooltip: ` title="Eclipse: estimated from message + thinking text only. Actual API counts are not stored locally."`, suffix: ' ⓘ' }; }
 return { tooltip: '', suffix: '' };
 }
 
-function renderTurnCard(turn: ChatTurn, isJetBrains = false, isAntigravity = false, isCursor = false): string {
+function renderTurnCard(turn: ChatTurn, isJetBrains = false, isAntigravity = false, isCursor = false, isEclipse = false): string {
 const totalTokens    = turn.inputTokensEstimate + turn.outputTokensEstimate + turn.thinkingTokensEstimate;
 const hasThinking    = turn.thinkingTokensEstimate > 0;
 const hasActualUsage = !!turn.actualUsage;
@@ -1157,7 +1158,7 @@ ${turn.mcpTools.map(mcp => `
 </div>
 ` : '';
 
-const { tooltip: tokenTooltip, suffix: tokenSuffix } = getTurnTokenAttrs(isJetBrains, isAntigravity, isCursor);
+const { tooltip: tokenTooltip, suffix: tokenSuffix } = getTurnTokenAttrs(isJetBrains, isAntigravity, isCursor, isEclipse);
 
 return `
 <div class="turn-card" data-turn="${turn.turnNumber}">
@@ -1367,7 +1368,7 @@ ${renderSessionActualUsage(
 
 <div class="turns-list">
 ${data.turns.length > 0 
-? data.turns.map(turn => renderTurnCard(turn, data.editorName === 'JetBrains', data.editorName === 'Antigravity', data.editorName === 'Cursor')).join('')
+? data.turns.map(turn => renderTurnCard(turn, data.editorName === 'JetBrains', data.editorName === 'Antigravity', data.editorName === 'Cursor', data.editorName === 'Eclipse')).join('')
 : '<div class="empty-state">No chat turns found in this session.</div>'
 }
 </div>
