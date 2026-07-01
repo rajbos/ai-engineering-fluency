@@ -76,6 +76,8 @@
     "qwen2.5": 0.25,
     "mai-code-1-flash[^mai-code-1-flash]": 0.25,
     "mai-code-1-flash": 0.25,
-    "claude-fable-5": 0.24
+    "claude-fable-5": 0.24,
+    "claude-sonnet-5": 0.24,
+    "claude-opus-4.8-(fast-mode)-(preview)": 0.24
   }
 }

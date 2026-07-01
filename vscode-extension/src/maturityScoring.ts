@@ -173,7 +173,7 @@ function _peQualifiesForStage4(totalInteractions: number, hasAgentMode: boolean,
 }
 function _buildPeTipsForStage3(hasAgentMode: boolean, usedSlashCommands: string[], T: { stage3MinSlashCommands: number }): string[] {
 	const tips: string[] = [];
-	if (!hasAgentMode) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-file changes'); }
+	if (!hasAgentMode) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-file changes — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
 	if (usedSlashCommands.length < T.stage3MinSlashCommands) { tips.push('Use [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /fix, or /tests to give structured prompts'); }
 	return tips;
 }
@@ -181,7 +181,7 @@ function _buildPeTipsForStage3(hasAgentMode: boolean, usedSlashCommands: string[
 function _buildPeTipsForStage4(hasAgentMode: boolean, hasModelSwitching: boolean, usedSlashCommands: string[], autoUsageRatio: number, T: { stage4MinSlashCommands: number }): string[] {
 	const tips: string[] = [];
 	if (!hasAgentMode) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for autonomous, multi-step coding tasks'); }
-	if (!hasModelSwitching) { tips.push('Experiment with [different models](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_choose-a-language-model) for different tasks - use fast models for simple queries and reasoning models for complex problems'); }
+	if (!hasModelSwitching) { tips.push('Experiment with [different models](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_choose-a-language-model) for different tasks - use fast models for simple queries and reasoning models for complex problems — [▶ Model selection video](https://tech.hub.ms/github-copilot/videos/model-selection)'); }
 	if (autoUsageRatio === 0) { tips.push('Try the Auto model for cost-sensitive tasks so Copilot can pick the most efficient model for you'); }
 	else if (autoUsageRatio < 0.5) { tips.push('Use the Auto model more often when you want Copilot to balance quality and cost for you'); }
 	if (usedSlashCommands.length < T.stage4MinSlashCommands && hasAgentMode && hasModelSwitching) { tips.push('Explore more [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /tests, or /doc to diversify your prompting'); }
@@ -191,7 +191,7 @@ function _buildPeTipsForStage4(hasAgentMode: boolean, hasModelSwitching: boolean
 function _buildPeTips(stage: Stage, hasAgentMode: boolean, hasModelSwitching: boolean, usedSlashCommands: string[], autoUsageRatio: number): string[] {
 	const T = STAGE_THRESHOLDS.promptEngineering;
 	const tips: string[] = [];
-	if (stage < 2) { tips.push('Try asking Copilot a question using the Chat panel'); }
+	if (stage < 2) { tips.push('Try asking Copilot a question using the Chat panel — [▶ Chat in IDE video](https://tech.hub.ms/github-copilot/videos/chat-in-ide)'); }
 	if (stage < 3) { tips.push(..._buildPeTipsForStage3(hasAgentMode, usedSlashCommands, T)); }
 	if (stage < 4) { tips.push(..._buildPeTipsForStage4(hasAgentMode, hasModelSwitching, usedSlashCommands, autoUsageRatio, T)); }
 	return tips;
@@ -430,8 +430,8 @@ function _agApplyMultiAgentBooster(
 
 function _agBuildTips(stage: Stage): string[] {
 	const tips: string[] = [];
-	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) — it can run terminal commands, edit files, and explore your codebase autonomously'); }
-	if (stage < 3) { tips.push('Use [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-step tasks; let it chain tools like file search, terminal, and code edits'); }
+	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) — it can run terminal commands, edit files, and explore your codebase autonomously — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
+	if (stage < 3) { tips.push('Use [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-step tasks; let it chain tools like file search, terminal, and code edits — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
 	if (stage < 4) { tips.push('Try [multi-agent orchestration](https://code.visualstudio.com/docs/copilot/agents/overview): start child sessions from a parent session to run multiple agents in parallel on independent sub-tasks'); }
 	return tips;
 }
@@ -504,13 +504,13 @@ function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
 
 function _tuBuildTips(stage: Stage, mcpServers: string[], isMCPDisabled?: boolean): string[] {
 	const tips: string[] = [];
-	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) to let Copilot use built-in tools for file operations and terminal commands'); }
+	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) to let Copilot use built-in tools for file operations and terminal commands — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
 	if (stage < 3) {
-		if (mcpServers.length === 0 && !isMCPDisabled) { tips.push('Set up [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to connect Copilot to external tools (databases, APIs, cloud services)'); }
+		if (mcpServers.length === 0 && !isMCPDisabled) { tips.push('Set up [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to connect Copilot to external tools (databases, APIs, cloud services) — [▶ MCP with Azure and GitHub](https://tech.hub.ms/github-copilot/videos/mcp-with-azure-and-github)'); }
 		else if (mcpServers.length > 0) { tips.push('Explore [GitHub integrations](https://code.visualstudio.com/docs/copilot/agents/agent-tools) and advanced tools like editFiles and run_in_terminal'); }
 	}
 	if (stage < 4) {
-		if (mcpServers.length === 1) { tips.push('Add more [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to expand Copilot\'s capabilities - check the VS Code MCP registry'); }
+		if (mcpServers.length === 1) { tips.push('Add more [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to expand Copilot\'s capabilities - check the VS Code MCP registry — [▶ MCP with Azure and GitHub](https://tech.hub.ms/github-copilot/videos/mcp-with-azure-and-github)'); }
 		else if (mcpServers.length === 0 && !isMCPDisabled) { tips.push('Explore the [VS Code MCP registry](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) for tools that integrate with your workflow'); }
 		else if (mcpServers.length > 0) { tips.push('You\'re using multiple MCP servers - keep exploring advanced tool combinations'); }
 	}
@@ -640,8 +640,8 @@ function _cuComputeStage(
 function _cuBuildTips(stage: Stage, totalRepos: number, reposWithCustomization: number): string[] {
 	const tips: string[] = [];
 	const uncustomized = totalRepos - reposWithCustomization;
-	if (stage < 2) { tips.push('Create a [.github/copilot-instructions.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) or [CLAUDE.md](https://docs.anthropic.com/en/docs/claude-code/memory) file with project-specific guidelines'); }
-	if (stage < 3) { tips.push('Add [custom instructions](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) to more repositories to standardize your Copilot experience'); }
+	if (stage < 2) { tips.push('Create a [.github/copilot-instructions.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) or [CLAUDE.md](https://docs.anthropic.com/en/docs/claude-code/memory) file with project-specific guidelines — [▶ User Instructions video](https://tech.hub.ms/github-copilot/videos/user-instructions)'); }
+	if (stage < 3) { tips.push('Add [custom instructions](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) to more repositories to standardize your Copilot experience — [▶ User Instructions video](https://tech.hub.ms/github-copilot/videos/user-instructions)'); }
 	if (stage < 4 && uncustomized > 0) { tips.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos have customization — add [instructions and agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) to the remaining ${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} for Stage 4`); }
 	else if (stage < 4) { tips.push('Aim for consistent customization across all projects with [instructions and agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions)'); }
 	return tips;
@@ -746,9 +746,9 @@ function _wiQualifiesForStage4(sessions: number, modesUsed: number, totalContext
 
 function _wiBuildTips(stage: Stage, modesUsed: number, totalContextRefs: number, T: typeof STAGE_THRESHOLDS.workflowIntegration): string[] {
 	const tips: string[] = [];
-	if (stage < 2) { tips.push('Use AI more regularly - even for quick questions'); }
+	if (stage < 2) { tips.push('Use AI more regularly - even for quick questions — [▶ Chat in IDE video](https://tech.hub.ms/github-copilot/videos/chat-in-ide)'); }
 	if (stage < 3) {
-		if (modesUsed < T.stage3MinModesUsed) { tips.push('Combine [ask mode with agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) in your daily workflow'); }
+		if (modesUsed < T.stage3MinModesUsed) { tips.push('Combine [ask mode with agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) in your daily workflow — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
 		if (totalContextRefs < T.hasExplicitContextMinRefs) { tips.push('Use explicit [context references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like #file, @workspace, and #selection'); }
 	}
 	if (stage < 4) {
