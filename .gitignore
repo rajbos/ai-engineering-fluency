@@ -1,6 +1,7 @@
 ﻿out
 dist
 node_modules
+.impeccable/
 .vscode-test/
 *.vsix
 *.backup
