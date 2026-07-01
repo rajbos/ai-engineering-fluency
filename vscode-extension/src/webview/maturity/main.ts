@@ -19,7 +19,7 @@ type UsageAnalysisPeriod = {
 	repositoriesWithCustomization: string[];
 	editScope?: { singleFileEdits: number; multiFileEdits: number; totalEditedFiles: number; avgFilesPerSession: number };
 	applyUsage?: { totalApplies: number; totalCodeBlocks: number; applyRate: number };
-	sessionDuration?: { totalDurationMs: number; avgDurationMs: number; avgFirstProgressMs: number; avgTotalElapsedMs: number; avgWaitTimeMs: number };
+	sessionDuration?: { totalDurationMs: number; avgDurationMs: number; avgFirstProgressMs: number; avgTotalElapsedMs: number; avgWaitTimeMs: number; activeDurationMs: number };
 	conversationPatterns?: { multiTurnSessions: number; singleTurnSessions: number; avgTurnsPerSession: number; maxTurnsInSession: number };
 	agentTypes?: { editsAgent: number; defaultAgent: number; workspaceAgent: number; other: number };
 };

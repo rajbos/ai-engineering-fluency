@@ -219,6 +219,7 @@ export function createEmptyUsageAnalysisPeriod(): UsageAnalysisPeriod {
 			avgFirstProgressMs: 0,
 			avgTotalElapsedMs: 0,
 			avgWaitTimeMs: 0,
+			activeDurationMs: 0,
 		},
 		conversationPatterns: {
 			multiTurnSessions: 0,

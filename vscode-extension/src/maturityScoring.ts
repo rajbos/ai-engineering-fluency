@@ -807,6 +807,10 @@ function _wiAddSessionDurationEvidence(evidence: string[], p: UsageAnalysisPerio
 	if (p.sessionDuration && p.sessionDuration.avgDurationMs > 0) {
 		evidence.push(`Avg ${Math.round(p.sessionDuration.avgDurationMs / 60000)}min session duration`);
 	}
+	if (p.sessionDuration && p.sessionDuration.activeDurationMs > 0 && p.sessions > 0) {
+		const avgActiveMin = Math.round(p.sessionDuration.activeDurationMs / p.sessions / 60000);
+		evidence.push(`Avg ${avgActiveMin}min active time (interacting + waiting on the agent)`);
+	}
 }
 
 /**

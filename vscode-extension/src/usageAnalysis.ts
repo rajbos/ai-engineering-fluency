@@ -515,9 +515,25 @@ function _mergeLanguageUsage(target: LanguageUsage, source: LanguageUsage): void
 	}
 }
 
+/** Accumulate timing-related data (timestamps, timing details, wait times, active intervals) for one request. */
+function _accumulateRequestTiming(
+	timing: TimingMetrics,
+	timestamps: number[],
+	timingsData: { firstProgress?: number; totalElapsed?: number }[],
+	waitTimes: number[],
+	activeIntervals: { start: number; end: number }[]
+): void {
+	if (timing.timestamp !== undefined) { timestamps.push(timing.timestamp); }
+	if (timing.timings) { timingsData.push(timing.timings); }
+	if (timing.waitTime !== undefined) { waitTimes.push(timing.waitTime); }
+	if (timing.timestamp !== undefined && timing.timings?.totalElapsed !== undefined) {
+		activeIntervals.push({ start: timing.timestamp, end: timing.timestamp + timing.timings.totalElapsed });
+	}
+}
+
 /**
  * Process a list of session requests, accumulating enhanced metrics in-place.
- * Mutates editedFiles, timestamps, timingsData, waitTimes and agentCounts.
+ * Mutates editedFiles, timestamps, timingsData, waitTimes, activeIntervals and agentCounts.
  * Returns the total applies and total code blocks counted.
  */
 function processRequestsForEnhancedMetrics(
@@ -526,7 +542,8 @@ function processRequestsForEnhancedMetrics(
 	editedFiles: Set<string>,
 	timestamps: number[],
 	timingsData: { firstProgress?: number; totalElapsed?: number }[],
-	waitTimes: number[]
+	waitTimes: number[],
+	activeIntervals: { start: number; end: number }[]
 ): { totalApplies: number; totalCodeBlocks: number; totalLinesAdded: number; totalLinesRemoved: number; languageUsage: LanguageUsage } {
 	let totalApplies = 0;
 	let totalCodeBlocks = 0;
@@ -536,10 +553,7 @@ function processRequestsForEnhancedMetrics(
 	for (const requestRaw of requests) {
 		if (!requestRaw) { continue; }
 
-		const timing = extractTimingMetrics(requestRaw);
-		if (timing.timestamp !== undefined) { timestamps.push(timing.timestamp); }
-		if (timing.timings) { timingsData.push(timing.timings); }
-		if (timing.waitTime !== undefined) { waitTimes.push(timing.waitTime); }
+		_accumulateRequestTiming(extractTimingMetrics(requestRaw), timestamps, timingsData, waitTimes, activeIntervals);
 
 		const agent = extractAgentMetrics(requestRaw);
 		if (agent.agentType !== null) {
@@ -899,6 +913,7 @@ function _muaMergeApplyUsage(period: UsageAnalysisPeriod, analysis: SessionUsage
 function _muaMergeSessionDuration(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
 	if (!analysis.sessionDuration) { return; }
 	period.sessionDuration.totalDurationMs += analysis.sessionDuration.totalDurationMs;
+	period.sessionDuration.activeDurationMs += analysis.sessionDuration.activeDurationMs;
 	const sessionCount = period.sessions;
 	if (sessionCount <= 0) { return; }
 	period.sessionDuration.avgDurationMs = period.sessionDuration.totalDurationMs / sessionCount;
@@ -1019,6 +1034,7 @@ function _muaMergeEnhancedMetrics(period: UsageAnalysisPeriod, analysis: Session
 	}
 	if (analysis.sessionDuration) {
 		period.sessionDuration.totalDurationMs += analysis.sessionDuration.totalDurationMs;
+		period.sessionDuration.activeDurationMs += analysis.sessionDuration.activeDurationMs;
 		const sessionCount = period.sessions;
 		if (sessionCount > 0) {
 			period.sessionDuration.avgDurationMs = period.sessionDuration.totalDurationMs / sessionCount;
@@ -1588,8 +1604,35 @@ type TemState = {
 	totalApplies: number; totalCodeBlocks: number; totalLinesAdded: number; totalLinesRemoved: number;
 	allLanguageUsage: LanguageUsage; editedFiles: Set<string>; timestamps: number[];
 	timingsData: { firstProgress?: number; totalElapsed?: number }[]; waitTimes: number[];
+	activeIntervals: { start: number; end: number }[];
 	agentCounts: { editsAgent: number; defaultAgent: number; workspaceAgent: number; other: number };
 };
+
+/**
+ * Merge overlapping/adjacent [start, end] intervals and sum their combined length.
+ * Used to compute "active" time (interactive use + tool/agent wait) while excluding
+ * idle gaps between an agent's response and the next user message.
+ */
+function mergeIntervalsAndSumMs(intervals: { start: number; end: number }[]): number {
+	if (intervals.length === 0) { return 0; }
+	const sorted = [...intervals].sort((a, b) => a.start - b.start);
+	let totalMs = 0;
+	let curStart = sorted[0].start;
+	let curEnd = sorted[0].end;
+	for (let i = 1; i < sorted.length; i++) {
+		const { start, end } = sorted[i];
+		if (start <= curEnd) {
+			// Overlapping or contiguous: extend the current merged window.
+			curEnd = Math.max(curEnd, end);
+		} else {
+			totalMs += curEnd - curStart;
+			curStart = start;
+			curEnd = end;
+		}
+	}
+	totalMs += curEnd - curStart;
+	return totalMs;
+}
 
 function _temMergeLocUsage(dest: LanguageUsage, src: LanguageUsage): void {
 	for (const [ext, usage] of Object.entries(src)) {
@@ -1611,7 +1654,7 @@ function _temProcessDeltaJsonl(lines: string[], state: TemState): void {
 	}
 	if (sessionState.creationDate !== undefined) { state.timestamps.push(sessionState.creationDate); }
 	if (sessionState.lastMessageDate !== undefined) { state.timestamps.push(sessionState.lastMessageDate); }
-	const result = processRequestsForEnhancedMetrics((sessionState.requests || []) as SessionRequestRaw[], state.agentCounts, state.editedFiles, state.timestamps, state.timingsData, state.waitTimes);
+	const result = processRequestsForEnhancedMetrics((sessionState.requests || []) as SessionRequestRaw[], state.agentCounts, state.editedFiles, state.timestamps, state.timingsData, state.waitTimes, state.activeIntervals);
 	state.totalApplies = result.totalApplies; state.totalCodeBlocks = result.totalCodeBlocks;
 	state.totalLinesAdded = result.totalLinesAdded; state.totalLinesRemoved = result.totalLinesRemoved;
 	_temMergeLocUsage(state.allLanguageUsage, result.languageUsage);
@@ -1621,7 +1664,7 @@ function _temProcessJsonFile(deps: Pick<UsageAnalysisDeps, 'warn'>, sessionFile:
 	if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return false; }
 	if (parsed.creationDate) { state.timestamps.push(parsed.creationDate); }
 	if (parsed.lastMessageDate) { state.timestamps.push(parsed.lastMessageDate); }
-	const result = processRequestsForEnhancedMetrics((parsed.requests ?? []) as SessionRequestRaw[], state.agentCounts, state.editedFiles, state.timestamps, state.timingsData, state.waitTimes);
+	const result = processRequestsForEnhancedMetrics((parsed.requests ?? []) as SessionRequestRaw[], state.agentCounts, state.editedFiles, state.timestamps, state.timingsData, state.waitTimes, state.activeIntervals);
 	state.totalApplies = result.totalApplies; state.totalCodeBlocks = result.totalCodeBlocks;
 	state.totalLinesAdded = result.totalLinesAdded; state.totalLinesRemoved = result.totalLinesRemoved;
 	_temMergeLocUsage(state.allLanguageUsage, result.languageUsage);
@@ -1647,7 +1690,8 @@ function _temStoreResults(analysis: SessionUsageAnalysis, state: TemState): void
 	const avgFirstProgressMs = state.timingsData.length > 0 ? state.timingsData.reduce((s, t) => s + (t.firstProgress || 0), 0) / state.timingsData.length : 0;
 	const avgTotalElapsedMs = state.timingsData.length > 0 ? state.timingsData.reduce((s, t) => s + (t.totalElapsed || 0), 0) / state.timingsData.length : 0;
 	const avgWaitTimeMs = state.waitTimes.length > 0 ? state.waitTimes.reduce((s, w) => s + w, 0) / state.waitTimes.length : 0;
-	analysis.sessionDuration = { totalDurationMs, avgDurationMs: totalDurationMs, avgFirstProgressMs, avgTotalElapsedMs, avgWaitTimeMs };
+	const activeDurationMs = mergeIntervalsAndSumMs(state.activeIntervals);
+	analysis.sessionDuration = { totalDurationMs, avgDurationMs: totalDurationMs, avgFirstProgressMs, avgTotalElapsedMs, avgWaitTimeMs, activeDurationMs };
 	deriveConversationPatterns(analysis);
 	analysis.agentTypes = state.agentCounts;
 }
@@ -1723,6 +1767,7 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 		const state: TemState = {
 			totalApplies: 0, totalCodeBlocks: 0, totalLinesAdded: 0, totalLinesRemoved: 0,
 			allLanguageUsage: {}, editedFiles: new Set<string>(), timestamps: [], timingsData: [], waitTimes: [],
+			activeIntervals: [],
 			agentCounts: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 },
 		};
 		if (isJsonl) {
