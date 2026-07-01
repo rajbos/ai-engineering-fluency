@@ -17,7 +17,9 @@
  * The JSON does NOT carry actual API token counts, so token figures are
  * best-effort estimates from message text (same approach as JetBrains and
  * Continue). A model identifier IS present per turn
- * (`message.model` / `reply.modelName`).
+ * (`message.model` / `reply.modelName`). Each edit-agent round may also carry
+ * a `thinkingBlock.content` with the model's reasoning text; this is only kept
+ * locally (never sent to the API) so its tokens are estimated the same way.
  *
  * Schema (one conversation file):
  *   {
@@ -30,7 +32,8 @@
  *         customChatModeId, source, userLanguage },
  *       // copilot record (same turnId as the preceding user record)
  *       { role: "copilot", turnId, timestamp, suggestedTitle,
- *         reply: { editAgentRounds: [ { roundId, reply, toolCalls: [] } ],
+ *         reply: { editAgentRounds: [ { roundId, reply, toolCalls: [],
+ *                    thinkingBlock: { state, id, content, title } } ],
  *                  modelName, billingMultiplier, reasoningEffort } }
  *     ]
  *   }
@@ -65,6 +68,8 @@ export interface EclipseTurn {
 	toolCalls: Array<{ toolName: string; arguments?: string; result?: string }>;
 	inputTokens: number;
 	outputTokens: number;
+	/** Estimated tokens for the reasoning text captured in `reply.editAgentRounds[].thinkingBlock.content`. */
+	thinkingTokens: number;
 }
 
 export class EclipseDataAccess {
@@ -242,6 +247,21 @@ export class EclipseDataAccess {
 			.join('\n');
 	}
 
+	/**
+	 * Concatenate the reasoning text from `thinkingBlock.content` across all
+	 * edit-agent rounds of a copilot-role turn record. This text is only ever
+	 * kept locally (never sent back to the API), so it is estimated the same
+	 * way as user/assistant text.
+	 */
+	private thinkingText(turn: any): string {
+		const rounds = turn?.reply?.editAgentRounds;
+		if (!Array.isArray(rounds)) { return ''; }
+		return rounds
+			.map((r: any) => (typeof r?.thinkingBlock?.content === 'string' ? r.thinkingBlock.content : ''))
+			.filter(Boolean)
+			.join('\n');
+	}
+
 	/** Collect tool calls from a copilot-role turn's edit-agent rounds. */
 	private toolCallsFromTurn(turn: any): Array<{ toolName: string; arguments?: string; result?: string }> {
 		const rounds = turn?.reply?.editAgentRounds;
@@ -256,14 +276,20 @@ export class EclipseDataAccess {
 		return calls;
 	}
 
-	/** Normalise a raw Eclipse tool-call object into the shared toolCall shape. */
+	/**
+	 * Normalise a raw Eclipse tool-call object into the shared toolCall shape.
+	 * Eclipse tool calls rarely carry a real `arguments` payload or a non-empty
+	 * `result` array, so `progressMessage` (a human-readable description such as
+	 * "Read file [Main.java](...)") is used as a fallback for `arguments` so the
+	 * log viewer's "Arguments" panel isn't left empty.
+	 */
 	private normalizeToolCall(tc: any): { toolName: string; arguments?: string; result?: string } {
 		const fn = tc?.function ?? {};
 		const toolName: string = tc?.name || tc?.toolName || fn.name || 'unknown';
 		return {
 			toolName,
-			arguments: this.stringifyArgs(tc?.arguments ?? fn.arguments),
-			result: this.strOrNull(tc?.result) ?? undefined,
+			arguments: this.stringifyArgs(tc?.arguments ?? fn.arguments) ?? this.strOrNull(tc?.progressMessage) ?? undefined,
+			result: this.resultToString(tc?.result),
 		};
 	}
 
@@ -280,8 +306,23 @@ export class EclipseDataAccess {
 	}
 
 	/**
-	 * Estimated token counts for a session (input + output text). Eclipse files
-	 * carry no actual API token counts, so thinkingTokens is always 0.
+	 * Coerce a tool-call `result` value to a display string. Eclipse's `result`
+	 * is usually an empty array, but may contain string entries or `{ value }`
+	 * text blocks (mirroring the shape used by other editors).
+	 */
+	private resultToString(rawResult: unknown): string | undefined {
+		if (typeof rawResult === 'string') { return rawResult || undefined; }
+		if (!Array.isArray(rawResult) || rawResult.length === 0) { return undefined; }
+		const parts = rawResult
+			.map((item: any) => (typeof item === 'string' ? item : (typeof item?.value === 'string' ? item.value : '')))
+			.filter(Boolean);
+		return parts.length > 0 ? parts.join('\n') : undefined;
+	}
+
+	/**
+	 * Estimated token counts for a session (input + output + thinking text).
+	 * Eclipse files carry no actual API token counts, so all three figures are
+	 * best-effort estimates from the persisted message/reasoning text.
 	 */
 	async getTokensFromEclipseSession(filePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
 		const session = await this.readSession(filePath);
@@ -289,14 +330,16 @@ export class EclipseDataAccess {
 			return { tokens: 0, thinkingTokens: 0 };
 		}
 		let total = 0;
+		let thinkingTotal = 0;
 		for (const turn of session.turns) {
 			if (turn?.role === 'user') {
 				total += this.estimate(this.userText(turn));
 			} else if (turn?.role === 'copilot') {
 				total += this.estimate(this.assistantText(turn));
+				thinkingTotal += this.estimate(this.thinkingText(turn));
 			}
 		}
-		return { tokens: total, thinkingTokens: 0 };
+		return { tokens: total + thinkingTotal, thinkingTokens: thinkingTotal };
 	}
 
 	/** Count user interactions (one per `role: "user"` turn record). */
@@ -392,6 +435,7 @@ export class EclipseDataAccess {
 	private buildTurn(turn: any, reply: any): EclipseTurn {
 		const userText = this.userText(turn);
 		const assistantText = this.assistantText(reply);
+		const thinkingText = this.thinkingText(reply);
 		return {
 			userText,
 			assistantText,
@@ -403,6 +447,7 @@ export class EclipseDataAccess {
 			toolCalls: this.toolCallsFromTurn(reply),
 			inputTokens: this.estimate(userText),
 			outputTokens: this.estimate(assistantText),
+			thinkingTokens: this.estimate(thinkingText),
 		};
 	}
 }

@@ -112,7 +112,7 @@ export class EclipseAdapter implements IEcosystemAdapter, IDiscoverableEcosystem
 				mcpTools: [],
 				inputTokensEstimate: et.inputTokens,
 				outputTokensEstimate: et.outputTokens,
-				thinkingTokensEstimate: 0,
+				thinkingTokensEstimate: et.thinkingTokens,
 				thinkingEffort: et.reasoningEffort ?? undefined,
 			});
 		}

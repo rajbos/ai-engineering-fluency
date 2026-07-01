@@ -693,19 +693,35 @@ function buildEditorModeCard(data: SessionLogData, stats: SummaryStats): string 
 </div>`;
 }
 
+/**
+ * Per-editor notes for the Estimated Tokens card. When an editor is present in
+ * this map the card renders a `ⓘ` hint with hover text explaining why the count
+ * is an estimate (no actual API token counts persisted by that editor).
+ */
+const ESTIMATED_TOKENS_NOTES: Record<string, { title: string; sub: string }> = {
+	JetBrains: {
+		title: 'JetBrains: only user messages + assistant text are persisted in the session log, so this is an estimate of those alone. Actual API token counts and thinking tokens are not available.',
+		sub: 'User + assistant text only (no API counts, no thinking)',
+	},
+	Antigravity: {
+		title: 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.',
+		sub: 'Estimated from transcript content',
+	},
+	Cursor: {
+		title: 'Cursor: shows the context window size at the last request (contextTokensUsed). This is a snapshot, not cumulative per-turn billing. Output tokens are not stored locally.',
+		sub: 'Context window at last request (snapshot, not cumulative)',
+	},
+	Eclipse: {
+		title: 'Eclipse: only user/assistant message text plus reasoning (thinkingBlock) text is persisted in the conversation file. The Context Window breakdown Eclipse shows (system instructions, tool definitions, tool results) is computed live and never written to disk, so this estimate covers message + thinking text only and will be lower than the context usage Eclipse displays.',
+		sub: 'Message + thinking text only (Context Window not stored)',
+	},
+};
+
 function buildEstimatedTokensCard(data: SessionLogData, stats: SummaryStats): string {
-	const isJetBrains = data.editorName === 'JetBrains';
-	const isAntigravity = data.editorName === 'Antigravity';
-	const isCursor = data.editorName === 'Cursor';
-	const titleAttr = isJetBrains
-		? ` title="JetBrains: only user messages + assistant text are persisted in the session log, so this is an estimate of those alone. Actual API token counts and thinking tokens are not available."`
-		: isAntigravity ? ` title="Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally."`
-		: isCursor ? ` title="Cursor: shows the context window size at the last request (contextTokensUsed). This is a snapshot, not cumulative per-turn billing. Output tokens are not stored locally."` : '';
-	const suffix = (isJetBrains || isAntigravity || isCursor) ? ' ⓘ' : '';
-	const sub = isJetBrains ? 'User + assistant text only (no API counts, no thinking)'
-		: isAntigravity ? 'Estimated from transcript content'
-		: isCursor ? 'Context window at last request (snapshot, not cumulative)'
-		: 'Input + Output estimated from text';
+	const note = ESTIMATED_TOKENS_NOTES[data.editorName];
+	const titleAttr = note ? ` title="${note.title}"` : '';
+	const suffix = note ? ' ⓘ' : '';
+	const sub = note ? note.sub : 'Input + Output estimated from text';
 	return `<div class="summary-card"${titleAttr}>
 <div class="summary-label">📊 Estimated Tokens${suffix}</div>
 <div class="summary-value">${formatCompact(stats.totalTokens)}</div>
@@ -1112,14 +1128,15 @@ wireUpToolCallHandlers();
 
 // ── Entry-point renderers (signatures preserved) ─────────────────────────────
 
-function getTurnTokenAttrs(isJetBrains: boolean, isAntigravity: boolean, isCursor: boolean): { tooltip: string; suffix: string } {
+function getTurnTokenAttrs(isJetBrains: boolean, isAntigravity: boolean, isCursor: boolean, isEclipse: boolean): { tooltip: string; suffix: string } {
 if (isJetBrains) { return { tooltip: ` title="JetBrains: estimated from user message + assistant text only. Actual API counts and thinking tokens are not available."`, suffix: ' ⓘ' }; }
 if (isAntigravity) { return { tooltip: ` title="Antigravity: estimated from transcript content. Actual API counts are not stored locally."`, suffix: ' ⓘ' }; }
 if (isCursor) { return { tooltip: ` title="Cursor: per-turn token counts are not stored locally. Output tokens are unavailable and input tokens require the full context window."`, suffix: ' ⓘ' }; }
+if (isEclipse) { return { tooltip: ` title="Eclipse: estimated from message + thinking text only. Actual API counts are not stored locally."`, suffix: ' ⓘ' }; }
 return { tooltip: '', suffix: '' };
 }
 
-function renderTurnCard(turn: ChatTurn, isJetBrains = false, isAntigravity = false, isCursor = false): string {
+function renderTurnCard(turn: ChatTurn, isJetBrains = false, isAntigravity = false, isCursor = false, isEclipse = false): string {
 const totalTokens    = turn.inputTokensEstimate + turn.outputTokensEstimate + turn.thinkingTokensEstimate;
 const hasThinking    = turn.thinkingTokensEstimate > 0;
 const hasActualUsage = !!turn.actualUsage;
@@ -1141,7 +1158,7 @@ ${turn.mcpTools.map(mcp => `
 </div>
 ` : '';
 
-const { tooltip: tokenTooltip, suffix: tokenSuffix } = getTurnTokenAttrs(isJetBrains, isAntigravity, isCursor);
+const { tooltip: tokenTooltip, suffix: tokenSuffix } = getTurnTokenAttrs(isJetBrains, isAntigravity, isCursor, isEclipse);
 
 return `
 <div class="turn-card" data-turn="${turn.turnNumber}">
@@ -1351,7 +1368,7 @@ ${renderSessionActualUsage(
 
 <div class="turns-list">
 ${data.turns.length > 0 
-? data.turns.map(turn => renderTurnCard(turn, data.editorName === 'JetBrains', data.editorName === 'Antigravity', data.editorName === 'Cursor')).join('')
+? data.turns.map(turn => renderTurnCard(turn, data.editorName === 'JetBrains', data.editorName === 'Antigravity', data.editorName === 'Cursor', data.editorName === 'Eclipse')).join('')
 : '<div class="empty-state">No chat turns found in this session.</div>'
 }
 </div>

@@ -17,6 +17,7 @@ import { OpenCodeDataAccess } from '../opencode';
 import type { UriLike } from '../opencode';
 import { CrushDataAccess } from '../crush';
 import { ContinueDataAccess } from '../continue';
+import { EclipseDataAccess } from '../eclipse';
 import { VisualStudioDataAccess } from '../visualstudio';
 import { ClaudeCodeDataAccess } from '../claudecode';
 import { ClaudeDesktopCoworkDataAccess } from '../claudedesktop';
@@ -30,6 +31,7 @@ import { OpenCodeAdapter } from './openCodeAdapter';
 import { CrushAdapter } from './crushAdapter';
 import { VisualStudioAdapter } from './visualStudioAdapter';
 import { ContinueAdapter } from './continueAdapter';
+import { EclipseAdapter } from './eclipseAdapter';
 import { ClaudeDesktopAdapter } from './claudeDesktopAdapter';
 import { ClaudeCodeAdapter } from './claudeCodeAdapter';
 import { MistralVibeAdapter } from './mistralVibeAdapter';
@@ -46,6 +48,7 @@ export interface AdapterRegistryDeps {
 openCode: OpenCodeDataAccess;
 crush: CrushDataAccess;
 continue_: ContinueDataAccess;
+eclipse: EclipseDataAccess;
 visualStudio: VisualStudioDataAccess;
 claudeCode: ClaudeCodeDataAccess;
 claudeDesktopCowork: ClaudeDesktopCoworkDataAccess;
@@ -83,6 +86,7 @@ return {
 openCode: new OpenCodeDataAccess(extensionUri),
 crush: new CrushDataAccess(extensionUri),
 continue_: new ContinueDataAccess(),
+eclipse: new EclipseDataAccess(),
 visualStudio: new VisualStudioDataAccess(),
 claudeCode: new ClaudeCodeDataAccess(),
 claudeDesktopCowork: new ClaudeDesktopCoworkDataAccess(),
@@ -106,6 +110,7 @@ new OpenCodeAdapter(deps.openCode),
 new CrushAdapter(deps.crush),
 new VisualStudioAdapter(deps.visualStudio, deps.estimateTokens),
 new ContinueAdapter(deps.continue_),
+new EclipseAdapter(deps.eclipse),
 new ClaudeDesktopAdapter(
 deps.claudeDesktopCowork,
 deps.isMcpTool,
