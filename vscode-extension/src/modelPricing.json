@@ -1140,6 +1140,16 @@
       "displayNames": [
         "Claude Opus 4.8 (fast mode) (preview)"
       ]
+    },
+    "kimi-k2.7-code": {
+      "inputCostPerMillion": 0.0,
+      "outputCostPerMillion": 0.0,
+      "category": "Moonshot AI models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "Kimi-K2.7-Code"
+      ]
     }
   }
 }
