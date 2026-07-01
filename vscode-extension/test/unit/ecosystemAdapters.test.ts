@@ -16,6 +16,7 @@ import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
 import { OpenCodeAdapter } from '../../src/adapters/openCodeAdapter';
 import { CrushAdapter } from '../../src/adapters/crushAdapter';
 import { ContinueAdapter } from '../../src/adapters/continueAdapter';
+import { EclipseAdapter } from '../../src/adapters/eclipseAdapter';
 import { ClaudeCodeAdapter } from '../../src/adapters/claudeCodeAdapter';
 import { ClaudeDesktopAdapter } from '../../src/adapters/claudeDesktopAdapter';
 import { VisualStudioAdapter } from '../../src/adapters/visualStudioAdapter';
@@ -28,6 +29,7 @@ import { AntigravityAdapter } from '../../src/adapters/antigravityAdapter';
 import { OpenCodeDataAccess } from '../../src/opencode';
 import { CrushDataAccess } from '../../src/crush';
 import { ContinueDataAccess } from '../../src/continue';
+import { EclipseDataAccess } from '../../src/eclipse';
 import { ClaudeCodeDataAccess } from '../../src/claudecode';
 import { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
 import { VisualStudioDataAccess } from '../../src/visualstudio';
@@ -44,6 +46,7 @@ const noopExtractMcpServerName = (_name: string) => '';
 const openCodeDA = new OpenCodeDataAccess(null as any);
 const crushDA = new CrushDataAccess(null as any);
 const continueDA = new ContinueDataAccess();
+const eclipseDA = new EclipseDataAccess();
 const claudeCodeDA = new ClaudeCodeDataAccess();
 const claudeDesktopDA = new ClaudeDesktopCoworkDataAccess();
 const visualStudioDA = new VisualStudioDataAccess();
@@ -54,6 +57,7 @@ const antigravityDA = new AntigravityDataAccess();
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
 const crushAdapter = new CrushAdapter(crushDA);
 const continueAdapter = new ContinueAdapter(continueDA);
+const eclipseAdapter = new EclipseAdapter(eclipseDA);
 const claudeCodeAdapter = new ClaudeCodeAdapter(claudeCodeDA);
 const claudeDesktopAdapter = new ClaudeDesktopAdapter(claudeDesktopDA, noopIsMcpTool, noopExtractMcpServerName, noopEstimateTokens);
 const visualStudioAdapter = new VisualStudioAdapter(visualStudioDA, noopEstimateTokens);
@@ -64,7 +68,7 @@ const copilotCliAdapter = new CopilotCliAdapter();
 const antigravityAdapter = new AntigravityAdapter(antigravityDA);
 
 const allAdapters: IEcosystemAdapter[] = [
-    openCodeAdapter, crushAdapter, continueAdapter,
+    openCodeAdapter, crushAdapter, continueAdapter, eclipseAdapter,
     claudeCodeAdapter, claudeDesktopAdapter, visualStudioAdapter, mistralVibeAdapter, geminiCliAdapter,
     copilotChatAdapter, copilotCliAdapter, antigravityAdapter,
 ];
@@ -73,11 +77,11 @@ const allAdapters: IEcosystemAdapter[] = [
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 11 adapters', () => {
+test('isDiscoverable: returns true for all 12 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 11);
+    assert.equal(allAdapters.length, 12);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -100,6 +104,7 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(openCodeAdapter.id, 'opencode');
     assert.equal(crushAdapter.id, 'crush');
     assert.equal(continueAdapter.id, 'continue');
+    assert.equal(eclipseAdapter.id, 'eclipse');
     assert.equal(claudeCodeAdapter.id, 'claudecode');
     assert.equal(claudeDesktopAdapter.id, 'claudedesktop');
     assert.equal(visualStudioAdapter.id, 'visualstudio');

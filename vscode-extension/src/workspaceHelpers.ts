@@ -486,6 +486,9 @@ function detectToolEditorFromRootPath(lower: string): string | undefined {
 export function getEditorNameFromRoot(rootPath: string): string {
 	if (!rootPath) { return 'Unknown'; }
 	const lower = normalizePathForComparison(rootPath);
+	// Eclipse roots contain "copilot" (com.microsoft.copilot.eclipse.core), so they
+	// must be matched before the generic Copilot CLI check below.
+	if (lower.includes('com.microsoft.copilot.eclipse')) { return 'Eclipse'; }
 	// Check obvious markers first (JetBrains must precede Copilot CLI)
 	if (isJetBrainsRoot(lower)) { return 'JetBrains'; }
 	if (isCopilotCliRoot(lower)) { return 'Copilot CLI'; }
@@ -968,6 +971,9 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
 export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);
 	if (lowerPath.startsWith('windsurf://')) { return 'Windsurf'; }
+	// Eclipse Copilot conversations live in the workspace metadata; check before
+	// the generic VS Code match (the path can pass through a 'code' folder).
+	if (lowerPath.includes('com.microsoft.copilot.eclipse')) { return 'Eclipse'; }
 	return detectToolEditorFromPath(filePath, lowerPath, isOpenCodeSessionFile) ??
 		detectVSCodeVariantFromPath(lowerPath) ??
 		'Unknown';
@@ -996,6 +1002,7 @@ function detectIDEEditorSource(lowerPath: string): string | undefined {
 export function detectEditorSource(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);
 	if (lowerPath.startsWith('windsurf://')) { return 'Windsurf'; }
+	if (lowerPath.includes('com.microsoft.copilot.eclipse')) { return 'Eclipse'; }
 	// Delegate to the shared tool-editor detector (handles JetBrains, Copilot CLI, OpenCode,
 	// Crush, Pi, Continue, Claude, Vibe, Antigravity, Gemini CLI).
 	return detectToolEditorFromPath(filePath, lowerPath, isOpenCodeSessionFile) ??
