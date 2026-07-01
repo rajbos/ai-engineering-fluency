@@ -373,11 +373,12 @@ export interface ApplyButtonUsage {
 }
 
 export interface SessionDurationData {
-  totalDurationMs: number; // Total session time
-  avgDurationMs: number; // Average session duration
+  totalDurationMs: number; // Total session time (wall clock: last timestamp - first timestamp, includes idle gaps between turns)
+  avgDurationMs: number; // Average session duration (wall clock)
   avgFirstProgressMs: number; // Average time to first response
   avgTotalElapsedMs: number; // Average total request time
   avgWaitTimeMs: number; // Average user wait time between interactions
+  activeDurationMs: number; // Sum of merged [requestTimestamp, requestTimestamp+totalElapsed] windows: actual interactive + tool/agent wait time, excluding idle gaps between turns
 }
 
 export interface ConversationPatterns {
