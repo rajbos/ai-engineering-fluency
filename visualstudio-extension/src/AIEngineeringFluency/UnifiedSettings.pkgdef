@@ -1,0 +1,10 @@
+// Register the Unified Settings manifest so the extension's settings appear
+// natively in Visual Studio's "All Settings" page (VS 2022 17.9+) instead of
+// showing the "These settings haven't been migrated yet" banner.
+//
+// The CacheTag qword must be updated whenever AIEngineeringFluency.registration.json
+// changes, so VS knows to re-parse the manifest.  Increment it by 1 on each change.
+[$RootKey$\SettingsManifests\{6B8CA5B3-1A9F-4C2E-8F3D-7E2A1B4C9D0F}]
+@="AIEngineeringFluency.AIEngineeringFluencyPackage"
+"ManifestPath"="$PackageFolder$\AIEngineeringFluency.registration.json"
+"CacheTag"=qword:0000000000000001

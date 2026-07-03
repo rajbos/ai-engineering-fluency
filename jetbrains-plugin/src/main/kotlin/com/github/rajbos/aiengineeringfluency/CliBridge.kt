@@ -1,6 +1,7 @@
 package com.github.rajbos.aiengineeringfluency
 
 import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.openapi.extensions.PluginId
 import com.intellij.openapi.util.SystemInfo
@@ -29,7 +30,37 @@ import java.util.concurrent.TimeUnit
 object CliBridge {
 
     private val log = Logger.getInstance(CliBridge::class.java)
-    private const val CLI_TIMEOUT_SECONDS = 120L
+    private const val DEFAULT_TIMEOUT_SECONDS = 120L
+    private const val PREFERENCES_KEY_TIMEOUT = "ai-engineering-fluency.cli.timeout.seconds"
+
+    /** Timeout used for CLI invocations; can be overridden (e.g. for "wait longer" retry). */
+    @Volatile var timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS
+
+    init {
+        // Load the stored timeout preference on startup, defaulting to 120 seconds
+        val storedTimeout = PropertiesComponent.getInstance().getValue(PREFERENCES_KEY_TIMEOUT)
+        if (storedTimeout != null) {
+            try {
+                timeoutSeconds = storedTimeout.toLong()
+                log.info("Loaded stored timeout preference: ${timeoutSeconds}s")
+            } catch (e: NumberFormatException) {
+                log.warn("Invalid stored timeout value: $storedTimeout, using default")
+                timeoutSeconds = DEFAULT_TIMEOUT_SECONDS
+            }
+        }
+    }
+
+    /** Persists the given timeout and updates [timeoutSeconds]. */
+    fun setPersistentTimeout(seconds: Long) {
+        timeoutSeconds = seconds
+        PropertiesComponent.getInstance().setValue(PREFERENCES_KEY_TIMEOUT, seconds.toString())
+        log.info("Persisted new timeout preference: ${seconds}s")
+    }
+
+    /** Resets [timeoutSeconds] back to the default (120 s) without affecting stored preference. */
+    fun resetTimeout() {
+        timeoutSeconds = DEFAULT_TIMEOUT_SECONDS
+    }
 
     @Volatile private var cachedExePath: Path? = null
 
@@ -114,11 +145,11 @@ object CliBridge {
             process.errorStream.bufferedReader().use { stderrBuilder.append(it.readText()) }
         }, "cli-stderr-reader").apply { isDaemon = true; start() }
 
-        val finished = process.waitFor(CLI_TIMEOUT_SECONDS, TimeUnit.SECONDS)
+        val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
         val elapsedMs = System.currentTimeMillis() - startMs
         if (!finished) {
             process.destroyForcibly()
-            throw IOException("CLI timed out after ${CLI_TIMEOUT_SECONDS}s")
+            throw IOException("CLI timed out after ${timeoutSeconds}s")
         }
 
         // Wait for reader threads to finish (they should complete almost
@@ -176,27 +207,33 @@ object CliBridge {
     }
 
     private fun copyResource(resourcePath: String, target: Path): Path {
-        // Skip extraction when a non-empty file already exists — the exe may
-        // still be locked by a previous sandbox run or by Windows Defender.
-        if (Files.exists(target) && Files.size(target) > 0) {
-            log.info("CLI binary already exists at $target (${Files.size(target)} bytes), skipping extraction")
-            return target
-        }
-        val stream = CliBridge::class.java.getResourceAsStream(resourcePath)
+        val url = CliBridge::class.java.getResource(resourcePath)
             ?: throw IllegalStateException(
                 "Bundled CLI not found at classpath:$resourcePath — " +
                     "this OS may not be supported by this build of the plugin."
             )
-        stream.use {
-            log.info("Extracting CLI from $resourcePath -> $target")
+        // Re-extract when the on-disk file is absent, empty, or a different size
+        // than the bundled resource. This catches stale dev-iteration copies
+        // without requiring a version bump.
+        val bundledSize: Long = url.openConnection().contentLengthLong
+        val diskSize: Long = if (Files.exists(target)) Files.size(target) else -1L
+        if (diskSize > 0 && bundledSize > 0 && diskSize == bundledSize) {
+            log.info("CLI binary already up-to-date at $target ($diskSize bytes), skipping extraction")
+            return target
+        }
+        url.openStream().use {
+            log.info("Extracting CLI from $resourcePath -> $target (bundled=$bundledSize, disk=$diskSize)")
             Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING)
         }
         return target
     }
 
     private fun copyResourceIfPresent(resourcePath: String, target: Path) {
-        if (Files.exists(target) && Files.size(target) > 0) return
-        CliBridge::class.java.getResourceAsStream(resourcePath)?.use {
+        val url = CliBridge::class.java.getResource(resourcePath) ?: return
+        val bundledSize: Long = url.openConnection().contentLengthLong
+        val diskSize: Long = if (Files.exists(target)) Files.size(target) else -1L
+        if (diskSize > 0 && bundledSize > 0 && diskSize == bundledSize) return
+        url.openStream().use {
             try {
                 Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING)
             } catch (_: java.nio.file.AccessDeniedException) {

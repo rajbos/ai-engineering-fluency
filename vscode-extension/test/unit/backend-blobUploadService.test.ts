@@ -2,27 +2,10 @@ import './vscode-shim-register';
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import * as vscode from 'vscode';
+import { createMockExtensionContext } from './vscode-test-helpers';
 import { BlobUploadService, type BlobUploadSettings } from '../../src/backend/services/blobUploadService';
 
-function makeGlobalState(): vscode.Memento & { setKeysForSync?(keys: readonly string[]): void } {
-	const state = new Map<string, unknown>();
-	return {
-		keys: () => [...state.keys()],
-		get<T>(key: string, fallback?: T): T {
-			return (state.has(key) ? state.get(key) : fallback) as T;
-		},
-		async update(key: string, value: unknown) {
-			state.set(key, value);
-		}
-	};
-}
-
-function makeContext(): vscode.ExtensionContext {
-	return {
-		globalState: makeGlobalState()
-	} as unknown as vscode.ExtensionContext;
-}
+function makeContext() { return createMockExtensionContext(); }
 
 const enabledSettings: BlobUploadSettings = {
 	enabled: true,

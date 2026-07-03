@@ -91,6 +91,23 @@ Tracks usage of MCP servers and tools:
 - JSONL files:
   - Events with `type: "mcp.tool.call"` or containing `mcpServer` in data
 
+### 5. Tool Curation
+
+The **Tools** tab includes a curation analysis section that compares the tools available in your environment against the tools actually used in the configured look-back window (default: last 30 days).
+
+**Available tools are discovered from:**
+- MCP config files: `.vscode/mcp.json`, `.mcp.json`, `.vs/mcp.json`, `.cursor/mcp.json`, and `~/.mcp.json`
+- Skill directories: `.github/skills/`, `.claude/skills/`, `.agents/skills/` (workspace) and `~/.copilot/skills/`, `~/.claude/skills/`, `~/.agents/skills/` (user-level)
+- Runtime tools registered via `vscode.lm.tools`
+
+**Recommendations produced:**
+- **Disable MCP server** — shown when no tools from an MCP server were called in the window, with an estimated token saving
+- **Refine skill** — shown when a skill file was never invoked in the window
+
+The look-back window is configurable via **`aiEngineeringFluency.curation.timeWindowDays`** (7 / 30 / 90 days).
+
+See [features/TOOL-CURATION.md](features/TOOL-CURATION.md) for the full reference.
+
 ## Data Analysis Details
 
 ### Session File Processing
@@ -155,6 +172,7 @@ Session analysis data is cached alongside token counts to improve performance:
 3. **Leverage Agent Mode**: For complex tasks, consider using agent mode or Copilot CLI
 4. **Monitor Tool Usage**: Tools can extend Copilot's capabilities - check which are being used
 5. **Explore MCP**: If available, MCP tools can provide additional functionality
+6. **Curate Your Tools**: Use the Tool Curation section to identify unused MCP servers and stale skills — disabling them reduces prompt overhead and token cost
 
 ## Technical Details
 
@@ -166,6 +184,7 @@ The extension uses several key functions to analyze session files:
 - `analyzeContextReferences()`: Pattern matching for context references in text
 - `calculateUsageAnalysisStats()`: Aggregates analysis data across all sessions
 - `mergeUsageAnalysis()`: Combines analysis data from multiple sessions
+- `analyzeToolCuration()`: Compares available tools against used tools; produces curation recommendations
 
 ### Performance
 

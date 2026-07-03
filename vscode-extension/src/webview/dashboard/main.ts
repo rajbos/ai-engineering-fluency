@@ -1,13 +1,13 @@
 // Import shared utilities
 import { BUTTONS } from "../shared/buttonConfig";
 import { createButton, el } from "../shared/domUtils";
-import { formatCost, formatNumber, formatCompact, setCompactNumbers } from "../shared/formatUtils";
+import { escapeHtml, formatCost, formatNumber, formatCompact, setCompactNumbers } from "../shared/formatUtils";
 import { getModelDisplayName } from "../shared/modelUtils";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
-
-type ModelUsage = Record<string, { inputTokens: number; outputTokens: number }>;
+import { getWindowData } from "../shared/dataLoader";
+import type { ModelUsage } from "../shared/types";
 
 interface UserSummary {
   userId: string;
@@ -64,16 +64,25 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 
 type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
+interface DashboardConfig {
+  azureConfigured: boolean;
+  teamServerConfigured: boolean;
+  teamServerUrl: string;
+}
+
 declare global {
   interface Window {
-    __INITIAL_DASHBOARD__?: DashboardStats;
+    __DASHBOARD_CONFIG__?: DashboardConfig;
   }
 }
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = window.__INITIAL_DASHBOARD__;
+const initialData = getWindowData<DashboardStats>('__INITIAL_DASHBOARD__');
 console.log("[CopilotTokenTracker] dashboard webview loaded");
 console.log("[CopilotTokenTracker] initialData:", initialData);
+
+/** Active backend config, set once from __DASHBOARD_CONFIG__ during bootstrap. */
+let currentConfig: DashboardConfig | null = null;
 
 /** Reference to the loading text element so backfillProgress messages can update it in place. */
 let loadingTextEl: HTMLElement | null = null;
@@ -150,6 +159,7 @@ function render(stats: DashboardStats): void {
 
 function renderShell(root: HTMLElement, stats: DashboardStats): void {
   const lastUpdated = new Date(stats.lastUpdated);
+  const hasBothBackends = !!(currentConfig?.azureConfigured && currentConfig?.teamServerConfigured);
 
   root.replaceChildren();
 
@@ -189,7 +199,17 @@ function renderShell(root: HTMLElement, stats: DashboardStats): void {
   sections.append(buildPersonalSection(stats.personal, stats.lookbackDays ?? 30));
   sections.append(buildTeamSection(stats));
 
-  container.append(header, sections, footer);
+  if (hasBothBackends) {
+    const tabNav = buildTabNav();
+    const teamServerPanel = buildTeamServerPanel(currentConfig!.teamServerUrl);
+    teamServerPanel.style.display = "none";
+
+    container.append(header, tabNav, sections, footer, teamServerPanel);
+    wireTabNav(tabNav, sections, footer, teamServerPanel);
+  } else {
+    container.append(header, sections, footer);
+  }
+
   root.append(themeStyle, style, container);
 }
 
@@ -315,7 +335,7 @@ function buildModelBreakdown(modelUsage: ModelUsage): HTMLElement {
       model,
       tokens: usage.inputTokens + usage.outputTokens,
     }))
-    .sort((a, b) => b.tokens - a.tokens);
+    .sort((a, b) => b.tokens - a.tokens || a.model.localeCompare(b.model));
 
   for (const { model, tokens } of models) {
     const item = el("div", "model-item");
@@ -329,169 +349,82 @@ function buildModelBreakdown(modelUsage: ModelUsage): HTMLElement {
   return container;
 }
 
+const LEADERBOARD_HEADERS = [
+	{ text: "#", class: "rank-header" }, { text: "User", class: "" }, { text: "Dataset", class: "" },
+	{ text: "Fluency", class: "" }, { text: "Tokens", class: "number-header" }, { text: "Days", class: "number-header" },
+	{ text: "Sessions", class: "number-header" }, { text: "Avg Turns", class: "number-header" },
+	{ text: "Models", class: "number-header" }, { text: "Projects", class: "number-header" },
+	{ text: "Tok/Turn", class: "number-header" }, { text: "Cost", class: "number-header" }, { text: "", class: "action-header" },
+];
+
+function buildLeaderboardFluencyCell(member: TeamMemberStats): HTMLElement {
+	const fluencyCell = el("td", "fluency-cell");
+	if (member.fluencyStage && member.fluencyLabel) {
+		const badge = el("span", `fluency-badge stage-${member.fluencyStage}`);
+		badge.textContent = `${getFluencyStageIcon(member.fluencyStage)} ${member.fluencyLabel}`;
+		fluencyCell.append(badge);
+	}
+	return fluencyCell;
+}
+
+function buildLeaderboardMemberRow(member: TeamMemberStats, stats: DashboardStats, colSpan: number): [HTMLElement, HTMLElement] {
+	const displayUserId = member.userId.replace(/^u:/, "");
+	const displayDatasetId = (member.datasetId || "").replace(/^ds:/, "");
+	const isCurrentUser = member.userId === stats.personal.userId;
+	const hasCategories = !!member.fluencyCategories?.length;
+	const row = el("tr", "leaderboard-row");
+	if (isCurrentUser) { row.classList.add("current-user"); }
+	if (hasCategories) { row.classList.add("expandable"); row.setAttribute("aria-expanded", "false"); }
+	const rankCell = el("td", "rank-cell", `${member.rank}`);
+	if (hasCategories) { rankCell.prepend(el("span", "expand-toggle", "▶")); }
+	const deleteBtn = document.createElement("button");
+	deleteBtn.className = "delete-row-btn";
+	deleteBtn.title = `Delete data for ${displayUserId} in dataset ${displayDatasetId}`;
+	deleteBtn.textContent = "🗑️";
+	deleteBtn.addEventListener("click", (e) => {
+		e.stopPropagation();
+		vscode.postMessage({ command: "deleteUserDataset", userId: member.userId, datasetId: member.datasetId });
+	});
+	const actionCell = el("td", "action-cell");
+	actionCell.append(deleteBtn);
+	row.append(rankCell, el("td", "", isCurrentUser ? `${displayUserId} 👈` : displayUserId), el("td", "dataset-cell", displayDatasetId),
+		buildLeaderboardFluencyCell(member), el("td", "number-cell", formatCompact(member.totalTokens)),
+		el("td", "number-cell", formatNumber(member.daysActive)), el("td", "number-cell", formatNumber(member.sessions)),
+		el("td", "number-cell", formatNumber(member.avgTurnsPerSession)), el("td", "number-cell", formatNumber(member.uniqueModels)),
+		el("td", "number-cell", formatNumber(member.uniqueWorkspaces)), el("td", "number-cell", formatNumber(member.avgTokensPerTurn)),
+		el("td", "number-cell", formatCost(member.totalCost)), actionCell);
+	const detailRow = el("tr", "detail-row hidden");
+	const detailCell = document.createElement("td");
+	detailCell.colSpan = colSpan; detailCell.className = "detail-cell";
+	if (hasCategories) {
+		detailCell.append(buildFluencyDetailPanel(member));
+		row.addEventListener("click", () => {
+			const expanded = row.getAttribute("aria-expanded") === "true";
+			row.setAttribute("aria-expanded", expanded ? "false" : "true");
+			const toggle = row.querySelector(".expand-toggle");
+			if (toggle) { toggle.textContent = expanded ? "▶" : "▼"; }
+			detailRow.classList.toggle("hidden", expanded);
+		});
+	}
+	detailRow.append(detailCell);
+	return [row, detailRow];
+}
+
 function buildLeaderboard(stats: DashboardStats): HTMLElement {
-  const container = el("div", "leaderboard");
-  const title = el("h3", "", "Leaderboard");
-
-  const table = el("table", "leaderboard-table");
-  const thead = el("thead", "");
-  const headerRow = el("tr", "");
-
-  const headers = [
-    { text: "#", class: "rank-header" },
-    { text: "User", class: "" },
-    { text: "Dataset", class: "" },
-    { text: "Fluency", class: "" },
-    { text: "Tokens", class: "number-header" },
-    { text: "Days", class: "number-header" },
-    { text: "Sessions", class: "number-header" },
-    { text: "Avg Turns", class: "number-header" },
-    { text: "Models", class: "number-header" },
-    { text: "Projects", class: "number-header" },
-    { text: "Tok/Turn", class: "number-header" },
-    { text: "Cost", class: "number-header" },
-    { text: "", class: "action-header" },
-  ];
-
-  headers.forEach((header) => {
-    const th = el("th", header.class, header.text);
-    headerRow.append(th);
-  });
-  thead.append(headerRow);
-
-  const tbody = el("tbody", "");
-  const colSpan = headers.length;
-
-  for (const member of stats.team.members) {
-    const row = el("tr", "leaderboard-row");
-
-    // Strip prefixes for display (u:, ds:)
-    const displayUserId = member.userId.replace(/^u:/, "");
-    const displayDatasetId = (member.datasetId || "").replace(/^ds:/, "");
-
-    // Highlight current user
-    const isCurrentUser = member.userId === stats.personal.userId;
-    if (isCurrentUser) {
-      row.classList.add("current-user");
-    }
-
-    // Mark as expandable if fluency categories are available
-    const hasCategories = !!member.fluencyCategories?.length;
-    if (hasCategories) {
-      row.classList.add("expandable");
-      row.setAttribute("aria-expanded", "false");
-    }
-
-    const rankCell = el("td", "rank-cell", `${member.rank}`);
-    // Expand toggle indicator in rank cell
-    if (hasCategories) {
-      const toggle = el("span", "expand-toggle", "▶");
-      rankCell.prepend(toggle);
-    }
-
-    const userCell = el(
-      "td",
-      "",
-      isCurrentUser ? `${displayUserId} 👈` : displayUserId,
-    );
-    const datasetCell = el("td", "dataset-cell", displayDatasetId);
-
-    // Fluency cell with stage indicator (or empty if no data)
-    const fluencyCell = el("td", "fluency-cell");
-    if (member.fluencyStage && member.fluencyLabel) {
-      const stageIcon = getFluencyStageIcon(member.fluencyStage);
-      const fluencyBadge = el("span", `fluency-badge stage-${member.fluencyStage}`);
-      fluencyBadge.textContent = `${stageIcon} ${member.fluencyLabel}`;
-      fluencyCell.append(fluencyBadge);
-    } else {
-      fluencyCell.textContent = "";
-    }
-
-    const tokensCell = el(
-      "td",
-      "number-cell",
-      formatCompact(member.totalTokens),
-    );
-    const daysCell = el("td", "number-cell", formatNumber(member.daysActive));
-    const sessionsCell = el("td", "number-cell", formatNumber(member.sessions));
-    const avgTurnsCell = el(
-      "td",
-      "number-cell",
-      formatNumber(member.avgTurnsPerSession),
-    );
-    const modelsCell = el(
-      "td",
-      "number-cell",
-      formatNumber(member.uniqueModels),
-    );
-    const projectsCell = el(
-      "td",
-      "number-cell",
-      formatNumber(member.uniqueWorkspaces),
-    );
-    const tokPerTurnCell = el(
-      "td",
-      "number-cell",
-      formatNumber(member.avgTokensPerTurn),
-    );
-    const costCell = el("td", "number-cell", formatCost(member.totalCost));
-
-    const actionCell = el("td", "action-cell");
-    const deleteBtn = document.createElement("button");
-    deleteBtn.className = "delete-row-btn";
-    deleteBtn.title = `Delete data for ${displayUserId} in dataset ${displayDatasetId}`;
-    deleteBtn.textContent = "🗑️";
-    deleteBtn.addEventListener("click", (e) => {
-      e.stopPropagation();
-      vscode.postMessage({
-        command: "deleteUserDataset",
-        userId: member.userId,
-        datasetId: member.datasetId,
-      });
-    });
-    actionCell.append(deleteBtn);
-
-    row.append(
-      rankCell,
-      userCell,
-      datasetCell,
-      fluencyCell,
-      tokensCell,
-      daysCell,
-      sessionsCell,
-      avgTurnsCell,
-      modelsCell,
-      projectsCell,
-      tokPerTurnCell,
-      costCell,
-      actionCell,
-    );
-
-    // Detail expand row (hidden by default)
-    const detailRow = el("tr", "detail-row hidden");
-    const detailCell = document.createElement("td");
-    detailCell.colSpan = colSpan;
-    detailCell.className = "detail-cell";
-
-    if (hasCategories) {
-      detailCell.append(buildFluencyDetailPanel(member));
-      // Toggle on row click
-      row.addEventListener("click", () => {
-        const expanded = row.getAttribute("aria-expanded") === "true";
-        row.setAttribute("aria-expanded", expanded ? "false" : "true");
-        const toggle = row.querySelector(".expand-toggle");
-        if (toggle) { toggle.textContent = expanded ? "▶" : "▼"; }
-        detailRow.classList.toggle("hidden", expanded);
-      });
-    }
-
-    detailRow.append(detailCell);
-    tbody.append(row, detailRow);
-  }
-
-  table.append(thead, tbody);
-  container.append(title, table);
-  return container;
+	const thead = el("thead", "");
+	const headerRow = el("tr", "");
+	LEADERBOARD_HEADERS.forEach((h) => headerRow.append(el("th", h.class, h.text)));
+	thead.append(headerRow);
+	const tbody = el("tbody", "");
+	for (const member of stats.team.members) {
+		const [row, detailRow] = buildLeaderboardMemberRow(member, stats, LEADERBOARD_HEADERS.length);
+		tbody.append(row, detailRow);
+	}
+	const table = el("table", "leaderboard-table");
+	table.append(thead, tbody);
+	const container = el("div", "leaderboard");
+	container.append(el("h3", "", "Leaderboard"), table);
+	return container;
 }
 
 function buildFluencyDetailPanel(member: TeamMemberStats): HTMLElement {
@@ -554,14 +487,6 @@ function getFluencyStageIcon(stage: number): string {
 	return icons[stage] || '❓';
 }
 
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;');
-}
-
 function markdownToHtml(text: string): string {
 	const escaped = escapeHtml(text);
 	return escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g,
@@ -582,6 +507,103 @@ function renderTipHtml(tip: string): string {
 		return `${summary}<div style="margin-top:8px;font-weight:600;font-size:11px;color:#999;">${header}</div><ul style="margin:6px 0 0 0;padding-left:18px;list-style:disc;">${listItems}</ul>`;
 	}
 	return lines.map(line => markdownToHtml(line)).join('<br>');
+}
+
+/** Builds the tab navigation bar shown when both Azure and Team Server are configured. */
+function buildTabNav(): HTMLElement {
+  const nav = el("div", "tab-nav");
+
+  const azureTab = el("button", "tab-btn tab-btn-active", "☁️ Azure Dashboard") as HTMLButtonElement;
+  azureTab.dataset.tab = "azure";
+
+  const teamServerTab = el("button", "tab-btn", "🖥️ Team Server") as HTMLButtonElement;
+  teamServerTab.dataset.tab = "teamServer";
+
+  nav.append(azureTab, teamServerTab);
+  return nav;
+}
+
+/** Wires tab click handlers to show/hide the Azure and Team Server panels. */
+function wireTabNav(
+  tabNav: HTMLElement,
+  azureContent: HTMLElement,
+  footer: HTMLElement,
+  teamServerPanel: HTMLElement,
+): void {
+  const tabs = tabNav.querySelectorAll<HTMLButtonElement>(".tab-btn");
+  tabs.forEach((tab) => {
+    tab.addEventListener("click", () => {
+      tabs.forEach((t) => t.classList.remove("tab-btn-active"));
+      tab.classList.add("tab-btn-active");
+      const isTeamServer = tab.dataset.tab === "teamServer";
+      azureContent.style.display = isTeamServer ? "none" : "";
+      footer.style.display = isTeamServer ? "none" : "";
+      teamServerPanel.style.display = isTeamServer ? "" : "none";
+    });
+  });
+}
+
+/** Builds the team server launch card (no iframe -- VS Code webviews don't share
+ *  browser cookie/session state, so OAuth-gated pages cannot be embedded). */
+function buildTeamServerPanel(url: string): HTMLElement {
+  const panel = el("div", "team-server-panel");
+
+  const card = el("div", "team-server-card");
+
+  const icon = el("div", "team-server-card-icon", "🖥️");
+  const heading = el("div", "team-server-card-heading", "Team Server Dashboard");
+  const urlEl = el("div", "team-server-card-url", url);
+
+  const openBtn = el("button", "team-server-open-btn", "↗ Open Team Server in Browser") as HTMLButtonElement;
+  openBtn.addEventListener("click", () => {
+    vscode.postMessage({ command: "openExternal", url });
+  });
+
+  const note = el(
+    "p",
+    "team-server-card-note",
+    "The team server dashboard uses GitHub OAuth for authentication. " +
+    "VS Code webviews run in an isolated sandbox that cannot share browser sessions, " +
+    "so the dashboard opens in your default browser instead.",
+  );
+
+  card.append(icon, heading, urlEl, openBtn, note);
+  panel.append(card);
+  return panel;
+}
+
+/** Shows the team-server-only full view (when Azure is not configured). */
+function showTeamServerView(url: string): void {
+  loadingTextEl = null;
+  const root = document.getElementById("root");
+  if (!root) { return; }
+
+  root.replaceChildren();
+
+  const themeStyle = document.createElement("style");
+  themeStyle.textContent = themeStyles;
+  const style = document.createElement("style");
+  style.textContent = styles;
+
+  const container = el("div", "container");
+  const header = el("div", "header");
+  const title = el("div", "title", "📊 Team Dashboard");
+  const buttonRow = el("div", "button-row");
+  buttonRow.append(
+    createButton(BUTTONS["btn-details"]),
+    createButton(BUTTONS["btn-chart"]),
+    createButton(BUTTONS["btn-usage"]),
+    createButton(BUTTONS["btn-environmental"]),
+    createButton(BUTTONS["btn-diagnostics"]),
+    createButton(BUTTONS["btn-maturity"]),
+  );
+  header.append(title, buttonRow);
+
+  const panel = buildTeamServerPanel(url);
+
+  container.append(header, panel);
+  root.append(themeStyle, style, container);
+  wireButtons();
 }
 
 function wireButtons(): void {
@@ -633,6 +655,10 @@ window.addEventListener("message", (event) => {
     case "dashboardError":
       showError(message.message);
       break;
+    case "dashboardTeamServerReload": {
+      // No-op: team server is now a launch card, not an iframe
+      break;
+    }
     case "backfillProgress": {
       const progressText = message.text ?? "Backfill in progress...";
       if (!loadingTextEl) {
@@ -649,12 +675,15 @@ window.addEventListener("message", (event) => {
 
 async function bootstrap(): Promise<void> {
   console.log("[CopilotTokenTracker] dashboard bootstrap called");
-  const { provideVSCodeDesignSystem, vsCodeButton } =
-    await import("@vscode/webview-ui-toolkit");
-  provideVSCodeDesignSystem().register(vsCodeButton());
+  await import('@vscode-elements/elements/dist/vscode-button/index.js');
+
+  currentConfig = window.__DASHBOARD_CONFIG__ ?? null;
 
   if (initialData) {
     render(initialData);
+  } else if (currentConfig?.teamServerConfigured && !currentConfig.azureConfigured) {
+    // Team server only — show iframe immediately, no Azure data needed
+    showTeamServerView(currentConfig.teamServerUrl);
   } else {
     showLoading();
   }

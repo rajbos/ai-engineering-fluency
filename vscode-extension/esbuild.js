@@ -38,6 +38,11 @@ async function main() {
 		outfile: 'dist/extension.js',
 		external: ['vscode'],
 		logLevel: 'silent',
+		// Polyfill import.meta.url so ESM packages that use createRequire(import.meta.url)
+		// work correctly when bundled as CJS (esbuild otherwise sets import.meta to {}).
+		// The banner defines a __importMetaUrl variable; define wires import.meta.url to it.
+		banner: { js: 'var __importMetaUrl = require("url").pathToFileURL(__filename).href;' },
+		define: { 'import.meta.url': '__importMetaUrl' },
 		plugins: [esbuildProblemMatcherPlugin],
 	});
 
@@ -74,23 +79,33 @@ async function main() {
 		await webviewCtx.dispose();
 	}
 
+	// Copy JSON config files to dist/webview/ so the VS extension can read them as runtime sidecars
+	const jsonConfigFiles = ['tokenEstimators.json', 'modelPricing.json', 'toolNames.json', 'automaticTools.json'];
+	const webviewDistDir = path.join(__dirname, 'dist', 'webview');
+	fs.mkdirSync(webviewDistDir, { recursive: true });
+	for (const file of jsonConfigFiles) {
+		const jsonSrc = path.join(__dirname, 'src', file);
+		const jsonDst = path.join(webviewDistDir, file);
+		if (fs.existsSync(jsonSrc)) {
+			fs.copyFileSync(jsonSrc, jsonDst);
+		}
+	}
+
 	// Copy sql.js WASM file to dist/ for OpenCode SQLite support
 	const wasmSrc = path.join(__dirname, 'node_modules', 'sql.js', 'dist', 'sql-wasm.wasm');
 	const wasmDst = path.join(__dirname, 'dist', 'sql-wasm.wasm');
 	if (fs.existsSync(wasmSrc)) {
+		fs.mkdirSync(path.dirname(wasmDst), { recursive: true });
 		fs.copyFileSync(wasmSrc, wasmDst);
 	}
 
-	// Copy VS Code Webview UI Toolkit to dist/ for webview usage
+	// Copy vscode-elements bundle to dist/ for webview usage (configPanel loads it at runtime via URI)
 	const toolkitDir = path.join(__dirname, 'dist', 'toolkit');
 	if (!fs.existsSync(toolkitDir)) {
 		fs.mkdirSync(toolkitDir, { recursive: true });
 	}
-	const toolkitSrc = path.join(__dirname, 'node_modules', '@vscode', 'webview-ui-toolkit', 'dist');
-	// Use minified version in production, regular version in development
-	const toolkitFile = production ? 'toolkit.min.js' : 'toolkit.js';
-	const src = path.join(toolkitSrc, toolkitFile);
-	const dst = path.join(toolkitDir, 'toolkit.js'); // Always name it toolkit.js for consistent loading
+	const src = path.join(__dirname, 'node_modules', '@vscode-elements', 'elements', 'dist', 'bundled.js');
+	const dst = path.join(toolkitDir, 'toolkit.js');
 	if (fs.existsSync(src)) {
 		fs.copyFileSync(src, dst);
 	}

@@ -22,18 +22,18 @@ jobs:
       
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+      uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
         egress-policy: audit
 
     - name: Checkout current repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         path: current-repo
         fetch-depth: 0
         
     - name: Checkout vscode-copilot-chat repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         repository: microsoft/vscode-copilot-chat
         path: vscode-copilot-chat
@@ -66,14 +66,9 @@ jobs:
           exit 1
         fi
 
-    - name: Install dependencies
-      working-directory: current-repo
-      run: npm ci
-      
     - name: Check Copilot CLI version
       env:
         GH_TOKEN: ${{ secrets.GH_PAT }}
-        COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
       run: |
         npx @github/copilot --version
         
@@ -82,7 +77,6 @@ jobs:
       working-directory: current-repo
       env:
         GH_TOKEN: ${{ secrets.GH_PAT }}
-        COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
       run: |
         # Read the prompt from the file
         PROMPT=$(cat .github/prompts/sync-toolnames.prompt.md)
@@ -91,7 +85,7 @@ jobs:
         UPSTREAM_PATH="${GITHUB_WORKSPACE}/vscode-copilot-chat"
         
         # Get the path to toolNames.json
-        TOOLNAMES_PATH="${GITHUB_WORKSPACE}/current-repo/src/toolNames.json"
+        TOOLNAMES_PATH="${GITHUB_WORKSPACE}/current-repo/vscode-extension/src/toolNames.json"
         
         # Create the full prompt with context - append context to the base prompt
         {
@@ -123,7 +117,7 @@ jobs:
         npx @github/copilot -p "$COPILOT_PROMPT_TEXT" --silent --allow-all --add-dir "${UPSTREAM_PATH}" --add-dir "${GITHUB_WORKSPACE}/current-repo" --no-ask-user  2>&1 || {
           EXIT_CODE=$?
           echo "Warning: gh copilot command exited with code $EXIT_CODE, but continuing to check output"
-          cat /tmp/copilot-output.txt
+          cat /tmp/copilot-output.txt 2>/dev/null || true
         }
         
     - name: Check for changes
@@ -145,7 +139,7 @@ jobs:
         path: current-repo
         branch: sync-toolnames
         add-paths: |
-          src/toolNames.json
+          vscode-extension/src/toolNames.json
         commit-message: |
           chore: sync toolNames.json with vscode-copilot-chat
           

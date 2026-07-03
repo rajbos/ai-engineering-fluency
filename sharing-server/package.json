@@ -21,12 +21,12 @@
   },
   "dependencies": {
     "@hono/node-server": "^1.13.0",
-    "hono": "^4.12.18"
+    "hono": "^4.12.25"
   },
   "devDependencies": {
     "@types/node": "^22.5.0",
     "chart.js": "^4.4.7",
-    "esbuild": "^0.25.0",
+    "esbuild": "^0.28.1",
     "typescript": "^5.8.0"
   },
   "engines": {

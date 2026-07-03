@@ -9,6 +9,7 @@ changelog:
       exclude:
         labels:
           - dependencies
+          - MCP Toolnames
     - title: 📦 npm Dependencies
       labels:
         - npm
@@ -18,3 +19,6 @@ changelog:
     - title: 📦 Other Dependencies
       labels:
         - dependencies
+    - title: Toolnames
+      labels: 
+        - MCP Toolnames

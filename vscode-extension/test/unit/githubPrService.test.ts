@@ -1,6 +1,6 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import { detectAiType, fetchRepoPrs, fetchCopilotPlanInfo, type CopilotPlanInfo } from '../../src/githubPrService';
+import { detectAiType, fetchRepoPrs, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
 
 // ---------------------------------------------------------------------------
 // detectAiType — pure function, no I/O
@@ -201,4 +201,125 @@ test('fetchCopilotPlanInfo: handles partial plan data gracefully', async () => {
 	assert.equal(error, undefined);
 	assert.equal(planInfo?.copilot_plan, 'copilot_free');
 	assert.equal(planInfo?.ide_chat, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// fetchCopilotTokenEndpointInfo — uses injectable fetcher
+// ---------------------------------------------------------------------------
+
+test('fetchCopilotTokenEndpointInfo: returns endpoint info on success', async () => {
+	const endpointData: CopilotTokenEndpointInfo = {
+		endpoints: { api: 'https://api.individual.githubcopilot.com' },
+		expires_at: 1730000000,
+		refresh_in: 1500,
+		sku: 'copilot_individual',
+	};
+	const mockFetcher = async () => ({ info: endpointData, statusCode: 200 });
+	const { info, statusCode, error } = await fetchCopilotTokenEndpointInfo('token', mockFetcher);
+	assert.equal(error, undefined);
+	assert.equal(statusCode, 200);
+	assert.deepEqual(info, endpointData);
+});
+
+test('fetchCopilotTokenEndpointInfo: returns error on non-2xx response', async () => {
+	const mockFetcher = async () => ({ statusCode: 401, error: 'HTTP 401' });
+	const { info, statusCode, error } = await fetchCopilotTokenEndpointInfo('token', mockFetcher);
+	assert.equal(info, undefined);
+	assert.equal(statusCode, 401);
+	assert.equal(error, 'HTTP 401');
+});
+
+test('fetchCopilotTokenEndpointInfo: returns error on network failure', async () => {
+	const mockFetcher = async () => ({ error: 'socket hang up' });
+	const { info, error } = await fetchCopilotTokenEndpointInfo('token', mockFetcher);
+	assert.equal(info, undefined);
+	assert.equal(error, 'socket hang up');
+});
+
+test('fetchCopilotTokenEndpointInfo: handles partial response gracefully', async () => {
+	// Only endpoints returned, no expiry info
+	const mockFetcher = async () => ({ info: { endpoints: { api: 'https://api.business.githubcopilot.com' } } as CopilotTokenEndpointInfo, statusCode: 200 });
+	const { info, error } = await fetchCopilotTokenEndpointInfo('token', mockFetcher);
+	assert.equal(error, undefined);
+	assert.equal(info?.endpoints?.api, 'https://api.business.githubcopilot.com');
+	assert.equal(info?.expires_at, undefined);
+});
+
+test('fetchCopilotTokenEndpointInfo: handles empty info object gracefully', async () => {
+	const mockFetcher = async () => ({ info: {} as CopilotTokenEndpointInfo, statusCode: 200 });
+	const { info, error } = await fetchCopilotTokenEndpointInfo('token', mockFetcher);
+	assert.equal(error, undefined);
+	assert.deepEqual(info, {});
+});
+
+// ---------------------------------------------------------------------------
+// fetchUserEnterprises — uses injectable fetcher
+// ---------------------------------------------------------------------------
+
+test('fetchUserEnterprises: returns enterprises on success', async () => {
+	const enterprises: EnterpriseInfo[] = [
+		{ slug: 'acme-corp', name: 'Acme Corporation' },
+		{ slug: 'widgets-inc', name: 'Widgets Inc' },
+	];
+	const mockFetcher = async () => ({ enterprises });
+	const { enterprises: result, error } = await fetchUserEnterprises('token', mockFetcher);
+	assert.equal(error, undefined);
+	assert.deepEqual(result, enterprises);
+});
+
+test('fetchUserEnterprises: returns empty array when user has no enterprises', async () => {
+	const mockFetcher = async () => ({ enterprises: [] });
+	const { enterprises, error } = await fetchUserEnterprises('token', mockFetcher);
+	assert.equal(error, undefined);
+	assert.deepEqual(enterprises, []);
+});
+
+test('fetchUserEnterprises: returns error on network failure', async () => {
+	const mockFetcher = async () => ({ error: 'socket hang up' });
+	const { enterprises, error } = await fetchUserEnterprises('token', mockFetcher);
+	assert.equal(enterprises, undefined);
+	assert.equal(error, 'socket hang up');
+});
+
+test('fetchUserEnterprises: returns error on GraphQL error', async () => {
+	const mockFetcher = async () => ({ error: 'Must be logged in.' });
+	const { enterprises, error } = await fetchUserEnterprises('token', mockFetcher);
+	assert.equal(enterprises, undefined);
+	assert.ok(error?.includes('Must be logged in'));
+});
+
+// ---------------------------------------------------------------------------
+// fetchEnterprisePremiumBudgets — uses injectable fetcher
+// ---------------------------------------------------------------------------
+
+test('fetchEnterprisePremiumBudgets: returns budgets on success', async () => {
+	const budgets: EnterpriseBudgetEntry[] = [
+		{ id: 'budget-1', budget_amount: 500, prevent_further_usage: true, budget_scope: 'enterprise', budget_product_skus: ['copilot_premium_requests'] },
+	];
+	const mockFetcher = async () => ({ budgets, statusCode: 200 });
+	const { budgets: result, error } = await fetchEnterprisePremiumBudgets('acme-corp', 'rajbos', 'token', mockFetcher);
+	assert.equal(error, undefined);
+	assert.deepEqual(result, budgets);
+});
+
+test('fetchEnterprisePremiumBudgets: returns error on 403 (not an admin)', async () => {
+	const mockFetcher = async () => ({ statusCode: 403, error: 'HTTP 403' });
+	const { budgets, statusCode, error } = await fetchEnterprisePremiumBudgets('acme-corp', 'rajbos', 'token', mockFetcher);
+	assert.equal(budgets, undefined);
+	assert.equal(statusCode, 403);
+	assert.equal(error, 'HTTP 403');
+});
+
+test('fetchEnterprisePremiumBudgets: returns error on network failure', async () => {
+	const mockFetcher = async () => ({ error: 'ECONNREFUSED' });
+	const { budgets, error } = await fetchEnterprisePremiumBudgets('acme-corp', 'rajbos', 'token', mockFetcher);
+	assert.equal(budgets, undefined);
+	assert.equal(error, 'ECONNREFUSED');
+});
+
+test('fetchEnterprisePremiumBudgets: returns empty array when no budgets configured', async () => {
+	const mockFetcher = async () => ({ budgets: [], statusCode: 200 });
+	const { budgets, error } = await fetchEnterprisePremiumBudgets('acme-corp', 'rajbos', 'token', mockFetcher);
+	assert.equal(error, undefined);
+	assert.deepEqual(budgets, []);
 });

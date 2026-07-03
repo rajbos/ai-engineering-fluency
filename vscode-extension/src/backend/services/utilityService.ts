@@ -5,8 +5,16 @@
 
 import * as path from 'path';
 import * as fs from 'fs/promises';
+import { fileUriToPath, normalizePath } from '../../workspaceHelpers';
+import {
+	CODE_WORKSPACE_EXTENSION,
+	DAY_KEY_REGEX,
+	DAY_MS,
+	EPOCH_SECONDS_THRESHOLD,
+	MAX_DAYS_RANGE,
+	MAX_DISPLAY_NAME_LENGTH,
+} from '../constants';
 
-const MAX_DISPLAY_NAME_LENGTH = 64;
 
 /**
  * BackendUtility provides pure static helper functions for the backend module.
@@ -40,7 +48,7 @@ export class BackendUtility {
 		if (!dayKey || typeof dayKey !== 'string') {
 			return false;
 		}
-		if (!/^\d{4}-\d{2}-\d{2}$/.test(dayKey)) {
+		if (!DAY_KEY_REGEX.test(dayKey)) {
 			return false;
 		}
 		const date = new Date(`${dayKey}T00:00:00.000Z`);
@@ -83,16 +91,15 @@ export class BackendUtility {
 			throw new Error(`Invalid endDayKey format: ${endDayKey}`);
 		}
 		
-		const MAX_DAYS = 400;
 		const startDate = new Date(`${startDayKey}T00:00:00.000Z`);
 		const endDate = new Date(`${endDayKey}T00:00:00.000Z`);
-		const dayCount = Math.ceil((endDate.getTime() - startDate.getTime()) / (24 * 60 * 60 * 1000)) + 1;
+		const dayCount = Math.ceil((endDate.getTime() - startDate.getTime()) / DAY_MS) + 1;
 		
 		if (dayCount < 0) {
 			throw new Error(`Invalid date range: startDayKey (${startDayKey}) is after endDayKey (${endDayKey})`);
 		}
-		if (dayCount > MAX_DAYS) {
-			throw new Error(`Date range too large: ${dayCount} days (max ${MAX_DAYS})`);
+		if (dayCount > MAX_DAYS_RANGE) {
+			throw new Error(`Date range too large: ${dayCount} days (max ${MAX_DAYS_RANGE})`);
 		}
 		
 		const result: string[] = [];
@@ -115,7 +122,7 @@ export class BackendUtility {
 		const asNumber = typeof value === 'number' ? value : typeof value === 'string' ? Number(value) : undefined;
 		if (typeof asNumber === 'number' && Number.isFinite(asNumber)) {
 			// Treat sub-second epochs as seconds, otherwise assume milliseconds.
-			return asNumber < 1_000_000_000_000 ? asNumber * 1000 : asNumber;
+			return asNumber < EPOCH_SECONDS_THRESHOLD ? asNumber * 1000 : asNumber;
 		}
 
 		if (typeof value === 'string') {
@@ -156,7 +163,7 @@ export class BackendUtility {
 	 * Extract workspace ID from a session file path.
 	 */
 	static extractWorkspaceIdFromSessionPath(sessionFile: string): string {
-		const normalized = sessionFile.replace(/\\/g, '/');
+		const normalized = normalizePath(sessionFile);
 		const parts = normalized.split('/');
 		const idx = parts.findIndex(p => p.toLowerCase() === 'workspacestorage');
 		if (idx >= 0 && parts[idx + 1]) {
@@ -179,7 +186,7 @@ export class BackendUtility {
 	 */
 	static async tryResolveWorkspaceNameFromSessionPath(sessionFile: string): Promise<string | undefined> {
 		try {
-			const normalized = sessionFile.replace(/\\/g, '/');
+			const normalized = normalizePath(sessionFile);
 			const marker = '/workspacestorage/';
 			const idx = normalized.toLowerCase().indexOf(marker);
 			if (idx < 0) {
@@ -198,52 +205,41 @@ export class BackendUtility {
 			];
 
 			for (const filePath of candidates) {
-				try {
-					const raw = await fs.readFile(filePath, 'utf8');
-					const parsed = JSON.parse(raw);
-					
-					const uriStr = (parsed?.folder ?? parsed?.workspace ?? parsed?.configuration ?? '').toString();
-					if (!uriStr) {
-						continue;
-					}
-					
-					// Parse the URI string to get the file path
-					// This is a simplified version that doesn't require vscode.Uri
-					let fsPath: string;
-					if (uriStr.startsWith('file://')) {
-						// file:// URI - extract path after protocol
-						fsPath = uriStr.substring('file://'.length);
-						// Handle Windows drive letters (e.g., file:///C:/path -> C:/path)
-						if (fsPath.startsWith('/') && /^\/[a-zA-Z]:\//.test(fsPath)) {
-							fsPath = fsPath.substring(1);
-						}
-						// Decode URI components
-						fsPath = decodeURIComponent(fsPath);
-					} else {
-						// Assume it's already a file path
-						fsPath = uriStr;
-					}
-					
-					if (!fsPath) {
-						continue;
-					}
-					const base = path.basename(fsPath);
-					if (!base) {
-						continue;
-					}
-					// For .code-workspace files, show name without extension.
-					const name = base.toLowerCase().endsWith('.code-workspace')
-						? base.substring(0, base.length - '.code-workspace'.length)
-						: base;
-					return BackendUtility.normalizeNameForStorage(name);
-				} catch {
-					// File doesn't exist or can't be read - continue to next candidate
-					continue;
+				const name = await BackendUtility.tryReadWorkspaceNameFromFile(filePath);
+				if (name !== undefined) {
+					return name;
 				}
 			}
 		} catch {
 			// Best-effort only.
 		}
 		return undefined;
+	}
+
+	private static async tryReadWorkspaceNameFromFile(filePath: string): Promise<string | undefined> {
+		try {
+			const raw = await fs.readFile(filePath, 'utf8');
+			const parsed = JSON.parse(raw);
+			const uriStr = (parsed?.folder ?? parsed?.workspace ?? parsed?.configuration ?? '').toString();
+			if (!uriStr) {
+				return undefined;
+			}
+			const fsPath = uriStr.startsWith('file://') ? fileUriToPath(uriStr) : uriStr;
+			if (!fsPath) {
+				return undefined;
+			}
+			const base = path.basename(fsPath);
+			if (!base) {
+				return undefined;
+			}
+			// For .code-workspace files, show name without extension.
+			const name = base.toLowerCase().endsWith(CODE_WORKSPACE_EXTENSION)
+				? base.substring(0, base.length - CODE_WORKSPACE_EXTENSION.length)
+				: base;
+			return BackendUtility.normalizeNameForStorage(name);
+		} catch {
+			// File doesn't exist or can't be read - not a valid candidate.
+			return undefined;
+		}
 	}
 }

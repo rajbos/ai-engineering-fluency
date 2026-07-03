@@ -54,6 +54,21 @@ export function redactSecretsInText(text: string, secretsToRedact: string[]): st
 	return result;
 }
 
+function _sseFromErrorInstance(error: Error, secretsToRedact?: string[]): string {
+	if (!error.stack) { return error.message || error.toString(); }
+	return secretsToRedact?.length ? redactSecretsInText(error.stack, secretsToRedact) : error.stack;
+}
+
+function _sseFromObject(error: object): string {
+	 
+	const errorObj = error as any;
+	try {
+		return errorObj.message || errorObj.error || JSON.stringify(error);
+	} catch {
+		return errorObj.message || errorObj.error || '[object Object]';
+	}
+}
+
 /**
  * Safely converts an error to a string, with optional secret redaction.
  * @param error - The error to stringify
@@ -62,79 +77,38 @@ export function redactSecretsInText(text: string, secretsToRedact: string[]): st
  */
 export function safeStringifyError(error: unknown, secretsToRedact?: string[]): string {
 	let message: string;
-	
-	if (error instanceof Error) {
-		// Include stack trace if available (useful for debugging)
-		if (error.stack) {
-			let stack = error.stack;
-			if (secretsToRedact && secretsToRedact.length > 0) {
-				stack = redactSecretsInText(stack, secretsToRedact);
-			}
-			message = stack;
-		} else {
-			message = error.message || error.toString();
-		}
-	} else if (typeof error === 'string') {
-		message = error;
-	} else if (error && typeof error === 'object') {
-		// Try to extract message from object
-		const errorObj = error as any;
-		try {
-			message = errorObj.message || errorObj.error || JSON.stringify(error);
-		} catch {
-			// Guard against circular structures
-			message = errorObj.message || errorObj.error || '[object Object]';
-		}
-	} else {
-		message = String(error);
-	}
-
-	// Redact secrets if provided (for non-stack trace messages)
-	if (secretsToRedact && secretsToRedact.length > 0) {
-		message = redactSecretsInText(message, secretsToRedact);
-	}
-
+	if (error instanceof Error) { message = _sseFromErrorInstance(error, secretsToRedact); }
+	else if (typeof error === 'string') { message = error; }
+	else if (error && typeof error === 'object') { message = _sseFromObject(error); }
+	else { message = String(error); }
+	if (secretsToRedact && secretsToRedact.length > 0) { message = redactSecretsInText(message, secretsToRedact); }
 	return message;
 }
 
 /**
- * Checks if an error is an Azure Policy "RequestDisallowedByPolicy" error.
- * @param error - The error to check
- * @returns True if this is an Azure Policy disallowed error
+ * Extracts the HTTP status code from an unknown error (e.g. Azure SDK RestError has a `statusCode` property).
+ * @param error - The error to inspect
+ * @returns The numeric status code, or undefined if not present
  */
-export function isAzurePolicyDisallowedError(error: unknown): boolean {
-	if (!error || typeof error !== 'object') {
-		return false;
-	}
-	const e = error as any;
-	// Azure Resource Manager returns this error code when policy blocks an operation
-	if (e.code === 'RequestDisallowedByPolicy') {
-		return true;
-	}
-	// Also check in message
-	const message = e.message || '';
-	return message.includes('RequestDisallowedByPolicy') || message.includes('policy assignment');
+export function getErrorStatusCode(error: unknown): number | undefined {
+	if (!error || typeof error !== 'object') { return undefined; }
+	const sc = (error as Record<string, unknown>)['statusCode'];
+	return typeof sc === 'number' ? sc : undefined;
 }
 
 /**
- * Checks if an error indicates Storage account local auth (Shared Key) is disabled by Azure Policy.
- * @param error - The error to check
- * @returns True if this is a Storage local auth disabled error
+ * Extracts the error code from an unknown error (e.g. Azure SDK errors expose a `code` string).
+ * @param error - The error to inspect
+ * @returns The code as a string or number, or undefined if not present
  */
-export function isStorageLocalAuthDisallowedByPolicyError(error: unknown): boolean {
-	if (!error || typeof error !== 'object') {
-		return false;
-	}
-	const e = error as any;
-	const message = (e.message || '').toLowerCase();
-	
-	// Common patterns in policy error messages
-	return (
-		message.includes('allowsharedkeyaccess') ||
-		message.includes('local authentication') ||
-		message.includes('shared key') && message.includes('policy')
-	);
+export function getErrorCode(error: unknown): string | number | undefined {
+	if (!error || typeof error !== 'object') { return undefined; }
+	const code = (error as Record<string, unknown>)['code'];
+	return typeof code === 'string' || typeof code === 'number' ? code : undefined;
 }
+
+// Re-exported from azureErrorClassifier.ts for backward compatibility.
+export { isAzurePolicyDisallowedError, isStorageLocalAuthDisallowedByPolicyError, isAuthError, isNotFoundError, isConflictError, isRetryableError, isNetworkError } from './azureErrorClassifier';
 
 /**
  * Wraps an async function with error handling and optional retry logic.
@@ -153,5 +127,63 @@ export async function withErrorHandling<T>(
 	} catch (error) {
 		const message = `${errorPrefix}: ${safeStringifyError(error, secretsToRedact)}`;
 		throw new BackendError(message, error);
+	}
+}
+
+/**
+ * Calls fn and returns its result. On error, logs with context and returns fallback.
+ * Use this instead of silent `catch { }` blocks so errors remain visible for debugging.
+ */
+export function withErrorRecoverySync<T>(fn: () => T, fallback: T, context?: string): T {
+	try {
+		return fn();
+	} catch (err) {
+		console.error(`[recovery] ${context ?? 'unknown'}:`, err);
+		return fallback;
+	}
+}
+
+/**
+ * Calls fn (sync or async) and returns its result. On error, logs with context and returns fallback.
+ * Use this instead of silent `catch { }` blocks so errors remain visible for debugging.
+ */
+export async function withErrorRecovery<T>(fn: () => T | Promise<T>, fallback: T, context?: string): Promise<T> {
+	try {
+		return await fn();
+	} catch (err) {
+		console.error(`[recovery] ${context ?? 'unknown'}:`, err);
+		return fallback;
+	}
+}
+
+/**
+ * Discriminated union returned by the Result variants of the recovery helpers.
+ * Callers can branch on `ok` to handle errors explicitly without needing a fallback value.
+ */
+export type Result<T> = { ok: true; value: T } | { ok: false; error: unknown };
+
+/**
+ * Like withErrorRecoverySync but returns a Result instead of requiring a fallback.
+ * Logs the error (same as the fallback variant) so failures remain visible.
+ */
+export function withErrorRecoverySyncResult<T>(fn: () => T, context?: string): Result<T> {
+	try {
+		return { ok: true, value: fn() };
+	} catch (err) {
+		console.error(`[recovery] ${context ?? 'unknown'}:`, err);
+		return { ok: false, error: err };
+	}
+}
+
+/**
+ * Like withErrorRecovery but returns a Result instead of requiring a fallback.
+ * Logs the error (same as the fallback variant) so failures remain visible.
+ */
+export async function withErrorRecoveryResult<T>(fn: () => T | Promise<T>, context?: string): Promise<Result<T>> {
+	try {
+		return { ok: true, value: await fn() };
+	} catch (err) {
+		console.error(`[recovery] ${context ?? 'unknown'}:`, err);
+		return { ok: false, error: err };
 	}
 }

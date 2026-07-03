@@ -3,6 +3,7 @@ build/
 out/
 .idea/
 .intellijPlatform/
+.kotlin/
 *.iml
 
 # Bundled assets are produced from sibling projects; never commit them.

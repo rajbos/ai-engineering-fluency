@@ -1,3 +1,4 @@
+// @ts-nocheck
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
@@ -8,9 +9,20 @@ import {
 	BackendSyncError,
 	isAzurePolicyDisallowedError,
 	isStorageLocalAuthDisallowedByPolicyError,
+	isAuthError,
+	isNotFoundError,
+	isConflictError,
+	isRetryableError,
+	isNetworkError,
 	redactSecretsInText,
 	safeStringifyError,
-	withErrorHandling
+	getErrorStatusCode,
+	getErrorCode,
+	withErrorHandling,
+	withErrorRecovery,
+	withErrorRecoverySync,
+	withErrorRecoveryResult,
+	withErrorRecoverySyncResult
 } from '../../src/utils/errors';
 
 test('BackendConfigError/BackendAuthError/BackendSyncError set name and cause', () => {
@@ -191,4 +203,300 @@ test('withErrorHandling preserves the original error as cause', async () => {
                 assert.ok(e instanceof BackendError);
                 assert.equal(e.cause, original);
         }
+});
+
+// ── withErrorRecoverySync tests ───────────────────────────────────────────
+
+test('withErrorRecoverySync returns fn result on success', () => {
+	const result = withErrorRecoverySync(() => 42, 0, 'test context');
+	assert.equal(result, 42);
+});
+
+test('withErrorRecoverySync returns fallback when fn throws', () => {
+	const result = withErrorRecoverySync(() => { throw new Error('boom'); }, 99, 'test context');
+	assert.equal(result, 99);
+});
+
+test('withErrorRecoverySync returns fallback with no context when context is omitted', () => {
+	const result = withErrorRecoverySync(() => { throw new Error('boom'); }, 'default');
+	assert.equal(result, 'default');
+});
+
+test('withErrorRecoverySync returns array fallback when fn throws', () => {
+	const result = withErrorRecoverySync(() => { throw new Error('oops'); }, [] as string[]);
+	assert.deepEqual(result, []);
+});
+
+test('withErrorRecoverySync returns null fallback when fn throws', () => {
+	const result = withErrorRecoverySync(() => { throw new Error('fail'); }, null);
+	assert.equal(result, null);
+});
+
+// ── withErrorRecovery tests (async) ──────────────────────────────────────
+
+test('withErrorRecovery returns fn result on success (sync fn)', async () => {
+	const result = await withErrorRecovery(() => 'hello', 'fallback', 'ctx');
+	assert.equal(result, 'hello');
+});
+
+test('withErrorRecovery returns fn result on success (async fn)', async () => {
+	const result = await withErrorRecovery(async () => 'world', 'fallback', 'ctx');
+	assert.equal(result, 'world');
+});
+
+test('withErrorRecovery returns fallback when sync fn throws', async () => {
+	const result = await withErrorRecovery(() => { throw new Error('boom'); }, 'default', 'ctx');
+	assert.equal(result, 'default');
+});
+
+test('withErrorRecovery returns fallback when async fn rejects', async () => {
+	const result = await withErrorRecovery(async () => { throw new Error('async boom'); }, 0, 'ctx');
+	assert.equal(result, 0);
+});
+
+test('withErrorRecovery returns array fallback when fn throws', async () => {
+	const result = await withErrorRecovery(() => { throw new Error('fail'); }, [] as number[]);
+	assert.deepEqual(result, []);
+});
+
+test('withErrorRecovery returns null fallback when fn throws', async () => {
+	const result = await withErrorRecovery(async () => { throw new Error('fail'); }, null);
+	assert.equal(result, null);
+});
+
+// ── withErrorRecoverySyncResult tests ─────────────────────────────────────
+
+test('withErrorRecoverySyncResult returns ok:true with value on success', () => {
+	const result = withErrorRecoverySyncResult(() => 42, 'ctx');
+	assert.ok(result.ok);
+	if (result.ok) { assert.equal(result.value, 42); }
+});
+
+test('withErrorRecoverySyncResult returns ok:false with error on throw', () => {
+	const thrown = new Error('sync-fail');
+	const result = withErrorRecoverySyncResult(() => { throw thrown; }, 'ctx');
+	assert.equal(result.ok, false);
+	if (!result.ok) { assert.equal(result.error, thrown); }
+});
+
+test('withErrorRecoverySyncResult captures non-Error thrown values', () => {
+	const result = withErrorRecoverySyncResult(() => { throw 'oops'; }, 'ctx');
+	assert.equal(result.ok, false);
+	if (!result.ok) { assert.equal(result.error, 'oops'); }
+});
+
+test('withErrorRecoverySyncResult works without context argument', () => {
+	const result = withErrorRecoverySyncResult(() => { throw new Error('no-ctx'); });
+	assert.equal(result.ok, false);
+});
+
+// ── withErrorRecoveryResult tests (async) ────────────────────────────────
+
+test('withErrorRecoveryResult returns ok:true with value for sync fn', async () => {
+	const result = await withErrorRecoveryResult(() => 'hello', 'ctx');
+	assert.ok(result.ok);
+	if (result.ok) { assert.equal(result.value, 'hello'); }
+});
+
+test('withErrorRecoveryResult returns ok:true with value for async fn', async () => {
+	const result = await withErrorRecoveryResult(async () => 'world', 'ctx');
+	assert.ok(result.ok);
+	if (result.ok) { assert.equal(result.value, 'world'); }
+});
+
+test('withErrorRecoveryResult returns ok:false when sync fn throws', async () => {
+	const thrown = new Error('sync-async-fail');
+	const result = await withErrorRecoveryResult(() => { throw thrown; }, 'ctx');
+	assert.equal(result.ok, false);
+	if (!result.ok) { assert.equal(result.error, thrown); }
+});
+
+test('withErrorRecoveryResult returns ok:false when async fn rejects', async () => {
+	const thrown = new Error('async-fail');
+	const result = await withErrorRecoveryResult(async () => { throw thrown; }, 'ctx');
+	assert.equal(result.ok, false);
+	if (!result.ok) { assert.equal(result.error, thrown); }
+});
+
+test('withErrorRecoveryResult captures non-Error thrown values', async () => {
+	const result = await withErrorRecoveryResult(async () => { throw 'string-error'; }, 'ctx');
+	assert.equal(result.ok, false);
+	if (!result.ok) { assert.equal(result.error, 'string-error'); }
+});
+
+test('withErrorRecoveryResult works without context argument', async () => {
+	const result = await withErrorRecoveryResult(async () => { throw new Error('no-ctx'); });
+	assert.equal(result.ok, false);
+});
+
+
+// ── getErrorStatusCode ─────────────────────────────────────────────────────
+
+test('getErrorStatusCode: returns undefined for null and non-objects', () => {
+assert.equal(getErrorStatusCode(null), undefined);
+assert.equal(getErrorStatusCode(undefined), undefined);
+assert.equal(getErrorStatusCode('string error'), undefined);
+assert.equal(getErrorStatusCode(42), undefined);
+});
+
+test('getErrorStatusCode: returns undefined when statusCode is absent', () => {
+assert.equal(getErrorStatusCode({}), undefined);
+assert.equal(getErrorStatusCode(new Error('oops')), undefined);
+});
+
+test('getErrorStatusCode: returns statusCode when it is a number', () => {
+assert.equal(getErrorStatusCode({ statusCode: 404 }), 404);
+assert.equal(getErrorStatusCode({ statusCode: 401 }), 401);
+assert.equal(getErrorStatusCode({ statusCode: 500 }), 500);
+});
+
+test('getErrorStatusCode: returns undefined when statusCode is a string', () => {
+assert.equal(getErrorStatusCode({ statusCode: '404' }), undefined);
+});
+
+// ── getErrorCode ───────────────────────────────────────────────────────────
+
+test('getErrorCode: returns undefined for null and non-objects', () => {
+assert.equal(getErrorCode(null), undefined);
+assert.equal(getErrorCode(undefined), undefined);
+assert.equal(getErrorCode('string'), undefined);
+assert.equal(getErrorCode(42), undefined);
+});
+
+test('getErrorCode: returns undefined when code is absent', () => {
+assert.equal(getErrorCode({}), undefined);
+assert.equal(getErrorCode({ message: 'oops' }), undefined);
+});
+
+test('getErrorCode: returns string code', () => {
+assert.equal(getErrorCode({ code: 'NOT_FOUND' }), 'NOT_FOUND');
+assert.equal(getErrorCode({ code: 'REQUEST_DISALLOWED' }), 'REQUEST_DISALLOWED');
+});
+
+test('getErrorCode: returns numeric code', () => {
+assert.equal(getErrorCode({ code: 404 }), 404);
+assert.equal(getErrorCode({ code: 0 }), 0);
+});
+
+test('getErrorCode: returns undefined when code is boolean or object', () => {
+assert.equal(getErrorCode({ code: true }), undefined);
+assert.equal(getErrorCode({ code: null }), undefined);
+assert.equal(getErrorCode({ code: {} }), undefined);
+});
+
+// ── isAuthError tests ─────────────────────────────────────────────────────
+
+test('isAuthError: returns true for statusCode 403', () => {
+assert.equal(isAuthError({ statusCode: 403 }), true);
+});
+
+test('isAuthError: returns true for AUTHORIZATION_PERMISSION_MISMATCH code', () => {
+assert.equal(isAuthError({ code: 'AuthorizationPermissionMismatch' }), true);
+});
+
+test('isAuthError: returns true when message contains 403', () => {
+assert.equal(isAuthError({ message: 'Error 403 Forbidden' } as any), true);
+});
+
+test('isAuthError: returns true when message contains Forbidden', () => {
+assert.equal(isAuthError({ message: 'Access Forbidden' } as any), true);
+});
+
+test('isAuthError: returns false for non-auth errors', () => {
+assert.equal(isAuthError({ statusCode: 404 }), false);
+assert.equal(isAuthError({ message: 'Not found' } as any), false);
+assert.equal(isAuthError(null), false);
+assert.equal(isAuthError(undefined), false);
+});
+
+// ── isNotFoundError tests ─────────────────────────────────────────────────
+
+test('isNotFoundError: returns true for statusCode 404', () => {
+assert.equal(isNotFoundError({ statusCode: 404 }), true);
+});
+
+test('isNotFoundError: returns true when message contains 404', () => {
+assert.equal(isNotFoundError({ message: 'Error 404 not found' } as any), true);
+});
+
+test('isNotFoundError: returns true when message contains NotFound', () => {
+assert.equal(isNotFoundError({ message: 'Resource NotFound' } as any), true);
+});
+
+test('isNotFoundError: returns false for non-404 errors', () => {
+assert.equal(isNotFoundError({ statusCode: 200 }), false);
+assert.equal(isNotFoundError({ statusCode: 500 }), false);
+assert.equal(isNotFoundError(null), false);
+});
+
+// ── isConflictError tests ─────────────────────────────────────────────────
+
+test('isConflictError: returns true for statusCode 409', () => {
+assert.equal(isConflictError({ statusCode: 409 }), true);
+});
+
+test('isConflictError: returns true for TABLE_ALREADY_EXISTS code', () => {
+assert.equal(isConflictError({ code: 'TableAlreadyExists' }), true);
+});
+
+test('isConflictError: returns true for numeric 409 code', () => {
+assert.equal(isConflictError({ code: 409 }), true);
+});
+
+test('isConflictError: returns false for non-conflict errors', () => {
+assert.equal(isConflictError({ statusCode: 200 }), false);
+assert.equal(isConflictError({ code: 'SomethingElse' }), false);
+assert.equal(isConflictError(null), false);
+});
+
+// ── isRetryableError tests ────────────────────────────────────────────────
+
+test('isRetryableError: returns true for TOO_MANY_REQUESTS (429)', () => {
+assert.equal(isRetryableError({ statusCode: 429 }), true);
+});
+
+test('isRetryableError: returns true for SERVICE_UNAVAILABLE (503)', () => {
+assert.equal(isRetryableError({ statusCode: 503 }), true);
+});
+
+test('isRetryableError: returns true for ETIMEDOUT code', () => {
+assert.equal(isRetryableError({ code: 'ETIMEDOUT' }), true);
+});
+
+test('isRetryableError: returns false for non-retryable errors', () => {
+assert.equal(isRetryableError({ statusCode: 400 }), false);
+assert.equal(isRetryableError({ code: 'ECONNREFUSED' }), false);
+assert.equal(isRetryableError(null), false);
+});
+
+// ── isNetworkError tests ──────────────────────────────────────────────────
+
+test('isNetworkError: returns true for ENOTFOUND code', () => {
+assert.equal(isNetworkError({ code: 'ENOTFOUND' }), true);
+});
+
+test('isNetworkError: returns true for ETIMEDOUT code', () => {
+assert.equal(isNetworkError({ code: 'ETIMEDOUT' }), true);
+});
+
+test('isNetworkError: returns true for ECONNREFUSED code', () => {
+assert.equal(isNetworkError({ code: 'ECONNREFUSED' }), true);
+});
+
+test('isNetworkError: returns true when message contains ENOTFOUND', () => {
+assert.equal(isNetworkError({ message: 'DNS lookup ENOTFOUND' } as any), true);
+});
+
+test('isNetworkError: returns true when message contains ETIMEDOUT', () => {
+assert.equal(isNetworkError({ message: 'Connection ETIMEDOUT' } as any), true);
+});
+
+test('isNetworkError: returns true when message contains ECONNREFUSED', () => {
+assert.equal(isNetworkError({ message: 'Connection ECONNREFUSED' } as any), true);
+});
+
+test('isNetworkError: returns false for non-network errors', () => {
+assert.equal(isNetworkError({ statusCode: 404 }), false);
+assert.equal(isNetworkError({ code: 'NOT_FOUND' }), false);
+assert.equal(isNetworkError(null), false);
 });

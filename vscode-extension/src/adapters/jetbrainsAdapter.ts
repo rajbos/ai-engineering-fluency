@@ -31,25 +31,15 @@ import type {
 	DiscoveryResult,
 	CandidatePath,
 } from '../ecosystemAdapter';
-import { parseJetBrainsPartition, type JetBrainsParsedSession, type JetBrainsToolCall } from '../jetbrains';
+import { parseJetBrainsPartition, type JetBrainsParsedSession, type JetBrainsToolCall, type JetBrainsTurn } from '../jetbrains';
+import { normalizePath } from '../utils/pathUtils';
+import { pathExists } from '../utils/fsAsync';
 
 /** Returns the canonical JetBrains Copilot session directory (~/.copilot/jb). */
 export function getJetBrainsSessionDir(): string {
 	return path.join(os.homedir(), '.copilot', 'jb');
 }
 
-/**
- * Path predicate matching JetBrains partition files under ~/.copilot/jb/.
- * Matches paths containing /.copilot/jb/ that end with /partition-{n}.jsonl.
- */
-export function isJetBrainsSessionPath(filePath: string): boolean {
-	const norm = filePath.replace(/\\/g, '/');
-	return norm.includes('/.copilot/jb/') && /\/partition-\d+\.jsonl$/.test(norm);
-}
-
-async function pathExists(p: string): Promise<boolean> {
-	try { await fs.promises.access(p); return true; } catch { return false; }
-}
 
 export class JetBrainsAdapter implements IEcosystemAdapter, IDiscoverableEcosystem {
 	readonly id = 'jetbrains';
@@ -133,6 +123,39 @@ export class JetBrainsAdapter implements IEcosystemAdapter, IDiscoverableEcosyst
 	async getToolCalls(sessionFile: string): Promise<JetBrainsToolCall[]> {
 		const parsed = await this.parsePartition(sessionFile);
 		return parsed?.toolCalls ?? [];
+	}
+
+	/**
+	 * Get turn-level information for a JetBrains partition.
+	 * Returns turn metadata including IDs, timestamps, status, and message associations.
+	 */
+	async getTurns(sessionFile: string): Promise<JetBrainsTurn[]> {
+		const parsed = await this.parsePartition(sessionFile);
+		return parsed?.turns ?? [];
+	}
+
+	/**
+	 * Get all message IDs from assistant messages in the partition.
+	 */
+	async getMessageIds(sessionFile: string): Promise<string[]> {
+		const parsed = await this.parsePartition(sessionFile);
+		return parsed?.messageIds ?? [];
+	}
+
+	/**
+	 * Get turn status counts (success, cancelled, failed, unknown).
+	 */
+	async getTurnStatusCounts(sessionFile: string): Promise<{ success: number; cancelled: number; failed: number; unknown: number }> {
+		const parsed = await this.parsePartition(sessionFile);
+		return parsed?.turnStatusCounts ?? { success: 0, cancelled: 0, failed: 0, unknown: 0 };
+	}
+
+	/**
+	 * Check if the partition contains any thinking content.
+	 */
+	async hasThinking(sessionFile: string): Promise<boolean> {
+		const parsed = await this.parsePartition(sessionFile);
+		return parsed?.hasThinking ?? false;
 	}
 
 	getEditorRoot(_sessionFile: string): string {

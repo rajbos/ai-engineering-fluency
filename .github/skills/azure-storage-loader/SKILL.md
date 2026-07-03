@@ -38,7 +38,7 @@ Before using this skill, ensure you have:
 The extension stores daily aggregate data in Azure Tables with the following schema:
 
 ### Table Name
-Default: `usageAggDaily` (configurable via `copilotTokenTracker.backend.aggTable`)
+Default: `usageAggDaily` (configurable via `aiEngineeringFluency.backend.aggTable`)
 
 ### Entity Structure
 

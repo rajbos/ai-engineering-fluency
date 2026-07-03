@@ -33,20 +33,20 @@ export class GeminiCliAdapter implements IEcosystemAdapter, IDiscoverableEcosyst
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = this.geminiCli.getTokensFromGeminiCliSession(sessionFile);
+		const result = await this.geminiCli.getTokensFromGeminiCliSession(sessionFile);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		return Promise.resolve(this.geminiCli.countGeminiCliInteractions(sessionFile));
+		return await this.geminiCli.countGeminiCliInteractions(sessionFile);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return Promise.resolve(this.geminiCli.getGeminiCliModelUsage(sessionFile));
+		return await this.geminiCli.getGeminiCliModelUsage(sessionFile);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		return Promise.resolve(this.geminiCli.getGeminiCliSessionMeta(sessionFile));
+		return await this.geminiCli.getGeminiCliSessionMeta(sessionFile);
 	}
 
 	getEditorRoot(_sessionFile: string): string {
@@ -58,7 +58,7 @@ export class GeminiCliAdapter implements IEcosystemAdapter, IDiscoverableEcosyst
 		const sessionFiles: string[] = [];
 
 		try {
-			const files = this.geminiCli.getGeminiCliSessionFiles();
+			const files = await this.geminiCli.getGeminiCliSessionFiles();
 			if (files.length > 0) {
 				log(`📄 Found ${files.length} session file(s) in Gemini CLI (~/.gemini/tmp/*/chats)`);
 				sessionFiles.push(...files);
@@ -79,53 +79,60 @@ export class GeminiCliAdapter implements IEcosystemAdapter, IDiscoverableEcosyst
 	}
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
-		return Promise.resolve(this.geminiCli.buildGeminiCliTurns(sessionFile));
+		return await this.geminiCli.buildGeminiCliTurns(sessionFile);
 	}
 
 	async getDailyFractions(sessionFile: string): Promise<Record<string, number>> {
-		return Promise.resolve(this.geminiCli.getGeminiCliDailyFractions(sessionFile));
+		return await this.geminiCli.getGeminiCliDailyFractions(sessionFile);
 	}
 
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
 		const analysis = createEmptySessionUsageAnalysis();
-		const session = this.geminiCli.readGeminiCliSession(sessionFile);
+		const session = await this.geminiCli.readGeminiCliSession(sessionFile);
 		const models: string[] = [];
 
 		analysis.modeUsage.cli += session.userRecords.length;
 
 		for (const assistant of session.assistantRecords) {
-			const model = normalizeGeminiModelId(assistant.model || 'unknown');
-			models.push(model);
-
-			for (const toolCall of Array.isArray(assistant.toolCalls) ? assistant.toolCalls : []) {
-				const toolName = typeof toolCall?.name === 'string' && toolCall.name.trim().length > 0
-					? toolCall.name.trim()
-					: typeof toolCall?.displayName === 'string' && toolCall.displayName.trim().length > 0
-						? toolCall.displayName.trim()
-						: '';
-				if (!toolName) {
-					continue;
-				}
-
-				analysis.toolCalls.total++;
-				analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-			}
+			this.processGeminiAssistantRecord(assistant, analysis, models);
 		}
 
+		this.applyGeminiModelSwitchingStats(models, analysis);
+		applyModelTierClassification(ctx.modelPricing, analysis.modelSwitching.uniqueModels, models, analysis);
+
+		return analysis;
+	}
+
+	private processGeminiAssistantRecord(assistant: any, analysis: import('../types').SessionUsageAnalysis, models: string[]): void {
+		const model = normalizeGeminiModelId(assistant.model || 'unknown');
+		models.push(model);
+		for (const toolCall of (Array.isArray(assistant.toolCalls) ? assistant.toolCalls : [])) {
+			const toolName = this.resolveGeminiToolName(toolCall);
+			if (!toolName) { continue; }
+			analysis.toolCalls.total++;
+			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+		}
+	}
+
+	private resolveGeminiToolName(toolCall: any): string {
+		if (typeof toolCall?.name === 'string' && toolCall.name.trim().length > 0) {
+			return toolCall.name.trim();
+		}
+		if (typeof toolCall?.displayName === 'string' && toolCall.displayName.trim().length > 0) {
+			return toolCall.displayName.trim();
+		}
+		return '';
+	}
+
+	private applyGeminiModelSwitchingStats(models: string[], analysis: import('../types').SessionUsageAnalysis): void {
 		const uniqueModels = [...new Set(models)];
 		analysis.modelSwitching.uniqueModels = uniqueModels;
 		analysis.modelSwitching.modelCount = uniqueModels.length;
 		analysis.modelSwitching.totalRequests = models.length;
-
 		let switchCount = 0;
-		for (let index = 1; index < models.length; index++) {
-			if (models[index] !== models[index - 1]) {
-				switchCount++;
-			}
+		for (let i = 1; i < models.length; i++) {
+			if (models[i] !== models[i - 1]) { switchCount++; }
 		}
 		analysis.modelSwitching.switchCount = switchCount;
-		applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
-
-		return analysis;
 	}
 }

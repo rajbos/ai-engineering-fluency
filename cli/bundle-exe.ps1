@@ -72,3 +72,11 @@ if ($LASTEXITCODE -ne 0) { throw "postject injection failed" }
 # Verify
 $fileSize = (Get-Item $exePath).Length / 1MB
 Write-Host "    ✓ Built: $exePath ($([math]::Round($fileSize, 1)) MB)" -ForegroundColor Green
+
+# Copy to Visual Studio extension cli-bundle/ (if present in this repo)
+$vsCliBundle = Join-Path $PSScriptRoot '..' 'visualstudio-extension' 'src' 'AIEngineeringFluency' 'cli-bundle'
+if (Test-Path $vsCliBundle) {
+    $dst = Join-Path $vsCliBundle $exeName
+    Copy-Item $exePath $dst -Force
+    Write-Host "    ✓ Copied to visualstudio-extension cli-bundle/" -ForegroundColor Green
+}

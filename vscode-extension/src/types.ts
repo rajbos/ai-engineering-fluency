@@ -3,6 +3,13 @@
  * Extracted from extension.ts to reduce file size and improve reusability.
  */
 
+/**
+ * Character-to-token ratio for a specific AI model.
+ * The value is a multiplier applied to the character count to estimate token count
+ * (e.g. 0.25 means ~4 characters per token).
+ */
+export type TokenEstimator = number;
+
 export interface TokenUsageStats {
   todayTokens: number;
   monthTokens: number;
@@ -48,6 +55,8 @@ export interface EditorUsage {
   [editorType: string]: {
     tokens: number;
     sessions: number;
+    linesAdded?: number;
+    linesRemoved?: number;
   };
 }
 
@@ -55,6 +64,15 @@ export interface RepositoryUsage {
   [repository: string]: {
     tokens: number;
     sessions: number;
+    linesAdded?: number;
+    linesRemoved?: number;
+  };
+}
+
+export interface LanguageUsage {
+  [extension: string]: {
+    linesAdded: number;
+    linesRemoved: number;
   };
 }
 
@@ -80,6 +98,13 @@ export interface PeriodStats {
   estimatedCostCopilot?: number;
   /** Sum of cache-read tokens across all interactions in this period (when available). */
   cachedTokens?: number;
+  /**
+   * Estimated cost per billing group for this period in USD.
+   * Keys are billing group names (e.g. "GitHub Copilot", "Anthropic", "Google").
+   * Uses Copilot AI-Credit pricing for the "GitHub Copilot" group; provider/API
+   * rates for all others.
+   */
+  billingGroupCosts?: Record<string, number>;
 }
 
 export interface DetailedStats {
@@ -98,6 +123,15 @@ export interface DailyTokenStats {
   modelUsage: ModelUsage;
   editorUsage: EditorUsage;
   repositoryUsage: RepositoryUsage;
+  languageUsage?: LanguageUsage;
+  linesAdded?: number;
+  linesRemoved?: number;
+  /**
+   * Per-editor model usage breakdown — used to compute accurate cost-by-editor charts.
+   * Each key is an editor display name (e.g. "VS Code", "Claude Code"); the value is the
+   * model usage aggregated from all sessions of that editor type on that day.
+   */
+  editorModelUsage?: { [editor: string]: ModelUsage };
 }
 
 /** Aggregated data for one time window (day/week/month) in the chart. */
@@ -120,6 +154,28 @@ export interface ChartPeriodData {
   totalCost: number;
   /** Average estimated cost per bar in USD (provider/API rates). Raw float, not rounded. */
   avgCostPerPeriod: number;
+  locData?: number[];
+  linesAddedData?: number[];
+  linesRemovedData?: number[];
+  languageDatasets?: object[];
+  locEditorDatasets?: object[];
+  locRepositoryDatasets?: object[];
+  totalLinesAdded?: number;
+  totalLinesRemoved?: number;
+  avgLocPerPeriod?: number;
+  /**
+   * Cost datasets split by editor/hosting surface — one dataset per editor type.
+   * Each dataset's `data` array aligns with `labels`; values are estimated costs in USD.
+   * Computed from per-day `editorModelUsage` using the appropriate pricing source for each editor.
+   */
+  editorCostDatasets?: object[];
+  /**
+   * Cost datasets split by billing provider — one dataset per provider group.
+   * Groups: "GitHub Copilot" (all Copilot surfaces), "Anthropic" (Claude Code, etc.),
+   * "Google" (Gemini CLI, etc.), "Mistral AI", "OpenAI", etc.
+   * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
+   */
+  billingGroupCostDatasets?: object[];
 }
 
 /** Shape of the data payload sent to the chart webview (via window.__INITIAL_CHART__ or postMessage). */
@@ -150,6 +206,7 @@ export interface ChartDataPayload {
    * When false, the webview should indicate that those views are loading.
    */
   periodsReady?: boolean;
+  hasLocData?: boolean;
 }
 
 /** Per-UTC-day token/interaction breakdown for a single session. Used for accurate daily stats. */
@@ -160,6 +217,8 @@ export interface DailyRollupEntry {
   cachedReadTokens?: number;
   interactions: number;
   modelUsage: ModelUsage;
+  /** Per-day share of the session's exact Copilot billing (in USD). Set when session has nanoAiu data. */
+  copilotExactCostDollars?: number;
 }
 
 export interface SessionFileCache {
@@ -177,8 +236,21 @@ export interface SessionFileCache {
   thinkingTokens?: number; // Estimated thinking/reasoning tokens
   actualTokens?: number; // Actual token count from LLM API usage data (when available)
   cacheReadTokens?: number; // Cache-read token count from session.shutdown modelMetrics or ecosystem adapter API usage
+  modelTurns?: number; // Number of LLM API calls in agent-mode sessions (from debug log)
+  debugLogInputTokens?: number; // Input token total from debug log (sum across all llm_request events)
+  debugLogOutputTokens?: number; // Output token total from debug log (sum across all llm_request events)
+  debugLogChecked?: boolean; // Sentinel: true means we already looked for a debug log and found none
+  /** Exact GitHub Copilot billing for this session in USD (from session.shutdown.totalNanoAiu or debug log copilotUsageNanoAiu). */
+  copilotExactCostDollars?: number;
+  /** Number of session.truncation events where messages were removed (breaking prompt cache). 0 or absent means no truncation. */
+  truncationCount?: number;
+  /** Total messages removed across all truncation events. Absent when truncationCount is 0 or unavailable. */
+  messagesRemovedByTruncation?: number;
   /** Per-UTC-day token/interaction breakdown (keyed by YYYY-MM-DD UTC). Used for consistent daily stats. */
   dailyRollups?: { [utcDayKey: string]: DailyRollupEntry };
+  linesAdded?: number;
+  linesRemoved?: number;
+  languageUsage?: LanguageUsage;
 }
 
 // Local copy of customization file entry type (mirrors webview/shared/contextRefUtils.ts)
@@ -214,12 +286,22 @@ export interface SessionUsageAnalysis {
     uniqueModels: string[];
     modelCount: number;
     switchCount: number;
+    autoSessions: number;
+    foundryWindowsSessions: number;
+    unknownProviderSessions: number;
+    selectedModelExtensions: string[];
+    unknownProviderModels: string[];
     tiers: { standard: string[]; premium: string[]; unknown: string[] };
     hasMixedTiers: boolean;
     standardRequests: number;
     premiumRequests: number;
     unknownRequests: number;
     totalRequests: number;
+    costBuckets: { low: string[]; medium: string[]; high: string[]; unknown: string[] };
+    hasMixedCosts: boolean;
+    lowCostRequests: number;
+    mediumCostRequests: number;
+    highCostRequests: number;
   };
   thinkingEffort?: ThinkingEffortUsage;
   editScope?: EditScopeUsage;
@@ -232,6 +314,7 @@ export interface SessionUsageAnalysis {
 export interface ToolCallUsage {
   total: number;
   byTool: { [toolName: string]: number };
+  outputTokensByTool?: { [toolName: string]: number };
 }
 
 export interface ModeUsage {
@@ -259,7 +342,8 @@ export interface ContextReferenceUsage {
   outputPanel: number; // #outputPanel references
   problemsPanel: number; // #problemsPanel references
   pullRequest: number; // #pr / #pullRequest references (Copilot PR chat, April 2026)
-// contentReferences tracking from session logs
+  codeContextLines?: number; // Total lines of code referenced via #file: range selections
+  // contentReferences tracking from session logs
   byKind: { [kind: string]: number }; // Count by reference kind
   copilotInstructions: number; // .github/copilot-instructions.md
   agentsMd: number; // agents.md in repo root
@@ -277,6 +361,9 @@ export interface EditScopeUsage {
   multiFileEdits: number; // Edit sessions touching 2+ files
   totalEditedFiles: number; // Total unique files edited
   avgFilesPerSession: number; // Average files per edit session
+  linesAdded?: number;
+  linesRemoved?: number;
+  languageUsage?: LanguageUsage;
 }
 
 export interface ApplyButtonUsage {
@@ -286,11 +373,12 @@ export interface ApplyButtonUsage {
 }
 
 export interface SessionDurationData {
-  totalDurationMs: number; // Total session time
-  avgDurationMs: number; // Average session duration
+  totalDurationMs: number; // Total session time (wall clock: last timestamp - first timestamp, includes idle gaps between turns)
+  avgDurationMs: number; // Average session duration (wall clock)
   avgFirstProgressMs: number; // Average time to first response
   avgTotalElapsedMs: number; // Average total request time
   avgWaitTimeMs: number; // Average user wait time between interactions
+  activeDurationMs: number; // Sum of merged [requestTimestamp, requestTimestamp+totalElapsed] windows: actual interactive + tool/agent wait time, excluding idle gaps between turns
 }
 
 export interface ConversationPatterns {
@@ -314,6 +402,9 @@ export interface ModelSwitchingAnalysis {
   maxModelsPerSession: number;
   minModelsPerSession: number;
   switchingFrequency: number; // % of sessions with >1 model
+  autoSessions: number; // Sessions with an Auto-selected model
+  foundryWindowsSessions: number; // Sessions using Microsoft Foundry on Windows / local models
+  unknownProviderSessions: number; // Sessions with models from unknown providers
   standardModels: string[]; // Unique standard models used
   premiumModels: string[]; // Unique premium models used
   unknownModels: string[]; // Unique models with unknown tier
@@ -322,6 +413,15 @@ export interface ModelSwitchingAnalysis {
   premiumRequests: number; // Count of requests using premium models
   unknownRequests: number; // Count of requests using unknown tier models
   totalRequests: number; // Total requests across all tiers
+  lowCostModels: string[];
+  mediumCostModels: string[];
+  highCostModels: string[];
+  mixedCostSessions: number;
+  lowCostRequests: number;
+  mediumCostRequests: number;
+  highCostRequests: number;
+  selectedModelExtensions: string[]; // Unique selectedModel metadata extensions observed
+  unknownProviderModels: string[]; // Unique models whose provider could not be identified
 }
 
 export interface MissedPotentialWorkspace {
@@ -333,14 +433,39 @@ nonCopilotFiles: CustomizationFileEntry[];
 }
 
 
+/** Summary of a single session for the "Today's Sessions" tab. */
+export interface TodaySessionSummary {
+  title: string | null;
+  filePath: string;
+  interactions: number;
+  toolCalls: number;
+  inputTokens: number;
+  outputTokens: number;
+  thinkingTokens: number;
+  cachedTokens: number;
+  totalTokens: number;
+  estimatedCost: number;
+  editor: string;
+  models: string[];
+  lastActivity: string;
+  /** Number of truncation events where messages were removed in this session. 0 or absent means no truncation. */
+  truncationCount?: number;
+}
+
 export interface UsageAnalysisStats {
 today: UsageAnalysisPeriod;
 last30Days: UsageAnalysisPeriod;
+/** Current calendar month-to-date. */
 month: UsageAnalysisPeriod;
+/** Previous calendar month (full month). */
+lastMonth: UsageAnalysisPeriod;
 locale?: string;
 lastUpdated: Date;
 customizationMatrix?: WorkspaceCustomizationMatrix;
 missedPotential?: MissedPotentialWorkspace[];
+todaySessions?: TodaySessionSummary[];
+/** Optional tool curation analysis (VS Code only; absent in CLI/VS/JetBrains). */
+curationAnalysis?: ToolCurationAnalysis | null;
 }
 
 /** Matrix types used for Usage Analysis customization matrix */
@@ -381,6 +506,20 @@ export interface UsageAnalysisPeriod {
     sessionCount: number; // sessions with effort data
     switchCount: number;  // total effort switches across all sessions
   };
+  /**
+   * Number of sessions in this period that are parents of 2+ child workspaces,
+   * indicating multi-agent orchestration. Populated from ~/.copilot/data.db;
+   * absent (undefined) when data.db is not available.
+   */
+  multiAgentParentSessions?: number;
+}
+
+/** Parent/child session reference used in hierarchy info (Copilot CLI sessions). */
+export interface SessionRelationRef {
+  uuid: string;
+  name: string;
+  /** Resolved path to the related session file (undefined when outside the loaded set). */
+  sessionFile?: string;
 }
 
 // Detailed session file information for diagnostics view
@@ -398,6 +537,21 @@ export interface SessionFileDetails {
   editorName?: string; // friendly editor name (e.g., 'VS Code')
   title?: string; // session title (customTitle from session file)
   repository?: string; // Git remote origin URL for the session's workspace
+  /** Parent session info (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  parentInfo?: SessionRelationRef | null;
+  /** Direct child sessions (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  childInfo?: SessionRelationRef[];
+  /**
+   * Total child count — may exceed childInfo.length when some
+   * children fall outside the loaded 14-day diagnostic window.
+   */
+  totalChildCount?: number;
+  // Per-model input/output/cached token breakdown.
+  // Populated for all sessions where cached ModelUsage is available; always
+  // present for Windsurf (derived from trajectory steps via the gRPC API).
+  modelUsage?: ModelUsage;
+  cachedTokens?: number;   // session-level cache-read tokens
+  toolCalls?: { total: number; byTool: { [tool: string]: number } }; // tool invocation breakdown
 }
 
 // Prompt token detail from actual LLM usage data
@@ -452,8 +606,30 @@ export interface SessionLogData {
   actualTokens?: number;
   /** Cache-read token count from session.shutdown modelMetrics (CLI sessions only). Absent when unavailable. */
   cachedTokens?: number;
-  /** Number of distinct subagent sessions started (CLI format only, from subagent.started events). */
+  /** Number of distinct subagent sessions started (CLI format: from subagent.started events; pi: from child session count). */
   subAgentsStarted?: number;
+  /** Parent session info (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  parentInfo?: SessionRelationRef | null;
+  /** Direct child sessions (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
+  childInfo?: SessionRelationRef[];
+  /** Total child count (may exceed childInfo.length when some children fall outside the loaded window). */
+  totalChildCount?: number;
+  /** Input token total from debug log (sum of all llm_request events). Present for VS Code Copilot Chat agent-mode sessions. */
+  debugLogInputTokens?: number;
+  /** Output token total from debug log (sum of all llm_request events). Present for VS Code Copilot Chat agent-mode sessions. */
+  debugLogOutputTokens?: number;
+  /** Number of LLM API calls made during the session (from debug log). >1 means agent-mode multi-call session. */
+  modelTurns?: number;
+  /** Number of session.truncation events where messages were removed (breaking prompt cache). 0 or absent means no truncation. */
+  truncationCount?: number;
+  /** Total messages removed across all truncation events. Absent when truncationCount is 0. */
+  messagesRemovedByTruncation?: number;
+  /**
+   * Optional editor-specific note injected by the adapter/backend.
+   * When present the log viewer renders an info panel at the top of the page
+   * listing the items as bullet points alongside the editor name and icon.
+   */
+  editorNote?: { items: string[] };
 }
 
 // ---------------------------------------------------------------------------
@@ -502,5 +678,95 @@ export interface WorkspaceCustomizationSummary {
   staleFiles: number;
 }
 
+// ---------------------------------------------------------------------------
+// Insights / Nudges framework
+// ---------------------------------------------------------------------------
 
+export type InsightCategory = 'context' | 'agentic' | 'customization' | 'consistency' | 'tools' | 'trend';
+export type InsightSeverity = 'tip' | 'opportunity' | 'celebration';
+export type InsightStatus = 'new' | 'seen' | 'dismissed' | 'snoozed' | 'done';
 
+export interface InsightState {
+  status: InsightStatus;
+  firstSurfacedAt: string;   // ISO timestamp
+  lastSurfacedAt: string;    // ISO timestamp
+  snoozeUntil?: string;      // ISO timestamp; present when status === 'snoozed'
+}
+
+/** Persisted bag of per-insight state keyed by insight id. */
+export type InsightStateBag = Record<string, InsightState>;
+
+/** A fully evaluated, display-ready insight card. */
+export interface EvaluatedInsight {
+  id: string;
+  category: InsightCategory;
+  severity: InsightSeverity;
+  title: string;
+  body: string;
+  actionLabel?: string;
+  actionCommand?: string;
+  status: InsightStatus;
+  allowToast?: boolean;
+}
+
+// ---------------------------------------------------------------------------
+// Tool Curation
+// ---------------------------------------------------------------------------
+
+/** A single tool entry from an enumerated "available tools" source. */
+export interface AvailableToolEntry {
+  /** Raw tool ID (e.g. `mcp__github__get_file_contents`). */
+  name: string;
+  /** Human-readable description. */
+  description: string;
+  /** Where this tool comes from. */
+  source: 'builtin' | 'mcp' | 'extension' | 'skill';
+  /** MCP server name when `source === 'mcp'`. */
+  server?: string;
+  /** VS Code extension ID when `source === 'extension'`. */
+  extensionId?: string;
+  /** Skill file path (relative) when `source === 'skill'`. */
+  skillPath?: string;
+  /** Agent-plugin name (from `installed.json`) when this skill comes from a VS Code agent plugin. */
+  pluginName?: string;
+  /** Absolute path(s) of the config or skill file(s) this entry was discovered from. */
+  configFiles?: string[];
+  /**
+   * For extension-contributed MCP server entries: true when at least one tool from
+   * the server is enabled in `vscode.lm.tools`, false when the user has disabled them
+   * in the chat tool picker (or the server hasn't started). Undefined when not applicable.
+   */
+  enabled?: boolean;
+  /** For extension-contributed entries: whether the contributing extension is currently activated. */
+  extensionActive?: boolean;
+}
+
+/** One actionable recommendation produced by curation analysis. */
+export interface ToolCurationRecommendation {
+  type: 'disable-mcp-server' | 'disable-extension' | 'refine-skill' | 'remove-skill';
+  /** Server name, extension ID, or skill name that the recommendation targets. */
+  target: string;
+  reason: string;
+  /** Estimated context-window token savings per interaction (rough). */
+  estimatedTokenSavings?: number;
+}
+
+/** Full result of a tool-curation analysis run. */
+export interface ToolCurationAnalysis {
+  /** Look-back window (days) used to determine "unused". */
+  windowDays: number;
+  /** All tools discovered from available sources. */
+  availableTools: AvailableToolEntry[];
+  /** Tools that were actually invoked within the window (name → call count). */
+  usedTools: { name: string; count: number }[];
+  /** Available tools with zero invocations in the window. */
+  unusedTools: AvailableToolEntry[];
+  /** MCP servers with partial or zero tool usage. */
+  underusedMcpServers: { server: string; availableToolCount: number; usedToolCount: number; configFiles?: string[]; extensionId?: string; enabled?: boolean; extensionActive?: boolean }[];
+  /** Agent plugins with skill usage counts for the window; sorted by usedSkillCount ascending. Includes all plugins (not just unused ones) so the UI can offer a "hide plugins with usage" toggle. */
+  underusedAgentPlugins: { pluginName: string; availableSkillCount: number; usedSkillCount: number }[];
+  /** Rough prompt-bloat estimate from unused tool descriptions. */
+  estimatedPromptBloat: { totalTokens: number; byServer: Record<string, number> };
+  /** Prioritised list of recommendations. */
+  recommendations: ToolCurationRecommendation[];
+}

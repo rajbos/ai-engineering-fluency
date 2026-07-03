@@ -18,7 +18,7 @@
     "individual": {
       "name": "Copilot Pro",
       "monthlyPricePerUser": 10,
-      "monthlyAiCreditsUsd": 10,
+      "monthlyAiCreditsUsd": 15,
       "monthlyPremiumRequests": 300,
       "codeCompletionsPerMonth": null,
       "description": "For individual developers (legacy plan ID, same as 'pro')"
@@ -26,18 +26,26 @@
     "pro": {
       "name": "Copilot Pro",
       "monthlyPricePerUser": 10,
-      "monthlyAiCreditsUsd": 10,
+      "monthlyAiCreditsUsd": 15,
       "monthlyPremiumRequests": 300,
       "codeCompletionsPerMonth": null,
-      "description": "For individual developers"
+      "description": "For individual developers. Includes 1,000 base + 500 flex = 1,500 total monthly AI credits ($15)."
     },
     "pro_plus": {
       "name": "Copilot Pro+",
       "monthlyPricePerUser": 39,
-      "monthlyAiCreditsUsd": 39,
+      "monthlyAiCreditsUsd": 70,
       "monthlyPremiumRequests": 1500,
       "codeCompletionsPerMonth": null,
-      "description": "For power users needing more premium requests and the broadest model selection"
+      "description": "For power users needing more premium requests and the broadest model selection. Includes 3,900 base + 3,100 flex = 7,000 total monthly AI credits ($70)."
+    },
+    "max": {
+      "name": "Copilot Max",
+      "monthlyPricePerUser": 100,
+      "monthlyAiCreditsUsd": 200,
+      "monthlyPremiumRequests": null,
+      "codeCompletionsPerMonth": null,
+      "description": "For users who need the highest limits. Includes 10,000 base + 10,000 flex = 20,000 total monthly AI credits ($200)."
     },
     "business": {
       "name": "Copilot Business",

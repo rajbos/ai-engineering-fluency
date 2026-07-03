@@ -373,45 +373,45 @@ All settings in VS Code user settings (global scope, Settings Sync compatible):
 #### Core Settings
 ```json
 {
-  "copilotTokenTracker.backend.enabled": false,
-  "copilotTokenTracker.backend.backend": "storageTables",
-  "copilotTokenTracker.backend.authMode": "entraId",  // or "sharedKey"
-  "copilotTokenTracker.backend.datasetId": "default"
+  "aiEngineeringFluency.backend.enabled": false,
+  "aiEngineeringFluency.backend.backend": "storageTables",
+  "aiEngineeringFluency.backend.authMode": "entraId",  // or "sharedKey"
+  "aiEngineeringFluency.backend.datasetId": "default"
 }
 ```
 
 #### Azure Resource Identifiers (wizard-managed)
 ```json
 {
-  "copilotTokenTracker.backend.subscriptionId": "",
-  "copilotTokenTracker.backend.resourceGroup": "",
-  "copilotTokenTracker.backend.storageAccount": "",
-  "copilotTokenTracker.backend.aggTable": "usageAggDaily",
-  "copilotTokenTracker.backend.eventsTable": "usageEvents"
+  "aiEngineeringFluency.backend.subscriptionId": "",
+  "aiEngineeringFluency.backend.resourceGroup": "",
+  "aiEngineeringFluency.backend.storageAccount": "",
+  "aiEngineeringFluency.backend.aggTable": "usageAggDaily",
+  "aiEngineeringFluency.backend.eventsTable": "usageEvents"
 }
 ```
 
 #### Privacy Settings
 ```json
 {
-  "copilotTokenTracker.backend.shareWithTeam": false,
-  "copilotTokenTracker.backend.shareConsentAt": "",
-  "copilotTokenTracker.backend.sharingProfile": "off",
-  "copilotTokenTracker.backend.userIdentityMode": "pseudonymous",
-  "copilotTokenTracker.backend.anonymizeWorkspaceMachineNames": false
+  "aiEngineeringFluency.backend.shareWithTeam": false,
+  "aiEngineeringFluency.backend.shareConsentAt": "",
+  "aiEngineeringFluency.backend.sharingProfile": "off",
+  "aiEngineeringFluency.backend.userIdentityMode": "pseudonymous",
+  "aiEngineeringFluency.backend.anonymizeWorkspaceMachineNames": false
 }
 ```
 
 #### Behavior Settings
 ```json
 {
-  "copilotTokenTracker.backend.lookbackDays": 30,      // min: 1, max: 365
-  "copilotTokenTracker.backend.includeMachineBreakdown": true
+  "aiEngineeringFluency.backend.lookbackDays": 30,      // min: 1, max: 365
+  "aiEngineeringFluency.backend.includeMachineBreakdown": true
 }
 ```
 
 #### Secrets (NOT in settings, stored in SecretStorage)
-- `copilotTokenTracker.backend.storageSharedKey:{storageAccount}`
+- `aiEngineeringFluency.backend.storageSharedKey:{storageAccount}`
 
 ### Commands
 

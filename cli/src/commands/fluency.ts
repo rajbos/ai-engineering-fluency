@@ -4,23 +4,28 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, calculateUsageAnalysisStats, fmt, buildCustomizationMatrix } from '../helpers';
+import { ProgressTracker } from '../progress';
 import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
+import { shouldOutputJson } from '../commandUtils';
+import { createFluencyPayload } from './payloads';
 
 export const fluencyCommand = new Command('fluency')
 	.description('Show your Copilot Fluency Score and improvement tips')
 	.option('-t, --tips', 'Show improvement tips for each category')
 	.option('--json', 'Output raw JSON (for machine consumption)')
 	.action(async (options) => {
-		if (!options.json) {
+		const json = shouldOutputJson(options);
+		if (!json) {
 			console.log(chalk.bold.cyan('\n🎯 Copilot Token Tracker - Fluency Score\n'));
 		}
 
-		if (!options.json) { process.stdout.write(chalk.dim('Scanning for session files...')); }
+		const progress = new ProgressTracker(json);
+		progress.show('Scanning for session files...');
 		const files = await discoverSessionFiles();
-		if (!options.json) { process.stdout.write('\r' + ' '.repeat(50) + '\r'); }
+		progress.done();
 
 		if (files.length === 0) {
-			if (options.json) {
+			if (json) {
 				process.stdout.write('{}');
 			} else {
 				console.log(chalk.yellow('⚠️  No session files found.'));
@@ -28,11 +33,11 @@ export const fluencyCommand = new Command('fluency')
 			return;
 		}
 
-		if (!options.json) { process.stdout.write(chalk.dim('Analyzing usage patterns...')); }
+		progress.show('Analyzing usage patterns...');
 
 		// Calculate usage analysis stats
 		const usageStats = await calculateUsageAnalysisStats(files);
-		if (!options.json) { process.stdout.write('\r' + ' '.repeat(50) + '\r'); }
+		progress.done();
 
 		// Build a customization matrix from workspace folder paths inferred from session file paths.
 		// This matches what the VS Code extension does (scanning workspace folders for instructions files).
@@ -45,17 +50,9 @@ export const fluencyCommand = new Command('fluency')
 			false
 		);
 
-		if (options.json) {
+		if (json) {
 			// Machine-readable output: emit pure JSON to stdout and exit
-			const payload = {
-				overallStage: scores.overallStage,
-				overallLabel: scores.overallLabel,
-				categories: scores.categories,
-				period: scores.period,
-				lastUpdated: scores.lastUpdated,
-				backendConfigured: false,
-			};
-			process.stdout.write(JSON.stringify(payload));
+			process.stdout.write(JSON.stringify(createFluencyPayload(scores)));
 			return;
 		}
 
@@ -68,8 +65,9 @@ export const fluencyCommand = new Command('fluency')
 		};
 
 		const stageBar = (stage: number): string => {
-			const filled = '█'.repeat(stage);
-			const empty = '░'.repeat(4 - stage);
+			const clampedStage = (Number.isFinite(stage) && stage >= 1 && stage <= 4) ? Math.floor(stage) : 0;
+			const filled = '█'.repeat(clampedStage);
+			const empty = '░'.repeat(4 - clampedStage);
 			return filled + empty;
 		};
 

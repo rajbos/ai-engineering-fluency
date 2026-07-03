@@ -285,3 +285,126 @@ test('parseJetBrainsPartition: avoids double-counting user text when both messag
 	const r2 = parseJetBrainsPartition(both);
 	assert.equal(r1.tokens, r2.tokens, 'rendered+message should not double-count user input');
 });
+
+// ── New Turn-based Features ─────────────────────────────────────────────────
+
+const makeTurnStart = (turnId = 't1') => ({
+	type: 'assistant.turn_start',
+	data: { turnId },
+	timestamp: '2026-04-30T12:28:51.900Z',
+});
+
+const makeTurnEnd = (turnId = 't1', status = 'success', turnStatus = 'success') => ({
+	type: 'assistant.turn_end',
+	data: { turnId, status, turnStatus },
+	timestamp: '2026-04-30T12:29:07.522Z',
+});
+
+const makeAssistantMessageWithMeta = (turnId = 't1', messageId = 'msg-1', iterationNumber = 1, text = 'hello', thinking?: string) => ({
+	type: 'assistant.message',
+	data: { turnId, messageId, iterationNumber, text, ...(thinking ? { thinking: { id: 'thinking_0', text: thinking } } : {}) },
+	timestamp: '2026-04-30T12:29:00.000Z',
+});
+
+test('parseJetBrainsPartition: extracts turn information with message IDs and iteration numbers', () => {
+	const content = toJsonl([
+		partitionCreated('conv-1'),
+		userMessage('t1', 'hello'),
+		makeTurnStart('t1'),
+		makeAssistantMessageWithMeta('t1', 'msg-001', 1, 'first response', 'thinking hard'),
+		makeTurnEnd('t1', 'success', 'success'),
+	]);
+	const r = parseJetBrainsPartition(content);
+	
+	// Basic turn info
+	assert.equal(r.turns.length, 1);
+	assert.equal(r.turns[0].turnId, 't1');
+	assert.equal(r.turns[0].messageId, 'msg-001');
+	assert.equal(r.turns[0].iterationNumber, 1);
+	assert.equal(r.turns[0].hasThinking, true);
+	assert.equal(r.turns[0].status, 'success');
+	assert.equal(r.turns[0].turnStatus, 'success');
+	
+	// Message IDs
+	assert.deepEqual(r.messageIds, ['msg-001']);
+	
+	// Thinking detection
+	assert.equal(r.hasThinking, true);
+	
+	// Turn status counts
+	assert.deepEqual(r.turnStatusCounts, { success: 1, cancelled: 0, failed: 0, unknown: 0 });
+});
+
+test('parseJetBrainsPartition: tracks multiple turns with different statuses', () => {
+	const content = toJsonl([
+		partitionCreated('conv-1'),
+		userMessage('t1', 'hello'),
+		makeTurnStart('t1'),
+		makeAssistantMessageWithMeta('t1', 'msg-001', 1, 'successful response'),
+		makeTurnEnd('t1', 'success', 'success'),
+		
+		userMessage('t2', 'cancel this'),
+		makeTurnStart('t2'),
+		makeAssistantMessageWithMeta('t2', 'msg-002', 1, 'partial response'),
+		makeTurnEnd('t2', 'cancelled', 'cancelled'),
+	]);
+	const r = parseJetBrainsPartition(content);
+	
+	assert.equal(r.turns.length, 2);
+	assert.equal(r.turns[0].status, 'success');
+	assert.equal(r.turns[1].status, 'cancelled');
+	assert.deepEqual(r.turnStatusCounts, { success: 1, cancelled: 1, failed: 0, unknown: 0 });
+});
+
+test('parseJetBrainsPartition: extracts tool call metadata with turn association', () => {
+	const content = toJsonl([
+		partitionCreated(),
+		userMessage('t1', 'use a tool'),
+		makeTurnStart('t1'),
+		toolStart('toolu_x', 'read_file'),
+		toolComplete('toolu_x', 'file contents'),
+		makeAssistantMessageWithMeta('t1', 'msg-001', 1, 'done'),
+		makeTurnEnd('t1', 'success', 'success'),
+	]);
+	const r = parseJetBrainsPartition(content);
+	
+	assert.equal(r.toolCalls.length, 1);
+	assert.equal(r.toolCalls[0].turnId, 't1');
+	assert.equal(r.toolCalls[0].toolCallId, 'toolu_x');
+	assert.equal(r.turns[0].toolCallCount, 1);
+});
+
+test('parseJetBrainsPartition: handles both text and content fields in assistant messages', () => {
+	const content = toJsonl([
+		partitionCreated(),
+		userMessage('t1', 'hello'),
+		{ type: 'assistant.message', data: { content: 'content field', text: 'text field' }, timestamp: '2026-04-30T12:00:00Z' },
+	]);
+	const r = parseJetBrainsPartition(content);
+	
+	// Should prefer text field over content, but both should work
+	assert.ok(r.tokens > 0, 'Should count tokens from assistant message');
+});
+
+test('parseJetBrainsPartition: captures progress messages from tool execution', () => {
+	const content = toJsonl([
+		partitionCreated(),
+		userMessage('t1', 'use a tool'),
+		makeTurnStart('t1'),
+		toolStart('toolu_x', 'read_file'),
+		{ type: 'tool.execution_complete', data: { toolCallId: 'toolu_x', success: true, result: { result: [{ type: 'text', value: 'file contents' }] }, progressMessage: 'Reading file...' } },
+		makeTurnEnd('t1', 'success', 'success'),
+	]);
+	const r = parseJetBrainsPartition(content);
+	
+	assert.equal(r.toolCalls.length, 1);
+	assert.equal(r.toolCalls[0].progressMessage, 'Reading file...');
+});
+
+test('parseJetBrainsPartition: initializes new fields for empty content', () => {
+	const r = parseJetBrainsPartition('');
+	assert.deepEqual(r.turns, []);
+	assert.deepEqual(r.messageIds, []);
+	assert.deepEqual(r.turnStatusCounts, { success: 0, cancelled: 0, failed: 0, unknown: 0 });
+	assert.equal(r.hasThinking, false);
+});

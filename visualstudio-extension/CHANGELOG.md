@@ -2,10 +2,6 @@
 
 All notable changes to the Visual Studio extension will be documented in this file.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
-
-## [Unreleased]
-
 ## [1.0.5] - 2026-04-11
 
 ### ✨ Features & Improvements

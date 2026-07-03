@@ -8,6 +8,11 @@
  * Adding a new ecosystem only requires:
  *   1. Implementing this interface in a new file under src/adapters/
  *   2. Adding an instance to the registry in extension.ts (and cli/src/helpers.ts)
+ *
+ * Concurrency contract: all async methods must be safe for concurrent invocation.
+ * Implementations that load heavyweight resources (e.g. WASM, SQLite databases) must
+ * cache the in-flight Promise — not just the resolved value — to prevent duplicate
+ * initialization when multiple callers await the same method simultaneously.
  */
 import type * as fsModule from 'fs';
 import type { ModelUsage, ChatTurn, SessionUsageAnalysis, ModelPricing } from './types';
@@ -17,6 +22,20 @@ export interface IEcosystemAdapter {
 	readonly id: string;
 	/** Human-readable display name, e.g. 'OpenCode', 'Crush', 'Continue'. */
 	readonly displayName: string;
+	/**
+	 * Returns the human-readable display name for a specific session file.
+	 * Defaults to `displayName` for adapters that handle only one editor.
+	 * Override when a single adapter covers multiple tools (e.g. Visual Studio + SSMS).
+	 */
+	getDisplayName?(sessionFile: string): string;
+	/**
+	 * Returns the display name for a session file path that this adapter *discovered*
+	 * but does not *handle* (i.e. handles() returns false for that path).
+	 * Return undefined to signal "not mine". Used so adapters can label discovered
+	 * files (e.g. events.jsonl) with a specific name (e.g. "MS Scout (Copilot CLI)")
+	 * without changing the handles() contract.
+	 */
+	getDisplayNameForDiscoveredPath?(sessionFile: string): string | undefined;
 	/**
 	 * When true, backend sync is skipped for sessions handled by this adapter
 	 * (e.g. Visual Studio binary MessagePack sessions cannot be synced).
@@ -148,6 +167,15 @@ export interface IDiscoverableEcosystem {
 /** Type guard: check whether an adapter also implements IDiscoverableEcosystem. */
 export function isDiscoverable(adapter: IEcosystemAdapter): adapter is IEcosystemAdapter & IDiscoverableEcosystem {
 	return typeof (adapter as any).discover === 'function';
+}
+
+/**
+ * Returns the display name for a session file from its adapter.
+ * Uses `getDisplayName(sessionFile)` when the adapter provides it (e.g. Visual Studio
+ * vs SSMS distinction); falls back to the static `displayName` otherwise.
+ */
+export function getEcosystemDisplayName(adapter: IEcosystemAdapter, sessionFile: string): string {
+	return adapter.getDisplayName ? adapter.getDisplayName(sessionFile) : adapter.displayName;
 }
 
 // ---------------------------------------------------------------------------

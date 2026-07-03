@@ -117,30 +117,30 @@ function createSampleRecords(): unknown[] {
 	];
 }
 
-test('normalizeGeminiModelId: maps observed preview IDs to priced model IDs', () => {
+test('normalizeGeminiModelId: maps observed preview IDs to priced model IDs', async () => {
 	assert.equal(normalizeGeminiModelId('gemini-3-flash-preview'), 'gemini-3-flash');
 	assert.equal(normalizeGeminiModelId('gemini-3-flash'), 'gemini-3-flash');
 });
 
-test('isGeminiCliSessionFile: recognises ~/.gemini session paths', () => {
+test('isGeminiCliSessionFile: recognises ~/.gemini session paths', async () => {
 	const sessionPath = path.join(os.homedir(), '.gemini', 'tmp', 'demo-project', 'chats', 'session-abc.jsonl');
 	assert.ok(geminiCli.isGeminiCliSessionFile(sessionPath));
 });
 
-test('isGeminiCliSessionFile: recognises Windows-style ~/.gemini session paths', () => {
+test('isGeminiCliSessionFile: recognises Windows-style ~/.gemini session paths', async () => {
 	const sessionPath = `${os.homedir()}\\.gemini\\tmp\\demo-project\\chats\\session-abc.jsonl`;
 	assert.ok(geminiCli.isGeminiCliSessionFile(sessionPath));
 });
 
-test('isGeminiCliSessionFile: rejects unrelated files', () => {
+test('isGeminiCliSessionFile: rejects unrelated files', async () => {
 	assert.ok(!geminiCli.isGeminiCliSessionFile('/tmp/random/session.jsonl'));
 	assert.ok(!geminiCli.isGeminiCliSessionFile(path.join(os.homedir(), '.gemini', 'logs.json')));
 });
 
-test('readGeminiCliSession: dedupes assistant updates by id', () => {
+test('readGeminiCliSession: dedupes assistant updates by id', async () => {
 	const sessionFile = createTempGeminiSession(createSampleRecords());
 	try {
-		const session = geminiCli.readGeminiCliSession(sessionFile);
+		const session = await geminiCli.readGeminiCliSession(sessionFile);
 		assert.equal(session.userRecords.length, 2);
 		assert.equal(session.assistantRecords.length, 2);
 		assert.equal(session.projectBucket, 'demo-project');
@@ -149,10 +149,10 @@ test('readGeminiCliSession: dedupes assistant updates by id', () => {
 	}
 });
 
-test('getTokensFromGeminiCliSession: uses actual token totals from latest assistant updates', () => {
+test('getTokensFromGeminiCliSession: uses actual token totals from latest assistant updates', async () => {
 	const sessionFile = createTempGeminiSession(createSampleRecords());
 	try {
-		const result = geminiCli.getTokensFromGeminiCliSession(sessionFile);
+		const result = await geminiCli.getTokensFromGeminiCliSession(sessionFile);
 		assert.equal(result.tokens, 220);
 		assert.equal(result.thinkingTokens, 8);
 	} finally {
@@ -160,19 +160,19 @@ test('getTokensFromGeminiCliSession: uses actual token totals from latest assist
 	}
 });
 
-test('countGeminiCliInteractions: counts user turns', () => {
+test('countGeminiCliInteractions: counts user turns', async () => {
 	const sessionFile = createTempGeminiSession(createSampleRecords());
 	try {
-		assert.equal(geminiCli.countGeminiCliInteractions(sessionFile), 2);
+		assert.equal(await geminiCli.countGeminiCliInteractions(sessionFile), 2);
 	} finally {
 		cleanupSessionFile(sessionFile);
 	}
 });
 
-test('getGeminiCliModelUsage: aggregates normalized models and cached reads', () => {
+test('getGeminiCliModelUsage: aggregates normalized models and cached reads', async () => {
 	const sessionFile = createTempGeminiSession(createSampleRecords());
 	try {
-		const modelUsage = geminiCli.getGeminiCliModelUsage(sessionFile);
+		const modelUsage = await geminiCli.getGeminiCliModelUsage(sessionFile);
 		assert.deepEqual(modelUsage['gemini-3-flash'], {
 			inputTokens: 180,
 			outputTokens: 40,
@@ -183,10 +183,10 @@ test('getGeminiCliModelUsage: aggregates normalized models and cached reads', ()
 	}
 });
 
-test('getGeminiCliSessionMeta: derives title, timestamps, and workspace fallback', () => {
+test('getGeminiCliSessionMeta: derives title, timestamps, and workspace fallback', async () => {
 	const sessionFile = createTempGeminiSession(createSampleRecords());
 	try {
-		const meta = geminiCli.getGeminiCliSessionMeta(sessionFile);
+		const meta = await geminiCli.getGeminiCliSessionMeta(sessionFile);
 		assert.equal(meta.title, 'Summarize the repo');
 		assert.equal(meta.firstInteraction, '2026-05-03T15:01:21.339Z');
 		assert.equal(meta.lastInteraction, '2026-05-04T10:00:05.000Z');
@@ -196,10 +196,10 @@ test('getGeminiCliSessionMeta: derives title, timestamps, and workspace fallback
 	}
 });
 
-test('buildGeminiCliTurns: groups assistant updates by user turn and filters blank tool names', () => {
+test('buildGeminiCliTurns: groups assistant updates by user turn and filters blank tool names', async () => {
 	const sessionFile = createTempGeminiSession(createSampleRecords());
 	try {
-		const result = geminiCli.buildGeminiCliTurns(sessionFile);
+		const result = await geminiCli.buildGeminiCliTurns(sessionFile);
 		assert.equal(result.actualTokens, 220);
 		assert.equal(result.turns.length, 2);
 
@@ -224,12 +224,17 @@ test('buildGeminiCliTurns: groups assistant updates by user turn and filters bla
 	}
 });
 
-test('getGeminiCliDailyFractions: splits usage by user-turn day', () => {
+test('getGeminiCliDailyFractions: splits usage by user-turn day', async () => {
 	const sessionFile = createTempGeminiSession(createSampleRecords());
 	try {
-		const dailyFractions = geminiCli.getGeminiCliDailyFractions(sessionFile);
-		assert.equal(dailyFractions['2026-05-03'], 0.5);
-		assert.equal(dailyFractions['2026-05-04'], 0.5);
+		const dailyFractions = await geminiCli.getGeminiCliDailyFractions(sessionFile);
+		// Timestamps '2026-05-03T15:01:31Z' and '2026-05-04T10:00:00Z' map to different
+		// local days in most timezones (UTC-10 to UTC+14). Check for 2 keys with 0.5 each.
+		const keys = Object.keys(dailyFractions).sort();
+		assert.equal(keys.length, 2, 'should have exactly 2 local day keys');
+		for (const v of Object.values(dailyFractions)) {
+			assert.ok(Math.abs(v - 0.5) < 1e-9, `each fraction should be 0.5, got ${v}`);
+		}
 	} finally {
 		cleanupSessionFile(sessionFile);
 	}

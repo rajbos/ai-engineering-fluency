@@ -1,23 +1,12 @@
 // Fluency Level Viewer webview
 import { buttonHtml } from '../shared/buttonConfig';
+import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import styles from './styles.css';
+import { getWindowData } from '../shared/dataLoader';
+import type { CategoryLevelData } from '../shared/types';
 
 // ── Types ──────────────────────────────────────────────────────────────
-
-type CategoryLevelData = {
-	category: string;
-	icon: string;
-	levels: LevelInfo[];
-};
-
-type LevelInfo = {
-	stage: number;
-	label: string;
-	description: string;
-	thresholds: string[];
-	tips: string[];
-};
 
 type FluencyLevelData = {
 	categories: CategoryLevelData[];
@@ -31,52 +20,11 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 	getState: () => TState | undefined;
 };
 
-declare global {
-	interface Window { __INITIAL_FLUENCY_LEVEL_DATA__?: FluencyLevelData; }
-}
-
 const vscode = acquireVsCodeApi();
-const initialData = window.__INITIAL_FLUENCY_LEVEL_DATA__;
+const initialData = getWindowData<FluencyLevelData>('__INITIAL_FLUENCY_LEVEL_DATA__');
 
 let selectedCategoryIndex = 0;
 
-// ── Stage labels ───────────────────────────────────────────────────────
-
-const STAGE_LABELS: Record<number, string> = {
-	1: 'Stage 1: AI Skeptic',
-	2: 'Stage 2: AI Explorer',
-	3: 'Stage 3: AI Collaborator',
-	4: 'Stage 4: AI Strategist'
-};
-
-const STAGE_DESCRIPTIONS: Record<number, string> = {
-	1: 'Rarely uses AI tools or uses only basic features',
-	2: 'Exploring AI capabilities with occasional use',
-	3: 'Regular, purposeful use across multiple features',
-	4: 'Strategic, advanced use leveraging the full AI ecosystem'
-};
-
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
-}
-
-/**
- * Convert markdown links to HTML links while escaping other HTML.
- * Converts [text](url) to <a href="url" target="_blank" rel="noopener noreferrer">text</a>
- */
-function markdownToHtml(text: string): string {
-	// First escape all HTML
-	let escaped = escapeHtml(text);
-	// Then convert markdown links to HTML links
-	// Pattern: [text](url) where text and url are already escaped
-	escaped = escaped.replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<a href="$2" target="_blank" rel="noopener noreferrer">$1</a>');
-	return escaped;
-}
 
 // ── Main render ────────────────────────────────────────────────────────
 
@@ -133,6 +81,24 @@ function renderLevelCards(category: CategoryLevelData): string {
 	}).join('');
 }
 
+function wireNavButtons(data: FluencyLevelData): void {
+	document.getElementById('btn-refresh')?.addEventListener('click', () => { vscode.postMessage({ command: 'refresh' }); });
+	document.getElementById('btn-maturity')?.addEventListener('click', () => { vscode.postMessage({ command: 'showMaturity' }); });
+	document.getElementById('btn-details')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDetails' }); });
+	document.getElementById('btn-chart')?.addEventListener('click', () => { vscode.postMessage({ command: 'showChart' }); });
+	document.getElementById('btn-usage')?.addEventListener('click', () => { vscode.postMessage({ command: 'showUsageAnalysis' }); });
+	document.getElementById('btn-diagnostics')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDiagnostics' }); });
+	document.getElementById('btn-dashboard')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDashboard' }); });
+	wireExtensionPointButtons(vscode);
+	document.querySelectorAll('.category-btn').forEach(btn => {
+		btn.addEventListener('click', (e) => {
+			const target = e.currentTarget as HTMLElement;
+			selectedCategoryIndex = parseInt(target.getAttribute('data-index') || '0', 10);
+			renderLayout(data);
+		});
+	});
+}
+
 function renderLayout(data: FluencyLevelData): void {
 	const root = document.getElementById('root');
 	if (!root) { return; }
@@ -182,44 +148,11 @@ function renderLayout(data: FluencyLevelData): void {
 		</div>
 	`;
 
-	// Wire up navigation buttons
-	document.getElementById('btn-refresh')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'refresh' });
-	});
-	document.getElementById('btn-maturity')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showMaturity' });
-	});
-	document.getElementById('btn-details')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showDetails' });
-	});
-	document.getElementById('btn-chart')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showChart' });
-	});
-	document.getElementById('btn-usage')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showUsageAnalysis' });
-	});
-	document.getElementById('btn-diagnostics')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showDiagnostics' });
-	});
-	document.getElementById('btn-dashboard')?.addEventListener('click', () => {
-		vscode.postMessage({ command: 'showDashboard' });
-	});
-	wireExtensionPointButtons(vscode);
-
-	// Wire up category selection buttons
-	document.querySelectorAll('.category-btn').forEach(btn => {
-		btn.addEventListener('click', (e) => {
-			const target = e.currentTarget as HTMLElement;
-			const index = parseInt(target.getAttribute('data-index') || '0', 10);
-			selectedCategoryIndex = index;
-			renderLayout(data);
-		});
-	});
+	wireNavButtons(data);
 }
 
 async function bootstrap(): Promise<void> {
-	const { provideVSCodeDesignSystem, vsCodeButton } = await import('@vscode/webview-ui-toolkit');
-	provideVSCodeDesignSystem().register(vsCodeButton());
+	await import('@vscode-elements/elements/dist/vscode-button/index.js');
 
 	if (!initialData) {
 		const root = document.getElementById('root');

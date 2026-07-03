@@ -6,16 +6,37 @@
     "lib": ["ES2022"],
     "types": ["node"],
     "sourceMap": true,
-    "rootDir": "src",
+    "rootDir": "..",
     "outDir": "dist",
     "strict": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "declaration": false,
+    "skipLibCheck": true,
     "paths": {
       "../vscode-extension/src/*": ["../vscode-extension/src/*"]
     }
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*.ts",
+    "../vscode-extension/src/types.ts",
+    "../vscode-extension/src/cachePolicy.ts",
+    "../vscode-extension/src/sessionDiscovery.ts",
+    "../vscode-extension/src/sessionParser.ts",
+    "../vscode-extension/src/dailyAttribution.ts",
+    "../vscode-extension/src/tokenEstimation.ts",
+    "../vscode-extension/src/workspaceHelpers.ts",
+    "../vscode-extension/src/statsHelpers.ts",
+    "../vscode-extension/src/adapters/**/*.ts",
+    "../vscode-extension/src/modelPricing.json",
+    "../vscode-extension/src/toolCuration.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "../vscode-extension/node_modules",
+    "../vscode-extension/src/copilotCliStore.ts",
+    "../vscode-extension/src/crush.ts",
+    "../vscode-extension/src/opencode.ts"
+  ]
 }

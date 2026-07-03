@@ -48,5 +48,14 @@
             anchor="right"
             factoryClass="com.github.rajbos.aiengineeringfluency.TokenTrackerToolWindowFactory"
             icon="AllIcons.Toolwindows.ToolWindowAnt"/>
+
+        <applicationService
+            serviceImplementation="com.github.rajbos.aiengineeringfluency.PluginSettings"/>
+
+        <applicationConfigurable
+            parentId="tools"
+            instance="com.github.rajbos.aiengineeringfluency.PluginSettingsConfigurable"
+            id="com.github.rajbos.aiengineeringfluency.settings"
+            displayName="AI Engineering Fluency"/>
     </extensions>
 </idea-plugin>

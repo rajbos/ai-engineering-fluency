@@ -10,9 +10,9 @@ import * as os from 'node:os';
 
 import {
     CopilotCliAdapter,
-    isCopilotCliSessionPath,
     getCopilotCliSessionStateDir,
 } from '../../src/adapters/copilotCliAdapter';
+import { isCopilotCliSessionPath } from '../../src/adapters/adapterPredicates';
 import { isDiscoverable } from '../../src/ecosystemAdapter';
 
 const adapter = new CopilotCliAdapter();
@@ -23,7 +23,52 @@ const adapter = new CopilotCliAdapter();
 
 test('CopilotCliAdapter: id and displayName are stable', () => {
     assert.equal(adapter.id, 'copilotcli');
-    assert.equal(adapter.displayName, 'GitHub Copilot CLI');
+    assert.equal(adapter.displayName, 'Copilot CLI');
+});
+
+test('CopilotCliAdapter.getDisplayName: returns MS Scout label for tracked Scout sessions via DB virtual path', () => {
+    const scoutSessionId = '11111111-1111-1111-1111-111111111111';
+    const scoutVirtualPath = path.join(os.homedir(), '.copilot', `session-store.db#${scoutSessionId}`);
+    const scoutSessionIds = (adapter as unknown as { _scoutSessionIds: Set<string> })._scoutSessionIds;
+
+    scoutSessionIds.add(scoutSessionId);
+    try {
+        assert.equal(adapter.getDisplayName(scoutVirtualPath), 'MS Scout (Copilot CLI)');
+        assert.equal(adapter.getDisplayName(path.join(os.homedir(), '.copilot', 'session-store.db#other-session')), 'Copilot CLI');
+    } finally {
+        scoutSessionIds.delete(scoutSessionId);
+    }
+});
+
+test('CopilotCliAdapter.getDisplayNameForDiscoveredPath: returns Scout label for tracked UUID, undefined otherwise', () => {
+    const scoutUuid = '33333333-3333-3333-3333-333333333333';
+    const eventsPath = path.join(os.homedir(), '.copilot', 'session-state', scoutUuid, 'events.jsonl');
+    const otherPath = path.join(os.homedir(), '.copilot', 'session-state', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'events.jsonl');
+    const scoutSessionIds = (adapter as unknown as { _scoutSessionIds: Set<string> })._scoutSessionIds;
+
+    scoutSessionIds.add(scoutUuid);
+    try {
+        assert.equal(adapter.getDisplayNameForDiscoveredPath!(eventsPath), 'MS Scout (Copilot CLI)');
+        assert.equal(adapter.getDisplayNameForDiscoveredPath!(otherPath), undefined);
+    } finally {
+        scoutSessionIds.delete(scoutUuid);
+    }
+});
+
+test('CopilotCliAdapter.getDisplayName: returns MS Scout label for tracked Scout sessions via events.jsonl path', () => {
+    const scoutSessionId = '22222222-2222-2222-2222-222222222222';
+    const eventsPath = path.join(os.homedir(), '.copilot', 'session-state', scoutSessionId, 'events.jsonl');
+    const scoutSessionIds = (adapter as unknown as { _scoutSessionIds: Set<string> })._scoutSessionIds;
+
+    scoutSessionIds.add(scoutSessionId);
+    try {
+        assert.equal(adapter.getDisplayName(eventsPath), 'MS Scout (Copilot CLI)');
+        // Unrelated events.jsonl path should still return Copilot CLI
+        const otherPath = path.join(os.homedir(), '.copilot', 'session-state', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'events.jsonl');
+        assert.equal(adapter.getDisplayName(otherPath), 'Copilot CLI');
+    } finally {
+        scoutSessionIds.delete(scoutSessionId);
+    }
 });
 
 test('CopilotCliAdapter: implements IDiscoverableEcosystem', () => {
@@ -63,11 +108,15 @@ test('CopilotCliAdapter.getEditorRoot: returns ~/.copilot/session-state', () => 
     assert.equal(adapter.getEditorRoot('/anything'), getCopilotCliSessionStateDir());
 });
 
-test('CopilotCliAdapter.getCandidatePaths: returns single Copilot CLI entry', () => {
+test('CopilotCliAdapter.getCandidatePaths: returns session-state dir and session-store.db entries', () => {
     const paths = adapter.getCandidatePaths();
-    assert.equal(paths.length, 1);
+    assert.equal(paths.length, 2);
+    // First entry: session-state directory
     assert.equal(paths[0].source, 'Copilot CLI');
     assert.ok(paths[0].path.replace(/\\/g, '/').endsWith('/.copilot/session-state'));
+    // Second entry: session-store.db for chat-only sessions
+    assert.equal(paths[1].source, 'Copilot CLI (session-store.db)');
+    assert.ok(paths[1].path.replace(/\\/g, '/').endsWith('/.copilot/session-store.db'));
 });
 
 // ---------------------------------------------------------------------------
@@ -133,10 +182,73 @@ test('CopilotCliAdapter.discover: finds flat .json/.jsonl AND uuid subdir events
     assert.equal(result.sessionFiles.filter(f => f.includes('b2c3d4e5')).length, 0);
 });
 
-test('CopilotCliAdapter.discover: returns empty result when session-state dir does not exist', async () => {
-    // The real adapter points at the user's homedir; if that dir doesn't
-    // exist (e.g. in CI), discover() must return cleanly with empty results.
-    const result = await adapter.discover(() => { /* noop */ });
+test('CopilotCliAdapter.discover: marks sessions with Scout workspace.yaml cwd as Scout', async (t) => {
+    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-home-scout-'));
+    const stateDir = path.join(tmpHome, '.copilot', 'session-state');
+    await fs.promises.mkdir(stateDir, { recursive: true });
+
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
+
+    t.after(async () => {
+        if (originalHome === undefined) { delete process.env.HOME; } else { process.env.HOME = originalHome; }
+        if (originalUserProfile === undefined) { delete process.env.USERPROFILE; } else { process.env.USERPROFILE = originalUserProfile; }
+        await fs.promises.rm(tmpHome, { recursive: true, force: true });
+    });
+
+    if (os.homedir() !== tmpHome) {
+        t.skip(`os.homedir() doesn't honour env override on this platform (got ${os.homedir()})`);
+        return;
+    }
+
+    // Scout session: has events.jsonl + workspace.yaml with Scout cwd
+    const scoutUuid = 'cccccccc-cccc-cccc-cccc-cccccccccccc';
+    const scoutDir = path.join(stateDir, scoutUuid);
+    await fs.promises.mkdir(scoutDir, { recursive: true });
+    await fs.promises.writeFile(path.join(scoutDir, 'events.jsonl'), '{"type":"start"}\n');
+    await fs.promises.writeFile(path.join(scoutDir, 'workspace.yaml'),
+        'cwd: C:\\Users\\me\\Documents\\Microsoft Scout\\my-project\n');
+
+    // Regular CLI session: has events.jsonl but no workspace.yaml Scout cwd
+    const regularUuid = 'dddddddd-dddd-dddd-dddd-dddddddddddd';
+    const regularDir = path.join(stateDir, regularUuid);
+    await fs.promises.mkdir(regularDir, { recursive: true });
+    await fs.promises.writeFile(path.join(regularDir, 'events.jsonl'), '{"type":"start"}\n');
+    await fs.promises.writeFile(path.join(regularDir, 'workspace.yaml'), 'cwd: C:\\Users\\me\\code\\my-project\n');
+
+    const fresh = new CopilotCliAdapter();
+    await fresh.discover(() => { /* noop */ });
+
+    const scoutEventsPath = path.join(scoutDir, 'events.jsonl');
+    const regularEventsPath = path.join(regularDir, 'events.jsonl');
+
+    assert.equal(fresh.getDisplayName(scoutEventsPath), 'MS Scout (Copilot CLI)',
+        'Scout session should be labelled MS Scout (Copilot CLI)');
+    assert.equal(fresh.getDisplayName(regularEventsPath), 'Copilot CLI',
+        'Regular CLI session should be labelled Copilot CLI');
+});
+
+test('CopilotCliAdapter.discover: returns empty result when session-state dir does not exist', async (t) => {
+    // Redirect HOME to an empty tmpdir so neither session-state/ nor session-store.db
+    // exist. This avoids loading sql.js WASM (which causes a Windows UV handle assertion
+    // on forced process exit) while still verifying that discover() handles missing dirs.
+    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-home-empty-'));
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
+
+    t.after(async () => {
+        if (originalHome === undefined) { delete process.env.HOME; } else { process.env.HOME = originalHome; }
+        if (originalUserProfile === undefined) { delete process.env.USERPROFILE; } else { process.env.USERPROFILE = originalUserProfile; }
+        await fs.promises.rm(tmpHome, { recursive: true, force: true });
+    });
+
+    const fresh = new CopilotCliAdapter();
+    const result = await fresh.discover(() => { /* noop */ });
     assert.ok(Array.isArray(result.sessionFiles));
     assert.ok(Array.isArray(result.candidatePaths));
+    assert.equal(result.sessionFiles.length, 0);
 });

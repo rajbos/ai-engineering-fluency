@@ -49,11 +49,50 @@ cd vscode-extension && npm run compile   # VS Code extension
 cd cli && npm run build                   # CLI
 ```
 
+## Documentation
+
+The `docs/` folder contains all project documentation. Start with the index:
+
+📖 **[docs/README.md](docs/README.md)** — Full categorized index of all documentation
+
+Key categories:
+- **Core Reference** — fluency scoring rules, data schemas, trackable metrics
+- **Component Docs** — per-component guides (`cli/`, `vscode-extension/`, `visual-studio/`, `sharing-server/`, `specs/`)
+- **Log File Schemas** — session log formats for all supported editors (`docs/logFilesSchema/`)
+- **Feature Docs** — per-feature documentation (`docs/features/`)
+- **ADRs** — implementation notes and architectural decisions (`docs/adr/`)
+
 ## Development Guidelines
 
 - **Minimal Changes**: Only modify files directly needed for the task. Avoid touching unrelated files.
 - **Focused Modifications**: Make surgical, precise changes without affecting other functionality.
 - **Preserve Existing Structure**: Don't refactor or reorganize unless essential for the task.
+
+## CLI Must Reuse Shared Extension Functions
+
+The CLI (`cli/`) is a thin consumer of the VS Code extension's TypeScript modules. **Never reimplement session parsing or cost attribution logic in the CLI — always call the shared functions from `vscode-extension/src/`.**
+
+### The canonical split (mirrors `getSessionFileDataCached` in `extension.ts`)
+
+| What you need | Function to call | Source |
+|---|---|---|
+| Token counts (total, actual, thinking) | `estimateTokensFromJsonlSession()` | `tokenEstimation.ts` |
+| Per-model cost attribution (model usage) | `getModelUsageFromSession()` | `usageAnalysis.ts` |
+| Debug-log token override | `extractAllTokensFromDebugLog()` | `tokenEstimation.ts` |
+
+**Critical rule**: `estimateTokensFromJsonlSession().modelUsage` must **not** be used as the primary source for model attribution. It returns `{}` for delta-format sessions (VS Code Chat JSONL), causing $0 cost for those sessions. Always call `getModelUsageFromSession()` separately for model attribution — it handles all formats through a single code path.
+
+```typescript
+// Correct — matches VS Code's getSessionFileDataCached pattern:
+const result = estimateTokensFromJsonlSession(content);         // token counts only
+tokens = result.actualTokens > 0 ? result.actualTokens : result.tokens;
+fileModelUsage = await getModelUsageFromSession(deps, filePath, content); // attribution
+
+// Wrong — diverges from VS Code, breaks delta-format sessions:
+fileModelUsage = result.modelUsage; // empty {} for VS Code Chat sessions
+```
+
+If you find yourself adding a fallback like "if modelUsage is empty, call X" in the CLI, that is a sign the primary attribution source is wrong — fix the source instead.
 
 ## Coding Agent Data Sources
 

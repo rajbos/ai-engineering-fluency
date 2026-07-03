@@ -5,6 +5,7 @@ import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, D
 import { CrushDataAccess } from '../crush';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { withErrorRecoverySync } from '../utils/errors';
 
 export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'crush';
@@ -102,12 +103,15 @@ export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, 
 		const candidates: CandidatePath[] = [
 			{ path: path.join(configDir, 'projects.json'), source: 'Crush (projects.json)' },
 		];
-		try {
-			const projects = this.crush.readCrushProjects();
-			for (const project of projects) {
-				candidates.push({ path: path.join(project.data_dir, 'crush.db'), source: `Crush (${path.basename(project.path)})` });
-			}
-		} catch { /* ignore */ }
+		const extraPaths = withErrorRecoverySync(
+			() => this.crush.readCrushProjects().map(project => ({
+				path: path.join(project.data_dir, 'crush.db'),
+				source: `Crush (${path.basename(project.path)})`
+			})),
+			[] as CandidatePath[],
+			'crushAdapter getCandidatePaths'
+		);
+		candidates.push(...extraPaths);
 		return candidates;
 	}
 
@@ -115,8 +119,7 @@ export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, 
 		const turns: ChatTurn[] = [];
 		const messages = await this.crush.getCrushMessages(sessionFile);
 		const session = await this.crush.readCrushSession(sessionFile);
-		const userMessages = messages.filter(m => m.role === 'user');
-		const numTurns = userMessages.length;
+		const numTurns = messages.filter(m => m.role === 'user').length;
 		let turnNumber = 0;
 		for (let i = 0; i < messages.length; i++) {
 			const msg = messages[i];
@@ -127,46 +130,63 @@ export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, 
 				if (messages[j].role === 'user') { break; }
 				if (messages[j].role === 'assistant') { turnAssistantMsgs.push(messages[j]); }
 			}
-			const userParts: any[] = Array.isArray(msg.parts) ? msg.parts : [];
-			const userText = userParts
-				.filter(p => p?.type === 'text' && p?.text)
-				.map(p => p.text as string)
-				.join('\n');
-			let assistantText = '';
-			const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
-			let model: string | null = null;
-			for (const assistantMsg of turnAssistantMsgs) {
-				if (!model) { model = assistantMsg.model || null; }
-				const parts: any[] = Array.isArray(assistantMsg.parts) ? assistantMsg.parts : [];
-				for (const part of parts) {
-					if (part?.type === 'text' && part?.text) {
-						assistantText += part.text;
-					} else if (part?.type === 'tool_call' && part?.data?.name) {
-						toolCalls.push({
-							toolName: part.data.name,
-							arguments: part.data.arguments ? JSON.stringify(part.data.arguments) : undefined
-						});
-					}
-				}
-			}
-			const perTurnInput = session?.prompt_tokens && numTurns > 0 ? Math.round(session.prompt_tokens / numTurns) : 0;
-			const perTurnOutput = session?.completion_tokens && numTurns > 0 ? Math.round(session.completion_tokens / numTurns) : 0;
-			turns.push({
-				turnNumber,
-				timestamp: msg.created_at ? new Date(msg.created_at * 1000).toISOString() : null,
-				mode: 'cli',
-				userMessage: userText,
-				assistantResponse: assistantText,
-				model,
-				toolCalls,
-				contextReferences: createEmptyContextRefs(),
-				mcpTools: [],
-				inputTokensEstimate: perTurnInput,
-				outputTokensEstimate: perTurnOutput,
-				thinkingTokensEstimate: 0
-			});
+			turns.push(this.buildCrushTurn(msg, turnAssistantMsgs, session, numTurns, turnNumber));
 		}
 		return { turns };
+	}
+
+	private buildCrushTurn(msg: any, turnAssistantMsgs: any[], session: any, numTurns: number, turnNumber: number): ChatTurn {
+		const userParts: any[] = Array.isArray(msg.parts) ? msg.parts : [];
+		const userText = userParts
+			.filter(p => p?.type === 'text' && p?.text)
+			.map(p => p.text as string)
+			.join('\n');
+		const { assistantText, toolCalls, model } = this.processAssistantMessagesForTurn(turnAssistantMsgs);
+		const perTurnInput = session?.prompt_tokens && numTurns > 0 ? Math.round(session.prompt_tokens / numTurns) : 0;
+		const perTurnOutput = session?.completion_tokens && numTurns > 0 ? Math.round(session.completion_tokens / numTurns) : 0;
+		return {
+			turnNumber,
+			timestamp: msg.created_at ? new Date(msg.created_at * 1000).toISOString() : null,
+			mode: 'cli',
+			userMessage: userText,
+			assistantResponse: assistantText,
+			model,
+			toolCalls,
+			contextReferences: createEmptyContextRefs(),
+			mcpTools: [],
+			inputTokensEstimate: perTurnInput,
+			outputTokensEstimate: perTurnOutput,
+			thinkingTokensEstimate: 0
+		};
+	}
+
+	private processAssistantMessagesForTurn(turnAssistantMsgs: any[]): {
+		assistantText: string; toolCalls: { toolName: string; arguments?: string; result?: string }[]; model: string | null;
+	} {
+		let assistantText = '';
+		const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
+		let model: string | null = null;
+		for (const assistantMsg of turnAssistantMsgs) {
+			if (!model) { model = assistantMsg.model || null; }
+			for (const part of (Array.isArray(assistantMsg.parts) ? assistantMsg.parts : [])) {
+				assistantText += this.processCrushMessagePart(part, toolCalls);
+			}
+		}
+		return { assistantText, toolCalls, model };
+	}
+
+	private processCrushMessagePart(
+		part: any,
+		toolCalls: { toolName: string; arguments?: string; result?: string }[]
+	): string {
+		if (part?.type === 'text' && part?.text) { return part.text as string; }
+		if (part?.type === 'tool_call' && part?.data?.name) {
+			toolCalls.push({
+				toolName: part.data.name,
+				arguments: part.data.arguments ? JSON.stringify(part.data.arguments) : undefined
+			});
+		}
+		return '';
 	}
 
 	async getSyncData(sessionFile: string): Promise<{ tokens: number; interactions: number; modelUsage: ModelUsage; timestamp: number }> {
@@ -180,18 +200,25 @@ export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, 
 		for (const msg of messages) {
 			if (msg.role === 'user') { analysis.modeUsage.cli++; }
 			if (msg.role === 'assistant') {
-				const model = msg.model || 'unknown';
-				models.push(model);
-				const parts: any[] = Array.isArray(msg.parts) ? msg.parts : [];
-				for (const part of parts) {
-					if (part?.type === 'tool_call' && part?.data?.name) {
-						analysis.toolCalls.total++;
-						const toolName = part.data.name as string;
-						analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
-					}
-				}
+				this.processCrushAssistantMessage(msg, analysis, models);
 			}
 		}
+		this.applyCrushModelSwitchingStats(models, analysis);
+		applyModelTierClassification(ctx.modelPricing, analysis.modelSwitching.uniqueModels, models, analysis);
+		return analysis;
+	}
+
+	private processCrushAssistantMessage(msg: any, analysis: import('../types').SessionUsageAnalysis, models: string[]): void {
+		models.push(msg.model || 'unknown');
+		for (const part of (Array.isArray(msg.parts) ? msg.parts : [])) {
+			if (part?.type !== 'tool_call' || !part?.data?.name) { continue; }
+			analysis.toolCalls.total++;
+			const toolName = part.data.name as string;
+			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+		}
+	}
+
+	private applyCrushModelSwitchingStats(models: string[], analysis: import('../types').SessionUsageAnalysis): void {
 		const uniqueModels = [...new Set(models)];
 		analysis.modelSwitching.uniqueModels = uniqueModels;
 		analysis.modelSwitching.modelCount = uniqueModels.length;
@@ -201,7 +228,5 @@ export class CrushAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, 
 			if (models[i] !== models[i - 1]) { switchCount++; }
 		}
 		analysis.modelSwitching.switchCount = switchCount;
-		applyModelTierClassification(ctx.modelPricing, uniqueModels, models, analysis);
-		return analysis;
 	}
 }

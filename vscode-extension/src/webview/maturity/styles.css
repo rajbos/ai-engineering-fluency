@@ -49,11 +49,7 @@ body {
 	letter-spacing: 0.2px;
 }
 
-.button-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-}
+
 
 /* Overall stage banner */
 .stage-banner {
@@ -86,19 +82,19 @@ body {
 
 /* Stage accent colors — dark theme defaults */
 .stage-1 { color: #93c5fd; }
-.stage-2 { color: #6ee7b7; }
+.stage-2 { color: #a78bfa; }
 .stage-3 { color: #3b82f6; }
-.stage-4 { color: #10b981; }
+.stage-4 { color: #22d3ee; }
 
 /* Light theme: darken pale stage colors for readable contrast */
 body[data-vscode-theme-kind="vscode-light"] .stage-1,
 body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-1 { color: #1d6fa4 !important; }
 body[data-vscode-theme-kind="vscode-light"] .stage-2,
-body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-2 { color: #059669 !important; }
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-2 { color: #7c3aed !important; }
 body[data-vscode-theme-kind="vscode-light"] .stage-3,
 body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-3 { color: #2563eb !important; }
 body[data-vscode-theme-kind="vscode-light"] .stage-4,
-body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-4 { color: #059669 !important; }
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-4 { color: #0891b2 !important; }
 
 /* Radar / spider chart container */
 .radar-wrapper {
@@ -178,9 +174,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-4 { color: #059
 }
 
 .stage-1-dot { background: #93c5fd; }
-.stage-2-dot { background: #6ee7b7; }
+.stage-2-dot { background: #a78bfa; }
 .stage-3-dot { background: #3b82f6; }
-.stage-4-dot { background: #10b981; }
+.stage-4-dot { background: #22d3ee; }
 
 .legend-content {
 	flex: 1;
@@ -244,9 +240,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-4 { color: #059
 }
 
 .badge-2 {
-	background: rgba(110, 231, 183, 0.15);
-	color: #6ee7b7;
-	border: 1px solid rgba(110, 231, 183, 0.4);
+	background: rgba(167, 139, 250, 0.15);
+	color: #a78bfa;
+	border: 1px solid rgba(167, 139, 250, 0.4);
 }
 
 .badge-3 {
@@ -256,20 +252,20 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-4 { color: #059
 }
 
 .badge-4 {
-	background: rgba(16, 185, 129, 0.15);
-	color: #10b981;
-	border: 1px solid rgba(16, 185, 129, 0.4);
+	background: rgba(34, 211, 238, 0.15);
+	color: #22d3ee;
+	border: 1px solid rgba(34, 211, 238, 0.4);
 }
 
 /* Light theme badge overrides — use darker text for contrast */
 body[data-vscode-theme-kind="vscode-light"] .badge-1,
 body[data-vscode-theme-kind="vscode-high-contrast-light"] .badge-1 { color: #1d6fa4; }
 body[data-vscode-theme-kind="vscode-light"] .badge-2,
-body[data-vscode-theme-kind="vscode-high-contrast-light"] .badge-2 { color: #059669; }
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .badge-2 { color: #7c3aed; }
 body[data-vscode-theme-kind="vscode-light"] .badge-3,
 body[data-vscode-theme-kind="vscode-high-contrast-light"] .badge-3 { color: #2563eb; }
 body[data-vscode-theme-kind="vscode-light"] .badge-4,
-body[data-vscode-theme-kind="vscode-high-contrast-light"] .badge-4 { color: #059669; }
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .badge-4 { color: #0891b2; }
 
 .category-stage-label {
 	font-size: 11px;
@@ -887,18 +883,18 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .share-btn-download { 
 }
 
 .demo-step-active.demo-step-1 { background: rgba(147, 197, 253, 0.2); color: #93c5fd; }
-.demo-step-active.demo-step-2 { background: rgba(110, 231, 183, 0.2); color: #6ee7b7; }
+.demo-step-active.demo-step-2 { background: rgba(167, 139, 250, 0.2); color: #a78bfa; }
 .demo-step-active.demo-step-3 { background: rgba(59, 130, 246, 0.2); color: #3b82f6; }
-.demo-step-active.demo-step-4 { background: rgba(16, 185, 129, 0.2); color: #10b981; }
+.demo-step-active.demo-step-4 { background: rgba(34, 211, 238, 0.2); color: #22d3ee; }
 
 body[data-vscode-theme-kind="vscode-light"] .demo-step-active.demo-step-1,
 body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo-step-1 { color: #1d6fa4; }
 body[data-vscode-theme-kind="vscode-light"] .demo-step-active.demo-step-2,
-body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo-step-2 { color: #059669; }
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo-step-2 { color: #7c3aed; }
 body[data-vscode-theme-kind="vscode-light"] .demo-step-active.demo-step-3,
 body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo-step-3 { color: #2563eb; }
 body[data-vscode-theme-kind="vscode-light"] .demo-step-active.demo-step-4,
-body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo-step-4 { color: #059669; }
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo-step-4 { color: #0891b2; }
 
 .demo-slider-value {
 	font-size: 11px;

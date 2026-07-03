@@ -3,6 +3,8 @@ import * as os from 'os';
 import * as path from 'path';
 import type { ChatTurn, ModelUsage, PromptTokenDetail } from './types';
 import { createEmptyContextRefs } from './tokenEstimation';
+import { normalizePathForComparison, normalizePath } from './workspaceHelpers';
+import { toLocalDayKey } from './utils/dayKeys';
 
 interface GeminiCliSessionHeader {
 	sessionId: string;
@@ -114,7 +116,61 @@ export function normalizeGeminiModelId(model: string): string {
 	return trimmed;
 }
 
+// ── getGeminiCliSessionFiles helpers ────────────────────────────────────────
+
+async function _ggcsfCollectChatFiles(chatsDir: string): Promise<string[]> {
+	const files: string[] = [];
+	try {
+		const entries = await fs.promises.readdir(chatsDir, { withFileTypes: true });
+		for (const entry of entries) {
+			if (entry.isDirectory()) { continue; }
+			if (!entry.name.startsWith('session-') || !entry.name.endsWith('.jsonl')) { continue; }
+			const fullPath = path.join(chatsDir, entry.name);
+			try {
+				const st = await fs.promises.stat(fullPath);
+				if (st.size > 0) { files.push(fullPath); }
+			} catch { /* ignore individual stat failures */ }
+		}
+	} catch { /* ignore unreadable chats dirs */ }
+	return files;
+}
+
+async function _ggcsfCollectProjectFiles(tmpDir: string, projectDir: fs.Dirent): Promise<string[]> {
+	if (!projectDir.isDirectory()) { return []; }
+	const chatsDir = path.join(tmpDir, projectDir.name, 'chats');
+	try {
+		await fs.promises.access(chatsDir);
+	} catch {
+		return [];
+	}
+	return _ggcsfCollectChatFiles(chatsDir);
+}
+
+// ── readGeminiCliSession helpers ─────────────────────────────────────────────
+
+interface RgsState {
+	header: GeminiCliSessionHeader | null;
+	latestHeaderUpdate: string | undefined;
+	anonymousAssistantCounter: number;
+	seenUserIds: Set<string>;
+	userRecords: GeminiCliUserRecord[];
+	assistantRecords: Map<string, GeminiCliAssistantRecord>;
+}
+
+function _rgsBuildHeader(parsed: any): GeminiCliSessionHeader {
+	return {
+		sessionId: parsed.sessionId,
+		projectHash: isNonEmptyString(parsed.projectHash) ? parsed.projectHash : undefined,
+		startTime: isNonEmptyString(parsed.startTime) ? parsed.startTime : undefined,
+		lastUpdated: isNonEmptyString(parsed.lastUpdated) ? parsed.lastUpdated : undefined,
+		kind: isNonEmptyString(parsed.kind) ? parsed.kind : undefined,
+	};
+}
+
 export class GeminiCliDataAccess {
+	private _projectsIndexCache: { map: Map<string, string>; mtimeMs: number; size: number } | null = null;
+	private _projectsIndexInflight: Map<string, Promise<Map<string, string>>> = new Map();
+
 	getGeminiDataDir(): string {
 		return path.join(os.homedir(), '.gemini');
 	}
@@ -132,151 +188,194 @@ export class GeminiCliDataAccess {
 	}
 
 	isGeminiCliSessionFile(filePath: string): boolean {
-		const normalized = filePath.toLowerCase().replace(/\\/g, '/');
-		const tmpDir = this.getGeminiTmpDir().toLowerCase().replace(/\\/g, '/');
+		const normalized = normalizePathForComparison(filePath);
+		const tmpDir = normalizePathForComparison(this.getGeminiTmpDir());
 		return normalized.startsWith(tmpDir)
 			&& normalized.includes('/chats/session-')
 			&& normalized.endsWith('.jsonl');
 	}
 
-	getGeminiCliSessionFiles(): string[] {
-		const tmpDir = this.getGeminiTmpDir();
-		if (!fs.existsSync(tmpDir)) {
-			return [];
-		}
-
-		const sessionFiles: string[] = [];
+	private async collectSessionFilesFromChatDir(chatsDir: string): Promise<string[]> {
+		const files: string[] = [];
 		try {
-			const projectDirs = fs.readdirSync(tmpDir, { withFileTypes: true });
-			for (const projectDir of projectDirs) {
-				if (!projectDir.isDirectory()) {
-					continue;
-				}
-
-				const chatsDir = path.join(tmpDir, projectDir.name, 'chats');
-				if (!fs.existsSync(chatsDir)) {
-					continue;
-				}
-
+			const chatEntries = await fs.promises.readdir(chatsDir, { withFileTypes: true });
+			for (const entry of chatEntries) {
+				if (entry.isDirectory() || !entry.name.startsWith('session-') || !entry.name.endsWith('.jsonl')) { continue; }
+				const fullPath = path.join(chatsDir, entry.name);
 				try {
-					const chatEntries = fs.readdirSync(chatsDir, { withFileTypes: true });
-					for (const entry of chatEntries) {
-						if (entry.isDirectory()) {
-							continue;
-						}
-						if (!entry.name.startsWith('session-') || !entry.name.endsWith('.jsonl')) {
-							continue;
-						}
-
-						const fullPath = path.join(chatsDir, entry.name);
-						try {
-							const stat = fs.statSync(fullPath);
-							if (stat.size > 0) {
-								sessionFiles.push(fullPath);
-							}
-						} catch {
-							// Ignore individual file stat failures.
-						}
-					}
-				} catch {
-					// Ignore unreadable chats directories.
-				}
+					const st = await fs.promises.stat(fullPath);
+					if (st.size > 0) { files.push(fullPath); }
+				} catch { /* skip */ }
 			}
+		} catch { /* ignore unreadable chat directories */ }
+		return files;
+	}
+
+	async getGeminiCliSessionFiles(): Promise<string[]> {
+		const tmpDir = this.getGeminiTmpDir();
+		try {
+			await fs.promises.access(tmpDir);
 		} catch {
 			return [];
 		}
-
-		return sessionFiles;
+		try {
+			const projectDirs = await fs.promises.readdir(tmpDir, { withFileTypes: true });
+			const results = await Promise.all(projectDirs.map(dir => _ggcsfCollectProjectFiles(tmpDir, dir)));
+			return results.flat();
+		} catch {
+			return [];
+		}
 	}
 
-	readGeminiCliSession(sessionFilePath: string): GeminiCliParsedSession {
-		const userRecords: GeminiCliUserRecord[] = [];
-		const assistantRecords = new Map<string, GeminiCliAssistantRecord>();
-		const seenUserIds = new Set<string>();
-		let header: GeminiCliSessionHeader | null = null;
-		let latestHeaderUpdate: string | undefined;
-		let anonymousAssistantCounter = 0;
+	private parseGeminiSessionHeader(parsed: any): GeminiCliSessionHeader {
+		return {
+			sessionId: parsed.sessionId,
+			projectHash: isNonEmptyString(parsed.projectHash) ? parsed.projectHash : undefined,
+			startTime: isNonEmptyString(parsed.startTime) ? parsed.startTime : undefined,
+			lastUpdated: isNonEmptyString(parsed.lastUpdated) ? parsed.lastUpdated : undefined,
+			kind: isNonEmptyString(parsed.kind) ? parsed.kind : undefined,
+		};
+	}
 
-		const lines = this.readJsonlLines(sessionFilePath);
-		for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
-			const line = lines[lineNumber];
+	private parseGeminiUserRecord(parsed: any, lineNumber: number, seenUserIds: Set<string>): GeminiCliUserRecord | null {
+		const userId = isNonEmptyString(parsed.id) ? parsed.id : `__user_${lineNumber}`;
+		if (seenUserIds.has(userId)) { return null; }
+		seenUserIds.add(userId);
+		return {
+			id: isNonEmptyString(parsed.id) ? parsed.id : undefined,
+			timestamp: isNonEmptyString(parsed.timestamp) ? parsed.timestamp : undefined,
+			type: 'user', content: parsed.content, lineNumber,
+		};
+	}
+
+	private parseGeminiAssistantRecord(parsed: any, lineNumber: number, counter: { value: number }): { id: string; record: GeminiCliAssistantRecord } {
+		const id = isNonEmptyString(parsed.id) ? parsed.id : `__assistant_${counter.value++}_${lineNumber}`;
+		return {
+			id,
+			record: {
+				id: isNonEmptyString(parsed.id) ? parsed.id : undefined,
+				timestamp: isNonEmptyString(parsed.timestamp) ? parsed.timestamp : undefined,
+				type: 'gemini', content: parsed.content,
+				thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : [],
+				tokens: parsed.tokens,
+				model: isNonEmptyString(parsed.model) ? parsed.model : undefined,
+				toolCalls: Array.isArray(parsed.toolCalls) ? parsed.toolCalls : [],
+				lineNumber,
+			},
+		};
+	}
+
+	private processOneParsedLine(line: string, lineNumber: number, state: {
+		header: GeminiCliSessionHeader | null; latestHeaderUpdate: string | undefined;
+		userRecords: GeminiCliUserRecord[]; assistantRecords: Map<string, GeminiCliAssistantRecord>;
+		seenUserIds: Set<string>; counter: { value: number };
+	}): void {
+		let parsed: any;
+		try { parsed = JSON.parse(line); } catch { return; }
+		if (!state.header && isNonEmptyString(parsed?.sessionId)) { state.header = this.parseGeminiSessionHeader(parsed); return; }
+		if (isNonEmptyString(parsed?.$set?.lastUpdated)) { state.latestHeaderUpdate = parsed.$set.lastUpdated; return; }
+		if (parsed?.type === 'user') {
+			const record = this.parseGeminiUserRecord(parsed, lineNumber, state.seenUserIds);
+			if (record) { state.userRecords.push(record); }
+			return;
+		}
+		if (parsed?.type === 'gemini') {
+			const { id, record } = this.parseGeminiAssistantRecord(parsed, lineNumber, state.counter);
+			state.assistantRecords.set(id, record);
+		}
+	}
+
+	async readGeminiCliSession(sessionFilePath: string): Promise<GeminiCliParsedSession> {
+		const state: RgsState = {
+			header: null,
+			latestHeaderUpdate: undefined,
+			anonymousAssistantCounter: 0,
+			seenUserIds: new Set<string>(),
+			userRecords: [],
+			assistantRecords: new Map<string, GeminiCliAssistantRecord>(),
+		};
+
+		for (const [i, line] of (await this.readJsonlLines(sessionFilePath)).entries()) {
 			let parsed: any;
-			try {
-				parsed = JSON.parse(line);
-			} catch {
-				continue;
-			}
-
-			if (!header && isNonEmptyString(parsed?.sessionId)) {
-				header = {
-					sessionId: parsed.sessionId,
-					projectHash: isNonEmptyString(parsed.projectHash) ? parsed.projectHash : undefined,
-					startTime: isNonEmptyString(parsed.startTime) ? parsed.startTime : undefined,
-					lastUpdated: isNonEmptyString(parsed.lastUpdated) ? parsed.lastUpdated : undefined,
-					kind: isNonEmptyString(parsed.kind) ? parsed.kind : undefined,
-				};
-				continue;
-			}
-
-			if (isNonEmptyString(parsed?.$set?.lastUpdated)) {
-				latestHeaderUpdate = parsed.$set.lastUpdated;
-				continue;
-			}
-
-			if (parsed?.type === 'user') {
-				const userId = isNonEmptyString(parsed.id) ? parsed.id : `__user_${lineNumber}`;
-				if (seenUserIds.has(userId)) {
-					continue;
-				}
-				seenUserIds.add(userId);
-				userRecords.push({
-					id: isNonEmptyString(parsed.id) ? parsed.id : undefined,
-					timestamp: isNonEmptyString(parsed.timestamp) ? parsed.timestamp : undefined,
-					type: 'user',
-					content: parsed.content,
-					lineNumber,
-				});
-				continue;
-			}
-
-			if (parsed?.type === 'gemini') {
-				const assistantId = isNonEmptyString(parsed.id)
-					? parsed.id
-					: `__assistant_${anonymousAssistantCounter++}_${lineNumber}`;
-				assistantRecords.set(assistantId, {
-					id: isNonEmptyString(parsed.id) ? parsed.id : undefined,
-					timestamp: isNonEmptyString(parsed.timestamp) ? parsed.timestamp : undefined,
-					type: 'gemini',
-					content: parsed.content,
-					thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : [],
-					tokens: parsed.tokens,
-					model: isNonEmptyString(parsed.model) ? parsed.model : undefined,
-					toolCalls: Array.isArray(parsed.toolCalls) ? parsed.toolCalls : [],
-					lineNumber,
-				});
-			}
+			try { parsed = JSON.parse(line); } catch { continue; }
+			this._rgsDispatchLine(parsed, i, state);
 		}
 
-		if (header && latestHeaderUpdate) {
-			header.lastUpdated = latestHeaderUpdate;
+		if (state.header && state.latestHeaderUpdate) {
+			state.header.lastUpdated = state.latestHeaderUpdate;
 		}
 
-		userRecords.sort(compareByTimestampThenLine);
-		const dedupedAssistants = Array.from(assistantRecords.values()).sort(compareByTimestampThenLine);
-		const projectBucket = this.getProjectBucketFromPath(sessionFilePath) || header?.projectHash;
-		const workspacePath = this.resolveWorkspacePath(projectBucket, header?.projectHash);
+		state.userRecords.sort(compareByTimestampThenLine);
+		const dedupedAssistants = Array.from(state.assistantRecords.values()).sort(compareByTimestampThenLine);
+		const projectBucket = this.getProjectBucketFromPath(sessionFilePath) || state.header?.projectHash;
+		const workspacePath = await this.resolveWorkspacePath(projectBucket, state.header?.projectHash);
 
 		return {
-			header,
+			header: state.header,
 			projectBucket,
 			workspacePath: workspacePath ?? projectBucket,
-			userRecords,
+			userRecords: state.userRecords,
 			assistantRecords: dedupedAssistants,
 		};
 	}
 
-	getTokensFromGeminiCliSession(sessionFilePath: string): { tokens: number; thinkingTokens: number } {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	private _rgsDispatchLine(parsed: any, lineNumber: number, state: RgsState): void {
+		if (!state.header && isNonEmptyString(parsed?.sessionId)) {
+			state.header = _rgsBuildHeader(parsed);
+			return;
+		}
+		if (isNonEmptyString(parsed?.$set?.lastUpdated)) {
+			state.latestHeaderUpdate = parsed.$set.lastUpdated;
+			return;
+		}
+		if (parsed?.type === 'user') {
+			this._rgsHandleUserRecord(parsed, lineNumber, state.seenUserIds, state.userRecords);
+			return;
+		}
+		if (parsed?.type === 'gemini') {
+			state.anonymousAssistantCounter = this._rgsHandleGeminiRecord(parsed, lineNumber, state.anonymousAssistantCounter, state.assistantRecords);
+		}
+	}
+
+	private _rgsHandleUserRecord(
+		parsed: any, lineNumber: number,
+		seenUserIds: Set<string>, userRecords: GeminiCliUserRecord[]
+	): void {
+		const userId = isNonEmptyString(parsed.id) ? parsed.id : `__user_${lineNumber}`;
+		if (seenUserIds.has(userId)) { return; }
+		seenUserIds.add(userId);
+		userRecords.push({
+			id: isNonEmptyString(parsed.id) ? parsed.id : undefined,
+			timestamp: isNonEmptyString(parsed.timestamp) ? parsed.timestamp : undefined,
+			type: 'user',
+			content: parsed.content,
+			lineNumber,
+		});
+	}
+
+	private _rgsHandleGeminiRecord(
+		parsed: any, lineNumber: number,
+		counter: number, assistantRecords: Map<string, GeminiCliAssistantRecord>
+	): number {
+		const assistantId = isNonEmptyString(parsed.id)
+			? parsed.id
+			: `__assistant_${counter}_${lineNumber}`;
+		assistantRecords.set(assistantId, {
+			id: isNonEmptyString(parsed.id) ? parsed.id : undefined,
+			timestamp: isNonEmptyString(parsed.timestamp) ? parsed.timestamp : undefined,
+			type: 'gemini',
+			content: parsed.content,
+			thoughts: Array.isArray(parsed.thoughts) ? parsed.thoughts : [],
+			tokens: parsed.tokens,
+			model: isNonEmptyString(parsed.model) ? parsed.model : undefined,
+			toolCalls: Array.isArray(parsed.toolCalls) ? parsed.toolCalls : [],
+			lineNumber,
+		});
+		return isNonEmptyString(parsed.id) ? counter : counter + 1;
+	}
+
+	async getTokensFromGeminiCliSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		let totalTokens = 0;
 		let thinkingTokens = 0;
 
@@ -289,12 +388,12 @@ export class GeminiCliDataAccess {
 		return { tokens: totalTokens, thinkingTokens };
 	}
 
-	countGeminiCliInteractions(sessionFilePath: string): number {
-		return this.readGeminiCliSession(sessionFilePath).userRecords.length;
+	async countGeminiCliInteractions(sessionFilePath: string): Promise<number> {
+		return (await this.readGeminiCliSession(sessionFilePath)).userRecords.length;
 	}
 
-	getGeminiCliModelUsage(sessionFilePath: string): ModelUsage {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	async getGeminiCliModelUsage(sessionFilePath: string): Promise<ModelUsage> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		const modelUsage: ModelUsage = {};
 
 		for (const assistant of session.assistantRecords) {
@@ -315,13 +414,13 @@ export class GeminiCliDataAccess {
 		return modelUsage;
 	}
 
-	getGeminiCliSessionMeta(sessionFilePath: string): {
+	async getGeminiCliSessionMeta(sessionFilePath: string): Promise<{
 		title: string | undefined;
 		firstInteraction: string | null;
 		lastInteraction: string | null;
 		workspacePath?: string;
-	} {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	}> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		const timestamps: number[] = [];
 
 		const pushTimestamp = (value: string | undefined): void => {
@@ -350,51 +449,43 @@ export class GeminiCliDataAccess {
 		};
 	}
 
-	buildGeminiCliTurns(sessionFilePath: string): { turns: ChatTurn[]; actualTokens: number } {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	private processAssistantGroup(group: { assistants: GeminiCliAssistantRecord[] }): {
+		assistantContents: string[];
+		toolCalls: ChatTurn['toolCalls'];
+		model: string | null;
+		inputTokens: number; outputTokens: number; thinkingTokens: number; toolTokens: number; cachedTokens: number; totalTokens: number;
+	} {
+		const assistantContents: string[] = [];
+		const toolCalls: ChatTurn['toolCalls'] = [];
+		let model: string | null = null;
+		let inputTokens = 0; let outputTokens = 0; let thinkingTokens = 0; let toolTokens = 0; let cachedTokens = 0; let totalTokens = 0;
+		for (const assistant of group.assistants) {
+			const tok = this.getTokenBreakdown(assistant.tokens);
+			totalTokens += tok.total; inputTokens += tok.input; outputTokens += tok.output;
+			thinkingTokens += tok.thinking; toolTokens += tok.tool; cachedTokens += tok.cached;
+			const text = isNonEmptyString(assistant.content) ? assistant.content.trim() : '';
+			if (text.length > 0) { assistantContents.push(text); }
+			for (const tc of this.toDisplayToolCalls(assistant.toolCalls)) { toolCalls.push(tc); }
+			if (isNonEmptyString(assistant.model)) { model = normalizeGeminiModelId(assistant.model); }
+		}
+		return { assistantContents, toolCalls, model, inputTokens, outputTokens, thinkingTokens, toolTokens, cachedTokens, totalTokens };
+	}
+
+	async buildGeminiCliTurns(sessionFilePath: string): Promise<{ turns: ChatTurn[]; actualTokens: number }> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		const groups = this.groupConversationTurns(session);
 		const turns: ChatTurn[] = [];
 		let sessionActualTokens = 0;
 
 		for (const group of groups) {
-			const assistantContents: string[] = [];
-			const toolCalls: ChatTurn['toolCalls'] = [];
-			let model: string | null = null;
-			let inputTokens = 0;
-			let outputTokens = 0;
-			let thinkingTokens = 0;
-			let toolTokens = 0;
-			let cachedTokens = 0;
-
+			const acc = { assistantContents: [] as string[], toolCalls: [] as ChatTurn['toolCalls'], model: null as string | null, inputTokens: 0, outputTokens: 0, thinkingTokens: 0, toolTokens: 0, cachedTokens: 0 };
 			for (const assistant of group.assistants) {
-				const tokenData = this.getTokenBreakdown(assistant.tokens);
-				sessionActualTokens += tokenData.total;
-				inputTokens += tokenData.input;
-				outputTokens += tokenData.output;
-				thinkingTokens += tokenData.thinking;
-				toolTokens += tokenData.tool;
-				cachedTokens += tokenData.cached;
-
-				const assistantText = isNonEmptyString(assistant.content) ? assistant.content.trim() : '';
-				if (assistantText.length > 0) {
-					assistantContents.push(assistantText);
-				}
-
-				for (const toolCall of this.toDisplayToolCalls(assistant.toolCalls)) {
-					toolCalls.push(toolCall);
-				}
-
-				if (isNonEmptyString(assistant.model)) {
-					model = normalizeGeminiModelId(assistant.model);
-				}
+				sessionActualTokens += this._bgtAggregateAssistant(assistant, acc);
 			}
 
+			const { assistantContents, toolCalls, model, inputTokens, outputTokens, thinkingTokens, toolTokens, cachedTokens } = acc;
 			const actualUsage = inputTokens > 0 || outputTokens > 0 || thinkingTokens > 0 || toolTokens > 0
-				? {
-					promptTokens: inputTokens,
-					completionTokens: outputTokens + thinkingTokens + toolTokens,
-					promptTokenDetails: this.buildPromptTokenDetails(inputTokens, cachedTokens),
-				}
+				? { promptTokens: inputTokens, completionTokens: outputTokens + thinkingTokens + toolTokens, promptTokenDetails: this.buildPromptTokenDetails(inputTokens, cachedTokens) }
 				: undefined;
 
 			turns.push({
@@ -403,8 +494,7 @@ export class GeminiCliDataAccess {
 				mode: 'cli',
 				userMessage: this.extractUserText(group.user?.content),
 				assistantResponse: assistantContents.join('\n\n'),
-				model,
-				toolCalls,
+				model, toolCalls,
 				contextReferences: createEmptyContextRefs(),
 				mcpTools: [],
 				inputTokensEstimate: inputTokens,
@@ -417,15 +507,32 @@ export class GeminiCliDataAccess {
 		return { turns, actualTokens: sessionActualTokens };
 	}
 
-	getGeminiCliDailyFractions(sessionFilePath: string): Record<string, number> {
-		const session = this.readGeminiCliSession(sessionFilePath);
+	private _bgtAggregateAssistant(
+		assistant: GeminiCliAssistantRecord,
+		acc: { assistantContents: string[]; toolCalls: ChatTurn['toolCalls']; model: string | null; inputTokens: number; outputTokens: number; thinkingTokens: number; toolTokens: number; cachedTokens: number }
+	): number {
+		const tokenData = this.getTokenBreakdown(assistant.tokens);
+		acc.inputTokens += tokenData.input;
+		acc.outputTokens += tokenData.output;
+		acc.thinkingTokens += tokenData.thinking;
+		acc.toolTokens += tokenData.tool;
+		acc.cachedTokens += tokenData.cached;
+		const text = isNonEmptyString(assistant.content) ? assistant.content.trim() : '';
+		if (text.length > 0) { acc.assistantContents.push(text); }
+		for (const tc of this.toDisplayToolCalls(assistant.toolCalls)) { acc.toolCalls.push(tc); }
+		if (isNonEmptyString(assistant.model)) { acc.model = normalizeGeminiModelId(assistant.model); }
+		return tokenData.total;
+	}
+
+	async getGeminiCliDailyFractions(sessionFilePath: string): Promise<Record<string, number>> {
+		const session = await this.readGeminiCliSession(sessionFilePath);
 		const dateKeys = session.userRecords
-			.map(record => this.toUtcDayKey(record.timestamp))
+			.map(record => this.toLocalDayKey(record.timestamp))
 			.filter((value): value is string => !!value);
 
 		if (dateKeys.length === 0) {
 			for (const assistant of session.assistantRecords) {
-				const dayKey = this.toUtcDayKey(assistant.timestamp);
+				const dayKey = this.toLocalDayKey(assistant.timestamp);
 				if (dayKey) {
 					dateKeys.push(dayKey);
 				}
@@ -433,9 +540,9 @@ export class GeminiCliDataAccess {
 		}
 
 		if (dateKeys.length === 0) {
-			const fallback = this.toUtcDayKey(session.header?.startTime)
-				?? this.toUtcDayKey(session.header?.lastUpdated)
-				?? new Date().toISOString().slice(0, 10);
+			const fallback = this.toLocalDayKey(session.header?.startTime)
+				?? this.toLocalDayKey(session.header?.lastUpdated)
+				?? toLocalDayKey(new Date());
 			return { [fallback]: 1.0 };
 		}
 
@@ -452,9 +559,9 @@ export class GeminiCliDataAccess {
 		return fractions;
 	}
 
-	private readJsonlLines(sessionFilePath: string): string[] {
+	private async readJsonlLines(sessionFilePath: string): Promise<string[]> {
 		try {
-			return fs.readFileSync(sessionFilePath, 'utf8')
+			return (await fs.promises.readFile(sessionFilePath, 'utf8'))
 				.split(/\r?\n/)
 				.map(line => line.trim())
 				.filter(line => line.length > 0);
@@ -464,7 +571,7 @@ export class GeminiCliDataAccess {
 	}
 
 	private getProjectBucketFromPath(sessionFilePath: string): string | undefined {
-		const normalized = sessionFilePath.replace(/\\/g, '/');
+		const normalized = normalizePath(sessionFilePath);
 		const parts = normalized.split('/').filter(part => part.length > 0);
 		const chatsIndex = parts.lastIndexOf('chats');
 		if (chatsIndex > 0) {
@@ -479,8 +586,8 @@ export class GeminiCliDataAccess {
 		return undefined;
 	}
 
-	private resolveWorkspacePath(projectBucket?: string, projectHash?: string): string | undefined {
-		const projectsIndex = this.readGeminiProjectsIndex();
+	private async resolveWorkspacePath(projectBucket?: string, projectHash?: string): Promise<string | undefined> {
+		const projectsIndex = await this.readGeminiProjectsIndex();
 		if (projectBucket && projectsIndex.has(projectBucket)) {
 			return projectsIndex.get(projectBucket);
 		}
@@ -490,63 +597,84 @@ export class GeminiCliDataAccess {
 		return undefined;
 	}
 
-	private readGeminiProjectsIndex(): Map<string, string> {
-		const mappings = new Map<string, string>();
+	private async readGeminiProjectsIndex(): Promise<Map<string, string>> {
 		const projectsPath = this.getGeminiProjectsPath();
-		if (!fs.existsSync(projectsPath)) {
-			return mappings;
-		}
 
+		let stats: fs.Stats | null;
 		try {
-			const raw = JSON.parse(fs.readFileSync(projectsPath, 'utf8'));
-			if (Array.isArray(raw)) {
-				for (const entry of raw) {
-					this.addProjectMapping(mappings, undefined, entry);
-				}
-				return mappings;
-			}
-
-			if (raw && typeof raw === 'object') {
-				for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
-					this.addProjectMapping(mappings, key, value);
-				}
-			}
+			stats = await fs.promises.stat(projectsPath);
 		} catch {
-			// Ignore malformed projects.json files.
+			return new Map();
 		}
 
-		return mappings;
+		const cache = this._projectsIndexCache;
+		if (cache && cache.mtimeMs === stats.mtimeMs && cache.size === stats.size) {
+			return cache.map;
+		}
+
+		const cacheKey = `${stats.mtimeMs}:${stats.size}`;
+		const inflight = this._projectsIndexInflight.get(cacheKey);
+		if (inflight) { return inflight; }
+
+		const readPromise = (async (): Promise<Map<string, string>> => {
+			const mappings = new Map<string, string>();
+			try {
+				const raw = JSON.parse(await fs.promises.readFile(projectsPath, 'utf8'));
+				if (Array.isArray(raw)) {
+					for (const entry of raw) {
+						this.addProjectMapping(mappings, undefined, entry);
+					}
+				} else if (raw && typeof raw === 'object') {
+					for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+						this.addProjectMapping(mappings, key, value);
+					}
+				}
+			} catch {
+				// Ignore malformed projects.json files.
+			}
+			const currentStats = await fs.promises.stat(projectsPath).catch(() => null);
+			if (currentStats && currentStats.mtimeMs === stats!.mtimeMs && currentStats.size === stats!.size) {
+				this._projectsIndexCache = { map: mappings, mtimeMs: stats!.mtimeMs, size: stats!.size };
+			}
+			return mappings;
+		})();
+
+		this._projectsIndexInflight.set(cacheKey, readPromise);
+		try {
+			return await readPromise;
+		} finally {
+			if (this._projectsIndexInflight.get(cacheKey) === readPromise) {
+				this._projectsIndexInflight.delete(cacheKey);
+			}
+		}
 	}
 
-	private addProjectMapping(mappings: Map<string, string>, keyHint: string | undefined, value: unknown): void {
-		if (typeof value === 'string') {
-			if (keyHint && this.looksLikePath(keyHint) && !this.looksLikePath(value)) {
-				mappings.set(value, this.normalizeWorkspacePath(keyHint));
-			} else if (keyHint && !this.looksLikePath(keyHint) && this.looksLikePath(value)) {
-				mappings.set(keyHint, this.normalizeWorkspacePath(value));
-			}
-			return;
+	private applyStringValueMapping(mappings: Map<string, string>, keyHint: string | undefined, value: string): void {
+		if (keyHint && this.looksLikePath(keyHint) && !this.looksLikePath(value)) {
+			mappings.set(value, this.normalizeWorkspacePath(keyHint));
+		} else if (keyHint && !this.looksLikePath(keyHint) && this.looksLikePath(value)) {
+			mappings.set(keyHint, this.normalizeWorkspacePath(value));
 		}
+	}
 
-		if (!value || typeof value !== 'object' || Array.isArray(value)) {
-			return;
-		}
-
-		const entry = value as Record<string, unknown>;
+	private applyObjectValueMapping(mappings: Map<string, string>, keyHint: string | undefined, entry: Record<string, unknown>): void {
 		const projectBucket = this.pickString(entry, ['projectHash', 'projectBucket', 'bucket', 'slug', 'name', 'id']);
 		const workspacePath = this.pickString(entry, ['workspacePath', 'path', 'directory', 'cwd', 'rootPath', 'repoPath', 'workspace', 'root']);
-
 		if (projectBucket && workspacePath && this.looksLikePath(workspacePath)) {
 			mappings.set(projectBucket, this.normalizeWorkspacePath(workspacePath));
 		}
-
 		if (keyHint && this.looksLikePath(keyHint) && projectBucket) {
 			mappings.set(projectBucket, this.normalizeWorkspacePath(keyHint));
 		}
-
 		if (keyHint && !this.looksLikePath(keyHint) && workspacePath && this.looksLikePath(workspacePath)) {
 			mappings.set(keyHint, this.normalizeWorkspacePath(workspacePath));
 		}
+	}
+
+	private addProjectMapping(mappings: Map<string, string>, keyHint: string | undefined, value: unknown): void {
+		if (typeof value === 'string') { this.applyStringValueMapping(mappings, keyHint, value); return; }
+		if (!value || typeof value !== 'object' || Array.isArray(value)) { return; }
+		this.applyObjectValueMapping(mappings, keyHint, value as Record<string, unknown>);
 	}
 
 	private pickString(entry: Record<string, unknown>, keys: string[]): string | undefined {
@@ -559,7 +687,7 @@ export class GeminiCliDataAccess {
 	}
 
 	private looksLikePath(value: string): boolean {
-		const normalized = value.replace(/\\/g, '/');
+		const normalized = normalizePath(value);
 		return /^[a-zA-Z]:/.test(value) || normalized.startsWith('/') || normalized.startsWith('~') || normalized.startsWith('file://');
 	}
 
@@ -737,8 +865,8 @@ export class GeminiCliDataAccess {
 		return null;
 	}
 
-	private toUtcDayKey(timestamp: string | undefined): string | null {
+	private toLocalDayKey(timestamp: string | undefined): string | null {
 		const timeMs = parseTimestampMs(timestamp);
-		return timeMs !== null ? new Date(timeMs).toISOString().slice(0, 10) : null;
+		return timeMs !== null ? toLocalDayKey(new Date(timeMs)) : null;
 	}
 }

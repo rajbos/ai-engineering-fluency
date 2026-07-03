@@ -302,14 +302,46 @@ test('invalid JSON returns zeros', () => {
 	assert.equal(result.interactions, 0);
 });
 
-test('JSON session: missing model defaults to gpt-4o', () => {
+// ── Input validation tests ──────────────────────────────────────────────
+
+test('null JSON content returns zeros without throwing (JSON path)', () => {
+	// JSON.parse("null") returns null — accessing .requests on null must not throw
+	const result = parseSessionFileContent('s.json', 'null', estimateTokensByLength);
+	assert.equal(result.tokens, 0);
+	assert.equal(result.interactions, 0);
+	assert.deepEqual(result.modelUsage, {});
+});
+
+test('null JSON content returns zeros without throwing (JSONL fallback path)', () => {
+	// .jsonl file whose content parses to null via the fallback (non-delta) branch
+	const result = parseSessionFileContent('s.jsonl', 'null', estimateTokensByLength);
+	assert.equal(result.tokens, 0);
+	assert.equal(result.interactions, 0);
+	assert.deepEqual(result.modelUsage, {});
+});
+
+test('empty fileContent returns zeros without throwing', () => {
+	const result = parseSessionFileContent('s.json', '', estimateTokensByLength);
+	assert.equal(result.tokens, 0);
+	assert.equal(result.interactions, 0);
+});
+
+test('array root JSON returns zeros without throwing', () => {
+	// An array at the root is not a valid session object
+	const result = parseSessionFileContent('s.json', '[]', estimateTokensByLength);
+	assert.equal(result.tokens, 0);
+	assert.equal(result.interactions, 0);
+	assert.deepEqual(result.modelUsage, {});
+});
+
+test('JSON session: missing model defaults to unknown', () => {
 	const content = JSON.stringify({
 		requests: [
 			{ message: { text: 'hi' }, response: [{ value: 'yo' }] }
 		]
 	});
 	const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
-	assert.ok(result.modelUsage['gpt-4o'], 'should default to gpt-4o');
+	assert.ok(result.modelUsage['unknown'], 'should default to unknown');
 });
 
 test('JSON session: uses message.parts when message.text is absent', () => {

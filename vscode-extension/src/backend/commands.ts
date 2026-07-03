@@ -14,6 +14,17 @@ import { writeClipboardText } from '../utils/clipboard';
 import type { BackendFacadeInterface } from './types';
 import type { BackendSettings } from './settings';
 import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messages';
+import { MANUAL_SYNC_COOLDOWN_MS } from './constants';
+import { RateLimiter } from '../utils/rateLimiter';
+
+async function withBackendErrorHandling(label: string, fn: () => Promise<void>): Promise<void> {
+	try {
+		await fn();
+	} catch (error) {
+		const details = error instanceof Error ? error.message : String(error);
+		showBackendError(ErrorMessages.unable(label, `Try again. Details: ${details}`));
+	}
+}
 
 /**
  * Handles backend-related commands.
@@ -21,8 +32,7 @@ import { ErrorMessages, SuccessMessages, ConfirmationMessages } from './ui/messa
 export class BackendCommandHandler {
 	private readonly facade: BackendFacadeInterface;
 	private readonly displayNameStore: DisplayNameStore | undefined;
-	private lastManualSyncAt = 0;
-	private readonly MANUAL_SYNC_COOLDOWN_MS = 5000; // 5 seconds
+	private readonly syncRateLimiter = new RateLimiter(MANUAL_SYNC_COOLDOWN_MS);
 
 	constructor(deps: {
 		facade: BackendFacadeInterface;
@@ -42,75 +52,21 @@ export class BackendCommandHandler {
 	 * Launches the wizard to set up Azure resources.
 	 */
 	async handleConfigureBackend(): Promise<void> {
-		try {
-			await this.facade.configureBackendWizard();
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('configure backend', `Try the wizard again. Details: ${details}`));
-		}
+		await withBackendErrorHandling('configure backend', () => this.facade.configureBackendWizard());
 	}
 
-	// Convenience methods matching the old interface
-	async configureBackend(): Promise<void> {
-		return this.handleConfigureBackend();
-	}
-
-	async copyBackendConfig(): Promise<void> {
-		return this.handleCopyBackendConfig();
-	}
-
-	async exportCurrentView(): Promise<void> {
-		return this.handleExportCurrentView();
-	}
-
-	async setBackendSharedKey(): Promise<void> {
-		return this.handleSetBackendSharedKey();
-	}
-
-	async rotateBackendSharedKey(): Promise<void> {
-		return this.handleRotateBackendSharedKey();
-	}
-
-	async clearBackendSharedKey(): Promise<void> {
-		return this.handleClearBackendSharedKey();
-	}
-
-	async toggleBackendWorkspaceMachineNameSync(): Promise<void> {
-		return this.handleToggleBackendWorkspaceMachineNameSync();
-	}
-
-	async enableTeamSharing(): Promise<void> {
-		return this.handleEnableTeamSharing();
-	}
-
-	async disableTeamSharing(): Promise<void> {
-		return this.handleDisableTeamSharing();
-	}
-
+	/**
+	 * Handles the "Toggle Workspace/Machine Name Sync" command.
+	 */
 	async handleToggleBackendWorkspaceMachineNameSync(): Promise<void> {
-		try {
-			await this.facade.toggleBackendWorkspaceMachineNameSync();
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('toggle workspace/machine name sync', `Check settings. Details: ${details}`));
-		}
+		await withBackendErrorHandling('toggle workspace/machine name sync', () => this.facade.toggleBackendWorkspaceMachineNameSync());
 	}
 
-	async setSharingProfile(): Promise<void> {
-		return this.handleSetSharingProfile();
-	}
-
-	async clearAzureSettings(): Promise<void> {
-		return this.handleClearAzureSettings();
-	}
-
+	/**
+	 * Handles the "Set Sharing Profile" command.
+	 */
 	async handleSetSharingProfile(): Promise<void> {
-		try {
-			await this.facade.setSharingProfileCommand();
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('set sharing profile', `Try again. Details: ${details}`));
-		}
+		await withBackendErrorHandling('set sharing profile', () => this.facade.setSharingProfileCommand());
 	}
 
 	/**
@@ -127,12 +83,11 @@ export class BackendCommandHandler {
 	 * Triggers an immediate manual sync.
 	 */
 	async handleSyncBackendNow(): Promise<void> {
-		const now = Date.now();
-		if (now - this.lastManualSyncAt < this.MANUAL_SYNC_COOLDOWN_MS) {
+		if (!this.syncRateLimiter.canExecute()) {
 			vscode.window.showWarningMessage('Please wait a few seconds before syncing again.');
 			return;
 		}
-		this.lastManualSyncAt = now;
+		this.syncRateLimiter.recordExecution();
 
 		const settings = this.facade.getSettings() as BackendSettings;
 		if (!settings.enabled) {
@@ -149,7 +104,7 @@ export class BackendCommandHandler {
 			return;
 		}
 
-		try {
+		await withBackendErrorHandling('sync to Azure', async () => {
 			await vscode.window.withProgress(
 				{
 					location: vscode.ProgressLocation.Notification,
@@ -161,10 +116,7 @@ export class BackendCommandHandler {
 				}
 			);
 			showBackendSuccess(SuccessMessages.synced());
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.sync(details));
-		}
+		});
 	}
 
 	/**
@@ -178,7 +130,7 @@ export class BackendCommandHandler {
 			return;
 		}
 
-		try {
+		await withBackendErrorHandling('query backend data', async () => {
 			const result = await this.facade.tryGetBackendDetailedStatsForStatusBar(settings);
 			if (!result) {
 				vscode.window.showWarningMessage('No data available from backend.');
@@ -193,22 +145,14 @@ export class BackendCommandHandler {
 			].join('\n');
 
 			vscode.window.showInformationMessage(summary);
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.query(`Details: ${details}`));
-		}
+		});
 	}
 
 	/**
 	 * Handles the "Set Backend Shared Key" command.
 	 */
 	async handleSetBackendSharedKey(): Promise<void> {
-		try {
-			await this.facade.setBackendSharedKey();
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('set shared key', `Verify the key is valid. Details: ${details}`));
-		}
+		await withBackendErrorHandling('set shared key', () => this.facade.setBackendSharedKey());
 	}
 
 	/**
@@ -225,12 +169,7 @@ export class BackendCommandHandler {
 			return;
 		}
 
-		try {
-			await this.facade.rotateBackendSharedKey();
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('rotate shared key', `Verify the new key is valid. Details: ${details}`));
-		}
+		await withBackendErrorHandling('rotate shared key', () => this.facade.rotateBackendSharedKey());
 	}
 
 	/**
@@ -247,12 +186,7 @@ export class BackendCommandHandler {
 			return;
 		}
 
-		try {
-			await this.facade.clearBackendSharedKey();
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('clear shared key', `Try again. Details: ${details}`));
-		}
+		await withBackendErrorHandling('clear shared key', () => this.facade.clearBackendSharedKey());
 	}
 
 	/**
@@ -271,15 +205,12 @@ export class BackendCommandHandler {
 		}
 
 		const consentAt = new Date().toISOString();
-		try {
+		await withBackendErrorHandling('enable team sharing', async () => {
 			await config.update('backend.sharingProfile', 'teamPseudonymous', vscode.ConfigurationTarget.Global);
 			await config.update('backend.shareWithTeam', true, vscode.ConfigurationTarget.Global);
 			await config.update('backend.shareConsentAt', consentAt, vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(SuccessMessages.completed('Team sharing enabled'));
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('enable team sharing', `Check settings. Details: ${details}`));
-		}
+		});
 	}
 
 	/**
@@ -297,15 +228,12 @@ export class BackendCommandHandler {
 		}
 
 		const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
-		try {
+		await withBackendErrorHandling('disable team sharing', async () => {
 			await config.update('backend.sharingProfile', 'teamAnonymized', vscode.ConfigurationTarget.Global);
 			await config.update('backend.shareWithTeam', false, vscode.ConfigurationTarget.Global);
 			await config.update('backend.shareWorkspaceMachineNames', false, vscode.ConfigurationTarget.Global);
 			vscode.window.showInformationMessage(SuccessMessages.completed('Switched to anonymized sharing'));
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('disable team sharing', `Check settings. Details: ${details}`));
-		}
+		});
 	}
 
 	/**
@@ -322,12 +250,7 @@ export class BackendCommandHandler {
 			return;
 		}
 
-		try {
-			await this.facade.clearAzureSettingsCommand();
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('clear Azure settings', `Try again. Details: ${details}`));
-		}
+		await withBackendErrorHandling('clear Azure settings', () => this.facade.clearAzureSettingsCommand());
 	}
 
 	/**
@@ -368,17 +291,14 @@ export class BackendCommandHandler {
 			vscode.window.showInformationMessage('Export will remain redacted based on the active Sharing Profile.');
 		}
 
-		try {
+		await withBackendErrorHandling('export results', async () => {
 			const payload = redactBackendQueryResultForExport(result, { includeIdentifiers });
 			const json = JSON.stringify(payload, null, 2);
 			await writeClipboardText(json);
 			vscode.window.showInformationMessage(includeIdentifiers
 				? SuccessMessages.exported('Query results with identifiers')
 				: SuccessMessages.exported('Redacted query results'));
-		} catch (error) {
-			const details = error instanceof Error ? error.message : String(error);
-			showBackendError(ErrorMessages.unable('export results', `Try again. Details: ${details}`));
-		}
+		});
 	}
 }
 

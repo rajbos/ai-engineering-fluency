@@ -4,8 +4,11 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, calculateDetailedStats, fmt, formatTokens, modelPricing } from '../helpers';
+import { ProgressTracker } from '../progress';
 import type { PeriodStats, ModelUsage } from '../../../vscode-extension/src/types';
 import { getModelTier } from '../../../vscode-extension/src/tokenEstimation';
+import { shouldOutputJson } from '../commandUtils';
+import { createDetailsPayload } from './payloads';
 
 export const usageCommand = new Command('usage')
 	.description('Show token usage for today, current month, last month, and last 30 days')
@@ -18,17 +21,9 @@ export const usageCommand = new Command('usage')
 
 		const stats = await calculateStats(files, options);
 
-		if (options.json) {
+		if (shouldOutputJson(options)) {
 			// Machine-readable output: emit pure JSON to stdout and exit
-			const payload = {
-				today: stats.today,
-				month: stats.month,
-				lastMonth: stats.lastMonth,
-				last30Days: stats.last30Days,
-				lastUpdated: stats.lastUpdated.toISOString(),
-				backendConfigured: false,
-			};
-			process.stdout.write(JSON.stringify(payload));
+			process.stdout.write(JSON.stringify(createDetailsPayload(stats)));
 			return;
 		}
 
@@ -51,15 +46,13 @@ export const usageCommand = new Command('usage')
 
 /** Discover session files (quiet when --json is set). */
 async function discoverFiles(options: { json?: boolean }) {
-	if (!options.json) {
-		process.stdout.write(chalk.dim('Scanning for session files...'));
-	}
+	const json = shouldOutputJson(options);
+	const progress = new ProgressTracker(json);
+	progress.show('Scanning for session files...');
 	const files = await discoverSessionFiles();
-	if (!options.json) {
-		process.stdout.write('\r' + ' '.repeat(50) + '\r');
-	}
+	progress.done();
 	if (files.length === 0) {
-		if (options.json) {
+		if (json) {
 			process.stdout.write('{}');
 		} else {
 			console.log(chalk.yellow('⚠️  No session files found.'));
@@ -71,15 +64,13 @@ async function discoverFiles(options: { json?: boolean }) {
 
 /** Calculate detailed stats (quiet when --json is set). */
 async function calculateStats(files: string[], options: { json?: boolean }) {
-	if (!options.json) {
-		process.stdout.write(chalk.dim('Calculating token usage...'));
-	}
-	const stats = await calculateDetailedStats(files, options.json ? undefined : (completed, total) => {
-		process.stdout.write(`\r${chalk.dim(`Processing: ${completed}/${total} files`)}`);
+	const json = shouldOutputJson(options);
+	const progress = new ProgressTracker(json);
+	progress.show('Calculating token usage...');
+	const stats = await calculateDetailedStats(files, (completed, total) => {
+		progress.update(`Processing: ${completed}/${total} files`);
 	});
-	if (!options.json) {
-		process.stdout.write('\r' + ' '.repeat(50) + '\r');
-	}
+	progress.done();
 	return stats;
 }
 
@@ -92,7 +83,7 @@ function printPeriodStats(
 	console.log(chalk.bold(`${emoji} ${label}`));
 	console.log(chalk.dim('─'.repeat(55)));
 
-	if (stats.sessions === 0) {
+	if (!stats || stats.sessions === 0) {
 		console.log(chalk.dim('  No activity in this period'));
 		console.log();
 		return;

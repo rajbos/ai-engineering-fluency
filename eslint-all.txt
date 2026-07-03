@@ -1,0 +1,246 @@
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\antigravity.ts
+  279:1  warning  Refactor this function to reduce its Cognitive Complexity from 74 to the 15 allowed  sonarjs/cognitive-complexity
+  279:1  warning  Method 'buildAntigravityTurns' has a complexity of 25. Maximum allowed is 15         complexity
+  310:1  warning  Blocks are nested too deeply (6). Maximum allowed is 5                               max-depth
+  311:1  warning  Blocks are nested too deeply (7). Maximum allowed is 5                               max-depth
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\extension.ts
+  2432:10  warning  Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed  sonarjs/cognitive-complexity
+  2591:10  warning  Refactor this function to reduce its Cognitive Complexity from 17 to the 15 allowed  sonarjs/cognitive-complexity
+  2743:10  warning  Refactor this function to reduce its Cognitive Complexity from 18 to the 15 allowed  sonarjs/cognitive-complexity
+  2901:16  warning  Refactor this function to reduce its Cognitive Complexity from 28 to the 15 allowed  sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\jetbrains.ts
+  104:8   warning  Function 'parseJetBrainsPartition' has too many lines (153). Maximum allowed is 80    max-lines-per-function
+  104:8   warning  Function 'parseJetBrainsPartition' has a complexity of 72. Maximum allowed is 15      complexity
+  104:17  warning  Refactor this function to reduce its Cognitive Complexity from 107 to the 15 allowed  sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\maturityScoring.ts
+  154:1   warning  Function '_scorePromptEngineering' has a complexity of 34. Maximum allowed is 15               complexity
+  154:10  warning  Refactor this function to reduce its Cognitive Complexity from 37 to the 15 allowed            sonarjs/cognitive-complexity
+  213:1   warning  Function '_scoreContextEngineering' has a complexity of 30. Maximum allowed is 15              complexity
+  213:10  warning  Refactor this function to reduce its Cognitive Complexity from 44 to the 15 allowed            sonarjs/cognitive-complexity
+  294:1   warning  Function '_scoreAgentic' has a complexity of 21. Maximum allowed is 15                         complexity
+  294:10  warning  Refactor this function to reduce its Cognitive Complexity from 22 to the 15 allowed            sonarjs/cognitive-complexity
+  337:1   warning  Function '_scoreToolUsage' has a complexity of 16. Maximum allowed is 15                       complexity
+  337:10  warning  Refactor this function to reduce its Cognitive Complexity from 23 to the 15 allowed            sonarjs/cognitive-complexity
+  402:1   warning  Function '_scoreCustomization' has a complexity of 31. Maximum allowed is 15                   complexity
+  402:10  warning  Refactor this function to reduce its Cognitive Complexity from 38 to the 15 allowed            sonarjs/cognitive-complexity
+  475:1   warning  Function '_scoreWorkflowIntegration' has a complexity of 19. Maximum allowed is 15             complexity
+  475:10  warning  Refactor this function to reduce its Cognitive Complexity from 22 to the 15 allowed            sonarjs/cognitive-complexity
+  560:8   warning  Function 'calculateFluencyScoreForTeamMember' has too many lines (206). Maximum allowed is 80  max-lines-per-function
+  560:8   warning  Function 'calculateFluencyScoreForTeamMember' has a complexity of 100. Maximum allowed is 15   complexity
+  560:17  warning  Refactor this function to reduce its Cognitive Complexity from 123 to the 15 allowed           sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\statsHelpers.ts
+   44:1   warning  Function 'attributeLocToDay' has a complexity of 17. Maximum allowed is 15            complexity
+  203:8   warning  Function 'aggregatePeriodStats' has too many lines (252). Maximum allowed is 80       max-lines-per-function
+  203:8   warning  Function 'aggregatePeriodStats' has a complexity of 83. Maximum allowed is 15         complexity
+  203:17  warning  Refactor this function to reduce its Cognitive Complexity from 187 to the 15 allowed  sonarjs/cognitive-complexity
+  298:1   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                max-depth
+  329:1   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                max-depth
+  330:1   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                max-depth
+  331:1   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                max-depth
+  394:1   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                max-depth
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\tokenEstimation.ts
+  271:2   warning  Method 'estimate' has too many lines (101). Maximum allowed is 80                      max-lines-per-function
+  271:2   warning  Refactor this function to reduce its Cognitive Complexity from 79 to the 15 allowed    sonarjs/cognitive-complexity
+  271:2   warning  Method 'estimate' has a complexity of 41. Maximum allowed is 15                        complexity
+  299:8   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                 max-depth
+  385:2   warning  Method 'estimate' has too many lines (123). Maximum allowed is 80                      max-lines-per-function
+  385:2   warning  Refactor this function to reduce its Cognitive Complexity from 112 to the 15 allowed   sonarjs/cognitive-complexity
+  385:2   warning  Method 'estimate' has a complexity of 63. Maximum allowed is 15                        complexity
+  414:8   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                 max-depth
+  421:8   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                 max-depth
+  424:8   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                 max-depth
+  577:8   warning  Function 'extractAllTokensFromDebugLog' has a complexity of 21. Maximum allowed is 15  complexity
+  577:17  warning  Refactor this function to reduce its Cognitive Complexity from 24 to the 15 allowed    sonarjs/cognitive-complexity
+  639:8   warning  Function 'buildReasoningEffortTimeline' has a complexity of 25. Maximum allowed is 15  complexity
+  639:17  warning  Refactor this function to reduce its Cognitive Complexity from 47 to the 15 allowed    sonarjs/cognitive-complexity
+  737:17  warning  Refactor this function to reduce its Cognitive Complexity from 19 to the 15 allowed    sonarjs/cognitive-complexity
+  815:8   warning  Function 'applyDelta' has a complexity of 23. Maximum allowed is 15                    complexity
+  815:17  warning  Refactor this function to reduce its Cognitive Complexity from 40 to the 15 allowed    sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\usageAnalysis.ts
+   133:17  warning  Expected '!==' and instead saw '!='                                                        eqeqeq
+   136:13  warning  Expected '!==' and instead saw '!='                                                        eqeqeq
+   141:15  warning  Expected '!==' and instead saw '!='                                                        eqeqeq
+   145:21  warning  Expected '!==' and instead saw '!='                                                        eqeqeq
+   148:24  warning  Expected '!==' and instead saw '!='                                                        eqeqeq
+   330:1   warning  Function 'extractEditMetrics' has a complexity of 25. Maximum allowed is 15                complexity
+   330:10  warning  Refactor this function to reduce its Cognitive Complexity from 86 to the 15 allowed        sonarjs/cognitive-complexity
+   349:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+   350:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+   351:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+   353:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+   356:9   warning  Blocks are nested too deeply (8). Maximum allowed is 5                                     max-depth
+   359:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+   362:9   warning  Blocks are nested too deeply (8). Maximum allowed is 5                                     max-depth
+   386:10  warning  Refactor this function to reduce its Cognitive Complexity from 18 to the 15 allowed        sonarjs/cognitive-complexity
+   432:1   warning  Function 'processDeltaSessionAnalysis' has too many lines (112). Maximum allowed is 80     max-lines-per-function
+   432:1   warning  Function 'processDeltaSessionAnalysis' has a complexity of 55. Maximum allowed is 15       complexity
+   432:10  warning  Refactor this function to reduce its Cognitive Complexity from 44 to the 15 allowed        sonarjs/cognitive-complexity
+   549:1   warning  Function 'processJsonSessionRequests' has a complexity of 30. Maximum allowed is 15        complexity
+   549:10  warning  Refactor this function to reduce its Cognitive Complexity from 59 to the 15 allowed        sonarjs/cognitive-complexity
+   632:8   warning  Function 'mergeUsageAnalysis' has too many lines (192). Maximum allowed is 80              max-lines-per-function
+   632:8   warning  Function 'mergeUsageAnalysis' has a complexity of 50. Maximum allowed is 15                complexity
+   632:17  warning  Refactor this function to reduce its Cognitive Complexity from 44 to the 15 allowed        sonarjs/cognitive-complexity
+   828:8   warning  Function 'analyzeContextReferences' has too many lines (95). Maximum allowed is 80         max-lines-per-function
+   828:8   warning  Function 'analyzeContextReferences' has a complexity of 17. Maximum allowed is 15          complexity
+   828:17  warning  Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed        sonarjs/cognitive-complexity
+   929:8   warning  Function 'analyzeContentReferences' has a complexity of 26. Maximum allowed is 15          complexity
+   929:17  warning  Refactor this function to reduce its Cognitive Complexity from 33 to the 15 allowed        sonarjs/cognitive-complexity
+  1012:8   warning  Function 'analyzeVariableData' has a complexity of 22. Maximum allowed is 15               complexity
+  1012:17  warning  Refactor this function to reduce its Cognitive Complexity from 21 to the 15 allowed        sonarjs/cognitive-complexity
+  1082:17  warning  Refactor this function to reduce its Cognitive Complexity from 22 to the 15 allowed        sonarjs/cognitive-complexity
+  1177:8   warning  Async function 'calculateModelSwitching' has too many lines (170). Maximum allowed is 80   max-lines-per-function
+  1177:8   warning  Async function 'calculateModelSwitching' has a complexity of 69. Maximum allowed is 15     complexity
+  1177:23  warning  Refactor this function to reduce its Cognitive Complexity from 95 to the 15 allowed        sonarjs/cognitive-complexity
+  1356:8   warning  Async function 'trackEnhancedMetrics' has too many lines (142). Maximum allowed is 80      max-lines-per-function
+  1356:8   warning  Async function 'trackEnhancedMetrics' has a complexity of 35. Maximum allowed is 15        complexity
+  1356:23  warning  Refactor this function to reduce its Cognitive Complexity from 58 to the 15 allowed        sonarjs/cognitive-complexity
+  1525:8   warning  Async function 'analyzeSessionUsage' has too many lines (253). Maximum allowed is 80       max-lines-per-function
+  1525:8   warning  Async function 'analyzeSessionUsage' has a complexity of 122. Maximum allowed is 15        complexity
+  1525:23  warning  Refactor this function to reduce its Cognitive Complexity from 193 to the 15 allowed       sonarjs/cognitive-complexity
+  1592:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1595:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1611:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1621:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1622:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1624:9   warning  Blocks are nested too deeply (8). Maximum allowed is 5                                     max-depth
+  1639:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1641:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1660:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1661:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1666:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1676:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1677:9   warning  Blocks are nested too deeply (8). Maximum allowed is 5                                     max-depth
+  1678:10  warning  Blocks are nested too deeply (9). Maximum allowed is 5                                     max-depth
+  1680:10  warning  Blocks are nested too deeply (9). Maximum allowed is 5                                     max-depth
+  1692:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1693:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1694:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1707:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1832:8   warning  Async function 'getModelUsageFromSession' has too many lines (279). Maximum allowed is 80  max-lines-per-function
+  1832:8   warning  Async function 'getModelUsageFromSession' has a complexity of 139. Maximum allowed is 15   complexity
+  1832:23  warning  Refactor this function to reduce its Cognitive Complexity from 268 to the 15 allowed       sonarjs/cognitive-complexity
+  1898:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1906:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1924:7   warning  Blocks are nested too deeply (6). Maximum allowed is 5                                     max-depth
+  1925:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1926:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1928:9   warning  Blocks are nested too deeply (8). Maximum allowed is 5                                     max-depth
+  1929:10  warning  Blocks are nested too deeply (9). Maximum allowed is 5                                     max-depth
+  1938:10  warning  Blocks are nested too deeply (9). Maximum allowed is 5                                     max-depth
+  1941:10  warning  Blocks are nested too deeply (9). Maximum allowed is 5                                     max-depth
+  1950:8   warning  Blocks are nested too deeply (7). Maximum allowed is 5                                     max-depth
+  1951:9   warning  Blocks are nested too deeply (8). Maximum allowed is 5                                     max-depth
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\utils\errors.ts
+  63:8   warning  Function 'safeStringifyError' has a complexity of 16. Maximum allowed is 15          complexity
+  63:17  warning  Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed  sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\viewRegression.ts
+  95:8  warning  Function 'createViewRegressionProbeScript' has too many lines (133). Maximum allowed is 80  max-lines-per-function
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\visualstudio.ts
+   96:9  warning  Refactor this function to reduce its Cognitive Complexity from 19 to the 15 allowed  sonarjs/cognitive-complexity
+  206:9  warning  Refactor this function to reduce its Cognitive Complexity from 25 to the 15 allowed  sonarjs/cognitive-complexity
+  244:9  warning  Refactor this function to reduce its Cognitive Complexity from 27 to the 15 allowed  sonarjs/cognitive-complexity
+  352:1  warning  Refactor this function to reduce its Cognitive Complexity from 22 to the 15 allowed  sonarjs/cognitive-complexity
+  352:1  warning  Method 'extractContextText' has a complexity of 17. Maximum allowed is 15            complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\chart\main.ts
+  195:1   warning  Function 'renderLayout' has too many lines (168). Maximum allowed is 80              max-lines-per-function
+  195:1   warning  Function 'renderLayout' has a complexity of 30. Maximum allowed is 15                complexity
+  195:10  warning  Refactor this function to reduce its Cognitive Complexity from 30 to the 15 allowed  sonarjs/cognitive-complexity
+  591:1   warning  Async function 'switchSplit' has a complexity of 16. Maximum allowed is 15           complexity
+  687:1   warning  Function 'createConfig' has too many lines (308). Maximum allowed is 80              max-lines-per-function
+  687:1   warning  Function 'createConfig' has a complexity of 45. Maximum allowed is 15                complexity
+  687:10  warning  Refactor this function to reduce its Cognitive Complexity from 67 to the 15 allowed  sonarjs/cognitive-complexity
+  997:16  warning  Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed  sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\dashboard\main.ts
+  352:1  warning  Function 'buildLeaderboard' has too many lines (164). Maximum allowed is 80  max-lines-per-function
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\details\main.ts
+  308:1   warning  Function 'buildMetricsSection' has too many lines (85). Maximum allowed is 80        max-lines-per-function
+  308:1   warning  Function 'buildMetricsSection' has a complexity of 31. Maximum allowed is 15         complexity
+  410:1   warning  Function 'buildEditorTbody' has too many lines (90). Maximum allowed is 80           max-lines-per-function
+  556:1   warning  Function 'buildModelTbody' has too many lines (184). Maximum allowed is 80           max-lines-per-function
+  556:10  warning  Refactor this function to reduce its Cognitive Complexity from 17 to the 15 allowed  sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\diagnostics\main.ts
+   199:1   warning  Function 'buildCandidatePathsElement' has too many lines (117). Maximum allowed is 80   max-lines-per-function
+   392:1   warning  Function 'getEditorIcon' has a complexity of 16. Maximum allowed is 15                  complexity
+   435:33  warning  Arrow function has a complexity of 17. Maximum allowed is 15                            complexity
+   497:1   warning  Function 'renderSessionTable' has too many lines (207). Maximum allowed is 80           max-lines-per-function
+   497:1   warning  Function 'renderSessionTable' has a complexity of 29. Maximum allowed is 15             complexity
+   497:10  warning  Refactor this function to reduce its Cognitive Complexity from 33 to the 15 allowed     sonarjs/cognitive-complexity
+   834:1   warning  Function 'renderAzureStoragePanel' has too many lines (94). Maximum allowed is 80       max-lines-per-function
+   834:10  warning  Refactor this function to reduce its Cognitive Complexity from 18 to the 15 allowed     sonarjs/cognitive-complexity
+   929:1   warning  Function 'renderTeamServerPanel' has too many lines (99). Maximum allowed is 80         max-lines-per-function
+   929:1   warning  Function 'renderTeamServerPanel' has a complexity of 28. Maximum allowed is 15          complexity
+   929:10  warning  Refactor this function to reduce its Cognitive Complexity from 29 to the 15 allowed     sonarjs/cognitive-complexity
+  1108:1   warning  Function 'renderFolderAnalysisResults' has too many lines (100). Maximum allowed is 80  max-lines-per-function
+  1245:1   warning  Function 'buildSessionFoldersElement' has too many lines (96). Maximum allowed is 80    max-lines-per-function
+  1667:1   warning  Function 'setupButtonHandlers' has too many lines (120). Maximum allowed is 80          max-lines-per-function
+  1704:46  warning  Refactor this function to reduce its Cognitive Complexity from 16 to the 15 allowed     sonarjs/cognitive-complexity
+  1788:1   warning  Function 'setupMessageHandlers' has too many lines (232). Maximum allowed is 80         max-lines-per-function
+  1789:38  warning  Arrow function has too many lines (230). Maximum allowed is 80                          max-lines-per-function
+  1789:46  warning  Refactor this function to reduce its Cognitive Complexity from 130 to the 15 allowed    sonarjs/cognitive-complexity
+  1789:46  warning  Arrow function has a complexity of 63. Maximum allowed is 15                            complexity
+  2021:1   warning  Function 'renderLayout' has too many lines (230). Maximum allowed is 80                 max-lines-per-function
+  2021:1   warning  Function 'renderLayout' has a complexity of 65. Maximum allowed is 15                   complexity
+  2021:10  warning  Refactor this function to reduce its Cognitive Complexity from 27 to the 15 allowed     sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\environmental\main.ts
+  170:1  warning  Function 'buildImpactCards' has too many lines (90). Maximum allowed is 80  max-lines-per-function
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\fluency-level-viewer\main.ts
+  84:1  warning  Function 'renderLayout' has too many lines (83). Maximum allowed is 80  max-lines-per-function
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\logviewer\main.ts
+   192:1   warning  Function 'getContextRefBadges' has a complexity of 23. Maximum allowed is 15               complexity
+   212:1   warning  Function 'renderContextReferencesDetailed' has too many lines (91). Maximum allowed is 80  max-lines-per-function
+   501:1   warning  Function 'renderActualUsageSummary' has too many lines (85). Maximum allowed is 80         max-lines-per-function
+   692:1   warning  Function 'renderSummaryCards' has too many lines (141). Maximum allowed is 80              max-lines-per-function
+   692:1   warning  Function 'renderSummaryCards' has a complexity of 38. Maximum allowed is 15                complexity
+   692:10  warning  Refactor this function to reduce its Cognitive Complexity from 42 to the 15 allowed        sonarjs/cognitive-complexity
+  1049:1   warning  Function 'renderLayout' has too many lines (120). Maximum allowed is 80                    max-lines-per-function
+  1049:1   warning  Function 'renderLayout' has a complexity of 35. Maximum allowed is 15                      complexity
+  1049:10  warning  Refactor this function to reduce its Cognitive Complexity from 26 to the 15 allowed        sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\maturity\main.ts
+  226:1   warning  Function 'renderLayout' has too many lines (456). Maximum allowed is 80  max-lines-per-function
+  226:1   warning  Function 'renderLayout' has a complexity of 26. Maximum allowed is 15    complexity
+  233:44  warning  Arrow function has too many lines (97). Maximum allowed is 80            max-lines-per-function
+  233:58  warning  Arrow function has a complexity of 19. Maximum allowed is 15             complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\shared\contextRefUtils.ts
+  112:8   warning  Function 'getContextRefsSummary' has a complexity of 52. Maximum allowed is 15       complexity
+  112:17  warning  Refactor this function to reduce its Cognitive Complexity from 71 to the 15 allowed  sonarjs/cognitive-complexity
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\webview\usage\main.ts
+   726:1   warning  Function 'sanitizeStats' has too many lines (138). Maximum allowed is 80                  max-lines-per-function
+   745:65  warning  Arrow function has a complexity of 22. Maximum allowed is 15                              complexity
+   767:60  warning  Arrow function has a complexity of 22. Maximum allowed is 15                              complexity
+  1081:1   warning  Function 'renderAgentSessionsContent' has too many lines (87). Maximum allowed is 80      max-lines-per-function
+  1183:1   warning  Function 'renderLayout' has too many lines (503). Maximum allowed is 80                   max-lines-per-function
+  1183:1   warning  Function 'renderLayout' has a complexity of 55. Maximum allowed is 15                     complexity
+  1183:10  warning  Refactor this function to reduce its Cognitive Complexity from 31 to the 15 allowed       sonarjs/cognitive-complexity
+  1786:29  warning  Arrow function has too many lines (128). Maximum allowed is 80                            max-lines-per-function
+  1786:39  warning  Refactor this function to reduce its Cognitive Complexity from 35 to the 15 allowed       sonarjs/cognitive-complexity
+  1786:39  warning  Arrow function has a complexity of 28. Maximum allowed is 15                              complexity
+  1937:1   warning  Function 'buildRepoAnalysisBodyElement' has too many lines (279). Maximum allowed is 80   max-lines-per-function
+  1937:1   warning  Function 'buildRepoAnalysisBodyElement' has a complexity of 52. Maximum allowed is 15     complexity
+  1937:10  warning  Refactor this function to reduce its Cognitive Complexity from 65 to the 15 allowed       sonarjs/cognitive-complexity
+  2217:1   warning  Function 'renderRepositoryHygienePanels' has too many lines (116). Maximum allowed is 80  max-lines-per-function
+
+C:\Users\RobBos\.copilot\copilot-worktrees\ai-engineering-fluency\rajbos-improved-pancake\vscode-extension\src\workspaceHelpers.ts
+  376:17  warning  Refactor this function to reduce its Cognitive Complexity from 18 to the 15 allowed  sonarjs/cognitive-complexity
+
+Γ£û 201 problems (0 errors, 201 warnings)
+

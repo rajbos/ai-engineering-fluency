@@ -7,6 +7,10 @@
 *.bat text eol=crlf
 *.cmd text eol=crlf
 
+# jetbrains-plugin gradlew.bat override: keep LF (not CRLF) to prevent
+# git stash/pop conflicts on Linux runners (see PR #1463 / issue #1445)
+jetbrains-plugin/gradlew.bat text
+
 # Keep images and binaries untouched
 *.png binary
 *.jpg binary

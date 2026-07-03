@@ -1,9 +1,23 @@
 /**
- * UTC day key helpers.
+ * Day key helpers.
  *
- * A "day key" is an ISO-8601 date string in UTC: YYYY-MM-DD.
+ * A "day key" is an ISO-8601 date string: YYYY-MM-DD.
+ *
+ * Use `toLocalDayKey` for file-based session attribution and period comparisons
+ * so that "today" reflects the user's local calendar day, not UTC.
+ *
+ * Use `toUtcDayKey` only for the Azure backend path where keys are stored in UTC.
  */
 
+/** Returns the local-calendar YYYY-MM-DD key for a Date. */
+export function toLocalDayKey(date: Date): string {
+	const y = date.getFullYear();
+	const m = String(date.getMonth() + 1).padStart(2, '0');
+	const d = String(date.getDate()).padStart(2, '0');
+	return `${y}-${m}-${d}`;
+}
+
+/** Returns the UTC YYYY-MM-DD key for a Date. Only use for the Azure backend path. */
 export function toUtcDayKey(date: Date): string {
 	return date.toISOString().slice(0, 10);
 }

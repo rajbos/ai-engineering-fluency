@@ -24,20 +24,20 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = this.mistralVibe.getTokensFromSession(sessionFile);
+		const result = await this.mistralVibe.getTokensFromSession(sessionFile);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		return Promise.resolve(this.mistralVibe.countInteractions(sessionFile));
+		return this.mistralVibe.countInteractions(sessionFile);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return Promise.resolve(this.mistralVibe.getModelUsage(sessionFile));
+		return this.mistralVibe.getModelUsage(sessionFile);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		const meta = this.mistralVibe.getSessionMeta(sessionFile);
+		const meta = await this.mistralVibe.getSessionMeta(sessionFile);
 		return {
 			title: meta.title,
 			firstInteraction: meta.firstInteraction,
@@ -53,7 +53,7 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 		const candidatePaths = this.getCandidatePaths();
 		const sessionFiles: string[] = [];
 		try {
-			const files = this.mistralVibe.discoverSessions();
+			const files = await this.mistralVibe.discoverSessions();
 			if (files.length > 0) {
 				log(`📄 Found ${files.length} session file(s) in Mistral Vibe (~/.vibe/logs/session)`);
 				sessionFiles.push(...files);
@@ -70,67 +70,87 @@ export class MistralVibeAdapter implements IEcosystemAdapter, IDiscoverableEcosy
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const turns: ChatTurn[] = [];
-		const messages = this.mistralVibe.readSessionMessages(sessionFile);
-		const sessionMeta = this.mistralVibe.getSessionMeta(sessionFile);
-		const tokenData = this.mistralVibe.getTokensFromSession(sessionFile);
+		const messages = await this.mistralVibe.readSessionMessages(sessionFile);
+		const sessionMeta = await this.mistralVibe.getSessionMeta(sessionFile);
+		const tokenData = await this.mistralVibe.getTokensFromSession(sessionFile);
 		const model: string = sessionMeta.model || 'devstral';
-
-		const userMsgIndices: number[] = [];
-		for (let i = 0; i < messages.length; i++) {
-			if (messages[i].role === 'user' && messages[i].injected !== true) {
-				userMsgIndices.push(i);
-			}
-		}
+		const userMsgIndices = this.findUserMessageIndices(messages);
 
 		for (let t = 0; t < userMsgIndices.length; t++) {
 			const userIdx = userMsgIndices[t];
 			const nextUserIdx = t + 1 < userMsgIndices.length ? userMsgIndices[t + 1] : messages.length;
-			const userMsg = messages[userIdx];
-			const userText = typeof userMsg.content === 'string' ? userMsg.content : '';
-			let assistantText = '';
-			const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
-
-			for (let j = userIdx + 1; j < nextUserIdx; j++) {
-				const msg = messages[j];
-				if (msg.role === 'assistant') {
-					if (typeof msg.content === 'string') { assistantText += msg.content; }
-					if (Array.isArray(msg.tool_calls)) {
-						for (const tc of msg.tool_calls) {
-							toolCalls.push({
-								toolName: tc.function?.name || tc.name || 'unknown',
-								arguments: tc.function?.arguments ? JSON.stringify(tc.function.arguments) : undefined
-							});
-						}
-					}
-				} else if (msg.role === 'tool') {
-					const last = toolCalls[toolCalls.length - 1];
-					if (last) { last.result = typeof msg.content === 'string' ? msg.content : undefined; }
-				}
-			}
-
-			turns.push({
-				turnNumber: t + 1,
-				timestamp: sessionMeta.firstInteraction,
-				mode: 'cli',
-				userMessage: userText,
-				assistantResponse: assistantText,
-				model,
-				toolCalls,
-				contextReferences: createEmptyContextRefs(),
-				mcpTools: [],
-				inputTokensEstimate: 0,
-				outputTokensEstimate: 0,
-				thinkingTokensEstimate: 0
-			});
+			turns.push(this.buildMistralTurn(messages, userIdx, nextUserIdx, sessionMeta, model, t + 1));
 		}
 
 		return { turns, actualTokens: tokenData.tokens };
 	}
 
+	private findUserMessageIndices(messages: any[]): number[] {
+		const indices: number[] = [];
+		for (let i = 0; i < messages.length; i++) {
+			if (messages[i].role === 'user' && messages[i].injected !== true) {
+				indices.push(i);
+			}
+		}
+		return indices;
+	}
+
+	private buildMistralTurn(messages: any[], userIdx: number, nextUserIdx: number, sessionMeta: any, model: string, turnNumber: number): ChatTurn {
+		const userMsg = messages[userIdx];
+		const userText = typeof userMsg.content === 'string' ? userMsg.content : '';
+		const { assistantText, toolCalls } = this.collectMistralTurnContent(messages, userIdx, nextUserIdx);
+		return {
+			turnNumber,
+			timestamp: sessionMeta.firstInteraction,
+			mode: 'cli',
+			userMessage: userText,
+			assistantResponse: assistantText,
+			model,
+			toolCalls,
+			contextReferences: createEmptyContextRefs(),
+			mcpTools: [],
+			inputTokensEstimate: 0,
+			outputTokensEstimate: 0,
+			thinkingTokensEstimate: 0
+		};
+	}
+
+	private collectMistralTurnContent(messages: any[], userIdx: number, nextUserIdx: number): {
+		assistantText: string; toolCalls: { toolName: string; arguments?: string; result?: string }[];
+	} {
+		let assistantText = '';
+		const toolCalls: { toolName: string; arguments?: string; result?: string }[] = [];
+		for (let j = userIdx + 1; j < nextUserIdx; j++) {
+			const msg = messages[j];
+			if (msg.role === 'assistant') {
+				assistantText += this.processMistralAssistantMsg(msg, toolCalls);
+			} else if (msg.role === 'tool') {
+				const last = toolCalls[toolCalls.length - 1];
+				if (last) { last.result = typeof msg.content === 'string' ? msg.content : undefined; }
+			}
+		}
+		return { assistantText, toolCalls };
+	}
+
+	private processMistralAssistantMsg(
+		msg: any,
+		toolCalls: { toolName: string; arguments?: string; result?: string }[]
+	): string {
+		let text = '';
+		if (typeof msg.content === 'string') { text = msg.content; }
+		for (const tc of (Array.isArray(msg.tool_calls) ? msg.tool_calls : [])) {
+			toolCalls.push({
+				toolName: tc.function?.name || tc.name || 'unknown',
+				arguments: tc.function?.arguments ? JSON.stringify(tc.function.arguments) : undefined
+			});
+		}
+		return text;
+	}
+
 	async analyzeUsage(sessionFile: string, ctx: UsageAnalysisAdapterContext): Promise<import('../types').SessionUsageAnalysis> {
 		const analysis = createEmptySessionUsageAnalysis();
-		const messages = this.mistralVibe.readSessionMessages(sessionFile);
-		const meta = this.mistralVibe.getSessionMeta(sessionFile);
+		const messages = await this.mistralVibe.readSessionMessages(sessionFile);
+		const meta = await this.mistralVibe.getSessionMeta(sessionFile);
 		const model = meta.model || 'devstral';
 		const models: string[] = [];
 		for (const msg of messages) {

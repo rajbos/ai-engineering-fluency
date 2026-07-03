@@ -2,20 +2,118 @@
 
 All notable changes to the VS Code extension will be documented in this file.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
-
 ## [Unreleased]
 
-## [0.7.1] - 2026-05-11
+## [0.11.6] - 2026-06-07
 
 ### Features
-- Add diagnostic logging to Details panel creation to aid blank-panel diagnosis (#)
+- Track session.truncation events as a negative fluency signal (#1354)
+- Add refresh button to log viewer for on-demand session reload (#1349)
+- Show context references as a readable table in usage analysis (#1348)
+- Add friendly tool names (#1352, #1347)
+- Replace premium/standard tier with cost-based model classification (#1345)
+- Surface exact Copilot billing cost from nanoAiu data (#1344)
 
 ### Bug Fixes
-- Fix PID-based liveness check to break stale cache lock after force-kill
+- Use modelUsage input+output sum for Tokens (input+output) display (#1353)
+
+## [0.11.3] - 2026-05-22
+
+### Maintenance
+- Patch version bump
+
+## [0.11.2] - 2026-05-22
+
+### Bug Fixes
+- fix(vscode): use getConfiguration() with full key for statusBar update() calls (#1046)
+
+## [0.11.1] - 2026-05-22
+
+### Bug Fixes
+- fix(vscode): use leaf-key getConfiguration for statusBar settings to fix 'not registered' error (#1044)
+- fix: muting unknown tool now instant, skips full stats recalc (#1043)
+
+## [0.11.0] - 2026-05-22
+
+### Features
+- Configurable status bar: independently show token counts and/or cost (#1036)
+- Added 17+ friendly tool names for Claude in Chrome, Cowork, M365 Connector, and other tools (#1037, #1038, #1039)
+
+### Security
+- Added HTML escaping to prevent XSS in configPanel webview
+
+### Maintenance
+- Enhanced token tracking: extract all tokens from debug log and update session cache structure (#1040)
+- Centralised adapter session path predicates to adapterPredicates.ts (#1034)
+- Refactored extension.ts activate() into focused registration helpers (#1035)
+- Extracted pathExists helper to utils/fsAsync.ts (#1031)
+- Extracted settings validation helpers to backend/settingsValidation.ts (#1030)
+- Consolidated path normalisation helpers to utils/pathUtils.ts (#1032)
+- Consolidated duplicated webview type definitions to shared/types.ts (#1033)
+- Added isNonNegativeInt type guard and safeJsonParse utility (#1029, #1013)
+- Extracted registerMessageHandler helper from webview message listeners (#1022)
+- Centralised Azure error classification in azureErrorClassifier.ts (#1017)
+- Introduced ValidationResult<T> discriminated union for type-safe validation (#1021)
+- Extracted Azure Storage endpoint URL builders to shared utility (#1005)
+- Multiple additional refactoring improvements for maintainability and type safety
+
+## [0.10.2] - 2026-05-13
+
+### Maintenance
+- Internal refactoring and dependency updates
+
+## [0.10.1] - 2026-05-19
+
+### Bug Fixes
+- Implement IAnalyzableEcosystem on CopilotCliAdapter to prevent ENOENT errors on virtual session paths (#931)
+
+## [0.10.0] - 2026-05-19
+
+### Features
+- Surface Copilot CLI chat-only sessions from session-store.db (#915)
+- Add friendly display names for additional tools (#920)
+- Persist chart view/period/displayMode selection across navigation (#911)
+
+### Bug Fixes
+- Propagate cachedReadTokens/cacheCreationTokens in calculateDailyStats (#907)
+- Fix N+1 inefficiency in processing OpenCode sessions (#922)
+
+### Performance
+- Apply mtime-based DB caching to crush adapter to fix N+1 inefficiency (#924)
+- Eliminate redundant JSON.parse calls in session analysis (#910)
+
+## [0.9.0] - 2026-05-14
+
+### Features
+- Add oh-my-posh segment command and Copilot CLI statusline support (#876)
+- Post-process SLM output to fix acronym capitalization (MCP, GitHub, etc.) (#880)
+- Add SLM-powered job to generate friendly tool names from issues (#875)
+
+### Bug Fixes
+- Populate cache tokens from CLI session.shutdown events (#869)
+- Pin Ollama install to versioned GitHub release with SHA256 verification (#881)
 
 ### Improvements
-- Exclude `stryker.config.mjs` and `vs-session-sample.json` from VSIX package
+- Add friendly display names for 50+ tools (#862, #864, #865, #866, #867, #868, #872, #873, #874, #879)
+
+## [0.8.0] - 2026-05-12
+
+### Features
+- Team dashboard now supports both Azure and Team Server backends (#854)
+- Surface cached tokens from all providers in Details view (#851)
+- Extract cached tokens from Copilot Chat debug logs (#851)
+- Remove cost estimate row and rename TBB to UBB (#847)
+- Add diagnostic logging to Details panel creation to aid blank-panel diagnosis (#845)
+
+### Bug Fixes
+- Replace team server iframe with launch card (#854)
+- Use PID-based liveness check to break stale cache lock after force-kill (#844)
+
+### Improvements
+- Move action buttons to top and reduce report height in diagnostics view (#853)
+- Sync latest model data (#852)
+- Address npm audit warning
+- Exclude `stryker.config.mjs` and `vs-session-sample.json` from VSIX package (#843)
 
 ## [0.7.0] - 2026-05-28
 

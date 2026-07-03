@@ -1,5 +1,6 @@
 import * as https from 'https';
 import * as childProcess from 'child_process';
+import { GITHUB_API_HOSTNAME, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3, GITHUB_API_VERSION } from './githubApiConfig';
 
 export type RepoPrDetail = {
 	number: number;
@@ -30,8 +31,39 @@ export type RepoPrStatsResult = {
 // Copilot plan info
 // ---------------------------------------------------------------------------
 
+export type QuotaSnapshot = {
+	quota_id?: string;
+	timestamp_utc?: string;
+	entitlement?: string;
+	quota_remaining?: number;
+	remaining?: number;
+	percent_remaining?: number;
+	unlimited?: boolean;
+	overage_permitted?: boolean;
+	overage_count?: number;
+	has_quota?: boolean;
+	quota_reset_at?: string;
+	token_based_billing?: boolean;
+};
+
 export type CopilotPlanInfo = {
+	login?: string;
 	copilot_plan?: string;             // e.g. "copilot_individual" | "copilot_business" | "copilot_enterprise" | "copilot_free"
+	chat_enabled?: boolean;
+	cli_enabled?: boolean;
+	is_mcp_enabled?: boolean;
+	editor_preview_features_enabled?: boolean;
+	copilotignore_enabled?: boolean;
+	restricted_telemetry?: boolean;
+	access_type_sku?: string;
+	assigned_date?: string;
+	organization_list?: string[];
+	quota_snapshots?: Record<string, QuotaSnapshot>;
+	quota_reset_date_utc?: string;
+	quota_reset_date?: string;
+	token_based_billing?: boolean;
+	analytics_tracking_id?: string;
+	// Legacy fields (may still be present)
 	public_code_suggestions?: string;  // "block" | "allow"
 	ide_chat?: string;                 // "enabled" | "disabled"
 	copilot_ide_agent?: string;        // "enabled" | "disabled"
@@ -47,11 +79,11 @@ function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: 'api.github.com',
+				hostname: GITHUB_API_HOSTNAME,
 				path: '/copilot_internal/user',
 				headers: {
 					Authorization: `Bearer ${token}`,
-					'User-Agent': 'copilot-token-tracker',
+					'User-Agent': GITHUB_API_USER_AGENT,
 					Accept: 'application/json',
 				},
 			},
@@ -98,6 +130,230 @@ export function fetchCopilotPlanInfo(
 	return fetcher(token);
 }
 
+// ---------------------------------------------------------------------------
+// Copilot v2 token endpoint info
+// ---------------------------------------------------------------------------
+
+/** Endpoint URLs returned by the copilot_internal/v2/token endpoint. */
+export type CopilotTokenEndpoints = {
+	api?: string;
+	'origin-tracker'?: string;
+	telemetry?: string;
+	proxy?: string;
+	[key: string]: string | undefined;
+};
+
+/** Non-sensitive metadata from the copilot_internal/v2/token response (token string excluded). */
+export type CopilotTokenEndpointInfo = {
+	endpoints?: CopilotTokenEndpoints;
+	/** Unix timestamp (seconds) when the token expires. */
+	expires_at?: number;
+	/** How many seconds until the token should be refreshed. */
+	refresh_in?: number;
+	/** Subscription SKU embedded in the token header (e.g. "copilot_individual"). */
+	sku?: string;
+	[key: string]: unknown;
+};
+
+export type CopilotTokenEndpointResult = { info?: CopilotTokenEndpointInfo; statusCode?: number; error?: string };
+
+/** Internal low-level fetcher for the copilot_internal/v2/token endpoint. */
+function fetchCopilotTokenEndpointInfoPage(token: string): Promise<CopilotTokenEndpointResult> {
+	return new Promise((resolve) => {
+		const req = https.request(
+			{
+				hostname: GITHUB_API_HOSTNAME,
+				path: '/copilot_internal/v2/token',
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'User-Agent': GITHUB_API_USER_AGENT,
+					Accept: 'application/json',
+				},
+			},
+			(res) => {
+				let data = '';
+				res.on('data', (chunk) => (data += chunk));
+				res.on('end', () => {
+					const statusCode = res.statusCode ?? 0;
+					if (statusCode < 200 || statusCode >= 300) {
+						resolve({ statusCode, error: `HTTP ${statusCode}` });
+						return;
+					}
+					try {
+						const parsed = JSON.parse(data);
+						if (typeof parsed !== 'object' || parsed === null) {
+							resolve({ statusCode, error: 'Unexpected response format' });
+							return;
+						}
+						// Exclude the short-lived token string — we only care about the metadata.
+						const { token: _token, ...rest } = parsed as { token?: string } & CopilotTokenEndpointInfo;
+						resolve({ info: rest as CopilotTokenEndpointInfo, statusCode });
+					} catch (e) {
+						resolve({ statusCode, error: String(e) });
+					}
+				});
+			},
+		);
+		req.on('error', (e) => resolve({ error: e.message }));
+		req.setTimeout(15000, () => {
+			req.destroy(new Error('Request timed out after 15 s'));
+		});
+		req.end();
+	});
+}
+
+/**
+ * Fetch Copilot token endpoint metadata for the authenticated user.
+ * Uses the VS Code-only internal endpoint `https://api.github.com/copilot_internal/v2/token`.
+ * Returns metadata (endpoints, expiry) but never the token string itself.
+ * Treat as best-effort — this endpoint may not be available for all accounts.
+ * @param fetcher Injectable fetcher for testing; defaults to the real HTTPS implementation.
+ */
+export function fetchCopilotTokenEndpointInfo(
+	token: string,
+	fetcher: (token: string) => Promise<CopilotTokenEndpointResult> = fetchCopilotTokenEndpointInfoPage,
+): Promise<CopilotTokenEndpointResult> {
+	return fetcher(token);
+}
+
+// ---------------------------------------------------------------------------
+// Enterprise membership discovery (GraphQL)
+// ---------------------------------------------------------------------------
+
+export type EnterpriseInfo = { slug: string; name: string };
+export type UserEnterprisesResult = { enterprises?: EnterpriseInfo[]; error?: string };
+
+/** Discover enterprises the authenticated user belongs to via the GitHub GraphQL API. */
+export function fetchUserEnterprises(
+	token: string,
+	fetcher: (token: string) => Promise<UserEnterprisesResult> = fetchUserEnterprisesPage,
+): Promise<UserEnterprisesResult> {
+	return fetcher(token);
+}
+
+function fetchUserEnterprisesPage(token: string): Promise<UserEnterprisesResult> {
+	const query = JSON.stringify({
+		query: '{ viewer { enterprises(first: 10, membershipType: ALL) { nodes { slug name } } } }',
+	});
+	return new Promise((resolve) => {
+		const req = https.request(
+			{
+				hostname: GITHUB_API_HOSTNAME,
+				path: '/graphql',
+				method: 'POST',
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'User-Agent': GITHUB_API_USER_AGENT,
+					'Content-Type': 'application/json',
+					'Content-Length': Buffer.byteLength(query),
+				},
+			},
+			(res) => {
+				let data = '';
+				res.on('data', (chunk) => (data += chunk));
+				res.on('end', () => {
+					const statusCode = res.statusCode ?? 0;
+					if (statusCode < 200 || statusCode >= 300) {
+						resolve({ error: `HTTP ${statusCode}` });
+						return;
+					}
+					try {
+						const parsed = JSON.parse(data);
+						const nodes = parsed?.data?.viewer?.enterprises?.nodes;
+						if (!Array.isArray(nodes)) {
+							const gqlError = parsed?.errors?.[0]?.message;
+							resolve({ error: gqlError ?? 'Unexpected response format' });
+							return;
+						}
+						resolve({ enterprises: nodes as EnterpriseInfo[] });
+					} catch (e) {
+						resolve({ error: String(e) });
+					}
+				});
+			},
+		);
+		req.on('error', (e) => resolve({ error: e.message }));
+		req.setTimeout(15000, () => {
+			req.destroy(new Error('Request timed out after 15 s'));
+		});
+		req.write(query);
+		req.end();
+	});
+}
+
+// ---------------------------------------------------------------------------
+// Enterprise premium request budget
+// ---------------------------------------------------------------------------
+
+export type EnterpriseBudgetEntry = {
+	id?: string;
+	budget_amount?: number;
+	prevent_further_usage?: boolean;
+	budget_scope?: string;
+	budget_product_skus?: string[];
+	[key: string]: unknown;
+};
+export type EnterpriseBudgetResult = { budgets?: EnterpriseBudgetEntry[]; statusCode?: number; error?: string };
+
+/**
+ * Fetch enterprise billing budgets filtered for premium requests for a specific user.
+ * Requires the authenticated user to be an enterprise admin or billing manager.
+ * Best-effort — returns an error on 403/404 for non-admin users.
+ */
+export function fetchEnterprisePremiumBudgets(
+	enterpriseSlug: string,
+	username: string,
+	token: string,
+	fetcher: (slug: string, username: string, token: string) => Promise<EnterpriseBudgetResult> = fetchEnterprisePremiumBudgetsPage,
+): Promise<EnterpriseBudgetResult> {
+	return fetcher(enterpriseSlug, username, token);
+}
+
+function fetchEnterprisePremiumBudgetsPage(enterpriseSlug: string, username: string, token: string): Promise<EnterpriseBudgetResult> {
+	const params = new URLSearchParams({ user: username, budgetTarget: 'premium_req' });
+	return new Promise((resolve) => {
+		const req = https.request(
+			{
+				hostname: GITHUB_API_HOSTNAME,
+				path: `/enterprises/${encodeURIComponent(enterpriseSlug)}/settings/billing/budgets?${params}`,
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'User-Agent': GITHUB_API_USER_AGENT,
+					Accept: GITHUB_API_ACCEPT_V3,
+					'X-GitHub-Api-Version': GITHUB_API_VERSION,
+				},
+			},
+			(res) => {
+				let data = '';
+				res.on('data', (chunk) => (data += chunk));
+				res.on('end', () => {
+					const statusCode = res.statusCode ?? 0;
+					if (statusCode < 200 || statusCode >= 300) {
+						resolve({ statusCode, error: `HTTP ${statusCode}` });
+						return;
+					}
+					try {
+						const parsed = JSON.parse(data);
+						const budgets = parsed?.budgets ?? (Array.isArray(parsed) ? parsed : undefined);
+						if (budgets === undefined) {
+							resolve({ statusCode, error: 'Unexpected response format' });
+							return;
+						}
+						resolve({ budgets, statusCode });
+					} catch (e) {
+						resolve({ statusCode, error: String(e) });
+					}
+				});
+			},
+		);
+		req.on('error', (e) => resolve({ error: e.message }));
+		req.setTimeout(15000, () => {
+			req.destroy(new Error('Request timed out after 15 s'));
+		});
+		req.end();
+	});
+}
+
 /** Detect which AI system a GitHub login belongs to, or null if not an AI bot. */
 export function detectAiType(login: string): RepoPrDetail['aiType'] | null {
 	const l = login.toLowerCase();
@@ -117,12 +373,12 @@ export function fetchRepoPrsPage(
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: 'api.github.com',
+				hostname: GITHUB_API_HOSTNAME,
 				path: `/repos/${owner}/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc&page=${page}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
-					'User-Agent': 'copilot-token-tracker',
-					Accept: 'application/vnd.github.v3+json',
+					'User-Agent': GITHUB_API_USER_AGENT,
+					Accept: GITHUB_API_ACCEPT_V3,
 				},
 			},
 			(res) => {
@@ -150,6 +406,12 @@ export function fetchRepoPrsPage(
 	});
 }
 
+function buildFetchRepoPrsError(statusCode: number | undefined, error: string | undefined): string {
+	if (statusCode === 404) { return 'Repo not found or not accessible with current token'; }
+	if (statusCode === 403) { return error || 'Access denied (private repo requires additional permissions)'; }
+	return error ?? 'Unknown error';
+}
+
 /** Fetch all PRs from the last 30 days for a repo, paginating as needed. */
 export async function fetchRepoPrs(
 	owner: string,
@@ -162,25 +424,13 @@ export async function fetchRepoPrs(
 	const MAX_PAGES = 5; // Cap at 500 PRs per repo
 	for (let page = 1; page <= MAX_PAGES; page++) {
 		const { prs, statusCode, error } = await fetchPage(owner, repo, token, page);
-		if (error) {
-			const msg = statusCode === 404
-				? 'Repo not found or not accessible with current token'
-				: statusCode === 403
-				? (error || 'Access denied (private repo requires additional permissions)')
-				: error;
-			return { prs: allPrs, error: msg };
-		}
+		if (error) { return { prs: allPrs, error: buildFetchRepoPrsError(statusCode, error) }; }
 		if (prs.length === 0) { break; }
 		for (const pr of prs) {
-			if (new Date(pr.created_at) >= since) {
-				allPrs.push(pr);
-			}
+			if (new Date(pr.created_at) >= since) { allPrs.push(pr); }
 		}
-		// Stop paginating when the oldest PR on this page is before our window
 		const oldest = prs[prs.length - 1];
-		if (new Date(oldest.created_at) < since || prs.length < 100) {
-			break;
-		}
+		if (new Date(oldest.created_at) < since || prs.length < 100) { break; }
 	}
 	return { prs: allPrs };
 }

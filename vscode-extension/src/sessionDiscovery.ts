@@ -20,32 +20,19 @@
  */
 import * as vscode from 'vscode';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isDiscoverable } from './ecosystemAdapter';
+import { normalizePathForDedup } from './workspaceHelpers';
+import type { WindsurfDataAccess } from './windsurf';
 
 export interface SessionDiscoveryDeps {
 	log: (message: string) => void;
 	warn: (message: string) => void;
 	error: (message: string, error?: any) => void;
 	ecosystems: IEcosystemAdapter[];
+	windsurf?: WindsurfDataAccess;
 	sampleDataDirectoryOverride?: () => string | undefined;
-}
-
-/**
- * Normalize a filesystem path for deduplication.
- *
- * On Windows and macOS the filesystem is typically case-insensitive, so two
- * adapters that report the same file under different casings must collapse
- * to one entry. On Linux the FS is case-sensitive so we preserve case.
- *
- * Backslashes are normalized to forward slashes so comparisons are
- * platform-agnostic regardless of which adapter formatted the path.
- */
-function normalizePathForDedup(p: string): string {
-	const fwd = p.replace(/\\/g, '/');
-	return os.platform() === 'linux' ? fwd : fwd.toLowerCase();
 }
 
 export class SessionDiscovery {
@@ -84,6 +71,19 @@ export class SessionDiscovery {
 		}
 	}
 
+	/** Checks whether a path exists and logs a debug message when it does not. */
+	private pathExistsWithLogging(p: string, context: string): boolean {
+		try {
+			const exists = fs.existsSync(p);
+			if (!exists) {
+				this.deps.log(`🔍 Path not found [${context}]: ${p}`);
+			}
+			return exists;
+		} catch {
+			return false;
+		}
+	}
+
 	/**
 	 * Returns the candidate filesystem paths the extension considers when
 	 * scanning for session files, along with whether each path exists on
@@ -99,11 +99,19 @@ export class SessionDiscovery {
 			try {
 				const ecoPaths = eco.getCandidatePaths();
 				for (const cp of ecoPaths) {
-					let exists = false;
-					try { exists = fs.existsSync(cp.path); } catch { /* ignore */ }
+					const exists = this.pathExistsWithLogging(cp.path, cp.source);
 					candidates.push({ path: cp.path, exists, source: cp.source });
 				}
 			} catch { /* ignore individual adapter errors */ }
+		}
+
+		if (this.deps.windsurf) {
+			const cascadeDir = this.deps.windsurf.getCascadeDir();
+			candidates.push({
+				path: cascadeDir,
+				exists: this.pathExistsWithLogging(cascadeDir, 'Windsurf Cascade'),
+				source: 'Windsurf Cascade',
+			});
 		}
 
 		return candidates;
@@ -137,84 +145,121 @@ export class SessionDiscovery {
 	 * fixtures.
 	 */
 	async getCopilotSessionFiles(): Promise<string[]> {
+		return this.getCopilotSessionFilesStreaming();
+	}
+
+	private async tryGetSampleDataFiles(now: number): Promise<string[] | undefined> {
+		const sampleDir = this.deps.sampleDataDirectoryOverride?.()
+			?? vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
+		if (!sampleDir || sampleDir.trim().length === 0) { return undefined; }
+		const resolvedSampleDir = sampleDir.trim();
+		try {
+			if (!await this.pathExists(resolvedSampleDir)) {
+				this.deps.warn(`Sample data directory not found: ${resolvedSampleDir}`);
+				return undefined;
+			}
+			const sampleFiles = (await fs.promises.readdir(resolvedSampleDir))
+				.filter(f => f.endsWith('.json') || f.endsWith('.jsonl'))
+				.map(f => path.join(resolvedSampleDir, f));
+			this.deps.log(`📸 Sample data mode: using ${sampleFiles.length} file(s) from ${resolvedSampleDir}`);
+			this._sessionFilesCache = sampleFiles;
+			this._sessionFilesCacheTime = now;
+			this._lastDiscoveryFilesCount = sampleFiles.length;
+			return sampleFiles;
+		} catch (err) {
+			this.deps.warn(`Error reading sample data directory: ${err}`);
+			return undefined;
+		}
+	}
+
+	/** Collect deduplicated files from adapter results, calling onBatch for each new batch. */
+	private collectAdapterFiles(
+		results: PromiseSettledResult<{ sessionFiles: string[] }>[],
+		adapters: IEcosystemAdapter[],
+		seen: Set<string>,
+		allDeduped: string[],
+		onBatch?: (files: string[]) => void,
+	): void {
+		for (let i = 0; i < results.length; i++) {
+			const result = results[i];
+			if (result.status === 'rejected') {
+				this.deps.warn(`Could not discover ${adapters[i].displayName} sessions: ${result.reason}`);
+				this._lastDiscoveryHadError = true;
+				continue;
+			}
+			const batch: string[] = [];
+			for (const f of result.value.sessionFiles) {
+				const key = normalizePathForDedup(f);
+				if (seen.has(key)) { continue; }
+				seen.add(key); batch.push(f);
+			}
+			if (batch.length > 0) { allDeduped.push(...batch); if (onBatch) { onBatch(batch); } }
+		}
+	}
+
+	/** Collect deduplicated Windsurf session files and add them to allDeduped. */
+	private async collectWindsurfFiles(seen: Set<string>, allDeduped: string[], onBatch?: (files: string[]) => void): Promise<void> {
+		if (!this.deps.windsurf) { return; }
+		try {
+			const windsurfFiles = (await this.deps.windsurf.getWindsurfSessions()).map(session => session.file);
+			const batch = windsurfFiles.filter(f => {
+				const key = normalizePathForDedup(f);
+				if (seen.has(key)) { return false; }
+				seen.add(key);
+				return true;
+			});
+			if (batch.length > 0) { allDeduped.push(...batch); if (onBatch) { onBatch(batch); } }
+		} catch (error) {
+			this.deps.warn(`Could not discover Windsurf sessions: ${error}`);
+			this._lastDiscoveryHadError = true;
+		}
+	}
+
+	private async discoverFromAdapters(onBatch?: (files: string[]) => void): Promise<string[]> {
+		const seen = new Set<string>();
+		const allDeduped: string[] = [];
+		const discoveryStartMs = Date.now();
+		const discoverableAdapters = this.deps.ecosystems.filter(isDiscoverable);
+		this.deps.log(`🔍 Searching for session files via ${discoverableAdapters.length} discoverable ecosystem adapter(s) (parallel)`);
+		const results = await Promise.allSettled(discoverableAdapters.map(eco => eco.discover(this.deps.log)));
+		this.collectAdapterFiles(results, discoverableAdapters, seen, allDeduped, onBatch);
+		await this.collectWindsurfFiles(seen, allDeduped, onBatch);
+		const dupCount = results.reduce((n, r) => n + (r.status === 'fulfilled' ? r.value.sessionFiles.length : 0), 0) - allDeduped.length;
+		if (dupCount > 0) { this.deps.log(`🧹 Deduplicated ${dupCount} duplicate session path(s)`); }
+		this.deps.log(`✨ Total: ${allDeduped.length} session file(s) discovered in ${((Date.now() - discoveryStartMs) / 1000).toFixed(1)}s`);
+		if (allDeduped.length === 0) { this.deps.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?'); }
+		return allDeduped;
+	}
+
+	/**
+	 * Discover session files with optional streaming: calls `onBatch` with
+	 * deduplicated file paths as each adapter completes. Adapters run in
+	 * parallel for maximum throughput. Returns the full deduplicated list.
+	 */
+	async getCopilotSessionFilesStreaming(onBatch?: (files: string[]) => void): Promise<string[]> {
 		const now = Date.now();
 		if (this._sessionFilesCache && (now - this._sessionFilesCacheTime) < SessionDiscovery.SESSION_FILES_CACHE_TTL) {
 			this.deps.log(`💨 Using cached session files list (${this._sessionFilesCache.length} files, cached ${Math.round((now - this._sessionFilesCacheTime) / 1000)}s ago)`);
+			if (onBatch) { onBatch(this._sessionFilesCache); }
 			return this._sessionFilesCache;
 		}
-
-		// Reset discovery state for this run.
 		this._lastDiscoveryHadError = false;
 		this._lastDiscoveryFilesCount = 0;
-
-		// Screenshot/demo mode: sample data directory bypasses adapter discovery.
-		const sampleDir = this.deps.sampleDataDirectoryOverride?.()
-			?? vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
-		if (sampleDir && sampleDir.trim().length > 0) {
-			const resolvedSampleDir = sampleDir.trim();
-			try {
-				if (await this.pathExists(resolvedSampleDir)) {
-					const sampleFiles = (await fs.promises.readdir(resolvedSampleDir))
-						.filter(f => f.endsWith('.json') || f.endsWith('.jsonl'))
-						.map(f => path.join(resolvedSampleDir, f));
-					this.deps.log(`📸 Sample data mode: using ${sampleFiles.length} file(s) from ${resolvedSampleDir}`);
-					this._sessionFilesCache = sampleFiles;
-					this._sessionFilesCacheTime = now;
-					this._lastDiscoveryFilesCount = sampleFiles.length;
-					return sampleFiles;
-				} else {
-					this.deps.warn(`Sample data directory not found: ${resolvedSampleDir}`);
-				}
-			} catch (err) {
-				this.deps.warn(`Error reading sample data directory: ${err}`);
-			}
-		}
-
-		const sessionFiles: string[] = [];
+		const sampleFiles = await this.tryGetSampleDataFiles(now);
+		if (sampleFiles) { if (onBatch) { onBatch(sampleFiles); } return sampleFiles; }
+		const allDeduped: string[] = [];
 		try {
-			this.deps.log(`🔍 Searching for session files via ${this.deps.ecosystems.filter(isDiscoverable).length} discoverable ecosystem adapter(s)`);
-			for (const eco of this.deps.ecosystems) {
-				if (!isDiscoverable(eco)) { continue; }
-				try {
-					const result = await eco.discover(this.deps.log);
-					sessionFiles.push(...result.sessionFiles);
-				} catch (ecoError) {
-					this.deps.warn(`Could not discover ${eco.displayName} sessions: ${ecoError}`);
-					this._lastDiscoveryHadError = true;
-				}
-			}
-
-			// Deduplicate by normalized path (case-insensitive on Windows/macOS).
-			// Adapters may report overlapping paths (e.g. workspaceStorage scanned
-			// from both stable and Insiders user dirs that resolve to the same
-			// underlying file via symlinks); without dedup we'd double-count.
-			const seen = new Set<string>();
-			const deduped: string[] = [];
-			for (const f of sessionFiles) {
-				const key = normalizePathForDedup(f);
-				if (seen.has(key)) { continue; }
-				seen.add(key);
-				deduped.push(f);
-			}
-			const dupCount = sessionFiles.length - deduped.length;
-			if (dupCount > 0) {
-				this.deps.log(`🧹 Deduplicated ${dupCount} duplicate session path(s)`);
-			}
-
-			this.deps.log(`✨ Total: ${deduped.length} session file(s) discovered`);
-			if (deduped.length === 0) {
-				this.deps.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?');
-			}
-
-			this._sessionFilesCache = deduped;
+			const files = await this.discoverFromAdapters(onBatch);
+			allDeduped.push(...files);
+			this._sessionFilesCache = allDeduped;
 			this._sessionFilesCacheTime = Date.now();
-			this._lastDiscoveryFilesCount = deduped.length;
-			return deduped;
+			this._lastDiscoveryFilesCount = allDeduped.length;
+			return allDeduped;
 		} catch (error) {
 			this.deps.error('Error getting session files:', error);
 			this._lastDiscoveryHadError = true;
-			this._lastDiscoveryFilesCount = sessionFiles.length;
-			return sessionFiles;
+			this._lastDiscoveryFilesCount = allDeduped.length;
+			return allDeduped;
 		}
 	}
 }

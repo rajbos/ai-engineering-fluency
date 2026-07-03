@@ -1,6 +1,7 @@
-import * as vscode from "vscode";
+﻿import * as vscode from "vscode";
+import type { Stats } from "fs";
 
-import { safeStringifyError } from "../utils/errors";
+import { safeStringifyError, isAuthError, isNotFoundError, isNetworkError } from "../utils/errors";
 import {
   BackendConfigPanel,
   type BackendConfigPanelState,
@@ -65,7 +66,7 @@ export interface BackendFacadeDeps {
     fileSize: number,
   ) => Promise<SessionFileCache>;
   // Stat helper for OpenCode DB virtual paths
-  statSessionFile: (sessionFile: string) => Promise<any>;
+  statSessionFile: (sessionFile: string) => Promise<Stats>;
   // OpenCode session handling
   isOpenCodeSession?: (sessionFile: string) => boolean;
   getOpenCodeSessionData?: (sessionFile: string) => Promise<{
@@ -129,19 +130,25 @@ export class BackendFacade {
     this.syncService = new SyncService(
       {
         context: deps.context,
-        log: deps.log,
-        warn: deps.warn,
-        getCopilotSessionFiles: deps.getCopilotSessionFiles,
-        estimateTokensFromText: deps.estimateTokensFromText,
-        getModelFromRequest: deps.getModelFromRequest,
-        getSessionFileDataCached: deps.getSessionFileDataCached,
+        logger: {
+          log: deps.log,
+          warn: deps.warn,
+        },
+        sessionHandlers: {
+          getCopilotSessionFiles: deps.getCopilotSessionFiles,
+          estimateTokensFromText: deps.estimateTokensFromText,
+          getModelFromRequest: deps.getModelFromRequest,
+          getSessionFileDataCached: deps.getSessionFileDataCached,
+          statSessionFile: deps.statSessionFile,
+        },
+        editorHandlers: {
+          isOpenCodeSession: deps.isOpenCodeSession,
+          getOpenCodeSessionData: deps.getOpenCodeSessionData,
+          isCrushSession: deps.isCrushSession,
+          getCrushSessionData: deps.getCrushSessionData,
+          isVSSessionFile: deps.isVSSessionFile,
+        },
         updateTokenStats: deps.updateTokenStats,
-        statSessionFile: deps.statSessionFile,
-        isOpenCodeSession: deps.isOpenCodeSession,
-        getOpenCodeSessionData: deps.getOpenCodeSessionData,
-        isCrushSession: deps.isCrushSession,
-        getCrushSessionData: deps.getCrushSessionData,
-        isVSSessionFile: deps.isVSSessionFile,
         getGithubToken: deps.getGithubToken,
       },
       this.credentialService,
@@ -176,6 +183,12 @@ export class BackendFacade {
 
   public clearQueryCache(): void {
     this.queryService.clearQueryCache();
+  }
+
+  private afterConfigChange(): void {
+    this.startTimerIfEnabled();
+    this.deps.updateTokenStats?.();
+    this.clearQueryCache();
   }
 
   public dispose(): void {
@@ -224,7 +237,7 @@ export class BackendFacade {
     if (settings.userIdentityMode === "teamAlias") {
       const validation = validateTeamAlias(settings.userId);
       this.deps.log(
-        `[Backend] Team alias validation - input: "${settings.userId}", valid: ${validation.valid}, ${validation.valid ? `alias: "${validation.alias}"` : `error: ${validation.error}`}`,
+        `[Backend] Team alias validation - input: "${settings.userId}", valid: ${validation.valid}, ${validation.valid ? `alias: "${validation.data.alias}"` : `error: ${validation.error}`}`,
       );
     }
 
@@ -343,9 +356,22 @@ export class BackendFacade {
       machines: Map<string, string>;
     };
   }> {
-    // Delegate to syncService which already has the implementation
+    // Delegate to syncService which already has the implementation.
+    // computeDailyRollupsFromLocalSessions is private on SyncService; we define a
+    // standalone interface and double-cast (via unknown) to preserve type-safety at
+    // the call site rather than using an untyped "as any".
+    interface SyncServiceInternals {
+      computeDailyRollupsFromLocalSessions(args: {
+        lookbackDays: number;
+        userId?: string;
+      }): Promise<{
+        rollups: Map<string, { key: DailyRollupKey; value: DailyRollupValue }>;
+        workspaceNamesById: Record<string, string>;
+        machineNamesById: Record<string, string>;
+      }>;
+    }
     const result = await (
-      this.syncService as any
+      this.syncService as unknown as SyncServiceInternals
     ).computeDailyRollupsFromLocalSessions(args);
     // The syncService returns:
     // { rollups: Map<string, { key, value }>, workspaceNamesById, machineNamesById }
@@ -472,7 +498,10 @@ export class BackendFacade {
    * rollups for every day within the given lookback window (default 365 days).
    * Use this when the normal sync has missed data due to the mtime filter.
    */
-  public async backfillHistoricalData(maxLookbackDays = 365, onProgress?: (processed: number, total: number, daysFound: number) => void): Promise<void> {
+  public async backfillHistoricalData(
+    maxLookbackDays = 365,
+    onProgress?: (processed: number, total: number, daysFound: number) => void,
+  ): Promise<void> {
     const settings = this.getSettings();
     await this.syncService.backfillSync(settings, this.isConfigured(settings), maxLookbackDays, onProgress);
     this.clearQueryCache();
@@ -480,7 +509,7 @@ export class BackendFacade {
 
   public async tryGetBackendDetailedStatsForStatusBar(
     settings: BackendSettings,
-  ): Promise<any | undefined> {
+  ): Promise<unknown> {
     const sharingPolicy = computeBackendSharingPolicy({
       enabled: settings.enabled,
       profile: settings.sharingProfile,
@@ -493,7 +522,7 @@ export class BackendFacade {
     );
   }
 
-  public async getStatsForDetailsPanel(): Promise<any | undefined> {
+  public async getStatsForDetailsPanel(): Promise<unknown> {
     const settings = this.getSettings();
     const sharingPolicy = computeBackendSharingPolicy({
       enabled: settings.enabled,
@@ -522,41 +551,31 @@ export class BackendFacade {
   }
 
   public async setBackendSharedKey(): Promise<void> {
-    const settings = this.getSettings();
-    const storageAccount = settings.storageAccount;
-    try {
-      const ok = await this.promptForAndStoreSharedKey(
-        storageAccount,
-        "Set Storage Shared Key for Backend Sync",
-      );
-      if (ok) {
-        vscode.window.showInformationMessage(
-          SuccessMessages.keyUpdated(storageAccount),
-        );
-      }
-    } catch (e) {
-      vscode.window.showErrorMessage(
-        `Failed to set Shared Key: ${safeStringifyError(e)}`,
-      );
-    }
+    return this.manageSharedKeyCommand("set");
   }
 
   public async rotateBackendSharedKey(): Promise<void> {
+    return this.manageSharedKeyCommand("rotate");
+  }
+
+  private async manageSharedKeyCommand(action: "set" | "rotate"): Promise<void> {
     const settings = this.getSettings();
     const storageAccount = settings.storageAccount;
+    const promptTitle =
+      action === "set"
+        ? "Set Storage Shared Key for Backend Sync"
+        : "Rotate Storage Shared Key for Backend Sync";
+    const errorPrefix = action === "set" ? "Failed to set" : "Failed to rotate";
     try {
-      const ok = await this.promptForAndStoreSharedKey(
-        storageAccount,
-        "Rotate Storage Shared Key for Backend Sync",
-      );
+      const ok = await this.promptForAndStoreSharedKey(storageAccount, promptTitle);
       if (ok) {
         vscode.window.showInformationMessage(
           SuccessMessages.keyUpdated(storageAccount),
         );
       }
-    } catch (e) {
+    } catch (e: unknown) {
       vscode.window.showErrorMessage(
-        `Failed to rotate Shared Key: ${safeStringifyError(e)}`,
+        `${errorPrefix} Shared Key: ${safeStringifyError(e)}`,
       );
     }
   }
@@ -603,13 +622,18 @@ export class BackendFacade {
       next,
       vscode.ConfigurationTarget.Global,
     );
-    const enabled = config.get<boolean>("backend.shareWithTeam", false);
-    const suffix = enabled
-      ? ""
-      : " (Note: this only affects team sharing mode; personal mode always includes names)";
+    const suffix = this.getShareWithTeamSuffix();
     vscode.window.showInformationMessage(
       `Backend: workspace/machine name sync ${next ? "enabled" : "disabled"}${suffix}`,
     );
+  }
+
+  private getShareWithTeamSuffix(): string {
+    const config = vscode.workspace.getConfiguration("aiEngineeringFluency");
+    const enabled = config.get<boolean>("backend.shareWithTeam", false);
+    return enabled
+      ? ""
+      : " (Note: this only affects team sharing mode; personal mode always includes names)";
   }
 
   private async getConfigPanelState(
@@ -618,14 +642,14 @@ export class BackendFacade {
     const settings = this.getSettings();
     const draft = draftOverride ?? toDraft(settings);
     const sharedKeySet = !!(
-      draft.storageAccount &&
+      draft.azureResources.storageAccount &&
       (await this.credentialService.getStoredStorageSharedKey(
-        draft.storageAccount,
+        draft.azureResources.storageAccount,
       ))
     );
     const privacyBadge = getPrivacyBadge(
-      draft.sharingProfile,
-      draft.shareWorkspaceMachineNames,
+      draft.sharing.sharingProfile,
+      draft.sharing.shareWorkspaceMachineNames,
     );
     const authStatus =
       draft.authMode === "sharedKey"
@@ -633,7 +657,7 @@ export class BackendFacade {
           ? "Auth: Shared Key stored on this machine"
           : "Auth: Shared Key missing on this machine"
         : "Auth: Entra ID (RBAC)";
-    const lastSyncAt = this.deps.context?.globalState?.get<number>('backend.lastSyncAt');
+    const lastSyncAt = this.deps.context?.globalState?.get<number>("backend.lastSyncAt");
     const githubTokenAvailable = !!(this.deps.getGithubToken?.());
     return {
       draft,
@@ -655,127 +679,61 @@ export class BackendFacade {
     }
     const config = vscode.workspace.getConfiguration("aiEngineeringFluency");
     await Promise.all([
-      config.update(
-        "backend.enabled",
-        next.enabled,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.authMode",
-        next.authMode,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.datasetId",
-        next.datasetId,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.sharingProfile",
-        next.sharingProfile,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareWithTeam",
-        next.shareWithTeam,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareWorkspaceMachineNames",
-        next.shareWorkspaceMachineNames,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareConsentAt",
-        next.shareConsentAt,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.userIdentityMode",
-        next.userIdentityMode,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.userId",
-        next.userId,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.userIdMode",
-        next.userIdMode,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.subscriptionId",
-        next.subscriptionId,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.resourceGroup",
-        next.resourceGroup,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.storageAccount",
-        next.storageAccount,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.aggTable",
-        next.aggTable,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.eventsTable",
-        next.eventsTable,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.lookbackDays",
-        next.lookbackDays,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.includeMachineBreakdown",
-        next.includeMachineBreakdown,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.blobUploadEnabled",
-        next.blobUploadEnabled,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.blobContainerName",
-        next.blobContainerName,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.blobUploadFrequencyHours",
-        next.blobUploadFrequencyHours,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.blobCompressFiles",
-        next.blobCompressFiles,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.backend",
-        next.backend,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.sharingServer.enabled",
-        next.sharingServerEnabled,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.sharingServer.endpointUrl",
-        next.sharingServerEndpointUrl,
-        vscode.ConfigurationTarget.Global,
-      ),
+      ...this.buildSharingConfigUpdates(config, next),
+      ...this.buildAzureConfigUpdates(config, next),
+      ...this.buildBlobAndServerConfigUpdates(config, next),
     ]);
+  }
+
+  private buildSharingConfigUpdates(
+    config: vscode.WorkspaceConfiguration,
+    next: BackendSettings,
+  ): Thenable<void>[] {
+    const T = vscode.ConfigurationTarget.Global;
+    return [
+      config.update("backend.enabled", next.enabled, T),
+      config.update("backend.authMode", next.authMode, T),
+      config.update("backend.datasetId", next.datasetId, T),
+      config.update("backend.sharingProfile", next.sharingProfile, T),
+      config.update("backend.shareWithTeam", next.shareWithTeam, T),
+      config.update("backend.shareWorkspaceMachineNames", next.shareWorkspaceMachineNames, T),
+      config.update("backend.shareConsentAt", next.shareConsentAt, T),
+      config.update("backend.userIdentityMode", next.userIdentityMode, T),
+      config.update("backend.userId", next.userId, T),
+      config.update("backend.userIdMode", next.userIdMode, T),
+    ];
+  }
+
+  private buildAzureConfigUpdates(
+    config: vscode.WorkspaceConfiguration,
+    next: BackendSettings,
+  ): Thenable<void>[] {
+    const T = vscode.ConfigurationTarget.Global;
+    return [
+      config.update("backend.subscriptionId", next.subscriptionId, T),
+      config.update("backend.resourceGroup", next.resourceGroup, T),
+      config.update("backend.storageAccount", next.storageAccount, T),
+      config.update("backend.aggTable", next.aggTable, T),
+      config.update("backend.eventsTable", next.eventsTable, T),
+      config.update("backend.lookbackDays", next.lookbackDays, T),
+      config.update("backend.includeMachineBreakdown", next.includeMachineBreakdown, T),
+    ];
+  }
+
+  private buildBlobAndServerConfigUpdates(
+    config: vscode.WorkspaceConfiguration,
+    next: BackendSettings,
+  ): Thenable<void>[] {
+    const T = vscode.ConfigurationTarget.Global;
+    return [
+      config.update("backend.blobUploadEnabled", next.blobUploadEnabled, T),
+      config.update("backend.blobContainerName", next.blobContainerName, T),
+      config.update("backend.blobUploadFrequencyHours", next.blobUploadFrequencyHours, T),
+      config.update("backend.blobCompressFiles", next.blobCompressFiles, T),
+      config.update("backend.backend", next.backend, T),
+      config.update("backend.sharingServer.enabled", next.sharingServerEnabled, T),
+      config.update("backend.sharingServer.endpointUrl", next.sharingServerEndpointUrl, T),
+    ];
   }
 
   private async showConfigPanel(): Promise<void> {
@@ -817,26 +775,22 @@ export class BackendFacade {
         await this.azureResourceService.configureBackendWizard();
       },
     );
-    this.startTimerIfEnabled();
-    this.deps.updateTokenStats?.();
-    this.clearQueryCache();
+    this.afterConfigChange();
     return this.getConfigPanelState();
   }
 
   private async disableBackend(): Promise<BackendConfigPanelState> {
     const settings = this.getSettings();
+    const disableBase = toDraft(settings);
     const draft: BackendConfigDraft = {
-      ...toDraft(settings),
+      ...disableBase,
       enabled: false,
-      sharingProfile: "off",
-      shareWorkspaceMachineNames: false,
       includeMachineBreakdown: false,
+      sharing: { ...disableBase.sharing, sharingProfile: "off", shareWorkspaceMachineNames: false },
     };
     const next = applyDraftToSettings(settings, draft, undefined);
     await this.updateConfiguration(next);
-    this.startTimerIfEnabled();
-    this.deps.updateTokenStats?.();
-    this.clearQueryCache();
+    this.afterConfigChange();
     return this.getConfigPanelState(draft);
   }
 
@@ -861,7 +815,7 @@ export class BackendFacade {
         await this.credentialService.clearStoredStorageSharedKey(
           settings.storageAccount,
         );
-      } catch (e) {
+      } catch (_e: unknown) {
         // Continue even if key clear fails
       }
     }
@@ -871,31 +825,37 @@ export class BackendFacade {
       enabled: false,
       backend: "storageTables",
       authMode: "entraId",
-      sharingProfile: "off",
-      shareWorkspaceMachineNames: false,
-      includeMachineBreakdown: false,
       datasetId: "default",
       lookbackDays: 30,
-      subscriptionId: "",
-      resourceGroup: "",
-      storageAccount: "",
-      aggTable: "usageAggDaily",
-      eventsTable: "usageEvents",
-      userIdentityMode: "pseudonymous",
-      userId: "",
-      sharingServerEnabled: false,
-      sharingServerEndpointUrl: "",
-      blobUploadEnabled: false,
-      blobContainerName: "copilot-session-logs",
-      blobUploadFrequencyHours: 24,
-      blobCompressFiles: true,
+      includeMachineBreakdown: false,
+      azureResources: {
+        subscriptionId: "",
+        resourceGroup: "",
+        storageAccount: "",
+        aggTable: "usageAggDaily",
+        eventsTable: "usageEvents",
+      },
+      identity: {
+        userIdentityMode: "pseudonymous",
+        userId: "",
+      },
+      blobUpload: {
+        blobUploadEnabled: false,
+        blobContainerName: "copilot-session-logs",
+        blobUploadFrequencyHours: 24,
+        blobCompressFiles: true,
+      },
+      sharing: {
+        sharingProfile: "off",
+        shareWorkspaceMachineNames: false,
+        sharingServerEnabled: false,
+        sharingServerEndpointUrl: "",
+      },
     };
 
     const next = applyDraftToSettings(settings, draft, undefined);
     await this.updateConfiguration(next);
-    this.startTimerIfEnabled();
-    this.deps.updateTokenStats?.();
-    this.clearQueryCache();
+    this.afterConfigChange();
     return this.getConfigPanelState(draft);
   }
 
@@ -984,30 +944,17 @@ export class BackendFacade {
             creds.tableCredential,
           );
           return { ok: true, message: SuccessMessages.connected() };
-        } catch (error: any) {
-          const details = error?.message || String(error);
-          if (details.includes("403") || details.includes("Forbidden")) {
-            return {
-              ok: false,
-              message: ErrorMessages.auth("Check storage account permissions"),
-            };
+        } catch (error: unknown) {
+          if (isAuthError(error)) {
+            return { ok: false, message: ErrorMessages.auth("Check storage account permissions") };
           }
-          if (details.includes("404") || details.includes("NotFound")) {
-            return {
-              ok: false,
-              message:
-                "Storage account or table not found. Verify resource names.",
-            };
+          if (isNotFoundError(error)) {
+            return { ok: false, message: "Storage account or table not found. Verify resource names." };
           }
-          if (details.includes("ENOTFOUND") || details.includes("ETIMEDOUT")) {
-            return {
-              ok: false,
-              message: ErrorMessages.connection(
-                "Check network and storage account name",
-              ),
-            };
+          if (isNetworkError(error)) {
+            return { ok: false, message: ErrorMessages.connection("Check network and storage account name") };
           }
-          return { ok: false, message: details };
+          return { ok: false, message: safeStringifyError(error) };
         }
       },
     );
@@ -1042,8 +989,8 @@ export class BackendFacade {
           draft ?? toDraft(this.getSettings()),
         ),
       };
-    } catch (error: any) {
-      return { ok: false, message: error?.message || String(error) };
+    } catch (error: unknown) {
+      return { ok: false, message: safeStringifyError(error) };
     }
   }
 
@@ -1059,74 +1006,46 @@ export class BackendFacade {
         await this.credentialService.clearStoredStorageSharedKey(
           settings.storageAccount,
         );
-      } catch (e) {
+      } catch (_e: unknown) {
         // Continue even if key clear fails
       }
     }
 
-    const config = vscode.workspace.getConfiguration("aiEngineeringFluency");
-    await Promise.all([
-      config.update(
-        "backend.enabled",
-        false,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.authMode",
-        "entraId",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.sharingProfile",
-        "off",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareWithTeam",
-        false,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareWorkspaceMachineNames",
-        false,
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.shareConsentAt",
-        "",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.subscriptionId",
-        "",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.resourceGroup",
-        "",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.storageAccount",
-        "",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.aggTable",
-        "usageAggDaily",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update(
-        "backend.eventsTable",
-        "usageEvents",
-        vscode.ConfigurationTarget.Global,
-      ),
-      config.update("backend.userId", "", vscode.ConfigurationTarget.Global),
-    ]);
-
-    this.startTimerIfEnabled();
-    this.deps.updateTokenStats?.();
-    this.clearQueryCache();
+    // Build a clean reset draft (same defaults used by clearAzureSettings)
+    const draft: BackendConfigDraft = {
+      enabled: false,
+      backend: "storageTables",
+      authMode: "entraId",
+      datasetId: "default",
+      lookbackDays: 30,
+      includeMachineBreakdown: false,
+      azureResources: {
+        subscriptionId: "",
+        resourceGroup: "",
+        storageAccount: "",
+        aggTable: "usageAggDaily",
+        eventsTable: "usageEvents",
+      },
+      identity: {
+        userIdentityMode: "pseudonymous",
+        userId: "",
+      },
+      blobUpload: {
+        blobUploadEnabled: false,
+        blobContainerName: "copilot-session-logs",
+        blobUploadFrequencyHours: 24,
+        blobCompressFiles: true,
+      },
+      sharing: {
+        sharingProfile: "off",
+        shareWorkspaceMachineNames: false,
+        sharingServerEnabled: false,
+        sharingServerEndpointUrl: "",
+      },
+    };
+    const next = applyDraftToSettings(settings, draft, undefined);
+    await this.updateConfiguration(next);
+    this.afterConfigChange();
 
     vscode.window.showInformationMessage(
       "Azure settings cleared successfully.",
@@ -1168,3 +1087,15 @@ export class BackendFacade {
     return true;
   }
 }
+
+
+
+
+
+
+
+
+
+
+
+

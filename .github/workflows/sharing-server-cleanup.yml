@@ -34,12 +34,22 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
-        uses: step-security/harden-runner@a5ad31d6a139d249332a2605b85202e8c0b78450 # v2.19.1
+        uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
           egress-policy: audit
 
       - name: Checkout code
-        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check Azure credentials
+        id: prereqs
+        run: |
+          if [[ -z "$ARM_CLIENT_ID" ]]; then
+            echo "⚠️ Azure credentials not configured for 'testing' environment — skipping cleanup." >> "$GITHUB_STEP_SUMMARY"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
 
       # Reproduce the exact same slug+hash logic used by the deploy workflow
       # so the state key resolves to the same tfstate file.
@@ -60,9 +70,11 @@ jobs:
           echo "state_key=sharing-server/test-${SLUG_TRUNC}${HASH}.tfstate"    >> "$GITHUB_OUTPUT"
 
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        if: steps.prereqs.outputs.configured == 'true'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
 
       - name: Terraform init
+        if: steps.prereqs.outputs.configured == 'true'
         id: init
         working-directory: sharing-server/infra
         run: |
@@ -77,9 +89,11 @@ jobs:
       # binding still references the cert (400 CertificateInUse), which breaks
       # terraform destroy. We must unbind all hostnames and delete all certs first.
       - name: Azure CLI login
+        if: steps.prereqs.outputs.configured == 'true'
         run: az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
 
       - name: Pre-destroy - unbind custom domains and delete managed certs
+        if: steps.prereqs.outputs.configured == 'true'
         env:
           APP_NAME: ${{ steps.env.outputs.app_name }}
           RG:       ${{ vars.AZURE_RESOURCE_GROUP }}
@@ -118,6 +132,7 @@ jobs:
           fi
 
       - name: Destroy resources (if any exist)
+        if: steps.prereqs.outputs.configured == 'true'
         working-directory: sharing-server/infra
         env:
           # Variables are required by Terraform even for destroy; use safe placeholders

@@ -1,9 +1,12 @@
-﻿// Diagnostics Report webview with tabbed interface
+// Diagnostics Report webview with tabbed interface
 import { buttonHtml } from "../shared/buttonConfig";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
+import { escapeHtml, formatFileSize, getTimeSince, getEditorIcon } from "../shared/formatUtils";
+import { createViewStateManager } from "../shared/viewState";
 // CSS imported as text via esbuild
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
+import { getWindowData } from "../shared/dataLoader";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -34,6 +37,11 @@ type SessionFileDetails = {
   editorName?: string;
   title?: string;
   repository?: string;
+  parentInfo?: { uuid: string; name: string; sessionFile?: string } | null;
+  childInfo?: Array<{ uuid: string; name: string; sessionFile?: string }>;
+  totalChildCount?: number;
+  /** Per-model input/output token breakdown (when model attribution data is available). */
+  modelUsage?: { [model: string]: { inputTokens: number; outputTokens: number } };
 };
 
 type CacheInfo = {
@@ -86,6 +94,25 @@ type GitHubAuthStatus = {
   username?: string;
 };
 
+type SessionFolder = {
+  dir: string;
+  count: number;
+  editorName?: string;
+};
+
+type StatusBarShowOption = 'none' | 'today' | 'last30days' | 'currentMonth' | 'both' | 'todayAndCurrentMonth';
+
+type DisplaySettings = {
+  showTokens: StatusBarShowOption;
+  showCost: StatusBarShowOption;
+  monthlyBudget?: number;
+};
+
+type QuotaEntitlements = {
+  premium_interactions?: number;
+  completions?: number;
+};
+
 type DiagnosticsData = {
   report: string;
   sessionFiles: { file: string; size: number; modified: string }[];
@@ -96,6 +123,19 @@ type DiagnosticsData = {
   isDebugMode?: boolean;
   globalStateCounters?: GlobalStateCounters;
   githubAuth?: GitHubAuthStatus;
+  sessionFolders?: SessionFolder[];
+  displaySettings?: DisplaySettings;
+  quotaEntitlements?: QuotaEntitlements;
+  toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
+  toolFamilies?: ToolFamilyConfig[];
+};
+
+type ToolFamilyConfig = {
+  id: string;
+  name: string;
+  builtIn: string[];
+  alternatives: string[];
+  description?: string;
 };
 
 type DiagnosticsViewState = {
@@ -118,14 +158,13 @@ declare function acquireVsCodeApi<TState = DiagnosticsViewState>(): {
   getState: () => TState | undefined;
 };
 
-declare global {
-  interface Window {
-    __INITIAL_DIAGNOSTICS__?: DiagnosticsData;
-  }
-}
-
 const vscode = acquireVsCodeApi<DiagnosticsViewState>();
-const initialData = window.__INITIAL_DIAGNOSTICS__;
+const initialData = getWindowData<DiagnosticsData>('__INITIAL_DIAGNOSTICS__');
+
+const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
+  activeTab: undefined,
+  activeSubtab: undefined,
+});
 
 // Sorting and filtering state
 let currentSortColumn: "lastInteraction" | "size" | "tokens" | "interactions" | "contextRefs" = "lastInteraction";
@@ -133,15 +172,18 @@ let currentSortDirection: "asc" | "desc" = "desc";
 let currentEditorFilter: string | null = null; // null = show all
 let currentContextRefFilter: keyof ContextReferenceUsage | null = null; // null = show all
 let hideEmptySessions = true; // hide sessions with 0 interactions by default
+let showOnlyUnattributed = false; // filter to only sessions with unattributed tokens
 
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, "&amp;")
-    .replace(/</g, "&lt;")
-    .replace(/>/g, "&gt;")
-    .replace(/"/g, "&quot;")
-    .replace(/'/g, "&#039;");
-}
+// Tool analysis table sort state
+let toolSortColumn: "tool" | "calls" | "total" | "avg" = "avg";
+let toolSortDir: "asc" | "desc" = "desc";
+let storedToolFamilies: ToolFamilyConfig[] | undefined;
+
+// Render state (promoted to module level so all setup functions can be top-level)
+let storedDetailedFiles: SessionFileDetails[] = [];
+let isLoading = true;
+let currentBackendInfo: BackendStorageInfo | undefined;
+let currentGithubAuth: GitHubAuthStatus | undefined;
 
 function removeSessionFilesSection(reportText: string): string {
   return reportText.replace(SESSION_FILES_SECTION_REGEX, "");
@@ -158,51 +200,6 @@ function formatDate(isoString: string | null): string {
   }
 }
 
-function getTimeSince(isoString: string): string {
-  try {
-    const now = Date.now();
-    const then = new Date(isoString).getTime();
-    const diffMs = now - then;
-
-    if (diffMs < 0) {
-      return "Just now";
-    }
-
-    const seconds = Math.floor(diffMs / 1000);
-    const minutes = Math.floor(seconds / 60);
-    const hours = Math.floor(minutes / 60);
-    const days = Math.floor(hours / 24);
-
-    if (days > 0) {
-      return `${days} day${days !== 1 ? "s" : ""} ago`;
-    }
-    if (hours > 0) {
-      return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
-    }
-    if (minutes > 0) {
-      return `${minutes} minute${minutes !== 1 ? "s" : ""} ago`;
-    }
-    return `${seconds} second${seconds !== 1 ? "s" : ""} ago`;
-  } catch {
-    return "Unknown";
-  }
-}
-
-function formatFileSize(bytes: number): string {
-  const numericBytes = Number(bytes);
-  if (!Number.isFinite(numericBytes) || numericBytes < 0) {
-    // Fallback for unexpected or untrusted values
-    return "N/A";
-  }
-  if (numericBytes < 1024) {
-    return `${numericBytes} B`;
-  }
-  if (numericBytes < 1024 * 1024) {
-    return `${(numericBytes / 1024).toFixed(1)} KB`;
-  }
-  return `${(numericBytes / (1024 * 1024)).toFixed(2)} MB`;
-}
-
 function sanitizeNumber(value: number | undefined | null): string {
   if (value === undefined || value === null) {
     return "0";
@@ -217,6 +214,7 @@ function sanitizeNumber(value: number | undefined | null): string {
 function formatTokenCount(value: number | undefined | null): string {
   const n = Number(value ?? 0);
   if (!Number.isFinite(n) || n === 0) { return "0"; }
+  if (n >= 1_000_000_000) { return `${(n / 1_000_000_000).toFixed(1)}B`; }
   if (n >= 1_000_000) { return `${(n / 1_000_000).toFixed(1)}M`; }
   if (n >= 1_000) { return `${(n / 1_000).toFixed(1)}K`; }
   return Math.floor(n).toString();
@@ -226,121 +224,84 @@ function formatTokenCount(value: number | undefined | null): string {
  * Build a DOM element showing all candidate paths the extension considers,
  * with their existence status. Helps users understand why data may be missing.
  */
+type CandidatePath = { path: string; exists: boolean; source: string };
+
+function buildCandidatePathRow(cp: CandidatePath, tbody: HTMLElement): void {
+  const row = document.createElement("tr");
+  if (!cp.exists) { row.style.opacity = "0.5"; }
+  const statusCell = document.createElement("td");
+  statusCell.textContent = cp.exists ? "✅" : "❌";
+  statusCell.style.textAlign = "center";
+  const sourceCell = document.createElement("td");
+  const badge = document.createElement("span");
+  badge.className = getEditorBadgeClass(cp.source);
+  badge.textContent = `${getEditorIcon(cp.source)} ${cp.source}`;
+  sourceCell.appendChild(badge);
+  const pathCell = document.createElement("td");
+  pathCell.setAttribute("title", cp.path);
+  pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
+  pathCell.style.fontSize = "12px";
+  pathCell.textContent = cp.path;
+  row.append(statusCell, sourceCell, pathCell);
+  tbody.appendChild(row);
+}
+
+function buildCrushGroupRow(crushEntries: CandidatePath[], tbody: HTMLElement): void {
+  const anyExist = crushEntries.some((cp) => cp.exists);
+  const row = document.createElement("tr");
+  if (!anyExist) { row.style.opacity = "0.5"; }
+  const statusCell = document.createElement("td");
+  statusCell.textContent = anyExist ? "✅" : "❌";
+  statusCell.style.textAlign = "center";
+  const sourceCell = document.createElement("td");
+  const badge = document.createElement("span");
+  badge.className = getEditorBadgeClass("Crush");
+  badge.textContent = `${getEditorIcon("Crush")} Crush`;
+  sourceCell.appendChild(badge);
+  const pathCell = document.createElement("td");
+  pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
+  pathCell.style.fontSize = "12px";
+  pathCell.style.lineHeight = "1.6";
+  for (const cp of crushEntries) {
+    const line = document.createElement("div");
+    line.style.opacity = cp.exists ? "1" : "0.5";
+    line.title = cp.path;
+    line.textContent = `${cp.exists ? "✅" : "❌"} ${cp.path}`;
+    pathCell.appendChild(line);
+  }
+  row.append(statusCell, sourceCell, pathCell);
+  tbody.appendChild(row);
+}
+
 function buildCandidatePathsElement(
-  candidatePaths: { path: string; exists: boolean; source: string }[],
+  candidatePaths: CandidatePath[],
 ): HTMLElement {
   const container = document.createElement("div");
   container.className = "candidate-paths-table";
-
   const heading = document.createElement("h4");
   heading.textContent = "Scanned Paths (all candidate locations):";
   container.appendChild(heading);
-
   const description = document.createElement("p");
   description.style.cssText = "color: #999; font-size: 12px; margin: 4px 0 8px 0;";
   description.textContent = "These are all the paths the extension checks for session files. Paths marked with ✅ exist on this system.";
   container.appendChild(description);
-
   const table = document.createElement("table");
   table.className = "session-table";
   container.appendChild(table);
-
   const thead = document.createElement("thead");
-  table.appendChild(thead);
   const headerRow = document.createElement("tr");
-  thead.appendChild(headerRow);
   for (const text of ["Status", "Source", "Path"]) {
-    const th = document.createElement("th");
-    th.textContent = text;
-    headerRow.appendChild(th);
+    const th = document.createElement("th"); th.textContent = text; headerRow.appendChild(th);
   }
-
+  thead.appendChild(headerRow);
+  table.appendChild(thead);
   const tbody = document.createElement("tbody");
   table.appendChild(tbody);
-
-  // Show found paths first, then missing paths
-  const sorted = [...candidatePaths].sort((a, b) => {
-    if (a.exists !== b.exists) {
-      return a.exists ? -1 : 1;
-    }
-    return a.source.localeCompare(b.source);
-  });
-
-  // Group all Crush entries into one row; render everything else individually
-  const crushEntries = sorted.filter((cp) =>
-    cp.source.toLowerCase().includes("crush"),
-  );
-  const otherEntries = sorted.filter(
-    (cp) => !cp.source.toLowerCase().includes("crush"),
-  );
-
-  const renderRow = (cp: { path: string; exists: boolean; source: string }) => {
-    const row = document.createElement("tr");
-    if (!cp.exists) {
-      row.style.opacity = "0.5";
-    }
-
-    const statusCell = document.createElement("td");
-    statusCell.textContent = cp.exists ? "✅" : "❌";
-    statusCell.style.textAlign = "center";
-    row.appendChild(statusCell);
-
-    const sourceCell = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = getEditorBadgeClass(cp.source);
-    badge.textContent = `${getEditorIcon(cp.source)} ${cp.source}`;
-    sourceCell.appendChild(badge);
-    row.appendChild(sourceCell);
-
-    const pathCell = document.createElement("td");
-    pathCell.setAttribute("title", cp.path);
-    pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
-    pathCell.style.fontSize = "12px";
-    pathCell.textContent = cp.path;
-    row.appendChild(pathCell);
-
-    tbody.appendChild(row);
-  };
-
-  for (const cp of otherEntries) {
-    renderRow(cp);
-  }
-
-  if (crushEntries.length > 0) {
-    const anyExist = crushEntries.some((cp) => cp.exists);
-    const row = document.createElement("tr");
-    if (!anyExist) {
-      row.style.opacity = "0.5";
-    }
-
-    const statusCell = document.createElement("td");
-    statusCell.textContent = anyExist ? "✅" : "❌";
-    statusCell.style.textAlign = "center";
-    row.appendChild(statusCell);
-
-    const sourceCell = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = getEditorBadgeClass("Crush");
-    badge.textContent = `${getEditorIcon("Crush")} Crush`;
-    sourceCell.appendChild(badge);
-    row.appendChild(sourceCell);
-
-    const pathCell = document.createElement("td");
-    pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
-    pathCell.style.fontSize = "12px";
-    pathCell.style.lineHeight = "1.6";
-    for (const cp of crushEntries) {
-      const line = document.createElement("div");
-      line.style.opacity = cp.exists ? "1" : "0.5";
-      line.title = cp.path;
-      line.textContent = `${cp.exists ? "✅" : "❌"} ${cp.path}`;
-      pathCell.appendChild(line);
-    }
-    row.appendChild(pathCell);
-
-    tbody.appendChild(row);
-  }
-
+  const sorted = [...candidatePaths].sort((a, b) => a.exists !== b.exists ? (a.exists ? -1 : 1) : a.source.localeCompare(b.source));
+  const crushEntries = sorted.filter((cp) => cp.source.toLowerCase().includes("crush"));
+  const otherEntries = sorted.filter((cp) => !cp.source.toLowerCase().includes("crush"));
+  for (const cp of otherEntries) { buildCandidatePathRow(cp, tbody); }
+  if (crushEntries.length > 0) { buildCrushGroupRow(crushEntries, tbody); }
   return container;
 }
 
@@ -397,8 +358,9 @@ function getRepoDisplayName(repoUrl: string): string {
 
 function getEditorBadgeClass(editor: string): string {
   const lower = editor.toLowerCase();
-  if (lower.includes("visual studio")) {
-    return "editor-badge editor-badge-vs";
+  // MS Scout must be checked before generic 'copilot' to avoid misclassification.
+  if (lower.includes("ms scout") || lower.includes("microsoft scout")) {
+    return "editor-badge editor-badge-ms-scout";
   }
   if (lower.includes("visual studio")) {
     return "editor-badge editor-badge-vs";
@@ -409,87 +371,81 @@ function getEditorBadgeClass(editor: string): string {
   if (lower.includes("mistral")) {
     return "editor-badge editor-badge-mistral-vibe";
   }
+  // Antigravity must be checked before gemini (both contain 'gemini' in their path)
+  if (lower.includes("antigravity")) {
+    return "editor-badge editor-badge-antigravity";
+  }
   if (lower.includes("gemini")) {
     return "editor-badge editor-badge-gemini-cli";
   }
   if (lower.includes("crush")) {
     return "editor-badge editor-badge-crush";
   }
+  if (lower.includes("cursor")) {
+    return "editor-badge editor-badge-cursor";
+  }
+  // Exact match required: 'copilot' contains the substring 'pi' and would false-positive.
+  if (lower === 'pi') {
+    return "editor-badge editor-badge-pi";
+  }
   return "editor-badge";
 }
 
-function getEditorIcon(editor: string): string {
-  const lower = editor.toLowerCase();
-  if (lower.includes("jetbrains") || lower.includes("rider") || lower.includes("intellij")) {
-    return "🟣";
+
+function getSortValue(file: SessionFileDetails, column: typeof currentSortColumn): number {
+  switch (column) {
+    case 'size': return file.size || 0;
+    case 'tokens': return file.tokens || 0;
+    case 'interactions': return file.interactions || 0;
+    case 'contextRefs': return getTotalContextRefs(file.contextReferences);
+    default: return 0;
   }
-  if (lower.includes("visual studio")) {
-    return "🪟";
+}
+
+function compareSessionFiles(a: SessionFileDetails, b: SessionFileDetails): number {
+  if (currentSortColumn === "lastInteraction") {
+    const aVal = a.lastInteraction;
+    const bVal = b.lastInteraction;
+    if (!aVal && !bVal) { return 0; }
+    if (!aVal) { return 1; }
+    if (!bVal) { return -1; }
+    const aNum = new Date(aVal).getTime();
+    const bNum = new Date(bVal).getTime();
+    return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
   }
-  if (lower.includes("visual studio")) {
-    return "🪟";
+  const aNum = getSortValue(a, currentSortColumn);
+  const bNum = getSortValue(b, currentSortColumn);
+  if (aNum === 0 && bNum === 0) { return 0; }
+  return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
+}
+
+function groupChildrenAfterParents(
+  sorted: SessionFileDetails[],
+  byFile: Map<string, SessionFileDetails>,
+): SessionFileDetails[] {
+  const placed = new Set<string>();
+  const result: SessionFileDetails[] = [];
+  for (const f of sorted) {
+    if (placed.has(f.file)) { continue; }
+    result.push(f);
+    placed.add(f.file);
+    for (const childRef of f.childInfo ?? []) {
+      if (!childRef.sessionFile) { continue; }
+      const childDetails = byFile.get(childRef.sessionFile);
+      if (childDetails && !placed.has(childDetails.file)) {
+        result.push(childDetails);
+        placed.add(childDetails.file);
+      }
+    }
   }
-  if (lower.includes("mistral")) {
-    return "🔥";
-  }
-  if (lower.includes("gemini")) {
-    return "💎";
-  }
-  if (lower.includes("crush")) {
-    return "🩷";
-  }
-  if (lower.includes("opencode")) {
-    return "🟢";
-  }
-  if (lower.includes("cursor")) {
-    return "🖱️";
-  }
-  if (lower.includes("insiders")) {
-    return "💚";
-  }
-  if (lower.includes("vscodium")) {
-    return "🔵";
-  }
-  if (lower.includes("windsurf")) {
-    return "🏄";
-  }
-  if (lower.includes("vs code") || lower.includes("vscode")) {
-    return "💙";
-  }
-  return "📝";
+  return result;
 }
 
 function sortSessionFiles(files: SessionFileDetails[]): SessionFileDetails[] {
-  return [...files].sort((a, b) => {
-    let aNum: number;
-    let bNum: number;
-
-    if (currentSortColumn === "lastInteraction") {
-      const aVal = a.lastInteraction;
-      const bVal = b.lastInteraction;
-      if (!aVal && !bVal) { return 0; }
-      if (!aVal) { return 1; }
-      if (!bVal) { return -1; }
-      aNum = new Date(aVal).getTime();
-      bNum = new Date(bVal).getTime();
-    } else if (currentSortColumn === "size") {
-      aNum = a.size || 0;
-      bNum = b.size || 0;
-    } else if (currentSortColumn === "tokens") {
-      aNum = a.tokens || 0;
-      bNum = b.tokens || 0;
-    } else if (currentSortColumn === "interactions") {
-      aNum = a.interactions || 0;
-      bNum = b.interactions || 0;
-    } else if (currentSortColumn === "contextRefs") {
-      aNum = getTotalContextRefs(a.contextReferences);
-      bNum = getTotalContextRefs(b.contextReferences);
-    } else {
-      return 0;
-    }
-
-    return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
-  });
+  const sorted = [...files].sort(compareSessionFiles);
+  const byFile = new Map<string, SessionFileDetails>();
+  for (const f of sorted) { byFile.set(f.file, f); }
+  return groupChildrenAfterParents(sorted, byFile);
 }
 
 function getSortIndicator(column: typeof currentSortColumn): string {
@@ -522,207 +478,118 @@ function safeText(value: unknown): string {
   return escapeHtml(String(value));
 }
 
+type ContextRefCounts = { file: number; symbol: number; selection: number; implicitSelection: number; codebase: number; workspace: number; terminal: number; vscode: number; copilotInstructions: number; agentsMd: number };
+type FilteredSessionResult = { filteredFiles: SessionFileDetails[]; zeroInteractionCount: number };
+
+/** Returns the number of tokens not attributed to any model (i.e. missing from modelUsage). */
+function getUnattributedTokens(sf: SessionFileDetails): number {
+  const tokens = sf.tokens || 0;
+  if (tokens === 0 || !sf.modelUsage) { return 0; }
+  const attributed = Object.values(sf.modelUsage).reduce((s, m) => s + m.inputTokens + m.outputTokens, 0);
+  return attributed > 0 ? Math.max(0, tokens - attributed) : 0;
+}
+
+function applySessionFilters(detailedFiles: SessionFileDetails[]): FilteredSessionResult {
+  let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => sf.editorSource === currentEditorFilter) : detailedFiles;
+  if (currentContextRefFilter) {
+    filteredFiles = filteredFiles.filter((sf) => { const value = sf.contextReferences[currentContextRefFilter!]; return typeof value === "number" && value > 0; });
+  }
+  if (showOnlyUnattributed) { filteredFiles = filteredFiles.filter(sf => getUnattributedTokens(sf) > 1000); }
+  const zeroInteractionCount = filteredFiles.filter(sf => sf.interactions === 0).length;
+  if (hideEmptySessions && zeroInteractionCount === filteredFiles.length && filteredFiles.length > 0) { hideEmptySessions = false; }
+  if (hideEmptySessions) { filteredFiles = filteredFiles.filter(sf => sf.interactions > 0); }
+  return { filteredFiles, zeroInteractionCount };
+}
+
+function aggregateContextRefs(filteredFiles: SessionFileDetails[]): ContextRefCounts {
+  return filteredFiles.reduce((agg, sf) => {
+    const r = sf.contextReferences;
+    agg.file += r.file; agg.symbol += r.symbol; agg.selection += r.selection; agg.implicitSelection += r.implicitSelection;
+    agg.codebase += r.codebase; agg.workspace += r.workspace; agg.terminal += r.terminal; agg.vscode += r.vscode;
+    agg.copilotInstructions += r.copilotInstructions; agg.agentsMd += r.agentsMd;
+    return agg;
+  }, { file: 0, symbol: 0, selection: 0, implicitSelection: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, copilotInstructions: 0, agentsMd: 0 });
+}
+
+function buildEditorPanelsHtml(detailedFiles: SessionFileDetails[], editorStats: Record<string, { count: number; interactions: number }>, editors: string[]): string {
+  return `<div class="editor-filter-panels">
+    <div class="editor-panel ${currentEditorFilter === null ? "active" : ""}" data-editor=""><div class="editor-panel-icon">🌐</div><div class="editor-panel-name">All Editors</div><div class="editor-panel-stats">${detailedFiles.length} sessions</div></div>
+    ${editors.map((editor) => `<div class="editor-panel ${currentEditorFilter === editor ? "active" : ""}" data-editor="${escapeHtml(editor)}"><div class="editor-panel-icon">${getEditorIcon(editor)}</div><div class="editor-panel-name">${escapeHtml(editor)}</div><div class="editor-panel-stats">${editorStats[editor].count} sessions · ${editorStats[editor].interactions} interactions</div></div>`).join("")}
+  </div>`;
+}
+
+function buildSessionSummaryCardsHtml(filteredFiles: SessionFileDetails[], allFiles: SessionFileDetails[], totalInteractions: number, totalTokens: number, totalContextRefs: number, agg: ContextRefCounts, zeroInteractionCount: number): string {
+  const mkRef = (key: keyof ContextRefCounts, icon: string, label: string) => agg[key] > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === key ? "active" : ""}" data-ref-type="${key}">${icon} ${label} ${agg[key]}</div>` : "";
+  const unattributedCount = allFiles.filter(sf => getUnattributedTokens(sf) > 1000).length;
+  const unattributedCheckbox = unattributedCount > 0
+    ? `<label class="empty-sessions-toggle" title="Sessions where some debug-log tokens cannot be assigned to a specific model — may indicate incomplete model attribution in the debug log"><input type="checkbox" id="show-only-unattributed" ${showOnlyUnattributed ? 'checked' : ''}>⚠️ Show only sessions with unattributed tokens<span class="hidden-count">(${unattributedCount} session${unattributedCount === 1 ? '' : 's'})</span></label>`
+    : '';
+  return `<div class="summary-cards">
+    <div class="summary-card"><div class="summary-label">📁 ${currentEditorFilter ? "Filtered" : "Total"} Sessions</div><div class="summary-value">${filteredFiles.length}</div></div>
+    <div class="summary-card"><div class="summary-label">💬 Interactions</div><div class="summary-value">${totalInteractions}</div></div>
+    <div class="summary-card"><div class="summary-label">🪙 Tokens</div><div class="summary-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div></div>
+    <div class="summary-card"><div class="summary-label">🔗 Context References</div><div class="summary-value">${safeText(totalContextRefs)}</div><div class="summary-sub">${totalContextRefs === 0 ? "None" : ""}${mkRef("file","","#file")}${mkRef("symbol","","#sym")}${mkRef("implicitSelection","","implicit")}${mkRef("copilotInstructions","📋","instructions")}${mkRef("agentsMd","🤖","agents")}${mkRef("workspace","","@workspace")}${mkRef("vscode","","@vscode")}</div></div>
+    <div class="summary-card"><div class="summary-label">📅 Time Range</div><div class="summary-value">Last 14 days</div></div>
+  </div>
+  <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ''}</label>${unattributedCheckbox}</div>`;
+}
+
+function buildHierarchyBadgesHtml(sf: SessionFileDetails): string {
+  let html = '';
+  if (sf.parentInfo) {
+    const parentTitle = escapeHtml(sf.parentInfo.name.length > 30 ? sf.parentInfo.name.substring(0, 30) + '…' : sf.parentInfo.name);
+    const linkAttr = sf.parentInfo.sessionFile
+      ? ` href="#" class="session-hierarchy-badge hierarchy-parent session-file-link" data-file="${encodeURIComponent(sf.parentInfo.sessionFile)}"`
+      : ` class="session-hierarchy-badge hierarchy-parent"`;
+    html += `<a${linkAttr} title="Parent session: ${escapeHtml(sf.parentInfo.name)}">↑ Parent: ${parentTitle}</a>`;
+  }
+  if (sf.totalChildCount && sf.totalChildCount > 0) {
+    const count = sf.totalChildCount;
+    const label = count === 1 ? '1 child session' : `${count} child sessions`;
+    html += `<span class="session-hierarchy-badge hierarchy-children" title="${label}">↓ ${count} ${count === 1 ? 'Child' : 'Children'}</span>`;
+  }
+  return html ? `<div class="session-hierarchy-badges">${html}</div>` : '';
+}
+
+/** Returns a warning badge HTML string when the session has significant unattributed tokens. */
+function buildUnattributedBadge(sf: SessionFileDetails): string {
+  const unattributed = getUnattributedTokens(sf);
+  if (unattributed <= 1000) { return ''; }
+  const pct = Math.round(unattributed / (sf.tokens || 1) * 100);
+  return ` <span title="⚠️ ${unattributed.toLocaleString()} tokens (~${pct}%) not attributed to any model — debug log events without a model field" style="color:#f59e0b; cursor:help; font-size:0.9em;">⚠️</span>`;
+}
+
+function buildSessionTableHtml(sortedFiles: SessionFileDetails[]): string {
+  const rows = sortedFiles.map((sf, idx) => {
+    const editorLabel = sf.editorName || sf.editorSource;
+    const isChild = !!sf.parentInfo;
+    const rawTitleHtml = sf.title ? `<a href="#" class="session-file-link" data-file="${encodeURIComponent(sf.file)}" title="${escapeHtml(sf.title)}">${escapeHtml(sf.title.length > 40 ? sf.title.substring(0, 40) + "..." : sf.title)}</a>` : `<a href="#" class="session-file-link empty-session-link" data-file="${encodeURIComponent(sf.file)}" title="Empty session">(Empty session)</a>`;
+    const titleHtml = isChild ? `<span class="child-title-indent">${rawTitleHtml}</span>` : rawTitleHtml;
+    const hierarchyBadges = buildHierarchyBadgesHtml(sf);
+    const repoLabel = sf.repository ? escapeHtml(getRepoDisplayName(sf.repository)) : (sf.file.includes('session-store.db') ? '<span style="color: #888; font-style: italic;">No workspace</span>' : '<span style="color: #666;">—</span>');
+    const repoTitle = sf.repository ? escapeHtml(sf.repository) : (sf.file.includes('session-store.db') ? 'Chat session — no workspace connected' : 'No repository detected');
+    const isUnknownEditor = (sf.editorName || sf.editorSource || "Unknown") === "Unknown";
+    const rowClass = isChild ? ' class="child-session-row"' : '';
+    return `<tr${rowClass}><td>${idx + 1}</td><td><span class="${getEditorBadgeClass(editorLabel)}" title="${escapeHtml(sf.editorSource)}">${getEditorIcon(editorLabel)} ${escapeHtml(editorLabel)}</span></td><td class="session-title" title="${sf.title ? escapeHtml(sf.title) : "Empty session"}">${hierarchyBadges}${titleHtml}</td><td class="repository-cell" title="${repoTitle}">${repoLabel}</td><td>${formatFileSize(sf.size)}</td><td title="${Number(sf.tokens || 0).toLocaleString()} tokens">${formatTokenCount(sf.tokens)}${buildUnattributedBadge(sf)}</td><td>${sanitizeNumber(sf.interactions)}</td><td title="${escapeHtml(getContextRefsSummary(sf.contextReferences))}">${sanitizeNumber(getTotalContextRefs(sf.contextReferences))}</td><td>${formatDate(sf.lastInteraction)}</td><td><a href="#" class="view-formatted-link" data-file="${encodeURIComponent(sf.file)}" title="View formatted JSONL file">📄 View</a>${isUnknownEditor ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.file)}" title="Report this unknown path so we can add editor support">📢 Report</a>` : ""}</td></tr>`;
+  }).join("");
+  return `<div class="table-container"><table class="session-table"><thead><tr><th>#</th><th>Editor</th><th>Title</th><th>Repository</th><th class="sortable" data-sort="size">Size${getSortIndicator("size")}</th><th class="sortable" data-sort="tokens">Tokens${getSortIndicator("tokens")}</th><th class="sortable" data-sort="interactions">Interactions${getSortIndicator("interactions")}</th><th class="sortable" data-sort="contextRefs">Context Refs${getSortIndicator("contextRefs")}</th><th class="sortable" data-sort="lastInteraction">Last Interaction${getSortIndicator("lastInteraction")}</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+}
+
 function renderSessionTable(
   detailedFiles: SessionFileDetails[],
   isLoading: boolean = false,
 ): string {
-  if (isLoading) {
-    return `
-			<div class="loading-state">
-				<div class="loading-spinner">⏳</div>
-				<div class="loading-text">Loading session files...</div>
-				<div class="loading-subtext">Analyzing up to 500 files from the last 14 days</div>
-			</div>
-		`;
-  }
-
-  if (detailedFiles.length === 0) {
-    return '<p style="color: #999;">No session files with activity in the last 14 days.</p>';
-  }
-
-  // Get editor stats for ALL files (before filtering)
+  if (isLoading) { return `<div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`; }
+  if (detailedFiles.length === 0) { return '<p style="color: #999;">No session files with activity in the last 14 days.</p>'; }
   const editorStats = getEditorStats(detailedFiles);
   const editors = Object.keys(editorStats).sort();
-
-  // Apply editor filter
-  let filteredFiles = currentEditorFilter
-    ? detailedFiles.filter((sf) => sf.editorSource === currentEditorFilter)
-    : detailedFiles;
-
-  // Apply context ref filter
-  if (currentContextRefFilter) {
-    filteredFiles = filteredFiles.filter((sf) => {
-      const refType = currentContextRefFilter!; // Assert non-null since we're inside the if block
-      const value = sf.contextReferences[refType];
-      return typeof value === "number" && value > 0;
-    });
-  }
-
-  // Count zero-interaction sessions (before hiding them) for the toggle label
-  const zeroInteractionCount = filteredFiles.filter(sf => sf.interactions === 0).length;
-
-  // Hide sessions with 0 interactions when filter is active
-  if (hideEmptySessions) {
-    filteredFiles = filteredFiles.filter(sf => sf.interactions > 0);
-  }
-
-  // Summary stats for filtered files
-  const totalInteractions = filteredFiles.reduce(
-    (sum, sf) => sum + Number(sf.interactions || 0),
-    0,
-  );
-  const totalTokens = filteredFiles.reduce(
-    (sum, sf) => sum + Number(sf.tokens || 0),
-    0,
-  );
-  const totalContextRefs = filteredFiles.reduce(
-    (sum, sf) => sum + getTotalContextRefs(sf.contextReferences),
-    0,
-  );
-
-  // Aggregate context ref breakdown
-  const aggContextRefs = filteredFiles.reduce(
-    (agg, sf) => {
-      const r = sf.contextReferences;
-      agg.file += r.file;
-      agg.symbol += r.symbol;
-      agg.selection += r.selection;
-      agg.implicitSelection += r.implicitSelection;
-      agg.codebase += r.codebase;
-      agg.workspace += r.workspace;
-      agg.terminal += r.terminal;
-      agg.vscode += r.vscode;
-      agg.copilotInstructions += r.copilotInstructions;
-      agg.agentsMd += r.agentsMd;
-      return agg;
-    },
-    {
-      file: 0,
-      symbol: 0,
-      selection: 0,
-      implicitSelection: 0,
-      codebase: 0,
-      workspace: 0,
-      terminal: 0,
-      vscode: 0,
-      copilotInstructions: 0,
-      agentsMd: 0,
-    },
-  );
-
-  // Sort filtered files
+  const { filteredFiles, zeroInteractionCount } = applySessionFilters(detailedFiles);
+  const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+  const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+  const totalContextRefs = filteredFiles.reduce((sum, sf) => sum + getTotalContextRefs(sf.contextReferences), 0);
+  const agg = aggregateContextRefs(filteredFiles);
   const sortedFiles = sortSessionFiles(filteredFiles);
-
-  // Build editor filter panels
-  const editorPanelsHtml = `
-		<div class="editor-filter-panels">
-			<div class="editor-panel ${currentEditorFilter === null ? "active" : ""}" data-editor="">
-				<div class="editor-panel-icon">🌐</div>
-				<div class="editor-panel-name">All Editors</div>
-				<div class="editor-panel-stats">${detailedFiles.length} sessions</div>
-			</div>
-			${editors
-        .map(
-          (editor) => `
-				<div class="editor-panel ${currentEditorFilter === editor ? "active" : ""}" data-editor="${escapeHtml(editor)}">
-					<div class="editor-panel-icon">${getEditorIcon(editor)}</div>
-					<div class="editor-panel-name">${escapeHtml(editor)}</div>
-					<div class="editor-panel-stats">${editorStats[editor].count} sessions · ${editorStats[editor].interactions} interactions</div>
-				</div>
-			`,
-        )
-        .join("")}
-		</div>
-	`;
-
-  return `
-		${editorPanelsHtml}
-
-		<div class="summary-cards">
-			<div class="summary-card">
-				<div class="summary-label">📁 ${currentEditorFilter ? "Filtered" : "Total"} Sessions</div>
-				<div class="summary-value">${filteredFiles.length}</div>
-			</div>
-			<div class="summary-card">
-				<div class="summary-label">💬 Interactions</div>
-				<div class="summary-value">${totalInteractions}</div>
-			</div>
-			<div class="summary-card">
-				<div class="summary-label">🪙 Tokens</div>
-				<div class="summary-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div>
-			</div>
-			<div class="summary-card">
-				<div class="summary-label">🔗 Context References</div>
-				<div class="summary-value">${safeText(totalContextRefs)}</div>
-				<div class="summary-sub">
-				${totalContextRefs === 0 ? "None" : ""}
-				${aggContextRefs.file > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "file" ? "active" : ""}" data-ref-type="file">#file ${aggContextRefs.file}</div>` : ""}
-				${aggContextRefs.symbol > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "symbol" ? "active" : ""}" data-ref-type="symbol">#sym ${aggContextRefs.symbol}</div>` : ""}
-				${aggContextRefs.implicitSelection > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "implicitSelection" ? "active" : ""}" data-ref-type="implicitSelection">implicit ${aggContextRefs.implicitSelection}</div>` : ""}
-				${aggContextRefs.copilotInstructions > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "copilotInstructions" ? "active" : ""}" data-ref-type="copilotInstructions">📋 instructions ${aggContextRefs.copilotInstructions}</div>` : ""}
-				${aggContextRefs.agentsMd > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "agentsMd" ? "active" : ""}" data-ref-type="agentsMd">🤖 agents ${aggContextRefs.agentsMd}</div>` : ""}
-				${aggContextRefs.workspace > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "workspace" ? "active" : ""}" data-ref-type="workspace">@workspace ${aggContextRefs.workspace}</div>` : ""}
-				${aggContextRefs.vscode > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === "vscode" ? "active" : ""}" data-ref-type="vscode">@vscode ${aggContextRefs.vscode}</div>` : ""}
-				</div>
-			</div>
-			<div class="summary-card">
-				<div class="summary-label">📅 Time Range</div>
-				<div class="summary-value">Last 14 days</div>
-			</div>
-		</div>
-
-		<div class="filter-options">
-			<label class="empty-sessions-toggle">
-				<input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>
-				Hide sessions with 0 interactions
-				${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ''}
-			</label>
-		</div>
-
-		<div class="table-container">
-			<table class="session-table">
-				<thead>
-					<tr>
-						<th>#</th>
-						<th>Editor</th>
-						<th>Title</th>
-						<th>Repository</th>
-						<th class="sortable" data-sort="size">Size${getSortIndicator("size")}</th>
-						<th class="sortable" data-sort="tokens">Tokens${getSortIndicator("tokens")}</th>
-						<th class="sortable" data-sort="interactions">Interactions${getSortIndicator("interactions")}</th>
-						<th class="sortable" data-sort="contextRefs">Context Refs${getSortIndicator("contextRefs")}</th>
-						<th class="sortable" data-sort="lastInteraction">Last Interaction${getSortIndicator("lastInteraction")}</th>
-						<th>Actions</th>
-					</tr>
-				</thead>
-				<tbody>
-					${sortedFiles
-            .map(
-              (sf, idx) => `
-						<tr>
-							<td>${idx + 1}</td>
-							<td><span class="${getEditorBadgeClass(sf.editorName || sf.editorSource)}" title="${escapeHtml(sf.editorSource)}">${getEditorIcon(sf.editorName || sf.editorSource)} ${escapeHtml(sf.editorName || sf.editorSource)}</span></td>
-							<td class="session-title" title="${sf.title ? escapeHtml(sf.title) : "Empty session"}">
-								${sf.title ? `<a href="#" class="session-file-link" data-file="${encodeURIComponent(sf.file)}" title="${escapeHtml(sf.title)}">${escapeHtml(sf.title.length > 40 ? sf.title.substring(0, 40) + "..." : sf.title)}</a>` : `<a href="#" class="session-file-link empty-session-link" data-file="${encodeURIComponent(sf.file)}" title="Empty session">(Empty session)</a>`}
-							</td>
-							<td class="repository-cell" title="${sf.repository ? escapeHtml(sf.repository) : "No repository detected"}">${sf.repository ? escapeHtml(getRepoDisplayName(sf.repository)) : '<span style="color: #666;">—</span>'}</td>
-							<td>${formatFileSize(sf.size)}</td>
-							<td title="${Number(sf.tokens || 0).toLocaleString()} tokens">${formatTokenCount(sf.tokens)}</td>
-							<td>${sanitizeNumber(sf.interactions)}</td>
-							<td title="${escapeHtml(getContextRefsSummary(sf.contextReferences))}">${sanitizeNumber(getTotalContextRefs(sf.contextReferences))}</td>
-							<td>${formatDate(sf.lastInteraction)}</td>
-							<td>
-								<a href="#" class="view-formatted-link" data-file="${encodeURIComponent(sf.file)}" title="View formatted JSONL file">📄 View</a>
-								${(sf.editorName || sf.editorSource || "Unknown") === "Unknown" ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.file)}" title="Report this unknown path so we can add editor support">📢 Report</a>` : ""}
-							</td>
-						</tr>
-					`,
-            )
-            .join("")}
-				</tbody>
-			</table>
-		</div>
-	`;
+  return `${buildEditorPanelsHtml(detailedFiles, editorStats, editors)}${buildSessionSummaryCardsHtml(filteredFiles, detailedFiles, totalInteractions, totalTokens, totalContextRefs, agg, zeroInteractionCount)}${buildSessionTableHtml(sortedFiles)}`;
 }
 
 function counterRow(key: string, label: string, value: number): string {
@@ -854,199 +721,52 @@ ${authenticated ? `
   `;
 }
 
+function getBackendStatus(isConfigured: boolean, enabled: boolean): { color: string; icon: string; text: string } {
+  return isConfigured
+    ? { color: "#2d6a4f", icon: "✅", text: "Configured & Enabled" }
+    : enabled
+      ? { color: "#d97706", icon: "⚠️", text: "Enabled but Not Configured" }
+      : { color: "#666", icon: "⚪", text: "Disabled" };
+}
+
+function renderAzureDetailsSection(azureInfo: AzureStorageInfo): string {
+  if (!azureInfo.isConfigured) {
+    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Azure Storage</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">To enable cloud synchronization, configure an Azure Storage account via the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Azure subscription with Storage Account access</li><li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li><li>VS Code signed in with your Azure account (for Entra ID auth)</li></ul></div>`;
+  }
+  return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Storage Account</td><td>${escapeHtml(azureInfo.storageAccount)}</td></tr><tr><td style="font-weight: 600;">Subscription ID</td><td>${escapeHtml(azureInfo.subscriptionId)}</td></tr><tr><td style="font-weight: 600;">Resource Group</td><td>${escapeHtml(azureInfo.resourceGroup)}</td></tr><tr><td style="font-weight: 600;">Aggregation Table</td><td>${escapeHtml(azureInfo.aggTable)}</td></tr><tr><td style="font-weight: 600;">Events Table</td><td>${escapeHtml(azureInfo.eventsTable)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">💻 Unique Devices</div><div class="summary-value">${escapeHtml(String(azureInfo.deviceCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Based on workspace IDs</div></div><div class="summary-card"><div class="summary-label">📁 Total Sessions</div><div class="summary-value">${escapeHtml(String(azureInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">☁️ Cloud Records</div><div class="summary-value">${azureInfo.recordCount !== null ? escapeHtml(String(azureInfo.recordCount)) : "—"}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Azure Storage records</div></div><div class="summary-card"><div class="summary-label">🔄 Sync Status</div><div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? formatDate(azureInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
+}
+
 function renderAzureStoragePanel(azureInfo: AzureStorageInfo): string {
-  const statusColor = azureInfo.isConfigured ? "#2d6a4f" : azureInfo.enabled ? "#d97706" : "#666";
-  const statusIcon = azureInfo.isConfigured ? "✅" : azureInfo.enabled ? "⚠️" : "⚪";
-  const statusText = azureInfo.isConfigured
-    ? "Configured & Enabled"
-    : azureInfo.enabled
-      ? "Enabled but Not Configured"
-      : "Disabled";
+  const { color, icon, text } = getBackendStatus(azureInfo.isConfigured, azureInfo.enabled);
+  return `<div class="info-box"><div class="info-box-title">☁️ Azure Storage Backend</div><div>Sync your token usage data to Azure Storage Tables for team-wide reporting and multi-device access.</div></div>
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div><div class="summary-card"><div class="summary-label">🔐 Auth Mode</div><div class="summary-value" style="font-size: 16px;">${azureInfo.authMode === "entraId" ? "Entra ID" : "Shared Key"}</div></div><div class="summary-card"><div class="summary-label">👥 Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(azureInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 Last Sync</div><div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? getTimeSince(azureInfo.lastSyncTime) : "Never"}</div></div></div>
+    ${renderAzureDetailsSection(azureInfo)}
+    <div class="button-group"><button class="button" id="btn-configure-backend"><span>${azureInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${azureInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
+}
 
-  return `
-    <div class="info-box">
-      <div class="info-box-title">☁️ Azure Storage Backend</div>
-      <div>Sync your token usage data to Azure Storage Tables for team-wide reporting and multi-device access.</div>
-    </div>
+function renderTeamServerGithubAuthCard(githubAuth: GitHubAuthStatus | undefined, githubNotAuthenticated: boolean): string {
+  const authColor = githubNotAuthenticated ? '#d97706' : githubAuth?.authenticated ? '#2d6a4f' : '#666';
+  const authIcon = githubNotAuthenticated ? '⚠️' : githubAuth?.authenticated ? '✅' : '⚪';
+  const authValue = githubNotAuthenticated ? 'Not Authenticated' : githubAuth?.authenticated ? escapeHtml(githubAuth.username || 'Authenticated') : 'Not Authenticated';
+  return `<div class="summary-card" style="border-left: 4px solid ${authColor};"><div class="summary-label">${authIcon} GitHub Auth</div><div class="summary-value" style="font-size: 14px; color: ${authColor};">${authValue}</div></div>`;
+}
 
-    <div class="summary-cards">
-      <div class="summary-card" style="border-left: 4px solid ${statusColor};">
-        <div class="summary-label">${statusIcon} Status</div>
-        <div class="summary-value" style="font-size: 16px; color: ${statusColor};">${statusText}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">🔐 Auth Mode</div>
-        <div class="summary-value" style="font-size: 16px;">${azureInfo.authMode === "entraId" ? "Entra ID" : "Shared Key"}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">👥 Sharing Profile</div>
-        <div class="summary-value" style="font-size: 14px;">${escapeHtml(azureInfo.sharingProfile)}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">🕒 Last Sync</div>
-        <div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? getTimeSince(azureInfo.lastSyncTime) : "Never"}</div>
-      </div>
-    </div>
-
-    ${azureInfo.isConfigured ? `
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4>
-        <table class="session-table">
-          <tbody>
-            <tr><td style="font-weight: 600; width: 200px;">Storage Account</td><td>${escapeHtml(azureInfo.storageAccount)}</td></tr>
-            <tr><td style="font-weight: 600;">Subscription ID</td><td>${escapeHtml(azureInfo.subscriptionId)}</td></tr>
-            <tr><td style="font-weight: 600;">Resource Group</td><td>${escapeHtml(azureInfo.resourceGroup)}</td></tr>
-            <tr><td style="font-weight: 600;">Aggregation Table</td><td>${escapeHtml(azureInfo.aggTable)}</td></tr>
-            <tr><td style="font-weight: 600;">Events Table</td><td>${escapeHtml(azureInfo.eventsTable)}</td></tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4>
-        <div class="summary-cards">
-          <div class="summary-card">
-            <div class="summary-label">💻 Unique Devices</div>
-            <div class="summary-value">${escapeHtml(String(azureInfo.deviceCount))}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Based on workspace IDs</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">📁 Total Sessions</div>
-            <div class="summary-value">${escapeHtml(String(azureInfo.sessionCount))}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">☁️ Cloud Records</div>
-            <div class="summary-value">${azureInfo.recordCount !== null ? escapeHtml(String(azureInfo.recordCount)) : "—"}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Azure Storage records</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">🔄 Sync Status</div>
-            <div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? formatDate(azureInfo.lastSyncTime) : "Never"}</div>
-          </div>
-        </div>
-      </div>
-    ` : `
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Azure Storage</h4>
-        <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
-          To enable cloud synchronization, configure an Azure Storage account via the Backend configuration panel.
-        </p>
-        <ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;">
-          <li>Azure subscription with Storage Account access</li>
-          <li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li>
-          <li>VS Code signed in with your Azure account (for Entra ID auth)</li>
-        </ul>
-      </div>
-    `}
-
-    <div class="button-group">
-      <button class="button" id="btn-configure-backend">
-        <span>${azureInfo.isConfigured ? "⚙️" : "🔧"}</span>
-        <span>${azureInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span>
-      </button>
-    </div>
-  `;
+function renderTeamServerDetailsSection(teamInfo: TeamServerInfo): string {
+  if (!teamInfo.isConfigured) {
+    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`;
+  }
+  return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Server URL</td><td>${escapeHtml(teamInfo.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">📁 Total Sessions</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">🔄 Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
 }
 
 function renderTeamServerPanel(teamInfo: TeamServerInfo, githubAuth?: GitHubAuthStatus): string {
-  const statusColor = teamInfo.isConfigured ? "#2d6a4f" : teamInfo.enabled ? "#d97706" : "#666";
-  const statusIcon = teamInfo.isConfigured ? "✅" : teamInfo.enabled ? "⚠️" : "⚪";
-  const statusText = teamInfo.isConfigured
-    ? "Configured & Enabled"
-    : teamInfo.enabled
-      ? "Enabled but Not Configured"
-      : "Disabled";
-
+  const { color, icon, text } = getBackendStatus(teamInfo.isConfigured, teamInfo.enabled);
   const githubNotAuthenticated = teamInfo.isConfigured && !githubAuth?.authenticated;
-
-  return `
-    <div class="info-box">
-      <div class="info-box-title">🖥️ Team Server Backend</div>
-      <div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div>
-    </div>
-
-    ${githubNotAuthenticated ? `
-    <button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub">
-      <span style="font-size: 18px; flex-shrink: 0;">⚠️</span>
-      <div style="flex: 1;">
-        <div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div>
-        <div style="color: #d4a017; font-size: 12px;">
-          Team server sync will not run until you sign in to GitHub.
-          <strong style="color: #fbbf24;">Click here to sign in.</strong>
-        </div>
-      </div>
-      <span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">→</span>
-    </button>
-    ` : ''}
-
-    <div class="summary-cards">
-      <div class="summary-card" style="border-left: 4px solid ${statusColor};">
-        <div class="summary-label">${statusIcon} Status</div>
-        <div class="summary-value" style="font-size: 16px; color: ${statusColor};">${statusText}</div>
-      </div>
-      <div class="summary-card" style="border-left: 4px solid ${githubNotAuthenticated ? '#d97706' : githubAuth?.authenticated ? '#2d6a4f' : '#666'};">
-        <div class="summary-label">${githubNotAuthenticated ? '⚠️' : githubAuth?.authenticated ? '✅' : '⚪'} GitHub Auth</div>
-        <div class="summary-value" style="font-size: 14px; color: ${githubNotAuthenticated ? '#d97706' : githubAuth?.authenticated ? '#2d6a4f' : '#666'};">${githubNotAuthenticated ? 'Not Authenticated' : githubAuth?.authenticated ? escapeHtml(githubAuth.username || 'Authenticated') : 'Not Authenticated'}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">👥 Sharing Profile</div>
-        <div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div>
-      </div>
-      <div class="summary-card">
-        <div class="summary-label">🕒 Last Sync</div>
-        <div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div>
-      </div>
-    </div>
-
-    ${teamInfo.isConfigured ? `
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📊 Configuration Details</h4>
-        <table class="session-table">
-          <tbody>
-            <tr>
-              <td style="font-weight: 600; width: 200px;">Server URL</td>
-              <td>${escapeHtml(teamInfo.endpointUrl)}</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">📈 Local Session Statistics</h4>
-        <div class="summary-cards">
-          <div class="summary-card">
-            <div class="summary-label">📁 Total Sessions</div>
-            <div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div>
-            <div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div>
-          </div>
-          <div class="summary-card">
-            <div class="summary-label">🔄 Last Sync</div>
-            <div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : "Never"}</div>
-          </div>
-        </div>
-      </div>
-    ` : `
-      <div style="margin-top: 24px;">
-        <h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🚀 Get Started with Team Server</h4>
-        <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
-          Deploy the sharing server and configure its URL in the Backend configuration panel.
-        </p>
-        <ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;">
-          <li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li>
-          <li>Enter the server's base URL in the Backend configuration panel</li>
-          <li>Data syncs automatically every 5 minutes once configured</li>
-        </ul>
-      </div>
-    `}
-
-    <div class="button-group">
-      <button class="button" id="btn-configure-backend-team">
-        <span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span>
-        <span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span>
-      </button>
-    </div>
-  `;
+  const authWarning = githubNotAuthenticated ? `<button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub"><span style="font-size: 18px; flex-shrink: 0;">⚠️</span><div style="flex: 1;"><div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div><div style="color: #d4a017; font-size: 12px;">Team server sync will not run until you sign in to GitHub. <strong style="color: #fbbf24;">Click here to sign in.</strong></div></div><span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">→</span></button>` : '';
+  return `<div class="info-box"><div class="info-box-title">🖥️ Team Server Backend</div><div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div></div>
+    ${authWarning}
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">👥 Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">🕒 Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div></div></div>
+    ${renderTeamServerDetailsSection(teamInfo)}
+    <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "⚙️" : "🔧"}</span><span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
 }
 
 function renderBackendStoragePanel(
@@ -1109,14 +829,15 @@ function renderFolderAnalyzerTab(): string {
         </label>
         <select id="tool-type-select" class="tool-type-select">
           <option value="auto">🔍 Auto-detect (all JSON / JSONL files)</option>
+          <option value="antigravity">🚀 Antigravity (.jsonl only)</option>
+          <option value="claude-code">🟣 Claude Code (.jsonl only)</option>
+          <option value="claude-desktop">🖥️ Claude Desktop</option>
+          <option value="continue">⚡ Continue</option>
           <option value="copilot-chat">💙 GitHub Copilot Chat (VS Code)</option>
           <option value="copilot-cli">🤖 GitHub Copilot CLI</option>
-          <option value="claude-code">🟣 Claude Code (.jsonl only)</option>
           <option value="gemini-cli">💎 Gemini CLI (.jsonl only)</option>
-          <option value="continue">⚡ Continue</option>
-          <option value="opencode">🟢 OpenCode (JSON format only — DB not supported)</option>
           <option value="mistral-vibe">🔥 Mistral Vibe</option>
-          <option value="claude-desktop">🖥️ Claude Desktop</option>
+          <option value="opencode">🟢 OpenCode (JSON format only — DB not supported)</option>
         </select>
       </div>
       <div style="margin-top: 16px;">
@@ -1125,6 +846,30 @@ function renderFolderAnalyzerTab(): string {
     </div>
     <div id="folder-analysis-results"></div>
   `;
+}
+
+function buildFolderFileTableRow(f: FolderFileResult, idx: number, folderPath: string): string {
+  const hasData = f.interactions > 0 || f.tokens > 0;
+  const rel = f.file.startsWith(folderPath)
+    ? f.file.slice(folderPath.length).replace(/^[/\\]/, "")
+    : getFileName(f.file);
+  const safeInteractions = Number(f.interactions);
+  const interactionsCell = safeInteractions > 0
+    ? `<strong>${escapeHtml(String(safeInteractions))}</strong>`
+    : `<span style="color: var(--text-muted);">0</span>`;
+  const safeTokens = Number(f.tokens);
+  const tokensCell = safeTokens > 0
+    ? `<strong title="${escapeHtml(String(safeTokens.toLocaleString()))} tokens">${escapeHtml(String(formatTokenCount(safeTokens)))}</strong>`
+    : `<span style="color: var(--text-muted);">0</span>`;
+  return `
+    <tr style="${hasData ? "" : "opacity: 0.45;"}">
+      <td>${idx + 1}</td>
+      <td title="${escapeHtml(f.file)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(rel)}</td>
+      <td>${escapeHtml(String(formatFileSize(f.size)))}</td>
+      <td>${interactionsCell}</td>
+      <td>${tokensCell}</td>
+      <td>${formatDate(f.modified)}</td>
+    </tr>`;
 }
 
 function renderFolderAnalysisResults(
@@ -1157,29 +902,7 @@ function renderFolderAnalysisResults(
       <div style="font-size: 12px; margin-top: 8px;">Try a different folder path or tool type.</div>
     </div>`;
 
-  const tableRows = sorted.map((f, idx) => {
-    const hasData = f.interactions > 0 || f.tokens > 0;
-    const rel = f.file.startsWith(folderPath)
-      ? f.file.slice(folderPath.length).replace(/^[/\\]/, "")
-      : getFileName(f.file);
-    const safeInteractions = Number(f.interactions);
-    const interactionsCell = safeInteractions > 0
-      ? `<strong>${escapeHtml(String(safeInteractions))}</strong>`
-      : `<span style="color: var(--text-muted);">0</span>`;
-    const safeTokens = Number(f.tokens);
-    const tokensCell = safeTokens > 0
-      ? `<strong title="${escapeHtml(String(safeTokens.toLocaleString()))} tokens">${escapeHtml(String(formatTokenCount(safeTokens)))}</strong>`
-      : `<span style="color: var(--text-muted);">0</span>`;
-    return `
-      <tr style="${hasData ? "" : "opacity: 0.45;"}">
-        <td>${idx + 1}</td>
-        <td title="${escapeHtml(f.file)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(rel)}</td>
-        <td>${escapeHtml(String(formatFileSize(f.size)))}</td>
-        <td>${interactionsCell}</td>
-        <td>${tokensCell}</td>
-        <td>${formatDate(f.modified)}</td>
-      </tr>`;
-  }).join("");
+  const tableRows = sorted.map((f, idx) => buildFolderFileTableRow(f, idx, folderPath)).join("");
 
   return `
     <div class="section" style="margin-top: 0;">
@@ -1258,1040 +981,545 @@ function groupSessionFolders(
   return result;
 }
 
-function renderLayout(data: DiagnosticsData): void {
-  const root = document.getElementById("root");
-  if (!root) {
-    return;
+function getHomeDirectory(): string {
+  type WindowWithProcess = Window & { process?: { env?: { HOME?: string; USERPROFILE?: string } } };
+  const win = window as WindowWithProcess;
+  return win.process?.env?.HOME || win.process?.env?.USERPROFILE || "";
+}
+
+function buildSessionFolderRow(sf: SessionFolder, home: string | null): HTMLElement {
+  let display = sf.dir;
+  if (home && display.startsWith(home)) {
+    display = display.replace(home, "~");
+  }
+  const editorName = sf.editorName || "Unknown";
+
+  const row = document.createElement("tr");
+
+  const folderCell = document.createElement("td");
+  folderCell.setAttribute("title", sf.dir);
+  folderCell.textContent = display;
+  row.appendChild(folderCell);
+
+  const editorCell = document.createElement("td");
+  const editorBadge = document.createElement("span");
+  editorBadge.className = getEditorBadgeClass(editorName);
+  editorBadge.textContent = `${getEditorIcon(editorName)} ${editorName}`;
+  editorCell.appendChild(editorBadge);
+  row.appendChild(editorCell);
+
+  const countCell = document.createElement("td");
+  countCell.textContent = String(sf.count);
+  row.appendChild(countCell);
+
+  const openCell = document.createElement("td");
+  const openLink = document.createElement("a");
+  openLink.href = "#";
+  openLink.className = "reveal-link";
+  openLink.setAttribute("data-path", encodeURIComponent(sf.dir));
+  openLink.textContent = "Open directory";
+  openCell.appendChild(openLink);
+  if (editorName === "Unknown") {
+    const reportLink = document.createElement("a");
+    reportLink.href = "#";
+    reportLink.className = "report-editor-link";
+    reportLink.setAttribute("data-path", encodeURIComponent(sf.dir));
+    reportLink.setAttribute("title", "Report this unknown path so we can add editor support");
+    reportLink.textContent = "📢 Report";
+    openCell.appendChild(document.createTextNode(" "));
+    openCell.appendChild(reportLink);
+  }
+  row.appendChild(openCell);
+  return row;
+}
+
+function buildSessionFoldersElement(folders: SessionFolder[]): HTMLElement {
+  const sorted = [...folders].sort((a, b) => b.count - a.count);
+  const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
+  const home = getHomeDirectory();
+
+  const container = document.createElement("div");
+  container.className = "session-folders-table";
+
+  const heading = document.createElement("h4");
+  heading.textContent = "Main Session Folders (by editor root):";
+  container.appendChild(heading);
+
+  const table = document.createElement("table");
+  table.className = "session-table";
+  container.appendChild(table);
+
+  const thead = document.createElement("thead");
+  table.appendChild(thead);
+  const headerRow = document.createElement("tr");
+  thead.appendChild(headerRow);
+  for (const text of ["Folder", "Editor", "# of Sessions", "Open"]) {
+    const th = document.createElement("th");
+    th.textContent = text;
+    headerRow.appendChild(th);
   }
 
-  // Build session folder summary (main entry folders) for reference
-  let sessionFilesHtml = "";
-  const sessionFolders = groupSessionFolders((data as any).sessionFolders || []);
-  if (sessionFolders.length > 0) {
-    // Sort folders by descending count so top folders show first
-    const sorted = [...sessionFolders].sort((a, b) => b.count - a.count);
-    sessionFilesHtml = `
-			<div class="session-folders-table">
-				<h4>Main Session Folders (by editor root):</h4>
-				<table class="session-table">
-					<thead>
-						<tr>
-							<th>Folder</th>
-							<th>Editor</th>
-							<th># of Sessions</th>
-							<th>Open</th>
-						</tr>
-					</thead>
-					<tbody>`;
-    const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
-    console.log(
-      "[Diagnostics] Total sessions calculated:",
-      totalSessions,
-      "from",
-      sorted.length,
-      "folders",
-    );
+  const tbody = document.createElement("tbody");
+  table.appendChild(tbody);
 
-    sorted.forEach(
-      (sf: { dir: string; count: number; editorName?: string }) => {
-        // Shorten common user paths for readability
-        let display = sf.dir;
-        const home =
-          (window as any).process?.env?.HOME ||
-          (window as any).process?.env?.USERPROFILE ||
-          "";
-        if (home && display.startsWith(home)) {
-          display = display.replace(home, "~");
-        }
-        const editorName = sf.editorName || "Unknown";
-        sessionFilesHtml += `
-				<tr>
-					<td title="${escapeHtml(sf.dir)}">${escapeHtml(display)}</td>
-				<td><span class="${getEditorBadgeClass(editorName)}">${getEditorIcon(editorName)} ${escapeHtml(editorName)}</span></td>
-					<td>${sf.count}</td>
-					<td><a href="#" class="reveal-link" data-path="${encodeURIComponent(sf.dir)}">Open directory</a>${editorName === "Unknown" ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.dir)}" title="Report this unknown path so we can add editor support">📢 Report</a>` : ""}</td>
-				</tr>`;
-      },
-    );
-
-    // Add total row
-    sessionFilesHtml += `
-				<tr style="border-top: 2px solid #5a5a5a; font-weight: 600; background: rgba(255, 255, 255, 0.05);">
-					<td colspan="2" style="text-align: right; padding-right: 16px;">Total:</td>
-					<td>${totalSessions}</td>
-					<td></td>
-				</tr>`;
-    console.log("[Diagnostics] Total row HTML added to sessionFilesHtml");
-
-    sessionFilesHtml += `
-					</tbody>
-				</table>
-			</div>`;
+  for (const sf of sorted) {
+    tbody.appendChild(buildSessionFolderRow(sf, home));
   }
 
-  // Remove session files section from report text (it's shown separately as clickable links)
-  let escapedReport = escapeHtml(data.report);
+  const totalRow = document.createElement("tr");
+  totalRow.style.borderTop = "2px solid #5a5a5a";
+  totalRow.style.fontWeight = "600";
+  totalRow.style.background = "rgba(255, 255, 255, 0.05)";
 
-  // Check if we're in loading state for the report
-  const reportIsLoading = data.report === LOADING_PLACEHOLDER;
+  const totalLabelCell = document.createElement("td");
+  totalLabelCell.setAttribute("colspan", "2");
+  totalLabelCell.style.textAlign = "right";
+  totalLabelCell.style.paddingRight = "16px";
+  totalLabelCell.textContent = "Total:";
+  totalRow.appendChild(totalLabelCell);
 
-  if (!reportIsLoading) {
-    // Remove the old session files list from the report text if present
-    escapedReport = removeSessionFilesSection(escapedReport);
-  } else {
-    // Show a better loading message
-    escapedReport = LOADING_MESSAGE.trim();
-  }
+  const totalCountCell = document.createElement("td");
+  totalCountCell.textContent = String(totalSessions);
+  totalRow.appendChild(totalCountCell);
 
-  // Build detailed session files table
-  const detailedFiles = data.detailedSessionFiles || [];
+  totalRow.appendChild(document.createElement("td"));
+  tbody.appendChild(totalRow);
 
-  root.innerHTML = `
-		<style>${themeStyles}</style>
-		<style>${styles}</style>
-		<div class="container">
-			<div class="header">
-				<div class="header-left">
-					<span class="header-icon">🔍</span>
-					<span class="header-title">Diagnostic Report</span>
-				</div>
-				<div class="button-row">
-					${buttonHtml("btn-refresh")}
-					${buttonHtml("btn-details")}
-					${buttonHtml("btn-chart")}
-					${buttonHtml("btn-usage")}
-					${buttonHtml("btn-environmental")}
-					${buttonHtml("btn-maturity")}
-					${data?.backendConfigured ? buttonHtml("btn-dashboard") : ""}
-				</div>
-			</div>
+  return container;
+}
 
-			<div class="tabs">
-				<button class="tab active" data-tab="report">📋 Report</button>
-				<button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
-				<button class="tab" data-tab="cache">💾 Cache</button>
-				<button class="tab" data-tab="backend">☁️ Backend Storage</button>
-				<button class="tab" data-tab="github">🔑 GitHub Auth</button>
-				<button class="tab" data-tab="display">⚙️ Settings</button>
-				<button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
-				${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
-			</div>
-
-			<div id="tab-report" class="tab-content active">
-				<div class="info-box">
-					<div class="info-box-title">📋 About This Report</div>
-					<div>
-						This diagnostic report contains information about your AI Engineering Fluency extension
-						extension setup and usage statistics. </br> It does <strong>not</strong> include any of your
-						code or conversation content. You can safely share this report when reporting issues.
-					</div>
-				</div>
-				<div class="button-group" style="margin-bottom: 12px;">
-					<button class="button" id="btn-copy"><span>📋</span><span>Copy to Clipboard</span></button>
-					<button class="button secondary" id="btn-issue"><span>🐛</span><span>Open GitHub Issue</span></button>
-					<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>Clear Cache</span></button>
-				</div>
-				<div class="report-content">${escapedReport}</div>
-				${sessionFilesHtml}
-			</div>
-
-			<div id="tab-sessions" class="tab-content">
-				<div class="info-box">
-					<div class="info-box-title">📁 Session File Analysis</div>
-					<div>
-						This tab shows session files with activity in the last 14 days from all detected editors. </br>
-						Click on an editor panel to filter, click column headers to sort, and click a file name to open it.
-					</div>
-				</div>
-				<div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
-			</div>
-
-			<div id="tab-cache" class="tab-content">
-				<div class="info-box">
-					<div class="info-box-title">💾 Cache Information</div>
-					<div>
-						The extension caches session file data to improve performance and reduce file system operations.
-						Cache is stored in VS Code's global state and persists across sessions.
-					</div>
-				</div>
-				<div class="cache-details">
-					<div class="summary-cards">
-						<div class="summary-card">
-						<div class="summary-label">📦 Cache Entries</div>
-						<div class="summary-value">${data.cacheInfo?.size || 0}</div>
-					</div>
-					<div class="summary-card">
-						<div class="summary-label">💾 Cache Size</div>
-						<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>
-						</div>
-						<div class="summary-card">
-							<div class="summary-label">🕒 Last Updated</div>
-							<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>
-						</div>
-						<div class="summary-card">
-							<div class="summary-label">⏱️ Cache Age</div>
-							<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? getTimeSince(data.cacheInfo.lastUpdated) : "N/A"}</div>
-						</div>
-					</div>
-					<div class="cache-location">
-						<h4>Storage Location</h4>
-						<div class="location-box">
-							<code>${escapeHtml(data.cacheInfo?.location || "VS Code Global State")}</code>
-							${data.cacheInfo?.storagePath ? ` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(data.cacheInfo.storagePath)}">Open storage location</a>` : ""}
-						</div>
-						<p style="color: #999; font-size: 12px; margin-top: 8px;">
-							Cache is stored in VS Code's global state (extension storage) and includes:
-							<ul style="margin: 8px 0 0 20px;">
-								<li>Token counts per session file</li>
-								<li>Interaction counts</li>
-								<li>Model usage statistics</li>
-								<li>File modification timestamps for validation</li>
-								<li>Usage analysis data (tool calls, modes, context references)</li>
-							</ul>
-						</p>
-					</div>
-					<div class="cache-actions">
-						<h4>Cache Management</h4>
-						<p style="color: #999; font-size: 12px; margin-bottom: 12px;">
-							Clearing the cache will force the extension to re-read and re-analyze all session files on the next update.
-							This can help resolve issues with stale or incorrect data.
-						</p>
-						<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-backend" class="tab-content">
-				${renderBackendStoragePanel(data.backendStorageInfo, data.githubAuth)}
-			</div>
-
-			<div id="tab-github" class="tab-content">
-				${renderGitHubAuthPanel(data.githubAuth)}
-			</div>
-			<div id="tab-display" class="tab-content">
-				<div class="info-box">
-					<div class="info-box-title">⚙️ Display Settings</div>
-					<div>Configure how numbers are displayed across the extension. Changes take effect immediately in the Settings editor and are applied the next time a view is opened or refreshed.</div>
-				</div>
-				<div class="backend-card">
-					<h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">🔢 Number Formatting</h4>
-					<p style="color: #ccc; margin-bottom: 12px;">
-						Token counts can be shown in compact format using K/M suffixes (e.g. <strong>1.5K</strong>, <strong>1.2M</strong>)
-						for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,200,000</strong>) for precision.
-					</p>
-					<div class="button-group">
-						<button class="button" id="btn-open-display-settings">
-							<span>⚙️</span>
-							<span>Open Display Settings</span>
-						</button>
-					</div>
-				</div>
-			</div>
-			${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
-			<div id="tab-path-analyzer" class="tab-content">
-				${renderFolderAnalyzerTab()}
-			</div>
-		</div>
-	`;
-
-  // Store data for re-rendering on sort - will be updated when data loads
-  let storedDetailedFiles = detailedFiles;
-  let isLoading = detailedFiles.length === 0;
-  // Cache backend and auth state so re-renders triggered by either update have both
-  let currentBackendInfo: BackendStorageInfo | undefined = data.backendStorageInfo;
-  let currentGithubAuth: GitHubAuthStatus | undefined = data.githubAuth;
-
-  // Listen for messages from the extension (background loading)
-  window.addEventListener("message", (event) => {
-    const message = event.data;
-    if (message.command === "diagnosticDataLoaded") {
-      // Initial diagnostic data has loaded (report, session folders, backend info)
-      // Update the report text and folders
-      if (message.report) {
-        // Update the report tab content
-        const reportTabContent = document.getElementById("tab-report");
-        if (reportTabContent) {
-          // Process the report text to remove session files section
-          const processedReport = removeSessionFilesSection(message.report);
-          const reportPre = reportTabContent.querySelector(".report-content");
-          if (reportPre) {
-            reportPre.textContent = processedReport;
-          }
-        }
+function setupStorageLinkHandlers(): void {
+  document.querySelectorAll(".open-storage-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const path = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-path") || "",
+      );
+      if (path) {
+        vscode.postMessage({ command: "revealPath", path });
       }
+    });
+  });
+}
 
-      // Update backend storage info if provided
-      if (message.backendStorageInfo) {
-        currentBackendInfo = message.backendStorageInfo;
-        if (message.githubAuth !== undefined) {
-          currentGithubAuth = message.githubAuth;
-        }
-        const backendTabContent = document.getElementById("tab-backend");
-        if (backendTabContent) {
-          // Capture active subtab before re-rendering so we can restore it
-          const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
-          const previousSubtab = activeSubtabEl?.getAttribute("data-subtab")
-            ?? vscode.getState()?.activeSubtab;
-
-          backendTabContent.innerHTML = renderBackendStoragePanel(
-            currentBackendInfo,
-            currentGithubAuth,
-          );
-          // Re-attach event listeners for backend buttons
-          setupBackendButtonHandlers();
-          setupSubtabHandlers();
-
-          // Restore previously-active subtab (or default to first)
-          if (previousSubtab) {
-            activateSubtab(previousSubtab);
-            const currentState = vscode.getState() ?? {};
-            vscode.setState({ ...currentState, activeSubtab: previousSubtab });
-          }
-        }
-      } else {
-        console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");
-      }
-
-      // Update session folders if provided
-      if (message.sessionFolders && message.sessionFolders.length > 0) {
-        const reportTabContent = document.getElementById("tab-report");
-        if (reportTabContent) {
-          const grouped = groupSessionFolders(message.sessionFolders);
-          const sorted = [...grouped].sort(
-            (a: any, b: any) => b.count - a.count,
-          );
-
-          // Build the session folders table using DOM APIs to avoid HTML injection
-          let container = reportTabContent.querySelector(
-            ".session-folders-table",
-          ) as HTMLElement | null;
-          if (!container) {
-            container = document.createElement("div");
-            container.className = "session-folders-table";
-          } else {
-            // Clear existing content so we can rebuild safely
-            while (container.firstChild) {
-              container.removeChild(container.firstChild);
-            }
-          }
-
-          const heading = document.createElement("h4");
-          heading.textContent = "Main Session Folders (by editor root):";
-          container.appendChild(heading);
-
-          const table = document.createElement("table");
-          table.className = "session-table";
-          container.appendChild(table);
-
-          const thead = document.createElement("thead");
-          table.appendChild(thead);
-          const headerRow = document.createElement("tr");
-          thead.appendChild(headerRow);
-
-          const headers = ["Folder", "Editor", "# of Sessions", "Open"];
-          headers.forEach((text) => {
-            const th = document.createElement("th");
-            th.textContent = text;
-            headerRow.appendChild(th);
-          });
-
-          const tbody = document.createElement("tbody");
-          table.appendChild(tbody);
-
-          sorted.forEach((sf: any) => {
-            let display = sf.dir;
-            const home =
-              (window as any).process?.env?.HOME ||
-              (window as any).process?.env?.USERPROFILE ||
-              "";
-            if (home && display.startsWith(home)) {
-              display = display.replace(home, "~");
-            }
-            const editorName = sf.editorName || "Unknown";
-
-            const row = document.createElement("tr");
-
-            // Folder cell
-            const folderCell = document.createElement("td");
-            folderCell.setAttribute("title", escapeHtml(sf.dir));
-            folderCell.textContent = escapeHtml(display);
-            row.appendChild(folderCell);
-
-            // Editor cell
-            const editorCell = document.createElement("td");
-            const editorBadge = document.createElement("span");
-            editorBadge.className = getEditorBadgeClass(editorName);
-            editorBadge.textContent = `${getEditorIcon(editorName)} ${escapeHtml(editorName)}`;
-            editorCell.appendChild(editorBadge);
-            row.appendChild(editorCell);
-
-            // Count cell
-            const countCell = document.createElement("td");
-            countCell.textContent = String(sf.count);
-            row.appendChild(countCell);
-
-            // Open link cell
-            const openCell = document.createElement("td");
-            const openLink = document.createElement("a");
-            openLink.href = "#";
-            openLink.className = "reveal-link";
-            openLink.setAttribute("data-path", encodeURIComponent(sf.dir));
-            openLink.textContent = "Open directory";
-            openCell.appendChild(openLink);
-            row.appendChild(openCell);
-
-            tbody.appendChild(row);
-          });
-
-          // Add total row
-          const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
-          const totalRow = document.createElement("tr");
-          totalRow.style.borderTop = "2px solid var(--vscode-panel-border)";
-          totalRow.style.fontWeight = "bold";
-          totalRow.style.background = "rgba(255, 255, 255, 0.05)";
-
-          const totalLabelCell = document.createElement("td");
-          totalLabelCell.setAttribute("colspan", "2");
-          totalLabelCell.style.textAlign = "right";
-          totalLabelCell.style.paddingRight = "16px";
-          totalLabelCell.textContent = "Total:";
-          totalRow.appendChild(totalLabelCell);
-
-          const totalCountCell = document.createElement("td");
-          totalCountCell.textContent = totalSessions.toString();
-          totalRow.appendChild(totalCountCell);
-
-          const totalEmptyCell = document.createElement("td");
-          totalRow.appendChild(totalEmptyCell);
-
-          tbody.appendChild(totalRow);
-
-          // Find where to insert or replace the session folders table
-          // It should be inserted after the report-content div but before the button-group
-          const existingTable = reportTabContent.querySelector(
-            ".session-folders-table",
-          );
-          if (!existingTable) {
-            // Insert after the report-content div
-            const reportContent =
-              reportTabContent.querySelector(".report-content");
-            if (reportContent) {
-              reportContent.insertAdjacentElement("afterend", container);
-            } else {
-              // Fallback: append to the tab content if report-content is missing
-              reportTabContent.appendChild(container);
-            }
-          }
-
-          setupStorageLinkHandlers();
-        }
-      }
-
-      // Update candidate paths if provided
-      if (message.candidatePaths && message.candidatePaths.length > 0) {
-        const reportTabContent = document.getElementById("tab-report");
-        if (reportTabContent) {
-          // Remove existing candidate paths table if present
-          const existing = reportTabContent.querySelector(".candidate-paths-table");
-          if (existing) {
-            existing.remove();
-          }
-
-          const candidateEl = buildCandidatePathsElement(message.candidatePaths);
-
-          // Insert after session-folders-table if it exists, otherwise after report-content
-          const foldersTable = reportTabContent.querySelector(".session-folders-table");
-          if (foldersTable) {
-            foldersTable.insertAdjacentElement("afterend", candidateEl);
-          } else {
-            const reportContent = reportTabContent.querySelector(".report-content");
-            if (reportContent) {
-              reportContent.insertAdjacentElement("afterend", candidateEl);
-            } else {
-              reportTabContent.appendChild(candidateEl);
-            }
-          }
-        }
-      }
-
-      // Diagnostic data loaded successfully - no console needed as this is normal operation
-
-      // Update GitHub Auth tab with the auth status from the loaded data
-      if (message.githubAuth !== undefined) {
-        const githubTabContent = document.getElementById("tab-github");
-        if (githubTabContent) {
-          githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
-          setupGitHubAuthHandlers();
-        }
-      }
-    } else if (message.command === "githubAuthUpdated") {
-      // Update GitHub Auth tab with new authentication status
-      currentGithubAuth = message.githubAuth;
-      const githubTabContent = document.getElementById("tab-github");
-      if (githubTabContent) {
-        githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
-        setupGitHubAuthHandlers();
-      }
-      // Re-render the backend panel so the team server warning reflects the new auth state
-      const backendTabContent = document.getElementById("tab-backend");
-      if (backendTabContent && currentBackendInfo) {
-        const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
-        const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
-        backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
-        setupBackendButtonHandlers();
-        setupSubtabHandlers();
-        if (previousSubtab) {
-          activateSubtab(previousSubtab);
-        }
-      }
-    } else if (message.command === "diagnosticDataError") {
-      // Show error message
-      console.error("Error loading diagnostic data:", message.error);
-      const root = document.getElementById("root");
-      if (root) {
-        const errorDiv = document.createElement("div");
-        errorDiv.style.cssText =
-          "color: #ff6b6b; padding: 20px; text-align: center;";
-        errorDiv.innerHTML = `
-					<h3>⚠️ Error Loading Diagnostic Data</h3>
-					<p>${escapeHtml(message.error || "Unknown error")}</p>
-				`;
-        root.insertBefore(errorDiv, root.firstChild);
-      }
-    } else if (
-      message.command === "sessionFilesLoaded" &&
-      message.detailedSessionFiles
-    ) {
-      storedDetailedFiles = message.detailedSessionFiles;
-      isLoading = false;
-
-      // Update tab count
-      const sessionsTab = document.querySelector('.tab[data-tab="sessions"]');
-      if (sessionsTab) {
-        sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
-      }
-
-      // Re-render the table
-      reRenderTable();
-    } else if (message.command === "cacheCleared") {
-      // Reset button states to indicate success
-      const btnReport = document.getElementById(
-        "btn-clear-cache",
-      ) as HTMLButtonElement | null;
-      const btnTab = document.getElementById(
-        "btn-clear-cache-tab",
-      ) as HTMLButtonElement | null;
-      if (btnReport) {
-        btnReport.style.background = "#2d6a4f";
-        btnReport.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
-        btnReport.disabled = false;
-      }
-      if (btnTab) {
-        btnTab.style.background = "#2d6a4f";
-        btnTab.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
-        btnTab.disabled = false;
-      }
-
-      // Re-enable buttons after a short delay and reset to original state
-      setTimeout(() => {
-        if (btnReport) {
-          btnReport.style.background = "";
-          btnReport.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
-        }
-        if (btnTab) {
-          btnTab.style.background = "";
-          btnTab.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
-        }
-      }, 2000);
-    } else if (message.command === "cacheRefreshed") {
-      // Update cache numbers with refreshed data
-      if (message.cacheInfo) {
-        const cacheInfo = message.cacheInfo;
-        const cacheTabContent = document.getElementById("tab-cache");
-        if (cacheTabContent) {
-          const summaryCards =
-            cacheTabContent.querySelectorAll(".summary-card");
-          if (summaryCards.length >= 4) {
-            const entriesValue =
-              summaryCards[0]?.querySelector(".summary-value");
-            if (entriesValue) {
-              entriesValue.textContent = String(cacheInfo.size);
-            }
-
-            const sizeValue = summaryCards[1]?.querySelector(".summary-value");
-            if (sizeValue) {
-              sizeValue.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`;
-            }
-
-            const lastUpdatedValue =
-              summaryCards[2]?.querySelector(".summary-value");
-            if (lastUpdatedValue) {
-              const date = new Date(cacheInfo.lastUpdated);
-              lastUpdatedValue.textContent = date.toLocaleString();
-            }
-
-            const ageValue = summaryCards[3]?.querySelector(".summary-value");
-            if (ageValue) {
-              ageValue.textContent = "0 seconds ago";
-            }
-          }
-        }
-      }
-    } else if (message.command === "folderPicked") {
-      const input = document.getElementById("folder-path-input") as HTMLInputElement | null;
-      if (input && message.folderPath) {
-        input.value = message.folderPath;
-        input.style.borderColor = "";
-      }
-    } else if (message.command === "folderAnalysisResult") {
-      const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
-      if (btn) {
-        btn.disabled = false;
-        btn.innerHTML = "<span>🔍</span><span>Analyze</span>";
-      }
-      const resultsDiv = document.getElementById("folder-analysis-results");
-      if (resultsDiv) {
-        if (message.error) {
-          resultsDiv.innerHTML = `
-            <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
-              <div class="info-box-title">⚠️ Analysis Error</div>
-              <div>${escapeHtml(message.error)}</div>
-            </div>`;
-        } else {
-          resultsDiv.innerHTML = renderFolderAnalysisResults(
-            message.files || [],
-            message.totalScanned || 0,
-            message.parseErrors || 0,
-            message.truncated || false,
-            escapeHtml(String(message.folderPath || "")),
-          );
-        }
-      }
-    }
+function setupGitHubAuthHandlers(): void {
+  document.getElementById('btn-authenticate-github')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'authenticateGitHub' });
   });
 
-  // Handle open storage link clicks
-  function setupStorageLinkHandlers(): void {
-    document.querySelectorAll(".open-storage-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const path = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-path") || "",
-        );
-        if (path) {
-          vscode.postMessage({ command: "revealPath", path });
+  document.getElementById('btn-sign-out-github')?.addEventListener('click', () => {
+    vscode.postMessage({ command: 'signOutGitHub' });
+  });
+}
+
+function activateSubtab(subtabId: string): boolean {
+  const subtabEl = document.querySelector(`.subtab[data-subtab="${subtabId}"]`);
+  const contentEl = document.getElementById(`subtab-${subtabId}`);
+  if (subtabEl && contentEl) {
+    const subtabBar = subtabEl.closest(".subtab-bar");
+    if (subtabBar) {
+      subtabBar.querySelectorAll(".subtab").forEach((s) => s.classList.remove("active"));
+    }
+    document.querySelectorAll(".subtab-content").forEach((c) => c.classList.remove("active"));
+    subtabEl.classList.add("active");
+    contentEl.classList.add("active");
+    return true;
+  }
+  return false;
+}
+
+function activateTab(tabId: string): boolean {
+  const tabButton = document.querySelector(`.tab[data-tab="${tabId}"]`);
+  const tabContent = document.getElementById(`tab-${tabId}`);
+
+  if (tabButton && tabContent) {
+    document
+      .querySelectorAll(".tab")
+      .forEach((t) => t.classList.remove("active"));
+    document
+      .querySelectorAll(".tab-content")
+      .forEach((c) => c.classList.remove("active"));
+
+    tabButton.classList.add("active");
+    tabContent.classList.add("active");
+    return true;
+  }
+  return false;
+}
+
+function setupSortHandlers(): void {
+  document.querySelectorAll(".sortable").forEach((header) => {
+    header.addEventListener("click", () => {
+      const sortColumn = (header as HTMLElement).getAttribute(
+        "data-sort",
+      ) as typeof currentSortColumn;
+      if (sortColumn) {
+        if (currentSortColumn === sortColumn) {
+          currentSortDirection =
+            currentSortDirection === "desc" ? "asc" : "desc";
+        } else {
+          currentSortColumn = sortColumn;
+          currentSortDirection = "desc";
         }
-      });
+        reRenderTable();
+      }
+    });
+  });
+}
+
+function setupEditorFilterHandlers(): void {
+  document.querySelectorAll(".editor-panel").forEach((panel) => {
+    panel.addEventListener("click", () => {
+      const editor = (panel as HTMLElement).getAttribute("data-editor");
+      currentEditorFilter = editor === "" ? null : editor;
+      reRenderTable();
+    });
+  });
+}
+
+function setupContextRefFilterHandlers(): void {
+  document.querySelectorAll(".context-ref-filter").forEach((filter) => {
+    filter.addEventListener("click", () => {
+      const refType = (filter as HTMLElement).getAttribute(
+        "data-ref-type",
+      ) as keyof ContextReferenceUsage | null;
+
+      if (currentContextRefFilter === refType) {
+        currentContextRefFilter = null;
+      } else {
+        currentContextRefFilter = refType;
+      }
+      reRenderTable();
+    });
+  });
+}
+
+function setupUnattributedFilterHandler(): void {
+  const checkbox = document.getElementById("show-only-unattributed") as HTMLInputElement | null;
+  if (checkbox) {
+    checkbox.addEventListener("change", () => {
+      showOnlyUnattributed = checkbox.checked;
+      reRenderTable();
     });
   }
+}
 
-  function setupGitHubAuthHandlers(): void {
-    document.getElementById('btn-authenticate-github')?.addEventListener('click', () => {
-      vscode.postMessage({ command: 'authenticateGitHub' });
-    });
-
-    document.getElementById('btn-sign-out-github')?.addEventListener('click', () => {
-      vscode.postMessage({ command: 'signOutGitHub' });
+function setupZeroInteractionFilterHandler(): void {
+  const checkbox = document.getElementById("hide-empty-sessions") as HTMLInputElement | null;
+  if (checkbox) {
+    checkbox.addEventListener("change", () => {
+      hideEmptySessions = checkbox.checked;
+      reRenderTable();
     });
   }
+}
 
-  // Helper function to activate a subtab by its ID (without the "subtab-" prefix)
-  function activateSubtab(subtabId: string): boolean {
-    const subtabEl = document.querySelector(`.subtab[data-subtab="${subtabId}"]`);
-    const contentEl = document.getElementById(`subtab-${subtabId}`);
-    if (subtabEl && contentEl) {
-      const subtabBar = subtabEl.closest(".subtab-bar");
+function setupBackendButtonHandlers(): void {
+  document
+    .getElementById("btn-configure-backend")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "configureBackend" });
+    });
+
+  document
+    .getElementById("btn-configure-backend-team")
+    ?.addEventListener("click", () => {
+      diagState.patch({ activeTab: "backend", activeSubtab: "backend-teamserver" });
+      vscode.postMessage({ command: "configureTeamServer" });
+    });
+
+  document
+    .getElementById("btn-team-server-auth-warning")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "authenticateGitHub" });
+    });
+
+  document
+    .getElementById("btn-open-settings")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "openSettings" });
+    });
+
+  document
+    .getElementById("btn-open-display-settings")
+    ?.addEventListener("click", () => {
+      vscode.postMessage({ command: "openDisplaySettings" });
+    });
+}
+
+function setupDisplaySettingHandlers(): void {
+  document
+    .getElementById("select-show-tokens")
+    ?.addEventListener("change", (e) => {
+      const value = (e.target as HTMLSelectElement).value;
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showTokens", value });
+    });
+
+  document
+    .getElementById("select-show-cost")
+    ?.addEventListener("change", (e) => {
+      const value = (e.target as HTMLSelectElement).value;
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showCost", value });
+    });
+
+  document
+    .getElementById("input-monthly-budget")
+    ?.addEventListener("change", (e) => {
+      const input = e.target as HTMLInputElement;
+      const raw = parseFloat(input.value);
+      const value = isNaN(raw) ? 0 : Math.min(99999, Math.max(0, Math.round(raw * 100) / 100));
+      input.value = value.toString();
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.monthlyBudget", value });
+    });
+}
+
+function setupSubtabHandlers(): void {
+  document.querySelectorAll(".subtab").forEach((subtab) => {
+    subtab.addEventListener("click", () => {
+      const subtabId = (subtab as HTMLElement).getAttribute("data-subtab");
+      if (!subtabId) {
+        return;
+      }
+      const subtabBar = subtab.closest(".subtab-bar");
       if (subtabBar) {
         subtabBar.querySelectorAll(".subtab").forEach((s) => s.classList.remove("active"));
       }
       document.querySelectorAll(".subtab-content").forEach((c) => c.classList.remove("active"));
-      subtabEl.classList.add("active");
-      contentEl.classList.add("active");
-      return true;
+      subtab.classList.add("active");
+      document.getElementById(`subtab-${subtabId}`)?.classList.add("active");
+      diagState.patch({ activeSubtab: subtabId });
+    });
+  });
+}
+
+function reRenderTable(): void {
+  const container = document.getElementById("session-table-container");
+  if (container) {
+    container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
+    if (!isLoading) {
+      setupSortHandlers();
+      setupEditorFilterHandlers();
+      setupContextRefFilterHandlers();
+      setupZeroInteractionFilterHandler();
+      setupUnattributedFilterHandler();
+      setupFileLinks();
     }
-    return false;
   }
+}
 
-  // Helper function to activate a tab by its ID
-  function activateTab(tabId: string): boolean {
-    const tabButton = document.querySelector(`.tab[data-tab="${tabId}"]`);
-    const tabContent = document.getElementById(`tab-${tabId}`);
+function reRenderToolAnalysisTable(): void {
+  document.querySelectorAll<HTMLElement>(".tool-analysis-table").forEach(table => {
+    const encoded = table.getAttribute("data-rows");
+    if (!encoded) { return; }
+    const rows: ToolAnalysisRow[] = JSON.parse(decodeURIComponent(encoded));
+    const baselineRaw = table.getAttribute("data-baseline");
+    const baseline = baselineRaw ? parseFloat(baselineRaw) : NaN;
+    const tbody = table.querySelector("tbody");
+    if (tbody) { tbody.innerHTML = renderToolAnalysisRows(rows, baseline); }
+    const thead = table.querySelector("thead");
+    if (thead) { thead.innerHTML = toolAnalysisTheadHtml(); }
+  });
+  setupToolAnalysisSortHandlers();
+}
 
-    if (tabButton && tabContent) {
-      // Remove active class from all tabs and contents
-      document
-        .querySelectorAll(".tab")
-        .forEach((t) => t.classList.remove("active"));
-      document
-        .querySelectorAll(".tab-content")
-        .forEach((c) => c.classList.remove("active"));
+function setupToolAnalysisSortHandlers(): void {
+  document.querySelectorAll<HTMLElement>(".tool-sortable").forEach(header => {
+    header.addEventListener("click", () => {
+      const col = header.getAttribute("data-sort") as typeof toolSortColumn | null;
+      if (!col) { return; }
+      if (toolSortColumn === col) {
+        toolSortDir = toolSortDir === "desc" ? "asc" : "desc";
+      } else {
+        toolSortColumn = col;
+        toolSortDir = col === "tool" ? "asc" : "desc";
+      }
+      reRenderToolAnalysisTable();
+    });
+  });
+  document.getElementById("btn-open-tool-families-settings")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "openToolFamiliesSettings" });
+  });
+}
 
-      // Activate the specified tab
-      tabButton.classList.add("active");
-      tabContent.classList.add("active");
-      return true;
+function setupFileLinks(): void {
+  document.querySelectorAll(".session-file-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const file = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-file") || "",
+      );
+      vscode.postMessage({ command: "openSessionFile", file });
+    });
+  });
+
+  document.querySelectorAll(".view-formatted-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const file = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-file") || "",
+      );
+      vscode.postMessage({ command: "openFormattedJsonlFile", file });
+    });
+  });
+
+  document.querySelectorAll(".reveal-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const path = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-path") || "",
+      );
+      vscode.postMessage({ command: "revealPath", path });
+    });
+  });
+
+  document.querySelectorAll(".report-editor-link").forEach((link) => {
+    link.addEventListener("click", (e) => {
+      e.preventDefault();
+      const path = decodeURIComponent(
+        (link as HTMLElement).getAttribute("data-path") || "",
+      );
+      vscode.postMessage({ command: "reportNewEditorPath", path });
+    });
+  });
+}
+
+function updateCacheNumbers(): void {
+  const cacheTabContent = document.getElementById("tab-cache");
+  if (cacheTabContent) {
+    const summaryCards = cacheTabContent.querySelectorAll(".summary-card");
+    if (summaryCards.length >= 4) {
+      const entriesValue = summaryCards[0]?.querySelector(".summary-value");
+      if (entriesValue) {
+        entriesValue.textContent = "0";
+      }
+
+      const sizeValue = summaryCards[1]?.querySelector(".summary-value");
+      if (sizeValue) {
+        sizeValue.textContent = "0 MB";
+      }
+
+      const lastUpdatedValue =
+        summaryCards[2]?.querySelector(".summary-value");
+      if (lastUpdatedValue) {
+        lastUpdatedValue.textContent = "Never";
+      }
+
+      const ageValue = summaryCards[3]?.querySelector(".summary-value");
+      if (ageValue) {
+        ageValue.textContent = "N/A";
+      }
     }
-    return false;
   }
+}
 
-  // Wire up tab switching
+function setupFolderAnalyzerHandlers(): void {
+  document.getElementById("btn-browse-folder")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "pickFolder" });
+  });
+
+  document.getElementById("btn-analyze-folder")?.addEventListener("click", () => {
+    const input = document.getElementById("folder-path-input") as HTMLInputElement | null;
+    const select = document.getElementById("tool-type-select") as HTMLSelectElement | null;
+    const folderPath = input?.value.trim() ?? "";
+
+    if (!folderPath) {
+      if (input) {
+        input.style.borderColor = "#d97706";
+        input.focus();
+      }
+      return;
+    }
+    if (input) {
+      input.style.borderColor = "";
+    }
+
+    const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = "<span>⏳</span><span>Analyzing…</span>";
+    }
+
+    const resultsDiv = document.getElementById("folder-analysis-results");
+    if (resultsDiv) {
+      resultsDiv.innerHTML = `
+          <div class="analyzer-loading">
+            <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+            <span>Scanning files…</span>
+          </div>`;
+    }
+
+    vscode.postMessage({
+      command: "analyzeFolder",
+      folderPath,
+      toolType: select?.value ?? "auto",
+    });
+  });
+}
+
+function setupTabHandlers(): void {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
       const tabId = (tab as HTMLElement).getAttribute("data-tab");
 
       if (tabId && activateTab(tabId)) {
-        // Save the active tab state
-        vscode.setState({ activeTab: tabId });
+        diagState.patch({ activeTab: tabId });
       }
     });
   });
+}
 
-  // Wire up sortable column headers
-  function setupSortHandlers(): void {
-    document.querySelectorAll(".sortable").forEach((header) => {
-      header.addEventListener("click", () => {
-        const sortColumn = (header as HTMLElement).getAttribute(
-          "data-sort",
-        ) as typeof currentSortColumn;
-        if (sortColumn) {
-          // Toggle direction if same column, otherwise default to desc
-          if (currentSortColumn === sortColumn) {
-            currentSortDirection =
-              currentSortDirection === "desc" ? "asc" : "desc";
-          } else {
-            currentSortColumn = sortColumn;
-            currentSortDirection = "desc";
-          }
-
-          // Re-render table
-          reRenderTable();
-        }
-      });
-    });
+function handleClearCacheClick(target: HTMLElement): void {
+  target.style.background = "#d97706";
+  target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+  if (target instanceof HTMLButtonElement) {
+    target.disabled = true;
   }
+  updateCacheNumbers();
+  vscode.postMessage({ command: "clearCache" });
+}
 
-  // Wire up editor filter panel handlers
-  function setupEditorFilterHandlers(): void {
-    document.querySelectorAll(".editor-panel").forEach((panel) => {
-      panel.addEventListener("click", () => {
-        const editor = (panel as HTMLElement).getAttribute("data-editor");
-        currentEditorFilter = editor === "" ? null : editor;
-
-        // Re-render table
-        reRenderTable();
-      });
-    });
-  }
-
-  // Wire up context ref filter handlers
-  function setupContextRefFilterHandlers(): void {
-    document.querySelectorAll(".context-ref-filter").forEach((filter) => {
-      filter.addEventListener("click", () => {
-        const refType = (filter as HTMLElement).getAttribute(
-          "data-ref-type",
-        ) as keyof ContextReferenceUsage | null;
-
-        // Toggle: if clicking the same filter, clear it
-        if (currentContextRefFilter === refType) {
-          currentContextRefFilter = null;
-        } else {
-          currentContextRefFilter = refType;
-        }
-
-        // Re-render table
-        reRenderTable();
-      });
-    });
-  }
-
-  // Wire up hide-empty-sessions checkbox handler
-  function setupZeroInteractionFilterHandler(): void {
-    const checkbox = document.getElementById("hide-empty-sessions") as HTMLInputElement | null;
-    if (checkbox) {
-      checkbox.addEventListener("change", () => {
-        hideEmptySessions = checkbox.checked;
-        reRenderTable();
-      });
+function handleDebugCounterSetClick(target: HTMLElement): void {
+  const key = target.getAttribute("data-key");
+  const row = target.closest("tr");
+  const input = row?.querySelector(".debug-counter-input") as HTMLInputElement | null;
+  if (key && input) {
+    const value = parseInt(input.value, 10);
+    if (!isNaN(value)) {
+      vscode.postMessage({ command: "setDebugCounter", key, value });
     }
   }
+}
 
-  // Wire up backend button handlers
-  function setupBackendButtonHandlers(): void {
-    document
-      .getElementById("btn-configure-backend")
-      ?.addEventListener("click", () => {
-        vscode.postMessage({ command: "configureBackend" });
-      });
-
-    document
-      .getElementById("btn-configure-backend-team")
-      ?.addEventListener("click", () => {
-        // Pre-save the teamserver subtab so the diagnostics panel restores to it
-        // after the settings change triggers a panel refresh
-        const currentState = vscode.getState() ?? {};
-        vscode.setState({ ...currentState, activeTab: "backend", activeSubtab: "backend-teamserver" });
-        vscode.postMessage({ command: "configureTeamServer" });
-      });
-
-    document
-      .getElementById("btn-team-server-auth-warning")
-      ?.addEventListener("click", () => {
-        vscode.postMessage({ command: "authenticateGitHub" });
-      });
-
-    document
-      .getElementById("btn-open-settings")
-      ?.addEventListener("click", () => {
-        vscode.postMessage({ command: "openSettings" });
-      });
-
-    document
-      .getElementById("btn-open-display-settings")
-      ?.addEventListener("click", () => {
-        vscode.postMessage({ command: "openDisplaySettings" });
-      });
+function handleDebugFlagSetClick(target: HTMLElement): void {
+  const key = target.getAttribute("data-key");
+  const row = target.closest("tr");
+  const input = row?.querySelector(".debug-flag-input") as HTMLInputElement | null;
+  if (key && input) {
+    vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
   }
+}
 
-  function setupSubtabHandlers(): void {
-    document.querySelectorAll(".subtab").forEach((subtab) => {
-      subtab.addEventListener("click", () => {
-        const subtabId = (subtab as HTMLElement).getAttribute("data-subtab");
-        if (!subtabId) {
-          return;
-        }
-        // Deactivate all subtabs and content in the same subtab-bar
-        const subtabBar = subtab.closest(".subtab-bar");
-        if (subtabBar) {
-          subtabBar.querySelectorAll(".subtab").forEach((s) => s.classList.remove("active"));
-        }
-        document.querySelectorAll(".subtab-content").forEach((c) => c.classList.remove("active"));
-        subtab.classList.add("active");
-        document.getElementById(`subtab-${subtabId}`)?.classList.add("active");
-        // Persist active subtab so it can be restored after a data refresh
-        const currentState = vscode.getState() ?? {};
-        vscode.setState({ ...currentState, activeSubtab: subtabId });
-      });
-    });
+function handleGlobalClickEvent(event: MouseEvent): void {
+  const target = event.target as HTMLElement;
+  if (!target) { return; }
+  if (target.id === "btn-clear-cache" || target.id === "btn-clear-cache-tab") {
+    handleClearCacheClick(target);
   }
-
-  // Re-render the session table with current filter/sort state
-  function reRenderTable(): void {
-    const container = document.getElementById("session-table-container");
-    if (container) {
-      container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
-      if (!isLoading) {
-        setupSortHandlers();
-        setupEditorFilterHandlers();
-        setupContextRefFilterHandlers();
-        setupZeroInteractionFilterHandler();
-        setupFileLinks();
-      }
-    }
+  if (target.id === "btn-reset-insights" || target.id === "btn-reset-insights-tab") {
+    vscode.postMessage({ command: "resetInsightsState" });
   }
-
-  // Wire up file link handlers
-  function setupFileLinks(): void {
-    document.querySelectorAll(".session-file-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const file = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-file") || "",
-        );
-        vscode.postMessage({ command: "openSessionFile", file });
-      });
-    });
-
-    // View formatted JSONL link handlers
-    document.querySelectorAll(".view-formatted-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const file = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-file") || "",
-        );
-        vscode.postMessage({ command: "openFormattedJsonlFile", file });
-      });
-    });
-
-    // Reveal link handlers
-    document.querySelectorAll(".reveal-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const path = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-path") || "",
-        );
-        vscode.postMessage({ command: "revealPath", path });
-      });
-    });
-
-    // Report unknown editor path handlers
-    document.querySelectorAll(".report-editor-link").forEach((link) => {
-      link.addEventListener("click", (e) => {
-        e.preventDefault();
-        const path = decodeURIComponent(
-          (link as HTMLElement).getAttribute("data-path") || "",
-        );
-        vscode.postMessage({ command: "reportNewEditorPath", path });
-      });
-    });
+  if (target.id === "btn-reset-debug-counters") {
+    vscode.postMessage({ command: "resetDebugCounters" });
   }
-
-  // Wire up event listeners
-  document.getElementById("btn-copy")?.addEventListener("click", () => {
-    vscode.postMessage({ command: "copyReport" });
-  });
-
-  document.getElementById("btn-issue")?.addEventListener("click", () => {
-    vscode.postMessage({ command: "openIssue" });
-  });
-
-  // Helper function to update cache numbers to zero
-  function updateCacheNumbers(): void {
-    const cacheTabContent = document.getElementById("tab-cache");
-    if (cacheTabContent) {
-      const summaryCards = cacheTabContent.querySelectorAll(".summary-card");
-      if (summaryCards.length >= 4) {
-        const entriesValue = summaryCards[0]?.querySelector(".summary-value");
-        if (entriesValue) {
-          entriesValue.textContent = "0";
-        }
-
-        const sizeValue = summaryCards[1]?.querySelector(".summary-value");
-        if (sizeValue) {
-          sizeValue.textContent = "0 MB";
-        }
-
-        const lastUpdatedValue =
-          summaryCards[2]?.querySelector(".summary-value");
-        if (lastUpdatedValue) {
-          lastUpdatedValue.textContent = "Never";
-        }
-
-        const ageValue = summaryCards[3]?.querySelector(".summary-value");
-        if (ageValue) {
-          ageValue.textContent = "N/A";
-        }
-      }
-    }
+  if (target.classList.contains("debug-counter-set")) {
+    handleDebugCounterSetClick(target);
   }
-
-  function setupFolderAnalyzerHandlers(): void {
-    document.getElementById("btn-browse-folder")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "pickFolder" });
-    });
-
-    document.getElementById("btn-analyze-folder")?.addEventListener("click", () => {
-      const input = document.getElementById("folder-path-input") as HTMLInputElement | null;
-      const select = document.getElementById("tool-type-select") as HTMLSelectElement | null;
-      const folderPath = input?.value.trim() ?? "";
-
-      if (!folderPath) {
-        if (input) {
-          input.style.borderColor = "#d97706";
-          input.focus();
-        }
-        return;
-      }
-      if (input) {
-        input.style.borderColor = "";
-      }
-
-      const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
-      if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = "<span>⏳</span><span>Analyzing…</span>";
-      }
-
-      const resultsDiv = document.getElementById("folder-analysis-results");
-      if (resultsDiv) {
-        resultsDiv.innerHTML = `
-          <div class="analyzer-loading">
-            <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
-            <span>Scanning files…</span>
-          </div>`;
-      }
-
-      vscode.postMessage({
-        command: "analyzeFolder",
-        folderPath,
-        toolType: select?.value ?? "auto",
-      });
-    });
+  if (target.classList.contains("debug-flag-set")) {
+    handleDebugFlagSetClick(target);
   }
+}
 
-  document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
-    const btn = document.getElementById(
-      "btn-clear-cache",
-    ) as HTMLButtonElement | null;
-    if (btn) {
-      btn.style.background = "#d97706";
-      btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-      btn.disabled = true;
-    }
-    // Immediately update cache numbers (optimistic update)
-    updateCacheNumbers();
-    vscode.postMessage({ command: "clearCache" });
-  });
-
-  document
-    .getElementById("btn-clear-cache-tab")
-    ?.addEventListener("click", () => {
-      const btn = document.getElementById(
-        "btn-clear-cache-tab",
-      ) as HTMLButtonElement | null;
-      if (btn) {
-        btn.style.background = "#d97706";
-        btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-        btn.disabled = true;
-      }
-      // Immediately update cache numbers (optimistic update)
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    });
-
-  // Fallback click delegation in case direct listeners are not attached
-  document.addEventListener("click", (event) => {
-    const target = event.target as HTMLElement;
-    if (!target) {
-      return;
-    }
-    if (
-      target.id === "btn-clear-cache" ||
-      target.id === "btn-clear-cache-tab"
-    ) {
-      target.style.background = "#d97706";
-      target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
-      if (target instanceof HTMLButtonElement) {
-        target.disabled = true;
-      }
-      // Immediately update cache numbers (optimistic update)
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    }
-    if (target.id === "btn-reset-debug-counters") {
-      vscode.postMessage({ command: "resetDebugCounters" });
-    }
-    if (target.classList.contains("debug-counter-set")) {
-      const key = target.getAttribute("data-key");
-      const row = target.closest("tr");
-      const input = row?.querySelector(".debug-counter-input") as HTMLInputElement | null;
-      if (key && input) {
-        const value = parseInt(input.value, 10);
-        if (!isNaN(value)) {
-          vscode.postMessage({ command: "setDebugCounter", key, value });
-        }
-      }
-    }
-    if (target.classList.contains("debug-flag-set")) {
-      const key = target.getAttribute("data-key");
-      const row = target.closest("tr");
-      const input = row?.querySelector(".debug-flag-input") as HTMLInputElement | null;
-      if (key && input) {
-        vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
-      }
-    }
-  });
-
-  // Navigation buttons (match details view)
+function wireNavButtons(): void {
   document
     .getElementById("btn-refresh")
     ?.addEventListener("click", () =>
@@ -2333,35 +1561,828 @@ function renderLayout(data: DiagnosticsData): void {
       vscode.postMessage({ command: "showEnvironmental" }),
     );
   wireExtensionPointButtons(vscode);
+}
 
+function setupButtonHandlers(): void {
+  document.getElementById("btn-copy")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "copyReport" });
+  });
+
+  document.getElementById("btn-issue")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "openIssue" });
+  });
+
+  document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
+    const btn = document.getElementById(
+      "btn-clear-cache",
+    ) as HTMLButtonElement | null;
+    if (btn) {
+      btn.style.background = "#d97706";
+      btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+      btn.disabled = true;
+    }
+    updateCacheNumbers();
+    vscode.postMessage({ command: "clearCache" });
+  });
+
+  document
+    .getElementById("btn-clear-cache-tab")
+    ?.addEventListener("click", () => {
+      const btn = document.getElementById(
+        "btn-clear-cache-tab",
+      ) as HTMLButtonElement | null;
+      if (btn) {
+        btn.style.background = "#d97706";
+        btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+        btn.disabled = true;
+      }
+      updateCacheNumbers();
+      vscode.postMessage({ command: "clearCache" });
+    });
+
+  document.addEventListener("click", handleGlobalClickEvent);
+
+  wireNavButtons();
+}
+
+type DiagMessage = Record<string, any>;
+
+function handleDiagnosticReport(message: DiagMessage): void {
+  if (!message.report) { return; }
+  const reportTabContent = document.getElementById("tab-report");
+  if (!reportTabContent) { return; }
+  const processedReport = removeSessionFilesSection(message.report);
+  const reportPre = reportTabContent.querySelector(".report-content");
+  if (reportPre) { reportPre.textContent = processedReport; }
+}
+
+function handleBackendStorageSection(message: DiagMessage): void {
+  if (!message.backendStorageInfo) {
+    console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");
+    return;
+  }
+  currentBackendInfo = message.backendStorageInfo;
+  if (message.githubAuth !== undefined) { currentGithubAuth = message.githubAuth; }
+  const backendTabContent = document.getElementById("tab-backend");
+  if (!backendTabContent) { return; }
+  const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
+  const previousSubtab = activeSubtabEl?.getAttribute("data-subtab") ?? diagState.restore().activeSubtab;
+  backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+  setupBackendButtonHandlers();
+  setupSubtabHandlers();
+  if (previousSubtab) {
+    activateSubtab(previousSubtab);
+    diagState.patch({ activeSubtab: previousSubtab });
+  }
+}
+
+function handleSessionFoldersSection(message: DiagMessage): void {
+  if (!message.sessionFolders || message.sessionFolders.length === 0) { return; }
+  const reportTabContent = document.getElementById("tab-report");
+  if (!reportTabContent) { return; }
+  const grouped = groupSessionFolders(message.sessionFolders as SessionFolder[]);
+  const foldersEl = buildSessionFoldersElement(grouped);
+  const existing = reportTabContent.querySelector(".session-folders-table");
+  if (existing) {
+    existing.replaceWith(foldersEl);
+  } else {
+    const reportContent = reportTabContent.querySelector(".report-content");
+    if (reportContent) { reportContent.insertAdjacentElement("afterend", foldersEl); }
+    else { reportTabContent.appendChild(foldersEl); }
+  }
+  setupStorageLinkHandlers();
+}
+
+function handleCandidatePathsSection(message: DiagMessage): void {
+  if (!message.candidatePaths || message.candidatePaths.length === 0) { return; }
+  const reportTabContent = document.getElementById("tab-report");
+  if (!reportTabContent) { return; }
+  reportTabContent.querySelector(".candidate-paths-table")?.remove();
+  const candidateEl = buildCandidatePathsElement(message.candidatePaths);
+  const foldersTable = reportTabContent.querySelector(".session-folders-table");
+  if (foldersTable) {
+    foldersTable.insertAdjacentElement("afterend", candidateEl);
+  } else {
+    const reportContent = reportTabContent.querySelector(".report-content");
+    if (reportContent) { reportContent.insertAdjacentElement("afterend", candidateEl); }
+    else { reportTabContent.appendChild(candidateEl); }
+  }
+}
+
+function handleDiagnosticDataLoaded(message: DiagMessage): void {
+  handleDiagnosticReport(message);
+  handleBackendStorageSection(message);
+  handleSessionFoldersSection(message);
+  handleCandidatePathsSection(message);
+  if (message.githubAuth !== undefined) {
+    const githubTabContent = document.getElementById("tab-github");
+    if (githubTabContent) {
+      githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
+      setupGitHubAuthHandlers();
+    }
+  }
+  if (message.toolFamilies) { storedToolFamilies = message.toolFamilies as ToolFamilyConfig[]; }
+  if (message.toolCallStats !== undefined) {
+    const toolAnalysisTab = document.getElementById("tab-tool-analysis");
+    if (toolAnalysisTab) {
+      const wasActive = toolAnalysisTab.classList.contains("active");
+      const newContent = renderToolAnalysisTab(message.toolCallStats as DiagnosticsData['toolCallStats'], storedToolFamilies);
+      const temp = document.createElement('div');
+      temp.innerHTML = newContent;
+      const newTab = temp.firstElementChild as HTMLElement | null;
+      if (newTab) {
+        if (wasActive) { newTab.classList.add("active"); }
+        toolAnalysisTab.replaceWith(newTab);
+        setupToolAnalysisSortHandlers();
+      }
+    }
+  }
+}
+
+function handleGithubAuthUpdated(message: DiagMessage): void {
+  currentGithubAuth = message.githubAuth;
+  const githubTabContent = document.getElementById("tab-github");
+  if (githubTabContent) {
+    githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
+    setupGitHubAuthHandlers();
+  }
+  const backendTabContent = document.getElementById("tab-backend");
+  if (backendTabContent && currentBackendInfo) {
+    const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
+    const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
+    backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+    setupBackendButtonHandlers();
+    setupSubtabHandlers();
+    if (previousSubtab) {
+      activateSubtab(previousSubtab);
+    }
+  }
+}
+
+function handleDiagnosticDataError(message: DiagMessage): void {
+  console.error("Error loading diagnostic data:", message.error);
+  const rootEl = document.getElementById("root");
+  if (rootEl) {
+    const errorDiv = document.createElement("div");
+    errorDiv.style.cssText =
+      "color: #ff6b6b; padding: 20px; text-align: center;";
+    errorDiv.innerHTML = `
+<h3>⚠️ Error Loading Diagnostic Data</h3>
+<p>${escapeHtml(message.error || "Unknown error")}</p>
+`;
+    rootEl.insertBefore(errorDiv, rootEl.firstChild);
+  }
+}
+
+function sanitizeNumericRecord(input: unknown): Record<string, number> {
+  if (!input || typeof input !== "object") {
+    return {};
+  }
+  return Object.fromEntries(
+    Object.entries(input as Record<string, unknown>).map(([key, value]) => [key, Number(value ?? 0) || 0]),
+  );
+}
+
+function numField(v: unknown): number { return Number(v ?? 0) || 0; }
+function optStr(v: unknown): string | undefined { return v === null || v === undefined ? undefined : String(v); }
+function nullStr(v: unknown): string | null { return v === null || v === undefined ? null : String(v); }
+
+function sanitizeContextReferences(contextRefs: Record<string, unknown>) {
+  return {
+    file: numField(contextRefs.file),
+    symbol: numField(contextRefs.symbol),
+    selection: numField(contextRefs.selection),
+    implicitSelection: numField(contextRefs.implicitSelection),
+    codebase: numField(contextRefs.codebase),
+    workspace: numField(contextRefs.workspace),
+    terminal: numField(contextRefs.terminal),
+    vscode: numField(contextRefs.vscode),
+    terminalLastCommand: numField(contextRefs.terminalLastCommand),
+    terminalSelection: numField(contextRefs.terminalSelection),
+    clipboard: numField(contextRefs.clipboard),
+    changes: numField(contextRefs.changes),
+    outputPanel: numField(contextRefs.outputPanel),
+    problemsPanel: numField(contextRefs.problemsPanel),
+    pullRequest: numField(contextRefs.pullRequest),
+    byKind: sanitizeNumericRecord(contextRefs.byKind),
+    copilotInstructions: numField(contextRefs.copilotInstructions),
+    agentsMd: numField(contextRefs.agentsMd),
+    byPath: sanitizeNumericRecord(contextRefs.byPath),
+  };
+}
+
+function sanitizeChildInfo(sf: Record<string, unknown>) {
+  if (!Array.isArray(sf.childInfo)) { return undefined; }
+  return sf.childInfo
+    .filter((child): child is Record<string, unknown> => !!child && typeof child === "object")
+    .map((child) => ({
+      uuid: String(child.uuid ?? ""),
+      name: String(child.name ?? ""),
+      sessionFile: optStr(child.sessionFile),
+    }));
+}
+
+function sanitizeParentInfo(sf: Record<string, unknown>) {
+  if (!sf.parentInfo || typeof sf.parentInfo !== "object") { return undefined; }
+  const p = sf.parentInfo as Record<string, unknown>;
+  return {
+    uuid: String(p.uuid ?? ""),
+    name: String(p.name ?? ""),
+    sessionFile: optStr(p.sessionFile),
+  };
+}
+
+function sanitizeSessionFileItem(item: unknown): SessionFileDetails {
+  const sf = (item ?? {}) as Record<string, unknown>;
+  const contextRefs = (sf.contextReferences ?? {}) as Record<string, unknown>;
+  return {
+    file: String(sf.file ?? sf.sessionFile ?? ""),
+    editorSource: String(sf.editorSource ?? ""),
+    editorRoot: optStr(sf.editorRoot),
+    editorName: optStr(sf.editorName),
+    title: optStr(sf.title),
+    repository: optStr(sf.repository),
+    size: numField(sf.size),
+    modified: String(sf.modified ?? ""),
+    tokens: numField(sf.tokens),
+    interactions: numField(sf.interactions),
+    firstInteraction: nullStr(sf.firstInteraction),
+    lastInteraction: nullStr(sf.lastInteraction),
+    contextReferences: sanitizeContextReferences(contextRefs),
+    parentInfo: sanitizeParentInfo(sf),
+    childInfo: sanitizeChildInfo(sf),
+    totalChildCount: sf.totalChildCount === null || sf.totalChildCount === undefined ? undefined : Number(sf.totalChildCount),
+  } as SessionFileDetails;
+}
+
+function sanitizeDetailedSessionFiles(input: unknown): SessionFileDetails[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+  return input.map(sanitizeSessionFileItem);
+}
+
+function handleSessionFilesLoaded(message: DiagMessage): void {
+  storedDetailedFiles = sanitizeDetailedSessionFiles(message.detailedSessionFiles);
+  isLoading = false;
+
+  const sessionsTab = document.querySelector('.tab[data-tab="sessions"]');
+  if (sessionsTab) {
+    sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
+  }
+
+  reRenderTable();
+}
+
+function handleCacheCleared(): void {
+  const btnReport = document.getElementById(
+    "btn-clear-cache",
+  ) as HTMLButtonElement | null;
+  const btnTab = document.getElementById(
+    "btn-clear-cache-tab",
+  ) as HTMLButtonElement | null;
+  if (btnReport) {
+    btnReport.style.background = "#2d6a4f";
+    btnReport.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
+    btnReport.disabled = false;
+  }
+  if (btnTab) {
+    btnTab.style.background = "#2d6a4f";
+    btnTab.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
+    btnTab.disabled = false;
+  }
+
+  setTimeout(() => {
+    if (btnReport) {
+      btnReport.style.background = "";
+      btnReport.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
+    }
+    if (btnTab) {
+      btnTab.style.background = "";
+      btnTab.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
+    }
+  }, 2000);
+}
+
+function updateCacheSummaryCards(cacheInfo: any, summaryCards: NodeListOf<Element>): void {
+  if (summaryCards.length < 4) { return; }
+  const entriesValue = summaryCards[0]?.querySelector(".summary-value");
+  if (entriesValue) { entriesValue.textContent = String(cacheInfo.size); }
+  const sizeValue = summaryCards[1]?.querySelector(".summary-value");
+  if (sizeValue) { sizeValue.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`; }
+  const lastUpdatedValue = summaryCards[2]?.querySelector(".summary-value");
+  if (lastUpdatedValue) { lastUpdatedValue.textContent = new Date(cacheInfo.lastUpdated).toLocaleString(); }
+  const ageValue = summaryCards[3]?.querySelector(".summary-value");
+  if (ageValue) { ageValue.textContent = "0 seconds ago"; }
+}
+
+function handleCacheRefreshed(message: DiagMessage): void {
+  if (!message.cacheInfo) { return; }
+  const cacheTabContent = document.getElementById("tab-cache");
+  if (!cacheTabContent) { return; }
+  updateCacheSummaryCards(message.cacheInfo, cacheTabContent.querySelectorAll(".summary-card"));
+}
+
+function handleFolderPicked(message: DiagMessage): void {
+  const input = document.getElementById("folder-path-input") as HTMLInputElement | null;
+  if (input && message.folderPath) {
+    input.value = message.folderPath;
+    input.style.borderColor = "";
+  }
+}
+
+function handleFolderAnalysisResult(message: DiagMessage): void {
+  const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = "<span>🔍</span><span>Analyze</span>";
+  }
+  const resultsDiv = document.getElementById("folder-analysis-results");
+  if (resultsDiv) {
+    if (message.error) {
+      resultsDiv.innerHTML = `
+        <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
+          <div class="info-box-title">⚠️ Analysis Error</div>
+          <div>${escapeHtml(message.error)}</div>
+        </div>`;
+    } else {
+      resultsDiv.innerHTML = renderFolderAnalysisResults(
+        message.files || [],
+        message.totalScanned || 0,
+        message.parseErrors || 0,
+        message.truncated || false,
+        escapeHtml(String(message.folderPath || "")),
+      );
+    }
+  }
+}
+
+function setupMessageHandlers(): void {
+  window.addEventListener("message", (event) => {
+    const message = event.data as DiagMessage;
+    if (message.command === "diagnosticDataLoaded") {
+      handleDiagnosticDataLoaded(message);
+    } else if (message.command === "githubAuthUpdated") {
+      handleGithubAuthUpdated(message);
+    } else if (message.command === "diagnosticDataError") {
+      handleDiagnosticDataError(message);
+    } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
+      handleSessionFilesLoaded(message);
+    } else if (message.command === "cacheCleared") {
+      handleCacheCleared();
+    } else if (message.command === "cacheRefreshed") {
+      handleCacheRefreshed(message);
+    } else if (message.command === "folderPicked") {
+      handleFolderPicked(message);
+    } else if (message.command === "folderAnalysisResult") {
+      handleFolderAnalysisResult(message);
+    }
+  });
+}
+
+function renderDiagCacheTabHtml(data: DiagnosticsData): string {
+  return `
+<div id="tab-cache" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">💾 Cache Information</div>
+<div>
+The extension caches session file data to improve performance and reduce file system operations.
+Cache is stored in VS Code's global state and persists across sessions.
+</div>
+</div>
+<div class="cache-details">
+<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">📦 Cache Entries</div>
+<div class="summary-value">${data.cacheInfo?.size || 0}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">💾 Cache Size</div>
+<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">🕒 Last Updated</div>
+<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">⏱️ Cache Age</div>
+<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? getTimeSince(data.cacheInfo.lastUpdated) : "N/A"}</div>
+</div>
+</div>
+<div class="cache-location">
+<h4>Storage Location</h4>
+<div class="location-box">
+<code>${escapeHtml(data.cacheInfo?.location || "VS Code Global State")}</code>
+${data.cacheInfo?.storagePath ? ` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(data.cacheInfo.storagePath)}">Open storage location</a>` : ""}
+</div>
+<p style="color: #999; font-size: 12px; margin-top: 8px;">
+Cache is stored in VS Code's global state (extension storage) and includes:
+<ul style="margin: 8px 0 0 20px;">
+<li>Token counts per session file</li>
+<li>Interaction counts</li>
+<li>Model usage statistics</li>
+<li>File modification timestamps for validation</li>
+<li>Usage analysis data (tool calls, modes, context references)</li>
+</ul>
+</p>
+</div>
+<div class="cache-actions">
+<h4>Cache Management</h4>
+<p style="color: #999; font-size: 12px; margin-bottom: 12px;">
+Clearing the cache will force the extension to re-read and re-analyze all session files on the next update.
+This can help resolve issues with stale or incorrect data.
+</p>
+<div class="button-group" style="margin-top: 8px;">
+<button class="button secondary" id="btn-clear-cache-tab"><span>🗑️</span><span>Clear Cache</span></button>
+<button class="button secondary" id="btn-reset-insights-tab"><span>💡</span><span>Reset Insights Dismissals</span></button>
+</div>
+</div>
+</div>
+</div>`;
+}
+
+function sel(current: string, value: string): string {
+  return current === value ? 'selected' : '';
+}
+
+function renderQuotaCardHtml(data: DiagnosticsData): string {
+  const quotaContent = data.quotaEntitlements
+    ? `<p>
+${
+      data.quotaEntitlements.premium_interactions
+        ? `<strong>Premium Interactions:</strong> $${data.quotaEntitlements.premium_interactions.toFixed(2)}/month<br/>`
+        : ''
+}${
+      data.quotaEntitlements.completions
+        ? `<strong>Completions:</strong> $${data.quotaEntitlements.completions.toFixed(2)}/month<br/>`
+        : ''
+}
+    </p>`
+    : `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>`;
+  return `<div class="backend-card">
+<h4>📊 API Quota Information</h4>
+${quotaContent}
+</div>`;
+}
+
+function renderDiagDisplayTabHtml(data: DiagnosticsData): string {
+  const showTokens = data.displaySettings?.showTokens ?? 'both';
+  const showCost = data.displaySettings?.showCost ?? 'none';
+  const monthlyBudget = Math.round((data.displaySettings?.monthlyBudget ?? 0) * 100) / 100;
+  return `
+<div id="tab-display" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">⚙️ Display Settings</div>
+<div>Configure what is shown in the status bar at the bottom of VS Code. Changes take effect immediately — no data refresh needed.</div>
+</div>
+<div class="backend-card">
+<h4>📊 Status Bar Display</h4>
+<p>
+Choose what to show in the VS Code status bar toolbar. You can show token counts, estimated costs, both, or neither for each period.
+</p>
+<div style="display: grid; gap: 16px;">
+<div style="display: flex; align-items: center; gap: 12px;">
+  <label style="min-width: 175px; font-size: 13px;">🔢 Token counts:</label>
+  <select id="select-show-tokens" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
+    <option value="none" ${sel(showTokens, 'none')}>None</option>
+    <option value="today" ${sel(showTokens, 'today')}>Today only</option>
+    <option value="last30days" ${sel(showTokens, 'last30days')}>Last 30 days only</option>
+    <option value="currentMonth" ${sel(showTokens, 'currentMonth')}>Current calendar month only</option>
+    <option value="both" ${sel(showTokens, 'both')}>Today + last 30 days (default)</option>
+    <option value="todayAndCurrentMonth" ${sel(showTokens, 'todayAndCurrentMonth')}>Today + current calendar month</option>
+  </select>
+</div>
+<div style="display: flex; align-items: center; gap: 12px;">
+  <label style="min-width: 175px; font-size: 13px;">💰 Estimated cost (USD):</label>
+  <select id="select-show-cost" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
+    <option value="none" ${sel(showCost, 'none')}>None (hidden)</option>
+    <option value="today" ${sel(showCost, 'today')}>Today only</option>
+    <option value="last30days" ${sel(showCost, 'last30days')}>Last 30 days only</option>
+    <option value="currentMonth" ${sel(showCost, 'currentMonth')}>Current calendar month only</option>
+    <option value="both" ${sel(showCost, 'both')}>Today + last 30 days</option>
+    <option value="todayAndCurrentMonth" ${sel(showCost, 'todayAndCurrentMonth')}>Today + current calendar month</option>
+  </select>
+</div>
+</div>
+<p class="hint">Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing). Changes apply to the status bar immediately.</p>
+</div>
+<div class="backend-card">
+<h4>💰 Monthly Budget</h4>
+<p>
+Set a monthly AI spend budget in USD to get visual alerts on the status bar. The bar turns yellow at 75%, orange at 90%, and red at 100% of your budget. Set to 0 to disable.
+</p>
+<div style="display: flex; align-items: center; gap: 12px;">
+  <label style="min-width: 175px; font-size: 13px;">💵 Monthly budget (USD):</label>
+  <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
+</div>
+<p class="hint">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
+${
+  data.quotaEntitlements && data.quotaEntitlements.premium_interactions
+    ? `<p class="hint" style="color: #90ee90;"><strong>ℹ️ API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${data.quotaEntitlements.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>`
+    : ''
+}
+</div>
+${renderQuotaCardHtml(data)}
+<div class="backend-card">
+<h4>🔢 Number Formatting</h4>
+<p>
+Token counts can be shown in compact format using K/M suffixes (e.g. <strong>1.5K</strong>, <strong>1.2M</strong>)
+for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,200,000</strong>) for precision.
+</p>
+<div class="button-group">
+<button class="button" id="btn-open-display-settings">
+<span>⚙️</span>
+<span>Open Display Settings</span>
+</button>
+</div>
+</div>
+</div>`;
+}
+
+type ToolAnalysisRow = { tool: string; totalTokens: number; calls: number; isBuiltIn: boolean };
+
+function getToolSortIndicator(col: typeof toolSortColumn): string {
+  if (toolSortColumn !== col) { return ' <span class="sort-hint">↕</span>'; }
+  return toolSortDir === "desc" ? " ▼" : " ▲";
+}
+
+/** Compute pooled avg tokens/call across a set of rows (built-in baseline). Returns NaN if no data. */
+function pooledAvg(rows: ToolAnalysisRow[]): number {
+  const totalCalls = rows.reduce((s, r) => s + r.calls, 0);
+  const totalTokens = rows.reduce((s, r) => s + r.totalTokens, 0);
+  return totalCalls > 0 ? totalTokens / totalCalls : NaN;
+}
+
+/** Sort rows by the current toolSortColumn/toolSortDir. */
+function sortToolRows(rows: ToolAnalysisRow[]): ToolAnalysisRow[] {
+  return [...rows].sort((a, b) => {
+    let aVal: number | string, bVal: number | string;
+    switch (toolSortColumn) {
+      case "tool": aVal = a.tool.toLowerCase(); bVal = b.tool.toLowerCase(); break;
+      case "calls": aVal = a.calls; bVal = b.calls; break;
+      case "total": aVal = a.totalTokens; bVal = b.totalTokens; break;
+      case "avg": default: aVal = a.calls > 0 ? a.totalTokens / a.calls : 0; bVal = b.calls > 0 ? b.totalTokens / b.calls : 0; break;
+    }
+    if (aVal < bVal) { return toolSortDir === "desc" ? 1 : -1; }
+    if (aVal > bVal) { return toolSortDir === "desc" ? -1 : 1; }
+    return 0;
+  });
+}
+
+function renderToolRow(r: ToolAnalysisRow, builtInBaseline: number): string {
+  const avg = r.calls > 0 ? Math.round(r.totalTokens / r.calls) : 0;
+  let ratioHtml = '<td class="tool-ratio">—</td>';
+  if (!r.isBuiltIn && !isNaN(builtInBaseline) && builtInBaseline > 0 && r.calls > 0) {
+    const ratio = (r.totalTokens / r.calls) / builtInBaseline;
+    const pct = Math.round(ratio * 100);
+    const cls = ratio < 0.85 ? 'ratio-better' : ratio > 1.15 ? 'ratio-worse' : 'ratio-neutral';
+    ratioHtml = `<td class="tool-ratio ${cls}" title="${pct}% of built-in average">${pct}%</td>`;
+  } else if (r.isBuiltIn) {
+    ratioHtml = '<td class="tool-ratio tool-builtin-label">baseline</td>';
+  }
+  const badge = r.isBuiltIn ? ' <span class="tool-type-badge built-in">built-in</span>' : ' <span class="tool-type-badge alternative">alt</span>';
+  return `<tr><td>${escapeHtml(r.tool)}${badge}</td><td>${escapeHtml(String(r.calls))}</td><td>${formatTokenCount(r.totalTokens)}</td><td>${formatTokenCount(avg)}</td>${ratioHtml}</tr>`;
+}
+
+function renderToolAnalysisRows(rows: ToolAnalysisRow[], builtInBaseline: number = NaN): string {
+  return sortToolRows(rows).map(r => renderToolRow(r, builtInBaseline)).join('');
+}
+
+/** Thead HTML shared across initial render and re-render. */
+function toolAnalysisTheadHtml(): string {
+  return `<tr>
+<th class="tool-sortable" data-sort="tool">Tool${getToolSortIndicator("tool")}</th>
+<th class="tool-sortable" data-sort="calls">Calls${getToolSortIndicator("calls")}</th>
+<th class="tool-sortable" data-sort="total">Total Output Tokens${getToolSortIndicator("total")}</th>
+<th class="tool-sortable" data-sort="avg">Avg Tokens / Call${getToolSortIndicator("avg")}</th>
+<th>vs Built-in</th>
+</tr>`;
+}
+
+/** Render one family section. Returns empty string if the family has no data. */
+function renderToolFamilySection(
+  family: ToolFamilyConfig,
+  outputTokensByTool: { [key: string]: number },
+  byTool: { [key: string]: number },
+  assignedTools: Set<string>
+): { html: string; rows: ToolAnalysisRow[] } {
+  const buildRows = (names: string[], isBuiltIn: boolean): ToolAnalysisRow[] =>
+    names
+      .filter(t => outputTokensByTool[t] !== undefined && (byTool[t] || 0) > 0 && !assignedTools.has(t))
+      .map(t => { assignedTools.add(t); return { tool: t, totalTokens: outputTokensByTool[t], calls: byTool[t] || 0, isBuiltIn }; });
+
+  const builtInRows = buildRows(family.builtIn, true);
+  const altRows = buildRows(family.alternatives, false);
+  const allRows = [...builtInRows, ...altRows];
+  if (allRows.length === 0) { return { html: '', rows: [] }; }
+
+  const baseline = pooledAvg(builtInRows);
+  const encodedRows = encodeURIComponent(JSON.stringify(allRows));
+  const desc = family.description ? ` <span class="hint">${escapeHtml(family.description)}</span>` : '';
+  const html = `
+<div class="tool-family-section">
+<h4 class="tool-family-heading">${escapeHtml(family.name)}${desc}</h4>
+<table class="session-table tool-analysis-table" data-rows="${encodedRows}" data-baseline="${isNaN(baseline) ? '' : String(baseline)}">
+<thead>${toolAnalysisTheadHtml()}</thead>
+<tbody>${renderToolAnalysisRows(allRows, baseline)}</tbody>
+</table>
+</div>`;
+  return { html, rows: allRows };
+}
+
+function renderToolAnalysisTab(toolCallStats: DiagnosticsData['toolCallStats'], families?: ToolFamilyConfig[]): string {
+  if (!toolCallStats || !toolCallStats.outputTokensByTool || Object.keys(toolCallStats.outputTokensByTool).length === 0) {
+    return `<div id="tab-tool-analysis" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🔧 Tool Output Token Analysis</div>
+<div>Track how many tokens each tool produces as output over the last 30 days. Data is collected as you use the extension — no output token data has been recorded yet.</div>
+</div>
+</div>`;
+  }
+  const outputTokensByTool = toolCallStats.outputTokensByTool;
+  const byTool = toolCallStats.byTool;
+  const assignedTools = new Set<string>();
+  let sectionsHtml = '';
+
+  if (families && families.length > 0) {
+    for (const family of families) {
+      const { html } = renderToolFamilySection(family, outputTokensByTool, byTool, assignedTools);
+      sectionsHtml += html;
+    }
+  }
+
+  // Remaining tools not in any family
+  const otherRows: ToolAnalysisRow[] = Object.entries(outputTokensByTool)
+    .filter(([t]) => !assignedTools.has(t) && (byTool[t] || 0) > 0)
+    .map(([t, tokens]) => ({ tool: t, totalTokens: tokens, calls: byTool[t] || 0, isBuiltIn: false }));
+  if (otherRows.length > 0) {
+    const encodedOther = encodeURIComponent(JSON.stringify(otherRows));
+    sectionsHtml += `
+<div class="tool-family-section">
+<h4 class="tool-family-heading">Other Tools</h4>
+<table class="session-table tool-analysis-table" data-rows="${encodedOther}" data-baseline="">
+<thead>${toolAnalysisTheadHtml()}</thead>
+<tbody>${renderToolAnalysisRows(otherRows, NaN)}</tbody>
+</table>
+</div>`;
+  }
+
+  return `<div id="tab-tool-analysis" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🔧 Tool Output Token Analysis</div>
+<div>Tokens produced by each tool's output over the last 30 days. Tools are grouped by family. <strong>vs Built-in</strong> shows how an alternative compares to the pooled baseline — green is more token-efficient. Click column headers to sort within each group. <button class="inline-link" id="btn-open-tool-families-settings">Configure tool families ↗</button></div>
+</div>
+${sectionsHtml}
+</div>`;
+}
+
+function buildDiagReportTabHtml(escapedReport: string): string {
+  return `<div id="tab-report" class="tab-content active">
+<div class="info-box">
+<div class="info-box-title">📋 About This Report</div>
+<div>
+This diagnostic report contains information about your AI Engineering Fluency extension
+extension setup and usage statistics. </br> It does <strong>not</strong> include any of your
+code or conversation content. You can safely share this report when reporting issues.
+</div>
+</div>
+<div class="button-group" style="margin-bottom: 12px;">
+<button class="button" id="btn-copy"><span>📋</span><span>Copy to Clipboard</span></button>
+<button class="button secondary" id="btn-issue"><span>🐛</span><span>Open GitHub Issue</span></button>
+<button class="button secondary" id="btn-clear-cache"><span>🗑️</span><span>Clear Cache</span></button>
+<button class="button secondary" id="btn-reset-insights"><span>💡</span><span>Reset Insights Dismissals</span></button>
+</div>
+<div class="report-content">${escapedReport}</div>
+</div>`;
+}
+
+function buildDiagRootHtml(
+  data: DiagnosticsData,
+  detailedFiles: SessionFileDetails[],
+  escapedReport: string,
+): string {
+  return `
+<style>${themeStyles}</style>
+<style>${styles}</style>
+<div class="container">
+<div class="header">
+<div class="header-left">
+<span class="header-icon">🔍</span>
+<span class="header-title">Diagnostic Report</span>
+</div>
+<div class="button-row">
+${buttonHtml("btn-refresh")}
+${buttonHtml("btn-details")}
+${buttonHtml("btn-chart")}
+${buttonHtml("btn-usage")}
+${buttonHtml("btn-environmental")}
+${buttonHtml("btn-maturity")}
+${data?.backendConfigured ? buttonHtml("btn-dashboard") : ""}
+</div>
+</div>
+
+<div class="tabs">
+<button class="tab active" data-tab="report">📋 Report</button>
+<button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
+<button class="tab" data-tab="cache">💾 Cache</button>
+<button class="tab" data-tab="backend">☁️ Backend Storage</button>
+<button class="tab" data-tab="github">🔑 GitHub Auth</button>
+<button class="tab" data-tab="display">⚙️ Settings</button>
+<button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
+<button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
+${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
+</div>
+
+${buildDiagReportTabHtml(escapedReport)}
+
+<div id="tab-sessions" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">📁 Session File Analysis</div>
+<div>
+This tab shows session files with activity in the last 14 days from all detected editors. </br>
+Click on an editor panel to filter, click column headers to sort, and click a file name to open it.
+</div>
+</div>
+<div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
+</div>
+
+${renderDiagCacheTabHtml(data)}
+<div id="tab-backend" class="tab-content">
+${renderBackendStoragePanel(data.backendStorageInfo, data.githubAuth)}
+</div>
+
+<div id="tab-github" class="tab-content">
+${renderGitHubAuthPanel(data.githubAuth)}
+</div>
+${renderDiagDisplayTabHtml(data)}
+${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
+<div id="tab-path-analyzer" class="tab-content">
+${renderFolderAnalyzerTab()}
+</div>
+${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+</div>
+`;
+}
+
+function renderLayout(data: DiagnosticsData): void {
+  const root = document.getElementById("root");
+  if (!root) {
+    return;
+  }
+
+  // Initialise module-level render state
+  const detailedFiles = data.detailedSessionFiles || [];
+  storedDetailedFiles = detailedFiles;
+  isLoading = detailedFiles.length === 0;
+  currentBackendInfo = data.backendStorageInfo;
+  currentGithubAuth = data.githubAuth;
+  if (data.toolFamilies) { storedToolFamilies = data.toolFamilies; }
+
+  const reportIsLoading = data.report === LOADING_PLACEHOLDER;
+  const escapedReport = reportIsLoading
+    ? LOADING_MESSAGE.trim()
+    : removeSessionFilesSection(escapeHtml(data.report));
+
+  root.innerHTML = buildDiagRootHtml(data, detailedFiles, escapedReport);
+
+  // Render session folders via DOM API (XSS-safe, no innerHTML)
+  const sessionFolders = groupSessionFolders(data.sessionFolders || []);
+  if (sessionFolders.length > 0) {
+    const reportTab = document.getElementById("tab-report");
+    const reportContent = reportTab?.querySelector(".report-content");
+    if (reportContent) {
+      reportContent.insertAdjacentElement("afterend", buildSessionFoldersElement(sessionFolders));
+    }
+  }
+
+  setupMessageHandlers();
+  setupTabHandlers();
   setupSortHandlers();
   setupEditorFilterHandlers();
   setupContextRefFilterHandlers();
   setupZeroInteractionFilterHandler();
+  setupUnattributedFilterHandler();
   setupBackendButtonHandlers();
   setupSubtabHandlers();
   setupFileLinks();
   setupStorageLinkHandlers();
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
+  setupButtonHandlers();
+  setupDisplaySettingHandlers();
+  setupToolAnalysisSortHandlers();
 
-  // Restore active tab from saved state, with fallback to default
-  const savedState = vscode.getState();
+  const savedState = diagState.restore();
   if (savedState?.activeTab && !activateTab(savedState.activeTab)) {
-    // If saved tab doesn't exist (e.g., structure changed), activate default "report" tab
     activateTab("report");
   }
 
-  // Restore active subtab from saved state
   if (savedState?.activeSubtab) {
     activateSubtab(savedState.activeSubtab);
   }
 }
-
 async function bootstrap(): Promise<void> {
-  const { provideVSCodeDesignSystem, vsCodeButton } =
-    await import("@vscode/webview-ui-toolkit");
-  provideVSCodeDesignSystem().register(vsCodeButton());
+  await import('@vscode-elements/elements/dist/vscode-button/index.js');
 
   if (!initialData) {
     const root = document.getElementById("root");

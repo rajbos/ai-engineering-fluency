@@ -22,6 +22,7 @@
     "gpt-5.3-codex": 0.25,
     "gpt-5.4": 0.25,
     "gpt-5.4-mini": 0.25,
+    "gpt-5.4-nano": 0.25,
     "gpt-4.1-nano": 0.25,
     "gemini-2.0-flash": 0.25,
     "gemini-2.0-flash-lite": 0.25,
@@ -39,6 +40,7 @@
     "claude-opus-4.6": 0.24,
     "claude-opus-4.6-(fast-mode)-(preview)": 0.24,
     "claude-opus-4.6-fast": 0.24,
+    "claude-opus-4.7": 0.24,
     "gemini-2.5-pro": 0.25,
     "gemini-3-flash": 0.25,
     "gemini-3-pro": 0.25,
@@ -70,6 +72,15 @@
     "ministral-8b-2410": 0.25,
     "magistral-small-latest": 0.25,
     "devstral-medium-2507": 0.25,
-    "pixtral-large-2411": 0.25
+    "pixtral-large-2411": 0.25,
+    "gemini-3.5-flash": 0.25,
+    "claude-opus-4.8": 0.24,
+    "qwen2.5": 0.25,
+    "mai-code-1-flash[^mai-code-1-flash]": 0.25,
+    "mai-code-1-flash": 0.25,
+    "claude-fable-5": 0.24,
+    "claude-sonnet-5": 0.24,
+    "claude-opus-4.8-(fast-mode)-(preview)": 0.24,
+    "kimi-k2.7-code": 0.25
   }
 }

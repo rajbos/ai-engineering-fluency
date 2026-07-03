@@ -9,6 +9,7 @@ import type {
 	UsageAnalysisPeriod,
 } from './types';
 import automaticToolIds from './automaticTools.json';
+import fluencyLevelDataRaw from './fluencyLevelData.json';
 
 /** Set of tool IDs that Copilot uses autonomously (reading files, searching, etc.).
  *  These are excluded from fluency scoring since the user doesn't configure them. */
@@ -17,6 +18,850 @@ const AUTOMATIC_TOOL_SET = new Set<string>((automaticToolIds as string[]).map(id
 /** Format a number with thousand separators for display. */
 function fmt(n: number): string {
 	return n.toLocaleString('en-US');
+}
+
+/** Fluency stage levels (1 = AI Skeptic through 4 = AI Strategist). */
+type Stage = 1 | 2 | 3 | 4;
+
+type CategoryScore = { stage: Stage; evidence: string[]; tips: string[] };
+
+/** Promotes a stage to at least `next`, returning the higher of the two. */
+function promoteStage(current: Stage, next: Stage): Stage {
+	return Math.max(current, next) as Stage;
+}
+
+/** Human-readable labels for each stage. */
+export const STAGE_LABELS: Record<Stage, string> = {
+	1: 'Stage 1: AI Skeptic',
+	2: 'Stage 2: AI Explorer',
+	3: 'Stage 3: AI Collaborator',
+	4: 'Stage 4: AI Strategist',
+};
+
+/**
+ * Centralised threshold configuration for all maturity/fluency stage promotions.
+ * Change a value here to adjust the bar for that stage across every scoring function
+ * (both the per-session `_score*` functions and `calculateFluencyScoreForTeamMember`).
+ */
+export const STAGE_THRESHOLDS = {
+	promptEngineering: {
+		/** Minimum total interactions (ask + edit + agent + cli) to reach Stage 2. */
+		stage2MinInteractions: 5,
+		/** Minimum avg turns per session to promote to at least Stage 2. */
+		stage2MinAvgTurns: 3,
+		/** Minimum avg turns per session to promote to at least Stage 3. */
+		stage3MinAvgTurns: 5,
+		/** Minimum total interactions (alongside slash commands or agent mode) to reach Stage 3. */
+		stage3MinInteractions: 30,
+		/** Minimum slash commands used (alongside stage3MinInteractions) to qualify for Stage 3. */
+		stage3MinSlashCommands: 2,
+		/** Minimum total interactions (alongside agent mode and model switching) to reach Stage 4. */
+		stage4MinInteractions: 100,
+		/** Minimum slash commands used as an alternative to model switching to qualify for Stage 4. */
+		stage4MinSlashCommands: 3,
+	},
+	contextEngineering: {
+		/** Minimum total context refs (file + selection + symbol + codebase + workspace) to reach Stage 2. */
+		stage2MinTotalRefs: 1,
+		/** Minimum distinct reference types used to reach Stage 3. */
+		stage3MinRefTypes: 3,
+		/** Minimum total context references to reach Stage 3. */
+		stage3MinTotalRefs: 10,
+		/** Minimum distinct reference types used to reach Stage 4. */
+		stage4MinRefTypes: 5,
+		/** Minimum total context references to reach Stage 4. */
+		stage4MinTotalRefs: 30,
+	},
+	agentic: {
+		/** Minimum avg files per edit session to promote to at least Stage 3. */
+		stage3MinAvgFilesPerSession: 3,
+		/** Minimum agent/CLI interactions (alongside non-auto tools) to reach Stage 3. */
+		stage3MinAgentInteractions: 10,
+		/** Minimum non-automatic tools used (alongside agent interactions) to reach Stage 3. */
+		stage3MinNonAutoTools: 3,
+		/** Minimum agent/CLI interactions (alongside non-auto tools) to reach Stage 4. */
+		stage4MinAgentInteractions: 50,
+		/** Minimum non-automatic tools used (alongside agent interactions) to reach Stage 4. */
+		stage4MinNonAutoTools: 5,
+		/** Minimum multi-file edit sessions (alongside avgFilesPerSession) to promote to Stage 4. */
+		stage4MinMultiFileEdits: 20,
+		/** Minimum sessions with 2+ child workspaces (multi-agent orchestration) to reach at least Stage 3. */
+		stage3MinMultiAgentParents: 1,
+		/** Minimum sessions with 2+ child workspaces (multi-agent orchestration) to reach at least Stage 4. */
+		stage4MinMultiAgentParents: 3,
+		/** Minimum number of child workspaces per session to count as multi-agent orchestration. */
+		multiAgentMinChildren: 2,
+	},
+	toolUsage: {
+		/** Minimum number of distinct advanced built-in tools used to promote to Stage 3. */
+		stage3MinAdvancedTools: 2,
+		/** Minimum number of distinct MCP servers connected to reach Stage 4. */
+		stage4MinMcpServers: 2,
+	},
+	customization: {
+		/** Minimum fraction of repos with customization to reach Stage 3 (requires stage3MinCustomizedRepos). */
+		stage3MinCustomizationRate: 0.3,
+		/** Minimum number of repos with customization to reach Stage 3 (requires stage3MinCustomizationRate). */
+		stage3MinCustomizedRepos: 2,
+		/** Minimum fraction of repos with customization to reach Stage 4 (requires stage4MinCustomizedRepos). */
+		stage4MinCustomizationRate: 0.7,
+		/** Minimum number of repos with customization to reach Stage 4 (requires stage4MinCustomizationRate). */
+		stage4MinCustomizedRepos: 3,
+		/** Minimum number of distinct AI models used to promote to at least Stage 3. */
+		stage3MinUniqueModels: 3,
+		/** Minimum distinct models used (alongside stage4MinCustomizedRepos) to reach Stage 4. */
+		stage4MinUniqueModels: 5,
+	},
+	workflowIntegration: {
+		/** Minimum sessions in the scoring period to reach Stage 2. */
+		stage2MinSessions: 3,
+		/** Minimum code-block apply rate (percentage) to promote to at least Stage 2. */
+		stage2MinApplyRatePct: 50,
+		/** Minimum number of distinct usage modes to promote to at least Stage 3. */
+		stage3MinModesUsed: 2,
+		/** Minimum total context references to be counted as "explicit context" evidence. */
+		hasExplicitContextMinRefs: 10,
+		/** Minimum total context references to promote to at least Stage 3. */
+		stage3MinContextRefs: 20,
+		/** Minimum sessions (alongside modes and context) to reach Stage 4. */
+		stage4MinSessions: 15,
+	},
+} as const;
+
+/** Computes the median stage from an array of category stage scores. */
+function computeMedianStage(stages: Stage[]): Stage {
+	const sorted = [...stages].sort((a, b) => a - b);
+	const mid = Math.floor(sorted.length / 2);
+	const median = sorted.length % 2 === 0
+		? Math.round((sorted[mid - 1] + sorted[mid]) / 2)
+		: sorted[mid];
+	return median as Stage;
+}
+
+/** VS Code Copilot slash commands (stored as tool calls by the session parser). */
+const SLASH_COMMANDS = ['explain', 'fix', 'tests', 'doc', 'generate', 'optimize', 'new', 'newNotebook', 'search', 'fixTestFailure', 'setupTests'] as const;
+
+/** Claude Code slash commands (stored with __slash__ prefix to avoid inflating tool counts). */
+const CLAUDE_SLASH_COMMANDS = ['review', 'bug', 'think', 'compact', 'pr_comments'] as const;
+
+/** Returns the slash commands actually used, based on tool call data. */
+function getUsedSlashCommands(byTool: Record<string, number>): string[] {
+	return [
+		...SLASH_COMMANDS.filter(cmd => (byTool[cmd] ?? 0) > 0),
+		...CLAUDE_SLASH_COMMANDS.filter(cmd => (byTool[`__slash__${cmd}`] ?? 0) > 0),
+	];
+}
+
+/** Counts tools intentionally invoked by the user (excludes automatic agent tools and slash-command entries). */
+function countNonAutoTools(byTool: Record<string, number>): number {
+	return Object.keys(byTool).filter(t => !AUTOMATIC_TOOL_SET.has(t.toLowerCase()) && !t.startsWith('__slash__')).length;
+}
+
+function _peHasModelSwitching(mixedTierSessions: number, mixedCostSessions: number, switchingFrequency: number): boolean {
+	return mixedTierSessions > 0 || mixedCostSessions > 0 || switchingFrequency > 0;
+}
+function _peHasAgentMode(agentCount: number, cliCount: number): boolean {
+	return agentCount > 0 || cliCount > 0;
+}
+function _peQualifiesForStage3(totalInteractions: number, usedSlashCommands: string[], hasAgentMode: boolean): boolean {
+	const T = STAGE_THRESHOLDS.promptEngineering;
+	return totalInteractions >= T.stage3MinInteractions && (usedSlashCommands.length >= T.stage3MinSlashCommands || hasAgentMode);
+}
+function _peQualifiesForStage4(totalInteractions: number, hasAgentMode: boolean, hasModelSwitching: boolean, usedSlashCommands: string[]): boolean {
+	const T = STAGE_THRESHOLDS.promptEngineering;
+	return totalInteractions >= T.stage4MinInteractions && hasAgentMode && (hasModelSwitching || usedSlashCommands.length >= T.stage4MinSlashCommands);
+}
+function _buildPeTipsForStage3(hasAgentMode: boolean, usedSlashCommands: string[], T: { stage3MinSlashCommands: number }): string[] {
+	const tips: string[] = [];
+	if (!hasAgentMode) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-file changes — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
+	if (usedSlashCommands.length < T.stage3MinSlashCommands) { tips.push('Use [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /fix, or /tests to give structured prompts'); }
+	return tips;
+}
+
+function _buildPeTipsForStage4(hasAgentMode: boolean, hasModelSwitching: boolean, usedSlashCommands: string[], autoUsageRatio: number, T: { stage4MinSlashCommands: number }): string[] {
+	const tips: string[] = [];
+	if (!hasAgentMode) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for autonomous, multi-step coding tasks'); }
+	if (!hasModelSwitching) { tips.push('Experiment with [different models](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_choose-a-language-model) for different tasks - use fast models for simple queries and reasoning models for complex problems — [▶ Model selection video](https://tech.hub.ms/github-copilot/videos/model-selection)'); }
+	if (autoUsageRatio === 0) { tips.push('Try the Auto model for cost-sensitive tasks so Copilot can pick the most efficient model for you'); }
+	else if (autoUsageRatio < 0.5) { tips.push('Use the Auto model more often when you want Copilot to balance quality and cost for you'); }
+	if (usedSlashCommands.length < T.stage4MinSlashCommands && hasAgentMode && hasModelSwitching) { tips.push('Explore more [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /tests, or /doc to diversify your prompting'); }
+	return tips;
+}
+
+function _buildPeTips(stage: Stage, hasAgentMode: boolean, hasModelSwitching: boolean, usedSlashCommands: string[], autoUsageRatio: number): string[] {
+	const T = STAGE_THRESHOLDS.promptEngineering;
+	const tips: string[] = [];
+	if (stage < 2) { tips.push('Try asking Copilot a question using the Chat panel — [▶ Chat in IDE video](https://tech.hub.ms/github-copilot/videos/chat-in-ide)'); }
+	if (stage < 3) { tips.push(..._buildPeTipsForStage3(hasAgentMode, usedSlashCommands, T)); }
+	if (stage < 4) { tips.push(..._buildPeTipsForStage4(hasAgentMode, hasModelSwitching, usedSlashCommands, autoUsageRatio, T)); }
+	return tips;
+}
+function _applyPeConversationStage(p: UsageAnalysisPeriod, evidence: string[], stage: Stage): Stage {
+	if (!p.conversationPatterns) { return stage; }
+	const T = STAGE_THRESHOLDS.promptEngineering;
+	const multiTurnRate = Math.round((p.conversationPatterns.multiTurnSessions / Math.max(1, p.sessions)) * 100);
+	if (p.conversationPatterns.multiTurnSessions > 0) { evidence.push(`${fmt(p.conversationPatterns.multiTurnSessions)} multi-turn sessions (${multiTurnRate}%)`); }
+	if (p.conversationPatterns.avgTurnsPerSession >= T.stage2MinAvgTurns) { evidence.push(`Avg ${p.conversationPatterns.avgTurnsPerSession.toFixed(1)} exchanges per session`); stage = promoteStage(stage, 2); }
+	if (p.conversationPatterns.avgTurnsPerSession >= T.stage3MinAvgTurns) { stage = promoteStage(stage, 3); }
+	return stage;
+}
+
+function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
+	const { stage, evidence, usedSlashCommands, hasModelSwitching, hasAgentMode, autoUsageRatio } = _speComputeEvidence(p);
+	return { stage, evidence, tips: _buildPeTips(stage, hasAgentMode, hasModelSwitching, usedSlashCommands, autoUsageRatio) };
+}
+
+
+/**
+ * Add evidence for mode usage counts.
+ */
+function _speAddModeEvidence(evidence: string[], p: UsageAnalysisPeriod): void {
+	const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + p.modeUsage.cli;
+	if (totalInteractions > 0) { evidence.push(`${fmt(totalInteractions)} total interactions`); }
+	if (p.modeUsage.ask > 0) { evidence.push(`${fmt(p.modeUsage.ask)} ask-mode conversations`); }
+	if (p.modeUsage.agent > 0) { evidence.push(`${fmt(p.modeUsage.agent)} agent-mode interactions`); }
+	if (p.modeUsage.cli > 0) { evidence.push(`${fmt(p.modeUsage.cli)} CLI interactions`); }
+}
+
+/**
+ * Add evidence for auto model usage.
+ */
+function _speAddAutoModelEvidence(evidence: string[], p: UsageAnalysisPeriod, autoUsageRatio: number): void {
+	if (p.modelSwitching.autoSessions > 0) {
+		evidence.push(`Auto model used in ${fmt(p.modelSwitching.autoSessions)} session${p.modelSwitching.autoSessions === 1 ? '' : 's'} (${Math.round(autoUsageRatio * 100)}%)`);
+	}
+}
+
+/**
+ * Apply stage promotions based on auto usage ratio.
+ */
+function _speApplyAutoUsageStage(stage: Stage, autoUsageRatio: number, sessions: number): Stage {
+	let result = stage;
+	if (autoUsageRatio > 0) { result = promoteStage(result, 2); }
+	if (autoUsageRatio >= 0.5) { result = promoteStage(result, 3); }
+	if (autoUsageRatio >= 0.8 && sessions >= 5) { result = 4; }
+	return result;
+}
+
+/**
+ * Apply model switching stage boost.
+ */
+function _speApplyModelSwitchingBoost(stage: Stage, hasModelSwitching: boolean, p: UsageAnalysisPeriod, evidence: string[]): Stage {
+	if (!hasModelSwitching) { return stage; }
+	
+	evidence.push(`Switched models in ${Math.round(p.modelSwitching.switchingFrequency)}% of sessions`);
+	if (stage < 4 && (p.modelSwitching.mixedTierSessions > 0 || p.modelSwitching.mixedCostSessions > 0)) {
+		return promoteStage(stage, 3);
+	}
+	return stage;
+}
+
+type SpeResult = { stage: Stage; evidence: string[]; usedSlashCommands: string[]; hasModelSwitching: boolean; hasAgentMode: boolean; autoUsageRatio: number };
+function _speComputeEvidence(p: UsageAnalysisPeriod): SpeResult {
+	const evidence: string[] = [];
+	const T = STAGE_THRESHOLDS.promptEngineering;
+	
+	_speAddModeEvidence(evidence, p);
+	
+	const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + p.modeUsage.cli;
+	let stage: Stage = _applyPeConversationStage(p, evidence, 1);
+	if (totalInteractions >= T.stage2MinInteractions) { stage = 2; }
+
+	const usedSlashCommands = getUsedSlashCommands(p.toolCalls.byTool);
+	if (usedSlashCommands.length > 0) { evidence.push(`Used slash commands: /${usedSlashCommands.join(', /')}`); }
+
+	const hasModelSwitching = _peHasModelSwitching(p.modelSwitching.mixedTierSessions, p.modelSwitching.mixedCostSessions, p.modelSwitching.switchingFrequency);
+	const hasAgentMode = _peHasAgentMode(p.modeUsage.agent, p.modeUsage.cli);
+	const autoUsageRatio = p.modelSwitching.totalSessions > 0 ? (p.modelSwitching.autoSessions / p.modelSwitching.totalSessions) : 0;
+	
+	_speAddAutoModelEvidence(evidence, p, autoUsageRatio);
+
+	if (_peQualifiesForStage3(totalInteractions, usedSlashCommands, hasAgentMode)) { stage = 3; }
+	if (_peQualifiesForStage4(totalInteractions, hasAgentMode, hasModelSwitching, usedSlashCommands)) { stage = 4; }
+	
+	stage = _speApplyAutoUsageStage(stage, autoUsageRatio, p.sessions);
+	stage = _speApplyModelSwitchingBoost(stage, hasModelSwitching, p, evidence);
+	
+	return { stage, evidence, usedSlashCommands, hasModelSwitching, hasAgentMode, autoUsageRatio };
+}
+
+function _ceFormatGapTip(gapParts: string[], allTypesNotUsed: string[]): string | undefined {
+	if (gapParts.length === 0) { return undefined; }
+	const suggStr = allTypesNotUsed.length > 0 ? ` — try ${allTypesNotUsed.slice(0, 3).join(', ')}` : '';
+	return `Stage 4 needs ${gapParts.join(' and ')}${suggStr}`;
+}
+
+function _ceFormatSpecializedTip(specializedItems: { name: string; used: boolean }[], link: string): string | undefined {
+	const notUsed = specializedItems.filter(i => !i.used).map(i => i.name);
+	if (notUsed.length === 0) { return undefined; }
+	const extra = notUsed.length > 3 ? ` and ${notUsed.length - 3} more` : '';
+	return `Try ${notUsed.slice(0, 3).join(', ')}${extra} — see ${link} to reach Stage 4`;
+}
+
+function _buildCeStage4Tip(refs: UsageAnalysisPeriod['contextReferences'], usedRefTypeCount: number, totalContextRefs: number): string | undefined {
+	const T = STAGE_THRESHOLDS.contextEngineering;
+	const typesStillNeeded = Math.max(0, T.stage4MinRefTypes - usedRefTypeCount);
+	const refsStillNeeded = Math.max(0, T.stage4MinTotalRefs - totalContextRefs);
+	const specializedItems = [
+		{ name: 'image attachments', used: (refs.byKind?.['copilot.image'] ?? 0) > 0 },
+		{ name: 'prompt files', used: (refs.byKind?.['promptFile'] ?? 0) > 0 },
+		{ name: 'custom prompt commands', used: (refs.byKind?.['prompt'] ?? 0) > 0 },
+		{ name: '#changes', used: refs.changes > 0 },
+		{ name: '#problemsPanel', used: refs.problemsPanel > 0 },
+		{ name: '#outputPanel', used: refs.outputPanel > 0 },
+		{ name: '#terminalLastCommand', used: refs.terminalLastCommand > 0 },
+		{ name: '#terminalSelection', used: refs.terminalSelection > 0 },
+		{ name: '#clipboard', used: refs.clipboard > 0 },
+		{ name: '@vscode', used: refs.vscode > 0 },
+	];
+	const specializedUsedCount = specializedItems.filter(i => i.used).length;
+	if (specializedUsedCount >= 2) {
+		const allTypesNotUsed = [
+			{ name: '#symbol', used: refs.symbol > 0 },
+			{ name: '@workspace', used: refs.workspace > 0 },
+			{ name: '#codebase', used: refs.codebase > 0 },
+			{ name: '@terminal', used: refs.terminal > 0 },
+			...specializedItems,
+		].filter(i => !i.used).map(i => i.name);
+		const gapParts: string[] = [];
+		if (typesStillNeeded > 0) { gapParts.push(`${fmt(usedRefTypeCount)} of ${T.stage4MinRefTypes} different reference types used`); }
+		if (refsStillNeeded > 0) { gapParts.push(`${fmt(totalContextRefs)} of ${T.stage4MinTotalRefs} total references`); }
+		return _ceFormatGapTip(gapParts, allTypesNotUsed);
+	}
+	return _ceFormatSpecializedTip(specializedItems, '[specialized context variables](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts)');
+}
+
+function _pushCeEvidence(evidence: string[], count: number, label: string): void {
+	if (count > 0) { evidence.push(`${fmt(count)} ${label}`); }
+}
+
+function _buildCeEvidence(refs: UsageAnalysisPeriod['contextReferences']): string[] {
+	const evidence: string[] = [];
+	const baseEvidence: Array<[number, string]> = [
+		[refs.file, '#file references'],
+		[refs.selection, '#selection references'],
+		[refs.codebase, '#codebase references'],
+		[refs.workspace, '@workspace references'],
+		[refs.terminal, '@terminal references'],
+		[refs.vscode, '@vscode references'],
+		[refs.clipboard, '#clipboard references'],
+		[refs.changes, '#changes references'],
+		[refs.problemsPanel, '#problemsPanel references'],
+		[refs.outputPanel, '#outputPanel references'],
+		[refs.terminalLastCommand, '#terminalLastCommand references'],
+		[refs.terminalSelection, '#terminalSelection references'],
+		[refs.byKind?.['promptFile'] ?? 0, 'prompt file uses'],
+		[refs.byKind?.['prompt'] ?? 0, 'custom prompt commands'],
+		[refs.codeContextLines ?? 0, 'lines of code context'],
+	];
+	for (const [count, label] of baseEvidence) {
+		_pushCeEvidence(evidence, count, label);
+	}
+	return evidence;
+}
+
+function _getCeUsedRefTypeCount(refs: UsageAnalysisPeriod['contextReferences']): number {
+	return [
+		refs.file, refs.selection, refs.symbol, refs.codebase, refs.workspace,
+		refs.terminal, refs.vscode, refs.clipboard, refs.changes,
+		refs.problemsPanel, refs.outputPanel, refs.terminalLastCommand, refs.terminalSelection,
+		refs.byKind?.['copilot.image'] ?? 0, refs.byKind?.['promptFile'] ?? 0, refs.byKind?.['prompt'] ?? 0,
+	].filter(Boolean).length;
+}
+
+function _applyCeBoosters(refs: UsageAnalysisPeriod['contextReferences'], evidence: string[], stage: Stage): Stage {
+	const imageRefs = refs.byKind['copilot.image'] || 0;
+	if (imageRefs > 0) {
+		evidence.push(`${fmt(imageRefs)} image references (vision)`);
+		stage = promoteStage(stage, 3);
+	}
+	if ((refs.byKind['promptFile'] || 0) > 0) {
+		stage = promoteStage(stage, 3);
+	}
+	return stage;
+}
+
+function _scoreContextEngineering(p: UsageAnalysisPeriod): CategoryScore {
+	let stage: Stage = 1;
+	const T = STAGE_THRESHOLDS.contextEngineering;
+	const refs = p.contextReferences;
+	const totalContextRefs = refs.file + refs.selection + refs.symbol + refs.codebase + refs.workspace;
+	const usedRefTypeCount = _getCeUsedRefTypeCount(refs);
+	const evidence = _buildCeEvidence(refs);
+	if (totalContextRefs >= T.stage2MinTotalRefs) { stage = 2; }
+	if (usedRefTypeCount >= T.stage3MinRefTypes && totalContextRefs >= T.stage3MinTotalRefs) { stage = 3; }
+	if (usedRefTypeCount >= T.stage4MinRefTypes && totalContextRefs >= T.stage4MinTotalRefs) { stage = 4; }
+	stage = _applyCeBoosters(refs, evidence, stage);
+	const tips: string[] = [];
+	if (stage < 2) { tips.push('Try adding [#file or #selection](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) references to give Copilot more context'); }
+	if (stage < 3) { tips.push('Explore [@workspace, #codebase, and @terminal](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) for broader context'); }
+	if (stage < 4) {
+		const tip = _buildCeStage4Tip(refs, usedRefTypeCount, totalContextRefs);
+		if (tip) { tips.push(tip); }
+	}
+	return { stage, evidence, tips };
+}
+
+function _agQualifiesForStage3(agentInteractions: number, nonAutoToolCount: number, T: typeof STAGE_THRESHOLDS.agentic): boolean {
+	return agentInteractions >= T.stage3MinAgentInteractions && nonAutoToolCount >= T.stage3MinNonAutoTools;
+}
+
+function _agQualifiesForStage4(agentInteractions: number, nonAutoToolCount: number, T: typeof STAGE_THRESHOLDS.agentic): boolean {
+	return agentInteractions >= T.stage4MinAgentInteractions && nonAutoToolCount >= T.stage4MinNonAutoTools;
+}
+
+function _agQualifiesMultiFileStage4(editScope: UsageAnalysisPeriod['editScope'], T: typeof STAGE_THRESHOLDS.agentic): boolean {
+	return !!editScope && editScope.multiFileEdits >= T.stage4MinMultiFileEdits && editScope.avgFilesPerSession >= T.stage3MinAvgFilesPerSession;
+}
+
+function _agApplyMultiAgentBooster(
+	multiAgentParents: number,
+	T: typeof STAGE_THRESHOLDS.agentic,
+	stage: Stage,
+	evidence: string[],
+): Stage {
+	if (multiAgentParents < T.stage3MinMultiAgentParents) { return stage; }
+	const label = multiAgentParents === 1 ? '1 session' : `${fmt(multiAgentParents)} sessions`;
+	evidence.push(`${label} with child workspaces (multi-agent orchestration)`);
+	stage = promoteStage(stage, 3);
+	if (multiAgentParents >= T.stage4MinMultiAgentParents) { stage = promoteStage(stage, 4); }
+	return stage;
+}
+
+function _agBuildTips(stage: Stage): string[] {
+	const tips: string[] = [];
+	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) — it can run terminal commands, edit files, and explore your codebase autonomously — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
+	if (stage < 3) { tips.push('Use [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-step tasks; let it chain tools like file search, terminal, and code edits — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
+	if (stage < 4) { tips.push('Try [multi-agent orchestration](https://code.visualstudio.com/docs/copilot/agents/overview): start child sessions from a parent session to run multiple agents in parallel on independent sub-tasks'); }
+	return tips;
+}
+
+/**
+ * Add evidence for basic agentic usage.
+ */
+function _agAddBasicEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage): Stage {
+	let result = stage;
+	if (p.modeUsage.agent > 0) { evidence.push(`${fmt(p.modeUsage.agent)} agent-mode interactions`); result = 2; }
+	if (p.modeUsage.cli > 0) { evidence.push(`${fmt(p.modeUsage.cli)} CLI interactions`); result = promoteStage(result, 2); }
+	if (p.toolCalls.total > 0) { evidence.push(`${fmt(p.toolCalls.total)} tool calls executed`); }
+	if (p.modeUsage.edit > 0) { evidence.push(`${fmt(p.modeUsage.edit)} edit-mode interactions`); }
+	return result;
+}
+
+/**
+ * Add evidence for edit scope and apply stage promotions.
+ */
+function _agAddEditScopeEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage, T: typeof STAGE_THRESHOLDS.agentic): Stage {
+	if (!p.editScope) { return stage; }
+	
+	let result = stage;
+	const totalEditSessions = p.editScope.singleFileEdits + p.editScope.multiFileEdits;
+	const multiFileRate = totalEditSessions > 0 ? Math.round((p.editScope.multiFileEdits / totalEditSessions) * 100) : 0;
+	
+	if (p.editScope.multiFileEdits > 0) {
+		evidence.push(`${fmt(p.editScope.multiFileEdits)} multi-file edit sessions (${multiFileRate}%)`);
+		result = promoteStage(result, 2);
+	}
+	if (p.editScope.avgFilesPerSession >= T.stage3MinAvgFilesPerSession) {
+		evidence.push(`Avg ${p.editScope.avgFilesPerSession.toFixed(1)} files per edit session`);
+		result = promoteStage(result, 3);
+	}
+	
+	return result;
+}
+
+/**
+ * Apply agentic stage qualifications and boosters.
+ */
+function _agApplyStageQualifications(stage: Stage, p: UsageAnalysisPeriod, T: typeof STAGE_THRESHOLDS.agentic, evidence: string[]): Stage {
+	let result = stage;
+	
+	if (p.agentTypes?.editsAgent) { evidence.push(`${fmt(p.agentTypes.editsAgent)} edits agent sessions`); result = promoteStage(result, 2); }
+
+	const nonAutoToolCount = countNonAutoTools(p.toolCalls.byTool);
+	const agentInteractions = p.modeUsage.agent + p.modeUsage.cli;
+	
+	if (_agQualifiesForStage3(agentInteractions, nonAutoToolCount, T)) { result = 3; }
+	if (_agQualifiesForStage4(agentInteractions, nonAutoToolCount, T)) { result = 4; }
+	if (_agQualifiesMultiFileStage4(p.editScope, T)) { result = promoteStage(result, 4); }
+	
+	result = _agApplyMultiAgentBooster(p.multiAgentParentSessions ?? 0, T, result, evidence);
+	
+	return result;
+}
+
+function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
+	const evidence: string[] = [];
+	let stage: Stage = 1;
+	const T = STAGE_THRESHOLDS.agentic;
+
+	stage = _agAddBasicEvidence(evidence, p, stage);
+	stage = _agAddEditScopeEvidence(evidence, p, stage, T);
+	stage = _agApplyStageQualifications(stage, p, T, evidence);
+
+	return { stage, evidence, tips: _agBuildTips(stage) };
+}
+
+function _tuBuildTips(stage: Stage, mcpServers: string[], isMCPDisabled?: boolean): string[] {
+	const tips: string[] = [];
+	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) to let Copilot use built-in tools for file operations and terminal commands — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
+	if (stage < 3) {
+		if (mcpServers.length === 0 && !isMCPDisabled) { tips.push('Set up [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to connect Copilot to external tools (databases, APIs, cloud services) — [▶ MCP with Azure and GitHub](https://tech.hub.ms/github-copilot/videos/mcp-with-azure-and-github)'); }
+		else if (mcpServers.length > 0) { tips.push('Explore [GitHub integrations](https://code.visualstudio.com/docs/copilot/agents/agent-tools) and advanced tools like editFiles and run_in_terminal'); }
+	}
+	if (stage < 4) {
+		if (mcpServers.length === 1) { tips.push('Add more [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to expand Copilot\'s capabilities - check the VS Code MCP registry — [▶ MCP with Azure and GitHub](https://tech.hub.ms/github-copilot/videos/mcp-with-azure-and-github)'); }
+		else if (mcpServers.length === 0 && !isMCPDisabled) { tips.push('Explore the [VS Code MCP registry](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) for tools that integrate with your workflow'); }
+		else if (mcpServers.length > 0) { tips.push('You\'re using multiple MCP servers - keep exploring advanced tool combinations'); }
+	}
+	return tips;
+}
+
+/**
+ * Add evidence for basic tool usage.
+ */
+function _tuAddBasicToolEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage): Stage {
+	const toolCount = Object.keys(p.toolCalls.byTool).length;
+	const nonAutoToolCount = countNonAutoTools(p.toolCalls.byTool);
+	
+	let result = stage;
+	if (nonAutoToolCount > 0) {
+		const autoCount = toolCount - nonAutoToolCount;
+		const autoNote = autoCount > 0 ? ` (+ ${fmt(autoCount)} automatic)` : '';
+		evidence.push(`${fmt(nonAutoToolCount)} intentional tools used${autoNote}`);
+		result = 2;
+	} else if (toolCount > 0) {
+		evidence.push(`${fmt(toolCount)} tools used (all automatic — agent reads/searches)`);
+	}
+	
+	return result;
+}
+
+/**
+ * Add evidence for workspace agent usage.
+ */
+function _tuAddWorkspaceAgentEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage): Stage {
+	if (p.agentTypes?.workspaceAgent > 0) {
+		evidence.push(`${fmt(p.agentTypes.workspaceAgent)} @workspace agent sessions`);
+		return promoteStage(stage, 3);
+	}
+	return stage;
+}
+
+/**
+ * Add evidence for advanced tool usage.
+ */
+function _tuAddAdvancedToolEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage, T: typeof STAGE_THRESHOLDS.toolUsage): Stage {
+	const advancedToolFriendlyNames: Record<string, string> = {
+		github_pull_request: 'GitHub Pull Request', github_repo: 'GitHub Repository',
+		run_in_terminal: 'Run In Terminal', editFiles: 'Edit Files', listFiles: 'List Files'
+	};
+	const usedAdvanced = Object.keys(advancedToolFriendlyNames).filter(t => (p.toolCalls.byTool[t] || 0) > 0);
+	
+	let result = stage;
+	if (usedAdvanced.length > 0) {
+		evidence.push(`Advanced tools: ${usedAdvanced.map(t => advancedToolFriendlyNames[t]).join(', ')}`);
+		if (usedAdvanced.length >= T.stage3MinAdvancedTools) {
+			result = promoteStage(result, 3);
+		}
+	}
+	
+	return result;
+}
+
+/**
+ * Add evidence for MCP tool usage.
+ */
+function _tuAddMcpEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage, T: typeof STAGE_THRESHOLDS.toolUsage): { stage: Stage; mcpServers: string[] } {
+	const mcpServers = Object.keys(p.mcpTools.byServer);
+	let result = stage;
+	
+	if (p.mcpTools.total > 0) {
+		evidence.push(`${fmt(p.mcpTools.total)} MCP tool calls across ${mcpServers.length} server(s)`);
+		result = promoteStage(result, 3);
+		if (mcpServers.length >= T.stage4MinMcpServers) {
+			result = 4;
+		}
+	}
+	
+	return { stage: result, mcpServers };
+}
+
+function _scoreToolUsage(p: UsageAnalysisPeriod, isMCPEnabled?: boolean): CategoryScore {
+	const evidence: string[] = [];
+	let stage: Stage = 1;
+	const T = STAGE_THRESHOLDS.toolUsage;
+
+	stage = _tuAddBasicToolEvidence(evidence, p, stage);
+	stage = _tuAddWorkspaceAgentEvidence(evidence, p, stage);
+	stage = _tuAddAdvancedToolEvidence(evidence, p, stage, T);
+
+	const mcpDisabled = isMCPEnabled === false;
+	if (!mcpDisabled) {
+		const { stage: mcpStage, mcpServers: mcpServersResult } = _tuAddMcpEvidence(evidence, p, stage, T);
+		stage = mcpStage;
+		return { stage, evidence, tips: _tuBuildTips(stage, mcpServersResult) };
+	}
+
+	return { stage, evidence, tips: _tuBuildTips(stage, [], mcpDisabled) };
+}
+
+function _buildCustomizationStage4Tip(matrix: WorkspaceCustomizationMatrix | undefined, totalRepos: number, reposWithCustomization: number): string {
+	const uncustomized = totalRepos - reposWithCustomization;
+	if (uncustomized === 0) {
+		return 'All repos customized! Keep instructions up to date and add [skill files](https://code.visualstudio.com/docs/copilot/customization/agent-skills) or [MCP server configs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) for deeper integration';
+	}
+	const summaryTip = `${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} still missing customization — add [instructions](https://code.visualstudio.com/docs/copilot/customization/custom-instructions), [agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions), or [MCP configs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) for full coverage.`;
+	const prioritizedMissingRepos = (matrix?.workspaces || [])
+		.filter(row => Object.values(row.typeStatuses).every(status => status === '❌'))
+		.filter(row => !row.workspacePath.startsWith('<unresolved:'))
+		.sort((a, b) => b.interactionCount !== a.interactionCount ? b.interactionCount - a.interactionCount : b.sessionCount - a.sessionCount)
+		.slice(0, 3);
+	if (prioritizedMissingRepos.length === 0) { return summaryTip; }
+	const repoLines = prioritizedMissingRepos.map(row =>
+		`${row.workspaceName} (${fmt(row.interactionCount)} interaction${row.interactionCount === 1 ? '' : 's'})`
+	).join('\n');
+	return `${summaryTip}\n\nTop repos to customize first:\n${repoLines}`;
+}
+
+function _cuComputeStage(
+	customizationRate: number, reposWithCustomization: number,
+	uniqueModelCount: number, T: typeof STAGE_THRESHOLDS.customization
+): Stage {
+	let stage: Stage = 1;
+	if (reposWithCustomization > 0) { stage = 2; }
+	if (customizationRate >= T.stage3MinCustomizationRate && reposWithCustomization >= T.stage3MinCustomizedRepos) { stage = 3; }
+	if (customizationRate >= T.stage4MinCustomizationRate && reposWithCustomization >= T.stage4MinCustomizedRepos) { stage = 4; }
+	if (uniqueModelCount >= T.stage3MinUniqueModels) { stage = promoteStage(stage, 3); }
+	if (uniqueModelCount >= T.stage4MinUniqueModels && reposWithCustomization >= T.stage4MinCustomizedRepos) { stage = 4; }
+	return stage;
+}
+
+function _cuBuildTips(stage: Stage, totalRepos: number, reposWithCustomization: number): string[] {
+	const tips: string[] = [];
+	const uncustomized = totalRepos - reposWithCustomization;
+	if (stage < 2) { tips.push('Create a [.github/copilot-instructions.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) or [CLAUDE.md](https://docs.anthropic.com/en/docs/claude-code/memory) file with project-specific guidelines — [▶ User Instructions video](https://tech.hub.ms/github-copilot/videos/user-instructions)'); }
+	if (stage < 3) { tips.push('Add [custom instructions](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) to more repositories to standardize your Copilot experience — [▶ User Instructions video](https://tech.hub.ms/github-copilot/videos/user-instructions)'); }
+	if (stage < 4 && uncustomized > 0) { tips.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos have customization — add [instructions and agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) to the remaining ${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} for Stage 4`); }
+	else if (stage < 4) { tips.push('Aim for consistent customization across all projects with [instructions and agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions)'); }
+	return tips;
+}
+
+/**
+ * Extract unique models from model switching data.
+ */
+function _cuExtractUniqueModels(p: UsageAnalysisPeriod): string[] {
+	return [...new Set([
+		...p.modelSwitching.standardModels,
+		...p.modelSwitching.premiumModels,
+		...p.modelSwitching.lowCostModels,
+		...p.modelSwitching.mediumCostModels,
+		...p.modelSwitching.highCostModels
+	])];
+}
+
+/**
+ * Add evidence for repository and model usage.
+ */
+function _cuAddBasicEvidence(evidence: string[], totalRepos: number, uniqueModels: string[], T: typeof STAGE_THRESHOLDS.customization): void {
+	if (totalRepos > 0) { evidence.push(`Worked in ${totalRepos} repositor${totalRepos === 1 ? 'y' : 'ies'}`); }
+	if (uniqueModels.length >= T.stage3MinUniqueModels) { evidence.push(`Used ${uniqueModels.length} different models`); }
+}
+
+/**
+ * Apply stage boosts for special model usage.
+ */
+function _cuApplyModelUsageBoosts(stage: Stage, p: UsageAnalysisPeriod, evidence: string[]): Stage {
+	let result = stage;
+	
+	if (p.modelSwitching.foundryWindowsSessions > 0) {
+		result = promoteStage(result, 2);
+		evidence.push(`Used Microsoft Foundry / local models in ${fmt(p.modelSwitching.foundryWindowsSessions)} session${p.modelSwitching.foundryWindowsSessions === 1 ? '' : 's'}`);
+	}
+	if (p.modelSwitching.unknownProviderSessions > 0) {
+		result = promoteStage(result, 2);
+		evidence.push(`Used models from unknown providers in ${fmt(p.modelSwitching.unknownProviderSessions)} session${p.modelSwitching.unknownProviderSessions === 1 ? '' : 's'}`);
+	}
+	
+	return result;
+}
+
+/**
+ * Add evidence for customization level.
+ */
+function _cuAddCustomizationEvidence(evidence: string[], stage: Stage, reposWithCustomization: number, totalRepos: number, T: typeof STAGE_THRESHOLDS.customization): void {
+	if (stage >= 4) {
+		evidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized (${T.stage4MinCustomizationRate * 100}%+ with ${T.stage4MinCustomizedRepos}+ repos → Stage 4)`);
+	} else if (stage >= 3) {
+		evidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized (${T.stage3MinCustomizationRate * 100}%+ with ${T.stage3MinCustomizedRepos}+ repos → Stage 3)`);
+	} else if (reposWithCustomization > 0) {
+		evidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos with custom instructions or agents.md`);
+	}
+}
+
+/**
+ * Build final tips with additional suggestions.
+ */
+function _cuBuildFinalTips(tips: string[], stage: Stage, p: UsageAnalysisPeriod, uniqueModels: string[], matrix: WorkspaceCustomizationMatrix | undefined, totalRepos: number, reposWithCustomization: number): string[] {
+	const result = [...tips];
+	
+	if (p.modelSwitching.foundryWindowsSessions === 0) {
+		result.unshift('Try the Microsoft Foundry on Windows extension if you want to experiment with local models and offline-friendly workflows');
+	}
+	if (p.modelSwitching.unknownProviderSessions === 0 && uniqueModels.length <= 1) {
+		result.unshift('Try different model providers from the marketplace when you want more specialized or cost-effective options');
+	}
+	if (stage >= 4) {
+		result.push(_buildCustomizationStage4Tip(matrix, totalRepos, reposWithCustomization));
+	}
+	
+	return result;
+}
+
+function _scoreCustomization(p: UsageAnalysisPeriod, lastCustomizationMatrix: WorkspaceCustomizationMatrix | undefined): CategoryScore {
+	const evidence: string[] = [];
+	const T = STAGE_THRESHOLDS.customization;
+
+	const matrix = lastCustomizationMatrix;
+	const totalRepos = matrix?.totalWorkspaces ?? 0;
+	const reposWithCustomization = totalRepos - (matrix?.workspacesWithIssues ?? 0);
+	const customizationRate = totalRepos > 0 ? (reposWithCustomization / totalRepos) : 0;
+	const uniqueModels = _cuExtractUniqueModels(p);
+	
+	let stage = _cuComputeStage(customizationRate, reposWithCustomization, uniqueModels.length, T);
+
+	_cuAddBasicEvidence(evidence, totalRepos, uniqueModels, T);
+	stage = _cuApplyModelUsageBoosts(stage, p, evidence);
+	_cuAddCustomizationEvidence(evidence, stage, reposWithCustomization, totalRepos, T);
+
+	let tips = _cuBuildTips(stage, totalRepos, reposWithCustomization);
+	tips = _cuBuildFinalTips(tips, stage, p, uniqueModels, matrix, totalRepos, reposWithCustomization);
+
+	return { stage, evidence, tips };
+}
+
+function _wiQualifiesForStage4(sessions: number, modesUsed: number, totalContextRefs: number, T: typeof STAGE_THRESHOLDS.workflowIntegration): boolean {
+	return sessions >= T.stage4MinSessions && modesUsed >= T.stage3MinModesUsed && totalContextRefs >= T.stage3MinContextRefs;
+}
+
+function _wiBuildTips(stage: Stage, modesUsed: number, totalContextRefs: number, T: typeof STAGE_THRESHOLDS.workflowIntegration): string[] {
+	const tips: string[] = [];
+	if (stage < 2) { tips.push('Use AI more regularly - even for quick questions — [▶ Chat in IDE video](https://tech.hub.ms/github-copilot/videos/chat-in-ide)'); }
+	if (stage < 3) {
+		if (modesUsed < T.stage3MinModesUsed) { tips.push('Combine [ask mode with agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) in your daily workflow — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
+		if (totalContextRefs < T.hasExplicitContextMinRefs) { tips.push('Use explicit [context references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like #file, @workspace, and #selection'); }
+	}
+	if (stage < 4) {
+		if (totalContextRefs < T.stage3MinContextRefs) { tips.push('Make explicit context a habit - use [#file, @workspace, and other references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) consistently'); }
+		tips.push('Make AI part of every coding task: planning, coding, testing, and reviewing');
+	}
+	return tips;
+}
+
+/**
+ * Calculate total context references from all sources.
+ */
+function _wiCalculateTotalContextRefs(p: UsageAnalysisPeriod): number {
+	return p.contextReferences.file + p.contextReferences.selection +
+		p.contextReferences.symbol + p.contextReferences.codebase + p.contextReferences.workspace;
+}
+
+/**
+ * Calculate number of modes used.
+ */
+function _wiCalculateModesUsed(p: UsageAnalysisPeriod): number {
+	return [p.modeUsage.ask > 0, p.modeUsage.agent > 0, p.modeUsage.cli > 0].filter(Boolean).length;
+}
+
+/**
+ * Add evidence for session count.
+ */
+function _wiAddSessionEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage, T: typeof STAGE_THRESHOLDS.workflowIntegration): Stage {
+	if (p.sessions >= T.stage2MinSessions) {
+		evidence.push(`${fmt(p.sessions)} sessions in the last 30 days`);
+		return 2;
+	}
+	return stage;
+}
+
+/**
+ * Add evidence for apply usage.
+ */
+function _wiAddApplyUsageEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage, T: typeof STAGE_THRESHOLDS.workflowIntegration): Stage {
+	if (!p.applyUsage || p.applyUsage.totalCodeBlocks <= 0) { return stage; }
+	
+	const applyRatePercent = Math.round(p.applyUsage.applyRate);
+	evidence.push(`${applyRatePercent}% code block apply rate (${fmt(p.applyUsage.totalApplies)}/${fmt(p.applyUsage.totalCodeBlocks)})`);
+	
+	if (applyRatePercent >= T.stage2MinApplyRatePct) {
+		return promoteStage(stage, 2);
+	}
+	
+	return stage;
+}
+
+/**
+ * Add evidence for session duration.
+ */
+function _wiAddSessionDurationEvidence(evidence: string[], p: UsageAnalysisPeriod): void {
+	if (p.sessionDuration && p.sessionDuration.avgDurationMs > 0) {
+		evidence.push(`Avg ${Math.round(p.sessionDuration.avgDurationMs / 60000)}min session duration`);
+	}
+	if (p.sessionDuration && p.sessionDuration.activeDurationMs > 0 && p.sessions > 0) {
+		const avgActiveMin = Math.round(p.sessionDuration.activeDurationMs / p.sessions / 60000);
+		evidence.push(`Avg ${avgActiveMin}min active time (interacting + waiting on the agent)`);
+	}
+}
+
+/**
+ * Add evidence for modes and context references.
+ */
+function _wiAddModesAndContextEvidence(evidence: string[], stage: Stage, modesUsed: number, totalContextRefs: number, T: typeof STAGE_THRESHOLDS.workflowIntegration): Stage {
+	let result = stage;
+	
+	if (modesUsed >= T.stage3MinModesUsed) {
+		evidence.push(`Uses ${modesUsed} modes (ask/agent/cli)`);
+		result = promoteStage(result, 3);
+	}
+
+	if (totalContextRefs >= T.hasExplicitContextMinRefs) {
+		evidence.push(`${fmt(totalContextRefs)} explicit context references`);
+		if (totalContextRefs >= T.stage3MinContextRefs) {
+			result = promoteStage(result, 3);
+		}
+	}
+	
+	return result;
+}
+
+/**
+ * Apply stage 4 qualification.
+ */
+function _wiApplyStage4Qualification(stage: Stage, p: UsageAnalysisPeriod, modesUsed: number, totalContextRefs: number, T: typeof STAGE_THRESHOLDS.workflowIntegration, evidence: string[]): Stage {
+	const qualifiesForStage4 = _wiQualifiesForStage4(p.sessions, modesUsed, totalContextRefs, T);
+	if (qualifiesForStage4) {
+		evidence.push('Deep integration: regular usage with multi-mode and explicit context');
+		return 4;
+	}
+	return stage;
+}
+
+function _scoreWorkflowIntegration(p: UsageAnalysisPeriod): CategoryScore {
+	const evidence: string[] = [];
+	let stage: Stage = 1;
+	const T = STAGE_THRESHOLDS.workflowIntegration;
+
+	stage = _wiAddSessionEvidence(evidence, p, stage, T);
+	stage = _wiAddApplyUsageEvidence(evidence, p, stage, T);
+	_wiAddSessionDurationEvidence(evidence, p);
+
+	const totalContextRefs = _wiCalculateTotalContextRefs(p);
+	const modesUsed = _wiCalculateModesUsed(p);
+	
+	stage = _wiAddModesAndContextEvidence(evidence, stage, modesUsed, totalContextRefs, T);
+	stage = _wiApplyStage4Qualification(stage, p, modesUsed, totalContextRefs, T, evidence);
+
+	return { stage, evidence, tips: _wiBuildTips(stage, modesUsed, totalContextRefs, T) };
 }
 
 
@@ -36,375 +881,17 @@ export function getFluencyLevelData(isDebugMode: boolean): {
   } {
     return {
       isDebugMode,
-      categories: [
-        {
-          category: "Prompt Engineering",
-          icon: "💬",
-          levels: [
-            {
-              stage: 1,
-              label: "Stage 1: AI Skeptic",
-              description: "Rarely uses AI tools or uses only basic features",
-              thresholds: [
-                "Fewer than 5 total interactions in 30 days",
-                "Minimal multi-turn conversations",
-                "No slash commands or agent mode usage",
-              ],
-              tips: [
-                "Try asking AI a question using the Chat panel — [▶ Chat in IDE video](https://tech.hub.ms/github-copilot/videos/chat-in-ide)",
-                "Start with simple queries to get familiar with the interface",
-              ],
-            },
-            {
-              stage: 2,
-              label: "Stage 2: AI Explorer",
-              description: "Exploring AI capabilities with occasional use",
-              thresholds: [
-                "At least 5 total interactions",
-                "Average 3+ exchanges per session shows iterative refinement",
-                "Beginning to use slash commands or agent mode",
-              ],
-              tips: [
-                "Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-file changes — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)",
-                "Use [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /fix, or /tests to give structured prompts",
-                "Experiment with multi-turn conversations to refine responses",
-              ],
-            },
-            {
-              stage: 3,
-              label: "Stage 3: AI Collaborator",
-              description: "Regular, purposeful use across multiple features",
-              thresholds: [
-                "At least 30 total interactions",
-                "Using 2+ slash commands or agent mode regularly",
-                "Average 5+ exchanges per session OR model switching in sessions",
-                "Shows model switching awareness (mixed-tier sessions)",
-              ],
-              tips: [
-                "Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for autonomous, multi-step coding tasks",
-                "Experiment with [different models](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_choose-a-language-model) for different tasks - use fast models for simple queries and reasoning models for complex problems — [▶ Model selection video](https://tech.hub.ms/github-copilot/videos/model-selection)",
-                "Explore more [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /tests, or /doc to diversify your prompting",
-              ],
-            },
-            {
-              stage: 4,
-              label: "Stage 4: AI Strategist",
-              description:
-                "Strategic, advanced use leveraging the full AI ecosystem",
-              thresholds: [
-                "At least 100 total interactions",
-                "Using agent mode regularly",
-                "Active model switching (switches in sessions) OR 3+ diverse slash commands",
-                "Demonstrates strategic choice of models and commands for different tasks",
-              ],
-              tips: [
-                "You're at the highest level!",
-                "Continue exploring advanced combinations of models, modes, and commands",
-              ],
-            },
-          ],
-        },
-        {
-          category: "Context Engineering",
-          icon: "📎",
-          levels: [
-            {
-              stage: 1,
-              label: "Stage 1: AI Skeptic",
-              description: "Not using explicit context references",
-              thresholds: [
-                "Zero explicit context references (#file, #selection, @workspace, etc.)",
-              ],
-              tips: [
-                "Try adding [#file or #selection](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) references to give Copilot more context",
-                "Start with #file to reference specific files in your prompts",
-              ],
-            },
-            {
-              stage: 2,
-              label: "Stage 2: AI Explorer",
-              description: "Beginning to use basic context references",
-              thresholds: [
-                "At least 1 context reference used",
-                "Exploring basic references like #file or #selection",
-              ],
-              tips: [
-                "Explore [@workspace, #codebase, and @terminal](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) for broader context",
-                "Try combining multiple context types in a single query",
-              ],
-            },
-            {
-              stage: 3,
-              label: "Stage 3: AI Collaborator",
-              description: "Regular use of diverse context types",
-              thresholds: [
-                "At least 3 different context reference types used",
-                "At least 10 total context references",
-                "May include image references (vision capabilities)",
-              ],
-              tips: [
-                "Try [image attachments](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts), #changes, #problemsPanel, and other specialized context variables",
-                "Experiment with @terminal and @vscode for IDE-level context",
-              ],
-            },
-            {
-              stage: 4,
-              label: "Stage 4: AI Strategist",
-              description: "Strategic use of advanced context engineering",
-              thresholds: [
-                "At least 5 different context reference types used",
-                "At least 30 total context references",
-                "Using specialized references like #changes, #problemsPanel, #outputPanel, etc.",
-              ],
-              tips: [
-                "You're at the highest level!",
-                "Continue mastering context engineering for optimal results",
-              ],
-            },
-          ],
-        },
-        {
-          category: "Agentic",
-          icon: "🤖",
-          levels: [
-            {
-              stage: 1,
-              label: "Stage 1: AI Skeptic",
-              description: "Not using agent mode or autonomous features",
-              thresholds: [
-                "Zero agent-mode interactions",
-                "No tool calls executed",
-                "Not using edit mode or multi-file capabilities",
-              ],
-              tips: [
-                "Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) — it can run terminal commands, edit files, and explore your codebase autonomously — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)",
-                "Start with simple tasks to see how agent mode works",
-              ],
-            },
-            {
-              stage: 2,
-              label: "Stage 2: AI Explorer",
-              description: "Beginning to explore agent mode",
-              thresholds: [
-                "At least 1 agent-mode interaction OR",
-                "Using edit mode OR",
-                "At least 1 multi-file edit session",
-              ],
-              tips: [
-                "Use [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-step tasks; let it chain tools like file search, terminal, and code edits — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)",
-                "Try edit mode for focused code changes",
-              ],
-            },
-            {
-              stage: 3,
-              label: "Stage 3: AI Collaborator",
-              description: "Regular use of agent mode with diverse tools",
-              thresholds: [
-                "At least 10 agent-mode interactions AND 3+ intentional tools used OR",
-                "Average 3+ files per edit session OR",
-                "Using edits agent for focused editing tasks",
-              ],
-              tips: [
-                "Tackle complex refactoring or debugging tasks in [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for deeper autonomous workflows",
-                "Let agent mode handle multi-step tasks that span multiple files — [▶ Multi-file Edits video](https://tech.hub.ms/github-copilot/videos/multi-file-edits)",
-              ],
-            },
-            {
-              stage: 4,
-              label: "Stage 4: AI Strategist",
-              description: "Heavy, strategic use of autonomous features",
-              thresholds: [
-                "At least 50 agent-mode interactions AND 5+ intentional tools used OR",
-                "At least 20 multi-file edits with 3+ files per session average",
-                "Demonstrates mastery of agent orchestration",
-              ],
-              tips: [
-                "You're at the highest level!",
-                "Continue leveraging agent mode for complex, multi-step workflows",
-              ],
-            },
-          ],
-        },
-        {
-          category: "Tool Usage",
-          icon: "🔧",
-          levels: [
-            {
-              stage: 1,
-              label: "Stage 1: AI Skeptic",
-              description: "Not using tools beyond basic chat",
-              thresholds: [
-                "Zero intentional tools used (automatic tools like file reads and searches are excluded)",
-                "No MCP servers configured",
-                "No workspace agent sessions",
-              ],
-              tips: [
-                "Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) to let Copilot use built-in tools for file operations and terminal commands — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)",
-                "Explore the built-in tools available in agent mode",
-              ],
-            },
-            {
-              stage: 2,
-              label: "Stage 2: AI Explorer",
-              description: "Beginning to use basic tools",
-              thresholds: [
-                "At least 1 intentional tool used (e.g. run_in_terminal, editFiles, websearch, MCP tools)",
-                "Automatic tools (file reads, searches, error checks) do not count",
-              ],
-              tips: [
-                "Set up [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to connect Copilot to external tools (databases, APIs, cloud services) — [▶ MCP with Azure and GitHub](https://tech.hub.ms/github-copilot/videos/mcp-with-azure-and-github)",
-                "Explore [GitHub integrations](https://code.visualstudio.com/docs/copilot/agents/agent-tools) and advanced tools like editFiles and run_in_terminal",
-              ],
-            },
-            {
-              stage: 3,
-              label: "Stage 3: AI Collaborator",
-              description: "Regular use of diverse tools and integrations",
-              thresholds: [
-                "Using @workspace agent OR",
-                "Using 2+ advanced tools (GitHub PR, GitHub Repo, terminal, editFiles, listFiles) OR",
-                "Using at least 1 MCP server",
-              ],
-              tips: [
-                "Add more [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to expand Copilot's capabilities - check the VS Code MCP registry — [▶ MCP with Azure and GitHub](https://tech.hub.ms/github-copilot/videos/mcp-with-azure-and-github)",
-                "Explore advanced tool combinations for complex workflows",
-              ],
-            },
-            {
-              stage: 4,
-              label: "Stage 4: AI Strategist",
-              description:
-                "Strategic use of multiple MCP servers and advanced tools",
-              thresholds: [
-                "Using 2+ MCP servers",
-                "Leveraging multiple advanced tools strategically",
-              ],
-              tips: [
-                "You're at the highest level!",
-                "Keep exploring advanced tool combinations and new MCP servers",
-              ],
-            },
-          ],
-        },
-        {
-          category: "Customization",
-          icon: "⚙️",
-          levels: [
-            {
-              stage: 1,
-              label: "Stage 1: AI Skeptic",
-              description: "Using default Copilot without customization",
-              thresholds: [
-                "No repositories with custom instructions, agents.md, or CLAUDE.md",
-                "Using fewer than 3 different models",
-              ],
-              tips: [
-                "Create a [.github/copilot-instructions.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) or [CLAUDE.md](https://docs.anthropic.com/en/docs/claude-code/memory) file with project-specific guidelines — [▶ User Instructions video](https://tech.hub.ms/github-copilot/videos/user-instructions)",
-                "Start customizing Copilot or Claude Code for your workflow",
-              ],
-            },
-            {
-              stage: 2,
-              label: "Stage 2: AI Explorer",
-              description: "Beginning to customize Copilot",
-              thresholds: [
-                "At least 1 repository with custom instructions or agents.md",
-              ],
-              tips: [
-                "Add [custom instructions](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) to more repositories to standardize your Copilot experience — [▶ User Instructions video](https://tech.hub.ms/github-copilot/videos/user-instructions)",
-                "Experiment with [different models](https://tech.hub.ms/github-copilot/videos/model-selection) for different tasks",
-              ],
-            },
-            {
-              stage: 3,
-              label: "Stage 3: AI Collaborator",
-              description: "Regular customization across repositories",
-              thresholds: [
-                "30%+ of repositories have customization (with 2+ repos) OR",
-                "Using 3+ different models strategically",
-              ],
-              tips: [
-                "Aim for consistent customization across all projects with [instructions and agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions)",
-                "Explore 5+ models to match tasks with optimal model capabilities — [▶ Model selection video](https://tech.hub.ms/github-copilot/videos/model-selection)",
-              ],
-            },
-            {
-              stage: 4,
-              label: "Stage 4: AI Strategist",
-              description: "Comprehensive customization strategy",
-              thresholds: [
-                "70%+ customization adoption rate with 3+ repos OR",
-                "Using 5+ different models with 3+ repos customized",
-              ],
-              tips: [
-                "You're at the highest level!",
-                "Continue refining your customization strategy",
-              ],
-            },
-          ],
-        },
-        {
-          category: "Workflow Integration",
-          icon: "🔄",
-          levels: [
-            {
-              stage: 1,
-              label: "Stage 1: AI Skeptic",
-              description: "Minimal integration into daily workflow",
-              thresholds: [
-                "Fewer than 3 sessions in 30 days",
-                "Using only 1 mode (ask OR agent)",
-                "Fewer than 10 explicit context references",
-              ],
-              tips: [
-                "Use Copilot more regularly - even for quick questions — [▶ Chat in IDE video](https://tech.hub.ms/github-copilot/videos/chat-in-ide)",
-                "Make Copilot part of your daily coding routine",
-              ],
-            },
-            {
-              stage: 2,
-              label: "Stage 2: AI Explorer",
-              description: "Occasional integration with some regularity",
-              thresholds: [
-                "At least 3 sessions in 30 days OR",
-                "50%+ code block apply rate",
-              ],
-              tips: [
-                "Combine [ask mode with agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) in your daily workflow — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)",
-                "Use explicit [context references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like #file, @workspace, and #selection",
-              ],
-            },
-            {
-              stage: 3,
-              label: "Stage 3: AI Collaborator",
-              description: "Regular workflow integration",
-              thresholds: [
-                "Using 2 modes (ask AND agent) OR",
-                "At least 20 explicit context references",
-              ],
-              tips: [
-                "Make explicit context a habit - use [#file, @workspace, and other references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) consistently",
-                "Make Copilot part of every coding task: planning, coding, testing, and reviewing",
-              ],
-            },
-            {
-              stage: 4,
-              label: "Stage 4: AI Strategist",
-              description: "Deep integration across all development activities",
-              thresholds: [
-                "At least 15 sessions",
-                "Using 2+ modes (ask + agent)",
-                "At least 20 explicit context references",
-                "Shows regular, purposeful usage pattern",
-              ],
-              tips: [
-                "You're at the highest level!",
-                "Continue integrating Copilot into every aspect of your development workflow",
-              ],
-            },
-          ],
-        },
-      ],
+      categories: fluencyLevelDataRaw as Array<{
+        category: string;
+        icon: string;
+        levels: Array<{
+          stage: number;
+          label: string;
+          description: string;
+          thresholds: string[];
+          tips: string[];
+        }>;
+      }>,
     };
   }
 
@@ -412,231 +899,283 @@ export function getFluencyLevelData(isDebugMode: boolean): {
    * Calculates a fluency stage (1-4) for a team member based on aggregated Azure Table Storage metrics.
    * Applies the same 6-category scoring thresholds as calculateMaturityScores().
    */
-export function calculateFluencyScoreForTeamMember(fd: {
-    askModeCount: number; editModeCount: number; agentModeCount: number;
-    planModeCount: number; customAgentModeCount: number; cliModeCount: number;
-    toolCallsTotal: number; toolCallsByTool: Record<string, number>;
-    ctxFile: number; ctxSelection: number; ctxSymbol: number;
-    ctxCodebase: number; ctxWorkspace: number; ctxTerminal: number;
-    ctxVscode: number; ctxClipboard: number; ctxChanges: number;
-    ctxProblemsPanel: number; ctxOutputPanel: number;
-    ctxTerminalLastCommand: number; ctxTerminalSelection: number;
-    ctxByKind: Record<string, number>;
-    mcpTotal: number; mcpByServer: Record<string, number>;
-    mixedTierSessions: number; switchingFreqSum: number; switchingFreqCount: number;
-    standardModels: Set<string>; premiumModels: Set<string>;
-    multiFileEdits: number; filesPerEditSum: number; filesPerEditCount: number;
-    editsAgentCount: number; workspaceAgentCount: number;
-    repositories: Set<string>; repositoriesWithCustomization: Set<string>;
-    applyRateSum: number; applyRateCount: number;
-    multiTurnSessions: number; turnsPerSessionSum: number; turnsPerSessionCount: number;
-    sessionCount: number; durationMsSum: number; durationMsCount: number;
-  }, dashboardSessions: number): { stage: number; label: string; categories: { category: string; icon: string; stage: number; tips: string[] }[] } {
-    const stageLabels: Record<number, string> = {
-      1: "Stage 1: AI Skeptic",
-      2: "Stage 2: AI Explorer",
-      3: "Stage 3: AI Collaborator",
-      4: "Stage 4: AI Strategist",
-    };
 
-    const totalInteractions = fd.askModeCount + fd.editModeCount + fd.agentModeCount + fd.cliModeCount;
-    const avgTurnsPerSession = fd.turnsPerSessionCount > 0 ? fd.turnsPerSessionSum / fd.turnsPerSessionCount : 0;
-    const switchingFrequency = fd.switchingFreqCount > 0 ? fd.switchingFreqSum / fd.switchingFreqCount : 0;
-    const hasModelSwitching = fd.mixedTierSessions > 0 || switchingFrequency > 0;
-    const hasAgentMode = (fd.agentModeCount + fd.cliModeCount) > 0;
-    const toolCount = Object.keys(fd.toolCallsByTool).length;
-    // Exclude __slash__ pseudo-entries from real tool counts (they track Claude slash commands, not actual tool calls)
-    const nonAutoToolCount = Object.keys(fd.toolCallsByTool).filter(t => !AUTOMATIC_TOOL_SET.has(t.toLowerCase()) && !t.startsWith('__slash__')).length;
-    const avgFilesPerSession = fd.filesPerEditCount > 0 ? fd.filesPerEditSum / fd.filesPerEditCount : 0;
-    const avgApplyRate = fd.applyRateCount > 0 ? fd.applyRateSum / fd.applyRateCount : 0;
-    const totalContextRefs = fd.ctxFile + fd.ctxSelection + fd.ctxSymbol + fd.ctxCodebase + fd.ctxWorkspace;
+/** Input data shape for calculateFluencyScoreForTeamMember. */
+type FluencyInputData = {
+	askModeCount: number; editModeCount: number; agentModeCount: number;
+	planModeCount: number; customAgentModeCount: number; cliModeCount: number;
+	toolCallsTotal: number; toolCallsByTool: Record<string, number>;
+	ctxFile: number; ctxSelection: number; ctxSymbol: number;
+	ctxCodebase: number; ctxWorkspace: number; ctxTerminal: number;
+	ctxVscode: number; ctxClipboard: number; ctxChanges: number;
+	ctxProblemsPanel: number; ctxOutputPanel: number;
+	ctxTerminalLastCommand: number; ctxTerminalSelection: number;
+	ctxByKind: Record<string, number>;
+	mcpTotal: number; mcpByServer: Record<string, number>;
+	mixedTierSessions: number; mixedCostSessions: number; switchingFreqSum: number; switchingFreqCount: number;
+	standardModels: Set<string>; premiumModels: Set<string>;
+	lowCostModels: Set<string>; mediumCostModels: Set<string>; highCostModels: Set<string>;
+	multiFileEdits: number; filesPerEditSum: number; filesPerEditCount: number;
+	editsAgentCount: number; workspaceAgentCount: number;
+	repositories: Set<string>; repositoriesWithCustomization: Set<string>;
+	autoSessions: number; foundryWindowsSessions: number; unknownProviderSessions: number;
+	selectedModelExtensions: Set<string>; unknownProviderModels: Set<string>;
+	applyRateSum: number; applyRateCount: number;
+	multiTurnSessions: number; turnsPerSessionSum: number; turnsPerSessionCount: number;
+	sessionCount: number; durationMsSum: number; durationMsCount: number;
+};
 
-    // 1. Prompt Engineering
-    let peStage = 1;
-    // VS Code Copilot slash commands (stored as tool calls by the session parser)
-    const slashCmds = ["explain", "fix", "tests", "doc", "generate", "optimize", "new", "newNotebook", "search", "fixTestFailure", "setupTests"];
-    // Claude Code slash commands (stored with __slash__ prefix to avoid inflating tool counts)
-    const claudeSlashCmds = ["review", "bug", "think", "compact", "pr_comments"];
-    const usedSlashCommands = [
-      ...slashCmds.filter(cmd => (fd.toolCallsByTool[cmd] ?? 0) > 0),
-      ...claudeSlashCmds.filter(cmd => (fd.toolCallsByTool[`__slash__${cmd}`] ?? 0) > 0),
-    ];
-    if (avgTurnsPerSession >= 3) { peStage = Math.max(peStage, 2); }
-    if (avgTurnsPerSession >= 5) { peStage = Math.max(peStage, 3); }
-    if (totalInteractions >= 5) { peStage = Math.max(peStage, 2); }
-    if (totalInteractions >= 30 && (usedSlashCommands.length >= 2 || hasAgentMode)) { peStage = Math.max(peStage, 3); }
-    if (totalInteractions >= 100 && hasAgentMode && (hasModelSwitching || usedSlashCommands.length >= 3)) { peStage = 4; }
-    if (hasModelSwitching && fd.mixedTierSessions > 0) { peStage = Math.max(peStage, 3); }
-    const peTips: string[] = [];
-    if (peStage < 2) { peTips.push("Try asking Copilot a question using the Chat panel"); }
-    if (peStage < 3) {
-      if (!hasAgentMode) { peTips.push("Try agent mode for multi-file changes"); }
-      if (usedSlashCommands.length < 2) { peTips.push("Use slash commands like /explain, /fix, or /tests for structured prompts"); }
-    }
-    if (peStage < 4) {
-      if (!hasAgentMode) { peTips.push("Try agent mode for autonomous, multi-step coding tasks"); }
-      if (!hasModelSwitching) { peTips.push("Experiment with different models — fast models for simple queries, reasoning models for complex problems"); }
-      if (usedSlashCommands.length < 3 && hasAgentMode && hasModelSwitching) { peTips.push("Explore more slash commands like /explain, /tests, or /doc"); }
-    }
+/** Pre-computed common values shared across all 6 fluency category helpers. */
+type FluencyVars = {
+	totalInteractions: number; avgTurnsPerSession: number;
+	hasModelSwitching: boolean; hasAgentMode: boolean;
+	nonAutoToolCount: number; avgFilesPerSession: number;
+	avgApplyRate: number; totalContextRefs: number;
+	usedRefTypeCount: number; usedSlashCommands: string[];
+};
 
-    // 2. Context Engineering
-    let ceStage = 1;
-    const usedRefTypeCount = [
-      fd.ctxFile, fd.ctxSelection, fd.ctxSymbol, fd.ctxCodebase, fd.ctxWorkspace,
-      fd.ctxTerminal, fd.ctxVscode, fd.ctxClipboard, fd.ctxChanges,
-      fd.ctxProblemsPanel, fd.ctxOutputPanel, fd.ctxTerminalLastCommand, fd.ctxTerminalSelection,
-    ].filter(v => v > 0).length;
-    if (totalContextRefs >= 1) { ceStage = 2; }
-    if (usedRefTypeCount >= 3 && totalContextRefs >= 10) { ceStage = 3; }
-    if (usedRefTypeCount >= 5 && totalContextRefs >= 30) { ceStage = 4; }
-    if ((fd.ctxByKind["copilot.image"] ?? 0) > 0) { ceStage = Math.max(ceStage, 3); }
-    const ceTips: string[] = [];
-    if (ceStage < 2) { ceTips.push("Add #file or #selection references to give Copilot more context"); }
-    if (ceStage < 3) { ceTips.push("Explore @workspace, #codebase, and @terminal for broader context"); }
-    if (ceStage < 4) {
-        const typesStillNeeded = Math.max(0, 5 - usedRefTypeCount);
-        const refsStillNeeded = Math.max(0, 30 - totalContextRefs);
-        const specializedItems = [
-            { name: 'image attachments', used: (fd.ctxByKind["copilot.image"] ?? 0) > 0 },
-            { name: '#changes', used: fd.ctxChanges > 0 },
-            { name: '#problemsPanel', used: fd.ctxProblemsPanel > 0 },
-            { name: '#outputPanel', used: fd.ctxOutputPanel > 0 },
-            { name: '#terminalLastCommand', used: fd.ctxTerminalLastCommand > 0 },
-            { name: '#terminalSelection', used: fd.ctxTerminalSelection > 0 },
-            { name: '#clipboard', used: fd.ctxClipboard > 0 },
-            { name: '@vscode', used: fd.ctxVscode > 0 },
-        ];
-        const specializedUsedCount = specializedItems.filter(i => i.used).length;
-        if (specializedUsedCount >= 2) {
-            // User already uses multiple specialized context techniques — show a concrete gap tip.
-            const allTypesNotUsed = [
-                { name: '#symbol', used: fd.ctxSymbol > 0 },
-                { name: '@workspace', used: fd.ctxWorkspace > 0 },
-                { name: '#codebase', used: fd.ctxCodebase > 0 },
-                { name: '@terminal', used: fd.ctxTerminal > 0 },
-                ...specializedItems,
-            ].filter(i => !i.used).map(i => i.name);
-            const gapParts: string[] = [];
-            if (typesStillNeeded > 0) { gapParts.push(`${fmt(usedRefTypeCount)} of 5 different reference types used`); }
-            if (refsStillNeeded > 0) { gapParts.push(`${fmt(totalContextRefs)} of 30 total references`); }
-            if (gapParts.length > 0) {
-                const suggest = allTypesNotUsed.slice(0, 3);
-                const suggStr = suggest.length > 0 ? ` — try ${suggest.join(', ')}` : '';
-                ceTips.push(`Stage 4 needs ${gapParts.join(' and ')}${suggStr}`);
-            }
-        } else {
-            // User hasn't explored many specialized vars yet — suggest them.
-            const specializedNotYetUsed = specializedItems.filter(i => !i.used).map(i => i.name);
-            if (specializedNotYetUsed.length > 0) {
-                const toMention = specializedNotYetUsed.slice(0, 3);
-                const extra = specializedNotYetUsed.length > 3 ? ` and ${specializedNotYetUsed.length - 3} more` : '';
-                ceTips.push(`Try ${toMention.join(', ')}${extra} — see specialized context variables to reach Stage 4`);
-            }
-        }
-    }
+type FluencyStageResult = { stage: Stage; tips: string[] };
 
-    // 3. Agentic
-    let agStage = 1;
-    if (hasAgentMode) { agStage = 2; }
-    if (fd.multiFileEdits > 0) { agStage = Math.max(agStage, 2); }
-    if (avgFilesPerSession >= 3) { agStage = Math.max(agStage, 3); }
-    if (fd.editsAgentCount > 0) { agStage = Math.max(agStage, 2); }
-    if (fd.agentModeCount >= 10 && nonAutoToolCount >= 3) { agStage = Math.max(agStage, 3); }
-    if (fd.agentModeCount >= 50 && nonAutoToolCount >= 5) { agStage = 4; }
-    if (fd.multiFileEdits >= 20 && avgFilesPerSession >= 3) { agStage = Math.max(agStage, 4); }
-    const agTips: string[] = [];
-    if (agStage < 2) { agTips.push("Try agent mode — it can run terminal commands, edit files, and explore codebases autonomously"); }
-    if (agStage < 3) { agTips.push("Use agent mode for multi-step tasks; let it chain tools like file search, terminal, and code edits"); }
-    if (agStage < 4) { agTips.push("Tackle complex refactoring or debugging tasks in agent mode for deeper autonomous workflows"); }
+function _calcFluencyPE(fd: FluencyInputData, cv: FluencyVars): FluencyStageResult {
+	const T = STAGE_THRESHOLDS.promptEngineering;
+	let stage: Stage = 1;
+	const autoUsageRatio = fd.sessionCount > 0 ? fd.autoSessions / fd.sessionCount : 0;
+	if (cv.avgTurnsPerSession >= T.stage2MinAvgTurns) { stage = promoteStage(stage, 2); }
+	if (cv.avgTurnsPerSession >= T.stage3MinAvgTurns) { stage = promoteStage(stage, 3); }
+	if (cv.totalInteractions >= T.stage2MinInteractions) { stage = promoteStage(stage, 2); }
+	if (_peQualifiesForStage3(cv.totalInteractions, cv.usedSlashCommands, cv.hasAgentMode)) { stage = promoteStage(stage, 3); }
+	if (_peQualifiesForStage4(cv.totalInteractions, cv.hasAgentMode, cv.hasModelSwitching, cv.usedSlashCommands)) { stage = 4; }
+	if (autoUsageRatio > 0) { stage = promoteStage(stage, 2); }
+	if (autoUsageRatio >= 0.5) { stage = promoteStage(stage, 3); }
+	if (autoUsageRatio >= 0.8 && fd.sessionCount >= 5) { stage = 4; }
+	if (cv.hasModelSwitching && (fd.mixedTierSessions > 0 || fd.mixedCostSessions > 0)) { stage = promoteStage(stage, 3); }
+	return { stage, tips: _buildPeTips(stage, cv.hasAgentMode, cv.hasModelSwitching, cv.usedSlashCommands, autoUsageRatio) };
+}
 
-    // 4. Tool Usage
-    let tuStage = 1;
-    if (nonAutoToolCount > 0) { tuStage = 2; }
-    if (fd.workspaceAgentCount > 0) { tuStage = Math.max(tuStage, 3); }
-    const advancedToolIds = ["github_pull_request", "github_repo", "run_in_terminal", "editFiles", "listFiles"];
-    const usedAdvancedCount = advancedToolIds.filter(t => (fd.toolCallsByTool[t] ?? 0) > 0).length;
-    if (usedAdvancedCount >= 2) { tuStage = Math.max(tuStage, 3); }
-    if (fd.mcpTotal > 0) { tuStage = Math.max(tuStage, 3); }
-    if (Object.keys(fd.mcpByServer).length >= 2) { tuStage = 4; }
-    const tuTips: string[] = [];
-    if (tuStage < 2) { tuTips.push("Try agent mode to let Copilot use built-in tools for file operations and terminal commands"); }
-    if (tuStage < 3) {
-      if (fd.mcpTotal === 0) { tuTips.push("Set up MCP servers to connect Copilot to external tools (databases, APIs, cloud services)"); }
-      else { tuTips.push("Explore GitHub integrations and advanced tools like editFiles and run_in_terminal"); }
-    }
-    if (tuStage < 4) {
-      if (Object.keys(fd.mcpByServer).length === 1) { tuTips.push("Add more MCP servers to expand Copilot's capabilities"); }
-      else if (fd.mcpTotal === 0) { tuTips.push("Explore MCP servers for tools that integrate with your workflow"); }
-    }
+function _buildCeGapTip(fd: FluencyInputData, cv: FluencyVars, T: typeof STAGE_THRESHOLDS.contextEngineering): string | undefined {
+	const typesStillNeeded = Math.max(0, T.stage4MinRefTypes - cv.usedRefTypeCount);
+	const refsStillNeeded = Math.max(0, T.stage4MinTotalRefs - cv.totalContextRefs);
+	const specializedItems = [
+		{ name: 'image attachments', used: (fd.ctxByKind["copilot.image"] ?? 0) > 0 },
+		{ name: 'prompt files', used: (fd.ctxByKind["promptFile"] ?? 0) > 0 },
+		{ name: 'custom prompt commands', used: (fd.ctxByKind["prompt"] ?? 0) > 0 },
+		{ name: '#changes', used: fd.ctxChanges > 0 },
+		{ name: '#problemsPanel', used: fd.ctxProblemsPanel > 0 },
+		{ name: '#outputPanel', used: fd.ctxOutputPanel > 0 },
+		{ name: '#terminalLastCommand', used: fd.ctxTerminalLastCommand > 0 },
+		{ name: '#terminalSelection', used: fd.ctxTerminalSelection > 0 },
+		{ name: '#clipboard', used: fd.ctxClipboard > 0 },
+		{ name: '@vscode', used: fd.ctxVscode > 0 },
+	];
+	const specializedUsedCount = specializedItems.filter(i => i.used).length;
+	if (specializedUsedCount >= 2) {
+		const allTypesNotUsed = [
+			{ name: '#symbol', used: fd.ctxSymbol > 0 }, { name: '@workspace', used: fd.ctxWorkspace > 0 },
+			{ name: '#codebase', used: fd.ctxCodebase > 0 }, { name: '@terminal', used: fd.ctxTerminal > 0 },
+			...specializedItems,
+		].filter(i => !i.used).map(i => i.name);
+		const gapParts: string[] = [];
+		if (typesStillNeeded > 0) { gapParts.push(`${fmt(cv.usedRefTypeCount)} of ${T.stage4MinRefTypes} different reference types used`); }
+		if (refsStillNeeded > 0) { gapParts.push(`${fmt(cv.totalContextRefs)} of ${T.stage4MinTotalRefs} total references`); }
+		return _ceFormatGapTip(gapParts, allTypesNotUsed);
+	}
+	return _ceFormatSpecializedTip(specializedItems, 'specialized context variables');
+}
 
-    // 5. Customization
-    let cuStage = 1;
-    const totalRepos = fd.repositories.size;
-    const reposWithCustomization = fd.repositoriesWithCustomization.size;
-    const customizationRate = totalRepos > 0 ? reposWithCustomization / totalRepos : 0;
-    if (reposWithCustomization > 0) { cuStage = 2; }
-    if (customizationRate >= 0.3 && reposWithCustomization >= 2) { cuStage = 3; }
-    if (customizationRate >= 0.7 && reposWithCustomization >= 3) { cuStage = 4; }
-    const uniqueModels = new Set([...fd.standardModels, ...fd.premiumModels]);
-    if (uniqueModels.size >= 3) { cuStage = Math.max(cuStage, 3); }
-    if (uniqueModels.size >= 5 && reposWithCustomization >= 3) { cuStage = 4; }
-    const cuTips: string[] = [];
-    if (cuStage < 2) { cuTips.push("Create a .github/copilot-instructions.md or CLAUDE.md file with project-specific guidelines"); }
-    if (cuStage < 3) { cuTips.push("Add custom instructions to more repositories to standardize your Copilot experience"); }
-    if (cuStage < 4) {
-      const uncustomized = totalRepos - reposWithCustomization;
-      if (uncustomized > 0) { cuTips.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized — add instructions to the remaining ${fmt(uncustomized)} for Stage 4`); }
-      else { cuTips.push("Aim for consistent customization across all projects with instructions and agents.md"); }
-    }
-    if (cuStage >= 4) {
-      const uncustomized = totalRepos - reposWithCustomization;
-      if (uncustomized > 0) {
-        cuTips.push(`${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} still missing customization — add instructions, agents.md, or MCP configs for full coverage`);
-      } else {
-        cuTips.push("All repos customized! Keep instructions up to date and add skill files or MCP server configs for deeper integration");
-      }
-    }
+function _buildCeTips(fd: FluencyInputData, cv: FluencyVars, stage: Stage): string[] {
+	const T = STAGE_THRESHOLDS.contextEngineering;
+	const tips: string[] = [];
+	if (stage < 2) { tips.push("Add #file or #selection references to give Copilot more context"); }
+	if (stage < 3) { tips.push("Explore @workspace, #codebase, and @terminal for broader context"); }
+	if (stage < 4) {
+		const tip = _buildCeGapTip(fd, cv, T);
+		if (tip) { tips.push(tip); }
+	}
+	return tips;
+}
 
-    // 6. Workflow Integration
-    const effectiveSessions = Math.max(dashboardSessions, fd.sessionCount);
-    let wiStage = 1;
-    if (effectiveSessions >= 3) { wiStage = 2; }
-    if (avgApplyRate >= 50) { wiStage = Math.max(wiStage, 2); }
-    const modesUsed = [fd.askModeCount > 0, fd.agentModeCount > 0].filter(Boolean).length;
-    if (modesUsed >= 2) { wiStage = Math.max(wiStage, 3); }
-    if (totalContextRefs >= 20) { wiStage = Math.max(wiStage, 3); }
-    if (effectiveSessions >= 15 && modesUsed >= 2 && totalContextRefs >= 20) { wiStage = 4; }
-    const wiTips: string[] = [];
-    if (wiStage < 2) { wiTips.push("Use Copilot more regularly — even for quick questions"); }
-    if (wiStage < 3) {
-      if (modesUsed < 2) { wiTips.push("Combine ask mode with agent mode in your daily workflow"); }
-      if (totalContextRefs < 10) { wiTips.push("Use explicit context references like #file, @workspace, and #selection"); }
-    }
-    if (wiStage < 4) {
-      if (totalContextRefs < 20) { wiTips.push("Make explicit context a habit — use #file, @workspace, and other references consistently"); }
-      wiTips.push("Make Copilot part of every coding task: planning, coding, testing, and reviewing");
-    }
+function _calcFluencyCE(fd: FluencyInputData, cv: FluencyVars): FluencyStageResult {
+	const T = STAGE_THRESHOLDS.contextEngineering;
+	let stage: Stage = 1;
+	if (cv.totalContextRefs >= T.stage2MinTotalRefs) { stage = 2; }
+	if (cv.usedRefTypeCount >= T.stage3MinRefTypes && cv.totalContextRefs >= T.stage3MinTotalRefs) { stage = 3; }
+	if (cv.usedRefTypeCount >= T.stage4MinRefTypes && cv.totalContextRefs >= T.stage4MinTotalRefs) { stage = 4; }
+	if ((fd.ctxByKind["copilot.image"] ?? 0) > 0 || (fd.ctxByKind["promptFile"] ?? 0) > 0) { stage = promoteStage(stage, 3); }
+	return { stage, tips: _buildCeTips(fd, cv, stage) };
+}
 
-    // Overall: median of 6 category stages
-    const scores = [peStage, ceStage, agStage, tuStage, cuStage, wiStage].sort((a, b) => a - b);
-    const mid = Math.floor(scores.length / 2);
-    const overallStage = scores.length % 2 === 0
-      ? Math.round((scores[mid - 1] + scores[mid]) / 2)
-      : scores[mid];
+function _calcFluencyAg(fd: FluencyInputData, cv: FluencyVars): FluencyStageResult {
+	const T = STAGE_THRESHOLDS.agentic;
+	let stage: Stage = 1;
+	if (cv.hasAgentMode) { stage = 2; }
+	if (fd.multiFileEdits > 0) { stage = promoteStage(stage, 2); }
+	if (cv.avgFilesPerSession >= T.stage3MinAvgFilesPerSession) { stage = promoteStage(stage, 3); }
+	if (fd.editsAgentCount > 0) { stage = promoteStage(stage, 2); }
+	if (fd.agentModeCount >= T.stage3MinAgentInteractions && cv.nonAutoToolCount >= T.stage3MinNonAutoTools) { stage = promoteStage(stage, 3); }
+	if (fd.agentModeCount >= T.stage4MinAgentInteractions && cv.nonAutoToolCount >= T.stage4MinNonAutoTools) { stage = 4; }
+	if (fd.multiFileEdits >= T.stage4MinMultiFileEdits && cv.avgFilesPerSession >= T.stage3MinAvgFilesPerSession) { stage = promoteStage(stage, 4); }
+	const tips: string[] = [];
+	if (stage < 2) { tips.push("Try agent mode — it can run terminal commands, edit files, and explore codebases autonomously"); }
+	if (stage < 3) { tips.push("Use agent mode for multi-step tasks; let it chain tools like file search, terminal, and code edits"); }
+	if (stage < 4) { tips.push("Tackle complex refactoring or debugging tasks in agent mode for deeper autonomous workflows"); }
+	return { stage, tips };
+}
 
-    return {
-      stage: overallStage,
-      label: stageLabels[overallStage] ?? `Stage ${overallStage}`,
-      categories: [
-        { category: "Prompt Engineering", icon: "💬", stage: peStage, tips: peTips },
-        { category: "Context Engineering", icon: "📎", stage: ceStage, tips: ceTips },
-        { category: "Agentic", icon: "🤖", stage: agStage, tips: agTips },
-        { category: "Tool Usage", icon: "🔧", stage: tuStage, tips: tuTips },
-        { category: "Customization", icon: "⚙️", stage: cuStage, tips: cuTips },
-        { category: "Workflow Integration", icon: "🔄", stage: wiStage, tips: wiTips },
-      ],
-    };
-  }
+function _calcFluencyTuStage(fd: FluencyInputData, cv: FluencyVars, isMCPEnabled: boolean | undefined): Stage {
+	const T = STAGE_THRESHOLDS.toolUsage;
+	const advancedToolIds = ["github_pull_request", "github_repo", "run_in_terminal", "editFiles", "listFiles"];
+	const usedAdvancedCount = advancedToolIds.filter(t => (fd.toolCallsByTool[t] ?? 0) > 0).length;
+	let stage: Stage = cv.nonAutoToolCount > 0 ? 2 : 1;
+	if (fd.workspaceAgentCount > 0) { stage = promoteStage(stage, 3); }
+	if (usedAdvancedCount >= T.stage3MinAdvancedTools) { stage = promoteStage(stage, 3); }
+	if (isMCPEnabled !== false && fd.mcpTotal > 0) { stage = promoteStage(stage, 3); }
+	if (isMCPEnabled !== false && Object.keys(fd.mcpByServer).length >= T.stage4MinMcpServers) { stage = 4; }
+	return stage;
+}
+
+function _calcFluencyTuTips(fd: FluencyInputData, stage: Stage, isMCPEnabled: boolean | undefined): string[] {
+	const tips: string[] = [];
+	if (stage < 2) { tips.push("Try agent mode to let Copilot use built-in tools for file operations and terminal commands"); }
+	if (stage < 3) {
+		if (fd.mcpTotal === 0 && isMCPEnabled !== false) { tips.push("Set up MCP servers to connect Copilot to external tools (databases, APIs, cloud services)"); }
+		else if (fd.mcpTotal > 0) { tips.push("Explore GitHub integrations and advanced tools like editFiles and run_in_terminal"); }
+	}
+	if (stage < 4) {
+		if (Object.keys(fd.mcpByServer).length === 1) { tips.push("Add more MCP servers to expand Copilot's capabilities"); }
+		else if (fd.mcpTotal === 0 && isMCPEnabled !== false) { tips.push("Explore MCP servers for tools that integrate with your workflow"); }
+		else if (fd.mcpTotal > 0) { tips.push("Keep exploring advanced tool combinations"); }
+	}
+	return tips;
+}
+
+function _calcFluencyTu(fd: FluencyInputData, cv: FluencyVars, isMCPEnabled?: boolean): FluencyStageResult {
+	const stage = _calcFluencyTuStage(fd, cv, isMCPEnabled);
+	return { stage, tips: _calcFluencyTuTips(fd, stage, isMCPEnabled) };
+}
+
+function _calcFluencyCu(fd: FluencyInputData, cv: FluencyVars): FluencyStageResult {
+	const T = STAGE_THRESHOLDS.customization;
+	const totalRepos = fd.repositories.size;
+	const reposWithCustomization = fd.repositoriesWithCustomization.size;
+	const customizationRate = totalRepos > 0 ? reposWithCustomization / totalRepos : 0;
+	const uniqueModels = new Set([...fd.standardModels, ...fd.premiumModels, ...fd.lowCostModels, ...fd.mediumCostModels, ...fd.highCostModels]);
+	let stage = _cuComputeStage(customizationRate, reposWithCustomization, uniqueModels.size, T);
+	const uncustomized = totalRepos - reposWithCustomization;
+	const tips: string[] = [];
+	if (fd.foundryWindowsSessions > 0) {
+		stage = promoteStage(stage, 2);
+		tips.push('If you are using Microsoft Foundry on Windows local models, keep exploring them for private and offline-friendly workflows');
+	} else if (uniqueModels.size <= 1) {
+		tips.push('Try the Microsoft Foundry on Windows extension if you want to experiment with local models and offline-friendly workflows');
+	}
+	if (fd.unknownProviderSessions > 0) {
+		stage = promoteStage(stage, 2);
+		tips.push('You have used models from other providers — keep exploring providers to match each task to the right model');
+	} else if (uniqueModels.size <= 1) {
+		tips.push('Try different model providers from the marketplace when you want more specialized or cost-effective options');
+	}
+	if (stage < 2) { tips.push("Create a .github/copilot-instructions.md or CLAUDE.md file with project-specific guidelines"); }
+	if (stage < 3) { tips.push("Add custom instructions to more repositories to standardize your Copilot experience"); }
+	if (stage < 4 && uncustomized > 0) { tips.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized — add instructions to the remaining ${fmt(uncustomized)} for Stage 4`); }
+	else if (stage < 4) { tips.push("Aim for consistent customization across all projects with instructions and agents.md"); }
+	if (stage >= 4 && uncustomized > 0) { tips.push(`${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} still missing customization — add instructions, agents.md, or MCP configs for full coverage`); }
+	else if (stage >= 4) { tips.push("All repos customized! Keep instructions up to date and add skill files or MCP server configs for deeper integration"); }
+	return { stage, tips };
+}
+
+function _calcFluencyWi(fd: FluencyInputData, cv: FluencyVars, effectiveSessions: number): FluencyStageResult {
+	const T = STAGE_THRESHOLDS.workflowIntegration;
+	let stage: Stage = 1;
+	if (effectiveSessions >= T.stage2MinSessions) { stage = 2; }
+	if (cv.avgApplyRate >= T.stage2MinApplyRatePct) { stage = promoteStage(stage, 2); }
+	const modesUsed = [fd.askModeCount > 0, fd.agentModeCount > 0].filter(Boolean).length;
+	if (modesUsed >= T.stage3MinModesUsed) { stage = promoteStage(stage, 3); }
+	if (cv.totalContextRefs >= T.stage3MinContextRefs) { stage = promoteStage(stage, 3); }
+	if (effectiveSessions >= T.stage4MinSessions && modesUsed >= T.stage3MinModesUsed && cv.totalContextRefs >= T.stage3MinContextRefs) { stage = 4; }
+	const tips: string[] = [];
+	if (stage < 2) { tips.push("Use Copilot more regularly — even for quick questions"); }
+	if (stage < 3) {
+		if (modesUsed < T.stage3MinModesUsed) { tips.push("Combine ask mode with agent mode in your daily workflow"); }
+		if (cv.totalContextRefs < T.hasExplicitContextMinRefs) { tips.push("Use explicit context references like #file, @workspace, and #selection"); }
+	}
+	if (stage < 4) {
+		if (cv.totalContextRefs < T.stage3MinContextRefs) { tips.push("Make explicit context a habit — use #file, @workspace, and other references consistently"); }
+		tips.push("Make Copilot part of every coding task: planning, coding, testing, and reviewing");
+	}
+	return { stage, tips };
+}
+
+/**
+ * Build FluencyVars object from FluencyInputData.
+ * Extracted to reduce complexity of calculateFluencyScoreForTeamMember.
+ */
+function _buildFluencyVars(fd: FluencyInputData): FluencyVars {
+	const totalInteractions = fd.askModeCount + fd.editModeCount + fd.agentModeCount + fd.cliModeCount;
+	const avgTurnsPerSession = fd.turnsPerSessionCount > 0 ? fd.turnsPerSessionSum / fd.turnsPerSessionCount : 0;
+	const switchingFrequency = fd.switchingFreqCount > 0 ? fd.switchingFreqSum / fd.switchingFreqCount : 0;
+	
+	const hasModelSwitching = fd.mixedTierSessions > 0 || fd.mixedCostSessions > 0 || switchingFrequency > 0;
+	const hasAgentMode = (fd.agentModeCount + fd.cliModeCount) > 0;
+	
+	const avgFilesPerSession = fd.filesPerEditCount > 0 ? fd.filesPerEditSum / fd.filesPerEditCount : 0;
+	const avgApplyRate = fd.applyRateCount > 0 ? fd.applyRateSum / fd.applyRateCount : 0;
+	
+	const totalContextRefs = fd.ctxFile + fd.ctxSelection + fd.ctxSymbol + fd.ctxCodebase + fd.ctxWorkspace;
+	
+	const usedRefTypeCount = [
+		fd.ctxFile, fd.ctxSelection, fd.ctxSymbol, fd.ctxCodebase, fd.ctxWorkspace,
+		fd.ctxTerminal, fd.ctxVscode, fd.ctxClipboard, fd.ctxChanges,
+		fd.ctxProblemsPanel, fd.ctxOutputPanel, fd.ctxTerminalLastCommand, fd.ctxTerminalSelection,
+	].filter(v => v > 0).length;
+	
+	return {
+		totalInteractions,
+		avgTurnsPerSession,
+		hasModelSwitching,
+		hasAgentMode,
+		nonAutoToolCount: countNonAutoTools(fd.toolCallsByTool),
+		avgFilesPerSession,
+		avgApplyRate,
+		totalContextRefs,
+		usedRefTypeCount,
+		usedSlashCommands: getUsedSlashCommands(fd.toolCallsByTool),
+	};
+}
+
+/**
+ * Build the result categories array from individual category scores.
+ * Extracted to reduce complexity of calculateFluencyScoreForTeamMember.
+ */
+function _buildFluencyCategories(pe: FluencyStageResult, ce: FluencyStageResult, ag: FluencyStageResult, tu: FluencyStageResult, cu: FluencyStageResult, wi: FluencyStageResult): { category: string; icon: string; stage: number; tips: string[] }[] {
+	return [
+		{ category: "Prompt Engineering", icon: "💬", stage: pe.stage, tips: pe.tips },
+		{ category: "Context Engineering", icon: "📎", stage: ce.stage, tips: ce.tips },
+		{ category: "Agentic", icon: "🤖", stage: ag.stage, tips: ag.tips },
+		{ category: "Tool Usage", icon: "🔧", stage: tu.stage, tips: tu.tips },
+		{ category: "Customization", icon: "⚙️", stage: cu.stage, tips: cu.tips },
+		{ category: "Workflow Integration", icon: "🔄", stage: wi.stage, tips: wi.tips },
+	];
+}
+
+export function calculateFluencyScoreForTeamMember(fd: FluencyInputData, dashboardSessions: number, isMCPEnabled?: boolean): { stage: number; label: string; categories: { category: string; icon: string; stage: number; tips: string[] }[] } {
+	const cv = _buildFluencyVars(fd);
+	const effectiveSessions = Math.max(dashboardSessions, fd.sessionCount);
+	
+	const pe = _calcFluencyPE(fd, cv);
+	const ce = _calcFluencyCE(fd, cv);
+	const ag = _calcFluencyAg(fd, cv);
+	const tu = _calcFluencyTu(fd, cv, isMCPEnabled);
+	const cu = _calcFluencyCu(fd, cv);
+	const wi = _calcFluencyWi(fd, cv, effectiveSessions);
+	
+	const overallStage = computeMedianStage([pe.stage, ce.stage, ag.stage, tu.stage, cu.stage, wi.stage] as Stage[]);
+	
+	return {
+		stage: overallStage,
+		label: STAGE_LABELS[overallStage as Stage] ?? `Stage ${overallStage}`,
+		categories: _buildFluencyCategories(pe, ce, ag, tu, cu, wi),
+	};
+}
 
 /**
  * Calculate maturity scores across 6 categories using last 30 days of usage data.
@@ -644,7 +1183,7 @@ export function calculateFluencyScoreForTeamMember(fd: {
  * Overall stage = median of the 6 category scores.
  * @param useCache If true, use cached usage stats. If false, force recalculation.
  */
-export async function calculateMaturityScores(lastCustomizationMatrix: WorkspaceCustomizationMatrix | undefined, calculateUsageAnalysisStatsFn: (useCache?: boolean) => Promise<UsageAnalysisStats>, useCache = true): Promise<{
+export async function calculateMaturityScores(lastCustomizationMatrix: WorkspaceCustomizationMatrix | undefined, calculateUsageAnalysisStatsFn: (useCache?: boolean) => Promise<UsageAnalysisStats>, useCache = true, isMCPEnabled?: boolean): Promise<{
 	overallStage: number;
 	overallLabel: string;
 	categories: { category: string; icon: string; stage: number; evidence: string[]; tips: string[] }[];
@@ -654,491 +1193,25 @@ export async function calculateMaturityScores(lastCustomizationMatrix: Workspace
 	const stats = await calculateUsageAnalysisStatsFn(useCache);
 	const p = stats.last30Days;
 
-	const stageLabels: Record<number, string> = {
-		1: 'Stage 1: AI Skeptic',
-		2: 'Stage 2: AI Explorer',
-		3: 'Stage 3: AI Collaborator',
-		4: 'Stage 4: AI Strategist'
-	};
+	const pe = _scorePromptEngineering(p);
+	const ce = _scoreContextEngineering(p);
+	const ag = _scoreAgentic(p);
+	const tu = _scoreToolUsage(p, isMCPEnabled);
+	const cu = _scoreCustomization(p, lastCustomizationMatrix);
+	const wi = _scoreWorkflowIntegration(p);
 
-	// ---------- 1. Prompt Engineering ----------
-	const peEvidence: string[] = [];
-	const peTips: string[] = [];
-	let peStage = 1;
-
-	const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + p.modeUsage.cli;
-	if (totalInteractions > 0) {
-		peEvidence.push(`${fmt(totalInteractions)} total interactions`);
-	}
-	if (p.modeUsage.ask > 0) {
-		peEvidence.push(`${fmt(p.modeUsage.ask)} ask-mode conversations`);
-	}
-	if (p.modeUsage.agent > 0) {
-		peEvidence.push(`${fmt(p.modeUsage.agent)} agent-mode interactions`);
-	}
-	if (p.modeUsage.cli > 0) {
-		peEvidence.push(`${fmt(p.modeUsage.cli)} CLI interactions`);
-	}
-
-	// Conversation patterns (multi-turn shows iterative refinement)
-	if (p.conversationPatterns) {
-		const multiTurnRate = p.sessions > 0
-			? Math.round((p.conversationPatterns.multiTurnSessions / p.sessions) * 100)
-			: 0;
-		if (p.conversationPatterns.multiTurnSessions > 0) {
-			peEvidence.push(`${fmt(p.conversationPatterns.multiTurnSessions)} multi-turn sessions (${multiTurnRate}%)`);
-		}
-		if (p.conversationPatterns.avgTurnsPerSession >= 3) {
-			peEvidence.push(`Avg ${p.conversationPatterns.avgTurnsPerSession.toFixed(1)} exchanges per session`);
-			peStage = Math.max(peStage, 2) as 1 | 2 | 3 | 4;
-		}
-		if (p.conversationPatterns.avgTurnsPerSession >= 5) {
-			peStage = Math.max(peStage, 3) as 1 | 2 | 3 | 4;
-		}
-	}
-
-	if (totalInteractions >= 5) {
-		peStage = 2; // At least trying it out
-	}
-
-	// Check slash command / tool usage (indicates structured prompts)
-	// VS Code Copilot slash commands (stored as tool calls by the session parser)
-	const slashCommands = ['explain', 'fix', 'tests', 'doc', 'generate', 'optimize', 'new', 'newNotebook', 'search', 'fixTestFailure', 'setupTests'];
-	// Claude Code slash commands (stored with __slash__ prefix to avoid inflating tool counts)
-	const claudeSlashCommands = ['review', 'bug', 'think', 'compact', 'pr_comments'];
-	const usedSlashCommands = [
-		...slashCommands.filter(cmd => (p.toolCalls.byTool[cmd] || 0) > 0),
-		...claudeSlashCommands.filter(cmd => (p.toolCalls.byTool[`__slash__${cmd}`] || 0) > 0),
-	];
-	if (usedSlashCommands.length > 0) {
-		peEvidence.push(`Used slash commands: /${usedSlashCommands.join(', /')}`);
-	}
-
-	const hasModelSwitching = p.modelSwitching.mixedTierSessions > 0 || p.modelSwitching.switchingFrequency > 0;
-	const hasAgentMode = p.modeUsage.agent > 0 || p.modeUsage.cli > 0;
-
-	if (totalInteractions >= 30 && (usedSlashCommands.length >= 2 || hasAgentMode)) {
-		peStage = 3; // Regular, purposeful use
-	}
-
-	// Strategist: high volume + agent mode + (model switching or diverse slash commands)
-	if (totalInteractions >= 100 && hasAgentMode && (hasModelSwitching || usedSlashCommands.length >= 3)) {
-		peStage = 4;
-	}
-
-	// Model switching awareness
-	if (hasModelSwitching) {
-		peEvidence.push(`Switched models in ${Math.round(p.modelSwitching.switchingFrequency)}% of sessions`);
-		if (peStage < 4 && p.modelSwitching.mixedTierSessions > 0) {
-			peStage = Math.max(peStage, 3) as 1 | 2 | 3 | 4;
-		}
-	}
-
-	// Context-aware tips
-	if (peStage < 2) { peTips.push('Try asking Copilot a question using the Chat panel'); }
-	if (peStage < 3) {
-		if (!hasAgentMode) { peTips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-file changes'); }
-		if (usedSlashCommands.length < 2) { peTips.push('Use [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /fix, or /tests to give structured prompts'); }
-	}
-	if (peStage < 4) {
-		if (!hasAgentMode) { peTips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for autonomous, multi-step coding tasks'); }
-		if (!hasModelSwitching) { peTips.push('Experiment with [different models](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_choose-a-language-model) for different tasks - use fast models for simple queries and reasoning models for complex problems'); }
-		if (usedSlashCommands.length < 3 && hasAgentMode && hasModelSwitching) { peTips.push('Explore more [slash commands](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like /explain, /tests, or /doc to diversify your prompting'); }
-	}
-
-	// ---------- 2. Context Engineering ----------
-	const ceEvidence: string[] = [];
-	const ceTips: string[] = [];
-	let ceStage = 1;
-
-	const totalContextRefs = p.contextReferences.file + p.contextReferences.selection +
-		p.contextReferences.symbol + p.contextReferences.codebase + p.contextReferences.workspace;
-	const refTypes = [
-		p.contextReferences.file > 0,
-		p.contextReferences.selection > 0,
-		p.contextReferences.symbol > 0,
-		p.contextReferences.codebase > 0,
-		p.contextReferences.workspace > 0,
-		p.contextReferences.terminal > 0,
-		p.contextReferences.vscode > 0,
-		p.contextReferences.clipboard > 0,
-		p.contextReferences.changes > 0,
-		p.contextReferences.problemsPanel > 0,
-		p.contextReferences.outputPanel > 0,
-		p.contextReferences.terminalLastCommand > 0,
-		p.contextReferences.terminalSelection > 0
-	];
-	const usedRefTypeCount = refTypes.filter(Boolean).length;
-
-	if (p.contextReferences.file > 0) { ceEvidence.push(`${fmt(p.contextReferences.file)} #file references`); }
-	if (p.contextReferences.selection > 0) { ceEvidence.push(`${fmt(p.contextReferences.selection)} #selection references`); }
-	if (p.contextReferences.codebase > 0) { ceEvidence.push(`${fmt(p.contextReferences.codebase)} #codebase references`); }
-	if (p.contextReferences.workspace > 0) { ceEvidence.push(`${fmt(p.contextReferences.workspace)} @workspace references`); }
-	if (p.contextReferences.terminal > 0) { ceEvidence.push(`${fmt(p.contextReferences.terminal)} @terminal references`); }
-	if (p.contextReferences.vscode > 0) { ceEvidence.push(`${fmt(p.contextReferences.vscode)} @vscode references`); }
-	if (p.contextReferences.clipboard > 0) { ceEvidence.push(`${fmt(p.contextReferences.clipboard)} #clipboard references`); }
-	if (p.contextReferences.changes > 0) { ceEvidence.push(`${fmt(p.contextReferences.changes)} #changes references`); }
-	if (p.contextReferences.problemsPanel > 0) { ceEvidence.push(`${fmt(p.contextReferences.problemsPanel)} #problemsPanel references`); }
-	if (p.contextReferences.outputPanel > 0) { ceEvidence.push(`${fmt(p.contextReferences.outputPanel)} #outputPanel references`); }
-	if (p.contextReferences.terminalLastCommand > 0) { ceEvidence.push(`${fmt(p.contextReferences.terminalLastCommand)} #terminalLastCommand references`); }
-	if (p.contextReferences.terminalSelection > 0) { ceEvidence.push(`${fmt(p.contextReferences.terminalSelection)} #terminalSelection references`); }
-
-	if (totalContextRefs >= 1) { ceStage = 2; }
-	if (usedRefTypeCount >= 3 && totalContextRefs >= 10) { ceStage = 3; }
-	if (usedRefTypeCount >= 5 && totalContextRefs >= 30) { ceStage = 4; }
-
-	// Image context (byKind: copilot.image)
-	const imageRefs = p.contextReferences.byKind['copilot.image'] || 0;
-	if (imageRefs > 0) {
-		ceEvidence.push(`${fmt(imageRefs)} image references (vision)`);
-		ceStage = Math.max(ceStage, 3) as 1 | 2 | 3 | 4;
-	}
-
-	if (ceStage < 2) { ceTips.push('Try adding [#file or #selection](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) references to give Copilot more context'); }
-	if (ceStage < 3) { ceTips.push('Explore [@workspace, #codebase, and @terminal](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) for broader context'); }
-	if (ceStage < 4) {
-		const typesStillNeeded = Math.max(0, 5 - usedRefTypeCount);
-		const refsStillNeeded = Math.max(0, 30 - totalContextRefs);
-		const specializedItems = [
-			{ name: 'image attachments', used: imageRefs > 0 },
-			{ name: '#changes', used: p.contextReferences.changes > 0 },
-			{ name: '#problemsPanel', used: p.contextReferences.problemsPanel > 0 },
-			{ name: '#outputPanel', used: p.contextReferences.outputPanel > 0 },
-			{ name: '#terminalLastCommand', used: p.contextReferences.terminalLastCommand > 0 },
-			{ name: '#terminalSelection', used: p.contextReferences.terminalSelection > 0 },
-			{ name: '#clipboard', used: p.contextReferences.clipboard > 0 },
-			{ name: '@vscode', used: p.contextReferences.vscode > 0 },
-		];
-		const specializedUsedCount = specializedItems.filter(i => i.used).length;
-		if (specializedUsedCount >= 2) {
-			// User already uses multiple specialized context techniques — show a concrete gap tip.
-			const allTypesNotUsed = [
-				{ name: '#symbol', used: p.contextReferences.symbol > 0 },
-				{ name: '@workspace', used: p.contextReferences.workspace > 0 },
-				{ name: '#codebase', used: p.contextReferences.codebase > 0 },
-				{ name: '@terminal', used: p.contextReferences.terminal > 0 },
-				...specializedItems,
-			].filter(i => !i.used).map(i => i.name);
-			const gapParts: string[] = [];
-			if (typesStillNeeded > 0) { gapParts.push(`${fmt(usedRefTypeCount)} of 5 different reference types used`); }
-			if (refsStillNeeded > 0) { gapParts.push(`${fmt(totalContextRefs)} of 30 total references`); }
-			if (gapParts.length > 0) {
-				const suggest = allTypesNotUsed.slice(0, 3);
-				const suggStr = suggest.length > 0 ? ` — try ${suggest.join(', ')}` : '';
-				ceTips.push(`Stage 4 needs ${gapParts.join(' and ')}${suggStr}`);
-			}
-		} else {
-			// User hasn't explored many specialized vars yet — suggest them.
-			const specializedNotYetUsed = specializedItems.filter(i => !i.used).map(i => i.name);
-			if (specializedNotYetUsed.length > 0) {
-				const toMention = specializedNotYetUsed.slice(0, 3);
-				const extra = specializedNotYetUsed.length > 3 ? ` and ${specializedNotYetUsed.length - 3} more` : '';
-				ceTips.push(`Try ${toMention.join(', ')}${extra} — see [specialized context variables](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) to reach Stage 4`);
-			}
-		}
-	}
-
-	// ---------- 3. Agentic ----------
-	const agEvidence: string[] = [];
-	const agTips: string[] = [];
-	let agStage = 1;
-
-	if (p.modeUsage.agent > 0) {
-		agEvidence.push(`${fmt(p.modeUsage.agent)} agent-mode interactions`);
-		agStage = 2;
-	}
-	if (p.modeUsage.cli > 0) {
-		agEvidence.push(`${fmt(p.modeUsage.cli)} CLI interactions`);
-		agStage = Math.max(agStage, 2) as 1 | 2 | 3 | 4;
-	}
-	if (p.toolCalls.total > 0) {
-		agEvidence.push(`${fmt(p.toolCalls.total)} tool calls executed`);
-	}
-	if (p.modeUsage.edit > 0) {
-		agEvidence.push(`${fmt(p.modeUsage.edit)} edit-mode interactions`);
-	}
-
-	// Edit scope tracking (multi-file edits show advanced agentic behavior)
-	if (p.editScope) {
-		const multiFileRate = p.editScope.totalEditedFiles > 0
-			? Math.round((p.editScope.multiFileEdits / (p.editScope.singleFileEdits + p.editScope.multiFileEdits)) * 100)
-			: 0;
-		if (p.editScope.multiFileEdits > 0) {
-			agEvidence.push(`${fmt(p.editScope.multiFileEdits)} multi-file edit sessions (${multiFileRate}%)`);
-			agStage = Math.max(agStage, 2) as 1 | 2 | 3 | 4;
-		}
-		if (p.editScope.avgFilesPerSession >= 3) {
-			agEvidence.push(`Avg ${p.editScope.avgFilesPerSession.toFixed(1)} files per edit session`);
-			agStage = Math.max(agStage, 3) as 1 | 2 | 3 | 4;
-		}
-	}
-
-	// Agent type distribution
-	if (p.agentTypes && p.agentTypes.editsAgent > 0) {
-		agEvidence.push(`${fmt(p.agentTypes.editsAgent)} edits agent sessions`);
-		agStage = Math.max(agStage, 2) as 1 | 2 | 3 | 4;
-	}
-
-	// Diverse tool usage in agent mode
-	const toolCount = Object.keys(p.toolCalls.byTool).length;
-	// Exclude __slash__ pseudo-entries from real tool counts (they track Claude slash commands, not actual tool calls)
-	const nonAutoToolCount = Object.keys(p.toolCalls.byTool).filter(t => !AUTOMATIC_TOOL_SET.has(t.toLowerCase()) && !t.startsWith('__slash__')).length;
-	if ((p.modeUsage.agent + p.modeUsage.cli) >= 10 && nonAutoToolCount >= 3) {
-		agStage = 3;
-	}
-
-	// Heavy agentic use with many tool types or high multi-file edit rate
-	if ((p.modeUsage.agent + p.modeUsage.cli) >= 50 && nonAutoToolCount >= 5) {
-		agStage = 4;
-	}
-	if (p.editScope && p.editScope.multiFileEdits >= 20 && p.editScope.avgFilesPerSession >= 3) {
-		agStage = Math.max(agStage, 4) as 1 | 2 | 3 | 4;
-	}
-
-	if (agStage < 2) { agTips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) — it can run terminal commands, edit files, and explore your codebase autonomously'); }
-	if (agStage < 3) { agTips.push('Use [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for multi-step tasks; let it chain tools like file search, terminal, and code edits'); }
-	if (agStage < 4) { agTips.push('Tackle complex refactoring or debugging tasks in [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) for deeper autonomous workflows'); }
-
-	// ---------- 4. Tool Usage ----------
-	const tuEvidence: string[] = [];
-	const tuTips: string[] = [];
-	let tuStage = 1;
-
-	// Basic tool usage — only count tools the user intentionally enables/configures (not automatic agent tools)
-	if (nonAutoToolCount > 0) {
-		const autoCount = toolCount - nonAutoToolCount;
-		const autoNote = autoCount > 0 ? ` (+ ${fmt(autoCount)} automatic)` : '';
-		tuEvidence.push(`${fmt(nonAutoToolCount)} intentional tools used${autoNote}`);
-		tuStage = 2;
-	} else if (toolCount > 0) {
-		tuEvidence.push(`${fmt(toolCount)} tools used (all automatic — agent reads/searches)`);
-	}
-
-	// Agent type distribution (workspace agent shows advanced tool usage)
-	if (p.agentTypes) {
-		if (p.agentTypes.workspaceAgent > 0) {
-			tuEvidence.push(`${fmt(p.agentTypes.workspaceAgent)} @workspace agent sessions`);
-			tuStage = Math.max(tuStage, 3) as 1 | 2 | 3 | 4;
-		}
-	}
-
-	// Specific advanced tool IDs (intentional tool integration)
-	const advancedToolFriendlyNames: Record<string, string> = {
-		github_pull_request: 'GitHub Pull Request',
-		github_repo: 'GitHub Repository',
-		run_in_terminal: 'Run In Terminal',
-		editFiles: 'Edit Files',
-		listFiles: 'List Files'
-	};
-	const usedAdvanced = Object.keys(advancedToolFriendlyNames).filter(t => (p.toolCalls.byTool[t] || 0) > 0);
-	if (usedAdvanced.length > 0) {
-		tuEvidence.push(`Advanced tools: ${usedAdvanced.map(t => advancedToolFriendlyNames[t]).join(', ')}`);
-		if (usedAdvanced.length >= 2) {
-			tuStage = Math.max(tuStage, 3) as 1 | 2 | 3 | 4;
-		}
-	}
-
-	// MCP tools are a strong signal of strategic/advanced use
-	const mcpServers = Object.keys(p.mcpTools.byServer);
-	if (p.mcpTools.total > 0) {
-		tuEvidence.push(`${fmt(p.mcpTools.total)} MCP tool calls across ${mcpServers.length} server(s)`);
-		tuStage = Math.max(tuStage, 3) as 1 | 2 | 3 | 4; // Using any MCP server is stage 3
-		if (mcpServers.length >= 2) {
-			tuStage = 4; // Multiple MCP servers = strategist
-		}
-	}
-
-	// Tips based on current state
-	if (tuStage < 2) {
-		tuTips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) to let Copilot use built-in tools for file operations and terminal commands');
-	}
-	if (tuStage < 3) {
-		if (mcpServers.length === 0) {
-			tuTips.push('Set up [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to connect Copilot to external tools (databases, APIs, cloud services)');
-		} else {
-			tuTips.push('Explore [GitHub integrations](https://code.visualstudio.com/docs/copilot/agents/agent-tools) and advanced tools like editFiles and run_in_terminal');
-		}
-	}
-	if (tuStage < 4) {
-		if (mcpServers.length === 1) {
-			tuTips.push('Add more [MCP servers](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) to expand Copilot\'s capabilities - check the VS Code MCP registry');
-		} else if (mcpServers.length === 0) {
-			tuTips.push('Explore the [VS Code MCP registry](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) for tools that integrate with your workflow');
-		} else {
-			tuTips.push('You\'re using multiple MCP servers - keep exploring advanced tool combinations');
-		}
-	}
-
-	// ---------- 5. Customization ----------
-	const cuEvidence: string[] = [];
-	const cuTips: string[] = [];
-	let cuStage = 1;
-
-	// Derive repo-level customization from the customization matrix (which is actually populated)
-	const matrix = lastCustomizationMatrix;
-	const totalRepos = matrix?.totalWorkspaces ?? 0;
-	const reposWithCustomization = totalRepos - (matrix?.workspacesWithIssues ?? 0);
-	const customizationRate = totalRepos > 0 ? (reposWithCustomization / totalRepos) : 0;
-
-	if (totalRepos > 0) {
-		cuEvidence.push(`Worked in ${totalRepos} repositor${totalRepos === 1 ? 'y' : 'ies'}`);
-	}
-
-	if (reposWithCustomization > 0) {
-		cuStage = 2;
-	}
-
-	// Stage thresholds based on adoption rate
-	if (customizationRate >= 0.3 && reposWithCustomization >= 2) {
-		cuStage = 3;
-	}
-
-	if (customizationRate >= 0.7 && reposWithCustomization >= 3) {
-		cuStage = 4;
-	}
-
-	// Model selection awareness (choosing specific models)
-	const uniqueModels = [...new Set([
-		...p.modelSwitching.standardModels,
-		...p.modelSwitching.premiumModels
-	])];
-	if (uniqueModels.length >= 3) {
-		// Check for Stage 4 criteria first
-		const hasStage4Models = uniqueModels.length >= 5 && reposWithCustomization >= 3;
-		
-		cuEvidence.push(`Used ${uniqueModels.length} different models`);
-		if (hasStage4Models) {
-			cuStage = 4;
-		} else if (uniqueModels.length >= 5) {
-			cuStage = Math.max(cuStage, 3) as 1 | 2 | 3 | 4;
-		} else {
-			cuStage = Math.max(cuStage, 3) as 1 | 2 | 3 | 4;
-		}
-	}
-
-	// Show repo customization evidence once, reflecting the final achieved stage
-	if (cuStage >= 4) {
-		cuEvidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized (70%+ with 3+ repos → Stage 4)`);
-	} else if (cuStage >= 3) {
-		cuEvidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos customized (30%+ with 2+ repos → Stage 3)`);
-	} else if (reposWithCustomization > 0) {
-		cuEvidence.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos with custom instructions or agents.md`);
-	}
-
-	if (cuStage < 2) { cuTips.push('Create a [.github/copilot-instructions.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) or [CLAUDE.md](https://docs.anthropic.com/en/docs/claude-code/memory) file with project-specific guidelines'); }
-	if (cuStage < 3) { cuTips.push('Add [custom instructions](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) to more repositories to standardize your Copilot experience'); }
-	if (cuStage < 4) {
-		const uncustomized = totalRepos - reposWithCustomization;
-		if (totalRepos > 0 && uncustomized > 0) {
-			cuTips.push(`${fmt(reposWithCustomization)} of ${fmt(totalRepos)} repos have customization — add [instructions and agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions) to the remaining ${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} for Stage 4`);
-		} else {
-			cuTips.push('Aim for consistent customization across all projects with [instructions and agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions)');
-		}
-	}
-	if (cuStage >= 4) {
-		const uncustomized = totalRepos - reposWithCustomization;
-		if (uncustomized > 0) {
-			const missingCustomizationRepos = (matrix?.workspaces || [])
-				.filter(row => Object.values(row.typeStatuses).every(status => status === '❌'));
-			const prioritizedMissingRepos = missingCustomizationRepos
-				.filter(row => !row.workspacePath.startsWith('<unresolved:'))
-				.sort((a, b) => {
-					if (b.interactionCount !== a.interactionCount) {
-						return b.interactionCount - a.interactionCount;
-					}
-					return b.sessionCount - a.sessionCount;
-				})
-				.slice(0, 3);
-
-			const summaryTip = `${fmt(uncustomized)} repo${uncustomized === 1 ? '' : 's'} still missing customization — add [instructions](https://code.visualstudio.com/docs/copilot/customization/custom-instructions), [agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions), or [MCP configs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) for full coverage.`;
-			if (prioritizedMissingRepos.length > 0) {
-				const repoLines = prioritizedMissingRepos.map(row => 
-					`${row.workspaceName} (${fmt(row.interactionCount)} interaction${row.interactionCount === 1 ? '' : 's'})`
-				).join('\n');
-				cuTips.push(`${summaryTip}\n\nTop repos to customize first:\n${repoLines}`);
-			} else {
-				cuTips.push(summaryTip);
-			}
-		} else {
-			cuTips.push('All repos customized! Keep instructions up to date and add [skill files](https://code.visualstudio.com/docs/copilot/customization/agent-skills) or [MCP server configs](https://code.visualstudio.com/docs/copilot/customization/mcp-servers) for deeper integration');
-		}
-	}
-
-	// ---------- 6. Workflow Integration ----------
-	const wiEvidence: string[] = [];
-	const wiTips: string[] = [];
-	let wiStage = 1;
-
-	// Sessions count reflects regularity
-	if (p.sessions >= 3) {
-		wiEvidence.push(`${fmt(p.sessions)} sessions in the last 30 days`);
-		wiStage = 2;
-	}
-
-	// Apply button usage (high rate shows active adoption of suggestions)
-	if (p.applyUsage && p.applyUsage.totalCodeBlocks > 0) {
-		const applyRatePercent = Math.round(p.applyUsage.applyRate);
-		wiEvidence.push(`${applyRatePercent}% code block apply rate (${fmt(p.applyUsage.totalApplies)}/${fmt(p.applyUsage.totalCodeBlocks)})`);
-		if (applyRatePercent >= 50) {
-			wiStage = Math.max(wiStage, 2) as 1 | 2 | 3 | 4;
-		}
-	}
-
-	// Session duration (informational only - not used for staging)
-	if (p.sessionDuration && p.sessionDuration.avgDurationMs > 0) {
-		const avgMinutes = Math.round(p.sessionDuration.avgDurationMs / 60000);
-		wiEvidence.push(`Avg ${avgMinutes}min session duration`);
-	}
-
-	// Multi-mode usage (ask + agent + cli) - key indicator of integration
-	const modesUsed = [p.modeUsage.ask > 0, p.modeUsage.agent > 0, p.modeUsage.cli > 0].filter(Boolean).length;
-	if (modesUsed >= 2) {
-		wiEvidence.push(`Uses ${modesUsed} modes (ask/agent/cli)`);
-		wiStage = Math.max(wiStage, 3) as 1 | 2 | 3 | 4;
-	}
-
-	// Explicit context usage - strong signal of intentional integration
-	const hasExplicitContext = totalContextRefs >= 10;
-	if (hasExplicitContext) {
-		wiEvidence.push(`${fmt(totalContextRefs)} explicit context references`);
-		if (totalContextRefs >= 20) {
-			wiStage = Math.max(wiStage, 3) as 1 | 2 | 3 | 4;
-		}
-	}
-
-	// Stage 4: Multi-mode + explicit context + regular usage
-	if (p.sessions >= 15 && modesUsed >= 2 && totalContextRefs >= 20) {
-		wiStage = 4;
-		wiEvidence.push('Deep integration: regular usage with multi-mode and explicit context');
-	}
-
-	if (wiStage < 2) { wiTips.push('Use AI more regularly - even for quick questions'); }
-	if (wiStage < 3) { 
-		if (modesUsed < 2) { wiTips.push('Combine [ask mode with agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) in your daily workflow'); }
-		if (totalContextRefs < 10) { wiTips.push('Use explicit [context references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) like #file, @workspace, and #selection'); }
-	}
-	if (wiStage < 4) { 
-		if (totalContextRefs < 20) { wiTips.push('Make explicit context a habit - use [#file, @workspace, and other references](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts) consistently'); }
-		wiTips.push('Make AI part of every coding task: planning, coding, testing, and reviewing'); 
-	}
-
-	// ---------- Overall score (median) ----------
-	const scores = [peStage, ceStage, agStage, tuStage, cuStage, wiStage].sort((a, b) => a - b);
-	const mid = Math.floor(scores.length / 2);
-	const overallStage = scores.length % 2 === 0
-		? Math.round((scores[mid - 1] + scores[mid]) / 2)
-		: scores[mid];
+	const overallStage = computeMedianStage([pe.stage, ce.stage, ag.stage, tu.stage, cu.stage, wi.stage]);
 
 	return {
 		overallStage,
-		overallLabel: stageLabels[overallStage] || `Stage ${overallStage}`,
+		overallLabel: STAGE_LABELS[overallStage as Stage] ?? `Stage ${overallStage}`,
 		categories: [
-			{ category: 'Prompt Engineering', icon: '💬', stage: peStage, evidence: peEvidence, tips: peTips },
-			{ category: 'Context Engineering', icon: '📎', stage: ceStage, evidence: ceEvidence, tips: ceTips },
-			{ category: 'Agentic', icon: '🤖', stage: agStage, evidence: agEvidence, tips: agTips },
-			{ category: 'Tool Usage', icon: '🔧', stage: tuStage, evidence: tuEvidence, tips: tuTips },
-			{ category: 'Customization', icon: '⚙️', stage: cuStage, evidence: cuEvidence, tips: cuTips },
-			{ category: 'Workflow Integration', icon: '🔄', stage: wiStage, evidence: wiEvidence, tips: wiTips }
+			{ category: 'Prompt Engineering', icon: '💬', stage: pe.stage, evidence: pe.evidence, tips: pe.tips },
+			{ category: 'Context Engineering', icon: '📎', stage: ce.stage, evidence: ce.evidence, tips: ce.tips },
+			{ category: 'Agentic', icon: '🤖', stage: ag.stage, evidence: ag.evidence, tips: ag.tips },
+			{ category: 'Tool Usage', icon: '🔧', stage: tu.stage, evidence: tu.evidence, tips: tu.tips },
+			{ category: 'Customization', icon: '⚙️', stage: cu.stage, evidence: cu.evidence, tips: cu.tips },
+			{ category: 'Workflow Integration', icon: '🔄', stage: wi.stage, evidence: wi.evidence, tips: wi.tips }
 		],
 		period: p,
 		lastUpdated: stats.lastUpdated.toISOString()

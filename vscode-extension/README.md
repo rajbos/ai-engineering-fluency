@@ -80,8 +80,10 @@ Supported editors shown in the chart:
 - `Cursor` — Cursor editor
 - `OpenCode` — Terminal-based coding agent
 - `Crush` — Terminal-based coding agent
+- `Pi` — Pi CLI coding agent (actual token counts from session JSONL)
 - `Claude Code` — Anthropic CLI/IDE extension (actual API token counts, no estimation)
 - `Gemini CLI` — Google's CLI coding agent (actual token counts from session JSONL)
+- `Windsurf` — Windsurf editor (running sessions discovered via Windsurf integration; file fallback available from local Cascade data)
 - `Visual Studio` — Visual Studio IDE (2022+); token counts are **estimated** from prompt and response text length
 
 ---
@@ -184,9 +186,9 @@ The extension can also upload your local session log files to Azure Blob Storage
 To enable log file uploads:
 ```json
 {
-  "copilotTokenTracker.backend.blobUploadEnabled": true,
-  "copilotTokenTracker.backend.blobContainerName": "copilot-session-logs",
-  "copilotTokenTracker.backend.blobUploadFrequencyHours": 24
+  "aiEngineeringFluency.backend.blobUploadEnabled": true,
+  "aiEngineeringFluency.backend.blobContainerName": "copilot-session-logs",
+  "aiEngineeringFluency.backend.blobUploadFrequencyHours": 24
 }
 ```
 
@@ -264,11 +266,12 @@ The extension uses intelligent caching to improve performance:
 
 ## Known Issues
 
-- Numbers shown use **actual token counts** from the LLM API when available (e.g. Copilot Chat JSONL sessions and OpenCode sessions). When actual token data is not available, the extension falls back to **estimates** computed from text in the session logs.
+- Numbers shown use **actual token counts** from the LLM API when available (e.g. Copilot Chat JSONL sessions, OpenCode sessions, and Pi CLI sessions). When actual token data is not available, the extension falls back to **estimates** computed from text in the session logs.
 - If you use multiple machines (or multiple VS Code profiles/windows), local-only mode will only reflect what's on the current machine. The cloud backend improves cross-device coverage.
 - Premium Requests are not tracked.
 - Dev Containers: Copilot Chat session logs are written to the host machine's user profile (outside the container). The extension currently does not read from host paths, so token tracking will not work inside a Dev Container. Run VS Code locally (outside the container) or mount the host user data directories into the container at the expected locations.
 - Windows with WSL: The extension can only show information when VS Code, Copilot CLI, and OpenCode run in the same environment as the VS Code host. To track usage properly, either run VS Code from within WSL using the [Remote - WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) (recommended), or run all tools natively on Windows. See the [VS Code WSL documentation](https://code.visualstudio.com/docs/remote/wsl) for setup instructions.
+- Windsurf sessions are surfaced as virtual `windsurf://trajectory/...` entries. Their underlying `.pb` Cascade files are binary protobuf data, so the text log viewer reveals the backing file instead of rendering the session as plain text.
 
 > **⚠️ Warning**
 >

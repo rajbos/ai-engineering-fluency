@@ -1,4 +1,5 @@
 import * as https from 'https';
+import { GITHUB_API_HOSTNAME, buildGitHubApiHeaders } from './githubApiConfig';
 
 export type AgentSessionSource = 'cloud-agent' | 'cli-remote' | 'unknown';
 
@@ -64,10 +65,16 @@ export interface TaskDetailResult {
 	error?: string;
 }
 
-export type FetchTaskPageFn = (
-	owner: string, repo: string, token: string,
-	page: number, archived: boolean, since?: string,
-) => Promise<TaskPageResult>;
+export interface FetchTaskPageOptions {
+	owner: string;
+	repo: string;
+	token: string;
+	page: number;
+	archived: boolean;
+	since?: string;
+}
+
+export type FetchTaskPageFn = (options: FetchTaskPageOptions) => Promise<TaskPageResult>;
 
 export type FetchTaskDetailFn = (
 	owner: string, repo: string, taskId: string, token: string,
@@ -75,12 +82,7 @@ export type FetchTaskDetailFn = (
 
 /** Fetch one page of agent tasks from the GitHub API. */
 export function fetchAgentTasksPage(
-	owner: string,
-	repo: string,
-	token: string,
-	page: number,
-	archived: boolean,
-	since?: string,
+	{ owner, repo, token, page, archived, since }: FetchTaskPageOptions,
 ): Promise<TaskPageResult> {
 	return new Promise((resolve) => {
 		let queryParams = `per_page=100&page=${page}`;
@@ -89,14 +91,9 @@ export function fetchAgentTasksPage(
 
 		const req = https.request(
 			{
-				hostname: 'api.github.com',
+				hostname: GITHUB_API_HOSTNAME,
 				path: `/agents/repos/${owner}/${repo}/tasks?${queryParams}`,
-				headers: {
-					Authorization: `Bearer ${token}`,
-					'User-Agent': 'copilot-token-tracker',
-					Accept: 'application/vnd.github.v3+json',
-					'X-GitHub-Api-Version': '2022-11-28',
-				},
+				headers: buildGitHubApiHeaders(token),
 			},
 			(res) => {
 				let data = '';
@@ -135,14 +132,9 @@ export function fetchAgentTaskDetail(
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: 'api.github.com',
+				hostname: GITHUB_API_HOSTNAME,
 				path: `/agents/repos/${owner}/${repo}/tasks/${encodeURIComponent(taskId)}`,
-				headers: {
-					Authorization: `Bearer ${token}`,
-					'User-Agent': 'copilot-token-tracker',
-					Accept: 'application/vnd.github.v3+json',
-					'X-GitHub-Api-Version': '2022-11-28',
-				},
+				headers: buildGitHubApiHeaders(token),
 			},
 			(res) => {
 				let data = '';
@@ -193,64 +185,84 @@ export async function fetchAgentSessionsForRepo(
 	fetchTaskDetail: FetchTaskDetailFn = fetchAgentTaskDetail,
 ): Promise<AgentRepoSummary> {
 	const sinceStr = since.toISOString();
-	const allTasks: any[] = [];
-	const seen = new Set<string>();
-
-	// Fetch active and archived task lists
-	for (const archived of [false, true]) {
-		for (let page = 1; page <= 5; page++) {
-			const { tasks, statusCode, error } = await fetchTaskPage(owner, repo, token, page, archived, sinceStr);
-			if (tasks.length === 0 || error) {
-				if (page === 1 && !archived && error) {
-					const msg = statusCode === 404
-						? 'Copilot cloud agent not enabled or not accessible for this repo'
-						: statusCode === 403
-						? 'Access denied — check that your GitHub token has repo scope'
-						: `API error (HTTP ${statusCode ?? 'unknown'})`;
-					return { owner, repo, totalTasks: 0, totalSessions: 0, totalCredits: 0, tasksScanned: 0, tasksTotal: 0, partial: false, error: msg };
-				}
-				break;
-			}
-			for (const t of tasks) {
-				if (!seen.has(t.id)) { seen.add(t.id); allTasks.push(t); }
-			}
-			if (tasks.length < 100) { break; }
-		}
-	}
+	const { allTasks, error } = await fetchAllTasksForRepo(owner, repo, token, sinceStr, fetchTaskPage);
+	if (error) { return error; }
 
 	const tasksTotal = allTasks.length;
 	const tasksToDetail = allTasks.slice(0, MAX_TASKS_DETAIL_PER_REPO);
 	const partial = tasksTotal > MAX_TASKS_DETAIL_PER_REPO;
+	const { totalTasks, totalSessions, totalCredits } = await aggregateTaskDetails(tasksToDetail, owner, repo, token, fetchTaskDetail);
 
+	return { owner, repo, totalTasks, totalSessions, totalCredits, tasksScanned: tasksToDetail.length, tasksTotal, partial };
+}
+
+function buildTaskFetchError(owner: string, repo: string, statusCode: number | undefined): AgentRepoSummary {
+	const msg = statusCode === 404
+		? 'Copilot cloud agent not enabled or not accessible for this repo'
+		: statusCode === 403
+		? 'Access denied — check that your GitHub token has repo scope'
+		: `API error (HTTP ${statusCode ?? 'unknown'})`;
+	return { owner, repo, totalTasks: 0, totalSessions: 0, totalCredits: 0, tasksScanned: 0, tasksTotal: 0, partial: false, error: msg };
+}
+
+async function fetchTasksForArchivedBatch(
+	owner: string, repo: string, token: string, sinceStr: string, archived: boolean,
+	fetchTaskPage: FetchTaskPageFn, seen: Set<string>, allTasks: any[],
+): Promise<AgentRepoSummary | undefined> {
+	for (let page = 1; page <= 5; page++) {
+		const { tasks, statusCode, error } = await fetchTaskPage({ owner, repo, token, page, archived, since: sinceStr });
+		if (error && page === 1 && !archived) { return buildTaskFetchError(owner, repo, statusCode); }
+		if (tasks.length === 0 || error) { break; }
+		for (const t of tasks) { if (!seen.has(t.id)) { seen.add(t.id); allTasks.push(t); } }
+		if (tasks.length < 100) { break; }
+	}
+	return undefined;
+}
+
+async function fetchAllTasksForRepo(
+	owner: string,
+	repo: string,
+	token: string,
+	sinceStr: string,
+	fetchTaskPage: FetchTaskPageFn,
+): Promise<{ allTasks: any[]; error?: AgentRepoSummary }> {
+	const allTasks: any[] = [];
+	const seen = new Set<string>();
+	for (const archived of [false, true]) {
+		const err = await fetchTasksForArchivedBatch(owner, repo, token, sinceStr, archived, fetchTaskPage, seen, allTasks);
+		if (err) { return { allTasks: [], error: err }; }
+	}
+	return { allTasks };
+}
+
+function sumCloudSessionCredits(sessions: any[]): { tasks: number; sessions: number; credits: number } {
+	const cloudSessions = sessions.filter(s => detectSessionSource(s) === 'cloud-agent');
+	if (cloudSessions.length === 0) { return { tasks: 0, sessions: 0, credits: 0 }; }
+	const credits = cloudSessions.reduce((sum, s) => sum + (s.usage && typeof s.usage.credits === 'number' ? s.usage.credits : 0), 0);
+	return { tasks: 1, sessions: cloudSessions.length, credits };
+}
+
+async function aggregateTaskDetails(
+	tasksToDetail: any[],
+	owner: string,
+	repo: string,
+	token: string,
+	fetchTaskDetail: FetchTaskDetailFn,
+): Promise<{ totalTasks: number; totalSessions: number; totalCredits: number }> {
 	let totalTasks = 0;
 	let totalSessions = 0;
 	let totalCredits = 0;
-
-	// Fetch task details in small concurrent batches
 	const CONCURRENCY = 5;
 	for (let i = 0; i < tasksToDetail.length; i += CONCURRENCY) {
 		const batch = tasksToDetail.slice(i, i + CONCURRENCY);
-		const results = await Promise.all(
-			batch.map(task => fetchTaskDetail(owner, repo, task.id, token))
-		);
+		const results = await Promise.all(batch.map(task => fetchTaskDetail(owner, repo, task.id, token)));
 		for (const { sessions } of results) {
 			if (!sessions || sessions.length === 0) { continue; }
-			const cloudSessions = sessions.filter(s => detectSessionSource(s) === 'cloud-agent');
-			if (cloudSessions.length > 0) {
-				totalTasks++;
-				totalSessions += cloudSessions.length;
-				for (const s of cloudSessions) {
-					if (s.usage && typeof s.usage.credits === 'number') {
-						totalCredits += s.usage.credits;
-					}
-				}
-			}
+			const { tasks, sessions: s, credits } = sumCloudSessionCredits(sessions);
+			totalTasks += tasks;
+			totalSessions += s;
+			totalCredits += credits;
 		}
 	}
-
-	return {
-		owner, repo,
-		totalTasks, totalSessions, totalCredits,
-		tasksScanned: tasksToDetail.length, tasksTotal, partial,
-	};
+	return { totalTasks, totalSessions, totalCredits };
 }

@@ -62,17 +62,27 @@ class TokenTrackerPanel(
      * Prefetches all CLI data (all --json + fluency --json in parallel) on a
      * background thread, then reloads [view] with the data pre-embedded.
      * Subsequent navigations use the warm cache — no spinner needed.
+     *
+     * [onSuccess] is invoked on the EDT after a successful fetch, before loading the view.
+     * [onFailure] is invoked on the EDT after a failed fetch, before showing the error.
+     * Use these for cleanup such as persisting or resetting a timeout override.
      */
-    private fun prefetchAndLoadView(view: String) {
+    private fun prefetchAndLoadView(
+        view: String,
+        onSuccess: (() -> Unit)? = null,
+        onFailure: (() -> Unit)? = null,
+    ) {
         ApplicationManager.getApplication().executeOnPooledThread {
             val result = runCatching { CliBridge.prefetchAll() }
             ApplicationManager.getApplication().invokeLater {
                 result.fold(
                     onSuccess = {
+                        onSuccess?.invoke()
                         // Cache is now warm — load the current view with data embedded
                         loadViewFromCache(currentView)
                     },
                     onFailure = { err ->
+                        onFailure?.invoke()
                         log.warn("CLI prefetch failed", err)
                         showError(err.message ?: "Unknown error fetching stats")
                     },
@@ -97,7 +107,7 @@ class TokenTrackerPanel(
                     initialJson = trimmed.dropLast(1) + ",\"initialPeriod\":\"${currentChartPeriod}\"}"
                 }
             }
-            initialJson
+            injectSettings(initialJson)
         }
         result.fold(
             onSuccess = { initialJson ->
@@ -155,12 +165,13 @@ class TokenTrackerPanel(
         val view = currentView
         log.info("Pushing stats to webview: ${statsJson.length} chars, globalKey=${WebviewResources.viewToGlobalKey(view)}")
         val globalKey = WebviewResources.viewToGlobalKey(view)
-        val escapedJson = statsJson
+        // statsJson is already the extracted view sub-object (done by refreshStatsAsync before calling here)
+        val statsJsonWithSettings = injectSettings(statsJson)
+        val escapedJson = statsJsonWithSettings
             .replace("\\", "\\\\")
             .replace("'", "\\'")
             .replace("\n", "\\n")
             .replace("\r", "\\r")
-        // statsJson is already the extracted view sub-object (done by refreshStatsAsync before calling here)
         val js = """
             (function() {
                 try {
@@ -187,23 +198,48 @@ class TokenTrackerPanel(
     }
 
     private fun showError(message: String) {
+        val isTimeout = message.contains("timed out", ignoreCase = true)
         val safe = message
             .replace("\\", "\\\\")
             .replace("'", "\\'")
             .replace("\n", "\\n")
             .replace("\r", "\\r")
+
+        // When the error is a timeout, define a JS helper for the retry buttons and
+        // render the buttons themselves inline in the overlay.
+        val retrySetup = if (isTimeout) """
+            window.__retryLoad = function(ext) {
+                window.chrome.webview.postMessage(JSON.stringify(
+                    ext ? {command:'retryWithExtendedTimeout'} : {command:'retry'}
+                ));
+            };
+        """.trimIndent() else ""
+
+        // Produces a JS string fragment ending with ' +' so it can be concatenated
+        // into the innerHTML assignment below; empty when not a timeout.
+        val retryBlock = if (isTimeout) """
+            '<div style="margin-top:12px;display:flex;gap:8px;justify-content:center">' +
+            '<button onclick="__retryLoad(false)" style="padding:6px 14px;background:#0e639c;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px">Retry</button>' +
+            '<button onclick="__retryLoad(true)" style="padding:6px 14px;background:#3a3d41;color:#ccc;border:1px solid #555;border-radius:4px;cursor:pointer;font-size:12px">Wait longer (5 min)</button>' +
+            '</div>' +
+        """.trimIndent() else ""
+
         val js = """
             (function() {
+                $retrySetup
                 var overlay = document.getElementById('loading-overlay');
                 if (overlay) {
                     overlay.innerHTML =
-                        '<div style="font-size:32px">&#x26A0;</div>' +
-                        '<div style="font-size:15px;font-weight:600;margin:8px 0">Error loading Copilot usage data</div>' +
-                        '<div style="font-size:12px;color:#999;max-width:480px;white-space:pre-wrap;word-break:break-word">' +
-                            '$safe' +
-                        '</div>' +
-                        '<div style="margin-top:16px;font-size:12px">' +
-                            'Something unexpected? <a href="https://github.com/rajbos/ai-engineering-fluency/issues" target="_blank" style="color:#4daafc;text-decoration:none">Report an issue</a>' +
+                        '<div style="width:100%;max-width:600px;background:var(--vscode-sideBar-background);border:1px solid var(--vscode-panel-border);border-radius:16px;padding:24px 28px;box-shadow:0 8px 32px rgba(0,0,0,0.3);text-align:center">' +
+                            '<div style="font-size:32px;margin-bottom:8px">&#x26A0;</div>' +
+                            '<div style="font-size:15px;font-weight:600;margin-bottom:8px">Error loading Copilot usage data</div>' +
+                            '<div style="font-size:12px;color:#999;max-width:480px;margin:0 auto;white-space:pre-wrap;word-break:break-word;text-align:center">' +
+                                '$safe' +
+                            '</div>' +
+                            $retryBlock
+                            '<div style="margin-top:16px;font-size:12px">' +
+                                'Something unexpected? <a href="https://github.com/rajbos/ai-engineering-fluency/issues" target="_blank" style="color:#4daafc;text-decoration:none">Report an issue</a>' +
+                            '</div>' +
                         '</div>';
                 }
             })();
@@ -225,6 +261,25 @@ class TokenTrackerPanel(
 
             when (command) {
                 "refresh" -> refreshStatsAsync()
+
+                "retry" -> {
+                    // Reload the spinner page and re-run the prefetch with the default timeout.
+                    CliBridge.invalidateCache()
+                    browser.loadHTML(WebviewResources.buildHtml(currentView, hostBridgeInjectFunction = hostBridge.inject("payload")))
+                    prefetchAndLoadView(currentView)
+                }
+
+                "retryWithExtendedTimeout" -> {
+                    // Use a 5-minute timeout for the next fetch. If it succeeds, persist it as the new default.
+                    CliBridge.timeoutSeconds = 300L
+                    CliBridge.invalidateCache()
+                    browser.loadHTML(WebviewResources.buildHtml(currentView, hostBridgeInjectFunction = hostBridge.inject("payload")))
+                    prefetchAndLoadView(
+                        currentView,
+                        onSuccess = { CliBridge.setPersistentTimeout(300L) },
+                        onFailure = { CliBridge.resetTimeout() }
+                    )
+                }
 
                 "showDetails" -> navigateToView("details")
                 "showChart" -> navigateToView("chart")
@@ -303,6 +358,20 @@ class TokenTrackerPanel(
             browser.loadHTML(WebviewResources.buildHtml(view, hostBridgeInjectFunction = hostBridge.inject("payload")))
             prefetchAndLoadView(view)
         }
+    }
+
+    /**
+     * Appends the current plugin display settings (compactNumbers, use24HourTime)
+     * to the JSON object that is sent to the webview, so the bundle can apply
+     * the same formatting rules as the VS Code extension.
+     */
+    private fun injectSettings(json: String): String {
+        val trimmed = json.trimEnd()
+        if (!trimmed.endsWith("}")) return json
+        val settings = PluginSettings.instance.state
+        val fragment = ",\"compactNumbers\":${settings.compactNumbers},\"use24HourTime\":${settings.use24HourTime}" +
+            (if (settings.monthlyCostBudget > 0.0) ",\"monthlyBudget\":${settings.monthlyCostBudget}" else "")
+        return trimmed.dropLast(1) + fragment + "}"
     }
 
     /**
