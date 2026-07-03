@@ -982,4 +982,13 @@
   ,"dart_format": "Dart Format"
   ,"Monitor": "Monitor"
   ,"SendMessage": "Send Message"
+  ,"atlassian-getConfluencePage": "Confluence Page Read/Write"
+  ,"atlassian-getVisibleJiraProjects": "Jira Projects View/Edit"
+  ,"atlassian-lookupJiraAccountId": "Jira Account Lookup"
+  ,"github-pull-request_create_pull_request": "GitHub Pull Request Create/Update"
+  ,"mcp_github_check_dependency_vulnerabilities": "Check GitHub Dependency Vulnerabilities"
+  ,"mcp_github_mcp_se_add_issue_comment": "Add Comment to Issue on GitHub MCP (Remote)"
+  ,"mcp_github_mcp_se_create_pull_request": "Create Pull Request on GitHub MCP (Remote)"
+  ,"mcp_github_mcp_se_get_file_contents": "Get File Contents from GitHub MCP (Local)"
+  ,"mcp_github_mcp_se_pull_request_read": "Read Pull Request on GitHub MCP (Local)"
 }
