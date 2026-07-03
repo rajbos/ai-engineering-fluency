@@ -991,4 +991,5 @@
   ,"mcp_github_mcp_se_create_pull_request": "Create Pull Request on GitHub MCP (Remote)"
   ,"mcp_github_mcp_se_get_file_contents": "Get File Contents from GitHub MCP (Remote)"
   ,"mcp_github_mcp_se_pull_request_read": "Read Pull Request on GitHub MCP (Remote)"
+  ,"mcp_provides_tool_pylanceInvokeRefactoring": "MCP Provides Tool Pylance Invoke Refactoring"
 }
