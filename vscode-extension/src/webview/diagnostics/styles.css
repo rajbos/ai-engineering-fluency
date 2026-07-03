@@ -43,11 +43,7 @@ body {
 }
 
 
-.button-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-}
+
 
 .section {
 	background: var(--bg-tertiary);

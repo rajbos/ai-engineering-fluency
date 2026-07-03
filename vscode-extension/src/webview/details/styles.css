@@ -31,11 +31,7 @@ body {
 	color: var(--text-primary);
 }
 
-.button-row {
-	display: flex;
-	flex-wrap: wrap;
-	gap: 8px;
-}
+
 
 .sections {
 	display: flex;
