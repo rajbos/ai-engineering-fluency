@@ -126,7 +126,20 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .stage-4 { color: #089
 }
 
 .radar-svg .radar-grid {
-	stroke: var(--border-subtle);
+	/*
+	 * Derive the grid from the editor foreground at low opacity rather than
+	 * --border-subtle (--vscode-widget-border), which many dark themes leave
+	 * undefined or nearly invisible against the editor background.
+	 */
+	stroke: var(--text-primary);
+	stroke-opacity: 0.25;
+}
+
+/* High-contrast themes need crisp, full-strength grid lines. */
+body[data-vscode-theme-kind="vscode-high-contrast"] .radar-svg .radar-grid,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .radar-svg .radar-grid {
+	stroke: var(--vscode-contrastBorder, var(--text-primary));
+	stroke-opacity: 1;
 }
 
 .radar-svg .radar-dot {
