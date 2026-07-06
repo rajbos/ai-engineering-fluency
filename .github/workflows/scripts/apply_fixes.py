@@ -57,9 +57,16 @@ FILE: <repository-relative path>
 <<<<END>>>>
 
 Rules:
-- The SEARCH text must be copied verbatim from the current file and be unique.
+- The SEARCH text must be copied verbatim from the CURRENT file content shown in the \
+diff (the lines as they exist after the change — i.e. context lines and lines starting \
+with '+', never lines starting with '-'). Do not use the finding's prose description or \
+its "Concrete fix" wording as the SEARCH text — that text is illustrative and may not \
+match the file exactly (different parentheses, spacing, or an outdated version of the \
+line). Always locate the real line in the diff first, then copy it exactly.
 - Keep each edit minimal — a few lines at most.
 - Do not invent files. Only edit files mentioned in the findings/diff.
+- If a finding's suggested fix would undo or contradict a change already made in the \
+diff, skip it — do not propose reverting the PR's own fix.
 - If nothing can be safely fixed, output the single line: NO_EDITS
 """
 
@@ -96,15 +103,27 @@ def is_path_allowed(path: str, allowed_roots: list) -> bool:
     return any(norm.startswith(root) for root in allowed_roots)
 
 
+def snippet(text: str, limit: int = 80) -> str:
+    """One-line, length-capped preview of a (possibly multi-line) string for logs."""
+    flat = text.strip().replace("\n", "\\n")
+    return flat if len(flat) <= limit else flat[:limit] + "…"
+
+
 def apply_edit(file_path: str, search: str, replace: str) -> str:
     """Return 'applied', 'not-found', 'ambiguous', or 'missing'."""
     if not os.path.isfile(file_path):
+        print(
+            f"    cwd={os.getcwd()} — file does not exist at this path",
+            file=sys.stderr,
+        )
         return "missing"
     content = read_text(file_path)
     count = content.count(search)
     if count == 0:
+        print(f"    search text not present verbatim: \"{snippet(search)}\"", file=sys.stderr)
         return "not-found"
     if count > 1:
+        print(f"    search text matches {count} times: \"{snippet(search)}\"", file=sys.stderr)
         return "ambiguous"
     new_content = content.replace(search, replace, 1)
     if new_content == content:
@@ -149,7 +168,7 @@ def main() -> int:
         return 0
 
     edits = list(EDIT_RE.finditer(response))
-    print(f"Model proposed {len(edits)} edit block(s).", file=sys.stderr)
+    print(f"Model proposed {len(edits)} edit block(s). cwd={os.getcwd()}", file=sys.stderr)
 
     applied = 0
     changed = []
