@@ -25,25 +25,18 @@ jobs:
         egress-policy: block
         # Allowlist inferred from the harden-runner audit output of the 10 most
         # recent successful runs of this workflow (run ids 28795599767..28802373956).
+        # Use wildcards for GitHub/Azure infra hosts that rotate between instances.
         allowed-endpoints: >
           azcliprod.blob.core.windows.net:443
           broker.actions.githubusercontent.com:443
           dc.services.visualstudio.com:443
           github.com:443
-          hosted-compute-watchdog-prod-iad-02.githubapp.com:443
+          hosted-compute-watchdog-prod-*.githubapp.com:443
           management.azure.com:443
-          productionresultssa2.blob.core.windows.net:443
-          productionresultssa3.blob.core.windows.net:443
-          productionresultssa4.blob.core.windows.net:443
-          productionresultssa5.blob.core.windows.net:443
-          productionresultssa8.blob.core.windows.net:443
-          productionresultssa10.blob.core.windows.net:443
-          productionresultssa12.blob.core.windows.net:443
-          productionresultssa13.blob.core.windows.net:443
-          productionresultssa17.blob.core.windows.net:443
+          productionresultssa*.blob.core.windows.net:443
           registry.npmjs.org:443
           results-receiver.actions.githubusercontent.com:443
-          run-actions-3-azure-eastus.actions.githubusercontent.com:443
+          run-actions-*-azure-eastus.actions.githubusercontent.com:443
           www.powershellgallery.com:443
 
     - name: Checkout code
@@ -149,14 +142,11 @@ jobs:
       with:
         egress-policy: block
         # Allowlist inferred from the harden-runner audit output of the sampled
-        # recent runs that included this job (main pushes only).
+        # recent runs that included this job (main pushes only). Use a wildcard
+        # for the rotating Actions results storage account names.
         allowed-endpoints: >
           github.com:443
-          productionresultssa2.blob.core.windows.net:443
-          productionresultssa5.blob.core.windows.net:443
-          productionresultssa8.blob.core.windows.net:443
-          productionresultssa10.blob.core.windows.net:443
-          productionresultssa13.blob.core.windows.net:443
+          productionresultssa*.blob.core.windows.net:443
           registry.npmjs.org:443
           results-receiver.actions.githubusercontent.com:443
 
