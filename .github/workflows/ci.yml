@@ -19,14 +19,36 @@ jobs:
         node-version: [22.x, 24.x]
     
     steps:
-    - name: Harden the runner (Audit all outbound calls)
+    - name: Harden the runner (Block all outbound calls except allowed)
       uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
-        egress-policy: audit
+        egress-policy: block
+        # Allowlist inferred from the harden-runner audit output of the 10 most
+        # recent successful runs of this workflow (run ids 28795599767..28802373956).
+        allowed-endpoints: >
+          azcliprod.blob.core.windows.net:443
+          broker.actions.githubusercontent.com:443
+          dc.services.visualstudio.com:443
+          github.com:443
+          hosted-compute-watchdog-prod-iad-02.githubapp.com:443
+          management.azure.com:443
+          productionresultssa2.blob.core.windows.net:443
+          productionresultssa3.blob.core.windows.net:443
+          productionresultssa4.blob.core.windows.net:443
+          productionresultssa5.blob.core.windows.net:443
+          productionresultssa8.blob.core.windows.net:443
+          productionresultssa10.blob.core.windows.net:443
+          productionresultssa12.blob.core.windows.net:443
+          productionresultssa13.blob.core.windows.net:443
+          productionresultssa17.blob.core.windows.net:443
+          registry.npmjs.org:443
+          results-receiver.actions.githubusercontent.com:443
+          run-actions-3-azure-eastus.actions.githubusercontent.com:443
+          www.powershellgallery.com:443
 
     - name: Checkout code
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      
+
     - name: Setup Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
@@ -122,10 +144,21 @@ jobs:
     if: github.ref == 'refs/heads/main'
     
     steps:
-    - name: Harden the runner (Audit all outbound calls)
+    - name: Harden the runner (Block all outbound calls except allowed)
       uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
-        egress-policy: audit
+        egress-policy: block
+        # Allowlist inferred from the harden-runner audit output of the sampled
+        # recent runs that included this job (main pushes only).
+        allowed-endpoints: >
+          github.com:443
+          productionresultssa2.blob.core.windows.net:443
+          productionresultssa5.blob.core.windows.net:443
+          productionresultssa8.blob.core.windows.net:443
+          productionresultssa10.blob.core.windows.net:443
+          productionresultssa13.blob.core.windows.net:443
+          registry.npmjs.org:443
+          results-receiver.actions.githubusercontent.com:443
 
     - name: Checkout code
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0

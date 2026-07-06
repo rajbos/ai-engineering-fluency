@@ -16,10 +16,18 @@ jobs:
   run-actionlint:
     runs-on: ubuntu-latest
     steps:
-      - name: Harden the runner (Audit all outbound calls)
+      - name: Harden the runner (Block all outbound calls except allowed)
         uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
         with:
-          egress-policy: audit
+          egress-policy: block
+          # Allowlist inferred from the harden-runner audit output of the 10 most
+          # recent successful runs of this workflow (run ids 28548602130..28791579209).
+          allowed-endpoints: >
+            auth.docker.io:443
+            github.com:443
+            production.cloudfront.docker.com:443
+            registry-1.docker.io:443
+            results-receiver.actions.githubusercontent.com:443
 
       - name: Checkout code
         uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
