@@ -999,4 +999,10 @@
   ,"mcp__codebase-memory-mcp__query_graph": "MCP Codebase Memory: Query Graph"
   ,"mcp__codebase-memory-mcp__search_code": "MCP Codebase Memory: Search Code"
   ,"mcp__codebase-memory-mcp__search_graph": "MCP Codebase Memory: Search Graph"
+  ,"create_project": "Create Project"
+  ,"mcp__scheduled-tasks__update_scheduled_task": "MCP Scheduled Tasks: Update Scheduled Task"
+  ,"mcp_github_mcp_s2_create_pull_request": "MCP GitHub: Create Pull Request"
+  ,"respond_to_session_plan": "Respond To Session Plan"
+  ,"str_replace": "Str Replace"
+  ,"workiq-ask": "Workiq Ask"
 }
