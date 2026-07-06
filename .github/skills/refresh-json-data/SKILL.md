@@ -157,11 +157,10 @@ After updating the JSON files:
    npm run compile
    ```
 
-3. **Test in VS Code**:
-   - Press F5 to launch Extension Development Host
-   - Check that the extension loads without errors
-   - Verify token tracking still works correctly
-   - Review the details panel to confirm pricing calculations
+3. **Validate with the automated test suite** (do not launch VS Code or the Extension Development Host — that is a manual, human-only debugging step; see `.github/copilot-instructions.md`):
+   ```bash
+   npm run test:node
+   ```
 
 4. **Review changes**:
    ```bash
@@ -217,15 +216,13 @@ After updating the JSON files:
 
 **Extension not loading updated data**:
 - Confirm you ran `npm run compile`
-- Reload the Extension Development Host (Cmd/Ctrl+R)
-- Check the output console for errors
+- Confirm `npm run test:node` passes
+- Check the build output for errors
 
 ## Example Update Workflow
 
 ```bash
-# 1. Update the JSON files with new data
-code src/tokenEstimators.json
-code src/modelPricing.json
+# 1. Update src/tokenEstimators.json and src/modelPricing.json with new data
 
 # 2. Validate JSON syntax
 node -e "require('./src/tokenEstimators.json')" && echo "tokenEstimators.json: OK"
@@ -234,8 +231,8 @@ node -e "require('./src/modelPricing.json')" && echo "modelPricing.json: OK"
 # 3. Rebuild the extension
 npm run compile
 
-# 4. Test in VS Code
-# Press F5 to launch Extension Development Host
+# 4. Run the automated test suite
+npm run test:node
 
 # 5. Commit changes
 git add src/tokenEstimators.json src/modelPricing.json

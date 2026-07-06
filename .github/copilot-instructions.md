@@ -68,6 +68,16 @@ Key categories:
 - **Focused Modifications**: Make surgical, precise changes without affecting other functionality.
 - **Preserve Existing Structure**: Don't refactor or reorganize unless essential for the task.
 
+## Never Launch a Real Editor/IDE Instance
+
+AI agents (Claude Code, GitHub Copilot, etc.) must never launch a real, visible instance of an IDE as part of testing or verifying a change — e.g. `code .` / `code <file>`, pressing `F5` to start the VS Code Extension Development Host, `./gradlew runIde` (JetBrains sandbox IDE), or opening Visual Studio/`devenv`. These pop open real windows on the developer's machine, which is disruptive and unexpected when it happens mid-session, especially in unattended or scheduled agent runs.
+
+These steps are documented in places like `.github/instructions/vscode-extension.instructions.md` and `.github/instructions/jetbrains-plugin.instructions.md` **for human developers only**, who can watch the window, click through the UI, and close it when done. An agent has no way to "close" a window it opens and no way to observe it, so these steps are meaningless for automated verification and only cause disruptive side effects.
+
+Instead, verify changes using non-interactive tooling: compile/build scripts (`npm run compile`, `./gradlew build`, `dotnet build`), automated unit test suites (`npm run test:node`, `./gradlew test`, `dotnet test`), and linters/type-checkers. If you are writing or editing a skill, prompt, or instructions file, do not add steps that tell an agent to launch a GUI editor/IDE — mark such steps explicitly as manual/human-only, or omit them entirely from agent-facing docs.
+
+This also governs `.github/github-app.yml`. Its `code .` script has **no `triggers` entry**, on purpose — that makes it an on-demand action a human clicks in the GitHub App's session UI, not something that fires automatically. **Never attach `triggers: [session.create]` (or any other trigger) to a script that launches an editor/IDE.** `automation.auto_issue_session: true` means sessions can be created unattended (e.g. an issue auto-assigned to Copilot) with nobody there to click anything — a triggered `code .` would pop open a real VS Code window during those unattended sessions too, which is the exact bug this section exists to prevent. Non-GUI setup steps (installing dependencies, compiling) are fine to keep on `session.create` since they have no visible side effect.
+
 ## CLI Must Reuse Shared Extension Functions
 
 The CLI (`cli/`) is a thin consumer of the VS Code extension's TypeScript modules. **Never reimplement session parsing or cost attribution logic in the CLI — always call the shared functions from `vscode-extension/src/`.**

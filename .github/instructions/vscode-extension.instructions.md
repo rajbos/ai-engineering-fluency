@@ -51,7 +51,7 @@ The entire extension's logic is contained within the `CopilotTokenTracker` class
 - **Setup**: Run `npm install` inside `vscode-extension/` to install dependencies.
 - **Build**: Run `npm run compile` from `vscode-extension/` to lint and build the extension using `esbuild`. The output is a single file: `vscode-extension/dist/extension.js`.
 - **Watch Mode**: For active development, use `npm run watch` from `vscode-extension/`. This will automatically recompile the extension on file changes.
-- **Testing/Debugging**: Press `F5` in VS Code to open the Extension Development Host. This will launch a new VS Code window with the extension running. `console.log` statements from `vscode-extension/src/extension.ts` will appear in the Developer Tools console of this new window (Help > Toggle Developer Tools).
+- **Testing/Debugging (human developers only)**: Press `F5` in VS Code to open the Extension Development Host. This will launch a new VS Code window with the extension running. `console.log` statements from `vscode-extension/src/extension.ts` will appear in the Developer Tools console of this new window (Help > Toggle Developer Tools). **AI agents must never do this** — see "Never launch a real editor/IDE instance" in the root `.github/copilot-instructions.md`. Use `npm run compile` and `npm run test:node` / `npm run test:coverage` to validate changes instead.
 
 **Important build guidance:** After making changes to source code or related files (TypeScript, JavaScript, JSON, or other code files used by the extension), always run both `npm ci` and then `npm run compile` from `vscode-extension/` to validate that the project still builds and lints cleanly before opening a pull request or releasing. Also run the unit tests with `npm run test:node` to catch any regressions. You do not need to run the full compile step for documentation-only changes (Markdown files), but you should run it after any edits that touch source, configuration, or JSON data files.
 
@@ -108,10 +108,12 @@ These are two completely separate logging systems:
 
 ### Debugging Without Logs
 
-Prefer VS Code's debugger with breakpoints rather than adding log statements:
+For human developers, prefer VS Code's debugger with breakpoints rather than adding log statements:
 1. Press `F5` to launch Extension Development Host
 2. Set breakpoints in `vscode-extension/src/extension.ts`
 3. Use the Debug Console to inspect variables
+
+AI agents cannot use the interactive debugger and must never launch the Extension Development Host (no `F5`, no `code .`, no editing `.vscode/launch.json` to auto-run). Rely on the unit test suite (`npm run test:node`) and, where needed, temporary `console.log`/assertions inside a test file — removed before committing.
 
 ## Parallel Model Usage Aggregation Paths
 
