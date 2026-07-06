@@ -67,6 +67,8 @@ A component **has changes** if the diff output is non-empty.
 
 Also note: changes to shared `vscode-extension/src/` files (e.g. `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`) are relevant to the VS Code extension. The VS extension build also depends on changes to `cli/` and shared `vscode-extension/src/*.ts` files — if those changed since the last VS tag, include the VS extension in the bump.
 
+**Tag staleness warning**: a release tag can lag behind reality — a version can already be bumped and published to npm/Marketplace without its matching tag ever being created (e.g. `cli/v0.2.10` was still the latest tag while `cli/package.json` and the npm registry were already at `0.2.11`). Don't trust `git diff <last-tag>...HEAD` blindly. Cross-check the actual current version against the live source of truth first — `npm view <package-name> version` for the CLI, the VS Code/VS Marketplace listing for the extensions — and find the real last version-bump commit with `git log -- <version-file>` if the tag looks stale. Diffing from a stale tag will pull in already-released changes and produce a misleading "what's new" picture.
+
 ### Step 4 — Read current versions
 
 ```bash
@@ -191,6 +193,41 @@ After the PR is created, output a clear summary:
 - Set `publish_marketplace: true` to publish to the Visual Studio Marketplace
 ```
 
+See Step 11 below for the exact, safe way to trigger these — the naive "Run workflow with defaults" can bump the CLI version a second time or rebuild the untouched Visual Studio extension.
+
+### Step 11 — Trigger the release pipelines after the PR merges
+
+Once the release-prep PR is merged, trigger the actual publish workflows. Do not just click "Run workflow" with all defaults — for both workflows the defaults can do more (or different) than intended.
+
+#### CLI — push a tag, don't use `workflow_dispatch`
+
+`cli-publish.yml`'s `workflow_dispatch` path (`version_bump` input) **re-bumps `cli/package.json` itself** via `npm version <bump-type>` before publishing. Since the release-prep PR already bumped and merged the version, running `workflow_dispatch` (e.g. with `patch`) bumps it *again* (0.2.12 → 0.2.13) and publishes a version nobody reviewed — the merged 0.2.12 never gets published.
+
+Instead, push a git tag matching the already-merged version to trigger the workflow's tag-push path. That path publishes the current `package.json` version as-is and verifies it matches the tag (fails loudly if not) — no re-bump:
+
+```bash
+git fetch origin main
+git tag -a cli/vX.Y.Z origin/main -m "Release cli/vX.Y.Z"
+git push origin cli/vX.Y.Z
+```
+
+This also creates the GitHub release automatically — no separate `gh release create` step needed.
+
+#### VS Code extension — pass `vscode_only=true` if only the VS Code extension was bumped
+
+`release.yml`'s `workflow_dispatch` defaults to building **both** the VS Code extension and the Visual Studio extension (`vscode_only` defaults to `false`, and the `build-visualstudio` job only skips when `vscode_only == true`). If the release-prep PR only bumped the VS Code extension, running with defaults also rebuilds/republishes the Visual Studio extension at its unchanged version.
+
+```bash
+gh workflow run "Extensions - Release" --ref main \
+  -f create_tag=true \
+  -f publish_marketplace=true \
+  -f vscode_only=true \
+  -f vs_only=false \
+  -f publish_pre_release=false
+```
+
+Only set `vscode_only=false` when the Visual Studio extension was *also* bumped in this release and should be published too.
+
 ---
 
 ## Important Rules
@@ -202,6 +239,8 @@ After the PR is created, output a clear summary:
 - **Use `--no-git-tag-version`** with `npm version` to prevent npm from creating a git tag automatically.
 - The VS extension's `<Identity Version="...">` is on a different line than `<PackageManifest Version="2.0.0">` — make sure to update only the `<Identity>` element.
 - After `npm version`, also stage the `package-lock.json` — npm updates both files.
+- **Never trigger the CLI publish workflow via `workflow_dispatch` right after merging a release-prep PR** — it re-bumps the version itself and will publish a version one patch ahead of the one just merged. Push a `cli/vX.Y.Z` tag instead (see Step 11).
+- **Always pass `vscode_only=true`** to the `Extensions - Release` workflow when only the VS Code extension changed — otherwise it also rebuilds/republishes the unchanged Visual Studio extension.
 
 ## Error Handling
 
