@@ -3539,7 +3539,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			title: sessionData.title || null, filePath: sessionFile, interactions,
 			toolCalls: analysis.toolCalls.total, inputTokens: inputTok, outputTokens: outputTok,
 			thinkingTokens: sessionData.thinkingTokens || 0, cachedTokens: cachedTok,
-			totalTokens: inputTok + outputTok + cachedTok + (sessionData.thinkingTokens || 0),
+			totalTokens: inputTok + outputTok + (sessionData.thinkingTokens || 0),
 			estimatedCost: sessionData.copilotExactCostDollars ?? this.calculateEstimatedCost(modelUsage),
 			editor: this.detectEditorSource(sessionFile), models: Object.keys(modelUsage),
 			lastActivity: sessionData.lastInteraction || new Date(mtime).toISOString(),
