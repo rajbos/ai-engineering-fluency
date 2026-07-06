@@ -24,7 +24,7 @@
     "hono": "^4.12.28"
   },
   "devDependencies": {
-    "@types/node": "^22.5.0",
+    "@types/node": "^26.1.0",
     "chart.js": "^4.4.7",
     "esbuild": "^0.28.1",
     "typescript": "^5.8.0"
