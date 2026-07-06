@@ -223,7 +223,7 @@ export class CopilotCliStoreAccess {
 				try {
 					wasmBinary = await fs.promises.readFile(wasmPath);
 				} catch { /* WASM file not present — proceed without pre-loaded binary */ }
-				const module = await initSqlJs(wasmBinary ? { wasmBinary } : undefined);
+				const module = await initSqlJs(wasmBinary ? { wasmBinary: wasmBinary.buffer as ArrayBuffer } : undefined);
 				this._sqlJsModule = module;
 				return module;
 			})().catch(err => {

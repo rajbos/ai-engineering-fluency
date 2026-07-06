@@ -1,7 +1,7 @@
 ﻿import * as vscode from "vscode";
 import type { Stats } from "fs";
 
-import { safeStringifyError, isAuthError, isNotFoundError, isNetworkError } from "../utils/errors";
+import { safeStringifyError, isAuthError, isNotFoundError, isNetworkError } from "../../../src/utils/errors";
 import {
   BackendConfigPanel,
   type BackendConfigPanelState,

@@ -16,12 +16,12 @@ import {
     createEmptySessionUsageAnalysis,
     applyModelTierClassification,
     type UsageAnalysisDeps,
-} from '../../src/usageAnalysis';
+} from '../../../src/usageAnalysis';
 import type {
     UsageAnalysisPeriod,
     SessionUsageAnalysis,
     ContextReferenceUsage,
-} from '../../src/types';
+} from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers

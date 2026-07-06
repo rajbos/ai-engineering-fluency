@@ -12,7 +12,7 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-import { EclipseDataAccess } from '../../src/eclipse';
+import { EclipseDataAccess } from '../../../src/eclipse';
 
 const eclipse = new EclipseDataAccess();
 

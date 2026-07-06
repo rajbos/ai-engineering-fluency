@@ -10,7 +10,7 @@ import * as zlib from 'zlib';
 import { promisify } from 'util';
 import type { TokenCredential } from '@azure/core-auth';
 import { BlobServiceClient, ContainerClient, StorageSharedKeyCredential } from '@azure/storage-blob';
-import { safeStringifyError, isAuthError } from '../../utils/errors';
+import { safeStringifyError, isAuthError } from '../../../../src/utils/errors';
 import { getAzureBlobStorageEndpoint } from '../../utils/azureEndpoints';
 
 const gzip = promisify(zlib.gzip);

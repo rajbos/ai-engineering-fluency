@@ -6,8 +6,8 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import type { SessionFileCache } from './types';
-import { type CachePolicy, VsCodeCachePolicy } from './cachePolicy';
+import type { SessionFileCache } from '../../src/types';
+import { type CachePolicy, VsCodeCachePolicy } from '../../src/cachePolicy';
 
 export interface CacheManagerDeps {
 	log: (msg: string) => void;

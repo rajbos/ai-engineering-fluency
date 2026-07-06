@@ -1,5 +1,5 @@
 // Import shared utilities
-import { getModelDisplayName } from '../shared/modelUtils';
+import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumber, formatCost, formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { el, createButton } from '../shared/domUtils';
 import { BUTTONS } from '../shared/buttonConfig';
@@ -7,7 +7,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import type { ModelUsage } from '../shared/types';
 

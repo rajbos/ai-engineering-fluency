@@ -99,7 +99,7 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 **Use this skill when:**
 - Adding support for a new editor or AI coding tool
 - After modifying `getEditorSourceFromPath` in `cli/src/analysis.ts`
-- After modifying `getEditorTypeFromPath` in `vscode-extension/src/workspaceHelpers.ts`
+- After modifying `getEditorTypeFromPath` in `src/workspaceHelpers.ts`
 - After updating `EDITOR_ICON_MAP` in `formatUtils.ts`
 - When JetBrains or another CLI-based consumer shows raw editor keys instead of friendly names
 

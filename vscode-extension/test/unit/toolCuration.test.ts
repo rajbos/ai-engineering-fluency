@@ -15,8 +15,8 @@ import {
 	extractDescriptionFromSkillContent,
 	type RuntimeToolInfo,
 	type ExtensionInfo,
-} from '../../src/toolCuration';
-import type { UsageAnalysisPeriod } from '../../src/types';
+} from '../../../src/toolCuration';
+import type { UsageAnalysisPeriod } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Temp directory registry — all dirs created via mkTmpDir() are removed after

@@ -5,7 +5,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { discoverSessionFiles, calculateUsageAnalysisStats, fmt, buildCustomizationMatrix } from '../helpers';
 import { ProgressTracker } from '../progress';
-import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
+import { calculateMaturityScores } from '../../../src/maturityScoring';
 import { shouldOutputJson } from '../commandUtils';
 import { createFluencyPayload } from './payloads';
 

@@ -30,7 +30,7 @@ Gemini CLI, or Antigravity. This skill closes that gap.
 ## Platforms covered
 
 The source of truth for supported platforms is
-`vscode-extension/src/adapters/adapterRegistry.ts`. This skill validates the
+`src/adapters/adapterRegistry.ts`. This skill validates the
 **file-based JSON/JSONL** ecosystems that have schema docs under
 `docs/logFilesSchema/`:
 
@@ -120,7 +120,7 @@ array items.
 
 - **DRIFT** → a required field disappeared. Open the platform's doc under
   `docs/logFilesSchema/` and the matching adapter under
-  `vscode-extension/src/adapters/`, confirm the change, and update both the
+  `src/adapters/`, confirm the change, and update both the
   parser and the contract.
 - **New fields** → review them. If useful (e.g. real token counts, new model
   metadata, a new event type), document them in `docs/logFilesSchema/`, consider
@@ -145,4 +145,4 @@ self-hosted runner that has real session data.)
 - `docs/logFilesSchema/` — per-platform schema documentation (the human source of truth)
 - `.github/skills/copilot-log-analysis/` — deeper Copilot-only schema field dump (`analyze-session-schema.ps1`)
 - `.github/skills/validate-app-db-schema/` — validates the unrelated `~/.copilot/data.db` hierarchy schema
-- `vscode-extension/src/adapters/adapterRegistry.ts` — canonical list of supported ecosystems
+- `src/adapters/adapterRegistry.ts` — canonical list of supported ecosystems

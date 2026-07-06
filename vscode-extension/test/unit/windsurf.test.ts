@@ -10,7 +10,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as vscode from 'vscode';
 
-import { WindsurfDataAccess } from '../../src/windsurf';
+import { WindsurfDataAccess } from '../../../src/windsurf';
 
 const windsurf = new WindsurfDataAccess(vscode.Uri.file('/mock/ext') as any);
 

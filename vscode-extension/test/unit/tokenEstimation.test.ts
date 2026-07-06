@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { extractSubAgentData, normalizeDisplayModelName, extractResponseItemText } from '../../src/tokenEstimation';
+import { extractSubAgentData, normalizeDisplayModelName, extractResponseItemText } from '../../../src/tokenEstimation';
 
 test('normalizeDisplayModelName: lowercases and replaces spaces with hyphens', () => {
 	assert.equal(normalizeDisplayModelName('Claude Haiku 4.5'), 'claude-haiku-4.5');
@@ -150,7 +150,7 @@ import {
         getTotalTokensFromModelUsage,
         getModelFromRequest,
         createEmptyContextRefs
-} from '../../src/tokenEstimation';
+} from '../../../src/tokenEstimation';
 
 // ── estimateTokensFromText ──────────────────────────────────────────────
 
@@ -464,7 +464,7 @@ test('extractSubAgentData: result object with non-string values becomes empty st
 
 // ── Round 2: estimateTokensFromJsonlSession ──────────────────────────────
 
-import { estimateTokensFromJsonlSession } from '../../src/tokenEstimation';
+import { estimateTokensFromJsonlSession } from '../../../src/tokenEstimation';
 
 test('estimateTokensFromJsonlSession: counts user.message tokens', () => {
         const content = JSON.stringify({ type: 'user.message', data: { content: 'hello there' } });
@@ -624,7 +624,7 @@ test('estimateTokensFromJsonlSession: session.shutdown without cache fields leav
 
 // ── extractCachedTokensFromDebugLog ──────────────────────────────────────
 
-import { extractCachedTokensFromDebugLog } from '../../src/tokenEstimation';
+import { extractCachedTokensFromDebugLog } from '../../../src/tokenEstimation';
 
 test('extractCachedTokensFromDebugLog: sums cachedTokens from llm_request events', () => {
         const lines = [
@@ -682,7 +682,7 @@ test('extractCachedTokensFromDebugLog: ignores non-numeric cachedTokens values',
 
 // ── extractAllTokensFromDebugLog ──────────────────────────────────────────
 
-import { extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
+import { extractAllTokensFromDebugLog } from '../../../src/tokenEstimation';
 
 test('extractAllTokensFromDebugLog: sums all token fields across llm_request events', () => {
         const lines = [
@@ -758,7 +758,7 @@ test('extractAllTokensFromDebugLog: extractCachedTokensFromDebugLog still works 
 
 // ── Strategy pattern: selectTokenEstimationStrategy ────────────────────────
 
-import { DeltaTokenStrategy, EventJsonlTokenStrategy, selectTokenEstimationStrategy } from '../../src/tokenEstimation';
+import { DeltaTokenStrategy, EventJsonlTokenStrategy, selectTokenEstimationStrategy } from '../../../src/tokenEstimation';
 
 test('selectTokenEstimationStrategy: returns DeltaTokenStrategy for delta-based JSONL', () => {
         const lines = [
@@ -925,7 +925,7 @@ test('EventJsonlTokenStrategy: returns empty result for empty input', () => {
 
 // ── getRequestResult ────────────────────────────────────────────────────────
 
-import { getRequestResult, getResponseArray } from '../../src/tokenEstimation';
+import { getRequestResult, getResponseArray } from '../../../src/tokenEstimation';
 
 test('getRequestResult: returns undefined for null', () => {
         assert.equal(getRequestResult(null), undefined);
@@ -1014,7 +1014,7 @@ test('getResponseArray: returns empty array when response is []', () => {
 
 // ── applyDelta ──────────────────────────────────────────────────────────────
 
-import { applyDelta } from '../../src/tokenEstimation';
+import { applyDelta } from '../../../src/tokenEstimation';
 
 test('applyDelta: kind:0 replaces the entire state with v', () => {
         const initial = { requests: [{ id: 1 }] };
@@ -1132,7 +1132,7 @@ test('applyDelta: kind:2 reuses existing array at target slot', () => {
 
 // ── buildReasoningEffortTimeline ────────────────────────────────────────────
 
-import { buildReasoningEffortTimeline } from '../../src/tokenEstimation';
+import { buildReasoningEffortTimeline } from '../../../src/tokenEstimation';
 
 function makeModelWithEffort(effort: string): unknown {
         return {
@@ -1260,7 +1260,7 @@ test('buildReasoningEffortTimeline: multiple effort switches tracked correctly',
 
 // ── extractPerRequestUsageFromRawLines ──────────────────────────────────────
 
-import { extractPerRequestUsageFromRawLines } from '../../src/tokenEstimation';
+import { extractPerRequestUsageFromRawLines } from '../../../src/tokenEstimation';
 
 test('extractPerRequestUsageFromRawLines: returns empty map for empty input', () => {
         const result = extractPerRequestUsageFromRawLines([]);
@@ -1670,7 +1670,7 @@ test('DeltaTokenStrategy: sub-agent items in kind:2 are counted from final recon
 
 // ── reconstructJsonlStateAsync ──────────────────────────────────────────────
 
-import { reconstructJsonlStateAsync } from '../../src/tokenEstimation';
+import { reconstructJsonlStateAsync } from '../../../src/tokenEstimation';
 
 test('reconstructJsonlStateAsync: delta-based input sets isDeltaBased=true', async () => {
         const lines = [

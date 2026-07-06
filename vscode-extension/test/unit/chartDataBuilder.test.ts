@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { getModelBillingProvider, getBillingGroup, COPILOT_EDITOR_NAMES } from '../../src/chartDataBuilder';
+import { getModelBillingProvider, getBillingGroup, COPILOT_EDITOR_NAMES } from '../../../src/chartDataBuilder';
 
 // ── getModelBillingProvider ───────────────────────────────────────────────────
 

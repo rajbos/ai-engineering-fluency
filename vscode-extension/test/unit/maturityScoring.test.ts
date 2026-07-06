@@ -4,8 +4,8 @@ import {
     calculateFluencyScoreForTeamMember,
     calculateMaturityScores,
     getFluencyLevelData,
-} from '../../src/maturityScoring';
-import type { UsageAnalysisStats, UsageAnalysisPeriod, WorkspaceCustomizationMatrix } from '../../src/types';
+} from '../../../src/maturityScoring';
+import type { UsageAnalysisStats, UsageAnalysisPeriod, WorkspaceCustomizationMatrix } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers

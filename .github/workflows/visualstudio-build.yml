@@ -6,34 +6,14 @@ on:
     paths:
       - 'visualstudio-extension/**'
       - 'cli/**'
-      - 'vscode-extension/src/sessionDiscovery.ts'
-      - 'vscode-extension/src/sessionParser.ts'
-      - 'vscode-extension/src/tokenEstimation.ts'
-      - 'vscode-extension/src/maturityScoring.ts'
-      - 'vscode-extension/src/usageAnalysis.ts'
-      - 'vscode-extension/src/opencode.ts'
-      - 'vscode-extension/src/visualstudio.ts'
-      - 'vscode-extension/src/types.ts'
-      - 'vscode-extension/src/tokenEstimators.json'
-      - 'vscode-extension/src/modelPricing.json'
-      - 'vscode-extension/src/toolNames.json'
+      - 'src/**'
       - '.github/workflows/visualstudio-build.yml'
   pull_request:
     branches: [ main, develop ]
     paths:
       - 'visualstudio-extension/**'
       - 'cli/**'
-      - 'vscode-extension/src/sessionDiscovery.ts'
-      - 'vscode-extension/src/sessionParser.ts'
-      - 'vscode-extension/src/tokenEstimation.ts'
-      - 'vscode-extension/src/maturityScoring.ts'
-      - 'vscode-extension/src/usageAnalysis.ts'
-      - 'vscode-extension/src/opencode.ts'
-      - 'vscode-extension/src/visualstudio.ts'
-      - 'vscode-extension/src/types.ts'
-      - 'vscode-extension/src/tokenEstimators.json'
-      - 'vscode-extension/src/modelPricing.json'
-      - 'vscode-extension/src/toolNames.json'
+      - 'src/**'
       - '.github/workflows/visualstudio-build.yml'
 
 permissions:

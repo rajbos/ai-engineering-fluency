@@ -6,7 +6,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import type { CustomizationFileEntry } from './types';
-import * as packageJson from '../package.json';
+import * as packageJson from '../vscode-extension/package.json';
 import customizationPatternsData from './customizationPatterns.json';
 import { resolveFileUri } from './workspacePathResolver';
 import {

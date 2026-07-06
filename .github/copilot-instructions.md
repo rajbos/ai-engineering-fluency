@@ -7,6 +7,9 @@ This document provides top-level guidance for AI agents contributing to this rep
 ```
 /
 ├── build.ps1                    ← Root build orchestrator (all projects)
+├── src/                         ← Shared TypeScript sources + JSON data files
+│                                   (session parsing, token estimation, adapters —
+│                                    consumed by vscode-extension/ and cli/)
 ├── vscode-extension/            ← VS Code extension (TypeScript / Node.js)
 ├── cli/                         ← Command-line tool  (TypeScript / Node.js)
 ├── visualstudio-extension/      ← Visual Studio extension (C# / .NET)
@@ -78,9 +81,9 @@ Instead, verify changes using non-interactive tooling: compile/build scripts (`n
 
 This also governs `.github/github-app.yml`. Its `code .` script has **no `triggers` entry**, on purpose — that makes it an on-demand action a human clicks in the GitHub App's session UI, not something that fires automatically. **Never attach `triggers: [session.create]` (or any other trigger) to a script that launches an editor/IDE.** `automation.auto_issue_session: true` means sessions can be created unattended (e.g. an issue auto-assigned to Copilot) with nobody there to click anything — a triggered `code .` would pop open a real VS Code window during those unattended sessions too, which is the exact bug this section exists to prevent. Non-GUI setup steps (installing dependencies, compiling) are fine to keep on `session.create` since they have no visible side effect.
 
-## CLI Must Reuse Shared Extension Functions
+## CLI Must Reuse Shared Functions
 
-The CLI (`cli/`) is a thin consumer of the VS Code extension's TypeScript modules. **Never reimplement session parsing or cost attribution logic in the CLI — always call the shared functions from `vscode-extension/src/`.**
+The CLI (`cli/`) is a thin consumer of the shared TypeScript modules in the repo-root `src/` folder (the same modules the VS Code extension uses). **Never reimplement session parsing or cost attribution logic in the CLI — always call the shared functions from `src/`.**
 
 ### The canonical split (mirrors `getSessionFileDataCached` in `extension.ts`)
 
@@ -153,7 +156,7 @@ Do not enter retry loops trying to capture terminal output. These patterns waste
 3. **Run tests in small batches.** Instead of running all test files in one command, run one file at a time:
    ```bash
    cd vscode-extension
-   node --require ./out/test/unit/vscode-shim-register.js --test out/test/unit/sessionParser.test.js
+   node --require ./out/vscode-extension/test/unit/vscode-shim-register.js --test out/vscode-extension/test/unit/sessionParser.test.js
    ```
 
 4. **Accept a single run.** If a test command runs without returning output, do **not** re-run it.

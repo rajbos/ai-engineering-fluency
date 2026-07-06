@@ -1,6 +1,8 @@
-# Data Files
+# Shared Sources & Data Files
 
-This directory contains JSON configuration files for the GitHub Copilot Token Tracker extension.
+This directory contains the TypeScript sources and JSON configuration files shared between the VS Code extension (`vscode-extension/`) and the CLI npm package (`cli/`).
+
+> Note: `copilotPlans.json` is only used by the VS Code extension and lives in `vscode-extension/src/copilotPlans.json`; it is documented here alongside the other data files.
 
 ## copilotPlans.json
 

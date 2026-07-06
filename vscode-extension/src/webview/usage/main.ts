@@ -8,9 +8,9 @@ import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitch
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
-import { getModelDisplayName } from '../shared/modelUtils';
+import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
@@ -534,7 +534,7 @@ function getEffortDisplayName(level: string): string {
 	return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
-import { resolveGuidMcpToolName, isGuidMcpTool } from '../../utils/toolUtils';
+import { resolveGuidMcpToolName, isGuidMcpTool } from '../../../../src/utils/toolUtils';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;

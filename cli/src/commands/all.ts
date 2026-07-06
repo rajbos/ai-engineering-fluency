@@ -12,7 +12,7 @@ import {
 	calculateUsageAnalysisStats,
 	buildCustomizationMatrix,
 } from '../helpers';
-import { calculateMaturityScores } from '../../../vscode-extension/src/maturityScoring';
+import { calculateMaturityScores } from '../../../src/maturityScoring';
 import { shouldOutputJson } from '../commandUtils';
 import {
 	createEmptyDetailsPayload,
@@ -31,7 +31,7 @@ import {
 	buildMcpEntriesFromJson,
 	discoverSkillEntries,
 	analyzeToolCuration,
-} from '../../../vscode-extension/src/toolCuration';
+} from '../../../src/toolCuration';
 
 export const allCommand = new Command('all')
 	.description('Output all view data in a single JSON response (for Visual Studio extension)')

@@ -7,7 +7,7 @@ import type { TokenCredential } from "@azure/core-auth";
 import { AzureNamedKeyCredential } from "@azure/core-auth";
 import { TableClient, TableServiceClient } from "@azure/data-tables";
 import * as vscode from "vscode";
-import { withErrorHandling, isConflictError, isAuthError, isRetryableError, getErrorStatusCode, getErrorCode } from "../../utils/errors";
+import { withErrorHandling, isConflictError, isAuthError, isRetryableError, getErrorStatusCode, getErrorCode } from "../../../../src/utils/errors";
 import { getAzureTableStorageEndpoint, getAzureBlobStorageEndpoint } from "../../utils/azureEndpoints";
 import { withTimeout } from "../../utils/promises";
 import { AZURE_SDK_QUERY_TIMEOUT_MS } from "../constants";

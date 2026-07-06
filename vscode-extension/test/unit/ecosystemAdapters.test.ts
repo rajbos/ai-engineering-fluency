@@ -10,32 +10,32 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 
-import { isDiscoverable } from '../../src/ecosystemAdapter';
-import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import { isDiscoverable } from '../../../src/ecosystemAdapter';
+import type { IEcosystemAdapter } from '../../../src/ecosystemAdapter';
 
-import { OpenCodeAdapter } from '../../src/adapters/openCodeAdapter';
-import { CrushAdapter } from '../../src/adapters/crushAdapter';
-import { ContinueAdapter } from '../../src/adapters/continueAdapter';
-import { EclipseAdapter } from '../../src/adapters/eclipseAdapter';
-import { ClaudeCodeAdapter } from '../../src/adapters/claudeCodeAdapter';
-import { ClaudeDesktopAdapter } from '../../src/adapters/claudeDesktopAdapter';
-import { VisualStudioAdapter } from '../../src/adapters/visualStudioAdapter';
-import { MistralVibeAdapter } from '../../src/adapters/mistralVibeAdapter';
-import { GeminiCliAdapter } from '../../src/adapters/geminiCliAdapter';
-import { CopilotChatAdapter } from '../../src/adapters/copilotChatAdapter';
-import { CopilotCliAdapter } from '../../src/adapters/copilotCliAdapter';
-import { AntigravityAdapter } from '../../src/adapters/antigravityAdapter';
+import { OpenCodeAdapter } from '../../../src/adapters/openCodeAdapter';
+import { CrushAdapter } from '../../../src/adapters/crushAdapter';
+import { ContinueAdapter } from '../../../src/adapters/continueAdapter';
+import { EclipseAdapter } from '../../../src/adapters/eclipseAdapter';
+import { ClaudeCodeAdapter } from '../../../src/adapters/claudeCodeAdapter';
+import { ClaudeDesktopAdapter } from '../../../src/adapters/claudeDesktopAdapter';
+import { VisualStudioAdapter } from '../../../src/adapters/visualStudioAdapter';
+import { MistralVibeAdapter } from '../../../src/adapters/mistralVibeAdapter';
+import { GeminiCliAdapter } from '../../../src/adapters/geminiCliAdapter';
+import { CopilotChatAdapter } from '../../../src/adapters/copilotChatAdapter';
+import { CopilotCliAdapter } from '../../../src/adapters/copilotCliAdapter';
+import { AntigravityAdapter } from '../../../src/adapters/antigravityAdapter';
 
-import { OpenCodeDataAccess } from '../../src/opencode';
-import { CrushDataAccess } from '../../src/crush';
-import { ContinueDataAccess } from '../../src/continue';
-import { EclipseDataAccess } from '../../src/eclipse';
-import { ClaudeCodeDataAccess } from '../../src/claudecode';
-import { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
-import { VisualStudioDataAccess } from '../../src/visualstudio';
-import { MistralVibeDataAccess } from '../../src/mistralvibe';
-import { GeminiCliDataAccess } from '../../src/geminicli';
-import { AntigravityDataAccess } from '../../src/antigravity';
+import { OpenCodeDataAccess } from '../../../src/opencode';
+import { CrushDataAccess } from '../../../src/crush';
+import { ContinueDataAccess } from '../../../src/continue';
+import { EclipseDataAccess } from '../../../src/eclipse';
+import { ClaudeCodeDataAccess } from '../../../src/claudecode';
+import { ClaudeDesktopCoworkDataAccess } from '../../../src/claudedesktop';
+import { VisualStudioDataAccess } from '../../../src/visualstudio';
+import { MistralVibeDataAccess } from '../../../src/mistralvibe';
+import { GeminiCliDataAccess } from '../../../src/geminicli';
+import { AntigravityDataAccess } from '../../../src/antigravity';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -379,7 +379,7 @@ test('getCandidatePaths paths are consistent with discover candidatePaths', asyn
 // extractClaudeSlashCommand — slash command detection
 // ---------------------------------------------------------------------------
 
-import { extractClaudeSlashCommand } from '../../src/adapters/claudeCodeAdapter';
+import { extractClaudeSlashCommand } from '../../../src/adapters/claudeCodeAdapter';
 
 test('extractClaudeSlashCommand: returns command name for allowed slash commands', () => {
     assert.equal(extractClaudeSlashCommand('/review'), 'review');

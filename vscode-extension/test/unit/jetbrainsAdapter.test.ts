@@ -11,9 +11,9 @@ import * as os from 'node:os';
 import {
 	JetBrainsAdapter,
 	getJetBrainsSessionDir,
-} from '../../src/adapters/jetbrainsAdapter';
-import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
-import { isDiscoverable } from '../../src/ecosystemAdapter';
+} from '../../../src/adapters/jetbrainsAdapter';
+import { isJetBrainsSessionPath } from '../../../src/adapters/adapterPredicates';
+import { isDiscoverable } from '../../../src/ecosystemAdapter';
 
 const adapter = new JetBrainsAdapter();
 

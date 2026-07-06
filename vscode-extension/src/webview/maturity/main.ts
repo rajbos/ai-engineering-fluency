@@ -6,7 +6,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 
 type UsageAnalysisPeriod = {
 	sessions: number;

@@ -25,8 +25,8 @@ import sys
 # Map each benchmark to the source file most likely responsible, so a flagged
 # regression points the reader at where to look.
 SOURCE_OF = {
-    "estimateTokensFromJsonlSession": "vscode-extension/src/tokenEstimation.ts",
-    "estimateTokensFromText": "vscode-extension/src/tokenEstimation.ts",
+    "estimateTokensFromJsonlSession": "src/tokenEstimation.ts",
+    "estimateTokensFromText": "src/tokenEstimation.ts",
 }
 
 HIGH = "\U0001f534"

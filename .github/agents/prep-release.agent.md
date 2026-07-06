@@ -65,7 +65,7 @@ git diff --name-only <merge-base> -- <path>/
 
 A component **has changes** if the diff output is non-empty.
 
-Also note: changes to shared `vscode-extension/src/` files (e.g. `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`) are relevant to the VS Code extension. The VS extension build also depends on changes to `cli/` and shared `vscode-extension/src/*.ts` files — if those changed since the last VS tag, include the VS extension in the bump.
+Also note: changes to shared `src/` files (e.g. `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`) are relevant to the VS Code extension. The VS extension build also depends on changes to `cli/` and shared `src/*.ts` files — if those changed since the last VS tag, include the VS extension in the bump.
 
 **Tag staleness warning**: a release tag can lag behind reality — a version can already be bumped and published to npm/Marketplace without its matching tag ever being created (e.g. `cli/v0.2.10` was still the latest tag while `cli/package.json` and the npm registry were already at `0.2.11`). Don't trust `git diff <last-tag>...HEAD` blindly. Cross-check the actual current version against the live source of truth first — `npm view <package-name> version` for the CLI, the VS Code/VS Marketplace listing for the extensions — and find the real last version-bump commit with `git log -- <version-file>` if the tag looks stale. Diffing from a stale tag will pull in already-released changes and produce a misleading "what's new" picture.
 

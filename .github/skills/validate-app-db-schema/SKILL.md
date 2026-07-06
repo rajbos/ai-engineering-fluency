@@ -68,5 +68,5 @@ It performs three checks:
 ## Related Code
 
 - `vscode-extension/src/copilotAppData.ts` — the module that reads data.db at runtime
-- `vscode-extension/src/types.ts` — `SessionHierarchyNode`, `SessionRelationRef`, `SessionFileDetails`
+- `src/types.ts` — `SessionHierarchyNode`, `SessionRelationRef`, `SessionFileDetails`
 - `vscode-extension/src/extension.ts` — `enrichSessionHierarchy()` method

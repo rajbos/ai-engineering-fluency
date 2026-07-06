@@ -85,7 +85,7 @@ jobs:
         UPSTREAM_PATH="${GITHUB_WORKSPACE}/vscode-copilot-chat"
         
         # Get the path to toolNames.json
-        TOOLNAMES_PATH="${GITHUB_WORKSPACE}/current-repo/vscode-extension/src/toolNames.json"
+        TOOLNAMES_PATH="${GITHUB_WORKSPACE}/current-repo/src/toolNames.json"
         
         # Create the full prompt with context - append context to the base prompt
         {
@@ -139,7 +139,7 @@ jobs:
         path: current-repo
         branch: sync-toolnames
         add-paths: |
-          vscode-extension/src/toolNames.json
+          src/toolNames.json
         commit-message: |
           chore: sync toolNames.json with vscode-copilot-chat
           

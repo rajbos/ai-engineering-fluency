@@ -2,7 +2,7 @@ import './vscode-shim-register';
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { VsCodeCachePolicy, CliCachePolicy } from '../../src/cachePolicy';
+import { VsCodeCachePolicy, CliCachePolicy } from '../../../src/cachePolicy';
 
 // ---------------------------------------------------------------------------
 // Shared helpers

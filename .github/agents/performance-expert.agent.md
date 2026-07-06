@@ -40,8 +40,8 @@ load-bearing token math that runs for **every** session file the extension proce
 
 | Benchmark | Source | Why it matters |
 |-----------|--------|----------------|
-| `estimateTokensFromJsonlSession` | `vscode-extension/src/tokenEstimation.ts` | Parses and token-counts a whole session; runs per file. |
-| `estimateTokensFromText` | `vscode-extension/src/tokenEstimation.ts` | The core character→token estimation loop. |
+| `estimateTokensFromJsonlSession` | `src/tokenEstimation.ts` | Parses and token-counts a whole session; runs per file. |
+| `estimateTokensFromText` | `src/tokenEstimation.ts` | The core character→token estimation loop. |
 
 These functions are pure (no VS Code API), which is what makes them measurable in isolation and
 stable enough to compare run-to-run.
@@ -102,7 +102,7 @@ results using exactly this structure:
 ## Findings
 
 ### 🔴 High
-- **`estimateTokensFromJsonlSession`** — 34.6% slower (base 8.10ms → PR 10.90ms), over the 20% threshold. Investigate changes to `vscode-extension/src/tokenEstimation.ts`.
+- **`estimateTokensFromJsonlSession`** — 34.6% slower (base 8.10ms → PR 10.90ms), over the 20% threshold. Investigate changes to `src/tokenEstimation.ts`.
 ```
 
 Rules for the output:

@@ -29,7 +29,7 @@ guidance:
 So you push for tests on the **risky, load-bearing paths** and you actively discourage tests
 that exist only to move a coverage number.
 
-### Where the load-bearing logic lives (TS surfaces, under `vscode-extension/src/`)
+### Where the load-bearing logic lives (TS surfaces, under the shared repo-root `src/` folder)
 - **Session parsing** (`sessionParser.ts`) — many editor log formats, malformed lines.
 - **Token estimation** (`tokenEstimation.ts`) — `estimateTokensFromJsonlSession`, debug-log
   override; empty/zero/huge inputs.
@@ -38,7 +38,7 @@ that exist only to move a coverage number.
   where the wrong attribution source yields **$0 cost for VS Code Chat sessions**.
 - **Scoring** (`maturityScoring.ts`) — boundary conditions and thresholds.
 - **Caching** (`cacheManager.ts`) — snapshot/merge logic and cache-version invalidation.
-- **Date keys / utils** (`utils/`, e.g. `vscode-extension/src/utils/dayKeys.ts`) — off-by-one
+- **Date keys / utils** (`utils/`, e.g. `src/utils/dayKeys.ts`) — off-by-one
   and timezone edges.
 
 ### Test layout & how to run
@@ -48,7 +48,7 @@ that exist only to move a coverage number.
   `cacheManager.ts`). Search the folder for the module name rather than assuming a single
   `<module>.test.ts` file exists.
 - Run a single file:
-  `node --require ./out/test/unit/vscode-shim-register.js --test out/test/unit/<name>.test.js`
+  `node --require ./out/vscode-extension/test/unit/vscode-shim-register.js --test out/vscode-extension/test/unit/<name>.test.js`
 - `npm run test:node` compiles and runs unit tests; `npm run test:coverage` enforces thresholds.
 - The repo runs **Stryker mutation testing** — a "survived mutant" mindset is the right lens:
   would a one-character change to the new code be caught by an existing assertion?

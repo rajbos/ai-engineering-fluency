@@ -10,9 +10,9 @@ import type {
 	WorkspaceCustomizationMatrix,
 	TodaySessionSummary,
 	ToolCurationAnalysis,
-} from './types';
-import toolNamesData from './toolNames.json';
-import { resolveGuidMcpToolName } from './utils/toolUtils';
+} from '../../src/types';
+import toolNamesData from '../../src/toolNames.json';
+import { resolveGuidMcpToolName } from '../../src/utils/toolUtils';
 
 // ---------------------------------------------------------------------------
 // Private helpers
