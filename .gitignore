@@ -38,4 +38,4 @@ jetbrains-plugin/.gradle/
 # IntelliJ sandbox directories
 **/idea-sandbox/
 .claude/scheduled_tasks.lock
-
+.claude/settings.local.json
