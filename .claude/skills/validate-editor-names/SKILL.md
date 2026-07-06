@@ -1,6 +1,6 @@
 ---
 name: validate-editor-names
-description: Find all hardcoded path-to-editor-name mappings in the CLI (cli/src/analysis.ts::getEditorSourceFromPath) and VS Code extension (vscode-extension/src/workspaceHelpers.ts::getEditorTypeFromPath), verify they return matching friendly display names for the same path patterns, and confirm every CLI-returned name appears in the EDITOR_ICON_MAP in formatUtils.ts. Use after adding a new editor adapter, after CLI changes, or if JetBrains/other CLI-based consumers show raw editor keys instead of friendly names.
+description: Find all hardcoded path-to-editor-name mappings in the CLI (cli/src/analysis.ts::getEditorSourceFromPath) and VS Code extension (src/workspaceHelpers.ts::getEditorTypeFromPath), verify they return matching friendly display names for the same path patterns, and confirm every CLI-returned name appears in the EDITOR_ICON_MAP in formatUtils.ts. Use after adding a new editor adapter, after CLI changes, or if JetBrains/other CLI-based consumers show raw editor keys instead of friendly names.
 ---
 
 # Validate Editor Names Skill
@@ -13,7 +13,7 @@ There are **three sources of truth** that must stay in sync:
 | Source | File | Function / symbol |
 |--------|------|-------------------|
 | **CLI path detector** | `cli/src/analysis.ts` | `getEditorSourceFromPath` |
-| **VS Code path detector** | `vscode-extension/src/workspaceHelpers.ts` | `getEditorTypeFromPath` (delegates to `detectToolEditorFromPath` + `detectVSCodeVariantFromPath`) |
+| **VS Code path detector** | `src/workspaceHelpers.ts` | `getEditorTypeFromPath` (delegates to `detectToolEditorFromPath` + `detectVSCodeVariantFromPath`) |
 | **Webview icon map** | `vscode-extension/src/webview/shared/formatUtils.ts` | `EDITOR_ICON_MAP` + `EditorName` union type |
 
 The JetBrains plugin (and any future CLI-based consumer) gets its editor names
@@ -61,7 +61,7 @@ node .github/skills/validate-editor-names/validate-editor-names.js --help
 
 ## When to run this skill
 
-- After **adding a new editor adapter** (`vscode-extension/src/adapters/`)
+- After **adding a new editor adapter** (`src/adapters/`)
 - After **modifying `getEditorSourceFromPath`** or `getEditorTypeFromPath`
 - After **updating `EDITOR_ICON_MAP`** in `formatUtils.ts`
 - When **JetBrains (or another CLI-based view) shows raw editor keys** instead
@@ -80,7 +80,7 @@ node .github/skills/validate-editor-names/validate-editor-names.js --help
 ## Related files
 
 - `cli/src/analysis.ts` — `getEditorSourceFromPath` (the CLI implementation)
-- `vscode-extension/src/workspaceHelpers.ts` — `getEditorTypeFromPath`,
+- `src/workspaceHelpers.ts` — `getEditorTypeFromPath`,
   `detectToolEditorFromPath`, `detectVSCodeVariantFromPath`
 - `vscode-extension/src/webview/shared/formatUtils.ts` — `EditorName` type +
   `EDITOR_ICON_MAP`

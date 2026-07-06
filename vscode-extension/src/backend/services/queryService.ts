@@ -10,7 +10,7 @@ import type { TableClientLike } from '../storageTables';
 import { CredentialService } from './credentialService';
 import { DataPlaneService } from './dataPlaneService';
 import { BackendUtility } from './utilityService';
-import { safeStringifyError } from '../../utils/errors';
+import { safeStringifyError } from '../../../../src/utils/errors';
 
 export interface BackendQueryResultLike {
 	stats: SessionStats;

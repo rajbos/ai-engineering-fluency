@@ -6,11 +6,11 @@ import * as os from 'os';
 import * as childProcess from 'child_process';
 
 // --- JSON data files ---
-import tokenEstimatorsData from './tokenEstimators.json';
-import modelPricingData from './modelPricing.json';
-import toolNamesData from './toolNames.json';
-import automaticToolsData from './automaticTools.json';
-import customizationPatternsData from './customizationPatterns.json';
+import tokenEstimatorsData from '../../src/tokenEstimators.json';
+import modelPricingData from '../../src/modelPricing.json';
+import toolNamesData from '../../src/toolNames.json';
+import automaticToolsData from '../../src/automaticTools.json';
+import customizationPatternsData from '../../src/customizationPatterns.json';
 import copilotPlansData from './copilotPlans.json';
 import * as packageJson from '../package.json';
 import { getToolFamilies, DEFAULT_TOOL_FAMILIES } from './toolFamilies';
@@ -60,7 +60,7 @@ import type {
   EvaluatedInsight,
   InsightStateBag,
   ToolCurationAnalysis,
-} from './types';
+} from '../../src/types';
 
 // --- Tool curation ---
 import {
@@ -70,7 +70,7 @@ import {
   buildMcpEntriesFromSettings as _buildMcpEntriesFromSettings,
   discoverSkillEntries as _discoverSkillEntries,
   analyzeToolCuration as _analyzeToolCuration,
-} from './toolCuration';
+} from '../../src/toolCuration';
 
 // --- Insights engine ---
 import {
@@ -81,23 +81,23 @@ import {
 } from './insightsEngine';
 
 // --- Ecosystem adapter types & helpers ---
-import type { OpenCodeDataAccess } from './opencode';
-import type { CrushDataAccess } from './crush';
-import type { VisualStudioDataAccess } from './visualstudio';
-import type { ContinueDataAccess } from './continue';
-import type { ClaudeCodeDataAccess } from './claudecode';
-import type { ClaudeDesktopCoworkDataAccess } from './claudedesktop';
-import type { MistralVibeDataAccess } from './mistralvibe';
-import type { GeminiCliDataAccess } from './geminicli';
-import type { IEcosystemAdapter } from './ecosystemAdapter';
-import { WindsurfDataAccess } from './windsurf';
-import { getEcosystemDisplayName } from './ecosystemAdapter';
-import { buildAdapterRegistry, createDataAccessInstances } from './adapters';
+import type { OpenCodeDataAccess } from '../../src/opencode';
+import type { CrushDataAccess } from '../../src/crush';
+import type { VisualStudioDataAccess } from '../../src/visualstudio';
+import type { ContinueDataAccess } from '../../src/continue';
+import type { ClaudeCodeDataAccess } from '../../src/claudecode';
+import type { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
+import type { MistralVibeDataAccess } from '../../src/mistralvibe';
+import type { GeminiCliDataAccess } from '../../src/geminicli';
+import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import { WindsurfDataAccess } from '../../src/windsurf';
+import { getEcosystemDisplayName } from '../../src/ecosystemAdapter';
+import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import { CopilotAppDataAccess } from './copilotAppData';
-import { PiDataAccess } from './pi';
-import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
-import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
-import { detectJetBrainsModelHintFromContent } from './jetbrains';
+import { PiDataAccess } from '../../src/pi';
+import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
+import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
+import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { createWakeupGate } from './utils/promises';
 
 // --- Session parsing & token estimation ---
@@ -119,8 +119,8 @@ import {
   extractAllTokensFromDebugLog as _extractAllTokensFromDebugLog,
   extractResponseItemText as _extractResponseItemText,
   NANO_AIU_TO_DOLLARS,
-} from './tokenEstimation';
-import { SessionDiscovery } from './sessionDiscovery';
+} from '../../src/tokenEstimation';
+import { SessionDiscovery } from '../../src/sessionDiscovery';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
@@ -139,14 +139,14 @@ import {
   analyzeSessionUsage as _analyzeSessionUsage,
   getModelUsageFromSession as _getModelUsageFromSession,
   type UsageAnalysisDeps,
-} from './usageAnalysis';
+} from '../../src/usageAnalysis';
 
 // --- Maturity & fluency scoring ---
 import {
   getFluencyLevelData as _getFluencyLevelData,
   calculateFluencyScoreForTeamMember as _calculateFluencyScoreForTeamMember,
   calculateMaturityScores as _calculateMaturityScores,
-} from './maturityScoring';
+} from '../../src/maturityScoring';
 
 // --- Workspace helpers ---
 import {
@@ -170,13 +170,13 @@ import {
   normalizeMcpToolName as _normalizeMcpToolName,
   extractMcpServerName as _extractMcpServerName,
   normalizePath as _normalizePath,
-} from './workspaceHelpers';
+} from '../../src/workspaceHelpers';
 
 // --- Chart building ---
-import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from './chartDataBuilder';
+import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, type SessionAggregateInput } from './statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -211,13 +211,13 @@ import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
 import { BackendFacade } from './backend/facade';
 import { BackendCommandHandler } from './backend/commands';
 import { TeamServerConfigPanel } from './backend/teamServerConfigPanel';
-import { getModelDisplayName } from './webview/shared/modelUtils';
+import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
 import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
 import { getNonce, buildCspMeta } from './utils/webviewUtils';
-import { isGuidMcpTool } from './utils/toolUtils';
-import { toLocalDayKey } from './utils/dayKeys';
+import { isGuidMcpTool } from '../../src/utils/toolUtils';
+import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { determineOnboardingAction } from './onboarding';
 
 type LocalViewRegressionProbeResult = {

@@ -8,7 +8,7 @@ import {
 	isNonNegativeInt,
 	normalizeModelId,
 	type JsonObject
-} from '../../src/utils/typeGuards';
+} from '../../../src/utils/typeGuards';
 
 // ── isObject ────────────────────────────────────────────────────────────────
 

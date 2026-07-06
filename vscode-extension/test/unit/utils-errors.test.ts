@@ -23,7 +23,7 @@ import {
 	withErrorRecoverySync,
 	withErrorRecoveryResult,
 	withErrorRecoverySyncResult
-} from '../../src/utils/errors';
+} from '../../../src/utils/errors';
 
 test('BackendConfigError/BackendAuthError/BackendSyncError set name and cause', () => {
 	const configErr = new BackendConfigError('config bad', new Error('cause'));

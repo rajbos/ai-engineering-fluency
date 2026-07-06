@@ -6,28 +6,28 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import chalk from 'chalk';
-import { SessionDiscovery } from '../../vscode-extension/src/sessionDiscovery';
-import { buildAdapterRegistry, createDataAccessInstances } from '../../vscode-extension/src/adapters';
-import type { IEcosystemAdapter } from '../../vscode-extension/src/ecosystemAdapter';
-import { isMcpTool, extractMcpServerName } from '../../vscode-extension/src/workspaceHelpers';
-import { resolveFileUri } from '../../vscode-extension/src/workspacePathResolver';
-import { parseSessionFileContent } from '../../vscode-extension/src/sessionParser';
-import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../vscode-extension/src/tokenEstimation';
-import { extractDailyFractions } from '../../vscode-extension/src/dailyAttribution';
-import { toLocalDayKey } from '../../vscode-extension/src/utils/dayKeys';
-import { isJetBrainsSessionPath } from '../../vscode-extension/src/adapters/adapterPredicates';
-import { parseJetBrainsPartition } from '../../vscode-extension/src/jetbrains';
-import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix } from '../../vscode-extension/src/types';
-import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../vscode-extension/src/usageAnalysis';
-import { withErrorRecovery } from '../../vscode-extension/src/utils/errors';
+import { SessionDiscovery } from '../../src/sessionDiscovery';
+import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
+import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import { isMcpTool, extractMcpServerName } from '../../src/workspaceHelpers';
+import { resolveFileUri } from '../../src/workspacePathResolver';
+import { parseSessionFileContent } from '../../src/sessionParser';
+import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
+import { extractDailyFractions } from '../../src/dailyAttribution';
+import { toLocalDayKey } from '../../src/utils/dayKeys';
+import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
+import { parseJetBrainsPartition } from '../../src/jetbrains';
+import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix } from '../../src/types';
+import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
+import { withErrorRecovery } from '../../src/utils/errors';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 import { ENVIRONMENTAL } from './constants';
 
 // Import JSON data files
-import tokenEstimatorsData from '../../vscode-extension/src/tokenEstimators.json';
-import modelPricingData from '../../vscode-extension/src/modelPricing.json';
-import toolNamesData from '../../vscode-extension/src/toolNames.json';
+import tokenEstimatorsData from '../../src/tokenEstimators.json';
+import modelPricingData from '../../src/modelPricing.json';
+import toolNamesData from '../../src/toolNames.json';
 
 // Pure analysis helpers from analysis.ts
 import {

@@ -46,7 +46,7 @@ jobs:
           echo "has_changes=true" >> "$GITHUB_OUTPUT"
           echo "since_tag=(none)" >> "$GITHUB_OUTPUT"
         else
-          CHANGES=$(git diff --name-only "$LAST_TAG"..HEAD -- vscode-extension/ | wc -l)
+          CHANGES=$(git diff --name-only "$LAST_TAG"..HEAD -- vscode-extension/ src/ | wc -l)
           echo "Changes in vscode-extension/ since $LAST_TAG: $CHANGES file(s)"
           echo "since_tag=$LAST_TAG" >> "$GITHUB_OUTPUT"
           if [ "$CHANGES" -gt 0 ] || [ "${{ inputs.force }}" == "true" ]; then

@@ -37,6 +37,9 @@ async function main() {
 		platform: 'node',
 		outfile: 'dist/extension.js',
 		external: ['vscode'],
+		// Shared sources in <repo>/src sit outside this package, so make sure
+		// bare imports still resolve against this project's node_modules.
+		nodePaths: [path.join(__dirname, 'node_modules')],
 		logLevel: 'silent',
 		// Polyfill import.meta.url so ESM packages that use createRequire(import.meta.url)
 		// work correctly when bundled as CJS (esbuild otherwise sets import.meta to {}).
@@ -66,6 +69,7 @@ async function main() {
 		outdir: 'dist/webview',
 		entryNames: '[name]',
 		external: ['vscode'],
+		nodePaths: [path.join(__dirname, 'node_modules')],
 		logLevel: 'silent',
 		plugins: [esbuildProblemMatcherPlugin],
 		loader: { '.css': 'text' },
@@ -79,12 +83,13 @@ async function main() {
 		await webviewCtx.dispose();
 	}
 
-	// Copy JSON config files to dist/webview/ so the VS extension can read them as runtime sidecars
+	// Copy JSON config files to dist/webview/ so the VS extension can read them as runtime sidecars.
+	// These live in the shared <repo>/src folder.
 	const jsonConfigFiles = ['tokenEstimators.json', 'modelPricing.json', 'toolNames.json', 'automaticTools.json'];
 	const webviewDistDir = path.join(__dirname, 'dist', 'webview');
 	fs.mkdirSync(webviewDistDir, { recursive: true });
 	for (const file of jsonConfigFiles) {
-		const jsonSrc = path.join(__dirname, 'src', file);
+		const jsonSrc = path.join(__dirname, '..', 'src', file);
 		const jsonDst = path.join(webviewDistDir, file);
 		if (fs.existsSync(jsonSrc)) {
 			fs.copyFileSync(jsonSrc, jsonDst);

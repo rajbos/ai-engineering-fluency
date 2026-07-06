@@ -5,6 +5,10 @@
     "target": "ES2022",
     "lib": ["ES2022"],
     "types": ["node"],
+    "typeRoots": [
+      "./node_modules/@types",
+      "../vscode-extension/node_modules/@types"
+    ],
     "sourceMap": true,
     "rootDir": "..",
     "outDir": "dist",
@@ -14,29 +18,31 @@
     "declaration": false,
     "skipLibCheck": true,
     "paths": {
-      "../vscode-extension/src/*": ["../vscode-extension/src/*"]
+      "../src/*": ["../src/*"],
+      "vscode": ["../vscode-extension/node_modules/@types/vscode/index.d.ts"],
+      "@msgpack/msgpack": ["./node_modules/@msgpack/msgpack/dist.esm/index.d.ts"]
     }
   },
   "include": [
     "src/**/*.ts",
-    "../vscode-extension/src/types.ts",
-    "../vscode-extension/src/cachePolicy.ts",
-    "../vscode-extension/src/sessionDiscovery.ts",
-    "../vscode-extension/src/sessionParser.ts",
-    "../vscode-extension/src/dailyAttribution.ts",
-    "../vscode-extension/src/tokenEstimation.ts",
-    "../vscode-extension/src/workspaceHelpers.ts",
-    "../vscode-extension/src/statsHelpers.ts",
-    "../vscode-extension/src/adapters/**/*.ts",
-    "../vscode-extension/src/modelPricing.json",
-    "../vscode-extension/src/toolCuration.ts"
+    "../src/types.ts",
+    "../src/cachePolicy.ts",
+    "../src/sessionDiscovery.ts",
+    "../src/sessionParser.ts",
+    "../src/dailyAttribution.ts",
+    "../src/tokenEstimation.ts",
+    "../src/workspaceHelpers.ts",
+    "../src/statsHelpers.ts",
+    "../src/adapters/**/*.ts",
+    "../src/modelPricing.json",
+    "../src/toolCuration.ts"
   ],
   "exclude": [
     "node_modules",
     "dist",
     "../vscode-extension/node_modules",
-    "../vscode-extension/src/copilotCliStore.ts",
-    "../vscode-extension/src/crush.ts",
-    "../vscode-extension/src/opencode.ts"
+    "../src/copilotCliStore.ts",
+    "../src/crush.ts",
+    "../src/opencode.ts"
   ]
 }

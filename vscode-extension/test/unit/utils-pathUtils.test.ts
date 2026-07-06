@@ -10,7 +10,7 @@ import {
 	splitNormalizedPath,
 	stripWindowsDriveUriPrefix,
 	toPlatformPath
-} from '../../src/utils/pathUtils';
+} from '../../../src/utils/pathUtils';
 
 // normalizePath tests
 test('normalizePath: converts backslashes to forward slashes', () => {

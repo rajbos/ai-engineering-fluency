@@ -5,10 +5,10 @@
  * Types are imported directly from types.ts (the extension's canonical source), so any schema
  * change there will cause an immediate compile error here — preventing schema drift.
  */
-import type { CustomizationTypeStatus, WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../types';
+import type { CustomizationTypeStatus, WorkspaceCustomizationMatrix, WorkspaceCustomizationRow } from '../../../../src/types';
 
 // Re-export for consumers (tests etc.) so they don't need to depend on types.ts directly
-export type { CustomizationTypeStatus, WorkspaceCustomizationMatrix as SanitizedCustomizationMatrix, WorkspaceCustomizationRow as SanitizedCustomizationRow } from '../../types';
+export type { CustomizationTypeStatus, WorkspaceCustomizationMatrix as SanitizedCustomizationMatrix, WorkspaceCustomizationRow as SanitizedCustomizationRow } from '../../../../src/types';
 
 const VALID_STATUSES = new Set<string>(['✅', '⚠️', '❌']);
 

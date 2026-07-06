@@ -50,6 +50,7 @@ jobs:
 
         echo "Scheduled event — checking for changes in the last 24h under vscode-extension/..."
         CHANGED=$(git log --since="24 hours ago" --pretty=format:'%H' -- \
+          src \
           vscode-extension/src \
           vscode-extension/test \
           vscode-extension/package.json \

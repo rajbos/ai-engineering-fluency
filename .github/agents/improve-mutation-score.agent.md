@@ -72,13 +72,13 @@ The report references compiled JS files (e.g. `out/src/tokenEstimation.js`). Map
 
 | Compiled path | TypeScript source |
 |---|---|
-| `out/src/tokenEstimation.js` | `vscode-extension/src/tokenEstimation.ts` |
-| `out/src/sessionParser.js` | `vscode-extension/src/sessionParser.ts` |
-| `out/src/workspaceHelpers.js` | `vscode-extension/src/workspaceHelpers.ts` |
-| `out/src/claudecode.js` | `vscode-extension/src/claudecode.ts` |
-| `out/src/utils/dayKeys.js` | `vscode-extension/src/utils/dayKeys.ts` |
-| `out/src/utils/errors.js` | `vscode-extension/src/utils/errors.ts` |
-| `out/src/utils/html.js` | `vscode-extension/src/utils/html.ts` |
+| `out/src/tokenEstimation.js` | `src/tokenEstimation.ts` |
+| `out/src/sessionParser.js` | `src/sessionParser.ts` |
+| `out/src/workspaceHelpers.js` | `src/workspaceHelpers.ts` |
+| `out/src/claudecode.js` | `src/claudecode.ts` |
+| `out/src/utils/dayKeys.js` | `src/utils/dayKeys.ts` |
+| `out/src/utils/errors.js` | `src/utils/errors.ts` |
+| `out/vscode-extension/src/utils/html.js` | `vscode-extension/src/utils/html.ts` |
 
 Read the TypeScript source at the reported line numbers to understand what was mutated.
 

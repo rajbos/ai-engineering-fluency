@@ -30,7 +30,7 @@ These are real, documented constraints. Treat a violation of any of them as a hi
 finding.
 
 ### 1. The CLI must reuse the extension's shared functions — never reimplement
-The CLI (`cli/`) is a **thin consumer** of `vscode-extension/src/` modules. Session parsing
+The CLI (`cli/`) is a **thin consumer** of `src/` modules (shared sources at the repo root). Session parsing
 and cost attribution must come from the shared functions, not be reimplemented in the CLI:
 
 | Need | Shared function | Source |

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import { resolveFileUri } from '../../src/workspacePathResolver';
+import { resolveFileUri } from '../../../src/workspacePathResolver';
 
 // ---------------------------------------------------------------------------
 // Non-file URIs and edge cases

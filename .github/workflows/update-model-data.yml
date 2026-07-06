@@ -72,8 +72,8 @@ jobs:
         with:
           branch: update/model-data
           add-paths: |
-            vscode-extension/src/modelPricing.json
-            vscode-extension/src/tokenEstimators.json
+            src/modelPricing.json
+            src/tokenEstimators.json
           commit-message: |
             chore: sync model data from rajbos/github-copilot-model-notifier
 
@@ -88,12 +88,12 @@ jobs:
             data from [rajbos/github-copilot-model-notifier](https://github.com/rajbos/github-copilot-model-notifier/blob/main/data/models.json).
 
             **Updated Files:**
-            - `vscode-extension/src/modelPricing.json` — model multipliers, tiers, and `copilotPricing.releaseStatus`
-            - `vscode-extension/src/tokenEstimators.json` — token estimators for new models
+            - `src/modelPricing.json` — model multipliers, tiers, and `copilotPricing.releaseStatus`
+            - `src/tokenEstimators.json` — token estimators for new models
 
             **⚠️ Note:** New model pricing stubs are set to `$0.00` by default and require
             manual verification before merging. See the
-            [pricing sources](https://github.com/rajbos/ai-engineering-fluency/blob/main/vscode-extension/src/modelPricing.json#L6)
+            [pricing sources](https://github.com/rajbos/ai-engineering-fluency/blob/main/src/modelPricing.json#L6)
             in `modelPricing.json` for reference URLs.
 
             **Source data SHA:** `${{ steps.update.outputs.source_sha }}`

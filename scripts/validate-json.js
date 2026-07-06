@@ -54,10 +54,10 @@ const JSON_FILES = [
   'vscode-extension/tsconfig.tests.json',
   
   // VS Code extension data files
-  'vscode-extension/src/tokenEstimators.json',
-  'vscode-extension/src/modelPricing.json',
-  'vscode-extension/src/toolNames.json',
-  'vscode-extension/src/customizationPatterns.json',
+  'src/tokenEstimators.json',
+  'src/modelPricing.json',
+  'src/toolNames.json',
+  'src/customizationPatterns.json',
   
   // VS Code configuration
   '.vscode/settings.json',

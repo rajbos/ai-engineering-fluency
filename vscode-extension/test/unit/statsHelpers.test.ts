@@ -9,8 +9,8 @@ aggregatePeriodStats,
 computeSessionTotalTokens,
 type SessionAggregateInput,
 type UtcDateRanges,
-} from '../../src/statsHelpers';
-import type { ModelUsage, EditorUsage, SessionFileCache } from '../../src/types';
+} from '../../../src/statsHelpers';
+import type { ModelUsage, EditorUsage, SessionFileCache } from '../../../src/types';
 
 // ── Helper factory ───────────────────────────────────────────────────────────
 

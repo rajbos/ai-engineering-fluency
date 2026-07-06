@@ -8,19 +8,19 @@ export default {
     // without adding killing power, causing timeouts and a near-zero kill rate.
     command: [
       'node',
-      '--require ./out/test/unit/vscode-shim-register.js',
+      '--require ./out/vscode-extension/test/unit/vscode-shim-register.js',
       '--test',
       '--test-force-exit',
-      'out/test/unit/tokenEstimation.test.js',
-      'out/test/unit/sessionParser.test.js',
-      'out/test/unit/sessionParser-integration.test.js',
-      'out/test/unit/maturityScoring.test.js',
-      'out/test/unit/usageAnalysis.test.js',
-      'out/test/unit/utils-dayKeys.test.js',
-      'out/test/unit/utils-errors.test.js',
-      'out/test/unit/utils-html.test.js',
-      'out/test/unit/workspaceHelpers.test.js',
-      'out/test/unit/claudecode.test.js',
+      'out/vscode-extension/test/unit/tokenEstimation.test.js',
+      'out/vscode-extension/test/unit/sessionParser.test.js',
+      'out/vscode-extension/test/unit/sessionParser-integration.test.js',
+      'out/vscode-extension/test/unit/maturityScoring.test.js',
+      'out/vscode-extension/test/unit/usageAnalysis.test.js',
+      'out/vscode-extension/test/unit/utils-dayKeys.test.js',
+      'out/vscode-extension/test/unit/utils-errors.test.js',
+      'out/vscode-extension/test/unit/utils-html.test.js',
+      'out/vscode-extension/test/unit/workspaceHelpers.test.js',
+      'out/vscode-extension/test/unit/claudecode.test.js',
     ].join(' '),
   },
 
@@ -36,8 +36,10 @@ export default {
   inPlace: true,
 
   // Mutate compiled JS produced by `npm run compile-tests`.
-  // The compiled tests in out/test/unit/ import from out/src/ via relative paths,
-  // so mutating out/src/ is picked up by the test runner automatically.
+  // Tests compile with rootDir at the repo root: shared sources (<repo>/src) land in
+  // out/src/**, extension-only sources in out/vscode-extension/src/**, and the compiled
+  // tests in out/vscode-extension/test/unit/ import them via relative paths, so mutating
+  // those trees is picked up by the test runner automatically.
   //
   // The glob patterns below use Stryker's built-in micromatch support (cross-platform).
   //
@@ -46,7 +48,7 @@ export default {
   // usageAnalysis and maturityScoring (~1900 and ~1200 lines respectively) for the
   // same reason. These can be added per-file once their test coverage is improved.
   mutate: [
-    // Core files
+    // Core files (shared sources from <repo>/src compile to out/src/**)
     'out/src/tokenEstimation.js',
     'out/src/sessionParser.js',
     'out/src/workspaceHelpers.js',
@@ -54,7 +56,7 @@ export default {
     // Utilities
     'out/src/utils/dayKeys.js',
     'out/src/utils/errors.js',
-    'out/src/utils/html.js',
+    'out/vscode-extension/src/utils/html.js',
   ],
 
   coverageAnalysis: 'off',

@@ -8,7 +8,7 @@ import { ResourceManagementClient } from '@azure/arm-resources';
 import { StorageManagementClient } from '@azure/arm-storage';
 import { SubscriptionClient } from '@azure/arm-resources-subscriptions';
 import { TableServiceClient } from '@azure/data-tables';
-import { safeStringifyError, isAzurePolicyDisallowedError, isStorageLocalAuthDisallowedByPolicyError } from '../../utils/errors';
+import { safeStringifyError, isAzurePolicyDisallowedError, isStorageLocalAuthDisallowedByPolicyError } from '../../../../src/utils/errors';
 import { getAzureTableStorageEndpoint } from '../../utils/azureEndpoints';
 import type { BackendAuthMode, BackendSettings } from '../settings';
 import { validateTeamAlias, type BackendUserIdentityMode } from '../identity';

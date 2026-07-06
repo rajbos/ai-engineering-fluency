@@ -1,7 +1,7 @@
 import { describe, test } from 'node:test';
 import * as assert from 'node:assert/strict';
 import { sanitizeCustomizationMatrix } from '../../src/webview/usage/customizationSanitizer';
-import type { WorkspaceCustomizationMatrix } from '../../src/types';
+import type { WorkspaceCustomizationMatrix } from '../../../src/types';
 
 // ── Compile-time schema parity guarantee ────────────────────────────────────────
 //

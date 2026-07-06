@@ -21,9 +21,9 @@ import {
     CopilotChatAdapter,
     getVSCodeUserPaths,
     isWSL,
-} from '../../src/adapters/copilotChatAdapter';
-import { isCopilotChatSessionPath } from '../../src/adapters/adapterPredicates';
-import { isDiscoverable } from '../../src/ecosystemAdapter';
+} from '../../../src/adapters/copilotChatAdapter';
+import { isCopilotChatSessionPath } from '../../../src/adapters/adapterPredicates';
+import { isDiscoverable } from '../../../src/ecosystemAdapter';
 
 const adapter = new CopilotChatAdapter();
 

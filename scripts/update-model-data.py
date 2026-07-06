@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-Update vscode-extension/src/modelPricing.json and
-vscode-extension/src/tokenEstimators.json from the model data published at
+Update src/modelPricing.json and
+src/tokenEstimators.json from the model data published at
 rajbos/github-copilot-model-notifier.
 
 For each model in the source:
@@ -35,8 +35,8 @@ MODELS_DATA_URL = (
 )
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-PRICING_PATH = REPO_ROOT / "vscode-extension" / "src" / "modelPricing.json"
-ESTIMATORS_PATH = REPO_ROOT / "vscode-extension" / "src" / "tokenEstimators.json"
+PRICING_PATH = REPO_ROOT / "src" / "modelPricing.json"
+ESTIMATORS_PATH = REPO_ROOT / "src" / "tokenEstimators.json"
 
 
 def api_request(url: str) -> dict | list:

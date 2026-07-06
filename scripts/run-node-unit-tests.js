@@ -4,7 +4,7 @@ const { spawnSync } = require('child_process');
 
 const repoRoot = path.resolve(__dirname, '..');
 const extensionRoot = path.join(repoRoot, 'vscode-extension');
-const outUnitDir = path.join(extensionRoot, 'out', 'test', 'unit');
+const outUnitDir = path.join(extensionRoot, 'out', 'vscode-extension', 'test', 'unit');
 const shimPath = path.join(outUnitDir, 'vscode-shim-register.js');
 
 const testFiles = fs.readdirSync(outUnitDir)

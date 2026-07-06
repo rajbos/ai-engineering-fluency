@@ -1,6 +1,6 @@
-import type { TokenEstimator } from '../../types';
+import type { TokenEstimator } from '../../../../src/types';
 import { EDITOR_ICON_MAP as _EDITOR_ICON_MAP, getEditorIconByName } from '../../editorIcons';
-import { getWindowData } from './dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 
 const _estimatorsData = getWindowData<{ estimators: Record<string, number> }>('__TOKEN_ESTIMATORS__');
 const tokenEstimators: Record<string, TokenEstimator> = _estimatorsData?.estimators ?? {};

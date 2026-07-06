@@ -3,7 +3,7 @@
  * Sends daily rollup data to a configured endpoint using a GitHub Bearer token.
  */
 
-import { safeStringifyError } from '../../utils/errors';
+import { safeStringifyError } from '../../../../src/utils/errors';
 
 export interface SharingServerEntry {
 	day: string;

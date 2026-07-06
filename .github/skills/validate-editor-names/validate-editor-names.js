@@ -5,7 +5,7 @@
  * Verifies that:
  *  1. Every editor name returned by cli/src/analysis.ts::getEditorSourceFromPath
  *     has an entry in the EDITOR_ICON_MAP in formatUtils.ts.
- *  2. Every editor name returned by vscode-extension/src/workspaceHelpers.ts::
+ *  2. Every editor name returned by src/workspaceHelpers.ts::
  *     getEditorTypeFromPath has an entry in the EDITOR_ICON_MAP.
  *  3. For a canonical set of test paths the CLI and VS Code detectors return
  *     identical friendly names.

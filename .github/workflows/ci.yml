@@ -92,13 +92,14 @@ jobs:
       shell: bash
       run: |
         set +e
-        node --require ./out/test/unit/vscode-shim-register.js \
+        node --require ./out/vscode-extension/test/unit/vscode-shim-register.js \
           --experimental-test-coverage \
           --test \
           --test-force-exit \
-          --test-coverage-include=out/src/backend/**/*.js \
+          --test-coverage-include=out/vscode-extension/src/backend/**/*.js \
+          --test-coverage-include=out/vscode-extension/src/utils/**/*.js \
           --test-coverage-include=out/src/utils/**/*.js \
-          out/test/unit/*.test.js 2>&1 | tee "$RUNNER_TEMP/test-output.txt"
+          out/vscode-extension/test/unit/*.test.js 2>&1 | tee "$RUNNER_TEMP/test-output.txt"
         status=${PIPESTATUS[0]}
         set -e
         exit "$status"

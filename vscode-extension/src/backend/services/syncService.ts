@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultAzureCredential } from '@azure/identity';
-import { safeStringifyError } from '../../utils/errors';
+import { safeStringifyError } from '../../../../src/utils/errors';
 import type { DailyRollupKey } from '../rollups';
 import { upsertDailyRollup } from '../rollups';
 import type { BackendSettings } from '../settings';
@@ -23,8 +23,8 @@ import { BackendUtility } from './utilityService';
 import { SharingServerUploadService, type SharingServerEntry } from './sharingServerUploadService';
 import { SyncLock } from './syncLock';
 import { type IBlobUploadService } from './blobUploadService';
-import { isJsonlContent } from '../../tokenEstimation';
-import { getEditorTypeFromPath } from '../../workspaceHelpers';
+import { isJsonlContent } from '../../../../src/tokenEstimation';
+import { getEditorTypeFromPath } from '../../../../src/workspaceHelpers';
 
 /** Ecosystem session per-model usage entry (input, output, optional interactions). */
 type ModelUsageEntry = { inputTokens: number; outputTokens: number; interactions?: number };

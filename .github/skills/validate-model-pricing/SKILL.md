@@ -1,13 +1,13 @@
 ---
 name: validate-model-pricing
-description: Find all model IDs referenced in local AI-coding session log files and debug logs, then compare them against the keys in vscode-extension/src/modelPricing.json. Reports models found in logs that have no pricing entry (unknown — informational only) and pricing entries never observed locally (unused). Use after adding a new model to modelPricing.json, after seeing unexpected cost attributions, or to discover which new models have appeared in recent sessions. Depends on file discovery patterns from the validate-session-schemas skill.
+description: Find all model IDs referenced in local AI-coding session log files and debug logs, then compare them against the keys in src/modelPricing.json. Reports models found in logs that have no pricing entry (unknown — informational only) and pricing entries never observed locally (unused). Use after adding a new model to modelPricing.json, after seeing unexpected cost attributions, or to discover which new models have appeared in recent sessions. Depends on file discovery patterns from the validate-session-schemas skill.
 ---
 
 # Validate Model Pricing Skill
 
 Scans **recent local AI-coding session log files** (and Copilot Chat debug logs) for
 every model ID that was actually used, then cross-references that list against the
-keys in `vscode-extension/src/modelPricing.json`.
+keys in `src/modelPricing.json`.
 
 It answers two questions:
 
@@ -89,7 +89,7 @@ This means cost estimation falls back to `gpt-4o-mini` pricing.
 - Model ID contains a `copilot/` prefix that was not stripped
 
 **Resolution**: Add the model key (and a `copilotPricing` block if applicable) to
-`vscode-extension/src/modelPricing.json`, then re-run the skill to confirm coverage.
+`src/modelPricing.json`, then re-run the skill to confirm coverage.
 
 ### UNUSED LOCALLY models
 

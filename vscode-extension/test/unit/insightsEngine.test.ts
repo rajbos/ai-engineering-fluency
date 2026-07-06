@@ -2,7 +2,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import { INSIGHT_CATALOG, evaluateInsights } from '../../src/insightsEngine';
 import type { InsightContext } from '../../src/insightsEngine';
-import type { ToolCurationAnalysis, UsageAnalysisPeriod } from '../../src/types';
+import type { ToolCurationAnalysis, UsageAnalysisPeriod } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers

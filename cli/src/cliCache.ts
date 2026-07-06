@@ -8,7 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { SessionData } from './helpers';
-import { CliCachePolicy } from '../../vscode-extension/src/cachePolicy';
+import { CliCachePolicy } from '../../src/cachePolicy';
 
 /** Bump this when the SessionData shape changes to force a full re-parse. */
 const CACHE_VERSION = 5; // Read debug log tokens for agent-mode sessions

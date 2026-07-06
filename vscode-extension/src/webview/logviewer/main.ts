@@ -1,12 +1,12 @@
 // Log Viewer webview - displays session file details and chat turns
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
 import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
-import { getModelDisplayName } from '../shared/modelUtils';
+import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 
 // ── Type definitions ──────────────────────────────────────────────────────────
 
@@ -163,7 +163,7 @@ interface Window { __INITIAL_LOGDATA__?: SessionLogData; }
 const vscode = acquireVsCodeApi();
 const initialData = getWindowData<SessionLogData>('__INITIAL_LOGDATA__');
 
-import { resolveGuidMcpToolName } from '../../utils/toolUtils';
+import { resolveGuidMcpToolName } from '../../../../src/utils/toolUtils';
 
 // Tool name map is injected by the extension host as window.__TOOL_NAMES__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { OpenCodeDataAccess } from '../../src/opencode';
+import { OpenCodeDataAccess } from '../../../src/opencode';
 
 type HarnessOptions = {
 	delayInit?: boolean;
