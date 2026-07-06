@@ -12,6 +12,7 @@ reports/mutation/
 .github/scripts/scraped-models.json
 example.json
 log-example.txt
+eslint-all.txt
 visualstudio-extension/.vs/
 visualstudio-extension/src/AIEngineeringFluency/bin/
 visualstudio-extension/src/AIEngineeringFluency/obj/
