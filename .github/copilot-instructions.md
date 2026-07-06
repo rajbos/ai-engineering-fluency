@@ -119,6 +119,15 @@ To check if data is available:
 [ -f ./usage-data/usage-agg-daily.json ] && echo "Aggregated data available"
 ```
 
+## Keep Claude Code's Mirrored Agents & Skills in Sync
+
+This repo also ships Claude Code equivalents of the Copilot customizations below, kept as separate files because the two tools use different formats/locations:
+
+- `.github/agents/*.agent.md` (Copilot custom agents) ↔ `.claude/agents/*.md` (Claude subagents) — same name, same body content, but frontmatter `tools:` uses Claude's tool names (`Read`, `Grep`, `Glob`, `Bash`, `Edit`, `Write`, `Agent`) instead of Copilot's internal tool IDs (`search/codebase`, `execute/runInTerminal`, etc.).
+- `.github/skills/*/SKILL.md` (Copilot Agent Skills) ↔ `.claude/skills/*/SKILL.md` (Claude Skills) — **only** the `SKILL.md` is duplicated (same content, same format on both tools). The scripts, README, and other supporting files live **only** under `.github/skills/<name>/` — do not copy them. The `.claude/skills/<name>/SKILL.md` file's instructions reference those scripts by their real `.github/skills/<name>/...` path, so there is a single source of truth for the code and no duplication.
+
+**If you add, remove, or edit a file under `.github/agents/`, make the matching change under `.claude/agents/` in the same PR** (and vice versa). **If you edit a skill's `SKILL.md` under `.github/skills/`, copy the same edit into `.claude/skills/<name>/SKILL.md`** — but if you only change a script/README/data file (not `SKILL.md` itself) under `.github/skills/`, no Claude-side change is needed, since Claude's copy just points at that same file. Claude Code does not read `.github/agents/` or `.github/skills/` on its own — without this manual mirroring the Claude-side copy silently goes stale.
+
 ## DevContainer Terminal Behavior
 
 This repository uses a devcontainer (`.devcontainer/devcontainer.json`). When working inside the devcontainer, **terminal output capture is unreliable** — commands execute successfully but the `run_in_terminal` tool often returns empty or truncated output. This is a known limitation of the remote filesystem layer.
