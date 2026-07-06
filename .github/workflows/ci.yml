@@ -100,7 +100,6 @@ jobs:
 
     - name: Run tests
       run: cd vscode-extension && npm test
-      continue-on-error: true  # VS Code extension tests can be flaky in CI
       env:
         DISPLAY: :99
       # coactions/setup-xvfb was abandoned on Node.js 20 (no node24 support).
