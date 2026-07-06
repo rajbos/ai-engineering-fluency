@@ -634,19 +634,9 @@ return `
 
 // ─── Multi-model period helper ──────────────────────────────────────────────────
 
-/** Renders one column of the Multi-Model Usage section for a single time period. */
-// eslint-disable-next-line max-lines-per-function
-function renderMultiModelPeriod(
-title: string,
-switching: ModelSwitchingAnalysis,
-allLowCostModels: readonly string[],
-allMediumCostModels: readonly string[],
-allHighCostModels: readonly string[],
-allUnknownModels: readonly string[],
-): string {
+/** Renders the top stats-grid section (avg models, switching frequency, max models). */
+function _renderMultiModelStatCards(switching: ModelSwitchingAnalysis): string {
 return `
-<div>
-<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
 <div class="stats-grid" style="grid-template-columns: 1fr;">
 <div class="stat-card">
 <div class="stat-label">\u{1F4CA} Avg Models per Conversation</div>
@@ -661,9 +651,17 @@ return `
 <div class="stat-label">\u{1F4C8} Max Models in Session</div>
 <div class="stat-value">${formatNumber(switching.maxModelsPerSession || 0)}</div>
 </div>
-</div>
-<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>
+</div>`;
+}
+
+/** Renders the "Models by Cost Level" breakdown listing model names per cost tier. */
+function _renderMultiModelCostLevelBreakdown(
+allLowCostModels: readonly string[],
+allMediumCostModels: readonly string[],
+allHighCostModels: readonly string[],
+allUnknownModels: readonly string[],
+): string {
+return `
 <div style="min-height: 110px;">
 ${allLowCostModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
@@ -689,8 +687,15 @@ ${allUnknownModels.length > 0 ? `
 <span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : ''}
-</div>
-${switching.totalRequests > 0 ? `
+</div>`;
+}
+
+/** Renders the "Request Count" breakdown by cost tier, or an empty string if there were no requests. */
+function _renderMultiModelRequestCountBreakdown(switching: ModelSwitchingAnalysis): string {
+if (switching.totalRequests <= 0) {
+return '';
+}
+return `
 <div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 85px;">
 <div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
 ${switching.lowCostRequests > 0 ? `
@@ -717,13 +722,38 @@ ${switching.unknownRequests > 0 ? `
 <span style="color: var(--text-primary);">${formatNumber(switching.unknownRequests)} (${formatPercent((switching.unknownRequests / switching.totalRequests) * 100)})</span>
 </div>
 ` : ''}
-</div>
-` : ''}
-${switching.mixedCostSessions > 0 ? `
+</div>`;
+}
+
+/** Renders the mixed-cost-sessions callout line, or an empty string if there were none. */
+function _renderMultiModelMixedCostSessions(switching: ModelSwitchingAnalysis): string {
+if (switching.mixedCostSessions <= 0) {
+return '';
+}
+return `
 <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
 <span style="font-size: 11px; color: var(--link-color);">🔀 Mixed cost sessions: ${formatNumber(switching.mixedCostSessions)}</span>
-</div>
-` : ''}
+</div>`;
+}
+
+/** Renders one column of the Multi-Model Usage section for a single time period. */
+function renderMultiModelPeriod(
+title: string,
+switching: ModelSwitchingAnalysis,
+allLowCostModels: readonly string[],
+allMediumCostModels: readonly string[],
+allHighCostModels: readonly string[],
+allUnknownModels: readonly string[],
+): string {
+return `
+<div>
+<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
+${_renderMultiModelStatCards(switching)}
+<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>
+${_renderMultiModelCostLevelBreakdown(allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
+${_renderMultiModelRequestCountBreakdown(switching)}
+${_renderMultiModelMixedCostSessions(switching)}
 </div>
 </div>`;
 }
