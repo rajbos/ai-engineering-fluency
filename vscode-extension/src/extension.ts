@@ -124,6 +124,7 @@ import { SessionDiscovery } from './sessionDiscovery';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
+import { HookManager } from './hookManager';
 
 // --- Usage analysis ---
 import {
@@ -356,6 +357,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public windsurf!: WindsurfDataAccess;
 	private ecosystems!: IEcosystemAdapter[];
 	private cacheManager!: CacheManager;
+	private hookManager!: HookManager;
 	private readonly copilotAppData = new CopilotAppDataAccess();
 
 	private get usageAnalysisDeps(): UsageAnalysisDeps {
@@ -1163,6 +1165,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			extractMcpServerName: (t) => this.extractMcpServerName(t),
 		});
 		this.cacheManager = new CacheManager(context, { log: (m: string) => this.log(m), warn: (m: string) => this.warn(m), error: (m: string) => this.error(m) }, CopilotTokenTracker.CACHE_VERSION);
+		this.hookManager = new HookManager(context.globalState, (msg) => this.log(msg));
 		this.sessionDiscovery = new SessionDiscovery({
 			log: (m) => this.log(m),
 			warn: (m) => this.warn(m),
@@ -6485,7 +6488,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const dismissedTips = await this.getDismissedFluencyTips();
 		const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
 		this.maturityPanel.webview.onDidReceiveMessage(async (message) => { await this.handleMaturityMessage(message); });
-		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels });
+		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
 		this.maturityPanel.onDidDispose(() => { this.log('🎯 Copilot Fluency Score dashboard closed'); this.maturityPanel = undefined; });
 	}
 
@@ -6512,7 +6515,36 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data)); } break;
 			case 'exportPdf': if (message.data) { await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data)); } break;
 			case 'exportPptx': if (message.data) { await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data)); } break;
+			case 'installHook': if (message.hookId) { await this.maturityHandleInstallHook(message.hookId); } break;
+			case 'uninstallHook': if (message.hookId) { await this.maturityHandleUninstallHook(message.hookId); } break;
 		}
+	}
+
+	private async maturityHandleInstallHook(hookId: string): Promise<void> {
+		try {
+			await this.hookManager.installHook(hookId);
+			const hooksDir = this.hookManager.getHooksDirectory();
+			const choice = await vscode.window.showInformationMessage(
+				`✅ Session reminder installed. Hook scripts written to ${hooksDir} — they will activate in your next Copilot agent session.`,
+				'Open Hooks Folder'
+			);
+			if (choice === 'Open Hooks Folder') {
+				await vscode.env.openExternal(vscode.Uri.file(hooksDir));
+			}
+		} catch (err) {
+			vscode.window.showErrorMessage(`Failed to install hook: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		await this.refreshMaturityPanel();
+	}
+
+	private async maturityHandleUninstallHook(hookId: string): Promise<void> {
+		try {
+			await this.hookManager.uninstallHook(hookId);
+			vscode.window.showInformationMessage(`Removed session reminder for "${hookId}".`);
+		} catch (err) {
+			vscode.window.showErrorMessage(`Failed to remove hook: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		await this.refreshMaturityPanel();
 	}
 
 	private async maturityHandleShareToIssue(): Promise<void> {
@@ -6536,7 +6568,7 @@ private async refreshMaturityPanel(): Promise<void> {
 	const dismissedTips = await this.getDismissedFluencyTips();
 	const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 	const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
-	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels });
+	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
 	this.log('✅ Copilot Fluency Score dashboard refreshed');
 }
 
@@ -6912,6 +6944,7 @@ ${hashtag}`;
       lastUpdated: string;
       dismissedTips?: string[];
       isDebugMode?: boolean;
+      installedHooks?: string[];
       fluencyLevels?: Array<{
         category: string;
         icon: string;

@@ -42,6 +42,14 @@ type MaturityData = {
 	isDebugMode?: boolean;
 	fluencyLevels?: CategoryLevelData[];
 	backendConfigured?: boolean;
+	installedHooks?: string[];
+};
+
+// Maps a category name to the hook id that provides a session reminder for it
+const CATEGORY_HOOK_MAP: Record<string, string> = {
+	'Customization': 'missing-instructions',
+	'Context Engineering': 'no-context-refs',
+	'Tool Usage': 'no-mcp-config',
 };
 
 declare function acquireVsCodeApi<TState = unknown>(): {
@@ -266,6 +274,21 @@ function buildDemoCategoryCardHtml(
     </div>`;
 }
 
+function buildHookReminderButton(category: string, tipsCount: number, installedHooks: string[]): string {
+  const hookId = CATEGORY_HOOK_MAP[category];
+  if (!hookId || tipsCount === 0) { return ''; }
+  const isInstalled = installedHooks.includes(hookId);
+  if (isInstalled) {
+    return `<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px;">
+      <button class="hook-reminder-btn hook-reminder-active" data-hook-id="${escapeHtml(hookId)}" data-action="uninstallHook" title="Remove session reminder" style="font-size: 11px; padding: 3px 10px; background: transparent; border: 1px solid #58a6ff; color: #58a6ff; border-radius: 4px; cursor: pointer;">✓ Reminder active</button>
+      <button class="hook-reminder-btn hook-reminder-remove" data-hook-id="${escapeHtml(hookId)}" data-action="uninstallHook" title="Remove session reminder" style="font-size: 10px; background: transparent; border: none; color: #666; cursor: pointer; text-decoration: underline;">remove</button>
+    </div>`;
+  }
+  return `<div style="margin-top: 8px;">
+    <button class="hook-reminder-btn" data-hook-id="${escapeHtml(hookId)}" data-action="installHook" title="Install a Copilot hook that reminds you in future sessions" style="font-size: 11px; padding: 3px 10px; background: transparent; border: 1px solid #444; color: #ccc; border-radius: 4px; cursor: pointer;">🔔 Remind me in sessions</button>
+  </div>`;
+}
+
 function buildCategoryCard(
   cat: CategoryScore,
   catIdx: number,
@@ -311,6 +334,8 @@ function buildCategoryCard(
     </div>
   ` : '';
 
+  const hookButton = buildHookReminderButton(cat.category, cat.tips.length, data.installedHooks ?? []);
+
   return `
     <div class="category-card">
       <div class="category-header">
@@ -330,7 +355,7 @@ function buildCategoryCard(
           </div>
           ${tipsHtml}
         </div>
-      ` : ''}${mcpButton}</div>`;
+      ` : ''}${hookButton}${mcpButton}</div>`;
 }
 
 function buildShareSectionHtml(): string {
@@ -523,6 +548,14 @@ function wireMaturityNavButtons(): void {
 function wireMaturityActionButtons(): void {
   document.getElementById('btn-share-issue')?.addEventListener('click', () => { vscode.postMessage({ command: 'shareToIssue' }); });
   document.querySelector('.mcp-discover-btn')?.addEventListener('click', () => { vscode.postMessage({ command: 'searchMcpExtensions' }); });
+  document.querySelectorAll('.hook-reminder-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const target = e.currentTarget as HTMLElement;
+      const hookId = target.getAttribute('data-hook-id');
+      const action = target.getAttribute('data-action');
+      if (hookId && action) { vscode.postMessage({ command: action, hookId }); }
+    });
+  });
   document.querySelectorAll('.dismiss-tips-btn').forEach(btn => {
     btn.addEventListener('click', (e) => {
       const target = e.target as HTMLElement;
