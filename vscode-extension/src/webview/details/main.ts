@@ -221,7 +221,7 @@ setCompactNumbers(stats.compactNumbers !== false);
 const root = document.getElementById('root');
 if (!root) { return; }
 
-const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens + (stats.last30Days.cachedTokens ?? 0) + stats.last30Days.thinkingTokens));
+const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens + stats.last30Days.thinkingTokens));
 const projectedSessions = Math.round(calculateProjection(stats.last30Days.sessions));
 const projectedCo2 = calculateProjection(stats.last30Days.co2);
 const projectedWater = calculateProjection(stats.last30Days.waterUsage);
@@ -331,7 +331,7 @@ function outputTokenCell(p: PeriodStats): string {
 function totalTokenCell(p: PeriodStats): string {
 	const modelTotal = sumInputTokens(p) + sumOutputTokens(p);
 	if ((p.actualTokens ?? 0) > 0) {
-		return formatCompact(p.tokens + (p.cachedTokens ?? 0) + p.thinkingTokens);
+		return formatCompact(p.tokens + p.thinkingTokens);
 	}
 	return formatCompact(modelTotal > 0 ? modelTotal : p.tokens);
 }

@@ -9,6 +9,17 @@ import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, Langua
 import { toLocalDayKey } from './utils/dayKeys';
 
 /**
+ * Computes a session's total token count from input, output, and thinking tokens.
+ *
+ * Cached (cache-read) tokens are deliberately excluded: they are already a
+ * subset of `inputTokens` (see `ModelUsage.inputTokens`), not an additive
+ * amount, so adding them again here would double-count and inflate the total.
+ */
+export function computeSessionTotalTokens(inputTokens: number, outputTokens: number, thinkingTokens: number): number {
+	return inputTokens + outputTokens + thinkingTokens;
+}
+
+/**
  * Merges `source` model usage into `target` (in-place).
  * All four token fields are summed: inputTokens, outputTokens,
  * cachedReadTokens (optional), and cacheCreationTokens (optional).

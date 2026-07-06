@@ -176,7 +176,7 @@ import {
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from './chartDataBuilder';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, type SessionAggregateInput } from './statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, type SessionAggregateInput } from './statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -3542,7 +3542,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			title: sessionData.title || null, filePath: sessionFile, interactions,
 			toolCalls: analysis.toolCalls.total, inputTokens: inputTok, outputTokens: outputTok,
 			thinkingTokens: sessionData.thinkingTokens || 0, cachedTokens: cachedTok,
-			totalTokens: inputTok + outputTok + cachedTok + (sessionData.thinkingTokens || 0),
+			totalTokens: computeSessionTotalTokens(inputTok, outputTok, sessionData.thinkingTokens || 0),
 			estimatedCost: sessionData.copilotExactCostDollars ?? this.calculateEstimatedCost(modelUsage),
 			editor: this.detectEditorSource(sessionFile), models: Object.keys(modelUsage),
 			lastActivity: sessionData.lastInteraction || new Date(mtime).toISOString(),

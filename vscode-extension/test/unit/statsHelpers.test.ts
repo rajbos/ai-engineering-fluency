@@ -6,6 +6,7 @@ addModelUsage,
 addEditorUsage,
 computeUtcDateRanges,
 aggregatePeriodStats,
+computeSessionTotalTokens,
 type SessionAggregateInput,
 type UtcDateRanges,
 } from '../../src/statsHelpers';
@@ -41,6 +42,23 @@ const last30DaysStartMs = last30DaysUtcStart.getTime();
 const lastMonthStartMs = new Date(Date.UTC(lastMonthLastDay.getUTCFullYear(), lastMonthLastDay.getUTCMonth(), 1)).getTime();
 return { todayUtcKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey, last30DaysUtcStartKey, last30DaysStartMs, lastMonthStartMs };
 }
+
+// ── computeSessionTotalTokens ────────────────────────────────────────────────
+
+test('computeSessionTotalTokens: sums input, output, and thinking tokens', () => {
+assert.strictEqual(computeSessionTotalTokens(100, 20, 5), 125);
+});
+
+test('computeSessionTotalTokens: does not double-count cached tokens (regression)', () => {
+// inputTokens already includes cache-read tokens (e.g. 100 input tokens of
+// which 40 were cache reads). The total must stay 100 + 20 + 0 = 120 and
+// must NOT add the 40 cached tokens again on top.
+const inputTokensIncludingCache = 100;
+const cachedReadTokensSubsetOfInput = 40;
+const total = computeSessionTotalTokens(inputTokensIncludingCache, 20, 0);
+assert.strictEqual(total, 120);
+assert.notStrictEqual(total, 120 + cachedReadTokensSubsetOfInput);
+});
 
 // ── addModelUsage ────────────────────────────────────────────────────────────
 
