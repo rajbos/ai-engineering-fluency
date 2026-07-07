@@ -26,6 +26,8 @@ import { GeminiCliDataAccess } from '../geminicli';
 import { AntigravityDataAccess } from '../antigravity';
 import { PiDataAccess } from '../pi';
 import { CursorDataAccess } from '../cursor';
+import { KiroDataAccess } from '../kiro';
+import { KiroCliDataAccess } from '../kirocli';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
 import { CrushAdapter } from './crushAdapter';
@@ -42,6 +44,8 @@ import { CursorAdapter } from './cursorAdapter';
 import { CopilotChatAdapter } from './copilotChatAdapter';
 import { CopilotCliAdapter } from './copilotCliAdapter';
 import { JetBrainsAdapter } from './jetbrainsAdapter';
+import { KiroAdapter } from './kiroAdapter';
+import { KiroCliAdapter } from './kiroCliAdapter';
 
 /** Data-access instances and callbacks required to build the adapter registry. */
 export interface AdapterRegistryDeps {
@@ -57,6 +61,8 @@ geminiCli: GeminiCliDataAccess;
 antigravity: AntigravityDataAccess;
 pi: PiDataAccess;
 cursor: CursorDataAccess;
+kiro: KiroDataAccess;
+kiroCli: KiroCliDataAccess;
 /** Estimates token count from raw text for a given model. */
 estimateTokens: (text: string, model?: string) => number;
 /** Returns true when the tool name identifies an MCP server tool. */
@@ -95,6 +101,8 @@ geminiCli: new GeminiCliDataAccess(),
 antigravity: new AntigravityDataAccess(),
 pi: new PiDataAccess(),
 cursor: new CursorDataAccess(extensionUri),
+kiro: new KiroDataAccess(),
+kiroCli: new KiroCliDataAccess(),
 };
 }
 
@@ -126,6 +134,8 @@ new AntigravityAdapter(deps.antigravity, deps.estimateTokens),
 new GeminiCliAdapter(deps.geminiCli),
 new PiAdapter(deps.pi),
 new CursorAdapter(deps.cursor),
+new KiroAdapter(deps.kiro),
+new KiroCliAdapter(deps.kiroCli),
 // Copilot Chat / CLI adapters: discovery-only. Their handles() returns
 // false so processSessionFile() falls through to the shared parser path
 // for VS Code Copilot Chat and CLI files. See issue #654.

@@ -25,6 +25,8 @@ import { GeminiCliAdapter } from '../../../src/adapters/geminiCliAdapter';
 import { CopilotChatAdapter } from '../../../src/adapters/copilotChatAdapter';
 import { CopilotCliAdapter } from '../../../src/adapters/copilotCliAdapter';
 import { AntigravityAdapter } from '../../../src/adapters/antigravityAdapter';
+import { KiroAdapter } from '../../../src/adapters/kiroAdapter';
+import { KiroCliAdapter } from '../../../src/adapters/kiroCliAdapter';
 
 import { OpenCodeDataAccess } from '../../../src/opencode';
 import { CrushDataAccess } from '../../../src/crush';
@@ -36,6 +38,8 @@ import { VisualStudioDataAccess } from '../../../src/visualstudio';
 import { MistralVibeDataAccess } from '../../../src/mistralvibe';
 import { GeminiCliDataAccess } from '../../../src/geminicli';
 import { AntigravityDataAccess } from '../../../src/antigravity';
+import { KiroDataAccess } from '../../../src/kiro';
+import { KiroCliDataAccess } from '../../../src/kirocli';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -53,6 +57,8 @@ const visualStudioDA = new VisualStudioDataAccess();
 const mistralVibeDA = new MistralVibeDataAccess();
 const geminiCliDA = new GeminiCliDataAccess();
 const antigravityDA = new AntigravityDataAccess();
+const kiroDA = new KiroDataAccess();
+const kiroCliDA = new KiroCliDataAccess();
 
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
 const crushAdapter = new CrushAdapter(crushDA);
@@ -66,22 +72,24 @@ const geminiCliAdapter = new GeminiCliAdapter(geminiCliDA);
 const copilotChatAdapter = new CopilotChatAdapter();
 const copilotCliAdapter = new CopilotCliAdapter();
 const antigravityAdapter = new AntigravityAdapter(antigravityDA);
+const kiroAdapter = new KiroAdapter(kiroDA);
+const kiroCliAdapter = new KiroCliAdapter(kiroCliDA);
 
 const allAdapters: IEcosystemAdapter[] = [
     openCodeAdapter, crushAdapter, continueAdapter, eclipseAdapter,
     claudeCodeAdapter, claudeDesktopAdapter, visualStudioAdapter, mistralVibeAdapter, geminiCliAdapter,
-    copilotChatAdapter, copilotCliAdapter, antigravityAdapter,
+    copilotChatAdapter, copilotCliAdapter, antigravityAdapter, kiroAdapter, kiroCliAdapter,
 ];
 
 // ---------------------------------------------------------------------------
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 12 adapters', () => {
+test('isDiscoverable: returns true for all 14 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 12);
+    assert.equal(allAdapters.length, 14);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -113,6 +121,8 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(copilotChatAdapter.id, 'copilotchat');
     assert.equal(copilotCliAdapter.id, 'copilotcli');
     assert.equal(antigravityAdapter.id, 'antigravity');
+    assert.equal(kiroAdapter.id, 'kiro');
+    assert.equal(kiroCliAdapter.id, 'kirocli');
 });
 
 // ---------------------------------------------------------------------------
@@ -193,6 +203,35 @@ test('AntigravityAdapter.handles: rejects generic Gemini CLI session paths', () 
 test('AntigravityAdapter.handles: rejects paths that lack transcript.jsonl filename', () => {
     const p = path.join(os.homedir(), '.gemini', 'antigravity', 'brain', 'some-uuid', '.system_generated', 'logs', 'other.jsonl');
     assert.ok(!antigravityAdapter.handles(p));
+});
+
+test('KiroCliAdapter.handles: recognises ~/.kiro/sessions/cli metadata paths', () => {
+    const p = path.join(os.homedir(), '.kiro', 'sessions', 'cli', '1737e9e4-1287-4dc1-85c8-acd62593c292.json');
+    assert.ok(kiroCliAdapter.handles(p));
+});
+
+test('KiroCliAdapter.handles: rejects the .jsonl message log and unrelated paths', () => {
+    assert.ok(!kiroCliAdapter.handles(path.join(os.homedir(), '.kiro', 'sessions', 'cli', 'abc.jsonl')));
+    assert.ok(!kiroCliAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
+});
+
+test('KiroAdapter.handles: recognises kiro.kiroagent workspace-sessions paths', () => {
+    const p = path.join(kiroDA.getKiroWorkspaceSessionsDir(), 'YzpcVXNlcnNcdGVzdA__', '11e640cd-0350-4991-b7a1-bef80ae3ddda.json');
+    assert.ok(kiroAdapter.handles(p));
+});
+
+test('KiroAdapter.handles: rejects the sessions.json index and Kiro CLI paths', () => {
+    assert.ok(!kiroAdapter.handles(path.join(kiroDA.getKiroWorkspaceSessionsDir(), 'YzpcVXNlcnNcdGVzdA__', 'sessions.json')));
+    assert.ok(!kiroAdapter.handles(path.join(os.homedir(), '.kiro', 'sessions', 'cli', 'abc.json')));
+});
+
+test('KiroDataAccess.decodeWorkspaceDirName: decodes base64 workspace folder names', () => {
+    const kiroWorkspaceDA = new KiroDataAccess();
+    assert.equal(
+        kiroWorkspaceDA.decodeWorkspaceDirName('YzpcVXNlcnNcUm9iQm9zXGNvZGVccmVwb3NccmFqYm9zXEphcnZpcw__'),
+        'c:\\Users\\RobBos\\code\\repos\\rajbos\\Jarvis'
+    );
+    assert.equal(kiroWorkspaceDA.decodeWorkspaceDirName('not-base64-path!!'), undefined);
 });
 
 test('VisualStudioAdapter.handles: recognises VS .vs session paths', () => {
