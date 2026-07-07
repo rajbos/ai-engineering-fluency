@@ -21,6 +21,7 @@ Track your GitHub Copilot token usage and AI Fluency across VS Code, Visual Stud
 - Gemini CLI (Google)
 - Claude Desktop Cowork (Anthropic)
 - Mistral Vibe
+- Kiro IDE + Kiro CLI (AWS)
 - Visual Studio + GitHub Copilot
 
 <p align="left">

@@ -4,8 +4,8 @@
  * Extension Functions".
  *
  * The canonical split (mirrors getSessionFileDataCached in the VS Code extension):
- *   - Token counts       → estimateTokensFromJsonlSession()  (vscode-extension/src/tokenEstimation.ts)
- *   - Model attribution  → getModelUsageFromSession()        (vscode-extension/src/usageAnalysis.ts)
+ *   - Token counts       → estimateTokensFromJsonlSession()  (src/tokenEstimation.ts)
+ *   - Model attribution  → getModelUsageFromSession()        (src/usageAnalysis.ts)
  *
  * WHY the contract exists: estimateTokensFromJsonlSession().modelUsage returns {}
  * for delta-format sessions (VS Code Chat JSONL, the `kind: 0/1/2` format). If the
@@ -21,10 +21,10 @@ import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
 import * as path from 'path';
 
-import { estimateTokensFromJsonlSession } from '../../../vscode-extension/src/tokenEstimation';
-import { getModelUsageFromSession } from '../../../vscode-extension/src/usageAnalysis';
-import tokenEstimatorsData from '../../../vscode-extension/src/tokenEstimators.json';
-import modelPricingData from '../../../vscode-extension/src/modelPricing.json';
+import { estimateTokensFromJsonlSession } from '../../../src/tokenEstimation';
+import { getModelUsageFromSession } from '../../../src/usageAnalysis';
+import tokenEstimatorsData from '../../../src/tokenEstimators.json';
+import modelPricingData from '../../../src/modelPricing.json';
 
 import { processSessionFile } from '../helpers';
 import { disableCache } from '../cliCache';
