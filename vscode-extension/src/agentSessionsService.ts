@@ -10,7 +10,7 @@ export interface AgentRepoSummary {
 	totalTasks: number;
 	/** Total cloud-agent sessions across all tasks. */
 	totalSessions: number;
-	/** Sum of usage.credits for all cloud-agent sessions (0 when unavailable). */
+	/** Sum of usage.credits (converted from nano-credits to whole AI credits) for all cloud-agent sessions (0 when unavailable). */
 	totalCredits: number;
 	/** How many tasks we fetched full details for (may be less than tasksTotal when capped). */
 	tasksScanned: number;
@@ -235,11 +235,18 @@ async function fetchAllTasksForRepo(
 	return { allTasks };
 }
 
+/**
+ * The GitHub agents API reports `usage.credits` in nano-credits (1 credit = 1_000_000_000 nano-credits),
+ * e.g. a task costing 43.38 AI credits is reported as `43380350000`. Divide by this factor to get the
+ * whole-credit value shown in the UI (where 1 credit = $0.01).
+ */
+const NANO_CREDITS_PER_CREDIT = 1_000_000_000;
+
 function sumCloudSessionCredits(sessions: any[]): { tasks: number; sessions: number; credits: number } {
 	const cloudSessions = sessions.filter(s => detectSessionSource(s) === 'cloud-agent');
 	if (cloudSessions.length === 0) { return { tasks: 0, sessions: 0, credits: 0 }; }
-	const credits = cloudSessions.reduce((sum, s) => sum + (s.usage && typeof s.usage.credits === 'number' ? s.usage.credits : 0), 0);
-	return { tasks: 1, sessions: cloudSessions.length, credits };
+	const rawCredits = cloudSessions.reduce((sum, s) => sum + (s.usage && typeof s.usage.credits === 'number' ? s.usage.credits : 0), 0);
+	return { tasks: 1, sessions: cloudSessions.length, credits: rawCredits / NANO_CREDITS_PER_CREDIT };
 }
 
 async function aggregateTaskDetails(
