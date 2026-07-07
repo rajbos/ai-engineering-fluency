@@ -39,9 +39,12 @@ function makeTask(id: string): any {
 	return { id, name: `Task ${id}`, state: 'completed', created_at: new Date().toISOString() };
 }
 
+/** GitHub's agents API reports usage.credits in nano-credits (1 credit = 1_000_000_000 nano-credits). */
+const NANO_CREDITS_PER_CREDIT = 1_000_000_000;
+
 function makeSession(model: string, credits?: number): any {
 	const s: any = { id: `s-${Math.random()}`, state: 'completed', model, created_at: new Date().toISOString() };
-	if (credits !== undefined) { s.usage = { credits, type: 'ai-credits' }; }
+	if (credits !== undefined) { s.usage = { credits: credits * NANO_CREDITS_PER_CREDIT, type: 'ai_credits' }; }
 	return s;
 }
 
@@ -87,6 +90,21 @@ test('fetchAgentSessionsForRepo: task with no cloud-agent sessions does not coun
 	const result = await fetchAgentSessionsForRepo('owner', 'repo', 'token', SINCE, fetchPage, fetchDetail);
 	assert.equal(result.totalTasks, 0);
 	assert.equal(result.totalSessions, 0);
+});
+
+test('fetchAgentSessionsForRepo: converts real-world nano-credit values to whole AI credits (issue #1554)', async () => {
+	const tasks = [makeTask('t1')];
+	const fetchPage: FetchTaskPageFn = async ({ page }) =>
+		page === 1 ? { tasks } : { tasks: [] };
+	const fetchDetail: FetchTaskDetailFn = async () => ({
+		sessions: [
+			// Raw value as observed from the live GitHub agents API (nano-credits).
+			{ id: 's1', state: 'completed', model: 'sweagent-capi:gpt-5.4', created_at: new Date().toISOString(), usage: { credits: 43380350000, type: 'ai_credits' } },
+		],
+	});
+	const result = await fetchAgentSessionsForRepo('owner', 'repo', 'token', SINCE, fetchPage, fetchDetail);
+	assert.equal(result.totalSessions, 1);
+	assert.ok(Math.abs(result.totalCredits - 43.38035) < 1e-9, `expected ~43.38 credits, got ${result.totalCredits}`);
 });
 
 test('fetchAgentSessionsForRepo: handles missing usage.credits gracefully', async () => {
