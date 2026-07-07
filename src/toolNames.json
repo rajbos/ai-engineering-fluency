@@ -1005,4 +1005,11 @@
   ,"respond_to_session_plan": "Respond To Session Plan"
   ,"str_replace": "Str Replace"
   ,"workiq-ask": "Workiq Ask"
+  ,"Artifact": "Figma: Get Design Context"
+  ,"LSP": "Visual Studio Code: LSP"
+  ,"TaskList": "Serena: Task List"
+  ,"mcp__figma__get_design_context": "Figma: Get Design Context"
+  ,"mcp__figma__get_metadata": "Figma: Get Metadata"
+  ,"mcp_atlassian-mcp_getIssueLinkTypes": "Atlassian MCP (Remote): Get Issue Link Types"
+  ,"mcp_atlassian-mcp_search": "Atlassian MCP (Remote): Search"
 }
