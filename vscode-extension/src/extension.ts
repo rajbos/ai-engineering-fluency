@@ -4159,7 +4159,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 
-		const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups);
+		const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups, cached);
 		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
 		return sessionData;
 	}
@@ -4245,7 +4245,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		resolvedActualTokens: number | undefined,
 		finalCacheReadTokens: number | undefined,
 		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
-		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
+		existingCache?: SessionFileCache
 	): SessionFileCache {
 		const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
 		const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
@@ -4254,6 +4255,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
 			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens,
+			// Repository is discovered separately by getSessionFileDetails() (via content-reference
+			// git-root lookup) and is not recomputed here. Without preserving it, every cache-miss
+			// rebuild of this entry (e.g. an actively-edited session whose file keeps changing)
+			// would silently wipe out a previously-known repository, making it fall back to
+			// "Unknown" and disappear from all "By Repository" charts — most noticeably for the
+			// "Output" (lines of code) chart, since LOC is attributed to the most recently active
+			// day, which is exactly the day whose cache entry keeps getting rebuilt.
+			...(existingCache?.repository !== undefined ? { repository: existingCache.repository } : {}),
 			...optionals,
 		};
 	}
