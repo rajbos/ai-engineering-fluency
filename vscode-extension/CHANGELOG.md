@@ -4,6 +4,46 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.4]
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* chore(visualstudio): refresh committed webview bundles from dist by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1532
+* docs: capture release-pipeline gotchas in prep-release agents by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1531
+* chore: update settings.local.json permissions and add to .gitignore by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1535
+* fix(maturity): make radar grid lines visible on all dark themes by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1536
+* feat: add 6 friendly tool name(s) from issue #1534 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1537
+* chore: bump versions for release (Visual Studio extension, JetBrains plugin) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1533
+* ci: make VS Code integration tests gate CI by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1539
+* fix: repair devcontainer bootstrap (postCreateCommand + node_modules volumes) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1540
+* Eliminate redundant npm ci runs in build.ps1 by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1541
+* chore: pin Node.js version in .nvmrc and consume it in workflows and devcontainer by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1542
+* Fix Dependabot npm coverage gap; add nuget and devcontainers entries by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1538
+* security: graduate harden-runner to egress-policy block in stable workflows by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1543
+* chore: remove stale eslint dump, add CLI shared-logic contract test by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1551
+* Extract shared extension/CLI code into top-level src/ folder by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1552
+* Fix Cloud Agent Sessions showing AI Credits ~1e9x too high (#1554) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1555
+* Fix: chart by output by repo is empty (#1553) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1556
+* feat: add 7 friendly tool name(s) from issue #1557 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1558
+* feat: add 14 friendly tool name(s) from issue #1560 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1562
+* feat: add 14 friendly tool name(s) from issue #1561 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1563
+* Add Kiro IDE and Kiro CLI as separate tracked editors by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1559
+* chore: bump versions for release (vscode 0.12.4, cli 0.2.13) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1564
+### 📦 npm Dependencies
+* npm(deps): bump the minor-and-patch-updates group across 2 directories with 9 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1545
+* npm(deps-dev): bump @types/node from 22.19.17 to 26.1.0 in /sharing-server by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1547
+* npm(deps-dev): bump @types/node from 25.9.3 to 26.1.0 in /vscode-extension by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1548
+* npm(deps): bump @hono/node-server from 1.19.14 to 2.0.8 in /sharing-server by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1546
+* npm(deps): bump @azure/arm-storage from 19.1.0 to 20.1.0 in /vscode-extension by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1549
+* npm(deps-dev): bump ovsx from 0.10.11 to 1.0.2 in /vscode-extension by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1550
+### 📦 Other Dependencies
+* chore(deps): bump ghcr.io/devcontainers/features/powershell from 1.5.1 to 2.0.2 by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1544
+
+
+**Full Changelog**: https://github.com/rajbos/ai-engineering-fluency/compare/cli/v0.2.12...vscode/v0.12.4
+
 ## [0.11.6] - 2026-06-07
 
 ### Features
