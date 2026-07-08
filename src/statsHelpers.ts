@@ -9,6 +9,17 @@ import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, Langua
 import { toLocalDayKey } from './utils/dayKeys';
 
 /**
+ * Editor display names that bill through GitHub Copilot's AI-Credit system.
+ * Sessions from these editors should use `copilotPricing` when computing costs.
+ * All other editors are billed directly by their own provider (use `provider` pricing).
+ */
+export const COPILOT_EDITOR_NAMES = new Set([
+	'VS Code', 'VS Code Insiders', 'VS Code Exploration',
+	'VS Code Server', 'VS Code Server (Insiders)', 'VSCodium',
+	'Visual Studio', 'JetBrains', 'Copilot CLI', 'MS Scout (Copilot CLI)',
+]);
+
+/**
  * Computes a session's total token count from input, output, and thinking tokens.
  *
  * Cached (cache-read) tokens are deliberately excluded: they are already a
@@ -316,7 +327,7 @@ editorUsage: EditorUsage;
 editorModelUsage: { [editor: string]: ModelUsage };
 /** Sum of exact Copilot billing costs (in USD) for sessions that have nanoAiu data. */
 exactCopilotCostDollars: number;
-/** Model usage for sessions that do NOT have exact nanoAiu billing data (used as fallback for Copilot cost estimate). */
+/** Model usage for Copilot-surface sessions that do NOT have exact nanoAiu billing data (used as fallback for Copilot cost estimate). Non-Copilot surfaces (Claude Code, Gemini CLI, …) are excluded — they bill their own provider. */
 modelUsageNoExact: ModelUsage;
 }
 
@@ -384,7 +395,10 @@ function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: num
 	addModelUsage(acc.editorModelUsage[editorType], modelUsage);
 	if (copilotExactCostDollars !== undefined) {
 		acc.exactCopilotCostDollars += copilotExactCostDollars;
-	} else {
+	} else if (COPILOT_EDITOR_NAMES.has(editorType)) {
+		// Only Copilot surfaces feed the Copilot cost-estimate fallback; sessions from
+		// other tools (Claude Code, Gemini CLI, …) bill their own provider and would
+		// otherwise inflate the estimated GitHub Copilot spend.
 		addModelUsage(acc.modelUsageNoExact, modelUsage);
 	}
 }

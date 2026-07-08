@@ -833,3 +833,70 @@ sessionData: makeSession({ tokens: 100, actualTokens: 180, interactions: 1 }),
 const result = aggregatePeriodStats([input], ranges);
 assert.equal(result.todayStats.tokens, 180, 'no cacheReadTokens → actualTokens only');
 });
+
+// ── modelUsageNoExact – Copilot cost-estimate fallback attribution ───────────
+
+test('modelUsageNoExact: Copilot-surface session without exact billing is included', () => {
+const ranges = makeRanges('2025-03-15');
+const usage: ModelUsage = { 'gpt-4.1': { inputTokens: 100, outputTokens: 50 } };
+const input: SessionAggregateInput = {
+editorType: 'VS Code',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-15T10:00:00.000Z',
+sessionData: makeSession({ modelUsage: usage, interactions: 1 }),
+};
+const result = aggregatePeriodStats([input], ranges);
+assert.deepEqual(result.monthStats.modelUsageNoExact['gpt-4.1'], { inputTokens: 100, outputTokens: 50 });
+assert.equal(result.monthStats.exactCopilotCostDollars, 0);
+});
+
+test('modelUsageNoExact: non-Copilot session does not leak into the Copilot cost estimate (regression)', () => {
+// Claude Code sessions bill Anthropic directly. Before the fix they landed in
+// modelUsageNoExact and were priced at Copilot AI-Credit rates, inflating the
+// "GitHub Copilot" monthly spend far beyond actual Copilot usage.
+const ranges = makeRanges('2025-03-15');
+const usage: ModelUsage = { 'claude-fable-5': { inputTokens: 1_000_000, outputTokens: 500_000 } };
+const input: SessionAggregateInput = {
+editorType: 'Claude Code',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-15T10:00:00.000Z',
+sessionData: makeSession({ modelUsage: usage, interactions: 1 }),
+};
+const result = aggregatePeriodStats([input], ranges);
+assert.deepEqual(result.monthStats.modelUsageNoExact, {}, 'Claude Code usage must not feed the Copilot estimate');
+assert.deepEqual(result.todayStats.modelUsageNoExact, {});
+assert.deepEqual(result.last30DaysStats.modelUsageNoExact, {});
+assert.deepEqual(result.monthStats.modelUsage['claude-fable-5'], { inputTokens: 1_000_000, outputTokens: 500_000 }, 'still counted in overall model usage');
+assert.equal(result.monthStats.editorModelUsage['Claude Code']['claude-fable-5'].inputTokens, 1_000_000, 'still attributed to its billing group via editorModelUsage');
+});
+
+test('modelUsageNoExact: Copilot-surface session with exact nanoAiu billing uses the exact cost instead', () => {
+const ranges = makeRanges('2025-03-15');
+const usage: ModelUsage = { 'gpt-4.1': { inputTokens: 100, outputTokens: 50 } };
+const input: SessionAggregateInput = {
+editorType: 'VS Code',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-15T10:00:00.000Z',
+sessionData: makeSession({ modelUsage: usage, interactions: 1, copilotExactCostDollars: 1.25 }),
+};
+const result = aggregatePeriodStats([input], ranges);
+assert.equal(result.monthStats.exactCopilotCostDollars, 1.25);
+assert.deepEqual(result.monthStats.modelUsageNoExact, {}, 'exact-billed sessions are excluded from the estimate fallback');
+});
+
+test('modelUsageNoExact: rollup path – non-Copilot rollup days are excluded, Copilot days included', () => {
+const ranges = makeRanges('2025-03-15');
+const usage: ModelUsage = { 'gemini-2.5-pro': { inputTokens: 300, outputTokens: 100 } };
+const input: SessionAggregateInput = {
+editorType: 'Gemini CLI',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+dailyRollups: {
+'2025-03-15': { tokens: 400, actualTokens: 0, thinkingTokens: 0, interactions: 1, modelUsage: usage },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+assert.deepEqual(result.monthStats.modelUsageNoExact, {}, 'Gemini CLI rollup must not feed the Copilot estimate');
+assert.deepEqual(result.monthStats.modelUsage['gemini-2.5-pro'], { inputTokens: 300, outputTokens: 100 });
+});
