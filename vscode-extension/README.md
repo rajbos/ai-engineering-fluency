@@ -83,6 +83,8 @@ Supported editors shown in the chart:
 - `Pi` — Pi CLI coding agent (actual token counts from session JSONL)
 - `Claude Code` — Anthropic CLI/IDE extension (actual API token counts, no estimation)
 - `Gemini CLI` — Google's CLI coding agent (actual token counts from session JSONL)
+- `Kiro` — AWS's agentic IDE (tokens estimated from agent execution records; Kiro meters credits, not tokens)
+- `Kiro CLI` — AWS's terminal coding agent (tokens estimated from the session message log)
 - `Windsurf` — Windsurf editor (running sessions discovered via Windsurf integration; file fallback available from local Cascade data)
 - `Visual Studio` — Visual Studio IDE (2022+); token counts are **estimated** from prompt and response text length
 

@@ -715,6 +715,14 @@ const ESTIMATED_TOKENS_NOTES: Record<string, { title: string; sub: string }> = {
 		title: 'Eclipse: only user/assistant message text plus reasoning (thinkingBlock) text is persisted in the conversation file. The Context Window breakdown Eclipse shows (system instructions, tool definitions, tool results) is computed live and never written to disk, so this estimate covers message + thinking text only and will be lower than the context usage Eclipse displays.',
 		sub: 'Message + thinking text only (Context Window not stored)',
 	},
+	Kiro: {
+		title: 'Kiro: token counts are estimated (~4 chars/token) from the agent execution records, which store the full request context and response text per agent run. Actual API token counts and real model IDs are not persisted locally (Kiro meters usage in credits).',
+		sub: 'Estimated from execution records (Kiro meters credits, not tokens)',
+	},
+	'Kiro CLI': {
+		title: 'Kiro CLI: token counts are estimated from the message log text (~4 chars/token). The CLI records usage in credits per request but its input/output token counters are always 0, and the model is logged as "auto" (server-side routing).',
+		sub: 'Estimated from message log (CLI meters credits, not tokens)',
+	},
 };
 
 function buildEstimatedTokensCard(data: SessionLogData, stats: SummaryStats): string {

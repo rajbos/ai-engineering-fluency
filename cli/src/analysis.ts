@@ -72,6 +72,9 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.crush/crush.db#')) { return 'Crush'; }
 	if (normalized.includes('/opencode/')) { return 'OpenCode'; }
+	// Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage) are separate editors.
+	if (normalized.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
+	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
 	if (normalized.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (normalized.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (normalized.includes('/.claude/projects/')) { return 'Claude Code'; }

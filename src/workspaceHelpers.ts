@@ -470,6 +470,10 @@ function isVSCodeRoot(lower: string): boolean {
  */
 function detectToolEditorFromRootPath(lower: string): string | undefined {
 	if (lower.includes('opencode')) { return 'OpenCode'; }
+	// Kiro CLI root (~/.kiro) must be checked before the Kiro IDE root — both
+	// contain 'kiro' but only the CLI root has the dot-prefixed folder.
+	if (lower.includes('/.kiro')) { return 'Kiro CLI'; }
+	if (lower.includes('kiro.kiroagent') || lower.includes('/kiro/user/') || lower.endsWith('/kiro')) { return 'Kiro'; }
 	if (lower.includes('.continue')) { return 'Continue'; }
 	if (lower.includes('.vibe')) { return 'Mistral Vibe'; }
 	// Antigravity must be checked before generic .gemini (both live under ~/.gemini/).
@@ -914,6 +918,31 @@ function isCodeInsidersSource(lowerPath: string): boolean {
 // ── getEditorTypeFromPath helpers ───────────────────────────────────────────
 
 /**
+ * Detect Kiro editors from a lower-cased normalised path.
+ * Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage)
+ * are tracked as separate editors.
+ * @internal
+ */
+function detectKiroEditorFromPath(lowerPath: string): string | undefined {
+	if (lowerPath.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
+	if (lowerPath.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
+	return undefined;
+}
+
+/**
+ * Detect JetBrains and Copilot CLI editors from a lower-cased normalised path.
+ * JetBrains must be checked before Copilot CLI: both live under ~/.copilot/ but
+ * jb/ is a sibling of session-state/ and must be attributed to the JetBrains IDE.
+ * @internal
+ */
+function detectCopilotFamilyFromPath(lowerPath: string): string | undefined {
+	if (lowerPath.includes('/.copilot/jb/')) { return 'JetBrains'; }
+	if (lowerPath.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
+	if (lowerPath.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
+	return undefined;
+}
+
+/**
  * Detect tool-specific (non-VS Code family) editors from a lower-cased normalised path.
  * Returns the editor name or undefined if none matched.
  * @internal
@@ -923,16 +952,15 @@ function detectToolEditorFromPath(
 	lowerPath: string,
 	isOpenCodeSessionFile?: (p: string) => boolean
 ): string | undefined {
-	// Check JetBrains before Copilot CLI: both live under ~/.copilot/ but jb/
-	// is a sibling of session-state/ and must be attributed to the JetBrains IDE.
-	if (lowerPath.includes('/.copilot/jb/')) { return 'JetBrains'; }
-	if (lowerPath.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
-	if (lowerPath.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
+	const copilotFamily = detectCopilotFamilyFromPath(lowerPath);
+	if (copilotFamily) { return copilotFamily; }
 	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
 	// Cursor virtual paths must be checked before the generic /cursor/ match in detectVSCodeVariantFromPath.
 	if (lowerPath.includes('/cursor/user/globalstorage/state.vscdb#')) { return 'Cursor'; }
 	if (lowerPath.includes('/.pi/agent/sessions/')) { return 'Pi'; }
+	const kiroEditor = detectKiroEditorFromPath(lowerPath);
+	if (kiroEditor) { return kiroEditor; }
 	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/.claude/projects/')) { return 'Claude Code'; }

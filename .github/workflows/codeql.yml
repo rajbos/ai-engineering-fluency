@@ -47,9 +47,15 @@ jobs:
           # Allowlist inferred from the harden-runner audit output of the 10 most
           # recent successful runs of this workflow (run ids 28795598756..28802374085).
           # Use a wildcard for the rotating Actions results storage account names.
+          # The *.githubusercontent.com hosts serve the CodeQL bundle download when
+          # the requested version is not in the runner's toolcache (release
+          # downloads on github.com redirect there) — without them, init fails
+          # with ECONNREFUSED on runner images that lack the pinned version.
           allowed-endpoints: >
             api.github.com:443
             github.com:443
+            objects.githubusercontent.com:443
+            release-assets.githubusercontent.com:443
             productionresultssa*.blob.core.windows.net:443
             results-receiver.actions.githubusercontent.com:443
             uploads.github.com:443

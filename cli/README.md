@@ -42,6 +42,7 @@ The CLI reads the same local session sources as the extension, including:
 
 - GitHub Copilot Chat / Copilot CLI sessions
 - OpenCode, Claude Code, and Gemini CLI sessions
+- Kiro IDE and Kiro CLI sessions
 - Other supported editor integrations wired through the shared adapter pipeline
 
 ## License

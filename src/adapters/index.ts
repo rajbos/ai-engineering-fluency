@@ -13,4 +13,6 @@ export { CopilotChatAdapter } from './copilotChatAdapter';
 export { CopilotCliAdapter } from './copilotCliAdapter';
 export { JetBrainsAdapter } from './jetbrainsAdapter';
 export { PiAdapter } from './piAdapter';
+export { KiroAdapter } from './kiroAdapter';
+export { KiroCliAdapter } from './kiroCliAdapter';
 
