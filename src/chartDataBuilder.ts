@@ -1,17 +1,10 @@
 import type { DailyTokenStats, ChartDataPayload, ModelUsage, LanguageUsage } from './types';
-import { addModelUsage } from './statsHelpers';
+import { addModelUsage, COPILOT_EDITOR_NAMES } from './statsHelpers';
 import { getModelDisplayName } from './webview/shared/modelUtils';
 
-/**
- * Editor display names that bill through GitHub Copilot's AI-Credit system.
- * Sessions from these editors should use `copilotPricing` when computing costs.
- * All other editors are billed directly by their own provider (use `provider` pricing).
- */
-export const COPILOT_EDITOR_NAMES = new Set([
-	'VS Code', 'VS Code Insiders', 'VS Code Exploration',
-	'VS Code Server', 'VS Code Server (Insiders)', 'VSCodium',
-	'Visual Studio', 'JetBrains', 'Copilot CLI', 'MS Scout (Copilot CLI)',
-]);
+// Re-exported for existing consumers; the set lives in statsHelpers so the
+// period accumulator can use it without a circular import.
+export { COPILOT_EDITOR_NAMES } from './statsHelpers';
 
 /** Returns the pricing source to use for cost estimation for a given editor. */
 function getPricingSourceForEditor(editor: string): 'provider' | 'copilot' {
