@@ -4,6 +4,19 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.12.5]
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* fix: bump engines.vscode to match @types/vscode 1.125.0 by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1565
+* Fix non-Copilot sessions inflating estimated GitHub Copilot spend by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1566
+* chore: bump vscode extension version for release (0.12.5) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1567
+
+
+**Full Changelog**: https://github.com/rajbos/ai-engineering-fluency/compare/cli/v0.2.13...vscode/v0.12.5
+
 ## [0.11.6] - 2026-06-07
 
 ### Features
