@@ -1044,4 +1044,8 @@
   ,"mcp_azure_mcp_ser_subscription_list": "Azure MCP: Search Subscription List"
   ,"microsoft-learn-microsoft_docs_fetch": "Microsoft Learn: Microsoft Docs Fetch"
   ,"record_observation": "Record Observation"
+  ,"readFiles": "Read Files"
+  ,"search": "Windsurf: Search"
+  ,"shell": "Windsurf: Shell"
+  ,"steering": "Windsurf: Steering"
 }
