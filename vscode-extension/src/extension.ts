@@ -2472,56 +2472,62 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.supportThemeIcons = false;
 		tooltip.appendMarkdown('#### AI Engineering Fluency');
 		tooltip.appendMarkdown('\n---\n');
-		tooltip.appendMarkdown(`📅 Today  \n`);
-		tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
-		tooltip.appendMarkdown(`| Tokens :                | ${detailedStats.today.tokens.toLocaleString()} |\n`);
-		tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| CO₂ estimated :              | ${detailedStats.today.co2.toFixed(2)} grams |\n`);
-		tooltip.appendMarkdown(`| Water estimated :           | ${detailedStats.today.waterUsage.toFixed(3)} liters |\n`);
-		tooltip.appendMarkdown('\n---\n');
 		const secondaryPeriod = tooltipSecondaryPeriod(this.getStatusBarShowTokensSetting(), this.getStatusBarShowCostSetting());
 		const secondaryStats = secondaryPeriod === 'currentMonth' ? detailedStats.month : detailedStats.last30Days;
-		const secondaryLabel = secondaryPeriod === 'currentMonth' ? '📅 Current Month' : '📊 Last 30 Days';
-		tooltip.appendMarkdown(`${secondaryLabel}  \n`);
-		tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
-		tooltip.appendMarkdown(`| Tokens :                | ${secondaryStats.tokens.toLocaleString()} |\n`);
-		tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| CO₂ estimated :              | ${secondaryStats.co2.toFixed(2)} grams |\n`);
-		tooltip.appendMarkdown(`| Water estimated :           | ${secondaryStats.waterUsage.toFixed(3)} liters |\n`);
+		const secondaryLabel = secondaryPeriod === 'currentMonth' ? 'Current Month' : 'Last 30 Days';
+		// Trailing &nbsp; padding on the "Today" column widens it a bit, giving the two
+		// value columns visual breathing room without VS Code table cell CSS to lean on.
+		const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
+		const grams = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} grams`;
+		const liters = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} liters`;
+		tooltip.appendMarkdown(`|  | 📅 Today | 📊 ${secondaryLabel} |\n|---|---|---|\n`);
+		tooltip.appendMarkdown(`| Tokens : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
+		tooltip.appendMarkdown(`| GitHub Copilot cost : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| All providers cost : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| CO₂ estimated : | ${pad(grams(detailedStats.today.co2))} | ${grams(secondaryStats.co2)} |\n`);
+		tooltip.appendMarkdown(`| Water estimated : | ${pad(liters(detailedStats.today.waterUsage))} | ${liters(secondaryStats.waterUsage)} |\n`);
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
 		return tooltip;
 	}
 
-	/** Builds and appends the per-provider cost section with SVG progress bars.
-	 *  Each provider always gets a bar: GitHub Copilot uses cost vs. budget (if configured),
-	 *  all others show cost as a proportion of total monthly spend across all providers. */
+	/** Sums per-provider costs into a total-across-all-providers figure. */
+	private sumBillingGroupCosts(billingGroupCosts: Record<string, number> | undefined): number {
+		return Object.values(billingGroupCosts ?? {}).reduce((s, v) => s + v, 0);
+	}
+
+	/** Builds and appends the cost sections: a GitHub Copilot budget gauge on top (spend vs.
+	 *  budget, health-colored), then a spend breakdown where every provider's bar is its share
+	 *  of total monthly spend (so those bars sum to 100%), and one combined footnote explaining
+	 *  the bar scales and where the budget value comes from. */
 	private appendProviderCostSection(tooltip: vscode.MarkdownString, detailedStats: DetailedStats): void {
 		const monthCosts = detailedStats.month.billingGroupCosts ?? {};
 		const providers = Object.keys(monthCosts).sort((a, b) => (monthCosts[b] ?? 0) - (monthCosts[a] ?? 0));
 		if (providers.length === 0) { return; }
-		const budget = this.getEffectiveMonthlyBudget();
-		const totalCost = Object.values(monthCosts).reduce((s, v) => s + v, 0);
+		const totalCost = this.sumBillingGroupCosts(monthCosts);
 		tooltip.appendMarkdown(`💰 Costs by Provider — Current Month  \n`);
 		tooltip.appendMarkdown(`|  |  |  |\n|---|---|---|\n`);
+		const { budget, source } = this.getEffectiveMonthlyBudgetWithSource();
+		if (budget > 0) {
+			const copilotCost = monthCosts['GitHub Copilot'] ?? 0;
+			const ratio = copilotCost / budget;
+			const color = ratio >= 0.9 ? '#EF5350' : ratio >= 0.75 ? '#FFA726' : '#4CAF50';
+			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, color))})`;
+			// Budget row first, then a sub-header row labelling the section below, so the
+			// "these bars are a different scale" context sits right where it's needed
+			// instead of a footnote read only after the bars already look confusing.
+			tooltip.appendMarkdown(`| 🎯 Copilot Budget | $${copilotCost.toFixed(2)} / $${budget.toFixed(2)} | ${barCell} |\n`);
+			tooltip.appendMarkdown(`| **Share of total spend** |  |  |\n`);
+		}
 		for (const provider of providers) {
 			const cost = monthCosts[provider] ?? 0;
-			const providerBudget = provider === 'GitHub Copilot' ? budget : 0;
-			const { ratio, color } = this.providerBarStyle(cost, providerBudget, totalCost);
-			const costStr = `$${cost.toFixed(2)}${providerBudget > 0 ? ` / $${providerBudget.toFixed(2)}` : ''}`;
-			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, color))})`;
-			tooltip.appendMarkdown(`| ${provider} | ${costStr} | ${barCell} |\n`);
+			const ratio = totalCost > 0 ? cost / totalCost : 0;
+			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, '#5B9BD5'))})`;
+			tooltip.appendMarkdown(`| ${provider} | $${cost.toFixed(2)} | ${barCell} |\n`);
 		}
-	}
-
-	/** Returns the bar fill ratio and colour for a provider row. */
-	private providerBarStyle(cost: number, providerBudget: number, totalCost: number): { ratio: number; color: string } {
-		if (providerBudget > 0) {
-			const ratio = cost / providerBudget;
-			const color = ratio >= 0.9 ? '#EF5350' : ratio >= 0.75 ? '#FFA726' : '#4CAF50';
-			return { ratio, color };
+		if (budget > 0) {
+			tooltip.appendMarkdown(`\n*Budget from ${source}*\n`);
 		}
-		return { ratio: totalCost > 0 ? cost / totalCost : 0, color: '#5B9BD5' };
 	}
 
 	/** Generates a small SVG progress bar with the given fill ratio (0–1) and color. */
@@ -2965,13 +2971,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  to the monthly AI credits included with the user's Copilot plan, or the premium_interactions
 	 *  quota entitlement from the API if available. */
 	private getEffectiveMonthlyBudget(): number {
+		return this.getEffectiveMonthlyBudgetWithSource().budget;
+	}
+
+	/** Same as getEffectiveMonthlyBudget, but also reports where the value comes from,
+	 *  so the UI can explain a budget the user never configured themselves. */
+	private getEffectiveMonthlyBudgetWithSource(): { budget: number; source: string } {
 		const configured = this.getMonthlyBudgetSetting();
-		if (configured > 0) { return configured; }
+		if (configured > 0) { return { budget: configured, source: 'monthlyBudget setting' }; }
 		// Fall back to quota entitlement (premium_interactions) if available, then to plan credits
 		if (this._copilotQuotaEntitlements.premium_interactions) {
-			return this._copilotQuotaEntitlements.premium_interactions;
+			return { budget: this._copilotQuotaEntitlements.premium_interactions, source: 'Copilot plan quota' };
 		}
-		return this._copilotPlanResolved?.monthlyAiCreditsUsd ?? 0;
+		const planCredits = this._copilotPlanResolved?.monthlyAiCreditsUsd ?? 0;
+		return { budget: planCredits, source: 'Copilot plan credits' };
 	}
 
 	/** Updates the status bar background color based on current-month GitHub Copilot spend vs. the configured budget.
