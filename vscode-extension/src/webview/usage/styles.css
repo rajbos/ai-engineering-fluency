@@ -307,6 +307,25 @@ body {
 	margin-bottom: 6px;
 }
 
+.info-box-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	cursor: pointer;
+	user-select: none;
+	margin-bottom: 0;
+}
+
+.info-box-chevron {
+	font-size: 10px;
+	color: var(--text-secondary);
+}
+
+.info-box-body {
+	margin-top: 6px;
+}
+
 
 .repo-hygiene-results {
 	margin-top: 4px;

@@ -2,7 +2,7 @@
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumber, formatCost, formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { el, createButton } from '../shared/domUtils';
-import { BUTTONS } from '../shared/buttonConfig';
+import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -268,17 +268,7 @@ headerLeft.append(planBadge);
 }
 const buttonRow = el('div', 'button-row');
 
-buttonRow.append(
-createButton(BUTTONS['btn-refresh']),
-createButton(BUTTONS['btn-chart']),
-createButton(BUTTONS['btn-usage']),
-createButton(BUTTONS['btn-environmental']),
-createButton(BUTTONS['btn-diagnostics']),
-createButton(BUTTONS['btn-maturity']),
-);
-if (stats.backendConfigured) {
-buttonRow.append(createButton(BUTTONS['btn-dashboard']));
-}
+buttonRow.append(...getNavButtons('btn-details', !!stats.backendConfigured).map(config => createButton(config)));
 
 header.append(headerLeft, buttonRow);
 

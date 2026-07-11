@@ -1,6 +1,6 @@
 // Usage Analysis webview
 import { el } from '../shared/domUtils';
-import { buttonHtml } from '../shared/buttonConfig';
+import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
 import { escapeHtml, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
@@ -237,8 +237,16 @@ interface RepoAnalysisRecord {
 	error?: string;
 }
 
-const vscode = acquireVsCodeApi();
+/** Webview state persisted by VS Code across tab switches (survives the panel being hidden). */
+interface UsageWebviewState {
+	aboutCollapsed?: boolean;
+}
+
+const vscode = acquireVsCodeApi<UsageWebviewState>();
 const curationTraceOnceKeys = new Set<string>();
+
+/** Collapsed state of the "About This Dashboard" info box, restored from webview state. */
+let aboutCollapsed = vscode.getState()?.aboutCollapsed ?? false;
 
 function traceCuration(stage: string, details?: Record<string, unknown>): void {
 	try {
@@ -2453,19 +2461,16 @@ function buildUsageRootHtml(
 					<span class="header-title">Usage Analysis</span>
 				</div>
 				<div class="button-row">
-				${buttonHtml('btn-refresh')}
-				${buttonHtml('btn-details')}
-				${buttonHtml('btn-chart')}
-				${buttonHtml('btn-environmental')}
-				${buttonHtml('btn-diagnostics')}
-				${buttonHtml('btn-maturity')}
-				${stats.backendConfigured ? buttonHtml('btn-dashboard') : ''}
+				${navButtonsHtml('btn-usage', !!stats.backendConfigured)}
 				</div>
 			</div>
 
 			<div class="info-box">
-				<div class="info-box-title">📋 About This Dashboard</div>
-				<div>
+				<div class="info-box-title info-box-toggle" id="about-info-toggle" role="button" tabindex="0" aria-expanded="${!aboutCollapsed}" aria-controls="about-info-body">
+					<span>📋 About This Dashboard</span>
+					<span class="info-box-chevron" aria-hidden="true">${aboutCollapsed ? '▸' : '▾'}</span>
+				</div>
+				<div class="info-box-body" id="about-info-body"${aboutCollapsed ? ' style="display:none"' : ''}>
 					This dashboard analyzes your GitHub Copilot usage patterns by examining session log files.
 					It tracks modes (ask/edit/agent), tool usage, context references (#file, @workspace, etc.),
 					and MCP (Model Context Protocol) tools to help you understand how you interact with Copilot.
@@ -2477,8 +2482,8 @@ function buildUsageRootHtml(
 				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions">📋 Today's Sessions</button>
 				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools">🔧 Tools &amp; Integrations</button>
 				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health">🏗️ Workspace Health</button>
-				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos">🤖 Repository PRs</button>
-				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent">🤖 Cloud Agent</button>
+				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos">🔀 Repository PRs</button>
+				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent">☁️ Cloud Agent</button>
 				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights">💡 Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
 			</div>
 
@@ -2970,6 +2975,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	);
 
 	wireNavigationButtons();
+	wireAboutInfoToggle();
 	wireRepositoryButtons();
 	wireCurationButtons();
 	renderRepositoryHygienePanels();
@@ -2978,6 +2984,28 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	// Initialize currentInsights from the stats and wire card buttons
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();
+}
+
+/** Wires up the collapsible "About This Dashboard" info box; the collapsed state is persisted via webview state. */
+function wireAboutInfoToggle(): void {
+	const toggle = document.getElementById('about-info-toggle');
+	const body = document.getElementById('about-info-body');
+	if (!toggle || !body) { return; }
+	const chevron = toggle.querySelector('.info-box-chevron');
+	const applyToggle = (): void => {
+		aboutCollapsed = !aboutCollapsed;
+		body.style.display = aboutCollapsed ? 'none' : '';
+		toggle.setAttribute('aria-expanded', String(!aboutCollapsed));
+		if (chevron) { chevron.textContent = aboutCollapsed ? '▸' : '▾'; }
+		vscode.setState({ ...(vscode.getState() ?? {}), aboutCollapsed });
+	};
+	toggle.addEventListener('click', applyToggle);
+	toggle.addEventListener('keydown', (event: KeyboardEvent) => {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			applyToggle();
+		}
+	});
 }
 
 /** Wires up top-level navigation toolbar buttons (refresh, details, chart, etc.). */
