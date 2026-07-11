@@ -1178,7 +1178,20 @@
       "displayNames": [
         "GPT-5.6 Luna"
       ],
-      "cachedInputCostPerMillion": 0.1
+      "cachedInputCostPerMillion": 0.1,
+      "copilotPricing": {
+        "inputCostPerMillion": 1.0,
+        "cachedInputCostPerMillion": 0.1,
+        "outputCostPerMillion": 6.0,
+        "releaseStatus": "GA",
+        "category": "Lightweight",
+        "longContext": {
+          "inputCostPerMillion": 2.0,
+          "cachedInputCostPerMillion": 0.2,
+          "outputCostPerMillion": 9.0,
+          "threshold": "> 200K"
+        }
+      }
     },
     "gpt-5.6-sol": {
       "inputCostPerMillion": 5.0,
@@ -1189,7 +1202,20 @@
       "displayNames": [
         "GPT-5.6 Sol"
       ],
-      "cachedInputCostPerMillion": 0.5
+      "cachedInputCostPerMillion": 0.5,
+      "copilotPricing": {
+        "inputCostPerMillion": 5.0,
+        "cachedInputCostPerMillion": 0.5,
+        "outputCostPerMillion": 30.0,
+        "releaseStatus": "GA",
+        "category": "Powerful",
+        "longContext": {
+          "inputCostPerMillion": 10.0,
+          "cachedInputCostPerMillion": 1.0,
+          "outputCostPerMillion": 45.0,
+          "threshold": "> 272K"
+        }
+      }
     },
     "gpt-5.6-terra": {
       "inputCostPerMillion": 2.5,
@@ -1200,7 +1226,20 @@
       "displayNames": [
         "GPT-5.6 Terra"
       ],
-      "cachedInputCostPerMillion": 0.25
+      "cachedInputCostPerMillion": 0.25,
+      "copilotPricing": {
+        "inputCostPerMillion": 2.5,
+        "cachedInputCostPerMillion": 0.25,
+        "outputCostPerMillion": 15.0,
+        "releaseStatus": "GA",
+        "category": "Versatile",
+        "longContext": {
+          "inputCostPerMillion": 5.0,
+          "cachedInputCostPerMillion": 0.5,
+          "outputCostPerMillion": 22.5,
+          "threshold": "> 272K"
+        }
+      }
     }
   }
 }

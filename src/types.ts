@@ -25,6 +25,14 @@ export interface ModelUsage {
   };
 }
 
+export interface CopilotLongContextPricing {
+  inputCostPerMillion: number;
+  outputCostPerMillion: number;
+  cachedInputCostPerMillion?: number;
+  cacheCreationCostPerMillion?: number;
+  threshold?: string;           // input-token threshold above which long-context rates apply (e.g. "> 200K")
+}
+
 export interface CopilotPricing {
   inputCostPerMillion: number;
   outputCostPerMillion: number;
@@ -32,6 +40,13 @@ export interface CopilotPricing {
   cacheCreationCostPerMillion?: number;
   releaseStatus?: string;       // e.g. "GA" or "Public preview"
   category?: string;            // GitHub Copilot capability category (Lightweight / Versatile / Powerful)
+  threshold?: string;           // input-token threshold for the Default tier, when the model is tiered
+  /**
+   * Optional Long-context tier rates for models that price differently above a
+   * context-window threshold. The top-level fields above are the Default tier.
+   * Additive — cost calculation uses the Default tier; consumers may opt in.
+   */
+  longContext?: CopilotLongContextPricing;
 }
 
 export interface ModelPricing {
@@ -246,6 +261,10 @@ export interface SessionFileCache {
   truncationCount?: number;
   /** Total messages removed across all truncation events. Absent when truncationCount is 0 or unavailable. */
   messagesRemovedByTruncation?: number;
+  /** Largest single-request prompt size (input incl. cached tokens) observed in this session. Used for long-context tier detection. */
+  maxRequestInputTokens?: number;
+  /** Copilot CLI context tier from session.start/resume/model_change events (e.g. "default"). */
+  contextTier?: string;
   /** Per-UTC-day token/interaction breakdown (keyed by YYYY-MM-DD UTC). Used for consistent daily stats. */
   dailyRollups?: { [utcDayKey: string]: DailyRollupEntry };
   linesAdded?: number;
@@ -450,6 +469,14 @@ export interface TodaySessionSummary {
   lastActivity: string;
   /** Number of truncation events where messages were removed in this session. 0 or absent means no truncation. */
   truncationCount?: number;
+  /** Largest single-request prompt size (input incl. cached tokens) observed in this session. */
+  maxRequestInputTokens?: number;
+  /** Copilot CLI context tier for this session (e.g. "default"); absent when not recorded. */
+  contextTier?: string;
+  /** Selected input-token window limit (Copilot CLI, from data.db context_input_token_limit). */
+  contextWindowLimit?: number;
+  /** Last known context fill in tokens (Copilot CLI, from data.db context_current_tokens). */
+  contextReachedTokens?: number;
 }
 
 export interface UsageAnalysisStats {
@@ -512,6 +539,25 @@ export interface UsageAnalysisPeriod {
    * absent (undefined) when data.db is not available.
    */
   multiAgentParentSessions?: number;
+  /**
+   * Context-window usage aggregated across the period's sessions.
+   * Absent when no session in the period carried context-size data.
+   */
+  contextWindow?: ContextWindowStats;
+}
+
+/** Aggregated context-window usage for one usage-analysis period. */
+export interface ContextWindowStats {
+  /** Largest single-request prompt (input incl. cached tokens) observed in the period. */
+  maxRequestInputTokens: number;
+  /** Models used by the session holding that largest request. */
+  maxRequestModels: string[];
+  /** Number of sessions per Copilot CLI context tier (e.g. { default: 3 }). */
+  tierCounts: { [tier: string]: number };
+  /** Highest data.db context fill among the period's CLI sessions. */
+  maxReachedTokens?: number;
+  /** Selected window limit of that fullest CLI session. */
+  maxReachedWindowLimit?: number;
 }
 
 /** Parent/child session reference used in hierarchy info (Copilot CLI sessions). */
