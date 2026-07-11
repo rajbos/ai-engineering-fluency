@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-07-01",
+    "lastUpdated": "2026-07-11",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1149,6 +1149,36 @@
       "multiplier": 0.0,
       "displayNames": [
         "Kimi-K2.7-Code"
+      ]
+    },
+    "gpt-5.6-luna": {
+      "inputCostPerMillion": 0.0,
+      "outputCostPerMillion": 0.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Luna"
+      ]
+    },
+    "gpt-5.6-sol": {
+      "inputCostPerMillion": 0.0,
+      "outputCostPerMillion": 0.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Sol"
+      ]
+    },
+    "gpt-5.6-terra": {
+      "inputCostPerMillion": 0.0,
+      "outputCostPerMillion": 0.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Terra"
       ]
     }
   }
