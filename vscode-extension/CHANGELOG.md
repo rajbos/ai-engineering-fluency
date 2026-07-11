@@ -4,6 +4,30 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0]
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* fix: bump engines.vscode to match @types/vscode 1.125.0 by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1565
+* Fix non-Copilot sessions inflating estimated GitHub Copilot spend by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1566
+* chore: bump vscode extension version for release (0.12.5) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1567
+* feat: add 4 friendly tool name(s) from issue #1571 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1572
+* feat: add 4 friendly tool name(s) from issue #1573 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1574
+* Clarify provider cost tooltip: unify budget/spend bars, add totals by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1578
+* feat: add 9 friendly tool name(s) from issue #1577 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1579
+* feat: add 2 friendly tool name(s) from issue #1581 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1582
+* fix: use notifier's real pricing data instead of $0.00 stubs by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1583
+* feat: long-context pricing discovery, insights, and Context Window section by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1584
+* Bump VS Code extension to v0.13.0 (minor) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1585
+### 📦 Other Dependencies
+* chore(deps-dev): bump typescript from 6.0.3 to 7.0.2 in /cli by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1568
+* chore(deps-dev): bump @types/node from 26.1.0 to 26.1.1 in /cli by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1569
+
+
+**Full Changelog**: https://github.com/rajbos/ai-engineering-fluency/compare/cli/v0.2.13...vscode/v0.13.0
+
 ## [0.13.0] - 2026-07-11
 
 ### Features
