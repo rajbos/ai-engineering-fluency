@@ -77,9 +77,10 @@ jobs:
           commit-message: |
             chore: sync model data from rajbos/github-copilot-model-notifier
 
-            Updates multiplier and tier values in modelPricing.json, refreshes
-            releaseStatus in copilotPricing blocks, and adds stub entries for
-            new models published by the notifier.
+            Updates pricing, multiplier and tier values in modelPricing.json,
+            refreshes releaseStatus in copilotPricing blocks, and adds new
+            models published by the notifier (using its pricing data when
+            available, otherwise a $0.00 stub for manual verification).
 
             Source SHA: ${{ steps.update.outputs.source_sha }}
           title: "chore: sync model data from rajbos/github-copilot-model-notifier"
@@ -88,10 +89,12 @@ jobs:
             data from [rajbos/github-copilot-model-notifier](https://github.com/rajbos/github-copilot-model-notifier/blob/main/data/models.json).
 
             **Updated Files:**
-            - `src/modelPricing.json` — model multipliers, tiers, and `copilotPricing.releaseStatus`
+            - `src/modelPricing.json` — model pricing, multipliers, tiers, and `copilotPricing.releaseStatus`
             - `src/tokenEstimators.json` — token estimators for new models
 
-            **⚠️ Note:** New model pricing stubs are set to `$0.00` by default and require
+            **⚠️ Note:** New models are populated with the source's pricing data
+            when available. If the source has no pricing yet for a model, it is
+            added as a `$0.00` stub and flagged in the workflow summary for
             manual verification before merging. See the
             [pricing sources](https://github.com/rajbos/ai-engineering-fluency/blob/main/src/modelPricing.json#L6)
             in `modelPricing.json` for reference URLs.
