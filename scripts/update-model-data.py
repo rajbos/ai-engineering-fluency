@@ -5,9 +5,14 @@ src/tokenEstimators.json from the model data published at
 rajbos/github-copilot-model-notifier.
 
 For each model in the source:
+  - Updates `inputCostPerMillion`, `outputCostPerMillion`,
+    `cachedInputCostPerMillion` and `cacheCreationCostPerMillion` from the
+    source's `pricing` block (direct provider/API pricing) when it differs
   - Updates the `multiplier` and `tier` fields for existing models
   - Updates `copilotPricing.releaseStatus` when that block already exists
-  - Adds stub entries (with $0.00 pricing) for previously unknown models
+  - Adds entries for previously unknown models, using the source's `pricing`
+    block when available; falls back to a $0.00 stub (flagged for manual
+    verification) when the source has no pricing data yet
   - Adds token estimator entries for new models
 
 Usage:
@@ -33,10 +38,6 @@ MODELS_DATA_URL = (
     "https://api.github.com/repos/rajbos/"
     "github-copilot-model-notifier/contents/data/models.json"
 )
-
-# Optional local override for testing: point at a locally generated models.json
-# (e.g. one produced by the notifier's scraper before it is published).
-MODELS_JSON_FILE = os.environ.get("MODELS_JSON_FILE")
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 PRICING_PATH = REPO_ROOT / "src" / "modelPricing.json"
@@ -65,12 +66,8 @@ def fetch_source_models() -> tuple[dict, str]:
     """Fetch data/models.json from the notifier repo.
 
     Returns (models_dict, blob_sha) where models_dict maps
-    display name → {multiplier_paid, multiplier_free, provider, release_status,
-    and optionally a `pricing` block with per-token USD rates}.
+    display name → {multiplier_paid, multiplier_free, provider, release_status}.
     """
-    if MODELS_JSON_FILE:
-        content = Path(MODELS_JSON_FILE).read_text(encoding="utf-8")
-        return json.loads(content), f"local:{MODELS_JSON_FILE}"
     response = api_request(MODELS_DATA_URL)
     content = base64.b64decode(response["content"]).decode("utf-8")
     sha = response.get("sha", "<unknown>")
@@ -90,17 +87,45 @@ def normalize_display_name(display_name: str) -> str:
 def parse_multiplier_paid(raw: str) -> float | None:
     """Parse multiplier_paid value.
 
-    Returns None when the source says 'Not applicable', meaning the model has
-    no paid-tier multiplier (free-only model). Callers should treat None as
-    "leave the existing value unchanged" rather than overwriting with 0.
+    Returns None when the source says 'Not applicable' or leaves the field
+    blank, meaning no paid-tier multiplier is known. Callers should treat
+    None as "leave the existing value unchanged" rather than overwriting
+    with 0.
     """
-    if raw.strip().lower() == "not applicable":
+    stripped = raw.strip()
+    if not stripped or stripped.lower() == "not applicable":
         return None
     try:
-        return float(raw)
+        return float(stripped)
     except ValueError:
         sys.stderr.write(f"Warning: unparseable multiplier {raw!r}, skipping\n")
         return None
+
+
+PRICING_FIELDS = (
+    "inputCostPerMillion",
+    "outputCostPerMillion",
+    "cachedInputCostPerMillion",
+    "cacheCreationCostPerMillion",
+)
+
+
+def extract_pricing(source_entry: dict) -> dict[str, float]:
+    """Extract the base (non-long-context) pricing fields from a source entry.
+
+    The notifier's `pricing` block reflects direct provider/API pricing,
+    which maps to the top-level cost fields in our schema (not the
+    `copilotPricing` block, which reflects GitHub's marked-up AI Credit
+    rates). Only the fields present in the source are returned.
+    """
+    pricing = source_entry.get("pricing")
+    if not isinstance(pricing, dict):
+        return {}
+    return {
+        field: pricing[field]
+        for field in PRICING_FIELDS
+        if isinstance(pricing.get(field), (int, float))
+    }
 
 
 def infer_tier(multiplier_paid: float | None) -> str:
@@ -157,44 +182,6 @@ def find_model_key(pricing: dict, display_name: str, normalized: str) -> str | N
     return None
 
 
-def build_copilot_pricing(pricing_src: dict, release_status: str) -> dict | None:
-    """Build a `copilotPricing` block from the notifier's `pricing` data.
-
-    The notifier publishes per-token USD rates already shaped to match the
-    consumer schema (inputCostPerMillion / cachedInputCostPerMillion /
-    outputCostPerMillion, plus cacheCreationCostPerMillion for models with a
-    cache-write cost, and an optional `longContext` sub-block). Returns None
-    when there is nothing usable.
-    """
-    if not pricing_src:
-        return None
-
-    block: dict = {}
-    for key in (
-        "inputCostPerMillion",
-        "cachedInputCostPerMillion",
-        "outputCostPerMillion",
-        "cacheCreationCostPerMillion",
-    ):
-        value = pricing_src.get(key)
-        if value is not None:
-            block[key] = value
-
-    status = release_status or pricing_src.get("releaseStatus")
-    if status:
-        block["releaseStatus"] = status
-
-    category = pricing_src.get("category")
-    if category:
-        block["category"] = category
-
-    long_context = pricing_src.get("longContext")
-    if isinstance(long_context, dict) and long_context:
-        block["longContext"] = dict(long_context)
-
-    return block or None
-
-
 def format_float(value: float) -> str:
     """Format float for diff summary output."""
     if value == int(value):
@@ -233,9 +220,21 @@ def main() -> int:
         new_tier = infer_tier(multiplier_paid)
         normalized = normalize_display_name(display_name)
         existing_key = find_model_key(pricing, display_name, normalized)
+        source_pricing = extract_pricing(source_entry)
 
         if existing_key is not None:
             entry = pricing[existing_key]
+
+            # Update direct provider/API pricing fields when the source has a value.
+            for field, new_value in source_pricing.items():
+                old_value = entry.get(field)
+                if old_value != new_value:
+                    entry[field] = new_value
+                    old_display = format_float(old_value) if old_value is not None else "unset"
+                    field_updates.append(
+                        f"  ~ {existing_key}: {field} {old_display} → {format_float(new_value)}"
+                    )
+                    pricing_changed = True
 
             # Only update multiplier when the source has an actual value.
             if multiplier_paid is not None and entry.get("multiplier") != multiplier_paid:
@@ -269,36 +268,31 @@ def main() -> int:
                     pricing_changed = True
 
         else:
-            # New model — populate real pricing when the source provides it,
-            # otherwise fall back to a $0.00 stub for manual verification.
+            # New model — use real pricing from the source when available,
+            # otherwise fall back to a $0.00 stub that needs manual verification.
             category = infer_category(display_name, provider)
             ratio = infer_token_ratio(display_name)
             stub_multiplier = multiplier_paid if multiplier_paid is not None else 0.0
-
-            pricing_src = source_entry.get("pricing") or {}
-            copilot_block = build_copilot_pricing(pricing_src, release_status)
-            # Use the Copilot Default-tier rates as the top-level reference
-            # price when available (better than a 0.0 stub); otherwise 0.0.
-            top_input = pricing_src.get("inputCostPerMillion", 0.00) or 0.00
-            top_output = pricing_src.get("outputCostPerMillion", 0.00) or 0.00
+            has_pricing = "inputCostPerMillion" in source_pricing and "outputCostPerMillion" in source_pricing
 
             new_entry = {
-                "inputCostPerMillion": top_input,
-                "outputCostPerMillion": top_output,
+                "inputCostPerMillion": source_pricing.get("inputCostPerMillion", 0.00),
+                "outputCostPerMillion": source_pricing.get("outputCostPerMillion", 0.00),
                 "category": category,
                 "tier": infer_tier(stub_multiplier),
                 "multiplier": stub_multiplier,
                 "displayNames": [display_name],
             }
-            if copilot_block:
-                new_entry["copilotPricing"] = copilot_block
-            pricing[normalized] = new_entry
+            if "cachedInputCostPerMillion" in source_pricing:
+                new_entry["cachedInputCostPerMillion"] = source_pricing["cachedInputCostPerMillion"]
+            if "cacheCreationCostPerMillion" in source_pricing:
+                new_entry["cacheCreationCostPerMillion"] = source_pricing["cacheCreationCostPerMillion"]
 
-            priced = " (priced)" if copilot_block else " (⚠️ $0.00 stub)"
+            pricing[normalized] = new_entry
+            flag = "" if has_pricing else " ⚠️ pricing requires manual verification"
             new_models.append(
                 f"  + {normalized} ({display_name}, "
-                f"provider={provider}, multiplier={format_float(stub_multiplier)})"
-                f"{priced}"
+                f"provider={provider}, multiplier={format_float(stub_multiplier)}){flag}"
             )
             pricing_changed = True
 
@@ -316,7 +310,7 @@ def main() -> int:
             print(line)
 
     if new_models:
-        print("Added new models (entries marked ⚠️ have no source pricing and need manual verification):")
+        print("Added new models (pricing from source when available):")
         for line in new_models:
             print(line)
 
