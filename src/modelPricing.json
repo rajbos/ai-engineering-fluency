@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-07-01",
+    "lastUpdated": "2026-07-11",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -100,7 +100,8 @@
         "outputCostPerMillion": 2.0,
         "releaseStatus": "GA",
         "category": "Lightweight"
-      }
+      },
+      "cachedInputCostPerMillion": 0.025
     },
     "gpt-5.1": {
       "inputCostPerMillion": 1.25,
@@ -201,7 +202,8 @@
         "outputCostPerMillion": 14.0,
         "releaseStatus": "GA",
         "category": "Powerful"
-      }
+      },
+      "cachedInputCostPerMillion": 0.175
     },
     "gpt-5.4": {
       "inputCostPerMillion": 2.5,
@@ -685,7 +687,8 @@
         "outputCostPerMillion": 10.0,
         "releaseStatus": "GA",
         "category": "Powerful"
-      }
+      },
+      "cachedInputCostPerMillion": 0.125
     },
     "gemini-2.5-flash": {
       "inputCostPerMillion": 0.3,
@@ -742,7 +745,8 @@
         "outputCostPerMillion": 3.0,
         "releaseStatus": "Public preview",
         "category": "Lightweight"
-      }
+      },
+      "cachedInputCostPerMillion": 0.05
     },
     "gemini-3-pro": {
       "inputCostPerMillion": 2.0,
@@ -780,7 +784,8 @@
         "outputCostPerMillion": 12.0,
         "releaseStatus": "Public preview",
         "category": "Powerful"
-      }
+      },
+      "cachedInputCostPerMillion": 0.2
     },
     "gemini-3.1-flash-lite": {
       "inputCostPerMillion": 0.25,
@@ -824,7 +829,8 @@
         "outputCostPerMillion": 2.0,
         "releaseStatus": "GA",
         "category": "Versatile"
-      }
+      },
+      "cachedInputCostPerMillion": 0.025
     },
     "goldeneye": {
       "inputCostPerMillion": 0.0,
@@ -841,14 +847,15 @@
       }
     },
     "gpt-5.5": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 5.0,
+      "outputCostPerMillion": 30.0,
       "category": "GPT-5 models",
       "tier": "standard",
       "multiplier": 7.5,
       "displayNames": [
         "GPT-5.5"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.5
     },
     "mistral-large-latest": {
       "inputCostPerMillion": 0.5,
@@ -1041,14 +1048,15 @@
       ]
     },
     "gemini-3.5-flash": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 1.5,
+      "outputCostPerMillion": 9.0,
       "category": "Google Gemini models",
       "tier": "standard",
       "multiplier": 14.0,
       "displayNames": [
         "Gemini 3.5 Flash"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.15
     },
     "claude-opus-4.8": {
       "inputCostPerMillion": 5.0,
@@ -1058,7 +1066,9 @@
       "multiplier": 15.0,
       "displayNames": [
         "Claude Opus 4.8"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.5,
+      "cacheCreationCostPerMillion": 6.25
     },
     "qwen2.5": {
       "inputCostPerMillion": 0.0,
@@ -1081,14 +1091,15 @@
       ]
     },
     "mai-code-1-flash": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 0.75,
+      "outputCostPerMillion": 4.5,
       "category": " models",
       "tier": "standard",
       "multiplier": 0.0,
       "displayNames": [
         "MAI-Code-1-Flash"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.075
     },
     "claude-fable-5": {
       "inputCostPerMillion": 10.0,
@@ -1098,7 +1109,9 @@
       "multiplier": 0.0,
       "displayNames": [
         "Claude Fable 5"
-      ]
+      ],
+      "cachedInputCostPerMillion": 1.0,
+      "cacheCreationCostPerMillion": 12.5
     },
     "deepseek-v4-flash": {
       "inputCostPerMillion": 0.14,
@@ -1122,34 +1135,72 @@
       ]
     },
     "claude-sonnet-5": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 0.0,
       "displayNames": [
         "Claude Sonnet 5"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.2,
+      "cacheCreationCostPerMillion": 2.5
     },
     "claude-opus-4.8-(fast-mode)-(preview)": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 10.0,
+      "outputCostPerMillion": 50.0,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 0.0,
       "displayNames": [
         "Claude Opus 4.8 (fast mode) (preview)"
-      ]
+      ],
+      "cachedInputCostPerMillion": 1.0,
+      "cacheCreationCostPerMillion": 12.5
     },
     "kimi-k2.7-code": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 0.95,
+      "outputCostPerMillion": 4.0,
       "category": "Moonshot AI models",
       "tier": "standard",
       "multiplier": 0.0,
       "displayNames": [
         "Kimi-K2.7-Code"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.19
+    },
+    "gpt-5.6-luna": {
+      "inputCostPerMillion": 1.0,
+      "outputCostPerMillion": 6.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Luna"
+      ],
+      "cachedInputCostPerMillion": 0.1
+    },
+    "gpt-5.6-sol": {
+      "inputCostPerMillion": 5.0,
+      "outputCostPerMillion": 30.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Sol"
+      ],
+      "cachedInputCostPerMillion": 0.5
+    },
+    "gpt-5.6-terra": {
+      "inputCostPerMillion": 2.5,
+      "outputCostPerMillion": 15.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Terra"
+      ],
+      "cachedInputCostPerMillion": 0.25
     }
   }
 }
