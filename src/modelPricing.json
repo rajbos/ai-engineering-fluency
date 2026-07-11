@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-07-01",
+    "lastUpdated": "2026-07-11",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1150,6 +1150,75 @@
       "displayNames": [
         "Kimi-K2.7-Code"
       ]
+    },
+    "gpt-5.6-luna": {
+      "inputCostPerMillion": 1.0,
+      "outputCostPerMillion": 6.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Luna"
+      ],
+      "copilotPricing": {
+        "inputCostPerMillion": 1.0,
+        "cachedInputCostPerMillion": 0.1,
+        "outputCostPerMillion": 6.0,
+        "releaseStatus": "GA",
+        "category": "Lightweight",
+        "longContext": {
+          "inputCostPerMillion": 2.0,
+          "cachedInputCostPerMillion": 0.2,
+          "outputCostPerMillion": 9.0,
+          "threshold": "> 200K"
+        }
+      }
+    },
+    "gpt-5.6-sol": {
+      "inputCostPerMillion": 5.0,
+      "outputCostPerMillion": 30.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Sol"
+      ],
+      "copilotPricing": {
+        "inputCostPerMillion": 5.0,
+        "cachedInputCostPerMillion": 0.5,
+        "outputCostPerMillion": 30.0,
+        "releaseStatus": "GA",
+        "category": "Powerful",
+        "longContext": {
+          "inputCostPerMillion": 10.0,
+          "cachedInputCostPerMillion": 1.0,
+          "outputCostPerMillion": 45.0,
+          "threshold": "> 272K"
+        }
+      }
+    },
+    "gpt-5.6-terra": {
+      "inputCostPerMillion": 2.5,
+      "outputCostPerMillion": 15.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "multiplier": 0.0,
+      "displayNames": [
+        "GPT-5.6 Terra"
+      ],
+      "copilotPricing": {
+        "inputCostPerMillion": 2.5,
+        "cachedInputCostPerMillion": 0.25,
+        "outputCostPerMillion": 15.0,
+        "releaseStatus": "GA",
+        "category": "Versatile",
+        "longContext": {
+          "inputCostPerMillion": 5.0,
+          "cachedInputCostPerMillion": 0.5,
+          "outputCostPerMillion": 22.5,
+          "threshold": "> 272K"
+        }
+      }
     }
   }
 }

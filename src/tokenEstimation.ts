@@ -281,6 +281,10 @@ export type TokenEstimationResult = {
 	truncationCount?: number;
 	/** Total messages removed across all truncation events in this session. */
 	messagesRemovedByTruncation?: number;
+	/** Largest single-request prompt size (input incl. cached tokens) observed in this session. */
+	maxRequestInputTokens?: number;
+	/** Copilot CLI context tier from session.start/resume/model_change events (e.g. "default"). */
+	contextTier?: string;
 };
 
 /**
@@ -298,6 +302,14 @@ interface DtsAccumulator {
 	totalTokens: number;
 	totalThinkingTokens: number;
 	parseFailedLines: number;
+}
+
+/** Extract the prompt (input) token count from one request's result object (all known delta formats). */
+function _dtsExtractPromptTokens(result: RequestResult): number {
+	if (typeof result.promptTokens === 'number') { return result.promptTokens; }
+	if (result.metadata && typeof result.metadata.promptTokens === 'number') { return result.metadata.promptTokens; }
+	if (result.usage && typeof result.usage.promptTokens === 'number') { return result.usage.promptTokens; }
+	return 0;
 }
 
 /** Extract token count from one request's result object (all known delta formats). */
@@ -324,23 +336,28 @@ function _dtsExtractFromResult(result: RequestResult): number {
 function _dtsExtractActualTokens(
 	requests: unknown[],
 	rawUsageFallback: Map<number, { promptTokens: number; outputTokens: number }>
-): number {
+): { total: number; maxPromptTokens: number } {
 	let maxIndex = requests.length;
 	for (const idx of rawUsageFallback.keys()) {
 		if (idx + 1 > maxIndex) { maxIndex = idx + 1; }
 	}
 	let totalActualTokens = 0;
+	let maxPromptTokens = 0;
 	for (let i = 0; i < maxIndex; i++) {
 		const result = getRequestResult(requests[i]);
 		const fromResult = result ? _dtsExtractFromResult(result) : 0;
 		if (fromResult > 0) {
 			totalActualTokens += fromResult;
+			maxPromptTokens = Math.max(maxPromptTokens, _dtsExtractPromptTokens(result!));
 		} else {
 			const extracted = rawUsageFallback.get(i);
-			if (extracted) { totalActualTokens += extracted.promptTokens + extracted.outputTokens; }
+			if (extracted) {
+				totalActualTokens += extracted.promptTokens + extracted.outputTokens;
+				maxPromptTokens = Math.max(maxPromptTokens, extracted.promptTokens);
+			}
 		}
 	}
-	return totalActualTokens;
+	return { total: totalActualTokens, maxPromptTokens };
 }
 
 /** Count estimated tokens for a single response item if it is a completed sub-agent invocation. */
@@ -434,7 +451,7 @@ export class DeltaTokenStrategy implements TokenEstimationStrategy {
 			: new Map<number, { promptTokens: number; outputTokens: number }>();
 		const rawRequests = sessionState['requests'];
 		const requests = (Array.isArray(rawRequests) ? rawRequests : []) as unknown[];
-		const totalActualTokens = _dtsExtractActualTokens(requests, rawUsageFallback);
+		const { total: totalActualTokens, maxPromptTokens } = _dtsExtractActualTokens(requests, rawUsageFallback);
 
 		// Sub-agent results are built up char-by-char via delta events and are only
 		// complete in the fully reconstructed state — count them here.
@@ -448,6 +465,7 @@ export class DeltaTokenStrategy implements TokenEstimationStrategy {
 			modelUsage: {},
 			dailyActualTokens: {},
 			copilotNanoAiu: 0,
+			...(maxPromptTokens > 0 ? { maxRequestInputTokens: maxPromptTokens } : {}),
 		};
 	}
 }
@@ -470,6 +488,8 @@ interface EjtsState {
 	truncationCount: number;
 	/** Total messages removed across all session.truncation events. */
 	messagesRemovedByTruncation: number;
+	/** Context tier from session.start/resume/model_change events (last non-empty value wins). */
+	contextTier: string | null;
 }
 
 /** Accumulate one model's metrics from a session.shutdown event into state. Returns the total tokens added. */
@@ -513,6 +533,13 @@ function _ejtsHandleShutdown(event: Record<string, unknown>, state: EjtsState): 
 			state.dailyActualTokens[dayKey] = (state.dailyActualTokens[dayKey] || 0) + shutdownTotal;
 		}
 	}
+}
+
+/** Handle session.start / session.resume / session.model_change — capture the Copilot CLI context tier. */
+function _ejtsHandleContextTier(event: Record<string, unknown>, state: EjtsState): void {
+	const data = event.data as Record<string, unknown> | undefined;
+	const tier = data?.contextTier;
+	if (typeof tier === 'string' && tier) { state.contextTier = tier; }
 }
 
 /** Handle a session.truncation event — count events where messages were removed (prompt cache break). */
@@ -613,6 +640,7 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 			cliTotalNanoAiu: 0,
 			truncationCount: 0,
 			messagesRemovedByTruncation: 0,
+			contextTier: null,
 		};
 
 		for (const line of lines) {
@@ -621,6 +649,7 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 				const event = JSON.parse(line) as Record<string, unknown>;
 				if (event.type === 'session.shutdown') { _ejtsHandleShutdown(event, state); }
 				else if (event.type === 'session.truncation') { _ejtsHandleTruncation(event, state); }
+				else if (event.type === 'session.start' || event.type === 'session.resume' || event.type === 'session.model_change') { _ejtsHandleContextTier(event, state); }
 				_ejtsHandleEventType(event, state);
 			} catch { /* skip invalid lines */ }
 		}
@@ -637,6 +666,7 @@ export class EventJsonlTokenStrategy implements TokenEstimationStrategy {
 			dailyActualTokens: state.dailyActualTokens,
 			copilotNanoAiu: state.cliTotalNanoAiu,
 			...(state.truncationCount > 0 ? { truncationCount: state.truncationCount, messagesRemovedByTruncation: state.messagesRemovedByTruncation } : {}),
+			...(state.contextTier ? { contextTier: state.contextTier } : {}),
 		};
 	}
 }
@@ -706,6 +736,7 @@ interface EatdlAcc {
 	modelTurns: number;
 	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
 	copilotNanoAiu: number;
+	maxRequestInputTokens: number;
 }
 
 /** Process one llm_request event into the accumulator. */
@@ -720,6 +751,7 @@ function _eatdlProcessLlmRequest(event: Record<string, unknown>, acc: EatdlAcc):
 	acc.outputTokens += out;
 	acc.cachedTokens += cached;
 	acc.copilotNanoAiu += nanoAiu;
+	acc.maxRequestInputTokens = Math.max(acc.maxRequestInputTokens, inp);
 	const model = typeof attrs?.model === 'string' && attrs.model ? attrs.model : '';
 	if (!model) { return; }
 	const entry = acc.modelBreakdown[model] ?? { inputTokens: 0, outputTokens: 0, cachedTokens: 0 };
@@ -769,8 +801,9 @@ export function extractAllTokensFromDebugLog(content: string): {
 	modelTurns: number;
 	modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>;
 	copilotNanoAiu: number;
+	maxRequestInputTokens: number;
 } | null {
-	const acc: EatdlAcc = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, modelTurns: 0, modelBreakdown: {}, copilotNanoAiu: 0 };
+	const acc: EatdlAcc = { inputTokens: 0, outputTokens: 0, cachedTokens: 0, modelTurns: 0, modelBreakdown: {}, copilotNanoAiu: 0, maxRequestInputTokens: 0 };
 	for (const line of content.split(/\r?\n/)) {
 		if (!line.trim()) { continue; }
 		try {
@@ -1089,6 +1122,56 @@ export function getModelTier(modelId: string, modelPricing: { [key: string]: Mod
 	}
 
 	return 'unknown';
+}
+
+/**
+ * Parse a Copilot pricing context-threshold string into a token count.
+ * Accepts the docs-table formats: "> 200K", "≤ 272K", "200K", "1M", "128000".
+ * Returns null when the string carries no parseable number.
+ */
+export function parseContextThreshold(threshold: string | undefined | null): number | null {
+	if (!threshold) { return null; }
+	const m = /([\d.]+)\s*([KkMm])?/.exec(threshold);
+	if (!m) { return null; }
+	const n = parseFloat(m[1]);
+	if (!isFinite(n) || n <= 0) { return null; }
+	const unit = (m[2] ?? '').toUpperCase();
+	return Math.round(n * (unit === 'M' ? 1_000_000 : unit === 'K' ? 1_000 : 1));
+}
+
+/** Long-context pricing tier info for a model, resolved from modelPricing.json. */
+export interface LongContextInfo {
+	/** Input-token threshold above which long-context rates apply (e.g. 200000). */
+	thresholdTokens: number;
+	/** Default-tier Copilot input cost per 1M tokens. */
+	defaultInputCostPerMillion: number;
+	/** Long-context-tier Copilot input cost per 1M tokens. */
+	longContextInputCostPerMillion: number;
+}
+
+/**
+ * Look up the long-context pricing tier for a model from modelPricing.json.
+ * Uses the same exact-then-partial key matching as getModelTier.
+ * Returns null when the model has no `copilotPricing.longContext` block or no
+ * parseable threshold — i.e. the model is billed at a single (default) rate.
+ */
+export function getLongContextInfo(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): LongContextInfo | null {
+	let pricing: ModelPricing | undefined = modelPricing[modelId];
+	if (!pricing) {
+		const id = modelId.toLowerCase();
+		for (const [key, value] of Object.entries(modelPricing)) {
+			if (id.includes(key.toLowerCase()) || key.toLowerCase().includes(id)) { pricing = value; break; }
+		}
+	}
+	const longContext = pricing?.copilotPricing?.longContext;
+	if (!longContext) { return null; }
+	const thresholdTokens = parseContextThreshold(longContext.threshold);
+	if (!thresholdTokens) { return null; }
+	return {
+		thresholdTokens,
+		defaultInputCostPerMillion: pricing!.copilotPricing!.inputCostPerMillion,
+		longContextInputCostPerMillion: longContext.inputCostPerMillion,
+	};
 }
 
 function _costBucketFromPricing(pricing: ModelPricing): 'low' | 'medium' | 'high' | 'unknown' {
