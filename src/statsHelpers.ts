@@ -31,6 +31,19 @@ export function computeSessionTotalTokens(inputTokens: number, outputTokens: num
 }
 
 /**
+ * Computes a session's duration in milliseconds from its first and last
+ * interaction timestamps (ISO strings). Returns undefined when either
+ * timestamp is missing/invalid or the range is negative.
+ */
+export function computeSessionDurationMs(firstInteraction: string | null | undefined, lastInteraction: string | null | undefined): number | undefined {
+	if (!firstInteraction || !lastInteraction) { return undefined; }
+	const start = new Date(firstInteraction).getTime();
+	const end = new Date(lastInteraction).getTime();
+	if (!Number.isFinite(start) || !Number.isFinite(end) || end < start) { return undefined; }
+	return end - start;
+}
+
+/**
  * Merges `source` model usage into `target` (in-place).
  * All four token fields are summed: inputTokens, outputTokens,
  * cachedReadTokens (optional), and cacheCreationTokens (optional).

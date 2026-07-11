@@ -452,7 +452,7 @@ nonCopilotFiles: CustomizationFileEntry[];
 }
 
 
-/** Summary of a single session for the "Today's Sessions" tab. */
+/** Summary of a single session for the "Recent Sessions" tab. */
 export interface TodaySessionSummary {
   title: string | null;
   filePath: string;
@@ -477,6 +477,10 @@ export interface TodaySessionSummary {
   contextWindowLimit?: number;
   /** Last known context fill in tokens (Copilot CLI, from data.db context_current_tokens). */
   contextReachedTokens?: number;
+  /** Session duration in milliseconds (last interaction − first interaction). Absent when not derivable. */
+  durationMs?: number;
+  /** Workspace/repository name the session belongs to. Absent when attribution is unavailable. */
+  workspace?: string;
 }
 
 export interface UsageAnalysisStats {
