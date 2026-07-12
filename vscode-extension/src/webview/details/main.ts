@@ -260,7 +260,12 @@ style.textContent = styles;
 
 const container = el('div', 'container');
 const header = el('div', 'header');
-const title = el('div', 'title', 'AI Engineering Fluency');
+const headerLeft = el('div', 'header-left');
+headerLeft.append(el('div', 'title', 'AI Engineering Fluency'));
+const planBadge = buildPlanBadge(stats);
+if (planBadge) {
+headerLeft.append(planBadge);
+}
 const buttonRow = el('div', 'button-row');
 
 buttonRow.append(
@@ -275,7 +280,7 @@ if (stats.backendConfigured) {
 buttonRow.append(createButton(BUTTONS['btn-dashboard']));
 }
 
-header.append(title, buttonRow);
+header.append(headerLeft, buttonRow);
 
 const footer = el('div', 'footer', `Last updated: ${lastUpdated.toLocaleString()} · Updates every 5 minutes`);
 
@@ -284,6 +289,8 @@ const sections = el('div', 'sections');
 const isEmptyState = (stats.today.tokens ?? 0) === 0 && (stats.last30Days.tokens ?? 0) === 0 && (stats.lastMonth.tokens ?? 0) === 0;
 if (isEmptyState) {
 sections.append(buildEmptyStateSection());
+} else {
+sections.append(buildSummaryCards(stats));
 }
 
 sections.append(buildMetricsSection(stats, projections));
@@ -343,15 +350,44 @@ function buildCachedTokenRow(stats: DetailedStats): MetricRow[] {
 	return [{ label: 'Cached tokens', labelTooltip: 'Cache-read tokens — already included in "Input tokens" above, shown separately because they are billed at a lower rate.', icon: '⚡', color: '#34d399', today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: '—' }];
 }
 
-function buildCopilotPlanRow(stats: DetailedStats): MetricRow[] {
-	if (!stats.copilotPlan) { return []; }
+/**
+ * Renders the active Copilot plan as a small badge shown under the header
+ * title (plan name + monthly credits) instead of a metrics-table row.
+ */
+function buildPlanBadge(stats: DetailedStats): HTMLElement | null {
+	if (!stats.copilotPlan) { return null; }
 	const plan = stats.copilotPlan;
 	const credits = plan.monthlyAiCreditsUsd > 0 ? `$${plan.monthlyAiCreditsUsd} credits/month` : 'no credits';
-	return [{ label: `${plan.planName} (${credits})`, labelTooltip: `Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`, icon: '🏷️', color: '#60a5fa', today: '—', last30Days: '—', month: '—', lastMonth: '—', projected: '—' }];
+	const badge = el('div', 'plan-badge', `🏷️ ${plan.planName} · ${credits}`);
+	badge.title = `Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`;
+	return badge;
 }
 
-function buildMetricsRows(stats: DetailedStats, projections: Projections): MetricRow[] {
-	const rows: MetricRow[] = [
+/** Creates a single summary card (label above value), matching the chart webview pattern. */
+function buildCard(id: string, label: string, value: string): HTMLElement {
+	const card = el('div', 'card');
+	card.id = id;
+	card.append(el('div', 'card-label', label), el('div', 'card-value', value));
+	return card;
+}
+
+/** Builds the row of hero summary cards shown above the metrics table. */
+function buildSummaryCards(stats: DetailedStats): HTMLElement {
+	const cards = el('div', 'cards');
+	cards.id = 'summary-cards';
+	cards.append(
+		buildCard('card-today-tokens', '📅 Tokens Today', totalTokenCell(stats.today)),
+		buildCard('card-30d-tokens', '📈 Tokens Last 30 Days', totalTokenCell(stats.last30Days)),
+		buildCard('card-month-cost', '💰 Est. Cost This Month (UBB)', formatCost(stats.month.estimatedCostCopilot ?? 0)),
+		buildCard('card-today-sessions', '📂 Sessions Today', formatNumber(stats.today.sessions)),
+	);
+	return cards;
+}
+
+type MetricGroup = { heading: string; rows: MetricRow[] };
+
+function buildMetricsGroups(stats: DetailedStats, projections: Projections): MetricGroup[] {
+	const tokenRows: MetricRow[] = [
 		{ label: 'Total tokens', labelTooltip: 'All LLM API tokens counted across every call in this period — matches the status bar. When debug logs are available this is the definitive total; otherwise it falls back to per-model attribution or the text-based estimate.', icon: '🟣', color: '#c37bff', today: totalTokenCell(stats.today), last30Days: totalTokenCell(stats.last30Days), month: totalTokenCell(stats.month), lastMonth: totalTokenCell(stats.lastMonth), projected: formatCompact(projections.projectedTokens) },
 		{ label: 'Input tokens', labelTooltip: 'Total prompt tokens sent to the model, including any cache-read tokens (shown separately below).', icon: '⬆️', color: '#c37bff', today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: '—' },
 		{ label: 'Output tokens', icon: '⬇️', color: '#c37bff', today: outputTokenCell(stats.today), last30Days: outputTokenCell(stats.last30Days), month: outputTokenCell(stats.month), lastMonth: outputTokenCell(stats.lastMonth), projected: '—' },
@@ -359,13 +395,31 @@ function buildMetricsRows(stats: DetailedStats, projections: Projections): Metri
 		{ label: 'Tokens (user estimated)', icon: '📝', color: '#b39ddb', today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), month: formatCompact(stats.month.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: '—' },
 		{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: serviceOverheadPct(stats.today), last30Days: serviceOverheadPct(stats.last30Days), month: serviceOverheadPct(stats.month), lastMonth: serviceOverheadPct(stats.lastMonth), projected: '—' },
 		{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
+	];
+	const costRows: MetricRow[] = [
 		{ label: 'Estimated cost (UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
-		...buildCopilotPlanRow(stats),
+	];
+	const activityRows: MetricRow[] = [
 		{ label: 'Sessions', icon: '📂', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
 		{ label: 'Average interactions/session', icon: '💬', color: '#8ce0ff', today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: '—' },
 		{ label: 'Average tokens/session', icon: '🔢', color: '#7ce38b', today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: '—' },
 	];
-	return rows;
+	return [
+		{ heading: '🔢 Tokens', rows: tokenRows },
+		{ heading: '💰 Cost', rows: costRows },
+		{ heading: '💬 Activity', rows: activityRows },
+	];
+}
+
+/** Builds a non-sortable separator row that labels a group of metric rows. */
+function buildGroupHeaderRow(label: string): HTMLTableRowElement {
+	const tr = document.createElement('tr');
+	tr.className = 'group-row';
+	const td = document.createElement('td');
+	td.colSpan = 6;
+	td.textContent = label;
+	tr.append(td);
+	return tr;
 }
 
 function buildMetricsSection(
@@ -373,7 +427,7 @@ stats: DetailedStats,
 projections: Projections
 ): HTMLElement {
 const section = el('div', 'section');
-section.append(el('h3', '', 'AI Engineering Fluency'));
+section.append(el('h3', '', '📊 Key Metrics'));
 const table = document.createElement('table');
 table.className = 'stats-table';
 const thead = document.createElement('thead');
@@ -390,10 +444,13 @@ headerRow.append(th);
 thead.append(headerRow);
 table.append(thead);
 const tbody = document.createElement('tbody');
-buildMetricsRows(stats, projections).forEach(row => {
+buildMetricsGroups(stats, projections).forEach(group => {
+tbody.append(buildGroupHeaderRow(group.heading));
+group.rows.forEach(row => {
 const tr = document.createElement('tr');
 tr.append(buildMetricLabelCell(row.icon, row.label, row.color, row.labelTooltip), buildValueCell(row.today), buildValueCell(row.last30Days), buildValueCell(row.month), buildValueCell(row.lastMonth), buildValueCell(row.projected));
 tbody.append(tr);
+});
 });
 table.append(tbody);
 section.append(table);
