@@ -8372,6 +8372,14 @@ ${this.getLoadingHtmlScript()}
    * modelUsage data + calculateEstimatedCost() the dashboard uses, so the breakdown a
    * user sees here matches what drove their cost figures — useful for self-diagnosing
    * "why does my cost look wrong" reports without a separate script.
+   *
+   * Note on Copilot CLI: "0 files with model attribution" for this editor is often
+   * expected, not a bug. Copilot CLI has two storage backends — events.jsonl (project/
+   * worktree sessions, rich per-model data) and session-store.db (chat-only sessions
+   * with no workspace). The DB schema has no model/token columns at all, so
+   * CopilotCliAdapter.getModelUsage() legitimately returns {} for those files — see the
+   * comment there for the verified schema. A mixed editor total can therefore show many
+   * "matched, 0 attributed" files simply because a large fraction are DB-only sessions.
    */
   private async diagHandleAnalyzeModelUsage(message: any): Promise<void> {
     const editor = typeof message?.editor === 'string' && message.editor ? message.editor : 'all';

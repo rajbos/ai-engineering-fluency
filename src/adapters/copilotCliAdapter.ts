@@ -101,7 +101,8 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	}
 
 	async getTokens(_sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		// session-store.db does not store token counts
+		// session-store.db does not store token counts (see getModelUsage() below for the
+		// full schema rationale — chat-only sessions have no token/model data to surface).
 		return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
 	}
 
@@ -112,6 +113,11 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		return 0;
 	}
 
+	// session-store.db has no model or token columns at all (sessions: id, cwd, repository,
+	// branch, summary, created_at, updated_at; turns: session_id, turn_index, user_message,
+	// assistant_response, timestamp — verified directly against the SQLite schema). Chat-only
+	// sessions therefore have no data to attribute per model; this is a genuine data-availability
+	// gap in the CLI's own storage, not a bug in this adapter or in getModelUsageFromSession().
 	async getModelUsage(_sessionFile: string): Promise<ModelUsage> {
 		return {};
 	}
