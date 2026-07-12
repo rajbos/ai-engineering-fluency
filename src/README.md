@@ -128,13 +128,17 @@ identical) GitHub-published rate explicitly.
 | Field | Description |
 |-------|-------------|
 | `cachedInputCostPerMillion` | Cost per million tokens for cache **reads** — tokens already cached and billed at a reduced rate |
-| `cacheCreationCostPerMillion` | Cost per million tokens for cache **creation** — writing tokens into the cache (billed at a premium) |
+| `cacheCreationCostPerMillion` | Cost per million tokens for cache **creation**, 5-minute TTL — writing tokens into the cache (billed at a premium) |
+| `cacheCreation1hCostPerMillion` | Cost per million tokens for cache **creation**, 1-hour TTL — Anthropic's longer-lived cache tier, billed at a higher premium than the 5-minute TTL |
 
 When these fields are absent, the full `inputCostPerMillion` rate is applied to all input tokens.
 
 **Anthropic prompt caching rates** (used for all `claude-*` models):
 - Cache reads: **10% of input rate** (e.g. $0.30/M for Claude Sonnet 4 at $3.00/M input)
-- Cache creation: **125% of input rate** (e.g. $3.75/M for Claude Sonnet 4)
+- Cache creation, 5-minute TTL: **125% of input rate** (e.g. $3.75/M for Claude Sonnet 4)
+- Cache creation, 1-hour TTL: **200% of input rate** (e.g. $6.00/M for Claude Sonnet 4) — Claude Code uses this TTL by default, so its cache-write tokens should be priced with `cacheCreation1hCostPerMillion`, not the 5-minute rate.
+
+For sources that report the TTL breakdown (`cache_creation.ephemeral_1h_input_tokens` vs. `ephemeral_5m_input_tokens` in the raw Anthropic usage object — currently Claude Code and Claude Desktop), `ModelUsage.cacheCreation1hTokens` carries the 1-hour portion of `cacheCreationTokens`, and `calculateEstimatedCost()` prices it separately. When a source doesn't report the split, all cache-creation tokens fall back to the 5-minute rate (prior behavior, unchanged).
 
 **OpenAI prompt caching rates** (automatic prefix matching) vary by model family:
 - Cache reads use the explicit per-model `cachedInputCostPerMillion` values in `modelPricing.json` (for example: GPT-4o = 50% of input, GPT-4.1 = 25%, GPT-5.4 = 10%)
