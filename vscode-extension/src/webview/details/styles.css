@@ -145,19 +145,19 @@ body {
 }
 
 .stats-table tr.group-row td {
-	background: var(--bg-tertiary);
-	font-size: 12.5px;
+	background: transparent;
+	color: var(--text-muted);
+	font-size: 11px;
 	font-weight: 700;
 	text-transform: uppercase;
-	letter-spacing: 1px;
-	padding: 8px 12px;
-	border-left: 3px solid var(--text-secondary);
+	letter-spacing: 1.5px;
+	padding: 14px 12px 6px;
 	border-bottom: 1px solid var(--border-subtle);
 }
 
-/* Breathing room above each group after the first, so groups read as blocks */
-.stats-table tbody tr.group-row:not(:first-child) td {
-	border-top: 10px solid var(--bg-primary);
+/* First group sits right under the table header, no extra lead-in */
+.stats-table tbody tr.group-row:first-child td {
+	padding-top: 6px;
 }
 
 .metric-label {

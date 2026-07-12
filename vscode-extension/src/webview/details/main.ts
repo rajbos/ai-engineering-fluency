@@ -384,7 +384,7 @@ function buildSummaryCards(stats: DetailedStats): HTMLElement {
 	return cards;
 }
 
-type MetricGroup = { heading: string; accent: string; rows: MetricRow[] };
+type MetricGroup = { heading: string; rows: MetricRow[] };
 
 function buildMetricsGroups(stats: DetailedStats, projections: Projections): MetricGroup[] {
 	const tokenRows: MetricRow[] = [
@@ -405,22 +405,19 @@ function buildMetricsGroups(stats: DetailedStats, projections: Projections): Met
 		{ label: 'Average tokens/session', icon: '🔢', color: '#7ce38b', today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: '—' },
 	];
 	return [
-		{ heading: '🔢 Tokens', accent: '#c37bff', rows: tokenRows },
-		{ heading: '💰 Cost', accent: '#7ce38b', rows: costRows },
-		{ heading: '💬 Activity', accent: '#66aaff', rows: activityRows },
+		{ heading: '🔢 Tokens', rows: tokenRows },
+		{ heading: '💰 Cost', rows: costRows },
+		{ heading: '💬 Activity', rows: activityRows },
 	];
 }
 
 /** Builds a non-sortable separator row that labels a group of metric rows. */
-function buildGroupHeaderRow(label: string, accent: string): HTMLTableRowElement {
+function buildGroupHeaderRow(label: string): HTMLTableRowElement {
 	const tr = document.createElement('tr');
 	tr.className = 'group-row';
 	const td = document.createElement('td');
 	td.colSpan = 6;
-	td.style.borderLeftColor = accent;
-	const labelSpan = el('span', 'group-label', label);
-	labelSpan.style.color = accent;
-	td.append(labelSpan);
+	td.textContent = label;
 	tr.append(td);
 	return tr;
 }
@@ -448,7 +445,7 @@ thead.append(headerRow);
 table.append(thead);
 const tbody = document.createElement('tbody');
 buildMetricsGroups(stats, projections).forEach(group => {
-tbody.append(buildGroupHeaderRow(group.heading, group.accent));
+tbody.append(buildGroupHeaderRow(group.heading));
 group.rows.forEach(row => {
 const tr = document.createElement('tr');
 tr.append(buildMetricLabelCell(row.icon, row.label, row.color, row.labelTooltip), buildValueCell(row.today), buildValueCell(row.last30Days), buildValueCell(row.month), buildValueCell(row.lastMonth), buildValueCell(row.projected));
