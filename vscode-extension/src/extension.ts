@@ -8377,6 +8377,13 @@ ${this.getLoadingHtmlScript()}
     const editor = typeof message?.editor === 'string' && message.editor ? message.editor : 'all';
     if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
 
+    if (!this.diagnosticsHasLoadedFiles) {
+      this.diagnosticsPanel.webview.postMessage({
+        command: 'modelUsageResult', editor, fileCount: 0, filesWithUsage: 0, rows: [], totalCost: 0, stillLoading: true,
+      });
+      return;
+    }
+
     const files = this.diagnosticsCachedFiles;
     const matching = editor === 'all' ? files : files.filter(f => (f.editorSource || 'Unknown') === editor);
     const { aggregated, filesWithUsage } = this.aggregateModelUsage(matching);

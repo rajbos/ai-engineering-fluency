@@ -984,6 +984,11 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[]): string {
         </select>
         <button class="button" id="btn-analyze-model-usage">🔍 Analyze</button>
       </div>
+      <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted);">
+        Session files load in the background after this panel opens. If the dropdown only
+        shows "All Editors" or results show 0 files, wait for the "Session Files" tab count
+        to populate, then try again.
+      </div>
     </div>
     <div id="model-usage-results"></div>
   `;
@@ -1594,6 +1599,14 @@ function handleModelUsageResult(message: DiagMessage): void {
   }
   const resultsDiv = document.getElementById("model-usage-results");
   if (!resultsDiv) { return; }
+  if (message.stillLoading) {
+    resultsDiv.innerHTML = `
+      <div class="info-box" style="margin-top: 12px;">
+        <div class="info-box-title">⏳ Still loading session files</div>
+        <div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>
+      </div>`;
+    return;
+  }
   resultsDiv.innerHTML = renderModelUsageResults(
     String(message.editor || "all"),
     Number(message.fileCount || 0),
