@@ -6,7 +6,7 @@
  * bootstrap-dependent logic lives in helpers.ts.
  */
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
-import { normalizePathForComparison } from '../../src/workspaceHelpers';
+import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
@@ -77,7 +77,7 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
 	if (normalized.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (normalized.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
-	if (normalized.includes('/.claude/projects/')) { return 'Claude Code'; }
+	if (normalized.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
 	if (normalized.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
 	// Antigravity must be checked before Gemini CLI: both live under ~/.gemini/.
 	if (normalized.includes('/.gemini/antigravity/brain/')) { return 'Antigravity'; }

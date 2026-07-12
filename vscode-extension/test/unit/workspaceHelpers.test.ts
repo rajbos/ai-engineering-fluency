@@ -257,7 +257,8 @@ import {
         extractWorkspaceIdFromSessionPath,
         globToRegExp,
         getEditorTypeFromPath,
-        detectEditorSource
+        detectEditorSource,
+        detectClaudeCodeEditorVariant
 } from '../../../src/workspaceHelpers';
 
 // ── extractWorkspaceIdFromSessionPath ───────────────────────────────────
@@ -327,6 +328,54 @@ test('getEditorTypeFromPath: detects Continue', () => {
 
 test('getEditorTypeFromPath: detects Claude Code', () => {
         assert.equal(getEditorTypeFromPath('/home/user/.claude/projects/hash/session.jsonl'), 'Claude Code');
+});
+
+test('detectClaudeCodeEditorVariant: returns Claude Desktop for entrypoint claude-desktop', () => {
+        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const projectsDir = nodePath.join(dir, '.claude', 'projects', 'hash');
+        fs.mkdirSync(projectsDir, { recursive: true });
+        const file = nodePath.join(projectsDir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-desktop', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Desktop');
+                assert.equal(getEditorTypeFromPath(file), 'Claude Desktop');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectClaudeCodeEditorVariant: returns Claude Code for entrypoint claude-cli', () => {
+        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const file = nodePath.join(dir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectClaudeCodeEditorVariant: returns Claude Code for entrypoint claude-vscode', () => {
+        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const file = nodePath.join(dir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-vscode', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
+});
+
+test('detectClaudeCodeEditorVariant: defaults to Claude Code when file is missing or has no entrypoint', () => {
+        assert.equal(detectClaudeCodeEditorVariant('/nonexistent/path/session.jsonl'), 'Claude Code');
+        const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+        const file = nodePath.join(dir, 'session.jsonl');
+        fs.writeFileSync(file, JSON.stringify({ type: 'queue-operation', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        try {
+                assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code');
+        } finally {
+                fs.rmSync(dir, { recursive: true, force: true });
+        }
 });
 
 test('getEditorTypeFromPath: detects Cursor', () => {
