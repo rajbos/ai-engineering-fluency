@@ -43,6 +43,9 @@ function createHarness() {
 
 	const access = new DevinCliDataAccess();
 	(access as any).initSqlJs = async () => ({ Database: FakeDatabase });
+	// Ensure discoverSessionIds()/getDbPath() use this harness's temp DB instead of the
+	// real OS-default location (which may or may not exist depending on the machine).
+	access.setDbPathOverrideForTests(dbPath);
 
 	return {
 		access, dbPath, virtualPath,

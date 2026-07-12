@@ -110,6 +110,8 @@ export class DevinCliDataAccess {
 	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
 	private _dbCache: Map<string, DbCacheEntry> = new Map();
 	private _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
+	/** Test-only override for the sessions.db path, so tests don't depend on the real OS default location. */
+	private _dbPathOverride: string | null = null;
 
 	dispose(): void {
 		for (const entry of this._dbCache.values()) {
@@ -137,7 +139,12 @@ export class DevinCliDataAccess {
 
 	/** Absolute path to sessions.db. */
 	getDbPath(): string {
-		return path.join(this.getConfigDir(), 'sessions.db');
+		return this._dbPathOverride ?? path.join(this.getConfigDir(), 'sessions.db');
+	}
+
+	/** Test-only: override the sessions.db path so tests don't depend on the real OS default location. */
+	setDbPathOverrideForTests(dbPath: string | null): void {
+		this._dbPathOverride = dbPath;
 	}
 
 	/** Build a virtual session path for the given session id. */
