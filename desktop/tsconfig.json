@@ -1,0 +1,44 @@
+{
+  "compilerOptions": {
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "target": "ES2022",
+    // The desktop main/preload run in Electron's Node process, but the desktop
+    // app transitively imports vscode-extension webview helpers (e.g.
+    // shared/dataLoader) that reference `window`. Including DOM lets those
+    // shared sources type-check without pulling in their own tsconfig.
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    // The shared root ../src sources resolve their type-only deps against the
+    // sibling packages' node_modules (same pattern as cli/tsconfig.json).
+    "typeRoots": [
+      "./node_modules/@types",
+      "../vscode-extension/node_modules/@types"
+    ],
+    "paths": {
+      "@msgpack/msgpack": ["./node_modules/@msgpack/msgpack/dist.esm/index.d.ts"],
+      "sql.js": ["../vscode-extension/node_modules/@types/sql.js/index.d.ts"]
+    },
+    "sourceMap": true,
+    "rootDir": "..",
+    "outDir": "dist",
+    "strict": true,
+    "resolveJsonModule": true,
+    "esModuleInterop": true,
+    "declaration": false,
+    "skipLibCheck": true
+  },
+  // Only the desktop sources are listed here. tsc follows the real import graph
+  // into ../cli and ../vscode-extension, so those packages' sources are checked
+  // exactly as the desktop app uses them — instead of globbing whole sibling
+  // trees (which dragged in unrelated CLI command/test files with their own
+  // deps and pre-existing errors). This keeps `check-types` a meaningful gate
+  // on the desktop app's own type-correctness.
+  "include": [
+    "src/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist"
+  ]
+}
