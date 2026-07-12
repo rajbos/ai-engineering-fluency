@@ -18,6 +18,11 @@ import {
     getFluencyLevelData,
 } from '../../vscode-extension/src/maturityScoring';
 import { getToolFamilies } from '../../vscode-extension/src/toolFamilies';
+import {
+    getLoadingHtmlCssBase,
+    getLoadingHtmlCssSteps,
+    getLoadingHtmlBody,
+} from '../../vscode-extension/src/loadingHtml';
 
 // JSON config data embedded into every panel HTML (mirrors extension's getJsonConfigScript)
 import tokenEstimatorsData from '../../vscode-extension/src/tokenEstimators.json';
@@ -92,7 +97,7 @@ const VSCODE_DARK_VARS = `
     --vscode-sideBar-background: #252526;
     --vscode-editorWidget-background: #252526;
     --vscode-editor-foreground: #d4d4d4;
-    --vscode-descriptionForeground: #717171;
+    --vscode-descriptionForeground: #9d9d9d;
     --vscode-disabledForeground: #585858;
     --vscode-panel-border: #454545;
     --vscode-widget-border: #454545;
@@ -180,10 +185,43 @@ async function getSessionFiles(): Promise<string[]> {
     return cachedSessionFiles;
 }
 
+/** Post a progress message to the loading screen (bridged to window messages by the preload). */
+function sendLoadingMessage(message: Record<string, unknown>): void {
+    if (mainWindow && !mainWindow.isDestroyed()) {
+        mainWindow.webContents.send('loading-message', message);
+    }
+}
+
+/**
+ * Drives the shared loading screen while session files are parsed. Mirrors the
+ * extension's buildProgressCallback: a one-time 'parsing' step transition, then
+ * progress ticks throttled to 500ms, then 'computing' once parsing finishes.
+ */
+function buildLoadingProgressCallback(): (completed: number, total: number) => void {
+    let parsingNotified = false;
+    let lastSentMs = 0;
+    return (completed, total) => {
+        if (!parsingNotified) {
+            parsingNotified = true;
+            sendLoadingMessage({ command: 'loadingStep', step: 'parsing', total, editors: [] });
+        }
+        const now = Date.now();
+        if (now - lastSentMs >= 500 || completed === total) {
+            lastSentMs = now;
+            const percentage = Math.round((completed / total) * 100);
+            sendLoadingMessage({ command: 'loadingProgress', completed, total, percentage, editors: [] });
+        }
+        if (completed === total) {
+            sendLoadingMessage({ command: 'loadingStep', step: 'computing' });
+        }
+    };
+}
+
 async function getStats(): Promise<DetailedStats> {
     if (!cachedStats) {
+        sendLoadingMessage({ command: 'loadingStep', step: 'discovering' });
         const files = await getSessionFiles();
-        cachedStats = await calculateDetailedStats(files);
+        cachedStats = await calculateDetailedStats(files, buildLoadingProgressCallback());
     }
     return cachedStats;
 }
@@ -352,29 +390,37 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
 </html>`;
 }
 
+/** App icon as a data URI so the loading page (served from a data: URL) can embed it. */
+function getLoadingIconDataUri(): string | undefined {
+    try {
+        const png = fs.readFileSync(resolveAppIcon());
+        return `data:image/png;base64,${png.toString('base64')}`;
+    } catch {
+        return undefined; // shared body falls back to the 🤖 emoji
+    }
+}
+
+/**
+ * The extension's animated "Building Activity Index" loading screen, reused via
+ * the shared vscode-extension/src/loadingHtml.ts module. Progress messages are
+ * sent over the 'loading-message' IPC channel and bridged to window messages by
+ * the preload, so the shared script works exactly as it does in VS Code.
+ */
 function buildLoadingHtml(): string {
     return `<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8" />
-    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline';" />
-    <title>AI Engineering Fluency</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src data:;" />
+    <title>AI Engineering Fluency — Loading</title>
     <style>
-        ${VSCODE_DARK_VARS}${VSCODE_LIGHT_VARS}
-        body { margin: 0; background: var(--vscode-editor-background); color: var(--vscode-editor-foreground);
-               font-family: -apple-system, 'Segoe UI', sans-serif; display: flex; align-items: center;
-               justify-content: center; height: 100vh; }
-        .spinner { text-align: center; opacity: 0.7; }
-        .spinner h2 { font-weight: 400; font-size: 16px; margin: 0 0 8px; }
-        .spinner p  { font-size: 12px; margin: 0; }
+${VSCODE_DARK_VARS}${VSCODE_LIGHT_VARS}
+${getLoadingHtmlCssBase()}
+${getLoadingHtmlCssSteps()}
     </style>
 </head>
-<body>
-    <div class="spinner">
-        <h2>AI Engineering Fluency</h2>
-        <p>Loading session data…</p>
-    </div>
-</body>
+${getLoadingHtmlBody('', getLoadingIconDataUri())}
 </html>`;
 }
 

@@ -10,3 +10,10 @@ contextBridge.exposeInMainWorld('acquireVsCodeApi', () => ({
     setState: (_state: unknown) => { /* no-op */ },
     getState: () => undefined,
 }));
+
+// Bridge main-process loading progress to the page as window messages, matching
+// how VS Code webviews receive webview.postMessage — so the shared loading
+// screen script (vscode-extension/src/loadingHtml.ts) runs unchanged here.
+ipcRenderer.on('loading-message', (_event, message: unknown) => {
+    window.postMessage(message, '*');
+});
