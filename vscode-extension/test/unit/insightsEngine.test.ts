@@ -247,3 +247,150 @@ test('stale-skills: does not fire when no unused skills exist', () => {
 	const insight = results.find(i => i.id === STALE_SKILLS_ID);
 	assert.equal(insight, undefined);
 });
+
+// ---------------------------------------------------------------------------
+// long-context pricing tier insights
+// ---------------------------------------------------------------------------
+
+import type { TodaySessionSummary } from '../../../src/types';
+
+const LC_CROSSED_ID = 'long-context-pricing-crossed';
+const LC_HEADROOM_ID = 'long-context-headroom';
+
+function makeTodaySession(overrides: Partial<TodaySessionSummary>): TodaySessionSummary {
+	return {
+		title: null, filePath: '/tmp/session.jsonl', interactions: 5, toolCalls: 2,
+		inputTokens: 1000, outputTokens: 500, thinkingTokens: 0, cachedTokens: 0,
+		totalTokens: 1500, estimatedCost: 0.01, editor: 'VS Code',
+		models: ['gpt-5.6-luna'], lastActivity: new Date().toISOString(),
+		...overrides,
+	};
+}
+
+function makeLcCtx(sessions: TodaySessionSummary[]): InsightContext {
+	return {
+		today: emptyPeriod(),
+		last30Days: emptyPeriod(),
+		missedPotential: [],
+		todaySessions: sessions,
+	};
+}
+
+test('long-context insights exist in INSIGHT_CATALOG', () => {
+	assert.ok(INSIGHT_CATALOG.find(d => d.id === LC_CROSSED_ID));
+	assert.ok(INSIGHT_CATALOG.find(d => d.id === LC_HEADROOM_ID));
+});
+
+test('long-context-pricing-crossed: fires when a request exceeds the model threshold', () => {
+	// gpt-5.6-luna default tier is <= 200K in modelPricing.json
+	const ctx = makeLcCtx([makeTodaySession({ maxRequestInputTokens: 210_000 })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === LC_CROSSED_ID);
+	assert.ok(insight, 'should fire above 200K for gpt-5.6-luna');
+	assert.ok(insight!.body.includes('210K'), 'body should show the max request size');
+	assert.ok(insight!.body.includes('200K'), 'body should show the threshold');
+	assert.ok(insight!.body.includes('gpt-5.6-luna'), 'body should name the model');
+});
+
+test('long-context-pricing-crossed: fires for a non-default CLI context tier', () => {
+	const ctx = makeLcCtx([makeTodaySession({ models: ['claude-sonnet-4.5'], contextTier: 'long-context' })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === LC_CROSSED_ID);
+	assert.ok(insight, 'should fire for non-default contextTier');
+	assert.ok(insight!.body.includes('long-context'), 'body should name the tier');
+});
+
+test('long-context-pricing-crossed: does NOT fire for default tier under the threshold', () => {
+	const ctx = makeLcCtx([makeTodaySession({ maxRequestInputTokens: 120_000, contextTier: 'default' })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LC_CROSSED_ID), undefined);
+});
+
+test('long-context-pricing-crossed: does NOT fire for non-tiered models over 200K', () => {
+	// claude-sonnet-4.5 has no longContext block, so no threshold to cross
+	const ctx = makeLcCtx([makeTodaySession({ models: ['claude-sonnet-4.5'], maxRequestInputTokens: 500_000 })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LC_CROSSED_ID), undefined);
+});
+
+test('long-context-headroom: fires at >= 70% of the threshold', () => {
+	const ctx = makeLcCtx([makeTodaySession({ maxRequestInputTokens: 150_000 })]); // 75% of 200K
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === LC_HEADROOM_ID);
+	assert.ok(insight, 'should fire at 75% of threshold');
+	assert.ok(insight!.body.includes('75%'), 'body should show percentage of the window');
+	assert.ok(insight!.body.includes('150K'), 'body should show the max request size');
+	assert.ok(insight!.body.includes('MB of code'), 'body should show the max repo size that fits the default tier');
+});
+
+test('long-context-headroom: does NOT fire below 70% of the threshold', () => {
+	const ctx = makeLcCtx([makeTodaySession({ maxRequestInputTokens: 120_000 })]); // 60% of 200K
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LC_HEADROOM_ID), undefined);
+});
+
+test('long-context-headroom: suppressed when the crossed insight fires', () => {
+	const ctx = makeLcCtx([
+		makeTodaySession({ maxRequestInputTokens: 210_000 }),
+		makeTodaySession({ maxRequestInputTokens: 150_000 }),
+	]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === LC_CROSSED_ID), 'crossed insight should fire');
+	assert.equal(results.find(i => i.id === LC_HEADROOM_ID), undefined, 'headroom tip should be suppressed');
+});
+
+test('long-context insights: no todaySessions means neither fires', () => {
+	const ctx = makeLcCtx([]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LC_CROSSED_ID), undefined);
+	assert.equal(results.find(i => i.id === LC_HEADROOM_ID), undefined);
+});
+
+// ---------------------------------------------------------------------------
+// large-context-window-unused tip
+// ---------------------------------------------------------------------------
+
+const LC_UNUSED_ID = 'large-context-window-unused';
+
+test('large-context-window-unused: fires when a non-default tier session stayed under the model threshold', () => {
+	// gpt-5.6-luna default-tier threshold is 200K; session only reached 80K
+	const ctx = makeLcCtx([makeTodaySession({ contextTier: 'long-context', contextWindowLimit: 400_000, contextReachedTokens: 80_000 })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === LC_UNUSED_ID);
+	assert.ok(insight, 'should fire when the big window was never needed');
+	assert.ok(insight!.body.includes('80K'), 'body should show the reached context size');
+	assert.ok(insight!.body.includes('long-context'), 'body should name the selected tier');
+});
+
+test('large-context-window-unused: fires for non-tiered models under 60% of the selected window', () => {
+	const ctx = makeLcCtx([makeTodaySession({ models: ['claude-sonnet-4.5'], contextTier: 'xl', contextWindowLimit: 400_000, contextReachedTokens: 100_000 })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === LC_UNUSED_ID), 'should fire at 25% window usage');
+});
+
+test('large-context-window-unused: suppresses the generic crossed insight for the same session', () => {
+	const ctx = makeLcCtx([makeTodaySession({ contextTier: 'long-context', contextWindowLimit: 400_000, contextReachedTokens: 80_000 })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === LC_UNUSED_ID), 'unused tip should fire');
+	assert.equal(results.find(i => i.id === LC_CROSSED_ID), undefined, 'generic tier warning should not double up');
+});
+
+test('large-context-window-unused: does NOT fire for the default tier', () => {
+	const ctx = makeLcCtx([makeTodaySession({ contextTier: 'default', contextWindowLimit: 200_000, contextReachedTokens: 80_000 })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LC_UNUSED_ID), undefined);
+});
+
+test('large-context-window-unused: does NOT fire when window usage is unknown (crossed generic fires instead)', () => {
+	const ctx = makeLcCtx([makeTodaySession({ contextTier: 'long-context' })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LC_UNUSED_ID), undefined, 'no usage data — cannot claim unused');
+	assert.ok(results.find(i => i.id === LC_CROSSED_ID), 'generic tier warning still applies');
+});
+
+test('large-context-window-unused: does NOT fire when the context actually exceeded the threshold', () => {
+	const ctx = makeLcCtx([makeTodaySession({ contextTier: 'long-context', contextWindowLimit: 400_000, contextReachedTokens: 250_000 })]);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LC_UNUSED_ID), undefined, 'window was genuinely used past the threshold');
+	assert.ok(results.find(i => i.id === LC_CROSSED_ID), 'crossed/tier warning applies instead');
+});

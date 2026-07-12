@@ -4,6 +4,16 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-07-11
+
+### Features
+- Long-context pricing discovery, insights, and Context Window section
+- Added friendly tool names from multiple community issues (#1571, #1573, #1577, #1581)
+- Clarified provider cost tooltip: unified budget/spend bars, add totals
+
+### Bug Fixes
+- Use notifier's real pricing data instead of hardcoded 0.00 stubs
+
 ## [0.11.6] - 2026-06-07
 
 ### Features
