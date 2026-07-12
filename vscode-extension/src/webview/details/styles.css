@@ -145,8 +145,8 @@ body {
 }
 
 .stats-table tr.group-row td {
-	background: var(--bg-tertiary);
-	color: var(--text-primary);
+	background: var(--list-hover-bg);
+	color: var(--text-secondary);
 	font-size: 12px;
 	font-weight: 700;
 	text-transform: uppercase;
