@@ -8,6 +8,8 @@ export type ButtonId = 'btn-refresh' | 'btn-details' | 'btn-chart' | 'btn-usage'
 export interface ButtonConfig {
 	id: ButtonId;
 	label: string;
+	/** Codicon name (without the `codicon-` prefix), rendered as a `<span class="codicon codicon-<icon>">` before the label. */
+	icon?: string;
 	appearance?: 'primary' | 'secondary';
 	/** When true, the button is not rendered in the UI (code is preserved for re-enabling later). */
 	hidden?: boolean;
@@ -21,40 +23,49 @@ export interface ButtonConfig {
 export const BUTTONS: Record<ButtonId, ButtonConfig> = {
 	'btn-refresh': {
 		id: 'btn-refresh',
-		label: '🔄 Refresh',
+		label: 'Refresh',
+		icon: 'refresh',
 		appearance: 'primary'
 	},
 	'btn-details': {
 		id: 'btn-details',
-		label: '🤖 Details'
+		label: 'Details',
+		icon: 'robot'
 	},
 	'btn-chart': {
 		id: 'btn-chart',
-		label: '📈 Chart'
+		label: 'Chart',
+		icon: 'graph-line'
 	},
 	'btn-usage': {
 		id: 'btn-usage',
-		label: '📊 Usage Analysis'
+		label: 'Usage Analysis',
+		icon: 'graph'
 	},
 	'btn-diagnostics': {
 		id: 'btn-diagnostics',
-		label: '🔍 Diagnostics'
+		label: 'Diagnostics',
+		icon: 'search'
 	},
 	'btn-maturity': {
 		id: 'btn-maturity',
-		label: '🎯 Fluency Score'
+		label: 'Fluency Score',
+		icon: 'target'
 	},
 	'btn-dashboard': {
 		id: 'btn-dashboard',
-		label: '📊 Team Dashboard'
-  },  
+		label: 'Team Dashboard',
+		icon: 'organization'
+  },
 	'btn-level-viewer': {
 		id: 'btn-level-viewer',
-		label: '🔍 Level Viewer'
+		label: 'Level Viewer',
+		icon: 'list-tree'
 	},
 	'btn-environmental': {
 		id: 'btn-environmental',
-		label: '🌿 Environmental Impact'
+		label: 'Environmental Impact',
+		icon: 'globe'
 	}
 };
 
@@ -100,7 +111,8 @@ export function buttonHtml(idOrConfig: ButtonId | ButtonConfig): string {
 	if (config.hidden) { return ''; }
 	const appearance = config.appearance ? ` appearance="${config.appearance}"` : '';
 	const active = config.active ? ' class="nav-active" disabled aria-current="page"' : '';
-	return `<vscode-button id="${config.id}"${appearance}${active}>${config.label}</vscode-button>`;
+	const icon = config.icon ? `<span class="codicon codicon-${config.icon}"></span> ` : '';
+	return `<vscode-button id="${config.id}"${appearance}${active}>${icon}${config.label}</vscode-button>`;
 }
 
 /**

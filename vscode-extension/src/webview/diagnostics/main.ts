@@ -813,7 +813,7 @@ function renderFolderAnalyzerTab(): string {
       </div>
     </div>
     <div class="section">
-      <div class="section-title">📁 Folder Selection</div>
+      <div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Folder Selection</span></div>
       <div class="folder-input-row">
         <input
           type="text"
@@ -906,7 +906,7 @@ function renderFolderAnalysisResults(
 
   return `
     <div class="section" style="margin-top: 0;">
-      <div class="section-title">📊 Analysis Results</div>
+      <div class="section-title"><span class="codicon codicon-graph"></span><span>Analysis Results</span></div>
       ${truncatedWarning}
       <div class="summary-cards">
         <div class="summary-card">
@@ -1727,7 +1727,7 @@ function handleDiagnosticDataError(message: DiagMessage): void {
     errorDiv.style.cssText =
       "color: #ff6b6b; padding: 20px; text-align: center;";
     errorDiv.innerHTML = `
-<h3>⚠️ Error Loading Diagnostic Data</h3>
+<h3><span class="codicon codicon-warning"></span> Error Loading Diagnostic Data</h3>
 <p>${escapeHtml(message.error || "Unknown error")}</p>
 `;
     rootEl.insertBefore(errorDiv, rootEl.firstChild);

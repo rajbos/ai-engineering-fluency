@@ -215,7 +215,7 @@ import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
 import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
-import { getNonce, buildCspMeta } from './utils/webviewUtils';
+import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { isGuidMcpTool } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { determineOnboardingAction } from './onboarding';
@@ -5841,6 +5841,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
 			<title>Environmental Impact</title>
 		</head>
 		<body>
@@ -7114,6 +7115,7 @@ ${hashtag}`;
 		<meta charset="UTF-8" />
 		<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 		${buildCspMeta(webview, nonce)}
+		${getCodiconStylesheetTag(webview, this.extensionUri)}
 		<title>Scoring Guide</title>
 	</head>
 	<body>
@@ -7177,6 +7179,7 @@ ${hashtag}`;
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
 			<title>AI Engineering Fluency Score</title>
 		</head>
 		<body>
@@ -7692,6 +7695,7 @@ ${hashtag}`;
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
 			<title>Team Dashboard</title>
 		</head>
 		<body>
@@ -7958,6 +7962,7 @@ ${this.getLoadingHtmlScript()}
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
 			<title>AI Engineering Fluency</title>
 		</head>
 		<body>
@@ -8795,6 +8800,7 @@ ${this.getLoadingHtmlScript()}
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
 			<title>Diagnostic Report</title>
 		</head>
 		<body>
@@ -8882,6 +8888,7 @@ ${this.getLoadingHtmlScript()}
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
 			<title>AI Engineering Fluency — Chart</title>
 		</head>
 		<body>
@@ -8953,6 +8960,7 @@ ${this.getLoadingHtmlScript()}
 			<meta charset="UTF-8" />
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
 			<title>Usage Analysis</title>
 		</head>
 		<body>
