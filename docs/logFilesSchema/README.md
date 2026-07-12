@@ -34,6 +34,17 @@ This is the **primary reference** for understanding Copilot session file structu
 - Model attribution heuristic from `toolCallId` prefix (`toolu_*` ⇒ Anthropic, `call_*` ⇒ OpenAI)
 - Why the JetBrains JSONL must NOT be conflated with the Copilot CLI JSONL under `~/.copilot/session-state/`
 
+### devin-windsurf-session-format.md
+**Research documentation** of Devin (Cognition Labs' desktop IDE) and its relationship to
+Windsurf. Devin is a direct fork/rebrand of Windsurf and shares the exact same Cascade
+`.pb` trajectory storage, bundled `codeium.windsurf` extension, and gRPC API — this file
+documents:
+- The `product.json` / `oldDataFolderName` evidence that Devin is a Windsurf fork
+- Why `src/windsurf.ts` (`WindsurfDataAccess`) is the single data access layer for both editors
+- How live sessions are attributed to "Windsurf" vs. "Devin" based on `vscode.env.appName`
+- The known limitation for file-based `.pb` fallback discovery (always labeled "Windsurf")
+- The separate, out-of-scope Devin CLI (`sessions.db`) tool
+
 ### gemini-cli-session-format.md
 **Research documentation** of an observed Gemini CLI session format on Windows. This file describes:
 - File locations under `~/.gemini/`

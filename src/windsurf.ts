@@ -89,11 +89,64 @@ export class WindsurfDataAccess {
 	}
 
 	/**
-	 * Check if a session file is a Windsurf session file.
-	 * Windsurf uses virtual windsurf://trajectory/{id} paths.
+	 * Check if the extension is running inside Devin (Cognition Labs' desktop IDE — a direct
+	 * fork/rebrand of Windsurf after Cognition acquired the Windsurf/Codeium team). Devin's
+	 * product.json reports appName "Devin"; it bundles the same `codeium.windsurf` extension
+	 * and writes Cascade trajectories into the very same ~/.codeium/windsurf/cascade folder.
+	 */
+	isRunningInDevin(): boolean {
+		const appName = vscode.env.appName.toLowerCase();
+		this.log(`[Windsurf] appName="${vscode.env.appName}" → isDevin=${appName.includes('devin')}`);
+		return appName.includes('devin');
+	}
+
+	/**
+	 * True when running inside either Windsurf or Devin — both host the same bundled
+	 * codeium.windsurf extension and gRPC language server, so live API session discovery
+	 * works identically from within either app.
+	 */
+	isRunningInWindsurfFamily(): boolean {
+		return this.isRunningInWindsurf() || this.isRunningInDevin();
+	}
+
+	/**
+	 * Returns the editor label to attribute a *live API-discovered* session to, based on
+	 * which app is actually hosting the extension right now. Only meaningful while running
+	 * inside Windsurf or Devin — callers must not use this for file-based (.pb) fallback
+	 * discovery, where the producing app cannot be determined (see getWindsurfCascadeSessionFiles).
+	 */
+	private getHostEditorLabel(): { source: 'windsurf' | 'devin'; name: string; scheme: string } {
+		if (this.isRunningInDevin()) {
+			return { source: 'devin', name: 'Devin', scheme: 'devin://trajectory/' };
+		}
+		return { source: 'windsurf', name: 'Windsurf', scheme: 'windsurf://trajectory/' };
+	}
+
+	/**
+	 * Given a windsurf:// or devin:// virtual session path, returns the friendly editor
+	 * name encoded by its scheme ('Windsurf' or 'Devin'). Cheaper than resolveSession()
+	 * when only the label (not full session data) is needed.
+	 */
+	getFamilyEditorName(sessionFile: string): string {
+		return sessionFile.startsWith('devin://') ? 'Devin' : 'Windsurf';
+	}
+
+	/**
+	 * Extracts the Cascade trajectory id from a windsurf://trajectory/{id} or
+	 * devin://trajectory/{id} virtual session path (both point at the same
+	 * ~/.codeium/windsurf/cascade/{id}.pb file on disk).
+	 */
+	extractTrajectoryId(sessionFile: string): string {
+		return sessionFile.replace('windsurf://trajectory/', '').replace('devin://trajectory/', '');
+	}
+
+	/**
+	 * Check if a session file is a Windsurf or Devin session file.
+	 * Windsurf uses virtual windsurf://trajectory/{id} paths; Devin (a fork/rebrand of
+	 * Windsurf that shares the same Cascade storage) uses devin://trajectory/{id} paths.
 	 */
 	isWindsurfSessionFile(filePath: string): boolean {
-		return filePath.startsWith('windsurf://trajectory/');
+		return filePath.startsWith('windsurf://trajectory/') || filePath.startsWith('devin://trajectory/');
 	}
 
 	/**
@@ -169,8 +222,8 @@ export class WindsurfDataAccess {
 	 * Get Windsurf credentials by intercepting HTTP requests from the Windsurf extension.
 	 */
 	async getCredentials(): Promise<WindsurfCredentials | null> {
-		if (!this.isRunningInWindsurf()) {
-			this.log('[Windsurf] Not running in Windsurf environment — skipping credential capture');
+		if (!this.isRunningInWindsurfFamily()) {
+			this.log('[Windsurf] Not running in Windsurf/Devin environment — skipping credential capture');
 			return null;
 		}
 
@@ -676,10 +729,15 @@ export class WindsurfDataAccess {
 			// API unavailable - fall through to file-based
 		}
 
-		// Fall back to .pb file metadata
-		const trajectoryId = sessionFile.replace('windsurf://trajectory/', '');
+		// Fall back to .pb file metadata. The origin app cannot be reliably determined
+		// from the file alone (Windsurf and Devin share the same Cascade directory), so
+		// the label is taken from the sessionFile's own virtual-path scheme, which was
+		// decided at discovery time (see getWindsurfCascadeSessionFiles / getHostEditorLabel).
+		const trajectoryId = this.extractTrajectoryId(sessionFile);
 		const cascadeDir = this.getCascadeDir();
 		const pbPath = path.join(cascadeDir, `${trajectoryId}.pb`);
+		const fallbackName = this.getFamilyEditorName(sessionFile);
+		const fallbackSource = fallbackName === 'Devin' ? 'devin' : 'windsurf';
 		try {
 			const stat = await fs.promises.stat(pbPath);
 			return {
@@ -697,9 +755,9 @@ export class WindsurfDataAccess {
 				},
 				firstInteraction: stat.birthtime.toISOString(),
 				lastInteraction: stat.mtime.toISOString(),
-				editorSource: 'windsurf',
-				editorName: 'Windsurf',
-				title: 'Windsurf Session',
+				editorSource: fallbackSource,
+				editorName: fallbackName,
+				title: `${fallbackName} Session`,
 			};
 		} catch {
 			return null;
@@ -831,8 +889,12 @@ export class WindsurfDataAccess {
 			this.log(`[Windsurf] trajectory ${trajectoryId}: stepCount=${activityScore} (no steps returned) → interactions=${stepData.interactions} tokens=${stepData.tokens} lastInteraction=${lastInteraction ?? '(none)'} (UTC day ${utcDayKey})`);
 		}
 
+		// Attribute the session to whichever app is actually hosting the extension right
+		// now (Windsurf or Devin) — both write to the same Cascade folder, so the virtual
+		// path scheme and editor label are decided here at live-API discovery time.
+		const host = this.getHostEditorLabel();
 		return {
-			file: `windsurf://trajectory/${trajectoryId}`,
+			file: `${host.scheme}${trajectoryId}`,
 			modified: summary.lastModifiedTime || new Date().toISOString(),
 			size: activityScore,
 			interactions: stepData.interactions,
@@ -843,9 +905,9 @@ export class WindsurfDataAccess {
 			contextReferences: { file: 0, selection: 0, implicitSelection: 0, symbol: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, terminalLastCommand: 0, terminalSelection: 0, clipboard: 0, changes: 0, outputPanel: 0, problemsPanel: 0, pullRequest: 0, byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {} },
 			firstInteraction: summary.createdTime,
 			lastInteraction: lastInteraction || summary.lastModifiedTime,
-			editorSource: 'windsurf',
-			editorName: 'Windsurf',
-			title: summary.summary || `Windsurf Session ${trajectoryId}`
+			editorSource: host.source,
+			editorName: host.name,
+			title: summary.summary || `${host.name} Session ${trajectoryId}`
 		};
 	}
 
@@ -1030,6 +1092,7 @@ export class WindsurfDataAccess {
 
 		diagnostics.environment = {
 			isRunningInWindsurf: this.isRunningInWindsurf(),
+			isRunningInDevin: this.isRunningInDevin(),
 			appName: vscode.env.appName,
 		};
 
