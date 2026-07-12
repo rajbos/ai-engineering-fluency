@@ -1318,7 +1318,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 				queued++;
 			}
 			if (queued > 0) {
-				this.log(`Queued ${queued} uncached OpenCode DB session(s) for startup refresh`);
+				if (queued > 0) {
+			this.log(`Queued ${queued} uncached OpenCode DB session(s) for startup refresh`);
+		}
 				this.sessionDiscovery.clearCache();
 			}
 		} catch (error) {
