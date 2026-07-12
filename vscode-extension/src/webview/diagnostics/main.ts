@@ -44,6 +44,16 @@ type SessionFileDetails = {
   modelUsage?: { [model: string]: { inputTokens: number; outputTokens: number } };
 };
 
+type ModelUsageRow = {
+  model: string;
+  inputTokens: number;
+  outputTokens: number;
+  cachedReadTokens: number;
+  cacheCreationTokens: number;
+  cacheCreation1hTokens: number;
+  estimatedCost: number;
+};
+
 type CacheInfo = {
   size: number;
   sizeInMB: number;
@@ -951,6 +961,102 @@ function renderFolderAnalysisResults(
     </div>`;
 }
 
+function renderModelUsageTab(detailedFiles: SessionFileDetails[]): string {
+  const editorStats = getEditorStats(detailedFiles);
+  const editorOptions = Object.keys(editorStats).sort()
+    .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
+    .join("");
+  return `
+    <div class="info-box">
+      <div class="info-box-title">🧮 Model Usage Breakdown</div>
+      <div>
+        Aggregates the exact per-model token usage and estimated cost the dashboard uses,
+        for a single editor or across all of them. Handy for spotting model/pricing
+        mismatches behind an unexpected cost total (e.g. tokens attributed to the wrong model tier).
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">🎯 Select Editor</div>
+      <div class="folder-input-row">
+        <select id="model-usage-editor-select" class="tool-type-select">
+          <option value="all">🌐 All Editors</option>
+          ${editorOptions}
+        </select>
+        <button class="button" id="btn-analyze-model-usage">🔍 Analyze</button>
+      </div>
+    </div>
+    <div id="model-usage-results"></div>
+  `;
+}
+
+function buildModelUsageTableRow(row: ModelUsageRow): string {
+  return `
+    <tr>
+      <td>${escapeHtml(row.model)}</td>
+      <td title="${row.inputTokens.toLocaleString()} tokens">${formatTokenCount(row.inputTokens)}</td>
+      <td title="${row.outputTokens.toLocaleString()} tokens">${formatTokenCount(row.outputTokens)}</td>
+      <td title="${row.cacheCreationTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreationTokens)}</td>
+      <td title="${row.cacheCreation1hTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreation1hTokens)}</td>
+      <td title="${row.cachedReadTokens.toLocaleString()} tokens">${formatTokenCount(row.cachedReadTokens)}</td>
+      <td>$${row.estimatedCost.toFixed(2)}</td>
+    </tr>`;
+}
+
+function renderModelUsageResults(
+  editor: string,
+  fileCount: number,
+  filesWithUsage: number,
+  rows: ModelUsageRow[],
+  totalCost: number,
+): string {
+  if (rows.length === 0) {
+    return `
+      <div class="section" style="margin-top: 0;">
+        <div style="padding: 32px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 36px; margin-bottom: 12px;">📭</div>
+          <div style="font-size: 14px;">No per-model usage data found for ${escapeHtml(editor === "all" ? "any editor" : editor)}.</div>
+          <div style="font-size: 12px; margin-top: 8px;">${fileCount} session file(s) matched, ${filesWithUsage} had model attribution data.</div>
+        </div>
+      </div>`;
+  }
+  const tableRows = rows.map(buildModelUsageTableRow).join("");
+  return `
+    <div class="section" style="margin-top: 0;">
+      <div class="section-title">📊 Results — ${escapeHtml(editor === "all" ? "All Editors" : editor)}</div>
+      <div class="summary-cards">
+        <div class="summary-card">
+          <div class="summary-label">📄 Session Files</div>
+          <div class="summary-value">${fileCount}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${filesWithUsage} with model data</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">🧩 Models</div>
+          <div class="summary-value">${rows.length}</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">💰 Est. Total Cost</div>
+          <div class="summary-value">$${totalCost.toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="table-container" style="margin-top: 12px; max-height: 420px;">
+        <table class="session-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Input</th>
+              <th>Output</th>
+              <th>Cache Create</th>
+              <th>Cache Create (1h)</th>
+              <th>Cache Read</th>
+              <th>Est. Cost</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
 function groupSessionFolders(
   raw: Array<{ dir: string; count: number; editorName?: string }>,
 ): Array<{ dir: string; count: number; editorName?: string }> {
@@ -1456,6 +1562,47 @@ function setupFolderAnalyzerHandlers(): void {
   });
 }
 
+function setupModelUsageHandlers(): void {
+  document.getElementById("btn-analyze-model-usage")?.addEventListener("click", () => {
+    const select = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
+    const editor = select?.value ?? "all";
+
+    const btn = document.getElementById("btn-analyze-model-usage") as HTMLButtonElement | null;
+    if (btn) {
+      btn.disabled = true;
+      btn.innerHTML = "<span>⏳</span><span>Analyzing…</span>";
+    }
+
+    const resultsDiv = document.getElementById("model-usage-results");
+    if (resultsDiv) {
+      resultsDiv.innerHTML = `
+          <div class="analyzer-loading">
+            <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+            <span>Aggregating model usage…</span>
+          </div>`;
+    }
+
+    vscode.postMessage({ command: "analyzeModelUsage", editor });
+  });
+}
+
+function handleModelUsageResult(message: DiagMessage): void {
+  const btn = document.getElementById("btn-analyze-model-usage") as HTMLButtonElement | null;
+  if (btn) {
+    btn.disabled = false;
+    btn.innerHTML = "🔍 Analyze";
+  }
+  const resultsDiv = document.getElementById("model-usage-results");
+  if (!resultsDiv) { return; }
+  resultsDiv.innerHTML = renderModelUsageResults(
+    String(message.editor || "all"),
+    Number(message.fileCount || 0),
+    Number(message.filesWithUsage || 0),
+    (message.rows || []) as ModelUsageRow[],
+    Number(message.totalCost || 0),
+  );
+}
+
 function setupTabHandlers(): void {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -1831,6 +1978,15 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
     sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
   }
 
+  const modelUsageSelect = document.getElementById("model-usage-editor-select");
+  if (modelUsageSelect) {
+    const editorStats = getEditorStats(storedDetailedFiles);
+    const editorOptions = Object.keys(editorStats).sort()
+      .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
+      .join("");
+    modelUsageSelect.innerHTML = `<option value="all">🌐 All Editors</option>${editorOptions}`;
+  }
+
   reRenderTable();
 }
 
@@ -1936,6 +2092,8 @@ function setupMessageHandlers(): void {
       handleFolderPicked(message);
     } else if (message.command === "folderAnalysisResult") {
       handleFolderAnalysisResult(message);
+    } else if (message.command === "modelUsageResult") {
+      handleModelUsageResult(message);
     }
   });
 }
@@ -2283,6 +2441,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <button class="tab" data-tab="github">🔑 GitHub Auth</button>
 <button class="tab" data-tab="display">⚙️ Settings</button>
 <button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
+<button class="tab" data-tab="model-usage">🧮 Model Usage</button>
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
 ${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
 </div>
@@ -2312,6 +2471,9 @@ ${renderDiagDisplayTabHtml(data)}
 ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 <div id="tab-path-analyzer" class="tab-content">
 ${renderFolderAnalyzerTab()}
+</div>
+<div id="tab-model-usage" class="tab-content">
+${renderModelUsageTab(detailedFiles)}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
 </div>
@@ -2362,6 +2524,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupStorageLinkHandlers();
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
+  setupModelUsageHandlers();
   setupButtonHandlers();
   setupDisplaySettingHandlers();
   setupToolAnalysisSortHandlers();

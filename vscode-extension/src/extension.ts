@@ -8157,6 +8157,7 @@ ${this.getLoadingHtmlScript()}
       signOutGitHub: () => this.dispatch('signOutGitHub:diagnostics', () => this.diagHandleGitHubAuth(false)),
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
+      analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
@@ -8338,6 +8339,68 @@ ${this.getLoadingHtmlScript()}
       return;
     }
     if (this.diagnosticsPanel) { await this.analyzeFolderPath(this.diagnosticsPanel, folderPath, effectiveToolType); }
+  }
+
+  /** Merge one file's per-model usage entries into the running aggregate. */
+  private static mergeModelUsageEntry(aggregated: ModelUsage, model: string, usage: ModelUsage[string]): void {
+    if (!aggregated[model]) { aggregated[model] = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 }; }
+    const agg = aggregated[model];
+    agg.inputTokens += usage.inputTokens || 0;
+    agg.outputTokens += usage.outputTokens || 0;
+    agg.cachedReadTokens = (agg.cachedReadTokens || 0) + (usage.cachedReadTokens || 0);
+    agg.cacheCreationTokens = (agg.cacheCreationTokens || 0) + (usage.cacheCreationTokens || 0);
+    agg.cacheCreation1hTokens = (agg.cacheCreation1hTokens || 0) + (usage.cacheCreation1hTokens || 0);
+  }
+
+  /** Aggregate per-model usage across a set of session files with modelUsage data. */
+  private aggregateModelUsage(matching: SessionFileDetails[]): { aggregated: ModelUsage; filesWithUsage: number } {
+    const aggregated: ModelUsage = {};
+    let filesWithUsage = 0;
+    for (const f of matching) {
+      if (!f.modelUsage) { continue; }
+      filesWithUsage++;
+      for (const [model, usage] of Object.entries(f.modelUsage)) {
+        CopilotTokenTracker.mergeModelUsageEntry(aggregated, model, usage);
+      }
+    }
+    return { aggregated, filesWithUsage };
+  }
+
+  /**
+   * Aggregates per-model token usage (and estimated cost) across the already-loaded
+   * diagnostics session files, optionally filtered to a single editor. Reuses the same
+   * modelUsage data + calculateEstimatedCost() the dashboard uses, so the breakdown a
+   * user sees here matches what drove their cost figures — useful for self-diagnosing
+   * "why does my cost look wrong" reports without a separate script.
+   */
+  private async diagHandleAnalyzeModelUsage(message: any): Promise<void> {
+    const editor = typeof message?.editor === 'string' && message.editor ? message.editor : 'all';
+    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
+
+    const files = this.diagnosticsCachedFiles;
+    const matching = editor === 'all' ? files : files.filter(f => (f.editorSource || 'Unknown') === editor);
+    const { aggregated, filesWithUsage } = this.aggregateModelUsage(matching);
+
+    const rows = Object.entries(aggregated).map(([model, usage]) => ({
+      model,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedReadTokens: usage.cachedReadTokens || 0,
+      cacheCreationTokens: usage.cacheCreationTokens || 0,
+      cacheCreation1hTokens: usage.cacheCreation1hTokens || 0,
+      estimatedCost: this.calculateEstimatedCost({ [model]: usage }),
+    })).sort((a, b) => b.estimatedCost - a.estimatedCost);
+
+    const totalCost = this.calculateEstimatedCost(aggregated);
+
+    this.diagnosticsPanel.webview.postMessage({
+      command: 'modelUsageResult',
+      editor,
+      fileCount: matching.length,
+      filesWithUsage,
+      rows,
+      totalCost,
+    });
   }
 
   /**
