@@ -96,9 +96,14 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] {
 
 /* Per-button icon accent color (set via the --icon-accent custom property on the icon
    span itself), so the label text keeps the theme's normal button foreground while the
-   glyph picks up a distinct color — breaks up an otherwise uniform row of solid pills. */
+   glyph picks up a distinct color — breaks up an otherwise uniform row of solid pills.
+   The explicit margin-right overrides vscode-button's own ::slotted(*) 4px default —
+   some codicon glyphs (graph, target, globe) fill their 16px box edge-to-edge with
+   little built-in whitespace, so 4px reads as touching the label; a fixed 6px keeps the
+   gap visually consistent across glyphs instead of varying with each icon's artwork. */
 .button-row .nav-icon {
 	color: var(--icon-accent, inherit);
+	margin-right: 6px !important;
 }
 
 /* Active view indicator — the nav button for the currently open view.
