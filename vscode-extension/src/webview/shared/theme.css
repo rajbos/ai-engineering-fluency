@@ -94,6 +94,13 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] {
 	flex-wrap: wrap;
 }
 
+/* Per-button icon accent color (set via the --icon-accent custom property on the icon
+   span itself), so the label text keeps the theme's normal button foreground while the
+   glyph picks up a distinct color — breaks up an otherwise uniform row of solid pills. */
+.button-row .nav-icon {
+	color: var(--icon-accent, inherit);
+}
+
 /* Active view indicator — the nav button for the currently open view.
    Rendered non-clickable (disabled) but kept fully opaque and marked with a
    secondary background plus an accent underline so the row reads as a tab strip. */
@@ -187,6 +194,13 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] {
 	--stage-2-color: #008787;
 	--stage-3-color: #b5b500;
 	--stage-4-color: #00a300;
+}
+
+/* High contrast stays stark and monochrome by design — the per-button icon accent
+   colors are a normal-theme-only affordance and must not dilute that contrast. */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-icon,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-icon {
+	color: currentColor;
 }
 
 /* Industrial navigation tab bar (high contrast only) */

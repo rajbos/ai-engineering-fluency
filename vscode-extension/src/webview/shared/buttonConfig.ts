@@ -10,6 +10,12 @@ export interface ButtonConfig {
 	label: string;
 	/** Codicon name (without the `codicon-` prefix), rendered as a `<span class="codicon codicon-<icon>">` before the label. */
 	icon?: string;
+	/**
+	 * Accent color for the icon glyph only (label text stays the theme's normal button color).
+	 * Applied via a CSS custom property so high-contrast themes can override it back to
+	 * `currentColor` — see `.nav-icon` in theme.css.
+	 */
+	iconColor?: string;
 	appearance?: 'primary' | 'secondary';
 	/** When true, the button is not rendered in the UI (code is preserved for re-enabling later). */
 	hidden?: boolean;
@@ -19,6 +25,9 @@ export interface ButtonConfig {
 
 /**
  * Navigation button definitions used across all webview panels.
+ * Every button besides Refresh renders as `appearance: 'secondary'` (outlined) so the row
+ * doesn't read as a wall of identical solid pills; the active view is still picked out via
+ * the `.nav-active` treatment in theme.css regardless of this base appearance.
  */
 export const BUTTONS: Record<ButtonId, ButtonConfig> = {
 	'btn-refresh': {
@@ -30,42 +39,58 @@ export const BUTTONS: Record<ButtonId, ButtonConfig> = {
 	'btn-details': {
 		id: 'btn-details',
 		label: 'Details',
-		icon: 'robot'
+		icon: 'robot',
+		iconColor: '#c37bff',
+		appearance: 'secondary'
 	},
 	'btn-chart': {
 		id: 'btn-chart',
 		label: 'Chart',
-		icon: 'graph-line'
+		icon: 'graph-line',
+		iconColor: '#60a5fa',
+		appearance: 'secondary'
 	},
 	'btn-usage': {
 		id: 'btn-usage',
 		label: 'Usage Analysis',
-		icon: 'graph'
+		icon: 'graph',
+		iconColor: '#22d3ee',
+		appearance: 'secondary'
 	},
 	'btn-diagnostics': {
 		id: 'btn-diagnostics',
 		label: 'Diagnostics',
-		icon: 'search'
+		icon: 'search',
+		iconColor: '#fb7185',
+		appearance: 'secondary'
 	},
 	'btn-maturity': {
 		id: 'btn-maturity',
 		label: 'Fluency Score',
-		icon: 'target'
+		icon: 'target',
+		iconColor: '#fbbf24',
+		appearance: 'secondary'
 	},
 	'btn-dashboard': {
 		id: 'btn-dashboard',
 		label: 'Team Dashboard',
-		icon: 'organization'
+		icon: 'organization',
+		iconColor: '#818cf8',
+		appearance: 'secondary'
   },
 	'btn-level-viewer': {
 		id: 'btn-level-viewer',
 		label: 'Level Viewer',
-		icon: 'list-tree'
+		icon: 'list-tree',
+		iconColor: '#94a3b8',
+		appearance: 'secondary'
 	},
 	'btn-environmental': {
 		id: 'btn-environmental',
 		label: 'Environmental Impact',
-		icon: 'globe'
+		icon: 'globe',
+		iconColor: '#4ade80',
+		appearance: 'secondary'
 	}
 };
 
@@ -111,7 +136,8 @@ export function buttonHtml(idOrConfig: ButtonId | ButtonConfig): string {
 	if (config.hidden) { return ''; }
 	const appearance = config.appearance ? ` appearance="${config.appearance}"` : '';
 	const active = config.active ? ' class="nav-active" disabled aria-current="page"' : '';
-	const icon = config.icon ? `<span class="codicon codicon-${config.icon}"></span> ` : '';
+	const iconStyle = config.iconColor ? ` style="--icon-accent:${config.iconColor}"` : '';
+	const icon = config.icon ? `<span class="codicon codicon-${config.icon} nav-icon"${iconStyle}></span> ` : '';
 	return `<vscode-button id="${config.id}"${appearance}${active}>${icon}${config.label}</vscode-button>`;
 }
 

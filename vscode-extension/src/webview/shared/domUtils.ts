@@ -23,6 +23,25 @@ export function iconHeading<K extends keyof HTMLElementTagNameMap>(tag: K, icon:
 	return node;
 }
 
+/** Builds the `<span class="codicon codicon-<icon> nav-icon">` used by both createButton and buttonHtml's DOM path. */
+function buildNavIconSpan(icon: string, iconColor: string | undefined): HTMLSpanElement {
+	const iconSpan = document.createElement('span');
+	iconSpan.className = `codicon codicon-${icon} nav-icon`;
+	if (iconColor) { iconSpan.style.setProperty('--icon-accent', iconColor); }
+	return iconSpan;
+}
+
+/** Applies the appearance/hidden/active attributes shared by both createButton call shapes. */
+function applyButtonConfigAttributes(button: HTMLElement, config: ButtonConfig): void {
+	if (config.appearance) { button.setAttribute('appearance', config.appearance); }
+	if (config.hidden) { button.hidden = true; }
+	if (config.active) {
+		button.classList.add('nav-active');
+		button.setAttribute('disabled', '');
+		button.setAttribute('aria-current', 'page');
+	}
+}
+
 /**
  * Creates a vscode-button element with the specified attributes.
  * Accepts either individual parameters or a ButtonConfig object.
@@ -37,26 +56,18 @@ export function createButton(configOrId: ButtonConfig | string, label?: string, 
 		button.id = configOrId;
 		button.textContent = label || '';
 		if (appearance) { button.setAttribute('appearance', appearance); }
-	} else {
-		// New signature: createButton(config)
-		const config = configOrId;
-		button.id = config.id;
-		if (config.icon) {
-			// Build icon + label as DOM nodes (not textContent) so the codicon span actually renders.
-			const iconSpan = document.createElement('span');
-			iconSpan.className = `codicon codicon-${config.icon}`;
-			button.append(iconSpan, document.createTextNode(` ${config.label}`));
-		} else {
-			button.textContent = config.label;
-		}
-		if (config.appearance) { button.setAttribute('appearance', config.appearance); }
-		if (config.hidden) { button.hidden = true; }
-		if (config.active) {
-			button.classList.add('nav-active');
-			button.setAttribute('disabled', '');
-			button.setAttribute('aria-current', 'page');
-		}
+		return button;
 	}
 
+	// New signature: createButton(config)
+	const config = configOrId;
+	button.id = config.id;
+	if (config.icon) {
+		// Build icon + label as DOM nodes (not textContent) so the codicon span actually renders.
+		button.append(buildNavIconSpan(config.icon, config.iconColor), document.createTextNode(` ${config.label}`));
+	} else {
+		button.textContent = config.label;
+	}
+	applyButtonConfigAttributes(button, config);
 	return button;
 }
