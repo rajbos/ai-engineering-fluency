@@ -6025,6 +6025,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 			case 'traceUsageCuration':
 				this._logTraceCuration(message);
 				break;
+			case 'saveSessionColumnSettings':
+				await this.dispatch('saveSessionColumnSettings', () =>
+					this.context.globalState.update('usage.sessionColumnSettings', message.settings)
+				);
+				break;
 		}
 	}
 
@@ -8921,6 +8926,8 @@ ${this.getLoadingHtmlScript()}
       .getConfiguration('aiEngineeringFluency')
       .get<string[]>('suppressedUnknownTools', []);
 
+    const sessionColumnSettings = this.context.globalState.get('usage.sessionColumnSettings', {});
+
     const initialData = stats ? JSON.stringify({
       today: stats.today,
       last30Days: stats.last30Days,
@@ -8937,6 +8944,7 @@ ${this.getLoadingHtmlScript()}
       use24HourTime: this.getUse24HourTimeSetting(),
       insights: this.buildCurrentInsights(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
+      sessionColumnSettings,
     }).replace(/</g, "\\u003c") : 'null';
 
     return `<!DOCTYPE html>

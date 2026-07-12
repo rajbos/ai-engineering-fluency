@@ -102,6 +102,8 @@ type UsageAnalysisStats = {
 	use24HourTime?: boolean;
 	insights?: EvaluatedInsight[];
 	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
+	sessionColumnSettings?: { enabledColumns?: string[] };
 };
 
 // ── Tool Curation types ──────────────────────────────────────────────────────
@@ -917,9 +919,51 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 		</table>`;
 }
 
-// --- Recent Sessions table with sortable columns ---
+// --- Recent Sessions table with sortable, toggleable columns ---
 type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity';
 type SessionsLookback = 'today' | '7' | '30';
+
+/** Optional (toggleable) session table columns. Title is always shown and is not part of this set. */
+type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity';
+
+type SessionColumnDef = {
+	id: SessionColumnId;
+	label: string;
+	/** Absent for columns that cannot be sorted (Models). */
+	sortKey?: SessionSortColumn;
+	align: 'left' | 'right';
+	/** Extra inline style appended after the base cell style (later declarations win). */
+	cellStyle?: string;
+	render: (s: TodaySessionSummary) => { html: string; title?: string };
+};
+
+const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
+	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => ({ html: formatNumber(s.interactions) }) },
+	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => ({ html: formatNumber(s.toolCalls) }) },
+	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => ({ html: formatNumber(s.inputTokens) }) },
+	{ id: 'outputTokens', label: 'Output', sortKey: 'outputTokens', align: 'right', render: s => ({ html: formatNumber(s.outputTokens) }) },
+	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => ({ html: formatNumber(s.thinkingTokens) }) },
+	{ id: 'cachedTokens', label: 'Cached', sortKey: 'cachedTokens', align: 'right', render: s => ({ html: formatNumber(s.cachedTokens) }) },
+	{ id: 'totalTokens', label: 'Total', sortKey: 'totalTokens', align: 'right', render: s => ({ html: formatNumber(s.totalTokens) }) },
+	{ id: 'estimatedCost', label: 'Cost', sortKey: 'estimatedCost', align: 'right', render: s => ({ html: s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—' }) },
+	{ id: 'editor', label: 'Editor', sortKey: 'editor', align: 'left', render: s => ({ html: escapeHtml(s.editor || 'unknown') }) },
+	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
+	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
+	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => ({ html: formatDurationShort(s.durationMs) }) },
+	{
+		id: 'lastActivity', label: 'Last Active', sortKey: 'lastActivity', align: 'right', cellStyle: 'white-space:nowrap;',
+		render: s => ({
+			html: s.lastActivity
+				? (sessionsLookback === 'today'
+					? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime })
+					: new Date(s.lastActivity).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }))
+				: '—'
+		}),
+	},
+];
+
+const ALL_SESSION_COLUMN_IDS: SessionColumnId[] = SESSION_COLUMN_DEFS.map(c => c.id);
+
 let sessionSortColumn: SessionSortColumn = 'interactions';
 let sessionSortDirection: 'asc' | 'desc' = 'desc';
 let cachedTodaySessions: TodaySessionSummary[] = [];
@@ -929,6 +973,12 @@ let use24HourTime = true;
 let sessionsLookback: SessionsLookback = 'today';
 let latestTodaySessions: TodaySessionSummary[] = [];
 const recentSessionsCache: { [days: string]: TodaySessionSummary[] } = {};
+/** Which optional columns are currently visible. Title (and the row number) are always shown. */
+let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
+
+function saveSessionColumnSettings(): void {
+	vscode.postMessage({ command: 'saveSessionColumnSettings', settings: { enabledColumns: Array.from(enabledSessionColumns) } });
+}
 
 function getSessionSortIndicator(column: SessionSortColumn): string {
 	if (sessionSortColumn !== column) { return ''; }
@@ -973,37 +1023,28 @@ function renderTodaySessionsTable(sessions: TodaySessionSummary[]): string {
 
 function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 	const sorted = sortTodaySessions(sessions);
+	const visibleColumns = SESSION_COLUMN_DEFS.filter(c => enabledSessionColumns.has(c.id));
+
 	const rows = sorted.map((s, idx) => {
 		const title = escapeHtml(s.title || 'Untitled session');
 		const filePath = escapeHtml(s.filePath || '');
-		const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—';
-		const editor = escapeHtml(s.editor || 'unknown');
-		const workspace = escapeHtml(s.workspace || '—');
-		const duration = formatDurationShort(s.durationMs);
-		const cost = s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—';
-		// For multi-day lookbacks include the date so rows from different days are distinguishable.
-		const time = s.lastActivity
-			? (sessionsLookback === 'today'
-				? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime })
-				: new Date(s.lastActivity).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }))
-			: '—';
+		const optionalCells = visibleColumns.map(col => {
+			const { html, title: cellTitle } = col.render(s);
+			const alignStyle = col.align === 'right' ? 'text-align:right;' : '';
+			const titleAttr = cellTitle !== undefined ? ` title="${cellTitle}"` : '';
+			return `<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${alignStyle}${col.cellStyle || ''}"${titleAttr}>${html}</td>`;
+		}).join('');
 		return `<tr>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; color:var(--text-secondary);">${idx + 1}</td>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Open viewer for session &quot;${title}&quot;"><a href="#" class="session-title-link" data-file="${filePath}" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${title}</a></td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.interactions)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.toolCalls)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.inputTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.outputTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.thinkingTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.cachedTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.totalTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${cost}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px;">${editor}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${workspace}">${workspace}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${models}">${models}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; white-space:nowrap; text-align:right;">${duration}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; white-space:nowrap; text-align:right;">${time}</td>
+			${optionalCells}
 		</tr>`;
+	}).join('');
+
+	const headerCells = visibleColumns.map(col => {
+		const alignStyle = col.align === 'right' ? ' text-align:right;' : '';
+		if (!col.sortKey) { return `<th style="padding:6px 8px;${alignStyle}">${col.label}</th>`; }
+		return `<th class="sortable" data-sort="${col.sortKey}" style="padding:6px 8px;${alignStyle}">${col.label}${getSessionSortIndicator(col.sortKey)}</th>`;
 	}).join('');
 
 	return `
@@ -1013,25 +1054,29 @@ function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">
 					<th style="padding:6px 8px;">#</th>
 					<th class="sortable" data-sort="title" style="padding:6px 8px;">Title${getSessionSortIndicator('title')}</th>
-					<th class="sortable" data-sort="interactions" style="padding:6px 8px; text-align:right;">Turns${getSessionSortIndicator('interactions')}</th>
-					<th class="sortable" data-sort="toolCalls" style="padding:6px 8px; text-align:right;">Tools${getSessionSortIndicator('toolCalls')}</th>
-					<th class="sortable" data-sort="inputTokens" style="padding:6px 8px; text-align:right;">Input${getSessionSortIndicator('inputTokens')}</th>
-					<th class="sortable" data-sort="outputTokens" style="padding:6px 8px; text-align:right;">Output${getSessionSortIndicator('outputTokens')}</th>
-					<th class="sortable" data-sort="thinkingTokens" style="padding:6px 8px; text-align:right;">Thinking${getSessionSortIndicator('thinkingTokens')}</th>
-					<th class="sortable" data-sort="cachedTokens" style="padding:6px 8px; text-align:right;">Cached${getSessionSortIndicator('cachedTokens')}</th>
-					<th class="sortable" data-sort="totalTokens" style="padding:6px 8px; text-align:right;">Total${getSessionSortIndicator('totalTokens')}</th>
-					<th class="sortable" data-sort="estimatedCost" style="padding:6px 8px; text-align:right;">Cost${getSessionSortIndicator('estimatedCost')}</th>
-					<th class="sortable" data-sort="editor" style="padding:6px 8px;">Editor${getSessionSortIndicator('editor')}</th>
-					<th class="sortable" data-sort="workspace" style="padding:6px 8px;">Workspace${getSessionSortIndicator('workspace')}</th>
-					<th style="padding:6px 8px;">Models</th>
-					<th class="sortable" data-sort="durationMs" style="padding:6px 8px; text-align:right;">Duration${getSessionSortIndicator('durationMs')}</th>
-					<th class="sortable" data-sort="lastActivity" style="padding:6px 8px; text-align:right;">Last Active${getSessionSortIndicator('lastActivity')}</th>
+					${headerCells}
 				</tr>
 			</thead>
 			<tbody>
 				${rows}
 			</tbody>
 		</table>
+		</div>`;
+}
+
+/** Builds the "Columns" toggle button and its checkbox dropdown for showing/hiding optional columns. */
+function buildSessionColumnsMenuHtml(): string {
+	const items = SESSION_COLUMN_DEFS.map(col => `
+		<label style="display:flex; align-items:center; gap:6px; padding:4px 8px; font-size:12px; white-space:nowrap; cursor:pointer;">
+			<input type="checkbox" data-column="${col.id}"${enabledSessionColumns.has(col.id) ? ' checked' : ''} />
+			<span>${col.label}</span>
+		</label>`).join('');
+	return `
+		<div class="columns-menu-wrap" style="position:relative;">
+			<button id="sessions-columns-toggle" type="button" style="font-size:12px; padding:2px 8px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px; cursor:pointer;">⚙ Columns</button>
+			<div id="sessions-columns-menu" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; z-index:20; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; box-shadow:0 4px 10px var(--shadow-color); padding:4px 0; min-width:160px;">
+				${items}
+			</div>
 		</div>`;
 }
 
@@ -1066,6 +1111,38 @@ function setupSessionsTableSort(): void {
 		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
 	});
 	setupSessionsLookbackSelector();
+	setupSessionColumnsMenu();
+}
+
+let _documentClickClosesColumnsMenu = false;
+
+function setupSessionColumnsMenu(): void {
+	const toggle = document.getElementById('sessions-columns-toggle');
+	const menu = document.getElementById('sessions-columns-menu');
+	if (!toggle || !menu) { return; }
+	toggle.addEventListener('click', (e) => {
+		e.stopPropagation();
+		menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+	});
+	menu.addEventListener('click', (e) => e.stopPropagation());
+	menu.addEventListener('change', (e) => {
+		const checkbox = e.target as HTMLInputElement;
+		const columnId = checkbox.getAttribute('data-column') as SessionColumnId | null;
+		if (!columnId) { return; }
+		if (checkbox.checked) { enabledSessionColumns.add(columnId); } else { enabledSessionColumns.delete(columnId); }
+		const container = document.getElementById('sessions-table-container');
+		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+		saveSessionColumnSettings();
+	});
+	// Attached once ever (not per re-render) and re-queries the live menu element on
+	// each click, so it keeps working across full DOM rebuilds without leaking listeners.
+	if (!_documentClickClosesColumnsMenu) {
+		_documentClickClosesColumnsMenu = true;
+		document.addEventListener('click', () => {
+			const liveMenu = document.getElementById('sessions-columns-menu');
+			if (liveMenu) { liveMenu.style.display = 'none'; }
+		});
+	}
 }
 
 function setupSessionsLookbackSelector(): void {
@@ -2586,6 +2663,7 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 						<option value="7"${sessionsLookback === '7' ? ' selected' : ''}>Last 7 days</option>
 						<option value="30"${sessionsLookback === '30' ? ' selected' : ''}>Last 30 days</option>
 					</select>
+					${buildSessionColumnsMenuHtml()}
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
 				<div id="sessions-panel-body" style="margin-top: 12px;">
@@ -3794,6 +3872,11 @@ async function bootstrap(): Promise<void> {
 	}
 	setFormatLocale(initialData.locale);
 	use24HourTime = initialData.use24HourTime !== false;
+	const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
+	if (Array.isArray(savedColumns)) {
+		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));
+		enabledSessionColumns = new Set(valid);
+	}
 	renderLayout(initialData);
 	setupSessionsTableSort();
 
