@@ -1,5 +1,5 @@
 // Maturity Score webview
-import { buttonHtml } from '../shared/buttonConfig';
+import { navButtonsHtml } from '../shared/buttonConfig';
 import type { ContextReferenceUsage } from '../shared/contextRefUtils';
 import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
@@ -400,13 +400,7 @@ function buildMaturityRootHtml(
           <span class="header-title">AI Engineering Fluency Score</span>
         </div>
         <div class="button-row">
-          ${buttonHtml('btn-refresh')}
-          ${buttonHtml('btn-details')}
-          ${buttonHtml('btn-chart')}
-          ${buttonHtml('btn-usage')}
-          ${buttonHtml('btn-environmental')}
-          ${buttonHtml('btn-diagnostics')}
-          ${data.backendConfigured ? buttonHtml('btn-dashboard') : ''}
+          ${navButtonsHtml('btn-maturity', !!data.backendConfigured)}
         </div>
       </div>
       <div class="info-box">

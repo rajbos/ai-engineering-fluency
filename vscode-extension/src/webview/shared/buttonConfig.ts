@@ -11,6 +11,8 @@ export interface ButtonConfig {
 	appearance?: 'primary' | 'secondary';
 	/** When true, the button is not rendered in the UI (code is preserved for re-enabling later). */
 	hidden?: boolean;
+	/** When true, the button represents the currently open view and is rendered in a distinct, non-clickable state. */
+	active?: boolean;
 }
 
 /**
@@ -64,12 +66,47 @@ export function getButton(id: ButtonId): ButtonConfig {
 }
 
 /**
- * Generates an HTML string for a vscode-button element from a button config.
- * Useful for template strings where DOM manipulation isn't available.
+ * Canonical order of the shared navigation button row rendered by every webview panel.
  */
-export function buttonHtml(id: ButtonId): string {
-	const config = BUTTONS[id];
+const NAV_ORDER: ButtonId[] = [
+	'btn-refresh',
+	'btn-details',
+	'btn-chart',
+	'btn-usage',
+	'btn-maturity',
+	'btn-environmental',
+	'btn-diagnostics',
+	'btn-dashboard'
+];
+
+/**
+ * Returns the full navigation button row in the canonical order.
+ * The button matching `activeView` is marked active so it renders in a
+ * visually distinct, non-clickable state (the nav reads as a tab strip).
+ * The Team Dashboard button is only included when a backend is configured.
+ */
+export function getNavButtons(activeView: ButtonId | null, backendConfigured: boolean): ButtonConfig[] {
+	return NAV_ORDER
+		.filter(id => id !== 'btn-dashboard' || backendConfigured)
+		.map(id => ({ ...BUTTONS[id], active: id === activeView }));
+}
+
+/**
+ * Generates an HTML string for a vscode-button element from a button config
+ * (or a button ID). Useful for template strings where DOM manipulation isn't available.
+ */
+export function buttonHtml(idOrConfig: ButtonId | ButtonConfig): string {
+	const config = typeof idOrConfig === 'string' ? BUTTONS[idOrConfig] : idOrConfig;
 	if (config.hidden) { return ''; }
 	const appearance = config.appearance ? ` appearance="${config.appearance}"` : '';
-	return `<vscode-button id="${config.id}"${appearance}>${config.label}</vscode-button>`;
+	const active = config.active ? ' class="nav-active" disabled aria-current="page"' : '';
+	return `<vscode-button id="${config.id}"${appearance}${active}>${config.label}</vscode-button>`;
+}
+
+/**
+ * Generates the HTML for the full shared navigation button row.
+ * String-template counterpart of `getNavButtons` + `createButton`.
+ */
+export function navButtonsHtml(activeView: ButtonId | null, backendConfigured: boolean): string {
+	return getNavButtons(activeView, backendConfigured).map(config => buttonHtml(config)).join('\n');
 }

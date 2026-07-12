@@ -94,6 +94,21 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] {
 	flex-wrap: wrap;
 }
 
+/* Active view indicator — the nav button for the currently open view.
+   Rendered non-clickable (disabled) but kept fully opaque and marked with a
+   secondary background plus an accent underline so the row reads as a tab strip. */
+.button-row vscode-button.nav-active {
+	opacity: 1;
+	pointer-events: none;
+}
+
+.button-row vscode-button.nav-active::part(control) {
+	background: var(--button-secondary-bg);
+	color: var(--button-secondary-fg);
+	border-bottom: 2px solid var(--focus-border);
+	cursor: default;
+}
+
 /* ------------------------------------------------------------------ *
  * High contrast themes — INDUSTRIAL REDUX
  * Stark outlines, uppercase navigation, neon stage colors, monospace.
@@ -251,6 +266,23 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-butto
 	background-color: var(--vscode-foreground) !important;
 	color: var(--vscode-editor-background) !important;
 	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important; /* Cyber/Industrial accent indicator */
+}
+
+/* Active view indicator (high contrast) — inverted like hover, with the accent underline */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button.nav-active,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button.nav-active {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important;
+	opacity: 1;
+	pointer-events: none;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button.nav-active::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button.nav-active::part(control) {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	cursor: default;
 }
 
 /* Industrial header + title (high contrast only) */
