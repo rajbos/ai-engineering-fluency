@@ -2,7 +2,7 @@
 import { el } from '../shared/domUtils';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { escapeHtml, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatDurationShort, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
@@ -67,6 +67,8 @@ type TodaySessionSummary = {
 	contextTier?: string;
 	contextWindowLimit?: number;
 	contextReachedTokens?: number;
+	durationMs?: number;
+	workspace?: string;
 };
 
 type InsightSeverity = 'tip' | 'opportunity' | 'celebration';
@@ -100,6 +102,8 @@ type UsageAnalysisStats = {
 	use24HourTime?: boolean;
 	insights?: EvaluatedInsight[];
 	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
+	sessionColumnSettings?: { enabledColumns?: string[] };
 };
 
 // ── Tool Curation types ──────────────────────────────────────────────────────
@@ -923,12 +927,66 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 		</table>`;
 }
 
-// --- Today's Sessions table with sortable columns ---
-type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'lastActivity';
+// --- Recent Sessions table with sortable, toggleable columns ---
+type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity';
+type SessionsLookback = 'today' | '7' | '30';
+
+/** Optional (toggleable) session table columns. Title is always shown and is not part of this set. */
+type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity';
+
+type SessionColumnDef = {
+	id: SessionColumnId;
+	label: string;
+	/** Absent for columns that cannot be sorted (Models). */
+	sortKey?: SessionSortColumn;
+	align: 'left' | 'right';
+	/** Extra inline style appended after the base cell style (later declarations win). */
+	cellStyle?: string;
+	render: (s: TodaySessionSummary) => { html: string; title?: string };
+};
+
+const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
+	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => ({ html: formatNumber(s.interactions) }) },
+	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => ({ html: formatNumber(s.toolCalls) }) },
+	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => ({ html: formatNumber(s.inputTokens) }) },
+	{ id: 'outputTokens', label: 'Output', sortKey: 'outputTokens', align: 'right', render: s => ({ html: formatNumber(s.outputTokens) }) },
+	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => ({ html: formatNumber(s.thinkingTokens) }) },
+	{ id: 'cachedTokens', label: 'Cached', sortKey: 'cachedTokens', align: 'right', render: s => ({ html: formatNumber(s.cachedTokens) }) },
+	{ id: 'totalTokens', label: 'Total', sortKey: 'totalTokens', align: 'right', render: s => ({ html: formatNumber(s.totalTokens) }) },
+	{ id: 'estimatedCost', label: 'Cost', sortKey: 'estimatedCost', align: 'right', render: s => ({ html: s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—' }) },
+	{ id: 'editor', label: 'Editor', sortKey: 'editor', align: 'left', render: s => ({ html: escapeHtml(s.editor || 'unknown') }) },
+	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
+	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
+	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => ({ html: formatDurationShort(s.durationMs) }) },
+	{
+		id: 'lastActivity', label: 'Last Active', sortKey: 'lastActivity', align: 'right', cellStyle: 'white-space:nowrap;',
+		render: s => ({
+			html: s.lastActivity
+				? (sessionsLookback === 'today'
+					? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime })
+					: new Date(s.lastActivity).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }))
+				: '—'
+		}),
+	},
+];
+
+const ALL_SESSION_COLUMN_IDS: SessionColumnId[] = SESSION_COLUMN_DEFS.map(c => c.id);
+
 let sessionSortColumn: SessionSortColumn = 'interactions';
 let sessionSortDirection: 'asc' | 'desc' = 'desc';
 let cachedTodaySessions: TodaySessionSummary[] = [];
 let use24HourTime = true;
+// Lookback selector state: "today" renders the summaries bundled with updateStats;
+// longer windows are lazily requested from the extension host and cached here.
+let sessionsLookback: SessionsLookback = 'today';
+let latestTodaySessions: TodaySessionSummary[] = [];
+const recentSessionsCache: { [days: string]: TodaySessionSummary[] } = {};
+/** Which optional columns are currently visible. Title (and the row number) are always shown. */
+let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
+
+function saveSessionColumnSettings(): void {
+	vscode.postMessage({ command: 'saveSessionColumnSettings', settings: { enabledColumns: Array.from(enabledSessionColumns) } });
+}
 
 function getSessionSortIndicator(column: SessionSortColumn): string {
 	if (sessionSortColumn !== column) { return ''; }
@@ -945,6 +1003,12 @@ function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary
 			case 'editor':
 				cmp = (a.editor || '').localeCompare(b.editor || '');
 				break;
+			case 'workspace':
+				cmp = (a.workspace || '').localeCompare(b.workspace || '');
+				break;
+			case 'durationMs':
+				cmp = (a.durationMs ?? -1) - (b.durationMs ?? -1);
+				break;
 			case 'lastActivity':
 				cmp = (a.lastActivity || '').localeCompare(b.lastActivity || '');
 				break;
@@ -959,55 +1023,46 @@ function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary
 function renderTodaySessionsTable(sessions: TodaySessionSummary[]): string {
 	cachedTodaySessions = sessions;
 	if (!sessions || sessions.length === 0) {
-		return '<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No sessions recorded today yet.</div>';
+		const emptyMessage = sessionsLookback === 'today' ? 'No sessions recorded today yet.' : 'No sessions recorded in this period.';
+		return `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">${emptyMessage}</div>`;
 	}
 	return `<div id="sessions-table-container">${buildSessionsTableHtml(sessions)}</div>`;
 }
 
 function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 	const sorted = sortTodaySessions(sessions);
+	const visibleColumns = SESSION_COLUMN_DEFS.filter(c => enabledSessionColumns.has(c.id));
+
 	const rows = sorted.map((s, idx) => {
 		const title = escapeHtml(s.title || 'Untitled session');
 		const filePath = escapeHtml(s.filePath || '');
-		const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—';
-		const editor = escapeHtml(s.editor || 'unknown');
-		const cost = s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—';
-		const time = s.lastActivity ? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }) : '—';
+		const optionalCells = visibleColumns.map(col => {
+			const { html, title: cellTitle } = col.render(s);
+			const alignStyle = col.align === 'right' ? 'text-align:right;' : '';
+			const titleAttr = cellTitle !== undefined ? ` title="${cellTitle}"` : '';
+			return `<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${alignStyle}${col.cellStyle || ''}"${titleAttr}>${html}</td>`;
+		}).join('');
 		return `<tr>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; color:var(--text-secondary);">${idx + 1}</td>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Open viewer for session &quot;${title}&quot;"><a href="#" class="session-title-link" data-file="${filePath}" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${title}</a></td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.interactions)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.toolCalls)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.inputTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.outputTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.thinkingTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.cachedTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.totalTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${cost}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px;">${editor}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${models}">${models}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; white-space:nowrap; text-align:right;">${time}</td>
+			${optionalCells}
 		</tr>`;
+	}).join('');
+
+	const headerCells = visibleColumns.map(col => {
+		const alignStyle = col.align === 'right' ? ' text-align:right;' : '';
+		if (!col.sortKey) { return `<th style="padding:6px 8px;${alignStyle}">${col.label}</th>`; }
+		return `<th class="sortable" data-sort="${col.sortKey}" style="padding:6px 8px;${alignStyle}">${col.label}${getSessionSortIndicator(col.sortKey)}</th>`;
 	}).join('');
 
 	return `
 		<div style="overflow-x:auto;">
-		<table class="sessions-table" style="width:100%; border-collapse:collapse; min-width:900px;">
+		<table class="sessions-table" style="width:100%; border-collapse:collapse; min-width:1050px;">
 			<thead>
 				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">
 					<th style="padding:6px 8px;">#</th>
 					<th class="sortable" data-sort="title" style="padding:6px 8px;">Title${getSessionSortIndicator('title')}</th>
-					<th class="sortable" data-sort="interactions" style="padding:6px 8px; text-align:right;">Turns${getSessionSortIndicator('interactions')}</th>
-					<th class="sortable" data-sort="toolCalls" style="padding:6px 8px; text-align:right;">Tools${getSessionSortIndicator('toolCalls')}</th>
-					<th class="sortable" data-sort="inputTokens" style="padding:6px 8px; text-align:right;">Input${getSessionSortIndicator('inputTokens')}</th>
-					<th class="sortable" data-sort="outputTokens" style="padding:6px 8px; text-align:right;">Output${getSessionSortIndicator('outputTokens')}</th>
-					<th class="sortable" data-sort="thinkingTokens" style="padding:6px 8px; text-align:right;">Thinking${getSessionSortIndicator('thinkingTokens')}</th>
-					<th class="sortable" data-sort="cachedTokens" style="padding:6px 8px; text-align:right;">Cached${getSessionSortIndicator('cachedTokens')}</th>
-					<th class="sortable" data-sort="totalTokens" style="padding:6px 8px; text-align:right;">Total${getSessionSortIndicator('totalTokens')}</th>
-					<th class="sortable" data-sort="estimatedCost" style="padding:6px 8px; text-align:right;">Cost${getSessionSortIndicator('estimatedCost')}</th>
-					<th class="sortable" data-sort="editor" style="padding:6px 8px;">Editor${getSessionSortIndicator('editor')}</th>
-					<th style="padding:6px 8px;">Models</th>
-					<th class="sortable" data-sort="lastActivity" style="padding:6px 8px; text-align:right;">Last Active${getSessionSortIndicator('lastActivity')}</th>
+					${headerCells}
 				</tr>
 			</thead>
 			<tbody>
@@ -1017,10 +1072,28 @@ function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 		</div>`;
 }
 
+/** Builds the "Columns" toggle button and its checkbox dropdown for showing/hiding optional columns. */
+function buildSessionColumnsMenuHtml(): string {
+	const items = SESSION_COLUMN_DEFS.map(col => `
+		<label style="display:flex; align-items:center; gap:6px; padding:4px 8px; font-size:12px; white-space:nowrap; cursor:pointer;">
+			<input type="checkbox" data-column="${col.id}"${enabledSessionColumns.has(col.id) ? ' checked' : ''} />
+			<span>${col.label}</span>
+		</label>`).join('');
+	return `
+		<div class="columns-menu-wrap" style="position:relative;">
+			<button id="sessions-columns-toggle" type="button" style="font-size:12px; padding:2px 8px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px; cursor:pointer;">⚙ Columns</button>
+			<div id="sessions-columns-menu" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; z-index:20; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; box-shadow:0 4px 10px var(--shadow-color); padding:4px 0; min-width:160px;">
+				${items}
+			</div>
+		</div>`;
+}
+
 function setupSessionsTableSort(): void {
-	const container = document.getElementById('sessions-table-container');
-	if (!container) { return; }
-	container.addEventListener('click', (e) => {
+	// Delegate from the stable panel body so listeners survive lookback re-renders,
+	// which replace the inner #sessions-table-container element.
+	const body = document.getElementById('sessions-panel-body');
+	if (!body) { return; }
+	body.addEventListener('click', (e) => {
 		// Handle session title link clicks → open in log viewer
 		const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.session-title-link');
 		if (link) {
@@ -1042,8 +1115,87 @@ function setupSessionsTableSort(): void {
 			sessionSortColumn = col;
 			sessionSortDirection = 'desc';
 		}
-		container.innerHTML = buildSessionsTableHtml(cachedTodaySessions);
+		const container = document.getElementById('sessions-table-container');
+		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
 	});
+	setupSessionsLookbackSelector();
+	setupSessionColumnsMenu();
+}
+
+let _documentClickClosesColumnsMenu = false;
+
+function setupSessionColumnsMenu(): void {
+	const toggle = document.getElementById('sessions-columns-toggle');
+	const menu = document.getElementById('sessions-columns-menu');
+	if (!toggle || !menu) { return; }
+	toggle.addEventListener('click', (e) => {
+		e.stopPropagation();
+		menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+	});
+	menu.addEventListener('click', (e) => e.stopPropagation());
+	menu.addEventListener('change', (e) => {
+		const checkbox = e.target as HTMLInputElement;
+		const columnId = checkbox.getAttribute('data-column') as SessionColumnId | null;
+		if (!columnId) { return; }
+		if (checkbox.checked) { enabledSessionColumns.add(columnId); } else { enabledSessionColumns.delete(columnId); }
+		const container = document.getElementById('sessions-table-container');
+		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+		saveSessionColumnSettings();
+	});
+	// Attached once ever (not per re-render) and re-queries the live menu element on
+	// each click, so it keeps working across full DOM rebuilds without leaking listeners.
+	if (!_documentClickClosesColumnsMenu) {
+		_documentClickClosesColumnsMenu = true;
+		document.addEventListener('click', () => {
+			const liveMenu = document.getElementById('sessions-columns-menu');
+			if (liveMenu) { liveMenu.style.display = 'none'; }
+		});
+	}
+}
+
+function setupSessionsLookbackSelector(): void {
+	const select = document.getElementById('sessions-lookback') as HTMLSelectElement | null;
+	if (!select) { return; }
+	select.value = sessionsLookback;
+	select.addEventListener('change', () => {
+		const value = select.value;
+		sessionsLookback = (value === '7' || value === '30') ? value : 'today';
+		refreshSessionsPanelBody();
+	});
+	// A full re-render may have restored a non-today lookback whose data was
+	// rendered from cache already; if the cache is empty, request it now.
+	if (sessionsLookback !== 'today' && !recentSessionsCache[sessionsLookback]) {
+		refreshSessionsPanelBody();
+	}
+}
+
+/** Renders the sessions table for the current lookback, requesting host data when needed. */
+function refreshSessionsPanelBody(): void {
+	const body = document.getElementById('sessions-panel-body');
+	if (!body) { return; }
+	if (sessionsLookback === 'today') {
+		body.innerHTML = renderTodaySessionsTable(latestTodaySessions);
+		return;
+	}
+	const cached = recentSessionsCache[sessionsLookback];
+	if (cached) {
+		body.innerHTML = renderTodaySessionsTable(cached);
+		return;
+	}
+	body.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
+	vscode.postMessage({ command: 'loadRecentSessions', days: Number(sessionsLookback) });
+}
+
+function handleRecentSessionsLoaded(message: any): void {
+	const days = Number(message.days);
+	if (days !== 7 && days !== 30) { return; }
+	const sessions = Array.isArray(message.sessions)
+		? message.sessions.filter((s: any) => s && typeof s === 'object' && typeof s.interactions === 'number') as TodaySessionSummary[]
+		: [];
+	recentSessionsCache[String(days)] = sessions;
+	if (sessionsLookback === String(days)) {
+		refreshSessionsPanelBody();
+	}
 }
 
 function unionFill(map: { [key: string]: number }, keys: string[]): { [key: string]: number } {
@@ -2479,7 +2631,7 @@ function buildUsageRootHtml(
 
 			<div class="tab-bar">
 				<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity">📊 My Activity</button>
-				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions">📋 Today's Sessions</button>
+				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions">📋 Recent Sessions</button>
 				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools">🔧 Tools &amp; Integrations</button>
 				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health">🏗️ Workspace Health</button>
 				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos">🔀 Repository PRs</button>
@@ -2501,13 +2653,26 @@ function buildUsageRootHtml(
 }
 
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
+	latestTodaySessions = stats.todaySessions || [];
+	const cachedForLookback = sessionsLookback === 'today' ? latestTodaySessions : recentSessionsCache[sessionsLookback];
+	const bodyHtml = cachedForLookback
+		? renderTodaySessionsTable(cachedForLookback)
+		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
 	return `
 		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
 			<div class="section">
-				<div class="section-title"><span>📋</span><span>Today's Sessions</span></div>
-				<div class="section-subtitle">Individual session breakdown for today — sorted by number of interactions (most active first).</div>
-				<div style="margin-top: 12px;">
-					${renderTodaySessionsTable(stats.todaySessions || [])}
+				<div class="section-title" style="display:flex; align-items:center; gap:8px;">
+					<span>📋</span><span>Recent Sessions</span>
+					<select id="sessions-lookback" style="margin-left:auto; font-size:12px; padding:2px 6px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px;">
+						<option value="today"${sessionsLookback === 'today' ? ' selected' : ''}>Today</option>
+						<option value="7"${sessionsLookback === '7' ? ' selected' : ''}>Last 7 days</option>
+						<option value="30"${sessionsLookback === '30' ? ' selected' : ''}>Last 30 days</option>
+					</select>
+					${buildSessionColumnsMenuHtml()}
+				</div>
+				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
+				<div id="sessions-panel-body" style="margin-top: 12px;">
+					${bodyHtml}
 				</div>
 			</div>
 		</div>`;
@@ -3117,6 +3282,9 @@ function handleUpdateStats(message: any): void {
 	const sanitized = sanitizeStats(message.data);
 	if (sanitized) {
 		_ulLoadingActive = false;
+		// New stats invalidate any lazily-loaded lookback data; it is re-requested on demand.
+		delete recentSessionsCache['7'];
+		delete recentSessionsCache['30'];
 		renderLayout(sanitized);
 		setupSessionsTableSort();
 		renderRepositoryHygienePanels();
@@ -3219,6 +3387,8 @@ function handleExtensionMessage(message: any): void {
 			break;
 		case 'agentSessionsLoaded':
 			handleAgentSessionsLoaded(message.data); break;
+		case 'recentSessionsLoaded':
+			handleRecentSessionsLoaded(message); break;
 		case 'agentSessionsProgress':
 			updateProgressPanel('#agent-sessions-content', 'agent-sessions-progress', 'Fetching agent sessions…', message.done as number, message.total as number);
 			break;
@@ -3730,6 +3900,11 @@ async function bootstrap(): Promise<void> {
 	}
 	setFormatLocale(initialData.locale);
 	use24HourTime = initialData.use24HourTime !== false;
+	const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
+	if (Array.isArray(savedColumns)) {
+		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));
+		enabledSessionColumns = new Set(valid);
+	}
 	renderLayout(initialData);
 	setupSessionsTableSort();
 

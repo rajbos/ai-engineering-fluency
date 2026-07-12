@@ -130,6 +130,26 @@ export function formatFileSize(bytes: number): string {
 }
 
 /**
+ * Formats a duration in milliseconds as a short string like "12m" or "1h 04m".
+ * Returns "—" when the value is missing, non-finite, or negative.
+ */
+export function formatDurationShort(durationMs?: number): string {
+	if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) {
+		return '—';
+	}
+	const totalMinutes = Math.round(durationMs / 60000);
+	if (totalMinutes < 1) {
+		return '<1m';
+	}
+	if (totalMinutes < 60) {
+		return `${totalMinutes}m`;
+	}
+	const hours = Math.floor(totalMinutes / 60);
+	const minutes = totalMinutes % 60;
+	return `${hours}h ${String(minutes).padStart(2, '0')}m`;
+}
+
+/**
  * Returns a human-readable "time since" string for an ISO timestamp.
  */
 export function getTimeSince(isoString: string): string {

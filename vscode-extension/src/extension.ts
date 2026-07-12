@@ -176,7 +176,7 @@ import {
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -3606,6 +3606,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return { results, totalFiles: sessionFiles.length };
 	}
 
+	/**
+	 * Build session summaries for a lookback window (last 7/30 days) and send them
+	 * to the analysis panel. Used by the "Recent Sessions" tab lookback selector;
+	 * the default "Today" view keeps using the summaries bundled with updateStats.
+	 */
+	private async loadRecentSessions(days: number): Promise<void> {
+		if (!this.analysisPanel) { return; }
+		const lookbackDays = days === 30 ? 30 : 7;
+		const now = new Date();
+		const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - lookbackDays);
+		const windowStartKey = toLocalDayKey(windowStart);
+		const sessions: TodaySessionSummary[] = [];
+		try {
+			const { results } = await this.loadUsageSessionFiles(undefined, windowStart.getTime());
+			for (const r of results) {
+				if (!r || r.sessionData.interactions === 0) { continue; }
+				if (this.computeLastActivityKey(r.sessionData, r.mtime) < windowStartKey) { continue; }
+				const analysis = r.sessionData.usageAnalysis || this.buildDefaultSessionAnalysis();
+				sessions.push(this.collectTodaySessionInfo(r.sessionData, r.sessionFile, analysis, r.sessionData.interactions, r.mtime));
+			}
+		} catch (error) {
+			this.error('Error loading recent sessions:', error);
+		}
+		sessions.sort((a, b) => b.interactions - a.interactions);
+		this.analysisPanel.webview.postMessage({ command: 'recentSessionsLoaded', days: lookbackDays, sessions });
+	}
+
 	private computeLastActivityKey(sessionData: SessionFileCache, mtime: number): string {
 		if (sessionData.dailyRollups && Object.keys(sessionData.dailyRollups).length > 0) {
 			return Object.keys(sessionData.dailyRollups).sort().pop()!;
@@ -3633,6 +3660,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	): TodaySessionSummary {
 		const modelUsage = sessionData.modelUsage || {};
 		const { inputTok, outputTok, cachedTok } = this._resolveSessionModelTokens(sessionData, modelUsage);
+		const durationMs = computeSessionDurationMs(sessionData.firstInteraction, sessionData.lastInteraction);
+		const workspace = this.resolveSessionWorkspaceName(sessionData, sessionFile);
 		return {
 			title: sessionData.title || null, filePath: sessionFile, interactions,
 			toolCalls: analysis.toolCalls.total, inputTokens: inputTok, outputTokens: outputTok,
@@ -3644,7 +3673,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(sessionData.truncationCount ? { truncationCount: sessionData.truncationCount } : {}),
 			...(sessionData.maxRequestInputTokens ? { maxRequestInputTokens: sessionData.maxRequestInputTokens } : {}),
 			...(sessionData.contextTier ? { contextTier: sessionData.contextTier } : {}),
+			...(durationMs !== undefined ? { durationMs } : {}),
+			...(workspace ? { workspace } : {}),
 		};
+	}
+
+	/**
+	 * Best-effort workspace name for a session summary. Uses the repository name
+	 * already cached on the session data, falling back to the workspaceStorage
+	 * folder resolution (cached per workspace id). Returns undefined when
+	 * attribution is unavailable.
+	 */
+	private resolveSessionWorkspaceName(sessionData: SessionFileCache, sessionFile: string): string | undefined {
+		if (sessionData.repository) { return sessionData.repository; }
+		try {
+			const workspaceFolder = _resolveWorkspaceFolderFromSessionPath(sessionFile, this._workspaceIdToFolderCache);
+			if (workspaceFolder) { return path.basename(workspaceFolder); }
+		} catch { /* attribution is optional */ }
+		return undefined;
 	}
 
 	private _mergeCodeWorkspaceCustomizationFiles(norm: string): CustomizationFileEntry[] {
@@ -5962,6 +6008,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			case 'loadAgentSessions':
 				await this.dispatch('loadAgentSessions', () => this.loadAgentSessions());
 				break;
+			case 'loadRecentSessions':
+				await this.dispatch('loadRecentSessions', () => this.loadRecentSessions(Number(message.days)));
+				break;
 			case 'openSessionFile':
 				if (message.file) {
 					await this.dispatch('openSessionFile:analysis', async () => {
@@ -5975,6 +6024,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 					break;
 			case 'traceUsageCuration':
 				this._logTraceCuration(message);
+				break;
+			case 'saveSessionColumnSettings':
+				await this.dispatch('saveSessionColumnSettings', () =>
+					this.context.globalState.update('usage.sessionColumnSettings', message.settings)
+				);
 				break;
 		}
 	}
@@ -8872,6 +8926,8 @@ ${this.getLoadingHtmlScript()}
       .getConfiguration('aiEngineeringFluency')
       .get<string[]>('suppressedUnknownTools', []);
 
+    const sessionColumnSettings = this.context.globalState.get('usage.sessionColumnSettings', {});
+
     const initialData = stats ? JSON.stringify({
       today: stats.today,
       last30Days: stats.last30Days,
@@ -8888,6 +8944,7 @@ ${this.getLoadingHtmlScript()}
       use24HourTime: this.getUse24HourTimeSetting(),
       insights: this.buildCurrentInsights(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
+      sessionColumnSettings,
     }).replace(/</g, "\\u003c") : 'null';
 
     return `<!DOCTYPE html>

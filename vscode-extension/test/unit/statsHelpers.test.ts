@@ -7,6 +7,7 @@ addEditorUsage,
 computeUtcDateRanges,
 aggregatePeriodStats,
 computeSessionTotalTokens,
+computeSessionDurationMs,
 type SessionAggregateInput,
 type UtcDateRanges,
 } from '../../../src/statsHelpers';
@@ -58,6 +59,33 @@ const cachedReadTokensSubsetOfInput = 40;
 const total = computeSessionTotalTokens(inputTokensIncludingCache, 20, 0);
 assert.strictEqual(total, 120);
 assert.notStrictEqual(total, 120 + cachedReadTokensSubsetOfInput);
+});
+
+// ── computeSessionDurationMs ─────────────────────────────────────────────────
+
+test('computeSessionDurationMs: returns the difference between first and last interaction', () => {
+assert.strictEqual(
+computeSessionDurationMs('2026-07-11T10:00:00.000Z', '2026-07-11T10:12:00.000Z'),
+12 * 60 * 1000,
+);
+});
+
+test('computeSessionDurationMs: returns 0 for identical timestamps', () => {
+assert.strictEqual(computeSessionDurationMs('2026-07-11T10:00:00.000Z', '2026-07-11T10:00:00.000Z'), 0);
+});
+
+test('computeSessionDurationMs: returns undefined when either timestamp is missing', () => {
+assert.strictEqual(computeSessionDurationMs(null, '2026-07-11T10:00:00.000Z'), undefined);
+assert.strictEqual(computeSessionDurationMs('2026-07-11T10:00:00.000Z', null), undefined);
+assert.strictEqual(computeSessionDurationMs(undefined, undefined), undefined);
+assert.strictEqual(computeSessionDurationMs('', ''), undefined);
+});
+
+test('computeSessionDurationMs: returns undefined for invalid or negative ranges', () => {
+assert.strictEqual(computeSessionDurationMs('not-a-date', '2026-07-11T10:00:00.000Z'), undefined);
+assert.strictEqual(computeSessionDurationMs('2026-07-11T10:00:00.000Z', 'not-a-date'), undefined);
+// last before first (clock skew / corrupt data) must not yield a negative duration
+assert.strictEqual(computeSessionDurationMs('2026-07-11T10:12:00.000Z', '2026-07-11T10:00:00.000Z'), undefined);
 });
 
 // ── addModelUsage ────────────────────────────────────────────────────────────
