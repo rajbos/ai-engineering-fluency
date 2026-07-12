@@ -23,6 +23,8 @@ import {
     getLoadingHtmlCssSteps,
     getLoadingHtmlBody,
 } from '../../vscode-extension/src/loadingHtml';
+import { detectEditorSource } from '../../vscode-extension/src/workspaceHelpers';
+import { getEditorIconByName } from '../../vscode-extension/src/editorIcons';
 
 // JSON config data embedded into every panel HTML (mirrors extension's getJsonConfigScript)
 import tokenEstimatorsData from '../../vscode-extension/src/tokenEstimators.json';
@@ -192,24 +194,35 @@ function sendLoadingMessage(message: Record<string, unknown>): void {
     }
 }
 
+/** Map discovered session file paths to the editor pills shown by the loading screen. */
+function detectLoadingEditors(files: string[]): { icon: string; name: string }[] {
+    const editorSet = new Set<string>();
+    for (const file of files) {
+        const editor = detectEditorSource(file);
+        if (editor && editor !== 'Unknown') { editorSet.add(editor); }
+    }
+    return [...editorSet].map(name => ({ icon: getEditorIconByName(name), name }));
+}
+
 /**
  * Drives the shared loading screen while session files are parsed. Mirrors the
  * extension's buildProgressCallback: a one-time 'parsing' step transition, then
  * progress ticks throttled to 500ms, then 'computing' once parsing finishes.
+ * Editors ride along on every message so the pills pop in as parsing advances.
  */
-function buildLoadingProgressCallback(): (completed: number, total: number) => void {
+function buildLoadingProgressCallback(editors: { icon: string; name: string }[]): (completed: number, total: number) => void {
     let parsingNotified = false;
     let lastSentMs = 0;
     return (completed, total) => {
         if (!parsingNotified) {
             parsingNotified = true;
-            sendLoadingMessage({ command: 'loadingStep', step: 'parsing', total, editors: [] });
+            sendLoadingMessage({ command: 'loadingStep', step: 'parsing', total, editors });
         }
         const now = Date.now();
         if (now - lastSentMs >= 500 || completed === total) {
             lastSentMs = now;
             const percentage = Math.round((completed / total) * 100);
-            sendLoadingMessage({ command: 'loadingProgress', completed, total, percentage, editors: [] });
+            sendLoadingMessage({ command: 'loadingProgress', completed, total, percentage, editors });
         }
         if (completed === total) {
             sendLoadingMessage({ command: 'loadingStep', step: 'computing' });
@@ -221,7 +234,7 @@ async function getStats(): Promise<DetailedStats> {
     if (!cachedStats) {
         sendLoadingMessage({ command: 'loadingStep', step: 'discovering' });
         const files = await getSessionFiles();
-        cachedStats = await calculateDetailedStats(files, buildLoadingProgressCallback());
+        cachedStats = await calculateDetailedStats(files, buildLoadingProgressCallback(detectLoadingEditors(files)));
     }
     return cachedStats;
 }
