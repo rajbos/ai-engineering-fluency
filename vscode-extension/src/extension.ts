@@ -505,7 +505,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Resolved Copilot plan details fetched from copilot_internal/user after sign-in. */
 	private _copilotPlanResolved: { planId: string; planName: string; monthlyAiCreditsUsd: number; monthlyPremiumRequests: number | null; isMCPEnabled?: boolean } | undefined;
 	/** Quota entitlements from copilot_internal/user response (e.g., premium_interactions entitlement). */
-	private _copilotQuotaEntitlements: { premium_interactions?: number; completions?: number } = {};
+	private _copilotQuotaEntitlements: {
+		premium_interactions?: number;
+		completions?: number;
+		/** Raw quota_remaining from the premium_interactions snapshot (in AI Credits). */
+		premium_interactions_remaining?: number;
+	} = {};
 
 	// Cached PR stats result for the repos tab
 	private _lastRepoPrStats?: RepoPrStatsResult;
@@ -1919,6 +1924,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (qs.entitlement === null || qs.entitlement === undefined) { return; }
 		if (key === 'premium_interactions') {
 			this._copilotQuotaEntitlements.premium_interactions = qs.entitlement / 100;
+			if (qs.quota_remaining !== null && qs.quota_remaining !== undefined) {
+				this._copilotQuotaEntitlements.premium_interactions_remaining = Number(qs.quota_remaining);
+			}
 		} else if (key === 'completions') {
 			this._copilotQuotaEntitlements.completions = qs.entitlement / 100;
 		}
@@ -6085,7 +6093,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 			todaySessions: analysisStats.todaySessions || [],
 			insights: this.buildCurrentInsights(analysisStats),
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
+			copilotApiBalance: this._buildCopilotApiBalance(),
+			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
 		};
+	}
+
+	/**
+	 * Returns a snapshot of the Copilot API quota balance for the usage view.
+	 * budgetUsd: monthly entitlement in USD (entitlement / 100).
+	 * budgetAiCredits: monthly entitlement in AI Credits (budgetUsd * 100).
+	 * remainingAiCredits: raw quota_remaining from the API (AI Credits).
+	 * usedAiCredits: budgetAiCredits - remainingAiCredits.
+	 * Returns null when no entitlement data is available.
+	 */
+	private _buildCopilotApiBalance(): { budgetUsd: number; budgetAiCredits: number; remainingAiCredits: number; usedAiCredits: number; pctAvailable: number } | null {
+		const budgetUsd = this._copilotQuotaEntitlements.premium_interactions;
+		if (!budgetUsd) { return null; }
+		const budgetAiCredits = Math.round(budgetUsd * 100);
+		const remainingAiCredits = this._copilotQuotaEntitlements.premium_interactions_remaining ?? budgetAiCredits;
+		const usedAiCredits = Math.max(0, budgetAiCredits - remainingAiCredits);
+		const pctAvailable = budgetAiCredits > 0 ? (remainingAiCredits / budgetAiCredits) * 100 : 0;
+		return { budgetUsd, budgetAiCredits, remainingAiCredits, usedAiCredits, pctAvailable };
 	}
 
 	private async loadAnalysisStatsInBackground(panel: vscode.WebviewPanel): Promise<void> {
@@ -8797,6 +8825,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       insights: this.buildCurrentInsights(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
       sessionColumnSettings,
+      copilotApiBalance: this._buildCopilotApiBalance(),
+      monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
     }).replace(/</g, "\\u003c") : 'null';
 
     return `<!DOCTYPE html>
