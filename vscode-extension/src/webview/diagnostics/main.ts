@@ -968,6 +968,14 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessi
     .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
     .join("");
   const statusText = isLoadingSessions ? "⏳ Loading sessions…" : "";
+  const timeRangeOptions = [
+    { value: "all", label: "🕐 All Time" },
+    { value: "lastMonth", label: "📅 Last Month" },
+    { value: "month", label: "📆 Current Month" },
+    { value: "week", label: "🗓️ This Week" },
+    { value: "today", label: "☀️ Today" },
+    { value: "yesterday", label: "🌙 Yesterday" },
+  ].map((o) => `<option value="${o.value}">${o.label}</option>`).join("");
   return `
     <div class="info-box">
       <div class="info-box-title">🧮 Model Usage Breakdown</div>
@@ -975,15 +983,18 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessi
         Aggregates the exact per-model token usage and estimated cost the dashboard uses,
         for a single editor or across all of them. Handy for spotting model/pricing
         mismatches behind an unexpected cost total (e.g. tokens attributed to the wrong model tier).
-        Updates automatically when you change the editor below.
+        Updates automatically when you change the editor or time range below.
       </div>
     </div>
     <div class="section">
-      <div class="section-title">🎯 Select Editor</div>
+      <div class="section-title">🎯 Select Editor &amp; Time Range</div>
       <div class="folder-input-row">
         <select id="model-usage-editor-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
           <option value="all">🌐 All Editors</option>
           ${editorOptions}
+        </select>
+        <select id="model-usage-time-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
+          ${timeRangeOptions}
         </select>
         <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${escapeHtml(statusText)}</span>
       </div>
@@ -1022,6 +1033,15 @@ function buildModelUsageExplanation(fileCount: number, filesWithUsage: number): 
     </div>`;
 }
 
+const TIME_RANGE_LABELS: Record<string, string> = {
+  all: "All Time",
+  lastMonth: "Last Month",
+  month: "Current Month",
+  week: "This Week",
+  today: "Today",
+  yesterday: "Yesterday",
+};
+
 function renderModelUsageResults(
   editor: string,
   fileCount: number,
@@ -1029,13 +1049,17 @@ function renderModelUsageResults(
   rows: ModelUsageRow[],
   totalCost: number,
   supportsCache1h: boolean = true,
+  timeRange: string = "all",
 ): string {
+  const editorLabel = editor === "all" ? "All Editors" : editor;
+  const timeLabel = TIME_RANGE_LABELS[timeRange] || "All Time";
+  const scopeLabel = timeRange === "all" ? editorLabel : `${editorLabel} — ${timeLabel}`;
   if (rows.length === 0) {
     return `
       <div class="section" style="margin-top: 0;">
         <div style="padding: 32px; text-align: center; color: var(--text-muted);">
           <div style="font-size: 36px; margin-bottom: 12px;">📭</div>
-          <div style="font-size: 14px;">No per-model usage data found for ${escapeHtml(editor === "all" ? "any editor" : editor)}.</div>
+          <div style="font-size: 14px;">No per-model usage data found for ${escapeHtml(scopeLabel)}.</div>
           <div style="font-size: 12px; margin-top: 8px;">${fileCount} session file(s) matched, ${filesWithUsage} had model attribution data.</div>
         </div>
       </div>
@@ -1044,7 +1068,7 @@ function renderModelUsageResults(
   const tableRows = rows.map((r) => buildModelUsageTableRow(r, supportsCache1h)).join("");
   return `
     <div class="section" style="margin-top: 0;">
-      <div class="section-title">📊 Results — ${escapeHtml(editor === "all" ? "All Editors" : editor)}</div>
+      <div class="section-title">📊 Results — ${escapeHtml(scopeLabel)}</div>
       <div class="summary-cards">
         <div class="summary-card">
           <div class="summary-label">📄 Session Files</div>
@@ -1588,8 +1612,10 @@ function setupFolderAnalyzerHandlers(): void {
 
 function triggerModelUsageAnalysis(): void {
   const select = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
+  const timeSelect = document.getElementById("model-usage-time-select") as HTMLSelectElement | null;
   if (!select || select.disabled) { return; }
   const editor = select.value || "all";
+  const timeRange = timeSelect?.value || "all";
 
   const resultsDiv = document.getElementById("model-usage-results");
   if (resultsDiv) {
@@ -1600,11 +1626,14 @@ function triggerModelUsageAnalysis(): void {
         </div>`;
   }
 
-  vscode.postMessage({ command: "analyzeModelUsage", editor });
+  vscode.postMessage({ command: "analyzeModelUsage", editor, timeRange });
 }
 
 function setupModelUsageHandlers(): void {
   document.getElementById("model-usage-editor-select")?.addEventListener("change", () => {
+    triggerModelUsageAnalysis();
+  });
+  document.getElementById("model-usage-time-select")?.addEventListener("change", () => {
     triggerModelUsageAnalysis();
   });
 }
@@ -1627,6 +1656,7 @@ function handleModelUsageResult(message: DiagMessage): void {
     (message.rows || []) as ModelUsageRow[],
     Number(message.totalCost || 0),
     message.supportsCache1h !== false,
+    String(message.timeRange || "all"),
   );
 }
 

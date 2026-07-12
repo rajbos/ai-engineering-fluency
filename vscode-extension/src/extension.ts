@@ -8385,6 +8385,47 @@ ${this.getLoadingHtmlScript()}
   }
 
   /**
+   * Computes [startMs, endMs) bounds for a Model Usage time-range filter, using the
+   * user's local calendar (not UTC) so "today"/"this week"/etc. match their wall clock.
+   * Returns null for 'all' (no filtering). Weeks start on Monday (ISO-8601 convention).
+   */
+  private getModelUsageTimeRangeBounds(range: string, now: Date = new Date()): { startMs: number; endMs: number } | null {
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const todayStart = startOfDay(now);
+    switch (range) {
+      case 'today':
+        return { startMs: todayStart, endMs: now.getTime() };
+      case 'yesterday': {
+        const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+        return { startMs: yesterdayStart, endMs: todayStart };
+      }
+      case 'week': {
+        // ISO week: Monday = start. getDay() is 0=Sun..6=Sat; convert to days-since-Monday.
+        const dayOfWeek = (now.getDay() + 6) % 7;
+        const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek).getTime();
+        return { startMs: weekStart, endMs: now.getTime() };
+      }
+      case 'month':
+        return { startMs: new Date(now.getFullYear(), now.getMonth(), 1).getTime(), endMs: now.getTime() };
+      case 'lastMonth':
+        return {
+          startMs: new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime(),
+          endMs: new Date(now.getFullYear(), now.getMonth(), 1).getTime(),
+        };
+      default:
+        return null;
+    }
+  }
+
+  /** Resolves the best available timestamp (ms) for a session file, for time-range filtering. */
+  private getSessionFileTimestampMs(f: SessionFileDetails): number | null {
+    const raw = f.lastInteraction || f.firstInteraction || f.modified;
+    if (!raw) { return null; }
+    const parsed = Date.parse(raw);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+
+  /**
    * Aggregates per-model token usage (and estimated cost) across the already-loaded
    * diagnostics session files, optionally filtered to a single editor. Reuses the same
    * modelUsage data + calculateEstimatedCost() the dashboard uses, so the breakdown a
@@ -8401,17 +8442,25 @@ ${this.getLoadingHtmlScript()}
    */
   private async diagHandleAnalyzeModelUsage(message: any): Promise<void> {
     const editor = typeof message?.editor === 'string' && message.editor ? message.editor : 'all';
+    const timeRange = typeof message?.timeRange === 'string' && message.timeRange ? message.timeRange : 'all';
     if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
 
     if (!this.diagnosticsHasLoadedFiles) {
       this.diagnosticsPanel.webview.postMessage({
-        command: 'modelUsageResult', editor, fileCount: 0, filesWithUsage: 0, rows: [], totalCost: 0, stillLoading: true,
+        command: 'modelUsageResult', editor, timeRange, fileCount: 0, filesWithUsage: 0, rows: [], totalCost: 0, stillLoading: true,
       });
       return;
     }
 
     const files = this.diagnosticsCachedFiles;
-    const matching = editor === 'all' ? files : files.filter(f => (f.editorSource || 'Unknown') === editor);
+    const editorMatching = editor === 'all' ? files : files.filter(f => (f.editorSource || 'Unknown') === editor);
+    const bounds = this.getModelUsageTimeRangeBounds(timeRange);
+    const matching = bounds
+      ? editorMatching.filter(f => {
+        const ts = this.getSessionFileTimestampMs(f);
+        return ts !== null && ts >= bounds.startMs && ts < bounds.endMs;
+      })
+      : editorMatching;
     const { aggregated, filesWithUsage, sessionCounts } = this.aggregateModelUsage(matching);
 
     const rows = Object.entries(aggregated).map(([model, usage]) => ({
@@ -8434,6 +8483,7 @@ ${this.getLoadingHtmlScript()}
     this.diagnosticsPanel.webview.postMessage({
       command: 'modelUsageResult',
       editor,
+      timeRange,
       fileCount: matching.length,
       filesWithUsage,
       rows,
