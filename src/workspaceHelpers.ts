@@ -943,6 +943,37 @@ function detectCopilotFamilyFromPath(lowerPath: string): string | undefined {
 }
 
 /**
+ * Peek at the start of a Claude Code session file (~/.claude/projects/**) to find the
+ * `entrypoint` field and distinguish the standalone Claude Desktop app from Claude Code
+ * running in a terminal or the VS Code extension. All three write to the same directory
+ * and are indistinguishable by path alone — only file content (the `entrypoint` field on
+ * early JSONL events, e.g. "claude-desktop", "claude-cli", "claude-vscode") tells them apart.
+ * Bounded to the first 64KB so classification stays cheap even for large session files.
+ * @internal
+ */
+export function detectClaudeCodeEditorVariant(filePath: string): string {
+	try {
+		const fd = fs.openSync(filePath, 'r');
+		try {
+			const buffer = Buffer.alloc(65536);
+			const bytesRead = fs.readSync(fd, buffer, 0, buffer.length, 0);
+			const chunk = buffer.toString('utf8', 0, bytesRead);
+			for (const line of chunk.split('\n')) {
+				const trimmed = line.trim();
+				if (!trimmed) { continue; }
+				let event: any;
+				try { event = JSON.parse(trimmed); } catch { continue; } // partial/truncated line
+				if (event?.entrypoint === 'claude-desktop') { return 'Claude Desktop'; }
+				if (event?.entrypoint) { return 'Claude Code'; }
+			}
+		} finally {
+			fs.closeSync(fd);
+		}
+	} catch { /* file unreadable — fall back to default below */ }
+	return 'Claude Code';
+}
+
+/**
  * Detect tool-specific (non-VS Code family) editors from a lower-cased normalised path.
  * Returns the editor name or undefined if none matched.
  * @internal
@@ -963,7 +994,7 @@ function detectToolEditorFromPath(
 	if (kiroEditor) { return kiroEditor; }
 	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
-	if (lowerPath.includes('/.claude/projects/')) { return 'Claude Code'; }
+	if (lowerPath.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
 	if (lowerPath.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
 	// Antigravity must be checked before Gemini CLI: both live under ~/.gemini/
 	// but Antigravity sessions are under ~/.gemini/antigravity/brain/ which is more specific.
@@ -993,8 +1024,12 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
 /**
  * Determine the editor type from a session file path.
  * Returns: 'VS Code', 'VS Code Insiders', 'VSCodium', 'Cursor', 'Copilot CLI',
- *          'JetBrains', 'OpenCode', 'Claude Code', 'Continue', 'Mistral Vibe',
- *          'Gemini CLI', 'Claude Desktop Cowork', 'Crush', or 'Unknown'.
+ *          'JetBrains', 'OpenCode', 'Claude Code', 'Claude Desktop', 'Continue',
+ *          'Mistral Vibe', 'Gemini CLI', 'Claude Desktop Cowork', 'Crush', or 'Unknown'.
+ * Note: 'Claude Code' and 'Claude Desktop' share the same ~/.claude/projects/ directory
+ * and are distinguished by the `entrypoint` field inside the session file, not the path
+ * (see detectClaudeCodeEditorVariant). 'Claude Desktop Cowork' is a separate, unrelated
+ * feature (local-agent-mode-sessions) and is still detected purely by path.
  */
 export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);

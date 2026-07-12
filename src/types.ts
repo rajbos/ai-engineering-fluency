@@ -22,6 +22,14 @@ export interface ModelUsage {
     outputTokens: number;
     cachedReadTokens?: number;     // portion of inputTokens that were cache reads (billed at reduced rate)
     cacheCreationTokens?: number;  // portion of inputTokens used to create cache entries (billed at higher rate)
+    /**
+     * Portion of cacheCreationTokens written under Anthropic's 1-hour cache TTL
+     * (`cache_creation.ephemeral_1h_input_tokens`), billed at a higher rate than the
+     * default 5-minute TTL. When present, calculateEstimatedCost() prices this portion
+     * with `cacheCreation1hCostPerMillion` and the remainder of cacheCreationTokens with
+     * the standard `cacheCreationCostPerMillion` (5-minute) rate.
+     */
+    cacheCreation1hTokens?: number;
   };
 }
 
@@ -30,6 +38,7 @@ export interface CopilotLongContextPricing {
   outputCostPerMillion: number;
   cachedInputCostPerMillion?: number;
   cacheCreationCostPerMillion?: number;
+  cacheCreation1hCostPerMillion?: number;
   threshold?: string;           // input-token threshold above which long-context rates apply (e.g. "> 200K")
 }
 
@@ -38,6 +47,7 @@ export interface CopilotPricing {
   outputCostPerMillion: number;
   cachedInputCostPerMillion?: number;
   cacheCreationCostPerMillion?: number;
+  cacheCreation1hCostPerMillion?: number;
   releaseStatus?: string;       // e.g. "GA" or "Public preview"
   category?: string;            // GitHub Copilot capability category (Lightweight / Versatile / Powerful)
   threshold?: string;           // input-token threshold for the Default tier, when the model is tiered
@@ -53,7 +63,8 @@ export interface ModelPricing {
   inputCostPerMillion: number;
   outputCostPerMillion: number;
   cachedInputCostPerMillion?: number;    // cost per million cache-read tokens (e.g. 0.30 for Claude Sonnet 4)
-  cacheCreationCostPerMillion?: number;  // cost per million cache-creation tokens (e.g. 3.75 for Claude Sonnet 4)
+  cacheCreationCostPerMillion?: number;  // cost per million cache-creation tokens, 5-minute TTL (e.g. 3.75 for Claude Sonnet 4)
+  cacheCreation1hCostPerMillion?: number; // cost per million cache-creation tokens, 1-hour TTL (e.g. 6.0 for Claude Sonnet 4)
   category?: string;
   tier?: "standard" | "premium" | "unknown";
   multiplier?: number;

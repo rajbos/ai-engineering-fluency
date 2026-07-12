@@ -263,6 +263,55 @@ test('getClaudeCodeModelUsage: aggregates per-model token usage', async () => {
 	}
 });
 
+test('getClaudeCodeModelUsage: tracks 1-hour cache TTL tokens separately from 5-minute TTL (issue #1589)', async () => {
+	// Claude Code defaults to Anthropic's 1-hour prompt-cache TTL, which is billed at a
+	// higher rate than the default 5-minute TTL. The breakdown lives under
+	// message.usage.cache_creation.ephemeral_1h_input_tokens / ephemeral_5m_input_tokens.
+	const events = [
+		{
+			type: 'assistant',
+			message: {
+				id: 'msg_1h',
+				model: 'claude-sonnet-4-6',
+				stop_reason: 'end_turn',
+				usage: {
+					input_tokens: 1,
+					output_tokens: 100,
+					cache_creation_input_tokens: 1000,
+					cache_read_input_tokens: 0,
+					cache_creation: { ephemeral_1h_input_tokens: 1000, ephemeral_5m_input_tokens: 0 }
+				}
+			}
+		},
+		{
+			type: 'assistant',
+			message: {
+				id: 'msg_5m',
+				model: 'claude-sonnet-4-6',
+				stop_reason: 'end_turn',
+				usage: {
+					input_tokens: 1,
+					output_tokens: 50,
+					cache_creation_input_tokens: 400,
+					cache_read_input_tokens: 0,
+					cache_creation: { ephemeral_1h_input_tokens: 0, ephemeral_5m_input_tokens: 400 }
+				}
+			}
+		}
+	];
+
+	const filePath = createTempSession(events);
+	try {
+		const modelUsage = await claudeCode.getClaudeCodeModelUsage(filePath);
+		const usage = modelUsage['claude-sonnet-4.6'];
+		assert.ok(usage);
+		assert.equal(usage.cacheCreationTokens, 1400); // total cache-write tokens (1000 + 400)
+		assert.equal(usage.cacheCreation1hTokens, 1000); // only the 1h-TTL portion
+	} finally {
+		cleanup(filePath);
+	}
+});
+
 test('getClaudeCodeSessionMeta: extracts title and timestamps', async () => {
 	const events = [
 		{

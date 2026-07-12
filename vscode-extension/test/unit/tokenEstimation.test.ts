@@ -1550,6 +1550,94 @@ test('calculateEstimatedCost: uses cachedInputCostPerMillion when present', () =
         assert.ok(Math.abs(cost - 6.0) < 1e-9);
 });
 
+// ── calculateEstimatedCost: 1-hour cache-creation TTL pricing ───────────────
+// Anthropic bills prompt-cache writes at different rates depending on TTL:
+// the default 5-minute TTL (cacheCreationCostPerMillion) vs. the 1-hour TTL
+// (cacheCreation1hCostPerMillion) that Claude Code uses by default, which is
+// billed at a higher rate. See issue #1589.
+
+test('calculateEstimatedCost: splits cacheCreationTokens into 1h and 5m portions', () => {
+        const modelUsage = {
+                'claude-sonnet-4-6': {
+                        inputTokens: 1_000_000,
+                        outputTokens: 0,
+                        cacheCreationTokens: 1_000_000,
+                        cacheCreation1hTokens: 400_000 // 400k of the 1M cache-write was 1h TTL, 600k was 5m TTL
+                }
+        };
+        const pricing = {
+                'claude-sonnet-4-6': {
+                        inputCostPerMillion: 3,
+                        outputCostPerMillion: 15,
+                        cacheCreationCostPerMillion: 3.75,
+                        cacheCreation1hCostPerMillion: 6
+                }
+        };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        // uncachedInput = max(0, 1_000_000 - 0 - 1_000_000) = 0
+        // 5m portion = 600_000 → 0.6 * 3.75 = 2.25
+        // 1h portion = 400_000 → 0.4 * 6 = 2.4
+        const expected = 2.25 + 2.4;
+        assert.ok(Math.abs(cost - expected) < 1e-9, `expected ${expected}, got ${cost}`);
+});
+
+test('calculateEstimatedCost: falls back to cacheCreationCostPerMillion when cacheCreation1hCostPerMillion is missing', () => {
+        const modelUsage = {
+                'model-x': {
+                        inputTokens: 100_000,
+                        outputTokens: 0,
+                        cacheCreationTokens: 100_000,
+                        cacheCreation1hTokens: 100_000
+                }
+        };
+        const pricing = {
+                'model-x': { inputCostPerMillion: 3, outputCostPerMillion: 15, cacheCreationCostPerMillion: 3.75 }
+        };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        // No cacheCreation1hCostPerMillion → all 100_000 tokens fall back to the 5-min rate
+        assert.ok(Math.abs(cost - 0.375) < 1e-9);
+});
+
+test('calculateEstimatedCost: cacheCreation1hTokens is clamped to cacheCreationTokens (never exceeds total)', () => {
+        const modelUsage = {
+                'claude-sonnet-4-6': {
+                        inputTokens: 100_000,
+                        outputTokens: 0,
+                        cacheCreationTokens: 50_000,
+                        cacheCreation1hTokens: 999_999 // malformed/overcounted input should not blow up the total
+                }
+        };
+        const pricing = {
+                'claude-sonnet-4-6': {
+                        inputCostPerMillion: 3,
+                        outputCostPerMillion: 15,
+                        cacheCreationCostPerMillion: 3.75,
+                        cacheCreation1hCostPerMillion: 6
+                }
+        };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        // cacheCreation1h clamped to 50_000 → 0.05 * 6 = 0.3, 5m portion = 0
+        // uncachedInput = max(0, 100_000 - 0 - 50_000) = 50_000 → 0.05 * 3 = 0.15
+        assert.ok(Math.abs(cost - 0.45) < 1e-9, `expected 0.45, got ${cost}`);
+});
+
+test('calculateEstimatedCost: no cacheCreation1hTokens behaves exactly as before (backward compatible)', () => {
+        const modelUsage = {
+                'claude-sonnet-4-6': { inputTokens: 100_000, outputTokens: 0, cacheCreationTokens: 100_000 }
+        };
+        const pricing = {
+                'claude-sonnet-4-6': {
+                        inputCostPerMillion: 3,
+                        outputCostPerMillion: 15,
+                        cacheCreationCostPerMillion: 3.75,
+                        cacheCreation1hCostPerMillion: 6
+                }
+        };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        // All 100_000 tokens priced at the 5m rate since cacheCreation1hTokens is absent
+        assert.ok(Math.abs(cost - 0.375) < 1e-9);
+});
+
 // ── getModelTier: additional edge cases ─────────────────────────────────────
 
 test('getModelTier: partial match where modelId includes key', () => {

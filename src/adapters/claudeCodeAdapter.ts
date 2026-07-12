@@ -3,7 +3,7 @@ import type { ModelUsage, ChatTurn, ActualUsage } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../claudecode';
 import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
-import { isMcpTool, extractMcpServerName } from '../workspaceHelpers';
+import { isMcpTool, extractMcpServerName, detectClaudeCodeEditorVariant } from '../workspaceHelpers';
 import { createEmptyContextRefs } from '../tokenEstimation';
 
 /**
@@ -51,6 +51,15 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 
 	handles(sessionFile: string): boolean {
 		return this.claudeCode.isClaudeCodeSessionFile(sessionFile);
+	}
+
+	/**
+	 * Claude Code (CLI/VS Code extension) and the standalone Claude Desktop app both write
+	 * to ~/.claude/projects/ and are indistinguishable by path alone — only the `entrypoint`
+	 * field inside the session file tells them apart.
+	 */
+	getDisplayName(sessionFile: string): string {
+		return detectClaudeCodeEditorVariant(sessionFile);
 	}
 
 	getBackingPath(sessionFile: string): string {

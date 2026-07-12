@@ -1204,11 +1204,21 @@ export function getModelCostBucket(modelId: string, modelPricing: { [key: string
  * are available (e.g. Claude Desktop / Claude Code / OpenCode sessions).
  *
  * Cost formula:
+ *   cacheCreation1h = min(cacheCreation1hTokens ?? 0, cacheCreationTokens ?? 0)
+ *   cacheCreation5m = (cacheCreationTokens ?? 0) - cacheCreation1h
  *   uncachedInput = inputTokens - (cachedReadTokens ?? 0) - (cacheCreationTokens ?? 0)
  *   cost = uncachedInput × inputCostPerMillion
  *        + cachedReadTokens × cachedInputCostPerMillion (fallback: inputCostPerMillion)
- *        + cacheCreationTokens × cacheCreationCostPerMillion (fallback: inputCostPerMillion)
+ *        + cacheCreation5m × cacheCreationCostPerMillion (fallback: inputCostPerMillion)
+ *        + cacheCreation1h × cacheCreation1hCostPerMillion (fallback: cacheCreationCostPerMillion, then inputCostPerMillion)
  *        + outputTokens × outputCostPerMillion
+ *
+ * Anthropic bills prompt-cache writes at different premiums depending on the cache TTL:
+ * the default 5-minute TTL is priced via `cacheCreationCostPerMillion`, while the 1-hour
+ * TTL (`cache_creation.ephemeral_1h_input_tokens` in the raw API response — used by
+ * default by Claude Code) is priced via `cacheCreation1hCostPerMillion`, roughly 1.6x the
+ * 5-minute rate. When callers don't split out `cacheCreation1hTokens`, all cache-creation
+ * tokens fall back to the 5-minute rate (unchanged prior behavior).
  *
  * @param modelUsage Object with model names as keys and token counts as values
  * @param modelPricing Pricing table keyed by model id
@@ -1240,14 +1250,17 @@ export function calculateEstimatedCost(
 
 		const cachedRead = usage.cachedReadTokens ?? 0;
 		const cacheCreation = usage.cacheCreationTokens ?? 0;
+		const cacheCreation1h = Math.min(usage.cacheCreation1hTokens ?? 0, cacheCreation);
+		const cacheCreation5m = cacheCreation - cacheCreation1h;
 		const uncachedInput = Math.max(0, usage.inputTokens - cachedRead - cacheCreation);
 
 		const uncachedInputCost = (uncachedInput / 1_000_000) * pricing.inputCostPerMillion;
 		const cachedReadCost = (cachedRead / 1_000_000) * (pricing.cachedInputCostPerMillion ?? pricing.inputCostPerMillion);
-		const cacheCreationCost = (cacheCreation / 1_000_000) * (pricing.cacheCreationCostPerMillion ?? pricing.inputCostPerMillion);
+		const cacheCreation5mCost = (cacheCreation5m / 1_000_000) * (pricing.cacheCreationCostPerMillion ?? pricing.inputCostPerMillion);
+		const cacheCreation1hCost = (cacheCreation1h / 1_000_000) * (pricing.cacheCreation1hCostPerMillion ?? pricing.cacheCreationCostPerMillion ?? pricing.inputCostPerMillion);
 		const outputCost = (usage.outputTokens / 1_000_000) * pricing.outputCostPerMillion;
 
-		totalCost += uncachedInputCost + cachedReadCost + cacheCreationCost + outputCost;
+		totalCost += uncachedInputCost + cachedReadCost + cacheCreation5mCost + cacheCreation1hCost + outputCost;
 	}
 
 	return totalCost;
