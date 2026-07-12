@@ -137,7 +137,9 @@ export function buttonHtml(idOrConfig: ButtonId | ButtonConfig): string {
 	const appearance = config.appearance ? ` appearance="${config.appearance}"` : '';
 	const active = config.active ? ' class="nav-active" disabled aria-current="page"' : '';
 	const iconStyle = config.iconColor ? ` style="--icon-accent:${config.iconColor}"` : '';
-	const icon = config.icon ? `<span class="codicon codicon-${config.icon} nav-icon"${iconStyle}></span> ` : '';
+	// No trailing space after the icon span: vscode-button's own ::slotted(*) rule already
+	// adds a margin after it, so a literal space on top of that doubles the gap.
+	const icon = config.icon ? `<span class="codicon codicon-${config.icon} nav-icon"${iconStyle}></span>` : '';
 	return `<vscode-button id="${config.id}"${appearance}${active}>${icon}${config.label}</vscode-button>`;
 }
 

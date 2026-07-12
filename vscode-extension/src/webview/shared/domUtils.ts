@@ -64,7 +64,9 @@ export function createButton(configOrId: ButtonConfig | string, label?: string, 
 	button.id = config.id;
 	if (config.icon) {
 		// Build icon + label as DOM nodes (not textContent) so the codicon span actually renders.
-		button.append(buildNavIconSpan(config.icon, config.iconColor), document.createTextNode(` ${config.label}`));
+		// No manual space here: vscode-button's own ::slotted(*) rule already adds a margin
+		// after the icon span, so a literal space on top of that doubles the gap.
+		button.append(buildNavIconSpan(config.icon, config.iconColor), document.createTextNode(config.label));
 	} else {
 		button.textContent = config.label;
 	}
