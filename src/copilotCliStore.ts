@@ -208,9 +208,25 @@ export class CopilotCliStoreAccess {
 		return id || null;
 	}
 
-	/** Stat the underlying session-store.db file. */
+	/**
+	 * Stat a virtual session-store.db session path.
+	 *
+	 * IMPORTANT: this must NOT simply return `fs.stat()` on the shared .db file —
+	 * every chat-only session would then report an identical, always-very-recent
+	 * mtime (whenever the DB was last touched by *any* session), making hundreds
+	 * of unrelated sessions look like the most recently modified files on disk.
+	 * That starved out every other editor from mtime-sorted/capped file lists
+	 * (e.g. the Diagnostics screen's session cache). Instead, use this session's
+	 * own `updated_at` column so each virtual session gets its real, distinct mtime.
+	 */
 	async stat(virtualPath: string): Promise<fs.Stats> {
-		return fs.promises.stat(this.getDbPathFromVirtual(virtualPath));
+		const dbPath = this.getDbPathFromVirtual(virtualPath);
+		const baseStats = await fs.promises.stat(dbPath);
+		const session = await this.readSession(virtualPath);
+		const updatedAt = session?.updated_at ? new Date(session.updated_at) : null;
+		if (!updatedAt || Number.isNaN(updatedAt.getTime())) { return baseStats; }
+		Object.defineProperty(baseStats, 'mtime', { value: updatedAt, writable: false });
+		return baseStats;
 	}
 
 	/** Lazily initialise and cache the sql.js WASM module. */

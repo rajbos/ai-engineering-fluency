@@ -8554,8 +8554,7 @@ ${this.getLoadingHtmlScript()}
     const detailedSessionFiles: SessionFileDetails[] = [];
     const initialCacheHits = this._cacheHits;
     const initialCacheMisses = this._cacheMisses;
-    const sortedFiles = await this.sortSessionFilesByMtime(sessionFiles);
-    const filesToProcess = sortedFiles.slice(0, 500);
+    const filesToProcess = await this.selectSessionFilesRoundRobin(sessionFiles, fourteenDaysAgo.getTime());
     const total = filesToProcess.length;
     let processed = 0;
     let lastProgressPost = Date.now();
@@ -8707,14 +8706,70 @@ ${this.getLoadingHtmlScript()}
     }
   }
 
-  private async sortSessionFilesByMtime(sessionFiles: string[]): Promise<string[]> {
-    const fileStats = await Promise.all(
+  /**
+   * Groups stat'd session files by editor, sorted most-recent-first within each
+   * group, filtered to those newer than `cutoffMs`. Helper for
+   * selectSessionFilesRoundRobin() below.
+   */
+  private groupSessionFilesByEditor(
+    withStats: ({ file: string; mtime: number } | null)[],
+    cutoffMs: number
+  ): Map<string, { file: string; mtime: number }[]> {
+    const byEditor = new Map<string, { file: string; mtime: number }[]>();
+    for (const entry of withStats) {
+      if (!entry || entry.mtime < cutoffMs) { continue; }
+      const editor = this.detectEditorSource(entry.file) || 'Unknown';
+      if (!byEditor.has(editor)) { byEditor.set(editor, []); }
+      byEditor.get(editor)!.push(entry);
+    }
+    for (const list of byEditor.values()) { list.sort((a, b) => b.mtime - a.mtime); }
+    return byEditor;
+  }
+
+  /** Round-robins through each editor's (already sorted, most-recent-first) file list, up to `maxFiles` total. */
+  private roundRobinSelect(byEditor: Map<string, { file: string; mtime: number }[]>, maxFiles: number): string[] {
+    const editors = [...byEditor.keys()];
+    const cursors = new Map<string, number>(editors.map((e) => [e, 0]));
+    const selected: string[] = [];
+    let anyLeft = true;
+    while (selected.length < maxFiles && anyLeft) {
+      anyLeft = false;
+      for (const editor of editors) {
+        if (selected.length >= maxFiles) { break; }
+        const idx = cursors.get(editor)!;
+        const list = byEditor.get(editor)!;
+        if (idx < list.length) {
+          selected.push(list[idx].file);
+          cursors.set(editor, idx + 1);
+          anyLeft = true;
+        }
+      }
+    }
+    return selected;
+  }
+
+  /**
+   * Selects up to 500 session files, within the last 14 days, round-robin across
+   * editors (most-recent-first within each editor) instead of a flat global
+   * mtime sort.
+   *
+   * Why: a flat "top 500 by mtime across all editors" sort lets a single
+   * high-volume editor crowd out every other editor entirely once its file
+   * count exceeds 500 — this starved the Diagnostics screen's session cache
+   * (Session Files list + Model Usage dropdown) of any files from lower-volume
+   * editors (e.g. Claude Code) whenever a heavier editor (e.g. Copilot CLI, with
+   * thousands of sessions) dominated the global sort. Round-robining by editor
+   * guarantees every discovered editor gets fair representation up to the cap.
+   */
+  private async selectSessionFilesRoundRobin(sessionFiles: string[], cutoffMs: number): Promise<string[]> {
+    const withStats = await Promise.all(
       sessionFiles.map(async (file) => {
         try { const stat = await this.statSessionFile(file); return { file, mtime: stat.mtime.getTime() }; }
-        catch { return { file, mtime: 0 }; }
+        catch { return null; }
       })
     );
-    return fileStats.sort((a, b) => b.mtime - a.mtime).map((item) => item.file);
+    const byEditor = this.groupSessionFilesByEditor(withStats, cutoffMs);
+    return this.roundRobinSelect(byEditor, 500);
   }
 
   private async sendBgLoadResults(panel: vscode.WebviewPanel, detailedSessionFiles: SessionFileDetails[], initialCacheHits: number, initialCacheMisses: number): Promise<void> {
