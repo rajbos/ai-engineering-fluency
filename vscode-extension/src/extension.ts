@@ -4771,21 +4771,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * @param tokenResult - Fresh token data from eco.getTokens(); when provided, takes
 	 *   precedence over any cached token values so eco-session diagnostics always show
 	 *   the correct (actual-API) count rather than a stale or zero value.
+	 * @param modelUsage - Fresh per-model usage data (from eco.getModelUsage() or the
+	 *   shared getModelUsageFromSession()); when provided, takes precedence over any
+	 *   cached value. Without this, per-model attribution silently stayed empty forever
+	 *   for any session never separately touched by the Usage/Charts analysis pipeline
+	 *   (the only other code path that computes it) — this is what caused the Model
+	 *   Usage diagnostics tab to show data for only a handful of editors.
 	 */
 	private async updateCacheWithSessionDetails(
 		sessionFile: string,
 		stat: fs.Stats,
 		details: SessionFileDetails,
-		tokenResult?: { tokens: number; thinkingTokens: number; actualTokens: number }
+		tokenResult?: { tokens: number; thinkingTokens: number; actualTokens: number },
+		modelUsage?: ModelUsage
 	): Promise<void> {
 		const existingCache = this.getCachedSessionData(sessionFile);
 		const resolved = this.resolveTokensForCacheUpdate(tokenResult, existingCache);
 		details.tokens = resolved.actualTokens || resolved.tokens || 0;
+		const resolvedModelUsage = modelUsage && Object.keys(modelUsage).length > 0 ? modelUsage : (existingCache?.modelUsage || {});
+		if (Object.keys(resolvedModelUsage).length > 0) { details.modelUsage = resolvedModelUsage; }
 
 		const cacheEntry: SessionFileCache = {
 			tokens: resolved.tokens,
 			interactions: details.interactions,
-			modelUsage: existingCache?.modelUsage || {},
+			modelUsage: resolvedModelUsage,
 			mtime: stat.mtime.getTime(),
 			size: stat.size,
 			actualTokens: resolved.actualTokens,
@@ -4896,7 +4905,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (Array.isArray(sessionContent.requests)) {
 				await this.processJsonRequestsDetails(sessionContent.requests, sessionFile, stat, details);
 			}
-			await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+			const modelUsage = await _getModelUsageFromSession(this.usageAnalysisDeps, sessionFile, fileContent, sessionContent);
+			await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
 		} catch (error) {
 			this.warn(`Error analyzing session file details for ${sessionFile}: ${error}`);
 		}
@@ -4919,8 +4929,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async processEcosystemSessionDetails(eco: IEcosystemAdapter, sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<SessionFileDetails> {
-		const [meta, tokenResult, interactionCount] = await Promise.all([
-			eco.getMeta(sessionFile), eco.getTokens(sessionFile), eco.countInteractions(sessionFile)
+		const [meta, tokenResult, interactionCount, modelUsage] = await Promise.all([
+			eco.getMeta(sessionFile), eco.getTokens(sessionFile), eco.countInteractions(sessionFile), eco.getModelUsage(sessionFile)
 		]);
 		details.title = meta.title;
 		details.firstInteraction = meta.firstInteraction;
@@ -4929,7 +4939,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.editorRoot = eco.getEditorRoot(sessionFile);
 		details.editorName = getEcosystemDisplayName(eco, sessionFile);
 		if (meta.workspacePath) { details.repository = path.basename(meta.workspacePath); }
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult);
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult, modelUsage);
 		return details;
 	}
 
@@ -4943,13 +4953,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 			try { const firstLine = JSON.parse(lines[0]); if (firstLine && typeof firstLine.kind === 'number') { isDeltaBased = true; } } catch { /* not delta */ }
 		}
 
+		// Compute model usage via the shared function (reusing already-read fileContent to
+		// avoid a second file read) so the Diagnostics detail cache gets real per-model
+		// attribution instead of only ever carrying over whatever a separate, unrelated
+		// Usage/Charts analysis pass happened to have cached already.
+		const modelUsage = await _getModelUsageFromSession(this.usageAnalysisDeps, sessionFile, fileContent);
+
 		if (isDeltaBased) {
-			return this.processDeltaJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences);
+			return this.processDeltaJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences, modelUsage);
 		}
-		return this.processCliJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences);
+		return this.processCliJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences, modelUsage);
 	}
 
-	private async processDeltaJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): Promise<SessionFileDetails> {
+	private async processDeltaJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[], modelUsage: ModelUsage): Promise<SessionFileDetails> {
 		const { sessionState } = await _reconstructJsonlStateAsync(lines);
 		if (sessionState.creationDate) { timestamps.push(sessionState.creationDate); }
 		if (sessionState.customTitle) { details.title = sessionState.customTitle; }
@@ -4970,11 +4986,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.repository = allContentReferences.length > 0
 			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
 			: '';
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
 		return details;
 	}
 
-	private async processCliJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): Promise<SessionFileDetails> {
+	private async processCliJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[], modelUsage: ModelUsage): Promise<SessionFileDetails> {
 		let firstUserMessage: string | undefined;
 		for (const line of lines) {
 			if (!line.trim()) { continue; }
@@ -4993,7 +5009,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.repository = allContentReferences.length > 0
 			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
 			: '';
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
 		return details;
 	}
 
