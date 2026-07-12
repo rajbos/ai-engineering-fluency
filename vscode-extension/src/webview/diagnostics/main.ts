@@ -589,7 +589,7 @@ function renderSessionTable(
   detailedFiles: SessionFileDetails[],
   isLoading: boolean = false,
 ): string {
-  if (isLoading) { return `<div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`; }
+  if (isLoading) { return `<div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="session-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`; }
   if (detailedFiles.length === 0) { return '<p style="color: #999;">No session files with activity in the last 14 days.</p>'; }
   const editorStats = getEditorStats(detailedFiles);
   const editors = Object.keys(editorStats).sort();
@@ -961,11 +961,12 @@ function renderFolderAnalysisResults(
     </div>`;
 }
 
-function renderModelUsageTab(detailedFiles: SessionFileDetails[]): string {
+function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessions: boolean = false): string {
   const editorStats = getEditorStats(detailedFiles);
   const editorOptions = Object.keys(editorStats).sort()
     .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
     .join("");
+  const analyzeButtonLabel = isLoadingSessions ? "⏳ Loading sessions…" : "🔍 Analyze";
   return `
     <div class="info-box">
       <div class="info-box-title">🧮 Model Usage Breakdown</div>
@@ -978,16 +979,11 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[]): string {
     <div class="section">
       <div class="section-title">🎯 Select Editor</div>
       <div class="folder-input-row">
-        <select id="model-usage-editor-select" class="tool-type-select">
+        <select id="model-usage-editor-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
           <option value="all">🌐 All Editors</option>
           ${editorOptions}
         </select>
-        <button class="button" id="btn-analyze-model-usage">🔍 Analyze</button>
-      </div>
-      <div style="margin-top: 8px; font-size: 11px; color: var(--text-muted);">
-        Session files load in the background after this panel opens. If the dropdown only
-        shows "All Editors" or results show 0 files, wait for the "Session Files" tab count
-        to populate, then try again.
+        <button class="button" id="btn-analyze-model-usage" ${isLoadingSessions ? "disabled" : ""}>${analyzeButtonLabel}</button>
       </div>
     </div>
     <div id="model-usage-results"></div>
@@ -1982,6 +1978,20 @@ function sanitizeDetailedSessionFiles(input: unknown): SessionFileDetails[] {
   return input.map(sanitizeSessionFileItem);
 }
 
+function handleSessionFilesLoadProgress(message: DiagMessage): void {
+  const processed = Number(message.processed || 0);
+  const total = Number(message.total || 0);
+  const progressText = total > 0 ? `Analyzing files… (${processed} / ${total})` : "Analyzing files…";
+
+  const sessionSubtext = document.getElementById("session-loading-subtext");
+  if (sessionSubtext) { sessionSubtext.textContent = progressText; }
+
+  const modelUsageBtn = document.getElementById("btn-analyze-model-usage") as HTMLButtonElement | null;
+  if (modelUsageBtn && modelUsageBtn.disabled) {
+    modelUsageBtn.innerHTML = total > 0 ? `⏳ Loading sessions… (${processed}/${total})` : "⏳ Loading sessions…";
+  }
+}
+
 function handleSessionFilesLoaded(message: DiagMessage): void {
   storedDetailedFiles = sanitizeDetailedSessionFiles(message.detailedSessionFiles);
   isLoading = false;
@@ -1991,13 +2001,19 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
     sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
   }
 
-  const modelUsageSelect = document.getElementById("model-usage-editor-select");
+  const modelUsageSelect = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
   if (modelUsageSelect) {
     const editorStats = getEditorStats(storedDetailedFiles);
     const editorOptions = Object.keys(editorStats).sort()
       .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
       .join("");
     modelUsageSelect.innerHTML = `<option value="all">🌐 All Editors</option>${editorOptions}`;
+    modelUsageSelect.disabled = false;
+  }
+  const modelUsageBtn = document.getElementById("btn-analyze-model-usage") as HTMLButtonElement | null;
+  if (modelUsageBtn) {
+    modelUsageBtn.disabled = false;
+    modelUsageBtn.innerHTML = "🔍 Analyze";
   }
 
   reRenderTable();
@@ -2097,6 +2113,8 @@ function setupMessageHandlers(): void {
       handleDiagnosticDataError(message);
     } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
       handleSessionFilesLoaded(message);
+    } else if (message.command === "sessionFilesLoadProgress") {
+      handleSessionFilesLoadProgress(message);
     } else if (message.command === "cacheCleared") {
       handleCacheCleared();
     } else if (message.command === "cacheRefreshed") {
@@ -2486,7 +2504,7 @@ ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 ${renderFolderAnalyzerTab()}
 </div>
 <div id="tab-model-usage" class="tab-content">
-${renderModelUsageTab(detailedFiles)}
+${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
 </div>

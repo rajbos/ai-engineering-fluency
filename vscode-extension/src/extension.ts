@@ -8547,13 +8547,24 @@ ${this.getLoadingHtmlScript()}
     const initialCacheHits = this._cacheHits;
     const initialCacheMisses = this._cacheMisses;
     const sortedFiles = await this.sortSessionFilesByMtime(sessionFiles);
-    for (const file of sortedFiles.slice(0, 500)) {
+    const filesToProcess = sortedFiles.slice(0, 500);
+    const total = filesToProcess.length;
+    let processed = 0;
+    let lastProgressPost = Date.now();
+    for (const file of filesToProcess) {
       if (!this.isPanelOpen(panel)) { this.log("Diagnostic panel closed, stopping background load"); return; }
       try {
         const details = await this.getSessionFileDetails(file);
         const lastActivity = details.lastInteraction ? new Date(details.lastInteraction) : new Date(details.modified);
         if (lastActivity >= fourteenDaysAgo) { detailedSessionFiles.push(details); }
       } catch { /* Skip inaccessible files */ }
+      processed++;
+      // Throttle progress updates to ~5/sec so large scans don't flood the webview with messages.
+      const now = Date.now();
+      if (now - lastProgressPost >= 200 || processed === total) {
+        lastProgressPost = now;
+        panel.webview.postMessage({ command: "sessionFilesLoadProgress", processed, total });
+      }
     }
     await this.enrichSessionHierarchy(detailedSessionFiles);
     await this.enrichPiSessionHierarchy(detailedSessionFiles);
