@@ -16,6 +16,7 @@ export const EDITOR_ICON_MAP: Record<string, string> = {
 	'Crush': '🦾',
 	'Cursor': '🖱️',
 	'Devin': '🧠',
+	'Devin CLI': '🧠',
 	'Eclipse': '🌑',
 	'Gemini CLI': '💎',
 	'JetBrains': '🧩',

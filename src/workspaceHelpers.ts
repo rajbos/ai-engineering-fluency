@@ -498,6 +498,11 @@ export function getEditorNameFromRoot(rootPath: string): string {
 	// collides with 'copilot' or 'code', but it is checked early for consistency
 	// with the other editor-specific guards in this function.
 	if (lower.includes('.devin') || lower.includes('devin-desktop')) { return 'Devin'; }
+	// Devin CLI (separate ACP-based CLI agent tool, distinct from the Devin desktop app
+	// above) stores its global sessions.db under a 'devin/cli' data dir. Checked before
+	// the generic checks below since 'devin' alone would otherwise be ambiguous with the
+	// desktop app guard above (that one requires '.devin' or 'devin-desktop' specifically).
+	if (lower.includes('devin/cli')) { return 'Devin CLI'; }
 	// Check obvious markers first (JetBrains must precede Copilot CLI)
 	if (isJetBrainsRoot(lower)) { return 'JetBrains'; }
 	if (isCopilotCliRoot(lower)) { return 'Copilot CLI'; }
@@ -992,6 +997,11 @@ function detectToolEditorFromPath(
 	if (copilotFamily) { return copilotFamily; }
 	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Devin CLI virtual paths: <...>/devin/cli/sessions.db#<id>. Checked here (not merely
+	// the generic 'devin' substring match in detectIDEEditorSource) so it always wins over
+	// the desktop app's devin:// scheme / Windsurf family checks, which are handled earlier
+	// in getEditorTypeFromPath/detectEditorSource before this function is even called.
+	if (lowerPath.includes('devin/cli/sessions.db#')) { return 'Devin CLI'; }
 	// Cursor virtual paths must be checked before the generic /cursor/ match in detectVSCodeVariantFromPath.
 	if (lowerPath.includes('/cursor/user/globalstorage/state.vscdb#')) { return 'Cursor'; }
 	if (lowerPath.includes('/.pi/agent/sessions/')) { return 'Pi'; }

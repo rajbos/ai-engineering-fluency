@@ -1,5 +1,9 @@
 # Devin & Windsurf Session Storage (Shared Cascade Format)
 
+> **Scope:** this document covers the **Devin desktop app** (the Windsurf-fork IDE) only.
+> For the separate **Devin CLI** tool (a global sessions.db SQLite database), see
+> [devin-cli-session-format.md](./devin-cli-session-format.md).
+
 ## Summary
 
 Devin's desktop IDE (Cognition Labs) is a direct fork/rebrand of Windsurf, produced after
@@ -83,13 +87,17 @@ note in `.github/agents/new-editor-support.agent.md` about Windsurf being a pre-
 exception to the adapter-registry pattern. Devin extends that same special case rather
 than introducing a second one, since the underlying mechanism is identical.
 
+## Scope
+
+**This document covers the Devin *desktop app* only** (the Windsurf-fork IDE). Devin CLI
+— a separate, unrelated tool that stores sessions in a global `%APPDATA%\devin\cli\sessions.db`
+SQLite database — is documented in
+[`devin-cli-session-format.md`](./devin-cli-session-format.md). It is integrated as a
+regular `IEcosystemAdapter` (`DevinCliAdapter`), unlike the desktop app's legacy special
+case described here.
+
 ## Future work
 
-- **Devin CLI** (`%APPDATA%\devin\cli\sessions.db`) is a distinct, ACP-based agent-mode
-  tool with its own SQLite schema. It was empty/unused on the machine this was
-  researched on. If it becomes actively used, it should be integrated as its own
-  `IEcosystemAdapter` (SQLite-backed, similar to `CrushAdapter`) — it is unrelated to the
-  Cascade-sharing described above.
 - If a reliable way to distinguish Devin-origin vs. Windsurf-origin `.pb` files without
   live API access is ever found (e.g. a field inside the protobuf payload), the
   file-based fallback discovery could attribute origin correctly instead of always

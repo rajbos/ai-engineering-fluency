@@ -723,6 +723,10 @@ const ESTIMATED_TOKENS_NOTES: Record<string, { title: string; sub: string }> = {
 		title: 'Kiro CLI: token counts are estimated from the message log text (~4 chars/token). The CLI records usage in credits per request but its input/output token counters are always 0, and the model is logged as "auto" (server-side routing).',
 		sub: 'Estimated from message log (CLI meters credits, not tokens)',
 	},
+	'Devin CLI': {
+		title: 'Devin CLI: the ACP protocol used by this tool does not define per-message token counts, so this is a ~4 chars/token estimate from message text. A per-session cogs_json field may hold real usage data, but its exact shape was unconfirmed (no populated example was available) at the time this was implemented.',
+		sub: 'Estimated from message text (ACP has no per-message token counts)',
+	},
 };
 
 function buildEstimatedTokensCard(data: SessionLogData, stats: SummaryStats): string {
