@@ -198,13 +198,13 @@ The CLI scans the same session files as the [VS Code extension](../vscode-extens
 
 ```bash
 # From the repository root
-npm run cli:build           # Build the CLI
-npm run cli:stats           # Run stats command
-npm run cli:usage           # Run usage command
-npm run cli:environmental   # Run environmental command
-npm run cli:fluency         # Run fluency command
-npm run cli:diagnostics     # Run diagnostics command
-npm run cli -- --help       # Run any CLI command
+pnpm run cli:build           # Build the CLI
+pnpm run cli:stats           # Run stats command
+pnpm run cli:usage           # Run usage command
+pnpm run cli:environmental   # Run environmental command
+pnpm run cli:fluency         # Run fluency command
+pnpm run cli:diagnostics     # Run diagnostics command
+pnpm run cli -- --help       # Run any CLI command
 ```
 
 ---
