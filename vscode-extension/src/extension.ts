@@ -8368,18 +8368,20 @@ ${this.getLoadingHtmlScript()}
     agg.cacheCreation1hTokens = (agg.cacheCreation1hTokens || 0) + (usage.cacheCreation1hTokens || 0);
   }
 
-  /** Aggregate per-model usage across a set of session files with modelUsage data. */
-  private aggregateModelUsage(matching: SessionFileDetails[]): { aggregated: ModelUsage; filesWithUsage: number } {
+  /** Aggregate per-model usage (and per-model session counts) across a set of session files with modelUsage data. */
+  private aggregateModelUsage(matching: SessionFileDetails[]): { aggregated: ModelUsage; filesWithUsage: number; sessionCounts: Record<string, number> } {
     const aggregated: ModelUsage = {};
+    const sessionCounts: Record<string, number> = {};
     let filesWithUsage = 0;
     for (const f of matching) {
       if (!f.modelUsage) { continue; }
       filesWithUsage++;
       for (const [model, usage] of Object.entries(f.modelUsage)) {
         CopilotTokenTracker.mergeModelUsageEntry(aggregated, model, usage);
+        sessionCounts[model] = (sessionCounts[model] || 0) + 1;
       }
     }
-    return { aggregated, filesWithUsage };
+    return { aggregated, filesWithUsage, sessionCounts };
   }
 
   /**
@@ -8410,10 +8412,11 @@ ${this.getLoadingHtmlScript()}
 
     const files = this.diagnosticsCachedFiles;
     const matching = editor === 'all' ? files : files.filter(f => (f.editorSource || 'Unknown') === editor);
-    const { aggregated, filesWithUsage } = this.aggregateModelUsage(matching);
+    const { aggregated, filesWithUsage, sessionCounts } = this.aggregateModelUsage(matching);
 
     const rows = Object.entries(aggregated).map(([model, usage]) => ({
       model,
+      sessionCount: sessionCounts[model] || 0,
       inputTokens: usage.inputTokens,
       outputTokens: usage.outputTokens,
       cachedReadTokens: usage.cachedReadTokens || 0,
@@ -8423,6 +8426,10 @@ ${this.getLoadingHtmlScript()}
     })).sort((a, b) => b.estimatedCost - a.estimatedCost);
 
     const totalCost = this.calculateEstimatedCost(aggregated);
+    // Only Anthropic/Claude models expose a 1-hour cache-TTL pricing tier. If none of the
+    // models in this result set have that pricing field, the column would always be a
+    // wall of zeros for this provider — hide it instead of showing dead data.
+    const supportsCache1h = Object.keys(aggregated).some(model => this.modelPricing[model]?.cacheCreation1hCostPerMillion !== undefined);
 
     this.diagnosticsPanel.webview.postMessage({
       command: 'modelUsageResult',
@@ -8431,6 +8438,7 @@ ${this.getLoadingHtmlScript()}
       filesWithUsage,
       rows,
       totalCost,
+      supportsCache1h,
     });
   }
 
