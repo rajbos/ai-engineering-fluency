@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
+import { getModelDisplayName } from '../../../src/webview/shared/modelUtils';
 import {
 	setFormatLocale,
 	getEditorIcon,
@@ -10,6 +10,7 @@ import {
 	formatPercent,
 	formatNumber,
 	formatCost,
+	formatDurationShort,
 	escapeHtml,
 	markdownToHtml,
 	STAGE_LABELS,
@@ -40,6 +41,30 @@ test('getModelDisplayName: decodes URI-encoded segments in unknown model IDs', (
 
 test('getModelDisplayName: returns raw ID when URI decoding fails (malformed percent)', () => {
 	assert.equal(getModelDisplayName('bad%2model'), 'bad%2model');
+});
+
+// ── formatDurationShort ─────────────────────────────────────────────────
+
+test('formatDurationShort: formats minutes-only durations', () => {
+	assert.equal(formatDurationShort(12 * 60 * 1000), '12m');
+	assert.equal(formatDurationShort(59 * 60 * 1000), '59m');
+});
+
+test('formatDurationShort: formats hour durations with zero-padded minutes', () => {
+	assert.equal(formatDurationShort(64 * 60 * 1000), '1h 04m');
+	assert.equal(formatDurationShort(2 * 60 * 60 * 1000), '2h 00m');
+	assert.equal(formatDurationShort((60 + 30) * 60 * 1000), '1h 30m');
+});
+
+test('formatDurationShort: formats sub-minute durations as <1m', () => {
+	assert.equal(formatDurationShort(0), '<1m');
+	assert.equal(formatDurationShort(29 * 1000), '<1m');
+});
+
+test('formatDurationShort: returns em dash for missing or invalid values', () => {
+	assert.equal(formatDurationShort(undefined), '—');
+	assert.equal(formatDurationShort(-1), '—');
+	assert.equal(formatDurationShort(Number.NaN), '—');
 });
 
 // ── getEditorIcon ───────────────────────────────────────────────────────

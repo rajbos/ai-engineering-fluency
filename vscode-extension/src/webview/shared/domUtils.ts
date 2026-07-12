@@ -31,6 +31,11 @@ export function createButton(configOrId: ButtonConfig | string, label?: string, 
 		button.textContent = config.label;
 		if (config.appearance) { button.setAttribute('appearance', config.appearance); }
 		if (config.hidden) { button.hidden = true; }
+		if (config.active) {
+			button.classList.add('nav-active');
+			button.setAttribute('disabled', '');
+			button.setAttribute('aria-current', 'page');
+		}
 	}
 	
 	return button;

@@ -1,12 +1,12 @@
 // Diagnostics Report webview with tabbed interface
-import { buttonHtml } from "../shared/buttonConfig";
+import { navButtonsHtml } from "../shared/buttonConfig";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import { escapeHtml, formatFileSize, getTimeSince, getEditorIcon } from "../shared/formatUtils";
 import { createViewStateManager } from "../shared/viewState";
 // CSS imported as text via esbuild
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
-import { getWindowData } from "../shared/dataLoader";
+import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -2271,13 +2271,7 @@ function buildDiagRootHtml(
 <span class="header-title">Diagnostic Report</span>
 </div>
 <div class="button-row">
-${buttonHtml("btn-refresh")}
-${buttonHtml("btn-details")}
-${buttonHtml("btn-chart")}
-${buttonHtml("btn-usage")}
-${buttonHtml("btn-environmental")}
-${buttonHtml("btn-maturity")}
-${data?.backendConfigured ? buttonHtml("btn-dashboard") : ""}
+${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 </div>
 </div>
 

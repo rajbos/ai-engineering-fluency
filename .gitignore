@@ -5,6 +5,7 @@ desktop/.dev-profile
 desktop/electron-stdout.log
 desktop/electron-stderr.log
 desktop/release
+.impeccable/
 .vscode-test/
 *.vsix
 *.backup
@@ -15,6 +16,7 @@ reports/mutation/
 .github/scripts/scraped-models.json
 example.json
 log-example.txt
+eslint-all.txt
 visualstudio-extension/.vs/
 visualstudio-extension/src/AIEngineeringFluency/bin/
 visualstudio-extension/src/AIEngineeringFluency/obj/
@@ -41,4 +43,4 @@ jetbrains-plugin/.gradle/
 # IntelliJ sandbox directories
 **/idea-sandbox/
 .claude/scheduled_tasks.lock
-
+.claude/settings.local.json

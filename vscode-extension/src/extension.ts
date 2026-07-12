@@ -6,11 +6,11 @@ import * as os from 'os';
 import * as childProcess from 'child_process';
 
 // --- JSON data files ---
-import tokenEstimatorsData from './tokenEstimators.json';
-import modelPricingData from './modelPricing.json';
-import toolNamesData from './toolNames.json';
-import automaticToolsData from './automaticTools.json';
-import customizationPatternsData from './customizationPatterns.json';
+import tokenEstimatorsData from '../../src/tokenEstimators.json';
+import modelPricingData from '../../src/modelPricing.json';
+import toolNamesData from '../../src/toolNames.json';
+import automaticToolsData from '../../src/automaticTools.json';
+import customizationPatternsData from '../../src/customizationPatterns.json';
 import copilotPlansData from './copilotPlans.json';
 import * as packageJson from '../package.json';
 import { getToolFamilies, DEFAULT_TOOL_FAMILIES } from './toolFamilies';
@@ -61,7 +61,7 @@ import type {
   EvaluatedInsight,
   InsightStateBag,
   ToolCurationAnalysis,
-} from './types';
+} from '../../src/types';
 
 // --- Tool curation ---
 import {
@@ -71,7 +71,7 @@ import {
   buildMcpEntriesFromSettings as _buildMcpEntriesFromSettings,
   discoverSkillEntries as _discoverSkillEntries,
   analyzeToolCuration as _analyzeToolCuration,
-} from './toolCuration';
+} from '../../src/toolCuration';
 
 // --- Insights engine ---
 import {
@@ -82,23 +82,23 @@ import {
 } from './insightsEngine';
 
 // --- Ecosystem adapter types & helpers ---
-import type { OpenCodeDataAccess } from './opencode';
-import type { CrushDataAccess } from './crush';
-import type { VisualStudioDataAccess } from './visualstudio';
-import type { ContinueDataAccess } from './continue';
-import type { ClaudeCodeDataAccess } from './claudecode';
-import type { ClaudeDesktopCoworkDataAccess } from './claudedesktop';
-import type { MistralVibeDataAccess } from './mistralvibe';
-import type { GeminiCliDataAccess } from './geminicli';
-import type { IEcosystemAdapter } from './ecosystemAdapter';
-import { WindsurfDataAccess } from './windsurf';
-import { getEcosystemDisplayName } from './ecosystemAdapter';
-import { buildAdapterRegistry, createDataAccessInstances } from './adapters';
-import { CopilotAppDataAccess } from './copilotAppData';
-import { PiDataAccess } from './pi';
-import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
-import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
-import { detectJetBrainsModelHintFromContent } from './jetbrains';
+import type { OpenCodeDataAccess } from '../../src/opencode';
+import type { CrushDataAccess } from '../../src/crush';
+import type { VisualStudioDataAccess } from '../../src/visualstudio';
+import type { ContinueDataAccess } from '../../src/continue';
+import type { ClaudeCodeDataAccess } from '../../src/claudecode';
+import type { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
+import type { MistralVibeDataAccess } from '../../src/mistralvibe';
+import type { GeminiCliDataAccess } from '../../src/geminicli';
+import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import { WindsurfDataAccess } from '../../src/windsurf';
+import { getEcosystemDisplayName } from '../../src/ecosystemAdapter';
+import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
+import { CopilotAppDataAccess, type SessionContextWindow } from './copilotAppData';
+import { PiDataAccess } from '../../src/pi';
+import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
+import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
+import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { createWakeupGate } from './utils/promises';
 
 // --- Session parsing & token estimation ---
@@ -120,11 +120,12 @@ import {
   extractAllTokensFromDebugLog as _extractAllTokensFromDebugLog,
   extractResponseItemText as _extractResponseItemText,
   NANO_AIU_TO_DOLLARS,
-} from './tokenEstimation';
-import { SessionDiscovery } from './sessionDiscovery';
+} from '../../src/tokenEstimation';
+import { SessionDiscovery } from '../../src/sessionDiscovery';
 
 // --- Cache ---
 import { CacheManager } from './cacheManager';
+import { HookManager } from './hookManager';
 
 // --- Usage analysis ---
 import {
@@ -139,14 +140,14 @@ import {
   analyzeSessionUsage as _analyzeSessionUsage,
   getModelUsageFromSession as _getModelUsageFromSession,
   type UsageAnalysisDeps,
-} from './usageAnalysis';
+} from '../../src/usageAnalysis';
 
 // --- Maturity & fluency scoring ---
 import {
   getFluencyLevelData as _getFluencyLevelData,
   calculateFluencyScoreForTeamMember as _calculateFluencyScoreForTeamMember,
   calculateMaturityScores as _calculateMaturityScores,
-} from './maturityScoring';
+} from '../../src/maturityScoring';
 
 // --- Workspace helpers ---
 import {
@@ -170,13 +171,13 @@ import {
   normalizeMcpToolName as _normalizeMcpToolName,
   extractMcpServerName as _extractMcpServerName,
   normalizePath as _normalizePath,
-} from './workspaceHelpers';
+} from '../../src/workspaceHelpers';
 
 // --- Chart building ---
-import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from './chartDataBuilder';
+import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, type SessionAggregateInput } from './statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -211,13 +212,13 @@ import { REPO_HYGIENE_SKILL } from './backend/repoHygieneSkill';
 import { BackendFacade } from './backend/facade';
 import { BackendCommandHandler } from './backend/commands';
 import { TeamServerConfigPanel } from './backend/teamServerConfigPanel';
-import { getModelDisplayName } from './webview/shared/modelUtils';
+import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
 import { ConfirmationMessages } from './backend/ui/messages';
 
 // --- Utilities ---
 import { getNonce, buildCspMeta } from './utils/webviewUtils';
-import { isGuidMcpTool } from './utils/toolUtils';
-import { toLocalDayKey } from './utils/dayKeys';
+import { isGuidMcpTool } from '../../src/utils/toolUtils';
+import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { determineOnboardingAction } from './onboarding';
 
 type LocalViewRegressionProbeResult = {
@@ -357,6 +358,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public windsurf!: WindsurfDataAccess;
 	private ecosystems!: IEcosystemAdapter[];
 	private cacheManager!: CacheManager;
+	private hookManager!: HookManager;
 	private readonly copilotAppData = new CopilotAppDataAccess();
 
 	private get usageAnalysisDeps(): UsageAnalysisDeps {
@@ -1164,6 +1166,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			extractMcpServerName: (t) => this.extractMcpServerName(t),
 		});
 		this.cacheManager = new CacheManager(context, { log: (m: string) => this.log(m), warn: (m: string) => this.warn(m), error: (m: string) => this.error(m) }, CopilotTokenTracker.CACHE_VERSION);
+		this.hookManager = new HookManager(context.globalState, (msg) => this.log(msg));
 		this.sessionDiscovery = new SessionDiscovery({
 			log: (m) => this.log(m),
 			warn: (m) => this.warn(m),
@@ -2470,56 +2473,62 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.supportThemeIcons = false;
 		tooltip.appendMarkdown('#### AI Engineering Fluency');
 		tooltip.appendMarkdown('\n---\n');
-		tooltip.appendMarkdown(`📅 Today  \n`);
-		tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
-		tooltip.appendMarkdown(`| Tokens :                | ${detailedStats.today.tokens.toLocaleString()} |\n`);
-		tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| CO₂ estimated :              | ${detailedStats.today.co2.toFixed(2)} grams |\n`);
-		tooltip.appendMarkdown(`| Water estimated :           | ${detailedStats.today.waterUsage.toFixed(3)} liters |\n`);
-		tooltip.appendMarkdown('\n---\n');
 		const secondaryPeriod = tooltipSecondaryPeriod(this.getStatusBarShowTokensSetting(), this.getStatusBarShowCostSetting());
 		const secondaryStats = secondaryPeriod === 'currentMonth' ? detailedStats.month : detailedStats.last30Days;
-		const secondaryLabel = secondaryPeriod === 'currentMonth' ? '📅 Current Month' : '📊 Last 30 Days';
-		tooltip.appendMarkdown(`${secondaryLabel}  \n`);
-		tooltip.appendMarkdown(`|                 |  |\n|-----------------------|-------|\n`);
-		tooltip.appendMarkdown(`| Tokens :                | ${secondaryStats.tokens.toLocaleString()} |\n`);
-		tooltip.appendMarkdown(`| Estimated cost (UBB) :       | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| CO₂ estimated :              | ${secondaryStats.co2.toFixed(2)} grams |\n`);
-		tooltip.appendMarkdown(`| Water estimated :           | ${secondaryStats.waterUsage.toFixed(3)} liters |\n`);
+		const secondaryLabel = secondaryPeriod === 'currentMonth' ? 'Current Month' : 'Last 30 Days';
+		// Trailing &nbsp; padding on the "Today" column widens it a bit, giving the two
+		// value columns visual breathing room without VS Code table cell CSS to lean on.
+		const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
+		const grams = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} grams`;
+		const liters = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} liters`;
+		tooltip.appendMarkdown(`|  | 📅 Today | 📊 ${secondaryLabel} |\n|---|---|---|\n`);
+		tooltip.appendMarkdown(`| Tokens : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
+		tooltip.appendMarkdown(`| GitHub Copilot cost : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| All providers cost : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| CO₂ estimated : | ${pad(grams(detailedStats.today.co2))} | ${grams(secondaryStats.co2)} |\n`);
+		tooltip.appendMarkdown(`| Water estimated : | ${pad(liters(detailedStats.today.waterUsage))} | ${liters(secondaryStats.waterUsage)} |\n`);
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
 		return tooltip;
 	}
 
-	/** Builds and appends the per-provider cost section with SVG progress bars.
-	 *  Each provider always gets a bar: GitHub Copilot uses cost vs. budget (if configured),
-	 *  all others show cost as a proportion of total monthly spend across all providers. */
+	/** Sums per-provider costs into a total-across-all-providers figure. */
+	private sumBillingGroupCosts(billingGroupCosts: Record<string, number> | undefined): number {
+		return Object.values(billingGroupCosts ?? {}).reduce((s, v) => s + v, 0);
+	}
+
+	/** Builds and appends the cost sections: a GitHub Copilot budget gauge on top (spend vs.
+	 *  budget, health-colored), then a spend breakdown where every provider's bar is its share
+	 *  of total monthly spend (so those bars sum to 100%), and one combined footnote explaining
+	 *  the bar scales and where the budget value comes from. */
 	private appendProviderCostSection(tooltip: vscode.MarkdownString, detailedStats: DetailedStats): void {
 		const monthCosts = detailedStats.month.billingGroupCosts ?? {};
 		const providers = Object.keys(monthCosts).sort((a, b) => (monthCosts[b] ?? 0) - (monthCosts[a] ?? 0));
 		if (providers.length === 0) { return; }
-		const budget = this.getEffectiveMonthlyBudget();
-		const totalCost = Object.values(monthCosts).reduce((s, v) => s + v, 0);
+		const totalCost = this.sumBillingGroupCosts(monthCosts);
 		tooltip.appendMarkdown(`💰 Costs by Provider — Current Month  \n`);
 		tooltip.appendMarkdown(`|  |  |  |\n|---|---|---|\n`);
+		const { budget, source } = this.getEffectiveMonthlyBudgetWithSource();
+		if (budget > 0) {
+			const copilotCost = monthCosts['GitHub Copilot'] ?? 0;
+			const ratio = copilotCost / budget;
+			const color = ratio >= 0.9 ? '#EF5350' : ratio >= 0.75 ? '#FFA726' : '#4CAF50';
+			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, color))})`;
+			// Budget row first, then a sub-header row labelling the section below, so the
+			// "these bars are a different scale" context sits right where it's needed
+			// instead of a footnote read only after the bars already look confusing.
+			tooltip.appendMarkdown(`| 🎯 Copilot Budget | $${copilotCost.toFixed(2)} / $${budget.toFixed(2)} | ${barCell} |\n`);
+			tooltip.appendMarkdown(`| **Share of total spend** |  |  |\n`);
+		}
 		for (const provider of providers) {
 			const cost = monthCosts[provider] ?? 0;
-			const providerBudget = provider === 'GitHub Copilot' ? budget : 0;
-			const { ratio, color } = this.providerBarStyle(cost, providerBudget, totalCost);
-			const costStr = `$${cost.toFixed(2)}${providerBudget > 0 ? ` / $${providerBudget.toFixed(2)}` : ''}`;
-			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, color))})`;
-			tooltip.appendMarkdown(`| ${provider} | ${costStr} | ${barCell} |\n`);
+			const ratio = totalCost > 0 ? cost / totalCost : 0;
+			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, '#5B9BD5'))})`;
+			tooltip.appendMarkdown(`| ${provider} | $${cost.toFixed(2)} | ${barCell} |\n`);
 		}
-	}
-
-	/** Returns the bar fill ratio and colour for a provider row. */
-	private providerBarStyle(cost: number, providerBudget: number, totalCost: number): { ratio: number; color: string } {
-		if (providerBudget > 0) {
-			const ratio = cost / providerBudget;
-			const color = ratio >= 0.9 ? '#EF5350' : ratio >= 0.75 ? '#FFA726' : '#4CAF50';
-			return { ratio, color };
+		if (budget > 0) {
+			tooltip.appendMarkdown(`\n*Budget from ${source}*\n`);
 		}
-		return { ratio: totalCost > 0 ? cost / totalCost : 0, color: '#5B9BD5' };
 	}
 
 	/** Generates a small SVG progress bar with the given fill ratio (0–1) and color. */
@@ -2963,13 +2972,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *  to the monthly AI credits included with the user's Copilot plan, or the premium_interactions
 	 *  quota entitlement from the API if available. */
 	private getEffectiveMonthlyBudget(): number {
+		return this.getEffectiveMonthlyBudgetWithSource().budget;
+	}
+
+	/** Same as getEffectiveMonthlyBudget, but also reports where the value comes from,
+	 *  so the UI can explain a budget the user never configured themselves. */
+	private getEffectiveMonthlyBudgetWithSource(): { budget: number; source: string } {
 		const configured = this.getMonthlyBudgetSetting();
-		if (configured > 0) { return configured; }
+		if (configured > 0) { return { budget: configured, source: 'monthlyBudget setting' }; }
 		// Fall back to quota entitlement (premium_interactions) if available, then to plan credits
 		if (this._copilotQuotaEntitlements.premium_interactions) {
-			return this._copilotQuotaEntitlements.premium_interactions;
+			return { budget: this._copilotQuotaEntitlements.premium_interactions, source: 'Copilot plan quota' };
 		}
-		return this._copilotPlanResolved?.monthlyAiCreditsUsd ?? 0;
+		const planCredits = this._copilotPlanResolved?.monthlyAiCreditsUsd ?? 0;
+		return { budget: planCredits, source: 'Copilot plan credits' };
 	}
 
 	/** Updates the status bar background color based on current-month GitHub Copilot spend vs. the configured budget.
@@ -3237,6 +3253,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.deduplicateWorkspacePaths(workspaceSessionCounts, workspaceInteractionCounts);
 			this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts);
 			await this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey);
+			await this.enrichContextWindowFromAppData(usageResults, periods, todaySessionsList);
 		} catch (error) {
 			this.error('Error calculating usage analysis stats:', error);
 		}
@@ -3428,7 +3445,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			repositoriesWithCustomization: [],
 			editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0 },
 			applyUsage: { totalApplies: 0, totalCodeBlocks: 0, applyRate: 0 },
-			sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0 },
+			sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0, activeDurationMs: 0 },
 			conversationPatterns: { multiTurnSessions: 0, singleTurnSessions: 0, avgTurnsPerSession: 0, maxTurnsInSession: 0 },
 			agentTypes: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 }
 		};
@@ -3461,6 +3478,87 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (node && node.totalChildCount >= 2) { count++; }
 			}
 			if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
+		} catch { /* optional enrichment — suppress */ }
+	}
+
+	/** The usage periods whose date range contains the given UTC activity key. */
+	private _periodsForActivityKey(
+		key: string,
+		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
+	): UsageAnalysisPeriod[] {
+		const matched: UsageAnalysisPeriod[] = [];
+		if (key >= periods.last30DaysUtcStartKey) { matched.push(periods.last30DaysStats); }
+		if (key >= periods.monthUtcStartKey) { matched.push(periods.monthStats); }
+		if (key >= periods.lastMonthUtcStartKey && key <= periods.lastMonthUtcEndKey) { matched.push(periods.lastMonthStats); }
+		if (key === periods.todayUtcKey) { matched.push(periods.todayStats); }
+		return matched;
+	}
+
+	/** Fold one data.db context row into a period aggregate. `hadTier` prevents double-counting sessions whose events.jsonl already carried a tier. */
+	private _mergeDbContextIntoPeriod(period: UsageAnalysisPeriod, info: SessionContextWindow, hadTier: boolean): void {
+		const cw = this._ensureContextWindow(period);
+		if (info.contextReachedTokens && info.contextReachedTokens > (cw.maxReachedTokens ?? 0)) {
+			cw.maxReachedTokens = info.contextReachedTokens;
+			cw.maxReachedWindowLimit = info.contextWindowLimit ?? undefined;
+		}
+		if (info.contextTier && !hadTier) {
+			cw.tierCounts[info.contextTier] = (cw.tierCounts[info.contextTier] ?? 0) + 1;
+		}
+	}
+
+	/**
+	 * Enrich the usage periods and today's session list with context-window
+	 * state from data.db: the selected window limit, the last known fill, and
+	 * the context tier (data.db also covers sessions whose events.jsonl lacks
+	 * a contextTier). Errors are swallowed — this is optional enrichment only.
+	 */
+	/** Collect activity key + tier presence per Copilot CLI session uuid in the loaded window. */
+	private _collectCliSessionEntries(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+	): Map<string, { activityKey: string; hadTier: boolean }> {
+		const entries = new Map<string, { activityKey: string; hadTier: boolean }>();
+		for (const r of usageResults) {
+			if (!r || r.sessionData.interactions === 0) { continue; }
+			const uuid = this.extractCopilotCliUuid(r.sessionFile);
+			if (!uuid) { continue; }
+			entries.set(uuid, {
+				activityKey: this.computeLastActivityKey(r.sessionData, r.mtime),
+				hadTier: !!r.sessionData.contextTier,
+			});
+		}
+		return entries;
+	}
+
+	/** Stamp data.db context-window state onto one today-session summary. */
+	private _applyDbContextToTodaySession(session: TodaySessionSummary, info: SessionContextWindow): void {
+		if (info.contextTier && !session.contextTier) { session.contextTier = info.contextTier; }
+		if (info.contextWindowLimit) { session.contextWindowLimit = info.contextWindowLimit; }
+		if (info.contextReachedTokens) { session.contextReachedTokens = info.contextReachedTokens; }
+	}
+
+	private async enrichContextWindowFromAppData(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
+		todaySessionsList: TodaySessionSummary[],
+	): Promise<void> {
+		const entries = this._collectCliSessionEntries(usageResults);
+		if (entries.size === 0) { return; }
+		const todayByUuid = new Map<string, TodaySessionSummary>();
+		for (const s of todaySessionsList) {
+			const uuid = this.extractCopilotCliUuid(s.filePath);
+			if (uuid) { todayByUuid.set(uuid, s); }
+		}
+		try {
+			const contextInfo = await this.copilotAppData.getSessionContextInfo([...entries.keys()]);
+			for (const [uuid, info] of contextInfo) {
+				const entry = entries.get(uuid);
+				if (!entry) { continue; }
+				for (const period of this._periodsForActivityKey(entry.activityKey, periods)) {
+					this._mergeDbContextIntoPeriod(period, info, entry.hadTier);
+				}
+				const session = todayByUuid.get(uuid);
+				if (session) { this._applyDbContextToTodaySession(session, info); }
+			}
 		} catch { /* optional enrichment — suppress */ }
 	}
 
@@ -3509,6 +3607,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return { results, totalFiles: sessionFiles.length };
 	}
 
+	/**
+	 * Build session summaries for a lookback window (last 7/30 days) and send them
+	 * to the analysis panel. Used by the "Recent Sessions" tab lookback selector;
+	 * the default "Today" view keeps using the summaries bundled with updateStats.
+	 */
+	private async loadRecentSessions(days: number): Promise<void> {
+		if (!this.analysisPanel) { return; }
+		const lookbackDays = days === 30 ? 30 : 7;
+		const now = new Date();
+		const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - lookbackDays);
+		const windowStartKey = toLocalDayKey(windowStart);
+		const sessions: TodaySessionSummary[] = [];
+		try {
+			const { results } = await this.loadUsageSessionFiles(undefined, windowStart.getTime());
+			for (const r of results) {
+				if (!r || r.sessionData.interactions === 0) { continue; }
+				if (this.computeLastActivityKey(r.sessionData, r.mtime) < windowStartKey) { continue; }
+				const analysis = r.sessionData.usageAnalysis || this.buildDefaultSessionAnalysis();
+				sessions.push(this.collectTodaySessionInfo(r.sessionData, r.sessionFile, analysis, r.sessionData.interactions, r.mtime));
+			}
+		} catch (error) {
+			this.error('Error loading recent sessions:', error);
+		}
+		sessions.sort((a, b) => b.interactions - a.interactions);
+		this.analysisPanel.webview.postMessage({ command: 'recentSessionsLoaded', days: lookbackDays, sessions });
+	}
+
 	private computeLastActivityKey(sessionData: SessionFileCache, mtime: number): string {
 		if (sessionData.dailyRollups && Object.keys(sessionData.dailyRollups).length > 0) {
 			return Object.keys(sessionData.dailyRollups).sort().pop()!;
@@ -3536,16 +3661,37 @@ class CopilotTokenTracker implements vscode.Disposable {
 	): TodaySessionSummary {
 		const modelUsage = sessionData.modelUsage || {};
 		const { inputTok, outputTok, cachedTok } = this._resolveSessionModelTokens(sessionData, modelUsage);
+		const durationMs = computeSessionDurationMs(sessionData.firstInteraction, sessionData.lastInteraction);
+		const workspace = this.resolveSessionWorkspaceName(sessionData, sessionFile);
 		return {
 			title: sessionData.title || null, filePath: sessionFile, interactions,
 			toolCalls: analysis.toolCalls.total, inputTokens: inputTok, outputTokens: outputTok,
 			thinkingTokens: sessionData.thinkingTokens || 0, cachedTokens: cachedTok,
-			totalTokens: inputTok + outputTok + cachedTok + (sessionData.thinkingTokens || 0),
+			totalTokens: computeSessionTotalTokens(inputTok, outputTok, sessionData.thinkingTokens || 0),
 			estimatedCost: sessionData.copilotExactCostDollars ?? this.calculateEstimatedCost(modelUsage),
 			editor: this.detectEditorSource(sessionFile), models: Object.keys(modelUsage),
 			lastActivity: sessionData.lastInteraction || new Date(mtime).toISOString(),
 			...(sessionData.truncationCount ? { truncationCount: sessionData.truncationCount } : {}),
+			...(sessionData.maxRequestInputTokens ? { maxRequestInputTokens: sessionData.maxRequestInputTokens } : {}),
+			...(sessionData.contextTier ? { contextTier: sessionData.contextTier } : {}),
+			...(durationMs !== undefined ? { durationMs } : {}),
+			...(workspace ? { workspace } : {}),
 		};
+	}
+
+	/**
+	 * Best-effort workspace name for a session summary. Uses the repository name
+	 * already cached on the session data, falling back to the workspaceStorage
+	 * folder resolution (cached per workspace id). Returns undefined when
+	 * attribution is unavailable.
+	 */
+	private resolveSessionWorkspaceName(sessionData: SessionFileCache, sessionFile: string): string | undefined {
+		if (sessionData.repository) { return sessionData.repository; }
+		try {
+			const workspaceFolder = _resolveWorkspaceFolderFromSessionPath(sessionFile, this._workspaceIdToFolderCache);
+			if (workspaceFolder) { return path.basename(workspaceFolder); }
+		} catch { /* attribution is optional */ }
+		return undefined;
 	}
 
 	private _mergeCodeWorkspaceCustomizationFiles(norm: string): CustomizationFileEntry[] {
@@ -3617,6 +3763,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (inLast30Days) {
 			periods.last30DaysStats.sessions++;
 			this.mergeUsageAnalysis(periods.last30DaysStats, analysis);
+			this._mergeContextWindowStats(periods.last30DaysStats, sessionData);
 			this.trackWorkspaceForSession(sessionFile, interactions,
 				wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
 				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
@@ -3624,15 +3771,39 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
 			periods.monthStats.sessions++;
 			this.mergeUsageAnalysis(periods.monthStats, analysis);
+			this._mergeContextWindowStats(periods.monthStats, sessionData);
 		}
 		if (inLastMonth) {
 			periods.lastMonthStats.sessions++;
 			this.mergeUsageAnalysis(periods.lastMonthStats, analysis);
+			this._mergeContextWindowStats(periods.lastMonthStats, sessionData);
 		}
 		if (lastActivityUtcKey === periods.todayUtcKey) {
 			periods.todayStats.sessions++;
 			this.mergeUsageAnalysis(periods.todayStats, analysis);
+			this._mergeContextWindowStats(periods.todayStats, sessionData);
 			todaySessionsList.push(this.collectTodaySessionInfo(sessionData, sessionFile, analysis, interactions, mtime));
+		}
+	}
+
+	/** Get-or-create the contextWindow aggregate on a usage period. */
+	private _ensureContextWindow(period: UsageAnalysisPeriod): NonNullable<UsageAnalysisPeriod['contextWindow']> {
+		if (!period.contextWindow) {
+			period.contextWindow = { maxRequestInputTokens: 0, maxRequestModels: [], tierCounts: {} };
+		}
+		return period.contextWindow;
+	}
+
+	/** Fold one session's context-window fields (from its cache entry) into a period aggregate. */
+	private _mergeContextWindowStats(period: UsageAnalysisPeriod, sessionData: SessionFileCache): void {
+		if (!sessionData.maxRequestInputTokens && !sessionData.contextTier) { return; }
+		const cw = this._ensureContextWindow(period);
+		if ((sessionData.maxRequestInputTokens ?? 0) > cw.maxRequestInputTokens) {
+			cw.maxRequestInputTokens = sessionData.maxRequestInputTokens!;
+			cw.maxRequestModels = Object.keys(sessionData.modelUsage || {});
+		}
+		if (sessionData.contextTier) {
+			cw.tierCounts[sessionData.contextTier] = (cw.tierCounts[sessionData.contextTier] ?? 0) + 1;
 		}
 	}
 
@@ -4157,7 +4328,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 
-		const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups);
+		const sessionData = this.buildSessionDataObject(tokenResult, interactions, resolvedModelUsage, mtime, fileSize, usageAnalysis, sessionMeta, resolvedActualTokens, finalCacheReadTokens, debugLogTokens, dailyRollups, cached);
 		this.setCachedSessionData(sessionFilePath, sessionData, fileSize);
 		return sessionData;
 	}
@@ -4205,9 +4376,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return { preloadedContent, preloadedParsedJson };
 	}
 
+	/** Long-context tier fields: largest per-request prompt size and CLI context tier. */
+	private buildContextTierFields(
+		tokenResult: { maxRequestInputTokens?: number; contextTier?: string },
+		debugLogTokens: { maxRequestInputTokens?: number } | null | undefined,
+	): Partial<SessionFileCache> {
+		// Debug-log per-request sizes are exact; fall back to the session-file value.
+		const maxRequestInputTokens = Math.max(debugLogTokens?.maxRequestInputTokens ?? 0, tokenResult.maxRequestInputTokens ?? 0);
+		return {
+			...(maxRequestInputTokens > 0 ? { maxRequestInputTokens } : {}),
+			...(tokenResult.contextTier ? { contextTier: tokenResult.contextTier } : {}),
+		};
+	}
+
 	private buildOptionalSessionFields(
-		tokenResult: { thinkingTokens?: number; copilotNanoAiu?: number; truncationCount?: number; messagesRemovedByTruncation?: number },
-		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
+		tokenResult: { thinkingTokens?: number; copilotNanoAiu?: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string },
+		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number; maxRequestInputTokens?: number } | null | undefined,
 		finalCacheReadTokens: number | undefined,
 		copilotExactCostDollars: number | undefined,
 		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
@@ -4223,6 +4407,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			dailyRollups: Object.keys(dailyRollups).length > 0 ? dailyRollups : undefined,
 			...(copilotExactCostDollars !== undefined ? { copilotExactCostDollars } : {}),
 			...(tokenResult.truncationCount ? { truncationCount: tokenResult.truncationCount, messagesRemovedByTruncation: tokenResult.messagesRemovedByTruncation } : {}),
+			...this.buildContextTierFields(tokenResult, debugLogTokens),
 			...(hasEditScope ? {
 				linesAdded: usageAnalysis!.editScope!.linesAdded,
 				linesRemoved: usageAnalysis!.editScope!.linesRemoved ?? 0,
@@ -4243,7 +4428,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		resolvedActualTokens: number | undefined,
 		finalCacheReadTokens: number | undefined,
 		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
-		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
+		existingCache?: SessionFileCache
 	): SessionFileCache {
 		const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
 		const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
@@ -4252,6 +4438,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
 			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens,
+			// Repository is discovered separately by getSessionFileDetails() (via content-reference
+			// git-root lookup) and is not recomputed here. Without preserving it, every cache-miss
+			// rebuild of this entry (e.g. an actively-edited session whose file keeps changing)
+			// would silently wipe out a previously-known repository, making it fall back to
+			// "Unknown" and disappear from all "By Repository" charts — most noticeably for the
+			// "Output" (lines of code) chart, since LOC is attributed to the most recently active
+			// day, which is exactly the day whose cache entry keeps getting rebuilt.
+			...(existingCache?.repository !== undefined ? { repository: existingCache.repository } : {}),
 			...optionals,
 		};
 	}
@@ -5429,7 +5623,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return 0;
 	}
 
-	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number } {
+	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string } {
 		return _estimateTokensFromJsonlSession(fileContent);
 	}
 
@@ -5443,7 +5637,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * When found, sums `inputTokens`, `outputTokens`, and `cachedTokens` across every
 	 * `llm_request` event to give true totals for agent-mode multi-call sessions.
 	 */
-	private async readTokensFromDebugLog(sessionFilePath: string): Promise<{ inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>; copilotNanoAiu: number } | null> {
+	private async readTokensFromDebugLog(sessionFilePath: string): Promise<{ inputTokens: number; outputTokens: number; cachedTokens: number; modelTurns: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>; copilotNanoAiu: number; maxRequestInputTokens: number } | null> {
 		const norm = _normalizePath(sessionFilePath);
 		const sessionId = path.basename(sessionFilePath, path.extname(sessionFilePath));
 		// Only process UUID-named session files (e.g. e84b3e82-c1fb-43de-8f52-367f4c74826a)
@@ -5815,6 +6009,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			case 'loadAgentSessions':
 				await this.dispatch('loadAgentSessions', () => this.loadAgentSessions());
 				break;
+			case 'loadRecentSessions':
+				await this.dispatch('loadRecentSessions', () => this.loadRecentSessions(Number(message.days)));
+				break;
 			case 'openSessionFile':
 				if (message.file) {
 					await this.dispatch('openSessionFile:analysis', async () => {
@@ -5828,6 +6025,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 					break;
 			case 'traceUsageCuration':
 				this._logTraceCuration(message);
+				break;
+			case 'saveSessionColumnSettings':
+				await this.dispatch('saveSessionColumnSettings', () =>
+					this.context.globalState.update('usage.sessionColumnSettings', message.settings)
+				);
 				break;
 		}
 	}
@@ -6486,7 +6688,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const dismissedTips = await this.getDismissedFluencyTips();
 		const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
 		this.maturityPanel.webview.onDidReceiveMessage(async (message) => { await this.handleMaturityMessage(message); });
-		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels });
+		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
 		this.maturityPanel.onDidDispose(() => { this.log('🎯 Copilot Fluency Score dashboard closed'); this.maturityPanel = undefined; });
 	}
 
@@ -6513,7 +6715,36 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data)); } break;
 			case 'exportPdf': if (message.data) { await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data)); } break;
 			case 'exportPptx': if (message.data) { await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data)); } break;
+			case 'installHook': if (message.hookId) { await this.maturityHandleInstallHook(message.hookId); } break;
+			case 'uninstallHook': if (message.hookId) { await this.maturityHandleUninstallHook(message.hookId); } break;
 		}
+	}
+
+	private async maturityHandleInstallHook(hookId: string): Promise<void> {
+		try {
+			await this.hookManager.installHook(hookId);
+			const hooksDir = this.hookManager.getHooksDirectory();
+			const choice = await vscode.window.showInformationMessage(
+				`✅ Session reminder installed. Hook scripts written to ${hooksDir} — they will activate in your next Copilot agent session.`,
+				'Open Hooks Folder'
+			);
+			if (choice === 'Open Hooks Folder') {
+				await vscode.env.openExternal(vscode.Uri.file(hooksDir));
+			}
+		} catch (err) {
+			vscode.window.showErrorMessage(`Failed to install hook: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		await this.refreshMaturityPanel();
+	}
+
+	private async maturityHandleUninstallHook(hookId: string): Promise<void> {
+		try {
+			await this.hookManager.uninstallHook(hookId);
+			vscode.window.showInformationMessage(`Removed session reminder for "${hookId}".`);
+		} catch (err) {
+			vscode.window.showErrorMessage(`Failed to remove hook: ${err instanceof Error ? err.message : String(err)}`);
+		}
+		await this.refreshMaturityPanel();
 	}
 
 	private async maturityHandleShareToIssue(): Promise<void> {
@@ -6537,7 +6768,7 @@ private async refreshMaturityPanel(): Promise<void> {
 	const dismissedTips = await this.getDismissedFluencyTips();
 	const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 	const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
-	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels });
+	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
 	this.log('✅ Copilot Fluency Score dashboard refreshed');
 }
 
@@ -6913,6 +7144,7 @@ ${hashtag}`;
       lastUpdated: string;
       dismissedTips?: string[];
       isDebugMode?: boolean;
+      installedHooks?: string[];
       fluencyLevels?: Array<{
         category: string;
         icon: string;
@@ -8539,6 +8771,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       .getConfiguration('aiEngineeringFluency')
       .get<string[]>('suppressedUnknownTools', []);
 
+    const sessionColumnSettings = this.context.globalState.get('usage.sessionColumnSettings', {});
+
     const initialData = stats ? JSON.stringify({
       today: stats.today,
       last30Days: stats.last30Days,
@@ -8555,6 +8789,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       use24HourTime: this.getUse24HourTimeSetting(),
       insights: this.buildCurrentInsights(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
+      sessionColumnSettings,
     }).replace(/</g, "\\u003c") : 'null';
 
     return `<!DOCTYPE html>

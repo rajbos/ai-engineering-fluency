@@ -15,8 +15,8 @@ import {
 	extractDescriptionFromSkillContent,
 	type RuntimeToolInfo,
 	type ExtensionInfo,
-} from '../../src/toolCuration';
-import type { UsageAnalysisPeriod } from '../../src/types';
+} from '../../../src/toolCuration';
+import type { UsageAnalysisPeriod } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Temp directory registry — all dirs created via mkTmpDir() are removed after
@@ -66,7 +66,7 @@ function emptyPeriod(): UsageAnalysisPeriod {
 		repositories: [], repositoriesWithCustomization: [],
 		editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0 },
 		applyUsage: { totalApplies: 0, totalCodeBlocks: 0, applyRate: 0 },
-		sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0 },
+		sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0, activeDurationMs: 0 },
 		conversationPatterns: { multiTurnSessions: 0, singleTurnSessions: 0, avgTurnsPerSession: 0, maxTurnsInSession: 0 },
 		agentTypes: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 },
 	};

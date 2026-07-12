@@ -9,6 +9,16 @@
     // shared sources type-check without pulling in their own tsconfig.
     "lib": ["ES2022", "DOM"],
     "types": ["node"],
+    // The shared root ../src sources resolve their type-only deps against the
+    // sibling packages' node_modules (same pattern as cli/tsconfig.json).
+    "typeRoots": [
+      "./node_modules/@types",
+      "../vscode-extension/node_modules/@types"
+    ],
+    "paths": {
+      "@msgpack/msgpack": ["./node_modules/@msgpack/msgpack/dist.esm/index.d.ts"],
+      "sql.js": ["../vscode-extension/node_modules/@types/sql.js/index.d.ts"]
+    },
     "sourceMap": true,
     "rootDir": "..",
     "outDir": "dist",

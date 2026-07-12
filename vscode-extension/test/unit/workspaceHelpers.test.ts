@@ -15,7 +15,7 @@ import {
     normalizePathForDedup,
     fileUriToPath,
     parseWorkspaceStorageJsonFile,
-} from '../../src/workspaceHelpers';
+} from '../../../src/workspaceHelpers';
 
 // ---------------------------------------------------------------------------
 // getModeType
@@ -258,7 +258,7 @@ import {
         globToRegExp,
         getEditorTypeFromPath,
         detectEditorSource
-} from '../../src/workspaceHelpers';
+} from '../../../src/workspaceHelpers';
 
 // ── extractWorkspaceIdFromSessionPath ───────────────────────────────────
 
@@ -562,7 +562,7 @@ test('extractMcpServerName: GUID-keyed MCP tool returns "Claude MCP"', () => {
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as nodePath from 'node:path';
-import { scanWorkspaceCustomizationFiles } from '../../src/workspaceHelpers';
+import { scanWorkspaceCustomizationFiles } from '../../../src/workspaceHelpers';
 
 test('scanWorkspaceCustomizationFiles: returns empty array for non-existent dir', () => {
 const result = scanWorkspaceCustomizationFiles('/does/not/exist/xyz123');
@@ -863,7 +863,7 @@ import {
     resolveExactWorkspacePath,
     extractRepositoryFromContentReferences,
     resolveWorkspaceFolderFromSessionPath,
-} from '../../src/workspaceHelpers';
+} from '../../../src/workspaceHelpers';
 
 test('escapeRegexSpecials: escapes dot', () => {
     assert.equal(escapeRegexSpecials('.'), '\\.');
@@ -1508,7 +1508,7 @@ test('globToRegExp: case-insensitive flag set correctly', () => {
 // parseCodeWorkspaceFolders
 // ---------------------------------------------------------------------------
 
-import { parseCodeWorkspaceFolders } from '../../src/workspaceHelpers';
+import { parseCodeWorkspaceFolders } from '../../../src/workspaceHelpers';
 
 test('parseCodeWorkspaceFolders: returns empty array for non-existent path', () => {
     const result = parseCodeWorkspaceFolders('/does/not/exist/code-workspace');

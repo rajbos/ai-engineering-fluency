@@ -16,12 +16,12 @@ import {
     createEmptySessionUsageAnalysis,
     applyModelTierClassification,
     type UsageAnalysisDeps,
-} from '../../src/usageAnalysis';
+} from '../../../src/usageAnalysis';
 import type {
     UsageAnalysisPeriod,
     SessionUsageAnalysis,
     ContextReferenceUsage,
-} from '../../src/types';
+} from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -76,7 +76,7 @@ function emptyPeriod(): UsageAnalysisPeriod {
         repositories: [], repositoriesWithCustomization: [],
         editScope: { singleFileEdits: 0, multiFileEdits: 0, totalEditedFiles: 0, avgFilesPerSession: 0 },
         applyUsage: { totalApplies: 0, totalCodeBlocks: 0, applyRate: 0 },
-        sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0 },
+        sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0, activeDurationMs: 0 },
         conversationPatterns: { multiTurnSessions: 0, singleTurnSessions: 0, avgTurnsPerSession: 0, maxTurnsInSession: 0 },
         agentTypes: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 },
     };
@@ -1524,7 +1524,7 @@ test('mergeUsageAnalysis: merges sessionDuration when sessions > 0', () => {
     const period = emptyPeriod();
     period.sessions = 1;
     const a = emptyAnalysis();
-    a.sessionDuration = { totalDurationMs: 30000, avgDurationMs: 30000, avgFirstProgressMs: 300, avgTotalElapsedMs: 1000, avgWaitTimeMs: 100 };
+    a.sessionDuration = { totalDurationMs: 30000, avgDurationMs: 30000, avgFirstProgressMs: 300, avgTotalElapsedMs: 1000, avgWaitTimeMs: 100, activeDurationMs: 15000 };
     mergeUsageAnalysis(period, a);
     assert.equal(period.sessionDuration.totalDurationMs, 30000);
     assert.equal(period.sessionDuration.avgDurationMs, 30000);
@@ -1537,7 +1537,7 @@ test('mergeUsageAnalysis: sessionDuration with sessions=0 skips avg calculation'
     const period = emptyPeriod();
     // period.sessions defaults to 0
     const a = emptyAnalysis();
-    a.sessionDuration = { totalDurationMs: 60000, avgDurationMs: 60000, avgFirstProgressMs: 500, avgTotalElapsedMs: 2000, avgWaitTimeMs: 200 };
+    a.sessionDuration = { totalDurationMs: 60000, avgDurationMs: 60000, avgFirstProgressMs: 500, avgTotalElapsedMs: 2000, avgWaitTimeMs: 200, activeDurationMs: 25000 };
     mergeUsageAnalysis(period, a);
     assert.equal(period.sessionDuration.totalDurationMs, 60000);
     // avgDurationMs stays 0 since sessionCount <= 0

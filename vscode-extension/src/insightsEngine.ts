@@ -10,9 +10,12 @@ import type {
 	WorkspaceCustomizationMatrix,
 	TodaySessionSummary,
 	ToolCurationAnalysis,
-} from './types';
-import toolNamesData from './toolNames.json';
-import { resolveGuidMcpToolName } from './utils/toolUtils';
+} from '../../src/types';
+import toolNamesData from '../../src/toolNames.json';
+import modelPricingData from '../../src/modelPricing.json';
+import { resolveGuidMcpToolName } from '../../src/utils/toolUtils';
+import { getLongContextInfo, type LongContextInfo } from '../../src/tokenEstimation';
+import type { ModelPricing } from '../../src/types';
 
 // ---------------------------------------------------------------------------
 // Private helpers
@@ -80,6 +83,102 @@ function formatTokensShort(n: number): string {
 /** Count of manual /compact commands in a period (Claude Code / Desktop only). */
 function manualCompactCount(p: UsageAnalysisPeriod): number {
 	return p.toolCalls.byTool['__slash__compact'] ?? 0;
+}
+
+// ── Long-context pricing tier helpers ──────────────────────────────────────
+const MODEL_PRICING = modelPricingData.pricing as { [key: string]: ModelPricing };
+
+/** A today-session paired with the long-context tier info of its cheapest-threshold model. */
+interface SessionLongContextStatus {
+	session: TodaySessionSummary;
+	info: LongContextInfo;
+	model: string;
+}
+
+/**
+ * Resolve the long-context pricing tier for a session's models.
+ * When a session used multiple tiered models, the smallest threshold wins
+ * (conservative: the first line the session could have crossed).
+ */
+function _sessionLongContextStatus(s: TodaySessionSummary): SessionLongContextStatus | null {
+	let best: SessionLongContextStatus | null = null;
+	for (const model of s.models) {
+		const info = getLongContextInfo(model, MODEL_PRICING);
+		if (info && (!best || info.thresholdTokens < best.info.thresholdTokens)) {
+			best = { session: s, info, model };
+		}
+	}
+	return best;
+}
+
+/** True when a session ran in an explicitly non-default Copilot CLI context tier. */
+function _isNonDefaultTier(s: TodaySessionSummary): boolean {
+	return !!s.contextTier && s.contextTier !== 'default';
+}
+
+/**
+ * True when a session selected a non-default (larger) context window but its
+ * observed context fill never needed it: the fill stayed within the model's
+ * default-tier threshold, or — when the model has no tiered pricing — under
+ * 60% of the selected window.
+ */
+function _qualifiesWindowUnused(s: TodaySessionSummary): boolean {
+	if (!_isNonDefaultTier(s)) { return false; }
+	const reached = s.contextReachedTokens;
+	if (typeof reached !== 'number' || reached <= 0) { return false; }
+	const tier = _sessionLongContextStatus(s);
+	if (tier) { return reached <= tier.info.thresholdTokens; }
+	return !!s.contextWindowLimit && reached <= s.contextWindowLimit * 0.6;
+}
+
+/** The fullest session today that selected a large window it never needed. */
+function _windowUnusedToday(ctx: InsightContext): TodaySessionSummary | null {
+	let fullest: TodaySessionSummary | null = null;
+	for (const s of ctx.todaySessions ?? []) {
+		if (!_qualifiesWindowUnused(s)) { continue; }
+		if (!fullest || (s.contextReachedTokens ?? 0) > (fullest.contextReachedTokens ?? 0)) {
+			fullest = s;
+		}
+	}
+	return fullest;
+}
+
+/** The session that crossed its model's long-context threshold today, if any (largest request wins). */
+function _longContextCrossedToday(ctx: InsightContext): SessionLongContextStatus | null {
+	let worst: SessionLongContextStatus | null = null;
+	for (const s of ctx.todaySessions ?? []) {
+		const status = _sessionLongContextStatus(s);
+		if (!status) { continue; }
+		if ((s.maxRequestInputTokens ?? 0) > status.info.thresholdTokens
+			&& (!worst || (s.maxRequestInputTokens ?? 0) > (worst.session.maxRequestInputTokens ?? 0))) {
+			worst = status;
+		}
+	}
+	return worst;
+}
+
+/** The largest request today (by per-request input tokens) among sessions using a tiered model. */
+function _largestTieredRequestToday(ctx: InsightContext): SessionLongContextStatus | null {
+	let largest: SessionLongContextStatus | null = null;
+	for (const s of ctx.todaySessions ?? []) {
+		if (!(s.maxRequestInputTokens && s.maxRequestInputTokens > 0)) { continue; }
+		const status = _sessionLongContextStatus(s);
+		if (!status) { continue; }
+		if (!largest || s.maxRequestInputTokens > (largest.session.maxRequestInputTokens ?? 0)) {
+			largest = status;
+		}
+	}
+	return largest;
+}
+
+/**
+ * Human-readable "how much repo fits in the default tier" estimate derived
+ * from the threshold: ~4 characters per token, ~40 characters per source line.
+ */
+function _describeDefaultTierCapacity(thresholdTokens: number): string {
+	const mb = (thresholdTokens * 4) / (1024 * 1024);
+	const lines = Math.round(thresholdTokens / 10 / 1000);
+	return `roughly ${mb.toFixed(1)} MB of code (≈${lines}K lines) — the largest slice of a repo that fits in one request at default pricing`;
 }
 
 function autoModelUsageRatio(p: UsageAnalysisPeriod): number {
@@ -868,6 +967,86 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		},
 		weight: 75,
 		allowToast: true,
+	},
+	{
+		id: 'long-context-pricing-crossed',
+		category: 'context',
+		severity: 'opportunity',
+		title: '💸 A request crossed into long-context pricing today',
+		buildBody: (ctx) => {
+			const crossed = _longContextCrossedToday(ctx);
+			if (crossed) {
+				const { session, info, model } = crossed;
+				const ratio = info.defaultInputCostPerMillion > 0
+					? (info.longContextInputCostPerMillion / info.defaultInputCostPerMillion).toFixed(1)
+					: null;
+				const rateNote = ratio
+					? ` ($${info.defaultInputCostPerMillion.toFixed(2)} → $${info.longContextInputCostPerMillion.toFixed(2)} per 1M input tokens, ${ratio}× more)`
+					: '';
+				return `Your largest request today sent ${formatTokensShort(session.maxRequestInputTokens ?? 0)} input tokens to ${model} — above its ${formatTokensShort(info.thresholdTokens)} default-tier threshold, so it was billed at long-context rates${rateNote}. ` +
+					`The default tier fits ${_describeDefaultTierCapacity(info.thresholdTokens)}. ` +
+					`Trim attached context, use \`/compact\`, or split work into focused sessions to stay under the line.`;
+			}
+			const tiered = (ctx.todaySessions ?? []).find(s => _isNonDefaultTier(s) && !_qualifiesWindowUnused(s));
+			return `A session today ran in the "${tiered?.contextTier}" context tier instead of the default tier. ` +
+				`Non-default tiers unlock a larger context window but bill input tokens at long-context rates once requests exceed the model's default-tier threshold. ` +
+				`Switch back to the default tier for routine work to keep costs down.`;
+		},
+		appliesTo: (ctx) => {
+			// Tier-only sessions whose window usage proves the big window was
+			// never needed are handled by large-context-window-unused instead.
+			return _longContextCrossedToday(ctx) !== null
+				|| (ctx.todaySessions ?? []).some(s => _isNonDefaultTier(s) && !_qualifiesWindowUnused(s));
+		},
+		weight: 74,
+		allowToast: true,
+	},
+	{
+		id: 'large-context-window-unused',
+		category: 'context',
+		severity: 'tip',
+		title: '🗜️ You selected a large context window you never needed',
+		buildBody: (ctx) => {
+			const s = _windowUnusedToday(ctx);
+			if (!s) { return ''; }
+			const reached = s.contextReachedTokens ?? 0;
+			const tier = _sessionLongContextStatus(s);
+			const limitNote = s.contextWindowLimit ? ` (${formatTokensShort(s.contextWindowLimit)}-token window)` : '';
+			const comparison = tier
+				? `stayed within the ${formatTokensShort(tier.info.thresholdTokens)} default-tier threshold for ${tier.model}`
+				: `only used ${Math.round((reached / (s.contextWindowLimit || reached)) * 100)}% of the selected window`;
+			return `A session today ran in the "${s.contextTier}" context tier${limitNote}, but its context only reached ${formatTokensShort(reached)} tokens — it ${comparison}. ` +
+				`The default tier would have covered this work at cheaper input rates. ` +
+				`Save the larger tiers for tasks that genuinely need huge context (whole-repo analysis, very long documents), and stay on the default tier for everything else.`;
+		},
+		appliesTo: (ctx) => _windowUnusedToday(ctx) !== null,
+		weight: 52,
+	},
+	{
+		id: 'long-context-headroom',
+		category: 'context',
+		severity: 'tip',
+		title: '📐 Your requests are approaching the long-context price line',
+		buildBody: (ctx) => {
+			const largest = _largestTieredRequestToday(ctx);
+			if (!largest) { return ''; }
+			const { session, info, model } = largest;
+			const max = session.maxRequestInputTokens ?? 0;
+			const pct = Math.round((max / info.thresholdTokens) * 100);
+			return `Your largest request today reached ${formatTokensShort(max)} input tokens — ${pct}% of the ${formatTokensShort(info.thresholdTokens)} default-tier window for ${model}. ` +
+				`Above that threshold GitHub bills long-context rates ($${info.defaultInputCostPerMillion.toFixed(2)} → $${info.longContextInputCostPerMillion.toFixed(2)} per 1M input tokens). ` +
+				`At ~4 characters per token, the default tier fits ${_describeDefaultTierCapacity(info.thresholdTokens)}. ` +
+				`Keep requests under the line with focused context, \`/compact\`, or a fresh chat per task.`;
+		},
+		appliesTo: (ctx) => {
+			// Don't double up with the crossed insight.
+			if (_longContextCrossedToday(ctx) !== null) { return false; }
+			const largest = _largestTieredRequestToday(ctx);
+			if (!largest) { return false; }
+			const max = largest.session.maxRequestInputTokens ?? 0;
+			return max >= largest.info.thresholdTokens * 0.7 && max <= largest.info.thresholdTokens;
+		},
+		weight: 48,
 	},
 
 	// ── Tool Curation ─────────────────────────────────────────────────────────

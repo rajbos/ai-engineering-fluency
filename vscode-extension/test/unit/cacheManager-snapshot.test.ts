@@ -6,7 +6,7 @@ import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { CacheManager } from '../../src/cacheManager';
-import type { SessionFileCache } from '../../src/types';
+import type { SessionFileCache } from '../../../src/types';
 import { createMockMemento } from './vscode-test-helpers';
 
 function makeManager(dir: string, cacheVersion = 1): CacheManager {

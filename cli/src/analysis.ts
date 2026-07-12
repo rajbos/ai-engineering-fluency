@@ -5,17 +5,17 @@
  * touching the filesystem, ecosystem registry, or cache.  All I/O-heavy and
  * bootstrap-dependent logic lives in helpers.ts.
  */
-import { calculateEstimatedCost } from '../../vscode-extension/src/tokenEstimation';
-import { normalizePathForComparison } from '../../vscode-extension/src/workspaceHelpers';
-import { createEmptyContextRefs } from '../../vscode-extension/src/tokenEstimation';
-import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../vscode-extension/src/types';
-export type { PeriodStats, UsageAnalysisPeriod } from '../../vscode-extension/src/types';
+import { calculateEstimatedCost } from '../../src/tokenEstimation';
+import { normalizePathForComparison } from '../../src/workspaceHelpers';
+import { createEmptyContextRefs } from '../../src/tokenEstimation';
+import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
+export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 
 /** Type alias for a single model pricing entry from modelPricing.json. */
 export type ModelPricingEntry = ModelPricing;
 
 // Import JSON data file used by buildChartPayload
-import modelPricingData from '../../vscode-extension/src/modelPricing.json';
+import modelPricingData from '../../src/modelPricing.json';
 const modelPricing = modelPricingData.pricing as Record<string, ModelPricingEntry>;
 
 // ── Types ────────────────────────────────────────────────────────────────────────────────
@@ -106,6 +106,9 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.crush/crush.db#')) { return 'Crush'; }
 	if (normalized.includes('/opencode/')) { return 'OpenCode'; }
+	// Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage) are separate editors.
+	if (normalized.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
+	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
 	if (normalized.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (normalized.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (normalized.includes('/.claude/projects/')) { return 'Claude Code'; }
@@ -258,6 +261,7 @@ export function createEmptyUsageAnalysisPeriod(): UsageAnalysisPeriod {
 			avgFirstProgressMs: 0,
 			avgTotalElapsedMs: 0,
 			avgWaitTimeMs: 0,
+			activeDurationMs: 0,
 		},
 		conversationPatterns: {
 			multiTurnSessions: 0,

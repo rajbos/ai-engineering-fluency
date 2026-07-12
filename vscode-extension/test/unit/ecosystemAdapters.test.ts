@@ -10,30 +10,36 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import * as fs from 'node:fs';
 
-import { isDiscoverable } from '../../src/ecosystemAdapter';
-import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
+import { isDiscoverable } from '../../../src/ecosystemAdapter';
+import type { IEcosystemAdapter } from '../../../src/ecosystemAdapter';
 
-import { OpenCodeAdapter } from '../../src/adapters/openCodeAdapter';
-import { CrushAdapter } from '../../src/adapters/crushAdapter';
-import { ContinueAdapter } from '../../src/adapters/continueAdapter';
-import { ClaudeCodeAdapter } from '../../src/adapters/claudeCodeAdapter';
-import { ClaudeDesktopAdapter } from '../../src/adapters/claudeDesktopAdapter';
-import { VisualStudioAdapter } from '../../src/adapters/visualStudioAdapter';
-import { MistralVibeAdapter } from '../../src/adapters/mistralVibeAdapter';
-import { GeminiCliAdapter } from '../../src/adapters/geminiCliAdapter';
-import { CopilotChatAdapter } from '../../src/adapters/copilotChatAdapter';
-import { CopilotCliAdapter } from '../../src/adapters/copilotCliAdapter';
-import { AntigravityAdapter } from '../../src/adapters/antigravityAdapter';
+import { OpenCodeAdapter } from '../../../src/adapters/openCodeAdapter';
+import { CrushAdapter } from '../../../src/adapters/crushAdapter';
+import { ContinueAdapter } from '../../../src/adapters/continueAdapter';
+import { EclipseAdapter } from '../../../src/adapters/eclipseAdapter';
+import { ClaudeCodeAdapter } from '../../../src/adapters/claudeCodeAdapter';
+import { ClaudeDesktopAdapter } from '../../../src/adapters/claudeDesktopAdapter';
+import { VisualStudioAdapter } from '../../../src/adapters/visualStudioAdapter';
+import { MistralVibeAdapter } from '../../../src/adapters/mistralVibeAdapter';
+import { GeminiCliAdapter } from '../../../src/adapters/geminiCliAdapter';
+import { CopilotChatAdapter } from '../../../src/adapters/copilotChatAdapter';
+import { CopilotCliAdapter } from '../../../src/adapters/copilotCliAdapter';
+import { AntigravityAdapter } from '../../../src/adapters/antigravityAdapter';
+import { KiroAdapter } from '../../../src/adapters/kiroAdapter';
+import { KiroCliAdapter } from '../../../src/adapters/kiroCliAdapter';
 
-import { OpenCodeDataAccess } from '../../src/opencode';
-import { CrushDataAccess } from '../../src/crush';
-import { ContinueDataAccess } from '../../src/continue';
-import { ClaudeCodeDataAccess } from '../../src/claudecode';
-import { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
-import { VisualStudioDataAccess } from '../../src/visualstudio';
-import { MistralVibeDataAccess } from '../../src/mistralvibe';
-import { GeminiCliDataAccess } from '../../src/geminicli';
-import { AntigravityDataAccess } from '../../src/antigravity';
+import { OpenCodeDataAccess } from '../../../src/opencode';
+import { CrushDataAccess } from '../../../src/crush';
+import { ContinueDataAccess } from '../../../src/continue';
+import { EclipseDataAccess } from '../../../src/eclipse';
+import { ClaudeCodeDataAccess } from '../../../src/claudecode';
+import { ClaudeDesktopCoworkDataAccess } from '../../../src/claudedesktop';
+import { VisualStudioDataAccess } from '../../../src/visualstudio';
+import { MistralVibeDataAccess } from '../../../src/mistralvibe';
+import { GeminiCliDataAccess } from '../../../src/geminicli';
+import { AntigravityDataAccess } from '../../../src/antigravity';
+import { KiroDataAccess } from '../../../src/kiro';
+import { KiroCliDataAccess } from '../../../src/kirocli';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -44,16 +50,20 @@ const noopExtractMcpServerName = (_name: string) => '';
 const openCodeDA = new OpenCodeDataAccess(null as any);
 const crushDA = new CrushDataAccess(null as any);
 const continueDA = new ContinueDataAccess();
+const eclipseDA = new EclipseDataAccess();
 const claudeCodeDA = new ClaudeCodeDataAccess();
 const claudeDesktopDA = new ClaudeDesktopCoworkDataAccess();
 const visualStudioDA = new VisualStudioDataAccess();
 const mistralVibeDA = new MistralVibeDataAccess();
 const geminiCliDA = new GeminiCliDataAccess();
 const antigravityDA = new AntigravityDataAccess();
+const kiroDA = new KiroDataAccess();
+const kiroCliDA = new KiroCliDataAccess();
 
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
 const crushAdapter = new CrushAdapter(crushDA);
 const continueAdapter = new ContinueAdapter(continueDA);
+const eclipseAdapter = new EclipseAdapter(eclipseDA);
 const claudeCodeAdapter = new ClaudeCodeAdapter(claudeCodeDA);
 const claudeDesktopAdapter = new ClaudeDesktopAdapter(claudeDesktopDA, noopIsMcpTool, noopExtractMcpServerName, noopEstimateTokens);
 const visualStudioAdapter = new VisualStudioAdapter(visualStudioDA, noopEstimateTokens);
@@ -62,22 +72,24 @@ const geminiCliAdapter = new GeminiCliAdapter(geminiCliDA);
 const copilotChatAdapter = new CopilotChatAdapter();
 const copilotCliAdapter = new CopilotCliAdapter();
 const antigravityAdapter = new AntigravityAdapter(antigravityDA);
+const kiroAdapter = new KiroAdapter(kiroDA);
+const kiroCliAdapter = new KiroCliAdapter(kiroCliDA);
 
 const allAdapters: IEcosystemAdapter[] = [
-    openCodeAdapter, crushAdapter, continueAdapter,
+    openCodeAdapter, crushAdapter, continueAdapter, eclipseAdapter,
     claudeCodeAdapter, claudeDesktopAdapter, visualStudioAdapter, mistralVibeAdapter, geminiCliAdapter,
-    copilotChatAdapter, copilotCliAdapter, antigravityAdapter,
+    copilotChatAdapter, copilotCliAdapter, antigravityAdapter, kiroAdapter, kiroCliAdapter,
 ];
 
 // ---------------------------------------------------------------------------
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 11 adapters', () => {
+test('isDiscoverable: returns true for all 14 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 11);
+    assert.equal(allAdapters.length, 14);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -100,6 +112,7 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(openCodeAdapter.id, 'opencode');
     assert.equal(crushAdapter.id, 'crush');
     assert.equal(continueAdapter.id, 'continue');
+    assert.equal(eclipseAdapter.id, 'eclipse');
     assert.equal(claudeCodeAdapter.id, 'claudecode');
     assert.equal(claudeDesktopAdapter.id, 'claudedesktop');
     assert.equal(visualStudioAdapter.id, 'visualstudio');
@@ -108,6 +121,8 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(copilotChatAdapter.id, 'copilotchat');
     assert.equal(copilotCliAdapter.id, 'copilotcli');
     assert.equal(antigravityAdapter.id, 'antigravity');
+    assert.equal(kiroAdapter.id, 'kiro');
+    assert.equal(kiroCliAdapter.id, 'kirocli');
 });
 
 // ---------------------------------------------------------------------------
@@ -188,6 +203,35 @@ test('AntigravityAdapter.handles: rejects generic Gemini CLI session paths', () 
 test('AntigravityAdapter.handles: rejects paths that lack transcript.jsonl filename', () => {
     const p = path.join(os.homedir(), '.gemini', 'antigravity', 'brain', 'some-uuid', '.system_generated', 'logs', 'other.jsonl');
     assert.ok(!antigravityAdapter.handles(p));
+});
+
+test('KiroCliAdapter.handles: recognises ~/.kiro/sessions/cli metadata paths', () => {
+    const p = path.join(os.homedir(), '.kiro', 'sessions', 'cli', '1737e9e4-1287-4dc1-85c8-acd62593c292.json');
+    assert.ok(kiroCliAdapter.handles(p));
+});
+
+test('KiroCliAdapter.handles: rejects the .jsonl message log and unrelated paths', () => {
+    assert.ok(!kiroCliAdapter.handles(path.join(os.homedir(), '.kiro', 'sessions', 'cli', 'abc.jsonl')));
+    assert.ok(!kiroCliAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
+});
+
+test('KiroAdapter.handles: recognises kiro.kiroagent workspace-sessions paths', () => {
+    const p = path.join(kiroDA.getKiroWorkspaceSessionsDir(), 'YzpcVXNlcnNcdGVzdA__', '11e640cd-0350-4991-b7a1-bef80ae3ddda.json');
+    assert.ok(kiroAdapter.handles(p));
+});
+
+test('KiroAdapter.handles: rejects the sessions.json index and Kiro CLI paths', () => {
+    assert.ok(!kiroAdapter.handles(path.join(kiroDA.getKiroWorkspaceSessionsDir(), 'YzpcVXNlcnNcdGVzdA__', 'sessions.json')));
+    assert.ok(!kiroAdapter.handles(path.join(os.homedir(), '.kiro', 'sessions', 'cli', 'abc.json')));
+});
+
+test('KiroDataAccess.decodeWorkspaceDirName: decodes base64 workspace folder names', () => {
+    const kiroWorkspaceDA = new KiroDataAccess();
+    assert.equal(
+        kiroWorkspaceDA.decodeWorkspaceDirName('YzpcVXNlcnNcUm9iQm9zXGNvZGVccmVwb3NccmFqYm9zXEphcnZpcw__'),
+        'c:\\Users\\RobBos\\code\\repos\\rajbos\\Jarvis'
+    );
+    assert.equal(kiroWorkspaceDA.decodeWorkspaceDirName('not-base64-path!!'), undefined);
 });
 
 test('VisualStudioAdapter.handles: recognises VS .vs session paths', () => {
@@ -374,7 +418,7 @@ test('getCandidatePaths paths are consistent with discover candidatePaths', asyn
 // extractClaudeSlashCommand — slash command detection
 // ---------------------------------------------------------------------------
 
-import { extractClaudeSlashCommand } from '../../src/adapters/claudeCodeAdapter';
+import { extractClaudeSlashCommand } from '../../../src/adapters/claudeCodeAdapter';
 
 test('extractClaudeSlashCommand: returns command name for allowed slash commands', () => {
     assert.equal(extractClaudeSlashCommand('/review'), 'review');

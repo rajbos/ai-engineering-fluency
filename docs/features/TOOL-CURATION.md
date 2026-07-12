@@ -98,7 +98,7 @@ Triggered when a skill file was **not invoked** during the look-back window. The
 
 ## Architecture
 
-The curation logic lives in `vscode-extension/src/toolCuration.ts`. The module is intentionally pure (no direct VS Code API calls) so it can be reused by the CLI.
+The curation logic lives in `src/toolCuration.ts`. The module is intentionally pure (no direct VS Code API calls) so it can be reused by the CLI.
 
 | Function | Purpose |
 |---|---|

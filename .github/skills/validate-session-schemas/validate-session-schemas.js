@@ -13,7 +13,7 @@
  *      baseline ("knownFields"). These are candidates for new features /
  *      better token attribution. New fields WARN by default (do not fail).
  *
- * Source of truth for supported platforms: vscode-extension/src/adapters/
+ * Source of truth for supported platforms: src/adapters/
  * adapterRegistry.ts. This skill covers the file-based JSON/JSONL ecosystems
  * that have schema docs under docs/logFilesSchema/. DB / binary ecosystems
  * (Crush sqlite, Visual Studio MessagePack, Continue, Mistral Vibe, Claude
@@ -161,7 +161,7 @@ function xdgDataHome() {
 
 // ---------------------------------------------------------------------------
 // Per-platform discovery. Each returns an array of absolute file paths.
-// Paths mirror the adapters under vscode-extension/src/adapters/.
+// Paths mirror the adapters under src/adapters/.
 // ---------------------------------------------------------------------------
 
 const HOME = os.homedir();

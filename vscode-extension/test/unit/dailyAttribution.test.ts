@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { extractDailyFractions } from '../../src/dailyAttribution';
+import { extractDailyFractions } from '../../../src/dailyAttribution';
 
 const FALLBACK = new Date('2025-01-01T12:00:00Z');
 

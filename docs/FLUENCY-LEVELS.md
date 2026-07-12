@@ -117,7 +117,7 @@ Copilot calls many tools on its own during agentic sessions to gather context �
 - Browser: `open_integrated_browser`, `renderMermaidDiagram`
 - Extensions and packages: `install_extension`, `install_python_packages`
 
-The full list of automatic tool IDs is maintained in `vscode-extension/src/automaticTools.json`.
+The full list of automatic tool IDs is maintained in `src/automaticTools.json`.
 
 ### 5. ⚙️ Customization
 

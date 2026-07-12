@@ -19,14 +19,29 @@ jobs:
         node-version: [22.x, 24.x]
     
     steps:
-    - name: Harden the runner (Audit all outbound calls)
+    - name: Harden the runner (Block all outbound calls except allowed)
       uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
-        egress-policy: audit
+        egress-policy: block
+        # Allowlist inferred from the harden-runner audit output of the 10 most
+        # recent successful runs of this workflow (run ids 28795599767..28802373956).
+        # Use wildcards for GitHub/Azure infra hosts that rotate between instances.
+        allowed-endpoints: >
+          azcliprod.blob.core.windows.net:443
+          broker.actions.githubusercontent.com:443
+          dc.services.visualstudio.com:443
+          github.com:443
+          hosted-compute-watchdog-prod-*.githubapp.com:443
+          management.azure.com:443
+          productionresultssa*.blob.core.windows.net:443
+          registry.npmjs.org:443
+          results-receiver.actions.githubusercontent.com:443
+          run-actions-*-azure-eastus.actions.githubusercontent.com:443
+          www.powershellgallery.com:443
 
     - name: Checkout code
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
-      
+
     - name: Setup Node.js ${{ matrix.node-version }}
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
@@ -77,13 +92,14 @@ jobs:
       shell: bash
       run: |
         set +e
-        node --require ./out/test/unit/vscode-shim-register.js \
+        node --require ./out/vscode-extension/test/unit/vscode-shim-register.js \
           --experimental-test-coverage \
           --test \
           --test-force-exit \
-          --test-coverage-include=out/src/backend/**/*.js \
+          --test-coverage-include=out/vscode-extension/src/backend/**/*.js \
+          --test-coverage-include=out/vscode-extension/src/utils/**/*.js \
           --test-coverage-include=out/src/utils/**/*.js \
-          out/test/unit/*.test.js 2>&1 | tee "$RUNNER_TEMP/test-output.txt"
+          out/vscode-extension/test/unit/*.test.js 2>&1 | tee "$RUNNER_TEMP/test-output.txt"
         status=${PIPESTATUS[0]}
         set -e
         exit "$status"
@@ -100,7 +116,6 @@ jobs:
 
     - name: Run tests
       run: cd vscode-extension && npm test
-      continue-on-error: true  # VS Code extension tests can be flaky in CI
       env:
         DISPLAY: :99
       # coactions/setup-xvfb was abandoned on Node.js 20 (no node24 support).
@@ -122,10 +137,18 @@ jobs:
     if: github.ref == 'refs/heads/main'
     
     steps:
-    - name: Harden the runner (Audit all outbound calls)
+    - name: Harden the runner (Block all outbound calls except allowed)
       uses: step-security/harden-runner@9af89fc71515a100421586dfdb3dc9c984fbf411 # v2.19.4
       with:
-        egress-policy: audit
+        egress-policy: block
+        # Allowlist inferred from the harden-runner audit output of the sampled
+        # recent runs that included this job (main pushes only). Use a wildcard
+        # for the rotating Actions results storage account names.
+        allowed-endpoints: >
+          github.com:443
+          productionresultssa*.blob.core.windows.net:443
+          registry.npmjs.org:443
+          results-receiver.actions.githubusercontent.com:443
 
     - name: Checkout code
       uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
@@ -133,7 +156,7 @@ jobs:
     - name: Setup Node.js
       uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
-        node-version: '24.x'
+        node-version-file: '.nvmrc'
         cache: 'npm'
         cache-dependency-path: vscode-extension/package-lock.json
         

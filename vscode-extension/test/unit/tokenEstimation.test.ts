@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { extractSubAgentData, normalizeDisplayModelName, extractResponseItemText } from '../../src/tokenEstimation';
+import { extractSubAgentData, normalizeDisplayModelName, extractResponseItemText } from '../../../src/tokenEstimation';
 
 test('normalizeDisplayModelName: lowercases and replaces spaces with hyphens', () => {
 	assert.equal(normalizeDisplayModelName('Claude Haiku 4.5'), 'claude-haiku-4.5');
@@ -150,7 +150,7 @@ import {
         getTotalTokensFromModelUsage,
         getModelFromRequest,
         createEmptyContextRefs
-} from '../../src/tokenEstimation';
+} from '../../../src/tokenEstimation';
 
 // ── estimateTokensFromText ──────────────────────────────────────────────
 
@@ -464,7 +464,7 @@ test('extractSubAgentData: result object with non-string values becomes empty st
 
 // ── Round 2: estimateTokensFromJsonlSession ──────────────────────────────
 
-import { estimateTokensFromJsonlSession } from '../../src/tokenEstimation';
+import { estimateTokensFromJsonlSession } from '../../../src/tokenEstimation';
 
 test('estimateTokensFromJsonlSession: counts user.message tokens', () => {
         const content = JSON.stringify({ type: 'user.message', data: { content: 'hello there' } });
@@ -624,7 +624,7 @@ test('estimateTokensFromJsonlSession: session.shutdown without cache fields leav
 
 // ── extractCachedTokensFromDebugLog ──────────────────────────────────────
 
-import { extractCachedTokensFromDebugLog } from '../../src/tokenEstimation';
+import { extractCachedTokensFromDebugLog } from '../../../src/tokenEstimation';
 
 test('extractCachedTokensFromDebugLog: sums cachedTokens from llm_request events', () => {
         const lines = [
@@ -682,7 +682,7 @@ test('extractCachedTokensFromDebugLog: ignores non-numeric cachedTokens values',
 
 // ── extractAllTokensFromDebugLog ──────────────────────────────────────────
 
-import { extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
+import { extractAllTokensFromDebugLog } from '../../../src/tokenEstimation';
 
 test('extractAllTokensFromDebugLog: sums all token fields across llm_request events', () => {
         const lines = [
@@ -758,7 +758,7 @@ test('extractAllTokensFromDebugLog: extractCachedTokensFromDebugLog still works 
 
 // ── Strategy pattern: selectTokenEstimationStrategy ────────────────────────
 
-import { DeltaTokenStrategy, EventJsonlTokenStrategy, selectTokenEstimationStrategy } from '../../src/tokenEstimation';
+import { DeltaTokenStrategy, EventJsonlTokenStrategy, selectTokenEstimationStrategy } from '../../../src/tokenEstimation';
 
 test('selectTokenEstimationStrategy: returns DeltaTokenStrategy for delta-based JSONL', () => {
         const lines = [
@@ -925,7 +925,7 @@ test('EventJsonlTokenStrategy: returns empty result for empty input', () => {
 
 // ── getRequestResult ────────────────────────────────────────────────────────
 
-import { getRequestResult, getResponseArray } from '../../src/tokenEstimation';
+import { getRequestResult, getResponseArray } from '../../../src/tokenEstimation';
 
 test('getRequestResult: returns undefined for null', () => {
         assert.equal(getRequestResult(null), undefined);
@@ -1014,7 +1014,7 @@ test('getResponseArray: returns empty array when response is []', () => {
 
 // ── applyDelta ──────────────────────────────────────────────────────────────
 
-import { applyDelta } from '../../src/tokenEstimation';
+import { applyDelta } from '../../../src/tokenEstimation';
 
 test('applyDelta: kind:0 replaces the entire state with v', () => {
         const initial = { requests: [{ id: 1 }] };
@@ -1132,7 +1132,7 @@ test('applyDelta: kind:2 reuses existing array at target slot', () => {
 
 // ── buildReasoningEffortTimeline ────────────────────────────────────────────
 
-import { buildReasoningEffortTimeline } from '../../src/tokenEstimation';
+import { buildReasoningEffortTimeline } from '../../../src/tokenEstimation';
 
 function makeModelWithEffort(effort: string): unknown {
         return {
@@ -1260,7 +1260,7 @@ test('buildReasoningEffortTimeline: multiple effort switches tracked correctly',
 
 // ── extractPerRequestUsageFromRawLines ──────────────────────────────────────
 
-import { extractPerRequestUsageFromRawLines } from '../../src/tokenEstimation';
+import { extractPerRequestUsageFromRawLines } from '../../../src/tokenEstimation';
 
 test('extractPerRequestUsageFromRawLines: returns empty map for empty input', () => {
         const result = extractPerRequestUsageFromRawLines([]);
@@ -1670,7 +1670,7 @@ test('DeltaTokenStrategy: sub-agent items in kind:2 are counted from final recon
 
 // ── reconstructJsonlStateAsync ──────────────────────────────────────────────
 
-import { reconstructJsonlStateAsync } from '../../src/tokenEstimation';
+import { reconstructJsonlStateAsync } from '../../../src/tokenEstimation';
 
 test('reconstructJsonlStateAsync: delta-based input sets isDeltaBased=true', async () => {
         const lines = [
@@ -1946,4 +1946,121 @@ test('reconstructJsonlStateAsync: yields to event loop every yieldInterval delta
         ];
         const { sessionState } = await reconstructJsonlStateAsync(lines, 1);
         assert.equal((sessionState as Record<string, unknown>).title, 'updated');
+});
+// ── Long-context tier discovery ──────────────────────────────────────────────
+
+import { parseContextThreshold, getLongContextInfo } from '../../../src/tokenEstimation';
+
+test('estimateTokensFromJsonlSession: captures contextTier from session.start', () => {
+	const events = [
+		JSON.stringify({ type: 'session.start', data: { sessionId: 'x', contextTier: 'default' } }),
+		JSON.stringify({ type: 'user.message', data: { content: 'hello' } }),
+	].join('\n');
+	const result = estimateTokensFromJsonlSession(events);
+	assert.equal(result.contextTier, 'default');
+});
+
+test('estimateTokensFromJsonlSession: last non-empty contextTier wins (session.model_change)', () => {
+	const events = [
+		JSON.stringify({ type: 'session.start', data: { contextTier: 'default' } }),
+		JSON.stringify({ type: 'session.model_change', data: { model: 'gpt-5.6-luna', contextTier: 'long-context' } }),
+	].join('\n');
+	const result = estimateTokensFromJsonlSession(events);
+	assert.equal(result.contextTier, 'long-context');
+});
+
+test('estimateTokensFromJsonlSession: null/missing contextTier leaves field absent', () => {
+	const events = [
+		JSON.stringify({ type: 'session.start', data: { contextTier: null } }),
+		JSON.stringify({ type: 'session.resume', data: {} }),
+	].join('\n');
+	const result = estimateTokensFromJsonlSession(events);
+	assert.equal(result.contextTier, undefined);
+});
+
+test('DeltaTokenStrategy: tracks max per-request prompt tokens (usage format)', () => {
+	const lines = [
+		JSON.stringify({ kind: 0, v: { requests: [
+			{ result: { usage: { promptTokens: 50_000, completionTokens: 100 } } },
+			{ result: { usage: { promptTokens: 120_000, completionTokens: 200 } } },
+			{ result: { usage: { promptTokens: 80_000, completionTokens: 300 } } },
+		] } }),
+	];
+	const result = new DeltaTokenStrategy().estimate(lines);
+	assert.equal(result.maxRequestInputTokens, 120_000);
+});
+
+test('DeltaTokenStrategy: maxRequestInputTokens absent when no request has usage data', () => {
+	const lines = [
+		JSON.stringify({ kind: 0, v: { requests: [{ result: { unexpectedField: true } }] } }),
+	];
+	const result = new DeltaTokenStrategy().estimate(lines);
+	assert.equal(result.maxRequestInputTokens, undefined);
+});
+
+test('extractAllTokensFromDebugLog: tracks max per-llm_request inputTokens', () => {
+	const content = [
+		JSON.stringify({ type: 'llm_request', attrs: { model: 'gpt-5.6-luna', inputTokens: 30_000, outputTokens: 100, cachedTokens: 25_000 } }),
+		JSON.stringify({ type: 'llm_request', attrs: { model: 'gpt-5.6-luna', inputTokens: 132_780, outputTokens: 250, cachedTokens: 90_000 } }),
+		JSON.stringify({ type: 'other_event', attrs: { inputTokens: 999_999 } }),
+	].join('\n');
+	const result = extractAllTokensFromDebugLog(content);
+	assert.ok(result);
+	assert.equal(result!.maxRequestInputTokens, 132_780);
+	assert.equal(result!.inputTokens, 162_780);
+});
+
+test('parseContextThreshold: parses docs-table formats', () => {
+	assert.equal(parseContextThreshold('> 200K'), 200_000);
+	assert.equal(parseContextThreshold('≤ 272K'), 272_000);
+	assert.equal(parseContextThreshold('200K'), 200_000);
+	assert.equal(parseContextThreshold('1M'), 1_000_000);
+	assert.equal(parseContextThreshold('128000'), 128_000);
+	assert.equal(parseContextThreshold(''), null);
+	assert.equal(parseContextThreshold(undefined), null);
+	assert.equal(parseContextThreshold('no numbers'), null);
+});
+
+test('getLongContextInfo: resolves tiered model with exact key match', () => {
+	const pricing = {
+		'gpt-5.6-luna': {
+			inputCostPerMillion: 1.0, outputCostPerMillion: 6.0,
+			copilotPricing: {
+				inputCostPerMillion: 1.0, outputCostPerMillion: 6.0,
+				longContext: { inputCostPerMillion: 2.0, outputCostPerMillion: 9.0, threshold: '> 200K' },
+			},
+		},
+	};
+	const info = getLongContextInfo('gpt-5.6-luna', pricing);
+	assert.ok(info);
+	assert.equal(info!.thresholdTokens, 200_000);
+	assert.equal(info!.defaultInputCostPerMillion, 1.0);
+	assert.equal(info!.longContextInputCostPerMillion, 2.0);
+});
+
+test('getLongContextInfo: partial key match (prefixed model id)', () => {
+	const pricing = {
+		'gpt-5.6-sol': {
+			inputCostPerMillion: 5.0, outputCostPerMillion: 30.0,
+			copilotPricing: {
+				inputCostPerMillion: 5.0, outputCostPerMillion: 30.0,
+				longContext: { inputCostPerMillion: 10.0, outputCostPerMillion: 45.0, threshold: '> 272K' },
+			},
+		},
+	};
+	const info = getLongContextInfo('copilot/GPT-5.6-Sol', pricing);
+	assert.ok(info, 'case-insensitive partial match should resolve');
+	assert.equal(info!.thresholdTokens, 272_000);
+});
+
+test('getLongContextInfo: returns null for models without a longContext block', () => {
+	const pricing = {
+		'claude-sonnet-4.5': {
+			inputCostPerMillion: 3.0, outputCostPerMillion: 15.0,
+			copilotPricing: { inputCostPerMillion: 3.3, outputCostPerMillion: 16.5 },
+		},
+	};
+	assert.equal(getLongContextInfo('claude-sonnet-4.5', pricing), null);
+	assert.equal(getLongContextInfo('unknown-model', pricing), null);
+	assert.equal(getLongContextInfo('anything', {}), null);
 });

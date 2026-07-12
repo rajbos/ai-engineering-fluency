@@ -12,25 +12,26 @@ import {
     loadCache,
     saveCache,
 } from '../../cli/src/helpers';
-import type { DetailedStats, UsageAnalysisStats } from '../../vscode-extension/src/types';
+import { getEditorSourceFromPath } from '../../cli/src/analysis';
+import type { DetailedStats, UsageAnalysisStats } from '../../src/types';
 import {
     calculateMaturityScores,
     getFluencyLevelData,
-} from '../../vscode-extension/src/maturityScoring';
+} from '../../src/maturityScoring';
 import { getToolFamilies } from '../../vscode-extension/src/toolFamilies';
 import {
     getLoadingHtmlCssBase,
     getLoadingHtmlCssSteps,
     getLoadingHtmlBody,
 } from '../../vscode-extension/src/loadingHtml';
-import { detectEditorSource } from '../../vscode-extension/src/workspaceHelpers';
+import { detectEditorSource } from '../../src/workspaceHelpers';
 import { getEditorIconByName } from '../../vscode-extension/src/editorIcons';
 
 // JSON config data embedded into every panel HTML (mirrors extension's getJsonConfigScript)
-import tokenEstimatorsData from '../../vscode-extension/src/tokenEstimators.json';
-import modelPricingData from '../../vscode-extension/src/modelPricing.json';
-import toolNamesData from '../../vscode-extension/src/toolNames.json';
-import automaticToolsData from '../../vscode-extension/src/automaticTools.json';
+import tokenEstimatorsData from '../../src/tokenEstimators.json';
+import modelPricingData from '../../src/modelPricing.json';
+import toolNamesData from '../../src/toolNames.json';
+import automaticToolsData from '../../src/automaticTools.json';
 
 // In dev mode use a local userData directory so cache files never conflict
 // between hot-reload restarts (the default %APPDATA%\Electron is shared with
@@ -194,11 +195,17 @@ function sendLoadingMessage(message: Record<string, unknown>): void {
     }
 }
 
-/** Map discovered session file paths to the editor pills shown by the loading screen. */
+/**
+ * Map discovered session file paths to the editor pills shown by the loading
+ * screen. Uses the CLI's detector first — the same labels that end up in the
+ * desktop's stats tables — and falls back to the shared path detector for
+ * editors the CLI mapping doesn't cover (e.g. Pi).
+ */
 function detectLoadingEditors(files: string[]): { icon: string; name: string }[] {
     const editorSet = new Set<string>();
     for (const file of files) {
-        const editor = detectEditorSource(file);
+        let editor = getEditorSourceFromPath(file);
+        if (!editor || editor === 'Unknown') { editor = detectEditorSource(file); }
         if (editor && editor !== 'Unknown') { editorSet.add(editor); }
     }
     return [...editorSet].map(name => ({ icon: getEditorIconByName(name), name }));

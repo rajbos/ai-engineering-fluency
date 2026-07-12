@@ -1,6 +1,6 @@
-import type { TokenEstimator } from '../../types';
+import type { TokenEstimator } from '../../../../src/types';
 import { EDITOR_ICON_MAP as _EDITOR_ICON_MAP, getEditorIconByName } from '../../editorIcons';
-import { getWindowData } from './dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 
 const _estimatorsData = getWindowData<{ estimators: Record<string, number> }>('__TOKEN_ESTIMATORS__');
 const tokenEstimators: Record<string, TokenEstimator> = _estimatorsData?.estimators ?? {};
@@ -127,6 +127,26 @@ export function formatFileSize(bytes: number): string {
 		return `${(numericBytes / 1024).toFixed(1)} KB`;
 	}
 	return `${(numericBytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+/**
+ * Formats a duration in milliseconds as a short string like "12m" or "1h 04m".
+ * Returns "—" when the value is missing, non-finite, or negative.
+ */
+export function formatDurationShort(durationMs?: number): string {
+	if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs < 0) {
+		return '—';
+	}
+	const totalMinutes = Math.round(durationMs / 60000);
+	if (totalMinutes < 1) {
+		return '<1m';
+	}
+	if (totalMinutes < 60) {
+		return `${totalMinutes}m`;
+	}
+	const hours = Math.floor(totalMinutes / 60);
+	const minutes = totalMinutes % 60;
+	return `${hours}h ${String(minutes).padStart(2, '0')}m`;
 }
 
 /**

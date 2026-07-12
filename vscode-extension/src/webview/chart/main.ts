@@ -1,6 +1,6 @@
 // @ts-nocheck // Chart.js ESM bundle is loaded dynamically; skip CJS resolution noise
 import { el, createButton } from '../shared/domUtils';
-import { BUTTONS } from '../shared/buttonConfig';
+import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
@@ -8,7 +8,7 @@ import { createViewStateManager } from '../shared/viewState';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 
 type ChartModule = typeof import('chart.js/auto');
@@ -216,12 +216,7 @@ function buildChartHeader(data: InitialChartData): HTMLElement {
 	title.id = 'chart-title';
 	headerLeft.append(el('span', 'header-icon', '📈'), title);
 	const buttons = el('div', 'button-row');
-	buttons.append(
-		createButton(BUTTONS['btn-refresh']), createButton(BUTTONS['btn-details']),
-		createButton(BUTTONS['btn-usage']), createButton(BUTTONS['btn-environmental']),
-		createButton(BUTTONS['btn-diagnostics']), createButton(BUTTONS['btn-maturity']),
-	);
-	if (data.backendConfigured) { buttons.append(createButton(BUTTONS['btn-dashboard'])); }
+	buttons.append(...getNavButtons('btn-chart', !!data.backendConfigured).map(config => createButton(config)));
 	header.append(headerLeft, buttons);
 	return header;
 }

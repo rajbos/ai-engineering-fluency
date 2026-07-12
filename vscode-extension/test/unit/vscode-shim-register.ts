@@ -329,7 +329,7 @@ setTimeout(() => process.exit(process.exitCode ?? 0), 30_000).unref();
 // We populate the JSON config globals so tests that exercise model/estimator
 // lookups get the real data rather than empty fallbacks.
 (global as any).window = (global as any).window ?? {};
-(global as any).window.__TOKEN_ESTIMATORS__ = require('../../src/tokenEstimators.json');
-(global as any).window.__MODEL_PRICING__    = require('../../src/modelPricing.json');
-(global as any).window.__TOOL_NAMES__       = require('../../src/toolNames.json');
-(global as any).window.__AUTOMATIC_TOOLS__  = require('../../src/automaticTools.json');
+(global as any).window.__TOKEN_ESTIMATORS__ = require('../../../src/tokenEstimators.json');
+(global as any).window.__MODEL_PRICING__    = require('../../../src/modelPricing.json');
+(global as any).window.__TOOL_NAMES__       = require('../../../src/toolNames.json');
+(global as any).window.__AUTOMATIC_TOOLS__  = require('../../../src/automaticTools.json');

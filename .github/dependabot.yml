@@ -2,7 +2,7 @@ version: 2
 updates:
   # Enable version updates for npm dependencies
   - package-ecosystem: "npm"
-    directory: "/"
+    directories: ["/vscode-extension", "/sharing-server"]
     schedule:
       interval: "weekly"
       day: "monday"
@@ -91,6 +91,43 @@ updates:
         update-types:
           - "minor"
           - "patch"
+
+  # Enable version updates for the Visual Studio extension NuGet dependencies
+  - package-ecosystem: "nuget"
+    directory: "/visualstudio-extension"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "UTC"
+    reviewers:
+      - "rajbos"
+    assignees:
+      - "rajbos"
+    labels:
+      - "dependencies"
+    groups:
+      minor-and-patch-updates:
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # Enable version updates for the dev container configuration
+  - package-ecosystem: "devcontainers"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "04:00"
+      timezone: "UTC"
+    reviewers:
+      - "rajbos"
+    assignees:
+      - "rajbos"
+    labels:
+      - "dependencies"
 
   - package-ecosystem: npm
     directory: /.github/scripts

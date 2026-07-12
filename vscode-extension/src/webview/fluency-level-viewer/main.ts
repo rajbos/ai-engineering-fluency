@@ -3,7 +3,7 @@ import { buttonHtml } from '../shared/buttonConfig';
 import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import type { CategoryLevelData } from '../shared/types';
 
 // ── Types ──────────────────────────────────────────────────────────────

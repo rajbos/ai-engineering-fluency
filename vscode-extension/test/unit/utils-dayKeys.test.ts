@@ -2,7 +2,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { toLocalDayKey, toUtcDayKey, addDaysUtc, getDayKeysInclusive } from '../../src/utils/dayKeys';
+import { toLocalDayKey, toUtcDayKey, addDaysUtc, getDayKeysInclusive } from '../../../src/utils/dayKeys';
 
 // ── toUtcDayKey ─────────────────────────────────────────────────────────
 

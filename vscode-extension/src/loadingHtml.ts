@@ -169,6 +169,9 @@ export function getLoadingHtmlScript(): string {
             var pct2 = document.getElementById('pct'); if (pct2) pct2.textContent = m.percentage + '%';
             var fill2 = document.getElementById('prog-fill'); if (fill2) { fill2.classList.remove('indeterminate'); fill2.style.width = (m.percentage < 3 ? 3 : m.percentage) + '%'; }
             var cd = document.getElementById('chip-done'); if (cd) cd.textContent = m.completed.toLocaleString();
+            // Backfill the total chip too: when the one-time loadingStep 'parsing' message
+            // was dropped before this listener attached, it would otherwise stay at '–'.
+            var ct2 = document.getElementById('chip-total'); if (ct2 && m.total) ct2.textContent = m.total.toLocaleString();
             var bf2 = document.getElementById('badge-files'); if (bf2) bf2.textContent = m.completed + '\\u202f/\\u202f' + m.total + ' files';
             var sc2 = document.getElementById('sc-parse'); if (sc2) sc2.textContent = '(' + m.completed + '/' + m.total + ')';
             var sub3 = document.getElementById('subtitle'); if (sub3) sub3.textContent = 'Parsing session ' + m.completed + '\\u202f/\\u202f' + m.total + '\\u2026';

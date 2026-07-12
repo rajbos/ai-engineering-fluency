@@ -1,6 +1,11 @@
 /**
  * Shared theme variables for all webview panels
- * Uses VS Code theme tokens for automatic light/dark theme support
+ * Uses VS Code theme tokens for automatic light/dark theme support.
+ *
+ * The "INDUSTRIAL REDUX" high-contrast styling (stark outlines, uppercase
+ * navigation, neon stage colors, monospace body) is intentionally scoped to
+ * the high-contrast themes only. Normal light/dark themes keep the native
+ * VS Code look so the navigation bar and typography stay unobtrusive.
  */
 
 :root {
@@ -13,7 +18,7 @@
 	--text-muted: var(--vscode-disabledForeground);
 	--border-color: var(--vscode-panel-border);
 	--border-subtle: var(--vscode-widget-border);
-	
+
 	/* Button colors */
 	--button-bg: var(--vscode-button-background);
 	--button-fg: var(--vscode-button-foreground);
@@ -21,32 +26,32 @@
 	--button-secondary-bg: var(--vscode-button-secondaryBackground);
 	--button-secondary-fg: var(--vscode-button-secondaryForeground);
 	--button-secondary-hover-bg: var(--vscode-button-secondaryHoverBackground);
-	
+
 	/* Input colors */
 	--input-bg: var(--vscode-input-background);
 	--input-fg: var(--vscode-input-foreground);
 	--input-border: var(--vscode-input-border);
-	
+
 	/* List/card colors */
 	--list-hover-bg: var(--vscode-list-hoverBackground);
 	--list-active-bg: var(--vscode-list-activeSelectionBackground);
 	--list-active-fg: var(--vscode-list-activeSelectionForeground);
 	--list-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
-	
+
 	/* Alternating row colors for better readability */
 	--row-alternate-bg: var(--vscode-list-inactiveSelectionBackground);
-	
+
 	/* Badge colors */
 	--badge-bg: var(--vscode-badge-background);
 	--badge-fg: var(--vscode-badge-foreground);
-	
+
 	/* Focus colors */
 	--focus-border: var(--vscode-focusBorder);
-	
+
 	/* Link colors */
 	--link-color: var(--vscode-textLink-foreground);
 	--link-hover-color: var(--vscode-textLink-activeForeground);
-	
+
 	/* Status colors */
 	--error-fg: var(--vscode-errorForeground);
 	--warning-fg: var(--vscode-editorWarning-foreground);
@@ -63,7 +68,7 @@
 
 	/* Semantic muted foreground */
 	--fg-muted: var(--vscode-disabledForeground);
-	
+
 	/* Shadow for cards */
 	--shadow-color: rgb(0, 0, 0, 0.16);
 	--shadow-hover-color: rgb(0, 0, 0, 0.24);
@@ -82,9 +87,225 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] {
 	--stage-pip-empty-bg: rgba(0, 0, 0, 0.12);
 }
 
-/* High contrast mode adjustments */
+/* Default navigation button row — native look for normal themes */
+.button-row {
+	display: flex;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+/* Active view indicator — the nav button for the currently open view.
+   Rendered non-clickable (disabled) but kept fully opaque and marked with a
+   secondary background plus an accent underline so the row reads as a tab strip. */
+.button-row vscode-button.nav-active {
+	opacity: 1;
+	pointer-events: none;
+}
+
+.button-row vscode-button.nav-active::part(control) {
+	background: var(--button-secondary-bg);
+	color: var(--button-secondary-fg);
+	border-bottom: 2px solid var(--focus-border);
+	cursor: default;
+}
+
+/* ------------------------------------------------------------------ *
+ * High contrast themes — INDUSTRIAL REDUX
+ * Stark outlines, uppercase navigation, neon stage colors, monospace.
+ * Everything below is deliberately gated to the high-contrast theme
+ * kinds so normal light/dark themes are unaffected.
+ * ------------------------------------------------------------------ */
+
 body[data-vscode-theme-kind="vscode-high-contrast"],
 body[data-vscode-theme-kind="vscode-high-contrast-light"] {
+	/* Base colors — forced to stark contrasts */
+	--bg-secondary: transparent;
+	--bg-tertiary: transparent;
+	--text-secondary: var(--vscode-foreground);
+	--text-muted: var(--vscode-descriptionForeground);
 	--border-color: var(--vscode-contrastBorder);
 	--border-subtle: var(--vscode-contrastBorder);
+
+	/* Button colors — high contrast, no subtle grays */
+	--button-bg: var(--vscode-foreground);
+	--button-fg: var(--vscode-editor-background);
+	--button-hover-bg: var(--vscode-editor-background);
+	--button-secondary-bg: transparent;
+	--button-secondary-fg: var(--vscode-foreground);
+	--button-secondary-hover-bg: var(--vscode-foreground);
+
+	/* Input colors */
+	--input-bg: transparent;
+	--input-fg: var(--vscode-foreground);
+	--input-border: var(--vscode-foreground);
+
+	/* List/card colors */
+	--list-hover-bg: var(--vscode-editor-background);
+	--list-active-bg: var(--vscode-foreground);
+	--list-active-fg: var(--vscode-editor-background);
+	--list-inactive-bg: transparent;
+
+	/* Alternating row colors dropped for harsh outlines */
+	--row-alternate-bg: transparent;
+
+	/* Badge colors */
+	--badge-bg: var(--vscode-foreground);
+	--badge-fg: var(--vscode-editor-background);
+
+	/* Focus colors */
+	--focus-border: var(--vscode-foreground);
+
+	/* Link colors */
+	--link-color: var(--vscode-foreground);
+	--link-hover-color: var(--vscode-textLink-activeForeground);
+
+	/* Stage progress pip empty fill */
+	--stage-pip-empty-bg: transparent;
+
+	/* Semantic muted foreground */
+	--fg-muted: var(--vscode-descriptionForeground);
+
+	/* Shadow for cards — HARD shadows */
+	--shadow-color: var(--vscode-foreground);
+	--shadow-hover-color: var(--vscode-foreground);
+
+	/* Monospace body for the industrial identity */
+	font-family: var(--vscode-editor-font-family), "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* High contrast dark — stark neon stage colors */
+body[data-vscode-theme-kind="vscode-high-contrast"] {
+	--stage-1-color: #ff00ff; /* Magenta */
+	--stage-2-color: #00ffff; /* Cyan */
+	--stage-3-color: #ffff00; /* Yellow */
+	--stage-4-color: #00ff00; /* Green */
+}
+
+/* High contrast light — darkened neon for readable contrast */
+body[data-vscode-theme-kind="vscode-high-contrast-light"] {
+	--stage-1-color: #d100d1;
+	--stage-2-color: #008787;
+	--stage-3-color: #b5b500;
+	--stage-4-color: #00a300;
+}
+
+/* Industrial navigation tab bar (high contrast only) */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row {
+	display: flex;
+	gap: 0; /* Force flush blocks */
+	flex-wrap: wrap; /* Let it wrap so no scrollbars appear */
+	border: 3px solid var(--vscode-foreground);
+	background-color: var(--vscode-editor-background);
+	margin-bottom: 2rem;
+	box-shadow: 4px 4px 0 var(--vscode-panel-border);
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > * {
+	flex-grow: 1; /* Stretch to fill */
+	flex-shrink: 1;
+	flex-basis: auto;
+	text-align: center;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button {
+	border-radius: 0 !important;
+	border: none !important;
+	border-right: 2px solid var(--vscode-foreground) !important;
+	font-family: inherit;
+	font-weight: 900;
+	text-transform: uppercase;
+	background-color: var(--vscode-editor-background) !important;
+	color: var(--vscode-foreground) !important;
+	padding: 12px 16px !important;
+	cursor: pointer;
+	box-shadow: none !important;
+	letter-spacing: 1px;
+	transition: transform 0.1s, background-color 0.1s;
+	height: auto !important; /* Override vscode-button strict heights */
+	border-bottom: 3px solid transparent !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button::part(control) {
+	background-color: var(--vscode-editor-background) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover::part(control) {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > *:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:last-child {
+	border-right: none !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button:hover {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important; /* Cyber/Industrial accent indicator */
+}
+
+/* Active view indicator (high contrast) — inverted like hover, with the accent underline */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button.nav-active,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button.nav-active {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important;
+	opacity: 1;
+	pointer-events: none;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button.nav-active::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button.nav-active::part(control) {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	cursor: default;
+}
+
+/* Industrial header + title (high contrast only) */
+body[data-vscode-theme-kind="vscode-high-contrast"] .header,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-end;
+	margin-bottom: 2rem;
+	flex-wrap: nowrap;
+	white-space: nowrap;
+	gap: 15px;
+	border-bottom: 4px solid var(--vscode-foreground);
+	padding-bottom: 1rem;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .title,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
+	font-size: 28px;
+	font-weight: 900;
+	text-transform: uppercase;
+	letter-spacing: 2px;
+	color: var(--vscode-foreground);
+	text-shadow: 2px 2px 0 var(--vscode-panel-border);
+	white-space: nowrap;
 }

@@ -10,7 +10,7 @@ import {
 	detectJetBrainsModeFromContent,
 	detectJetBrainsModelHintFromContent,
 	modelHintFromToolCallId,
-} from '../../src/jetbrains';
+} from '../../../src/jetbrains';
 
 const partitionCreated = (id = 'conv-1') => ({
 	type: 'partition.created',

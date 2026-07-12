@@ -1,12 +1,12 @@
 // Environmental Impact webview
 import { el, createButton } from '../shared/domUtils';
-import { BUTTONS } from '../shared/buttonConfig';
+import { getNavButtons } from '../shared/buttonConfig';
 import { formatFixed, formatNumber, formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 
 // --- Analogy constants ---
@@ -142,17 +142,7 @@ function render(stats: EnvironmentalStats): void {
 	const title = el('div', 'title', '🌿 Environmental Impact');
 
 	const buttonRow = el('div', 'button-row');
-	buttonRow.append(
-		createButton(BUTTONS['btn-refresh']),
-		createButton(BUTTONS['btn-details']),
-		createButton(BUTTONS['btn-chart']),
-		createButton(BUTTONS['btn-usage']),
-		createButton(BUTTONS['btn-diagnostics']),
-		createButton(BUTTONS['btn-maturity']),
-	);
-	if (stats.backendConfigured) {
-		buttonRow.append(createButton(BUTTONS['btn-dashboard']));
-	}
+	buttonRow.append(...getNavButtons('btn-environmental', !!stats.backendConfigured).map(config => createButton(config)));
 	header.append(title, buttonRow);
 
 	const footer = el('div', 'footer', `Last updated: ${lastUpdated.toLocaleString()} · Updates every 5 minutes`);

@@ -1,16 +1,18 @@
 // Usage Analysis webview
 import { el } from '../shared/domUtils';
-import { buttonHtml } from '../shared/buttonConfig';
+import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { escapeHtml, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatDurationShort, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
-import { getWindowData } from '../shared/dataLoader';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
-import { getModelDisplayName } from '../shared/modelUtils';
+import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
+import { getLongContextInfo } from '../../../../src/tokenEstimation';
+import type { ModelPricing } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
@@ -22,6 +24,14 @@ type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	mediumCostRequests: number;
 	unknownRequests: number;
 	totalRequests: number;
+};
+
+type ContextWindowStats = {
+	maxRequestInputTokens: number;
+	maxRequestModels: string[];
+	tierCounts: { [tier: string]: number };
+	maxReachedTokens?: number;
+	maxReachedWindowLimit?: number;
 };
 
 type UsageAnalysisPeriod = {
@@ -36,6 +46,7 @@ type UsageAnalysisPeriod = {
 		sessionCount: number;
 		switchCount: number;
 	};
+	contextWindow?: ContextWindowStats;
 };
 
 type TodaySessionSummary = {
@@ -52,6 +63,12 @@ type TodaySessionSummary = {
 	editor: string;
 	models: string[];
 	lastActivity: string;
+	maxRequestInputTokens?: number;
+	contextTier?: string;
+	contextWindowLimit?: number;
+	contextReachedTokens?: number;
+	durationMs?: number;
+	workspace?: string;
 };
 
 type InsightSeverity = 'tip' | 'opportunity' | 'celebration';
@@ -85,6 +102,8 @@ type UsageAnalysisStats = {
 	use24HourTime?: boolean;
 	insights?: EvaluatedInsight[];
 	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
+	sessionColumnSettings?: { enabledColumns?: string[] };
 };
 
 // ── Tool Curation types ──────────────────────────────────────────────────────
@@ -222,8 +241,16 @@ interface RepoAnalysisRecord {
 	error?: string;
 }
 
-const vscode = acquireVsCodeApi();
+/** Webview state persisted by VS Code across tab switches (survives the panel being hidden). */
+interface UsageWebviewState {
+	aboutCollapsed?: boolean;
+}
+
+const vscode = acquireVsCodeApi<UsageWebviewState>();
 const curationTraceOnceKeys = new Set<string>();
+
+/** Collapsed state of the "About This Dashboard" info box, restored from webview state. */
+let aboutCollapsed = vscode.getState()?.aboutCollapsed ?? false;
 
 function traceCuration(stage: string, details?: Record<string, unknown>): void {
 	try {
@@ -534,7 +561,7 @@ function getEffortDisplayName(level: string): string {
 	return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
-import { resolveGuidMcpToolName, isGuidMcpTool } from '../../utils/toolUtils';
+import { resolveGuidMcpToolName, isGuidMcpTool } from '../../../../src/utils/toolUtils';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -634,19 +661,9 @@ return `
 
 // ─── Multi-model period helper ──────────────────────────────────────────────────
 
-/** Renders one column of the Multi-Model Usage section for a single time period. */
-// eslint-disable-next-line max-lines-per-function
-function renderMultiModelPeriod(
-title: string,
-switching: ModelSwitchingAnalysis,
-allLowCostModels: readonly string[],
-allMediumCostModels: readonly string[],
-allHighCostModels: readonly string[],
-allUnknownModels: readonly string[],
-): string {
+/** Renders the top stats-grid section (avg models, switching frequency, max models). */
+function _renderMultiModelStatCards(switching: ModelSwitchingAnalysis): string {
 return `
-<div>
-<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
 <div class="stats-grid" style="grid-template-columns: 1fr;">
 <div class="stat-card">
 <div class="stat-label">\u{1F4CA} Avg Models per Conversation</div>
@@ -661,9 +678,17 @@ return `
 <div class="stat-label">\u{1F4C8} Max Models in Session</div>
 <div class="stat-value">${formatNumber(switching.maxModelsPerSession || 0)}</div>
 </div>
-</div>
-<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>
+</div>`;
+}
+
+/** Renders the "Models by Cost Level" breakdown listing model names per cost tier. */
+function _renderMultiModelCostLevelBreakdown(
+allLowCostModels: readonly string[],
+allMediumCostModels: readonly string[],
+allHighCostModels: readonly string[],
+allUnknownModels: readonly string[],
+): string {
+return `
 <div style="min-height: 110px;">
 ${allLowCostModels.length > 0 ? `
 <div style="margin-bottom: 6px;">
@@ -689,8 +714,15 @@ ${allUnknownModels.length > 0 ? `
 <span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
 </div>
 ` : ''}
-</div>
-${switching.totalRequests > 0 ? `
+</div>`;
+}
+
+/** Renders the "Request Count" breakdown by cost tier, or an empty string if there were no requests. */
+function _renderMultiModelRequestCountBreakdown(switching: ModelSwitchingAnalysis): string {
+if (switching.totalRequests <= 0) {
+return '';
+}
+return `
 <div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 85px;">
 <div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
 ${switching.lowCostRequests > 0 ? `
@@ -717,13 +749,38 @@ ${switching.unknownRequests > 0 ? `
 <span style="color: var(--text-primary);">${formatNumber(switching.unknownRequests)} (${formatPercent((switching.unknownRequests / switching.totalRequests) * 100)})</span>
 </div>
 ` : ''}
-</div>
-` : ''}
-${switching.mixedCostSessions > 0 ? `
+</div>`;
+}
+
+/** Renders the mixed-cost-sessions callout line, or an empty string if there were none. */
+function _renderMultiModelMixedCostSessions(switching: ModelSwitchingAnalysis): string {
+if (switching.mixedCostSessions <= 0) {
+return '';
+}
+return `
 <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
 <span style="font-size: 11px; color: var(--link-color);">🔀 Mixed cost sessions: ${formatNumber(switching.mixedCostSessions)}</span>
-</div>
-` : ''}
+</div>`;
+}
+
+/** Renders one column of the Multi-Model Usage section for a single time period. */
+function renderMultiModelPeriod(
+title: string,
+switching: ModelSwitchingAnalysis,
+allLowCostModels: readonly string[],
+allMediumCostModels: readonly string[],
+allHighCostModels: readonly string[],
+allUnknownModels: readonly string[],
+): string {
+return `
+<div>
+<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
+${_renderMultiModelStatCards(switching)}
+<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>
+${_renderMultiModelCostLevelBreakdown(allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
+${_renderMultiModelRequestCountBreakdown(switching)}
+${_renderMultiModelMixedCostSessions(switching)}
 </div>
 </div>`;
 }
@@ -870,12 +927,66 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 		</table>`;
 }
 
-// --- Today's Sessions table with sortable columns ---
-type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'lastActivity';
+// --- Recent Sessions table with sortable, toggleable columns ---
+type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity';
+type SessionsLookback = 'today' | '7' | '30';
+
+/** Optional (toggleable) session table columns. Title is always shown and is not part of this set. */
+type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity';
+
+type SessionColumnDef = {
+	id: SessionColumnId;
+	label: string;
+	/** Absent for columns that cannot be sorted (Models). */
+	sortKey?: SessionSortColumn;
+	align: 'left' | 'right';
+	/** Extra inline style appended after the base cell style (later declarations win). */
+	cellStyle?: string;
+	render: (s: TodaySessionSummary) => { html: string; title?: string };
+};
+
+const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
+	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => ({ html: formatNumber(s.interactions) }) },
+	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => ({ html: formatNumber(s.toolCalls) }) },
+	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => ({ html: formatNumber(s.inputTokens) }) },
+	{ id: 'outputTokens', label: 'Output', sortKey: 'outputTokens', align: 'right', render: s => ({ html: formatNumber(s.outputTokens) }) },
+	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => ({ html: formatNumber(s.thinkingTokens) }) },
+	{ id: 'cachedTokens', label: 'Cached', sortKey: 'cachedTokens', align: 'right', render: s => ({ html: formatNumber(s.cachedTokens) }) },
+	{ id: 'totalTokens', label: 'Total', sortKey: 'totalTokens', align: 'right', render: s => ({ html: formatNumber(s.totalTokens) }) },
+	{ id: 'estimatedCost', label: 'Cost', sortKey: 'estimatedCost', align: 'right', render: s => ({ html: s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—' }) },
+	{ id: 'editor', label: 'Editor', sortKey: 'editor', align: 'left', render: s => ({ html: escapeHtml(s.editor || 'unknown') }) },
+	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
+	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
+	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => ({ html: formatDurationShort(s.durationMs) }) },
+	{
+		id: 'lastActivity', label: 'Last Active', sortKey: 'lastActivity', align: 'right', cellStyle: 'white-space:nowrap;',
+		render: s => ({
+			html: s.lastActivity
+				? (sessionsLookback === 'today'
+					? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime })
+					: new Date(s.lastActivity).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }))
+				: '—'
+		}),
+	},
+];
+
+const ALL_SESSION_COLUMN_IDS: SessionColumnId[] = SESSION_COLUMN_DEFS.map(c => c.id);
+
 let sessionSortColumn: SessionSortColumn = 'interactions';
 let sessionSortDirection: 'asc' | 'desc' = 'desc';
 let cachedTodaySessions: TodaySessionSummary[] = [];
 let use24HourTime = true;
+// Lookback selector state: "today" renders the summaries bundled with updateStats;
+// longer windows are lazily requested from the extension host and cached here.
+let sessionsLookback: SessionsLookback = 'today';
+let latestTodaySessions: TodaySessionSummary[] = [];
+const recentSessionsCache: { [days: string]: TodaySessionSummary[] } = {};
+/** Which optional columns are currently visible. Title (and the row number) are always shown. */
+let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
+
+function saveSessionColumnSettings(): void {
+	vscode.postMessage({ command: 'saveSessionColumnSettings', settings: { enabledColumns: Array.from(enabledSessionColumns) } });
+}
 
 function getSessionSortIndicator(column: SessionSortColumn): string {
 	if (sessionSortColumn !== column) { return ''; }
@@ -892,6 +1003,12 @@ function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary
 			case 'editor':
 				cmp = (a.editor || '').localeCompare(b.editor || '');
 				break;
+			case 'workspace':
+				cmp = (a.workspace || '').localeCompare(b.workspace || '');
+				break;
+			case 'durationMs':
+				cmp = (a.durationMs ?? -1) - (b.durationMs ?? -1);
+				break;
 			case 'lastActivity':
 				cmp = (a.lastActivity || '').localeCompare(b.lastActivity || '');
 				break;
@@ -906,55 +1023,46 @@ function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary
 function renderTodaySessionsTable(sessions: TodaySessionSummary[]): string {
 	cachedTodaySessions = sessions;
 	if (!sessions || sessions.length === 0) {
-		return '<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No sessions recorded today yet.</div>';
+		const emptyMessage = sessionsLookback === 'today' ? 'No sessions recorded today yet.' : 'No sessions recorded in this period.';
+		return `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">${emptyMessage}</div>`;
 	}
 	return `<div id="sessions-table-container">${buildSessionsTableHtml(sessions)}</div>`;
 }
 
 function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 	const sorted = sortTodaySessions(sessions);
+	const visibleColumns = SESSION_COLUMN_DEFS.filter(c => enabledSessionColumns.has(c.id));
+
 	const rows = sorted.map((s, idx) => {
 		const title = escapeHtml(s.title || 'Untitled session');
 		const filePath = escapeHtml(s.filePath || '');
-		const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—';
-		const editor = escapeHtml(s.editor || 'unknown');
-		const cost = s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—';
-		const time = s.lastActivity ? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }) : '—';
+		const optionalCells = visibleColumns.map(col => {
+			const { html, title: cellTitle } = col.render(s);
+			const alignStyle = col.align === 'right' ? 'text-align:right;' : '';
+			const titleAttr = cellTitle !== undefined ? ` title="${cellTitle}"` : '';
+			return `<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${alignStyle}${col.cellStyle || ''}"${titleAttr}>${html}</td>`;
+		}).join('');
 		return `<tr>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; color:var(--text-secondary);">${idx + 1}</td>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Open viewer for session &quot;${title}&quot;"><a href="#" class="session-title-link" data-file="${filePath}" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${title}</a></td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.interactions)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.toolCalls)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.inputTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.outputTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.thinkingTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.cachedTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${formatNumber(s.totalTokens)}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); text-align:right; font-size:12px;">${cost}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px;">${editor}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${models}">${models}</td>
-			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; white-space:nowrap; text-align:right;">${time}</td>
+			${optionalCells}
 		</tr>`;
+	}).join('');
+
+	const headerCells = visibleColumns.map(col => {
+		const alignStyle = col.align === 'right' ? ' text-align:right;' : '';
+		if (!col.sortKey) { return `<th style="padding:6px 8px;${alignStyle}">${col.label}</th>`; }
+		return `<th class="sortable" data-sort="${col.sortKey}" style="padding:6px 8px;${alignStyle}">${col.label}${getSessionSortIndicator(col.sortKey)}</th>`;
 	}).join('');
 
 	return `
 		<div style="overflow-x:auto;">
-		<table class="sessions-table" style="width:100%; border-collapse:collapse; min-width:900px;">
+		<table class="sessions-table" style="width:100%; border-collapse:collapse; min-width:1050px;">
 			<thead>
 				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">
 					<th style="padding:6px 8px;">#</th>
 					<th class="sortable" data-sort="title" style="padding:6px 8px;">Title${getSessionSortIndicator('title')}</th>
-					<th class="sortable" data-sort="interactions" style="padding:6px 8px; text-align:right;">Turns${getSessionSortIndicator('interactions')}</th>
-					<th class="sortable" data-sort="toolCalls" style="padding:6px 8px; text-align:right;">Tools${getSessionSortIndicator('toolCalls')}</th>
-					<th class="sortable" data-sort="inputTokens" style="padding:6px 8px; text-align:right;">Input${getSessionSortIndicator('inputTokens')}</th>
-					<th class="sortable" data-sort="outputTokens" style="padding:6px 8px; text-align:right;">Output${getSessionSortIndicator('outputTokens')}</th>
-					<th class="sortable" data-sort="thinkingTokens" style="padding:6px 8px; text-align:right;">Thinking${getSessionSortIndicator('thinkingTokens')}</th>
-					<th class="sortable" data-sort="cachedTokens" style="padding:6px 8px; text-align:right;">Cached${getSessionSortIndicator('cachedTokens')}</th>
-					<th class="sortable" data-sort="totalTokens" style="padding:6px 8px; text-align:right;">Total${getSessionSortIndicator('totalTokens')}</th>
-					<th class="sortable" data-sort="estimatedCost" style="padding:6px 8px; text-align:right;">Cost${getSessionSortIndicator('estimatedCost')}</th>
-					<th class="sortable" data-sort="editor" style="padding:6px 8px;">Editor${getSessionSortIndicator('editor')}</th>
-					<th style="padding:6px 8px;">Models</th>
-					<th class="sortable" data-sort="lastActivity" style="padding:6px 8px; text-align:right;">Last Active${getSessionSortIndicator('lastActivity')}</th>
+					${headerCells}
 				</tr>
 			</thead>
 			<tbody>
@@ -964,10 +1072,28 @@ function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
 		</div>`;
 }
 
+/** Builds the "Columns" toggle button and its checkbox dropdown for showing/hiding optional columns. */
+function buildSessionColumnsMenuHtml(): string {
+	const items = SESSION_COLUMN_DEFS.map(col => `
+		<label style="display:flex; align-items:center; gap:6px; padding:4px 8px; font-size:12px; white-space:nowrap; cursor:pointer;">
+			<input type="checkbox" data-column="${col.id}"${enabledSessionColumns.has(col.id) ? ' checked' : ''} />
+			<span>${col.label}</span>
+		</label>`).join('');
+	return `
+		<div class="columns-menu-wrap" style="position:relative;">
+			<button id="sessions-columns-toggle" type="button" style="font-size:12px; padding:2px 8px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px; cursor:pointer;">⚙ Columns</button>
+			<div id="sessions-columns-menu" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; z-index:20; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; box-shadow:0 4px 10px var(--shadow-color); padding:4px 0; min-width:160px;">
+				${items}
+			</div>
+		</div>`;
+}
+
 function setupSessionsTableSort(): void {
-	const container = document.getElementById('sessions-table-container');
-	if (!container) { return; }
-	container.addEventListener('click', (e) => {
+	// Delegate from the stable panel body so listeners survive lookback re-renders,
+	// which replace the inner #sessions-table-container element.
+	const body = document.getElementById('sessions-panel-body');
+	if (!body) { return; }
+	body.addEventListener('click', (e) => {
 		// Handle session title link clicks → open in log viewer
 		const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.session-title-link');
 		if (link) {
@@ -989,8 +1115,87 @@ function setupSessionsTableSort(): void {
 			sessionSortColumn = col;
 			sessionSortDirection = 'desc';
 		}
-		container.innerHTML = buildSessionsTableHtml(cachedTodaySessions);
+		const container = document.getElementById('sessions-table-container');
+		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
 	});
+	setupSessionsLookbackSelector();
+	setupSessionColumnsMenu();
+}
+
+let _documentClickClosesColumnsMenu = false;
+
+function setupSessionColumnsMenu(): void {
+	const toggle = document.getElementById('sessions-columns-toggle');
+	const menu = document.getElementById('sessions-columns-menu');
+	if (!toggle || !menu) { return; }
+	toggle.addEventListener('click', (e) => {
+		e.stopPropagation();
+		menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+	});
+	menu.addEventListener('click', (e) => e.stopPropagation());
+	menu.addEventListener('change', (e) => {
+		const checkbox = e.target as HTMLInputElement;
+		const columnId = checkbox.getAttribute('data-column') as SessionColumnId | null;
+		if (!columnId) { return; }
+		if (checkbox.checked) { enabledSessionColumns.add(columnId); } else { enabledSessionColumns.delete(columnId); }
+		const container = document.getElementById('sessions-table-container');
+		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+		saveSessionColumnSettings();
+	});
+	// Attached once ever (not per re-render) and re-queries the live menu element on
+	// each click, so it keeps working across full DOM rebuilds without leaking listeners.
+	if (!_documentClickClosesColumnsMenu) {
+		_documentClickClosesColumnsMenu = true;
+		document.addEventListener('click', () => {
+			const liveMenu = document.getElementById('sessions-columns-menu');
+			if (liveMenu) { liveMenu.style.display = 'none'; }
+		});
+	}
+}
+
+function setupSessionsLookbackSelector(): void {
+	const select = document.getElementById('sessions-lookback') as HTMLSelectElement | null;
+	if (!select) { return; }
+	select.value = sessionsLookback;
+	select.addEventListener('change', () => {
+		const value = select.value;
+		sessionsLookback = (value === '7' || value === '30') ? value : 'today';
+		refreshSessionsPanelBody();
+	});
+	// A full re-render may have restored a non-today lookback whose data was
+	// rendered from cache already; if the cache is empty, request it now.
+	if (sessionsLookback !== 'today' && !recentSessionsCache[sessionsLookback]) {
+		refreshSessionsPanelBody();
+	}
+}
+
+/** Renders the sessions table for the current lookback, requesting host data when needed. */
+function refreshSessionsPanelBody(): void {
+	const body = document.getElementById('sessions-panel-body');
+	if (!body) { return; }
+	if (sessionsLookback === 'today') {
+		body.innerHTML = renderTodaySessionsTable(latestTodaySessions);
+		return;
+	}
+	const cached = recentSessionsCache[sessionsLookback];
+	if (cached) {
+		body.innerHTML = renderTodaySessionsTable(cached);
+		return;
+	}
+	body.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
+	vscode.postMessage({ command: 'loadRecentSessions', days: Number(sessionsLookback) });
+}
+
+function handleRecentSessionsLoaded(message: any): void {
+	const days = Number(message.days);
+	if (days !== 7 && days !== 30) { return; }
+	const sessions = Array.isArray(message.sessions)
+		? message.sessions.filter((s: any) => s && typeof s === 'object' && typeof s.interactions === 'number') as TodaySessionSummary[]
+		: [];
+	recentSessionsCache[String(days)] = sessions;
+	if (sessionsLookback === String(days)) {
+		refreshSessionsPanelBody();
+	}
 }
 
 function unionFill(map: { [key: string]: number }, keys: string[]): { [key: string]: number } {
@@ -2408,19 +2613,16 @@ function buildUsageRootHtml(
 					<span class="header-title">Usage Analysis</span>
 				</div>
 				<div class="button-row">
-				${buttonHtml('btn-refresh')}
-				${buttonHtml('btn-details')}
-				${buttonHtml('btn-chart')}
-				${buttonHtml('btn-environmental')}
-				${buttonHtml('btn-diagnostics')}
-				${buttonHtml('btn-maturity')}
-				${stats.backendConfigured ? buttonHtml('btn-dashboard') : ''}
+				${navButtonsHtml('btn-usage', !!stats.backendConfigured)}
 				</div>
 			</div>
 
 			<div class="info-box">
-				<div class="info-box-title">📋 About This Dashboard</div>
-				<div>
+				<div class="info-box-title info-box-toggle" id="about-info-toggle" role="button" tabindex="0" aria-expanded="${!aboutCollapsed}" aria-controls="about-info-body">
+					<span>📋 About This Dashboard</span>
+					<span class="info-box-chevron" aria-hidden="true">${aboutCollapsed ? '▸' : '▾'}</span>
+				</div>
+				<div class="info-box-body" id="about-info-body"${aboutCollapsed ? ' style="display:none"' : ''}>
 					This dashboard analyzes your GitHub Copilot usage patterns by examining session log files.
 					It tracks modes (ask/edit/agent), tool usage, context references (#file, @workspace, etc.),
 					and MCP (Model Context Protocol) tools to help you understand how you interact with Copilot.
@@ -2429,11 +2631,11 @@ function buildUsageRootHtml(
 
 			<div class="tab-bar">
 				<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity">📊 My Activity</button>
-				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions">📋 Today's Sessions</button>
+				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions">📋 Recent Sessions</button>
 				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools">🔧 Tools &amp; Integrations</button>
 				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health">🏗️ Workspace Health</button>
-				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos">🤖 Repository PRs</button>
-				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent">🤖 Cloud Agent</button>
+				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos">🔀 Repository PRs</button>
+				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent">☁️ Cloud Agent</button>
 				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights">💡 Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
 			</div>
 
@@ -2451,13 +2653,26 @@ function buildUsageRootHtml(
 }
 
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
+	latestTodaySessions = stats.todaySessions || [];
+	const cachedForLookback = sessionsLookback === 'today' ? latestTodaySessions : recentSessionsCache[sessionsLookback];
+	const bodyHtml = cachedForLookback
+		? renderTodaySessionsTable(cachedForLookback)
+		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
 	return `
 		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
 			<div class="section">
-				<div class="section-title"><span>📋</span><span>Today's Sessions</span></div>
-				<div class="section-subtitle">Individual session breakdown for today — sorted by number of interactions (most active first).</div>
-				<div style="margin-top: 12px;">
-					${renderTodaySessionsTable(stats.todaySessions || [])}
+				<div class="section-title" style="display:flex; align-items:center; gap:8px;">
+					<span>📋</span><span>Recent Sessions</span>
+					<select id="sessions-lookback" style="margin-left:auto; font-size:12px; padding:2px 6px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px;">
+						<option value="today"${sessionsLookback === 'today' ? ' selected' : ''}>Today</option>
+						<option value="7"${sessionsLookback === '7' ? ' selected' : ''}>Last 7 days</option>
+						<option value="30"${sessionsLookback === '30' ? ' selected' : ''}>Last 30 days</option>
+					</select>
+					${buildSessionColumnsMenuHtml()}
+				</div>
+				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
+				<div id="sessions-panel-body" style="margin-top: 12px;">
+					${bodyHtml}
 				</div>
 			</div>
 		</div>`;
@@ -2488,6 +2703,128 @@ function buildActivityTabPanelHtml(
 			${multiModelHtml}
 			${modelCostHtml}
 			${thinkingEffortHtml}
+			${buildContextWindowSectionHtml(stats)}
+		</div>`;
+}
+
+// ─── Context window / long-context pricing section ─────────────────────────────
+
+const _modelPricingData = getWindowData<{ pricing: Record<string, ModelPricing> }>('__MODEL_PRICING__');
+const MODEL_PRICING_MAP: Record<string, ModelPricing> = _modelPricingData?.pricing ?? {};
+
+/** Long-context tier info for a set of models — smallest threshold wins. */
+function _tierInfoForModels(models: string[]): { thresholdTokens: number; defaultInputCostPerMillion: number; longContextInputCostPerMillion: number; model: string } | null {
+	let best: { thresholdTokens: number; defaultInputCostPerMillion: number; longContextInputCostPerMillion: number; model: string } | null = null;
+	for (const model of models) {
+		const info = getLongContextInfo(model, MODEL_PRICING_MAP);
+		if (info && (!best || info.thresholdTokens < best.thresholdTokens)) {
+			best = { ...info, model };
+		}
+	}
+	return best;
+}
+
+/** "how much repo fits" estimate: ~4 characters per token, ~40 characters per source line. */
+function _defaultTierCapacityText(thresholdTokens: number): string {
+	const mb = (thresholdTokens * 4) / (1024 * 1024);
+	const lines = Math.round(thresholdTokens / 10 / 1000);
+	return `≈${formatFixed(mb, 1)} MB of code (~${formatNumber(lines)}K lines)`;
+}
+
+function _renderContextWindowBar(maxTokens: number, tier: { thresholdTokens: number; defaultInputCostPerMillion: number; longContextInputCostPerMillion: number; model: string }): string {
+	const pct = (maxTokens / tier.thresholdTokens) * 100;
+	const fillPct = Math.min(pct, 100);
+	const color = pct > 100 ? 'var(--error-color, #f14c4c)' : pct >= 70 ? 'var(--warning-color, #cca700)' : 'var(--success-color, #89d185)';
+	const modelName = escapeHtml(getModelDisplayName(tier.model));
+	const rateNote = `above it, input billing goes $${tier.defaultInputCostPerMillion.toFixed(2)} → $${tier.longContextInputCostPerMillion.toFixed(2)} per 1M tokens`;
+	return `
+		<div style="margin-top: 12px;">
+			<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-secondary); margin-bottom:4px;">
+				<span>${formatNumber(maxTokens)} tokens — ${formatFixed(pct, 0)}% of the ${formatNumber(tier.thresholdTokens)}-token default tier for ${modelName}</span>
+				<span>${formatNumber(tier.thresholdTokens)}</span>
+			</div>
+			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
+				<div style="height:100%; width:${formatFixed(fillPct, 0)}%; background:${color}; border-radius:4px;"></div>
+			</div>
+			<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Default tier fits ${_defaultTierCapacityText(tier.thresholdTokens)}; ${rateNote}.</div>
+		</div>`;
+}
+
+/** One labelled value line inside a context-window period column. */
+function _cwRow(label: string, value: string, subNote?: string, labelTitle?: string): string {
+	const titleAttr = labelTitle ? ` title="${labelTitle}"` : '';
+	return `
+		<div style="margin-bottom: 10px;">
+			<div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px;"${titleAttr}>${label}</div>
+			<div style="font-size: 13px; color: var(--text-primary);">${value}</div>
+			${subNote ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; line-height: 1.4;">${subNote}</div>` : ''}
+		</div>`;
+}
+
+/** Largest-request row for one period column (empty string when the period has none). */
+function _cwLargestRequestRow(cw: ContextWindowStats): string {
+	if (cw.maxRequestInputTokens <= 0) { return ''; }
+	const tier = _tierInfoForModels(cw.maxRequestModels);
+	const modelsLabel = escapeHtml(cw.maxRequestModels.map(m => getModelDisplayName(m)).join(', ') || '—');
+	const thresholdNote = tier
+		? `${formatFixed((cw.maxRequestInputTokens / tier.thresholdTokens) * 100, 0)}% of the ${formatNumber(tier.thresholdTokens)}-token price line · ${modelsLabel}`
+		: `${modelsLabel} — no long-context surcharge for ${cw.maxRequestModels.length > 1 ? 'these models' : 'this model'}`;
+	return _cwRow('📏 Largest request', `${formatNumber(cw.maxRequestInputTokens)} input tokens`, thresholdNote,
+		'The biggest single prompt (input incl. cached tokens) sent to a model in one request during this period');
+}
+
+/** Fullest-CLI-window row for one period column (empty string when unavailable). */
+function _cwFullestWindowRow(cw: ContextWindowStats): string {
+	if ((cw.maxReachedTokens ?? 0) <= 0) { return ''; }
+	const limit = cw.maxReachedWindowLimit;
+	const value = limit
+		? `${formatNumber(cw.maxReachedTokens!)} of ${formatNumber(limit)} (${formatFixed((cw.maxReachedTokens! / limit) * 100, 0)}%)`
+		: formatNumber(cw.maxReachedTokens!);
+	return _cwRow('🪟 Fullest CLI window', value, undefined,
+		'The highest context fill recorded for a Copilot CLI session in this period, versus its window limit');
+}
+
+/** Renders one period column of the context-window section. */
+function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): string {
+	const hasData = !!cw && (cw.maxRequestInputTokens > 0 || (cw.maxReachedTokens ?? 0) > 0 || Object.keys(cw.tierCounts).length > 0);
+	if (!hasData) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	const tierEntries = Object.entries(cw!.tierCounts);
+	const tierSessionCount = tierEntries.reduce((sum, [, c]) => sum + c, 0);
+	const tierRow = tierEntries.length > 0
+		? _cwRow('🪜 Context tiers', tierEntries.map(([t, c]) => `${escapeHtml(t)} ×${c}`).join(', '),
+			`${tierSessionCount} Copilot CLI session${tierSessionCount === 1 ? '' : 's'} grouped by chosen window size — "default" is the standard window at normal rates; larger tiers unlock more context at long-context prices`,
+			'Copilot CLI lets you pick a context-window tier per session; the count shows how many sessions used each tier')
+		: '';
+	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow;
+}
+
+/**
+ * Bottom-of-tab section: largest request per period vs the long-context
+ * pricing threshold, fullest CLI window, and context tiers used.
+ */
+function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
+	const cw30 = stats.last30Days.contextWindow;
+	const tier30 = cw30 && cw30.maxRequestInputTokens > 0 ? _tierInfoForModels(cw30.maxRequestModels) : null;
+	const bar = cw30 && tier30 ? _renderContextWindowBar(cw30.maxRequestInputTokens, tier30) : '';
+	return `
+		<div class="section">
+			<div class="section-title"><span>🪟</span><span>Context Window &amp; Long-Context Pricing</span></div>
+			<div class="section-subtitle">How close your largest requests come to the long-context price line. Models with tiered pricing bill higher input rates once a request exceeds their default-tier threshold.</div>
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					${renderContextWindowPeriodHtml(stats.today.contextWindow)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					${renderContextWindowPeriodHtml(cw30)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow)}
+				</div>
+			</div>
+			${bar}
 		</div>`;
 }
 
@@ -2803,6 +3140,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	);
 
 	wireNavigationButtons();
+	wireAboutInfoToggle();
 	wireRepositoryButtons();
 	wireCurationButtons();
 	renderRepositoryHygienePanels();
@@ -2811,6 +3149,28 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	// Initialize currentInsights from the stats and wire card buttons
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();
+}
+
+/** Wires up the collapsible "About This Dashboard" info box; the collapsed state is persisted via webview state. */
+function wireAboutInfoToggle(): void {
+	const toggle = document.getElementById('about-info-toggle');
+	const body = document.getElementById('about-info-body');
+	if (!toggle || !body) { return; }
+	const chevron = toggle.querySelector('.info-box-chevron');
+	const applyToggle = (): void => {
+		aboutCollapsed = !aboutCollapsed;
+		body.style.display = aboutCollapsed ? 'none' : '';
+		toggle.setAttribute('aria-expanded', String(!aboutCollapsed));
+		if (chevron) { chevron.textContent = aboutCollapsed ? '▸' : '▾'; }
+		vscode.setState({ ...(vscode.getState() ?? {}), aboutCollapsed });
+	};
+	toggle.addEventListener('click', applyToggle);
+	toggle.addEventListener('keydown', (event: KeyboardEvent) => {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			applyToggle();
+		}
+	});
 }
 
 /** Wires up top-level navigation toolbar buttons (refresh, details, chart, etc.). */
@@ -2922,6 +3282,9 @@ function handleUpdateStats(message: any): void {
 	const sanitized = sanitizeStats(message.data);
 	if (sanitized) {
 		_ulLoadingActive = false;
+		// New stats invalidate any lazily-loaded lookback data; it is re-requested on demand.
+		delete recentSessionsCache['7'];
+		delete recentSessionsCache['30'];
 		renderLayout(sanitized);
 		setupSessionsTableSort();
 		renderRepositoryHygienePanels();
@@ -3024,6 +3387,8 @@ function handleExtensionMessage(message: any): void {
 			break;
 		case 'agentSessionsLoaded':
 			handleAgentSessionsLoaded(message.data); break;
+		case 'recentSessionsLoaded':
+			handleRecentSessionsLoaded(message); break;
 		case 'agentSessionsProgress':
 			updateProgressPanel('#agent-sessions-content', 'agent-sessions-progress', 'Fetching agent sessions…', message.done as number, message.total as number);
 			break;
@@ -3535,6 +3900,11 @@ async function bootstrap(): Promise<void> {
 	}
 	setFormatLocale(initialData.locale);
 	use24HourTime = initialData.use24HourTime !== false;
+	const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
+	if (Array.isArray(savedColumns)) {
+		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));
+		enabledSessionColumns = new Set(valid);
+	}
 	renderLayout(initialData);
 	setupSessionsTableSort();
 

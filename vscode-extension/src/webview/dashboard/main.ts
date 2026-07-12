@@ -2,11 +2,11 @@
 import { BUTTONS } from "../shared/buttonConfig";
 import { createButton, el } from "../shared/domUtils";
 import { escapeHtml, formatCost, formatNumber, formatCompact, setCompactNumbers } from "../shared/formatUtils";
-import { getModelDisplayName } from "../shared/modelUtils";
+import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
-import { getWindowData } from "../shared/dataLoader";
+import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import type { ModelUsage } from "../shared/types";
 
 interface UserSummary {

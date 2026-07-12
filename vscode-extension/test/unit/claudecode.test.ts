@@ -4,8 +4,8 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 
-import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../../src/claudecode';
-import { ClaudeCodeAdapter } from '../../src/adapters/claudeCodeAdapter';
+import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../../../src/claudecode';
+import { ClaudeCodeAdapter } from '../../../src/adapters/claudeCodeAdapter';
 
 const claudeCode = new ClaudeCodeDataAccess();
 const claudeCodeAdapter = new ClaudeCodeAdapter(claudeCode);
