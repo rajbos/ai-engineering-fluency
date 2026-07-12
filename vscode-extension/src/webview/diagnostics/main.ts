@@ -2062,6 +2062,8 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
     modelUsageSelect.innerHTML = `<option value="all">🌐 All Editors</option>${editorOptions}`;
     modelUsageSelect.disabled = false;
   }
+  const modelUsageTimeSelect = document.getElementById("model-usage-time-select") as HTMLSelectElement | null;
+  if (modelUsageTimeSelect) { modelUsageTimeSelect.disabled = false; }
   const modelUsageStatus = document.getElementById("model-usage-status");
   if (modelUsageStatus) { modelUsageStatus.textContent = ""; }
 
