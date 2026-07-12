@@ -500,6 +500,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _sessionRestorePromise: Promise<void> | undefined;
 	// Promise that resolves when the initial cache load from disk completes
 	private _cacheLoadPromise: Promise<void> | undefined;
+	/**
+	 * OpenCode DB virtual session paths discovered at startup that are missing from the
+	 * persisted cache. These paths bypass the mtime cutoff once so new DB sessions are
+	 * picked up even when opencode.db's file mtime lags behind per-session updates.
+	 */
+	private readonly _startupOpenCodeDbMisses = new Set<string>();
 	/** True when the user explicitly signed out from our extension this VS Code session. Gated by globalState so it survives reloads. */
 	private _githubSignedOutByUser: boolean = false;
 	/** Resolved Copilot plan details fetched from copilot_internal/user after sign-in. */
@@ -1133,7 +1139,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.context = context;
 		this.initializeAdapters(extensionUri, context);
 		this.initializeOutputChannel(context);
-		this._cacheLoadPromise = this.cacheManager.loadCacheFromStorage().finally(() => {
+		this._cacheLoadPromise = this.cacheManager.loadCacheFromStorage().then(async () => {
+			await this.queueMissingOpenCodeDbSessionsFromCache();
+		}).finally(() => {
 			this._cacheLoadPromise = undefined;
 		});
 		this._sessionRestorePromise = this.restoreGitHubSession();
@@ -1290,6 +1298,32 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this.error('Error in initial update:', error);
 			}
 		}, 3000);
+	}
+
+	private async queueMissingOpenCodeDbSessionsFromCache(): Promise<void> {
+		try {
+			const dbSessionIds = await this.openCode.discoverOpenCodeDbSessions();
+			if (dbSessionIds.length === 0) { return; }
+			const cachedOpenCodeIds = new Set<string>();
+			for (const filePath of this.cacheManager.cache.keys()) {
+				if (!this.openCode.isOpenCodeDbSession(filePath)) { continue; }
+				const sessionId = this.openCode.getOpenCodeSessionId(filePath);
+				if (sessionId) { cachedOpenCodeIds.add(sessionId); }
+			}
+			const dataDir = this.openCode.getOpenCodeDataDir();
+			let queued = 0;
+			for (const sessionId of dbSessionIds) {
+				if (cachedOpenCodeIds.has(sessionId)) { continue; }
+				this._startupOpenCodeDbMisses.add(path.join(dataDir, `opencode.db#${sessionId}`));
+				queued++;
+			}
+			if (queued > 0) {
+				this.log(`Queued ${queued} uncached OpenCode DB session(s) for startup refresh`);
+				this.sessionDiscovery.clearCache();
+			}
+		} catch (error) {
+			this.warn(`OpenCode startup DB check skipped: ${error}`);
+		}
 	}
 
 	/**
@@ -2075,13 +2109,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const fileStats = await this.statSessionFile(sessionFile);
 		const mtime = fileStats.mtime.getTime();
 		const fileSize = fileStats.size;
-		if (mtime < cutoffMs) { return; }
+		const forceStartupOpenCodeLoad = this._startupOpenCodeDbMisses.has(sessionFile);
+		if (mtime < cutoffMs && !forceStartupOpenCodeLoad) { return; }
 		const cachedData = this.getCachedSessionData(sessionFile);
 		const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+		if (forceStartupOpenCodeLoad && wasCached) {
+			this._startupOpenCodeDbMisses.delete(sessionFile);
+		}
 		// Follower mode (missBudget defined): avoid the N-windows-parse-everything
 		// stampede. Serve cache hits freely, but only parse a bounded number of
 		// cache-miss files; skip the rest until the leader publishes a snapshot.
-		if (!wasCached && missBudget) {
+		if (!wasCached && missBudget && !forceStartupOpenCodeLoad) {
 			if (missBudget.remaining <= 0) { return; }
 			missBudget.remaining--;
 		}
@@ -2094,6 +2132,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			? ((await this.getSessionFileDetailsFromCache(sessionFile, fileStats)) ?? this.buildMinimalPreloadDetails(sessionFile, fileStats, sessionData))
 			: undefined;
 		preloaded.push({ sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload);
+		if (forceStartupOpenCodeLoad) {
+			this._startupOpenCodeDbMisses.delete(sessionFile);
+		}
 		if (!wasCached) {
 			// Yield after CPU-intensive cache-miss work to keep VS Code responsive
 			await new Promise(r => setImmediate(r));
