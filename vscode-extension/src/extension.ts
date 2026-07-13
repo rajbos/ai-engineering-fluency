@@ -98,6 +98,7 @@ import { PiDataAccess } from '../../src/pi';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
+import { extractCopilotCliSessionId, getCopilotCliOtelUsage } from '../../src/copilotCliOtel';
 import { createWakeupGate } from './utils/promises';
 
 // --- Session parsing & token estimation ---
@@ -5547,7 +5548,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFilePath, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) { return { tokens: 0, thinkingTokens: 0, actualTokens: 0 }; }
 			if (sessionFilePath.endsWith('.jsonl') || this.isJsonlContent(fileContent)) {
-				return this.estimateTokensFromJsonlSession(fileContent);
+				const otelUsage = extractCopilotCliSessionId(sessionFilePath) ? await getCopilotCliOtelUsage(sessionFilePath) : null;
+				return this.estimateTokensFromJsonlSession(fileContent, otelUsage);
 			}
 			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
 			return this.estimateTokensFromJsonSession(sessionContent);
@@ -5622,8 +5624,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return 0;
 	}
 
-	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string } {
-		return _estimateTokensFromJsonlSession(fileContent);
+	private estimateTokensFromJsonlSession(fileContent: string, otelUsage?: Awaited<ReturnType<typeof getCopilotCliOtelUsage>>): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string } {
+		return _estimateTokensFromJsonlSession(fileContent, otelUsage);
 	}
 
 	/**
