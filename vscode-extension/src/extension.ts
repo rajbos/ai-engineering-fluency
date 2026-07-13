@@ -2102,7 +2102,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					continue;
 				}
 				const sessionFile = queue[readIndex++];
-				try { await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget); } catch { /* skip files that fail to stat/parse */ }
+				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
 			}
@@ -2126,6 +2126,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		return { sessionFiles, preloaded };
+	}
+
+	/**
+	 * Wraps processPreloadQueueFile() with crash-safe start/done/error logging
+	 * (see debugCrashLog) so a hard native crash mid-scan still leaves a trace of
+	 * which file(s) were in flight. A "start" line with no matching "done"/"error"
+	 * for the same file means the process died while processing it.
+	 */
+	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
+		this.debugCrashLog(`start ${sessionFile}`);
+		try {
+			await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+			this.debugCrashLog(`done  ${sessionFile}`);
+		} catch (e) {
+			this.debugCrashLog(`error ${sessionFile}: ${e}`);
+		}
 	}
 
 	private async processPreloadQueueFile(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
