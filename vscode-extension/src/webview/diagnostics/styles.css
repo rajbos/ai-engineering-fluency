@@ -802,6 +802,16 @@ border: 1px solid #1f6feb;
 	min-width: 280px;
 }
 
+.otel-delta-period-select {
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, var(--border-color));
+	border-radius: 4px;
+	padding: 4px 8px;
+	font-size: 13px;
+	cursor: pointer;
+}
+
 .analyzer-loading {
 	display: flex;
 	align-items: center;

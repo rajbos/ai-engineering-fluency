@@ -340,6 +340,8 @@ interface CopilotCliOtelComparisonSession {
 	otelTokens: number;
 	delta: number;
 	models: string[];
+	/** Session file mtime (ISO string), used for the tab's date-range filter. Null if stat failed. */
+	lastActivity: string | null;
 }
 
 /** Summary of how much more/different token tracking is with the OTel export versus the estimate-only path. */
@@ -8448,6 +8450,9 @@ ${this.getLoadingHtmlScript()}
         } catch { /* unreadable session file — treat baseline as 0 */ }
       }
 
+      let lastActivity: string | null = null;
+      try { lastActivity = (await this.statSessionFile(file)).mtime.toISOString(); } catch { /* stat failed — leave null, filter treats as unknown */ }
+
       totalBaselineTokens += baselineTokens;
       totalOtelTokens += otel.actualTokens;
       sessions.push({
@@ -8455,6 +8460,7 @@ ${this.getLoadingHtmlScript()}
         otelTokens: otel.actualTokens,
         delta: otel.actualTokens - baselineTokens,
         models: Object.keys(otel.modelUsage),
+        lastActivity,
       });
     }
 

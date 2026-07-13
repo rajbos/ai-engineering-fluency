@@ -120,6 +120,7 @@ type CopilotCliOtelComparisonSession = {
   otelTokens: number;
   delta: number;
   models: string[];
+  lastActivity: string | null;
 };
 
 type CopilotCliOtelComparison = {
@@ -160,9 +161,12 @@ type ToolFamilyConfig = {
   description?: string;
 };
 
+type OtelDeltaPeriod = "all" | "today" | "yesterday" | "week" | "month";
+
 type DiagnosticsViewState = {
   activeTab?: string;
   activeSubtab?: string;
+  otelDeltaPeriod?: OtelDeltaPeriod;
 };
 
 type FolderFileResult = {
@@ -186,7 +190,11 @@ const initialData = getWindowData<DiagnosticsData>('__INITIAL_DIAGNOSTICS__');
 const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,
   activeSubtab: undefined,
+  otelDeltaPeriod: "all",
 });
+
+let currentOtelComparison: CopilotCliOtelComparison | null | undefined;
+let currentOtelDeltaPeriod: OtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
 
 // Sorting and filtering state
 let currentSortColumn: "lastInteraction" | "size" | "tokens" | "interactions" | "contextRefs" = "lastInteraction";
@@ -1721,10 +1729,25 @@ function handleToolAnalysisSection(message: DiagMessage): void {
   replaceTabContent("tool-analysis", newContent, setupToolAnalysisSortHandlers);
 }
 
+/** Re-renders the OTel Delta tab body from currentOtelComparison + currentOtelDeltaPeriod, preserving active/tab state. */
+function rerenderOtelDeltaTab(): void {
+  replaceTabContent("otel-delta", renderOtelDeltaTab(currentOtelComparison, currentOtelDeltaPeriod), setupOtelDeltaPeriodHandler);
+}
+
+function setupOtelDeltaPeriodHandler(): void {
+  const select = document.getElementById("otel-delta-period") as HTMLSelectElement | null;
+  if (!select) { return; }
+  select.addEventListener("change", () => {
+    currentOtelDeltaPeriod = select.value as OtelDeltaPeriod;
+    diagState.patch({ otelDeltaPeriod: currentOtelDeltaPeriod });
+    rerenderOtelDeltaTab();
+  });
+}
+
 function handleOtelComparisonSection(message: DiagMessage): void {
   if (message.otelComparison === undefined) { return; }
-  const newContent = renderOtelDeltaTab(message.otelComparison as DiagnosticsData['otelComparison']);
-  replaceTabContent("otel-delta", newContent);
+  currentOtelComparison = message.otelComparison as DiagnosticsData['otelComparison'];
+  rerenderOtelDeltaTab();
 }
 
 function handleDiagnosticDataLoaded(message: DiagMessage): void {
@@ -2300,6 +2323,64 @@ function formatTokenDelta(delta: number): { text: string; cssClass: string } {
   return { text: `${sign}${formatTokenCount(Math.abs(delta))}`, cssClass };
 }
 
+/** Local (not UTC) start-of-day, for comparing a session's lastActivity against "today"/"yesterday". */
+function startOfLocalDay(d: Date): Date {
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+}
+
+function otelSessionMatchesPeriod(lastActivity: string | null, period: OtelDeltaPeriod, now: Date): boolean {
+  if (period === "all") { return true; }
+  if (!lastActivity) { return false; }
+  const activity = new Date(lastActivity);
+  if (Number.isNaN(activity.getTime())) { return false; }
+  const today = startOfLocalDay(now);
+  const activityDay = startOfLocalDay(activity);
+  if (period === "today") { return activityDay.getTime() === today.getTime(); }
+  if (period === "yesterday") {
+    const yesterday = new Date(today);
+    yesterday.setDate(yesterday.getDate() - 1);
+    return activityDay.getTime() === yesterday.getTime();
+  }
+  if (period === "week") {
+    const weekStart = new Date(today);
+    weekStart.setDate(weekStart.getDate() - 6); // rolling 7 days including today
+    return activity >= weekStart && activity <= now;
+  }
+  // month: current calendar month to date
+  return activity.getFullYear() === now.getFullYear() && activity.getMonth() === now.getMonth() && activity <= now;
+}
+
+/** Filters an OTel comparison to sessions matching the given period, recomputing the aggregate totals from the subset. */
+function filterOtelComparisonByPeriod(comparison: CopilotCliOtelComparison, period: OtelDeltaPeriod): CopilotCliOtelComparison {
+  if (period === "all") { return comparison; }
+  const now = new Date();
+  const sessions = comparison.sessions.filter(s => otelSessionMatchesPeriod(s.lastActivity, period, now));
+  const totalBaselineTokens = sessions.reduce((sum, s) => sum + s.baselineTokens, 0);
+  const totalOtelTokens = sessions.reduce((sum, s) => sum + s.otelTokens, 0);
+  return {
+    ...comparison,
+    sessions,
+    sessionsMatched: sessions.length,
+    totalBaselineTokens,
+    totalOtelTokens,
+    deltaTokens: totalOtelTokens - totalBaselineTokens,
+  };
+}
+
+const OTEL_DELTA_PERIOD_LABELS: Record<OtelDeltaPeriod, string> = {
+  all: "All Time", today: "Today", yesterday: "Yesterday", week: "This Week", month: "This Month",
+};
+
+function renderOtelDeltaPeriodSelector(period: OtelDeltaPeriod): string {
+  const options = (Object.keys(OTEL_DELTA_PERIOD_LABELS) as OtelDeltaPeriod[])
+    .map(p => `<option value="${p}"${p === period ? ' selected' : ''}>${OTEL_DELTA_PERIOD_LABELS[p]}</option>`)
+    .join('');
+  return `<div class="button-group" style="margin-bottom:12px;">
+<label for="otel-delta-period" style="margin-right:6px;">Show:</label>
+<select id="otel-delta-period" class="otel-delta-period-select">${options}</select>
+</div>`;
+}
+
 function renderOtelDeltaSummaryCards(comparison: CopilotCliOtelComparison): string {
   const delta = formatTokenDelta(comparison.deltaTokens);
   return `<div class="summary-cards">
@@ -2337,7 +2418,7 @@ function renderOtelDeltaSessionRows(sessions: CopilotCliOtelComparisonSession[])
   }).join('');
 }
 
-function renderOtelDeltaTab(comparison: CopilotCliOtelComparison | null | undefined): string {
+function renderOtelDeltaTab(comparison: CopilotCliOtelComparison | null | undefined, period: OtelDeltaPeriod = currentOtelDeltaPeriod): string {
   const setupNotice = renderOtelDeltaSetupNotice(comparison);
   if (!comparison || comparison.sessionsMatched === 0) {
     return `<div id="tab-otel-delta" class="tab-content">
@@ -2348,6 +2429,13 @@ function renderOtelDeltaTab(comparison: CopilotCliOtelComparison | null | undefi
 ${setupNotice}
 </div>`;
   }
+  const filtered = filterOtelComparisonByPeriod(comparison, period);
+  const tableOrEmpty = filtered.sessions.length > 0
+    ? `<table class="session-table">
+<thead><tr><th>Session</th><th>Model(s)</th><th>Previous Estimate</th><th>OTel Exact</th><th>Delta</th></tr></thead>
+<tbody>${renderOtelDeltaSessionRows(filtered.sessions)}</tbody>
+</table>`
+    : `<div class="info-box">No Copilot CLI sessions with OTel data in this period. Try a wider range.</div>`;
   return `<div id="tab-otel-delta" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">📡 OTel vs. Estimated Token Counts</div>
@@ -2357,11 +2445,9 @@ Checked ${comparison.sessionsChecked.toLocaleString()} Copilot CLI session(s) fo
 </div>
 </div>
 ${setupNotice}
-${renderOtelDeltaSummaryCards(comparison)}
-<table class="session-table">
-<thead><tr><th>Session</th><th>Model(s)</th><th>Previous Estimate</th><th>OTel Exact</th><th>Delta</th></tr></thead>
-<tbody>${renderOtelDeltaSessionRows(comparison.sessions)}</tbody>
-</table>
+${renderOtelDeltaPeriodSelector(period)}
+${renderOtelDeltaSummaryCards(filtered)}
+${tableOrEmpty}
 </div>`;
 }
 
@@ -2461,6 +2547,7 @@ function renderLayout(data: DiagnosticsData): void {
   isLoading = detailedFiles.length === 0;
   currentBackendInfo = data.backendStorageInfo;
   currentGithubAuth = data.githubAuth;
+  currentOtelComparison = data.otelComparison;
   if (data.toolFamilies) { storedToolFamilies = data.toolFamilies; }
 
   const reportIsLoading = data.report === LOADING_PLACEHOLDER;
@@ -2496,6 +2583,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupButtonHandlers();
   setupDisplaySettingHandlers();
   setupToolAnalysisSortHandlers();
+  setupOtelDeltaPeriodHandler();
 
   const savedState = diagState.restore();
   if (savedState?.activeTab && !activateTab(savedState.activeTab)) {
