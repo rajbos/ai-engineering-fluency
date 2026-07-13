@@ -802,6 +802,18 @@ border: 1px solid #1f6feb;
 	min-width: 280px;
 }
 
+.otel-delta-period-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 20px;
+}
+
+.otel-delta-period-row label {
+	color: var(--text-secondary);
+	font-size: 13px;
+}
+
 .otel-delta-period-select {
 	background: var(--vscode-input-background);
 	color: var(--vscode-input-foreground);

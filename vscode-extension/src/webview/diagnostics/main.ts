@@ -2375,8 +2375,8 @@ function renderOtelDeltaPeriodSelector(period: OtelDeltaPeriod): string {
   const options = (Object.keys(OTEL_DELTA_PERIOD_LABELS) as OtelDeltaPeriod[])
     .map(p => `<option value="${p}"${p === period ? ' selected' : ''}>${OTEL_DELTA_PERIOD_LABELS[p]}</option>`)
     .join('');
-  return `<div class="button-group" style="margin-bottom:12px;">
-<label for="otel-delta-period" style="margin-right:6px;">Show:</label>
+  return `<div class="otel-delta-period-row">
+<label for="otel-delta-period">Show:</label>
 <select id="otel-delta-period" class="otel-delta-period-select">${options}</select>
 </div>`;
 }
