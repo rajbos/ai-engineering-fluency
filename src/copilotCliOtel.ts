@@ -137,12 +137,15 @@ let cachedIndex: Map<string, CopilotCliOtelSessionUsage> | null = null;
 let cachedAt = 0;
 /** Re-scan the OTel directory at most this often; the export file grows across a live CLI session. */
 const CACHE_TTL_MS = 30_000;
+/**
+ * In-flight load, cached (not just the resolved value) so concurrent callers on a cold
+ * cache all await the same read+parse instead of each independently reading the OTel
+ * export file — which is unbounded in size and can reach tens of MB, so N concurrent
+ * callers means N redundant full reads/parses of it at once.
+ */
+let inFlightLoad: Promise<Map<string, CopilotCliOtelSessionUsage>> | null = null;
 
-/** Loads (and caches) the OTel usage index by scanning every .jsonl file under ~/.copilot/otel/. */
-export async function loadCopilotCliOtelIndex(): Promise<Map<string, CopilotCliOtelSessionUsage>> {
-	const now = Date.now();
-	if (cachedIndex && now - cachedAt < CACHE_TTL_MS) { return cachedIndex; }
-
+async function readCopilotCliOtelIndex(): Promise<Map<string, CopilotCliOtelSessionUsage>> {
 	const index = new Map<string, CopilotCliOtelSessionUsage>();
 	const dir = getCopilotCliOtelDir();
 	try {
@@ -155,16 +158,30 @@ export async function loadCopilotCliOtelIndex(): Promise<Map<string, CopilotCliO
 			} catch { /* unreadable file — skip */ }
 		}
 	} catch { /* ~/.copilot/otel doesn't exist — OTel export not enabled, no data available */ }
-
-	cachedIndex = index;
-	cachedAt = now;
 	return index;
+}
+
+/** Loads (and caches) the OTel usage index by scanning every .jsonl file under ~/.copilot/otel/. */
+export async function loadCopilotCliOtelIndex(): Promise<Map<string, CopilotCliOtelSessionUsage>> {
+	const now = Date.now();
+	if (cachedIndex && now - cachedAt < CACHE_TTL_MS) { return cachedIndex; }
+	if (inFlightLoad) { return inFlightLoad; }
+
+	inFlightLoad = readCopilotCliOtelIndex()
+		.then((index) => {
+			cachedIndex = index;
+			cachedAt = Date.now();
+			return index;
+		})
+		.finally(() => { inFlightLoad = null; });
+	return inFlightLoad;
 }
 
 /** Clears the cached OTel index. Exposed for tests. */
 export function clearCopilotCliOtelCache(): void {
 	cachedIndex = null;
 	cachedAt = 0;
+	inFlightLoad = null;
 }
 
 /**
