@@ -275,6 +275,23 @@ body {
 	margin-top: 6px;
 }
 
+.otel-delta-positive {
+	color: var(--success-fg);
+}
+
+.otel-delta-negative {
+	color: var(--error-fg);
+}
+
+.info-box pre {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 8px 10px;
+	font-size: 12px;
+	overflow-x: auto;
+}
+
 .context-ref-filter {
 	cursor: pointer;
 	padding: 2px 6px;

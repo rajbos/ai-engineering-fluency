@@ -98,7 +98,7 @@ import { PiDataAccess } from '../../src/pi';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
-import { extractCopilotCliSessionId, getCopilotCliOtelUsage } from '../../src/copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliOtelUsage, getCopilotCliOtelStatus } from '../../src/copilotCliOtel';
 import { createWakeupGate } from './utils/promises';
 
 // --- Session parsing & token estimation ---
@@ -329,6 +329,30 @@ function _scdlDistributeToDays(
 		result[dayKey] = { ...dayRollup, modelUsage: dayModelUsage };
 	}
 	return result;
+}
+
+/** One Copilot CLI session where OTel export data was found, for the diagnostics "OTel Delta" tab. */
+interface CopilotCliOtelComparisonSession {
+	file: string;
+	sessionId: string;
+	/** Token count the extension would have reported before OTel enrichment (0 for DB-only chat sessions). */
+	baselineTokens: number;
+	otelTokens: number;
+	delta: number;
+	models: string[];
+}
+
+/** Summary of how much more/different token tracking is with the OTel export versus the estimate-only path. */
+interface CopilotCliOtelComparison {
+	otelDirExists: boolean;
+	otelFileCount: number;
+	otelSessionsIndexed: number;
+	sessionsChecked: number;
+	sessionsMatched: number;
+	totalBaselineTokens: number;
+	totalOtelTokens: number;
+	deltaTokens: number;
+	sessions: CopilotCliOtelComparisonSession[];
 }
 
 class CopilotTokenTracker implements vscode.Disposable {
@@ -8343,6 +8367,72 @@ ${this.getLoadingHtmlScript()}
   }
 
   /**
+   * Compare "normal" (ratio-based estimate, or 0 for DB-only chat sessions) token
+   * counts against exact counts from the Copilot CLI OpenTelemetry file export, for
+   * every Copilot CLI session where OTel data is available. Powers the diagnostics
+   * "OTel Delta" tab, which shows how much more accurate/complete the OTel export
+   * makes token tracking versus the estimate-only path.
+   */
+  private async computeCopilotCliOtelComparison(sessionFiles: string[]): Promise<CopilotCliOtelComparison> {
+    const status = await getCopilotCliOtelStatus();
+    const candidates = sessionFiles
+      .map(file => ({ file, sessionId: extractCopilotCliSessionId(file) }))
+      .filter((c): c is { file: string; sessionId: string } => !!c.sessionId);
+
+    const sessions: CopilotCliOtelComparisonSession[] = [];
+    let totalBaselineTokens = 0;
+    let totalOtelTokens = 0;
+
+    for (const { file, sessionId } of candidates) {
+      const otel = await getCopilotCliOtelUsage(file);
+      if (!otel) { continue; }
+
+      // DB-only chat sessions (session-store.db#uuid) have no token data of their own
+      // and previously always reported 0 — that IS the "normal way" baseline for them.
+      let baselineTokens = 0;
+      if (file.endsWith('.jsonl')) {
+        try {
+          const content = await fs.promises.readFile(file, 'utf8');
+          baselineTokens = this.estimateTokensFromJsonlSession(content).actualTokens;
+        } catch { /* unreadable session file — treat baseline as 0 */ }
+      }
+
+      totalBaselineTokens += baselineTokens;
+      totalOtelTokens += otel.actualTokens;
+      sessions.push({
+        file, sessionId, baselineTokens,
+        otelTokens: otel.actualTokens,
+        delta: otel.actualTokens - baselineTokens,
+        models: Object.keys(otel.modelUsage),
+      });
+    }
+
+    sessions.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    return {
+      otelDirExists: status.dirExists,
+      otelFileCount: status.fileCount,
+      otelSessionsIndexed: status.sessionsIndexed,
+      sessionsChecked: candidates.length,
+      sessionsMatched: sessions.length,
+      totalBaselineTokens,
+      totalOtelTokens,
+      deltaTokens: totalOtelTokens - totalBaselineTokens,
+      sessions: sessions.slice(0, 100),
+    };
+  }
+
+  /** Computes the Copilot CLI OTel comparison, swallowing errors — this is an optional diagnostics enrichment. */
+  private async tryComputeCopilotCliOtelComparison(sessionFiles: string[]): Promise<CopilotCliOtelComparison | null> {
+    try {
+      return await this.computeCopilotCliOtelComparison(sessionFiles);
+    } catch (error) {
+      this.warn(`Failed to compute Copilot CLI OTel comparison: ${error}`);
+      return null;
+    }
+  }
+
+  /**
    * Load all diagnostic data in the background and update the webview progressively.
    */
   private async loadDiagnosticDataInBackground(
@@ -8382,6 +8472,7 @@ ${this.getLoadingHtmlScript()}
       );
 
       const githubAuthStatus = this.getGitHubAuthStatus();
+      const otelComparison = await this.tryComputeCopilotCliOtelComparison(sessionFiles);
 
       if (!this.isPanelOpen(panel)) {
         this.log("Diagnostic panel closed during data load, aborting update");
@@ -8401,6 +8492,7 @@ ${this.getLoadingHtmlScript()}
         githubAuth: githubAuthStatus,
         toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
         toolFamilies: getToolFamilies(),
+        otelComparison,
       });
 
       this.log("✅ Diagnostic data loaded and sent to webview");

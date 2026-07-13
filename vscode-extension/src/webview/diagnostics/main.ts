@@ -113,6 +113,27 @@ type QuotaEntitlements = {
   completions?: number;
 };
 
+type CopilotCliOtelComparisonSession = {
+  file: string;
+  sessionId: string;
+  baselineTokens: number;
+  otelTokens: number;
+  delta: number;
+  models: string[];
+};
+
+type CopilotCliOtelComparison = {
+  otelDirExists: boolean;
+  otelFileCount: number;
+  otelSessionsIndexed: number;
+  sessionsChecked: number;
+  sessionsMatched: number;
+  totalBaselineTokens: number;
+  totalOtelTokens: number;
+  deltaTokens: number;
+  sessions: CopilotCliOtelComparisonSession[];
+};
+
 type DiagnosticsData = {
   report: string;
   sessionFiles: { file: string; size: number; modified: string }[];
@@ -128,6 +149,7 @@ type DiagnosticsData = {
   quotaEntitlements?: QuotaEntitlements;
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
   toolFamilies?: ToolFamilyConfig[];
+  otelComparison?: CopilotCliOtelComparison | null;
 };
 
 type ToolFamilyConfig = {
@@ -1669,34 +1691,50 @@ function handleCandidatePathsSection(message: DiagMessage): void {
   }
 }
 
+/** Replaces a tab's content element with freshly rendered HTML, preserving its active state. */
+function replaceTabContent(tabId: string, newContent: string, onReplaced?: () => void): void {
+  const tabContent = document.getElementById(`tab-${tabId}`);
+  if (!tabContent) { return; }
+  const wasActive = tabContent.classList.contains("active");
+  const temp = document.createElement('div');
+  temp.innerHTML = newContent;
+  const newTab = temp.firstElementChild as HTMLElement | null;
+  if (!newTab) { return; }
+  if (wasActive) { newTab.classList.add("active"); }
+  tabContent.replaceWith(newTab);
+  onReplaced?.();
+}
+
+function handleGithubAuthSection(message: DiagMessage): void {
+  if (message.githubAuth === undefined) { return; }
+  const githubTabContent = document.getElementById("tab-github");
+  if (githubTabContent) {
+    githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
+    setupGitHubAuthHandlers();
+  }
+}
+
+function handleToolAnalysisSection(message: DiagMessage): void {
+  if (message.toolFamilies) { storedToolFamilies = message.toolFamilies as ToolFamilyConfig[]; }
+  if (message.toolCallStats === undefined) { return; }
+  const newContent = renderToolAnalysisTab(message.toolCallStats as DiagnosticsData['toolCallStats'], storedToolFamilies);
+  replaceTabContent("tool-analysis", newContent, setupToolAnalysisSortHandlers);
+}
+
+function handleOtelComparisonSection(message: DiagMessage): void {
+  if (message.otelComparison === undefined) { return; }
+  const newContent = renderOtelDeltaTab(message.otelComparison as DiagnosticsData['otelComparison']);
+  replaceTabContent("otel-delta", newContent);
+}
+
 function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleDiagnosticReport(message);
   handleBackendStorageSection(message);
   handleSessionFoldersSection(message);
   handleCandidatePathsSection(message);
-  if (message.githubAuth !== undefined) {
-    const githubTabContent = document.getElementById("tab-github");
-    if (githubTabContent) {
-      githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
-      setupGitHubAuthHandlers();
-    }
-  }
-  if (message.toolFamilies) { storedToolFamilies = message.toolFamilies as ToolFamilyConfig[]; }
-  if (message.toolCallStats !== undefined) {
-    const toolAnalysisTab = document.getElementById("tab-tool-analysis");
-    if (toolAnalysisTab) {
-      const wasActive = toolAnalysisTab.classList.contains("active");
-      const newContent = renderToolAnalysisTab(message.toolCallStats as DiagnosticsData['toolCallStats'], storedToolFamilies);
-      const temp = document.createElement('div');
-      temp.innerHTML = newContent;
-      const newTab = temp.firstElementChild as HTMLElement | null;
-      if (newTab) {
-        if (wasActive) { newTab.classList.add("active"); }
-        toolAnalysisTab.replaceWith(newTab);
-        setupToolAnalysisSortHandlers();
-      }
-    }
-  }
+  handleGithubAuthSection(message);
+  handleToolAnalysisSection(message);
+  handleOtelComparisonSection(message);
 }
 
 function handleGithubAuthUpdated(message: DiagMessage): void {
@@ -2236,6 +2274,97 @@ ${sectionsHtml}
 </div>`;
 }
 
+function renderOtelDeltaSetupNotice(comparison: CopilotCliOtelComparison | null | undefined): string {
+  if (comparison && comparison.otelSessionsIndexed > 0) { return ''; }
+  const dirStatus = comparison?.otelDirExists
+    ? `The export directory exists but no session data has been indexed from it yet (${comparison.otelFileCount} file(s) found).`
+    : `No <code>~/.copilot/otel</code> directory was found — the export isn't enabled yet.`;
+  return `<div class="info-box">
+<div class="info-box-title">📡 Copilot CLI OpenTelemetry Export Not Detected</div>
+<div>
+${dirStatus} Enabling it lets this extension read <strong>exact</strong> token counts (input, output, cache) straight from Copilot CLI instead of estimating them from ratios.<br/><br/>
+Set these three environment variables before starting a Copilot CLI session, then run a session and reopen this tab:
+<pre style="margin-top:8px;">COPILOT_OTEL_ENABLED=true
+COPILOT_OTEL_EXPORTER_TYPE=file
+COPILOT_OTEL_FILE_EXPORTER_PATH=~/.copilot/otel/copilot-otel.jsonl</pre>
+See <code>docs/COPILOT-CLI-OTEL-EXPORT.md</code> in the repo for full setup steps (Windows/PowerShell and Unix shells) and how to verify it's working.
+</div>
+</div>`;
+}
+
+/** Formats a signed token delta as e.g. "+12.3K" / "-4.0K" / "0", with a class for coloring. */
+function formatTokenDelta(delta: number): { text: string; cssClass: string } {
+  if (delta === 0) { return { text: '0', cssClass: '' }; }
+  const sign = delta > 0 ? '+' : '-';
+  const cssClass = delta > 0 ? 'otel-delta-positive' : 'otel-delta-negative';
+  return { text: `${sign}${formatTokenCount(Math.abs(delta))}`, cssClass };
+}
+
+function renderOtelDeltaSummaryCards(comparison: CopilotCliOtelComparison): string {
+  const delta = formatTokenDelta(comparison.deltaTokens);
+  return `<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">📡 Sessions With OTel Data</div>
+<div class="summary-value">${comparison.sessionsMatched.toLocaleString()}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">📊 Previous Estimate (Total)</div>
+<div class="summary-value" title="${comparison.totalBaselineTokens.toLocaleString()} tokens">${formatTokenCount(comparison.totalBaselineTokens)}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">🎯 OTel Exact (Total)</div>
+<div class="summary-value" title="${comparison.totalOtelTokens.toLocaleString()} tokens">${formatTokenCount(comparison.totalOtelTokens)}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">Δ Delta</div>
+<div class="summary-value ${delta.cssClass}" title="${comparison.deltaTokens.toLocaleString()} tokens">${delta.text}</div>
+</div>
+</div>`;
+}
+
+function renderOtelDeltaSessionRows(sessions: CopilotCliOtelComparisonSession[]): string {
+  return sessions.map(s => {
+    const delta = formatTokenDelta(s.delta);
+    const shortId = escapeHtml(s.sessionId.slice(0, 8));
+    const models = escapeHtml(s.models.join(', ') || '—');
+    return `<tr>
+<td title="${escapeHtml(s.sessionId)}"><code>${shortId}</code></td>
+<td>${models}</td>
+<td title="${s.baselineTokens.toLocaleString()} tokens">${formatTokenCount(s.baselineTokens)}</td>
+<td title="${s.otelTokens.toLocaleString()} tokens">${formatTokenCount(s.otelTokens)}</td>
+<td class="${delta.cssClass}" title="${s.delta.toLocaleString()} tokens">${delta.text}</td>
+</tr>`;
+  }).join('');
+}
+
+function renderOtelDeltaTab(comparison: CopilotCliOtelComparison | null | undefined): string {
+  const setupNotice = renderOtelDeltaSetupNotice(comparison);
+  if (!comparison || comparison.sessionsMatched === 0) {
+    return `<div id="tab-otel-delta" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">📡 OTel vs. Estimated Token Counts</div>
+<div>Compares the token counts this extension estimates for Copilot CLI sessions against exact counts read from Copilot CLI's OpenTelemetry export, when available.</div>
+</div>
+${setupNotice}
+</div>`;
+  }
+  return `<div id="tab-otel-delta" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">📡 OTel vs. Estimated Token Counts</div>
+<div>
+Compares the token counts this extension would normally estimate for each Copilot CLI session against the exact counts read from Copilot CLI's OpenTelemetry file export. A positive delta means OTel revealed usage the estimate missed entirely (e.g. chat-only sessions, which previously reported 0 tokens); near-zero deltas mean the estimate already had exact numbers from a session.shutdown event.<br/>
+Checked ${comparison.sessionsChecked.toLocaleString()} Copilot CLI session(s) found locally; ${comparison.otelSessionsIndexed.toLocaleString()} session(s) are present in the OTel export.
+</div>
+</div>
+${setupNotice}
+${renderOtelDeltaSummaryCards(comparison)}
+<table class="session-table">
+<thead><tr><th>Session</th><th>Model(s)</th><th>Previous Estimate</th><th>OTel Exact</th><th>Delta</th></tr></thead>
+<tbody>${renderOtelDeltaSessionRows(comparison.sessions)}</tbody>
+</table>
+</div>`;
+}
+
 function buildDiagReportTabHtml(escapedReport: string): string {
   return `<div id="tab-report" class="tab-content active">
 <div class="info-box">
@@ -2284,6 +2413,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <button class="tab" data-tab="display">⚙️ Settings</button>
 <button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
+<button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
 ${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
 </div>
 
@@ -2314,6 +2444,7 @@ ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 ${renderFolderAnalyzerTab()}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+${renderOtelDeltaTab(data.otelComparison)}
 </div>
 `;
 }

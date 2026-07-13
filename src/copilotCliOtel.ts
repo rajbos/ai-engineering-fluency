@@ -177,3 +177,25 @@ export async function getCopilotCliOtelUsage(sessionFile: string): Promise<Copil
 	const index = await loadCopilotCliOtelIndex();
 	return index.get(sessionId) ?? null;
 }
+
+/** Whether the OTel export directory exists, how many export files it holds, and how many distinct sessions they cover. */
+export interface CopilotCliOtelStatus {
+	dirExists: boolean;
+	fileCount: number;
+	sessionsIndexed: number;
+}
+
+/** Reports whether the OTel export is set up on this machine, for diagnostics display. */
+export async function getCopilotCliOtelStatus(): Promise<CopilotCliOtelStatus> {
+	const dir = getCopilotCliOtelDir();
+	let dirExists = false;
+	let fileCount = 0;
+	try {
+		const entries = await fs.promises.readdir(dir);
+		dirExists = true;
+		fileCount = entries.filter(name => name.endsWith('.jsonl')).length;
+	} catch { /* ~/.copilot/otel doesn't exist — OTel export not enabled */ }
+
+	const index = await loadCopilotCliOtelIndex();
+	return { dirExists, fileCount, sessionsIndexed: index.size };
+}
