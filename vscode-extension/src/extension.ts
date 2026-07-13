@@ -395,6 +395,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private readonly extensionUri: vscode.Uri;
 	private readonly context: vscode.ExtensionContext;
 	private _devBranch: string | undefined;
+	/** Dev-mode-only path for debugCrashLog(); undefined disables it entirely (never set outside Development mode). */
+	private _crashDebugLogPath: string | undefined;
 	private localRegressionSampleDataDir?: string;
 	private pendingLocalViewRegressionProbe?: ViewRegressionProbeConfig;
 	private readonly localViewRegressionResolvers = new Map<string, (result: LocalViewRegressionProbeResult) => void>();
@@ -1216,6 +1218,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					cwd: context.extensionUri.fsPath, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
 				}).trim();
 			} catch { /* Ignore git errors in dev mode */ }
+			this.initializeCrashDebugLog(context);
 		}
 		this.outputChannel = vscode.window.createOutputChannel('AI Engineering Fluency');
 		context.subscriptions.push(this.outputChannel);
@@ -1233,6 +1236,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 			} catch { /* git unavailable */ }
 		}
 		this.log(startupInfo);
+	}
+
+	/**
+	 * Sets up debugCrashLog()'s target file and truncates it for this session. Dev
+	 * mode only, called once from initializeOutputChannel(). Left unset (debugCrashLog
+	 * becomes a no-op) if this fails, e.g. globalStorage isn't writable yet.
+	 */
+	private initializeCrashDebugLog(context: vscode.ExtensionContext): void {
+		const logPath = path.join(context.globalStorageUri.fsPath, 'crash-debug.log');
+		try {
+			fs.mkdirSync(path.dirname(logPath), { recursive: true });
+			fs.writeFileSync(logPath, `=== session ${vscode.env.sessionId} started ${new Date().toISOString()} ===\n`);
+			this._crashDebugLogPath = logPath;
+		} catch { /* best-effort — debugCrashLog stays a no-op */ }
+	}
+
+	/**
+	 * Synchronous, crash-safe logging for the session-file scan loop. Unlike this.log()
+	 * (the OutputChannel, which buffers in the renderer and can be lost entirely if the
+	 * extension host process dies before it flushes), this hits disk immediately via a
+	 * blocking write — so the last few lines survive even a hard native crash. Dev mode
+	 * only (debugCrashLogPath is never set otherwise): the synchronous I/O cost per call
+	 * is not acceptable for real users, only for diagnosing a crash during development.
+	 */
+	private debugCrashLog(msg: string): void {
+		if (!this._crashDebugLogPath) { return; }
+		try { fs.appendFileSync(this._crashDebugLogPath, `${new Date().toISOString()} ${msg}\n`); } catch { /* best-effort */ }
 	}
 
 	private setupGitHubAuthListener(context: vscode.ExtensionContext): void {
@@ -2831,15 +2861,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (sessionFiles.length === 0) { this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?'); }
 		return this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
 			if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
+			this.debugCrashLog(`start [${i + 1}/${sessionFiles.length}] ${sessionFile}`);
 			const fileStats = await this.statSessionFile(sessionFile);
 			const mtime = fileStats.mtime.getTime();
 			const fileSize = fileStats.size;
-			if (mtime < fileLoadCutoffMs) { return null; }
+			if (mtime < fileLoadCutoffMs) { this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile} (too old, skipped)`); return null; }
 			const cachedData = this.getCachedSessionData(sessionFile);
 			const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
 			const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-			if (sessionData.interactions === 0) { return null; }
+			if (sessionData.interactions === 0) { this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile} (0 interactions, skipped)`); return null; }
 			const details = await this.getSessionFileDetails(sessionFile);
+			this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile}`);
 			return { sessionFile, sessionData, details, mtime, wasCached };
 		});
 	}
