@@ -1160,6 +1160,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._cacheLoadPromise = this.cacheManager.loadCacheFromStorage().finally(() => {
 			this._cacheLoadPromise = undefined;
 		});
+		// Best-effort housekeeping: reclaim cache/lock files orphaned by previous
+		// Extension Development Host sessions. Never blocks activation.
+		void this.cacheManager.cleanupStaleDevCacheFiles().catch((e) => this.warn(`Stale dev cache cleanup failed: ${e}`));
 		this._sessionRestorePromise = this.restoreGitHubSession();
 		this.setupGitHubAuthListener(context);
 		this.sessionDiscovery.checkCopilotExtension();
