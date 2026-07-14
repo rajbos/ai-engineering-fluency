@@ -4957,21 +4957,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * @param tokenResult - Fresh token data from eco.getTokens(); when provided, takes
 	 *   precedence over any cached token values so eco-session diagnostics always show
 	 *   the correct (actual-API) count rather than a stale or zero value.
+	 * @param modelUsage - Fresh per-model usage data (from eco.getModelUsage() or the
+	 *   shared getModelUsageFromSession()); when provided, takes precedence over any
+	 *   cached value. Without this, per-model attribution silently stayed empty forever
+	 *   for any session never separately touched by the Usage/Charts analysis pipeline
+	 *   (the only other code path that computes it) — this is what caused the Model
+	 *   Usage diagnostics tab to show data for only a handful of editors.
 	 */
 	private async updateCacheWithSessionDetails(
 		sessionFile: string,
 		stat: fs.Stats,
 		details: SessionFileDetails,
-		tokenResult?: { tokens: number; thinkingTokens: number; actualTokens: number }
+		tokenResult?: { tokens: number; thinkingTokens: number; actualTokens: number },
+		modelUsage?: ModelUsage
 	): Promise<void> {
 		const existingCache = this.getCachedSessionData(sessionFile);
 		const resolved = this.resolveTokensForCacheUpdate(tokenResult, existingCache);
 		details.tokens = resolved.actualTokens || resolved.tokens || 0;
+		const resolvedModelUsage = modelUsage && Object.keys(modelUsage).length > 0 ? modelUsage : (existingCache?.modelUsage || {});
+		if (Object.keys(resolvedModelUsage).length > 0) { details.modelUsage = resolvedModelUsage; }
 
 		const cacheEntry: SessionFileCache = {
 			tokens: resolved.tokens,
 			interactions: details.interactions,
-			modelUsage: existingCache?.modelUsage || {},
+			modelUsage: resolvedModelUsage,
 			mtime: stat.mtime.getTime(),
 			size: stat.size,
 			actualTokens: resolved.actualTokens,
@@ -5082,7 +5091,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (Array.isArray(sessionContent.requests)) {
 				await this.processJsonRequestsDetails(sessionContent.requests, sessionFile, stat, details);
 			}
-			await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+			const modelUsage = await _getModelUsageFromSession(this.usageAnalysisDeps, sessionFile, fileContent, sessionContent);
+			await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
 		} catch (error) {
 			this.warn(`Error analyzing session file details for ${sessionFile}: ${error}`);
 		}
@@ -5107,8 +5117,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async processEcosystemSessionDetails(eco: IEcosystemAdapter, sessionFile: string, stat: fs.Stats, details: SessionFileDetails): Promise<SessionFileDetails> {
-		const [meta, tokenResult, interactionCount] = await Promise.all([
-			eco.getMeta(sessionFile), eco.getTokens(sessionFile), eco.countInteractions(sessionFile)
+		const [meta, tokenResult, interactionCount, modelUsage] = await Promise.all([
+			eco.getMeta(sessionFile), eco.getTokens(sessionFile), eco.countInteractions(sessionFile), eco.getModelUsage(sessionFile)
 		]);
 		details.title = meta.title;
 		details.firstInteraction = meta.firstInteraction;
@@ -5117,7 +5127,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.editorRoot = eco.getEditorRoot(sessionFile);
 		details.editorName = getEcosystemDisplayName(eco, sessionFile);
 		if (meta.workspacePath) { details.repository = path.basename(meta.workspacePath); }
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult);
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult, modelUsage);
 		return details;
 	}
 
@@ -5131,13 +5141,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 			try { const firstLine = JSON.parse(lines[0]); if (firstLine && typeof firstLine.kind === 'number') { isDeltaBased = true; } } catch { /* not delta */ }
 		}
 
+		// Compute model usage via the shared function (reusing already-read fileContent to
+		// avoid a second file read) so the Diagnostics detail cache gets real per-model
+		// attribution instead of only ever carrying over whatever a separate, unrelated
+		// Usage/Charts analysis pass happened to have cached already.
+		const modelUsage = await _getModelUsageFromSession(this.usageAnalysisDeps, sessionFile, fileContent);
+
 		if (isDeltaBased) {
-			return this.processDeltaJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences);
+			return this.processDeltaJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences, modelUsage);
 		}
-		return this.processCliJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences);
+		return this.processCliJsonlDetails(lines, sessionFile, stat, details, timestamps, allContentReferences, modelUsage);
 	}
 
-	private async processDeltaJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): Promise<SessionFileDetails> {
+	private async processDeltaJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[], modelUsage: ModelUsage): Promise<SessionFileDetails> {
 		const { sessionState } = await _reconstructJsonlStateAsync(lines);
 		if (sessionState.creationDate) { timestamps.push(sessionState.creationDate); }
 		if (sessionState.customTitle) { details.title = sessionState.customTitle; }
@@ -5158,11 +5174,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.repository = allContentReferences.length > 0
 			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
 			: '';
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
 		return details;
 	}
 
-	private async processCliJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[]): Promise<SessionFileDetails> {
+	private async processCliJsonlDetails(lines: string[], sessionFile: string, stat: fs.Stats, details: SessionFileDetails, timestamps: number[], allContentReferences: any[], modelUsage: ModelUsage): Promise<SessionFileDetails> {
 		let firstUserMessage: string | undefined;
 		for (const line of lines) {
 			if (!line.trim()) { continue; }
@@ -5181,7 +5197,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.repository = allContentReferences.length > 0
 			? (await this.extractRepositoryFromContentReferences(allContentReferences) ?? '')
 			: '';
-		await this.updateCacheWithSessionDetails(sessionFile, stat, details);
+		await this.updateCacheWithSessionDetails(sessionFile, stat, details, undefined, modelUsage);
 		return details;
 	}
 
@@ -8218,6 +8234,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       signOutGitHub: () => this.dispatch('signOutGitHub:diagnostics', () => this.diagHandleGitHubAuth(false)),
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
+      analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
       pickWorktreeRoot: () => this.dispatch('pickWorktreeRoot:diagnostics', () => this.diagHandlePickWorktreeRoot()),
       scanWorktrees: () => this.dispatch('scanWorktrees:diagnostics', () => this.diagHandleScanWorktrees(message)),
       cancelWorktreeScan: () => this.dispatch('cancelWorktreeScan:diagnostics', () => this.diagHandleCancelWorktreeScan()),
@@ -8409,6 +8426,141 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       return;
     }
     if (this.diagnosticsPanel) { await this.analyzeFolderPath(this.diagnosticsPanel, folderPath, effectiveToolType); }
+  }
+
+  /** Merge one file's per-model usage entries into the running aggregate. */
+  private static mergeModelUsageEntry(aggregated: ModelUsage, model: string, usage: ModelUsage[string]): void {
+    if (!aggregated[model]) { aggregated[model] = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 }; }
+    const agg = aggregated[model];
+    agg.inputTokens += usage.inputTokens || 0;
+    agg.outputTokens += usage.outputTokens || 0;
+    agg.cachedReadTokens = (agg.cachedReadTokens || 0) + (usage.cachedReadTokens || 0);
+    agg.cacheCreationTokens = (agg.cacheCreationTokens || 0) + (usage.cacheCreationTokens || 0);
+    agg.cacheCreation1hTokens = (agg.cacheCreation1hTokens || 0) + (usage.cacheCreation1hTokens || 0);
+  }
+
+  /** Aggregate per-model usage (and per-model session counts) across a set of session files with modelUsage data. */
+  private aggregateModelUsage(matching: SessionFileDetails[]): { aggregated: ModelUsage; filesWithUsage: number; sessionCounts: Record<string, number> } {
+    const aggregated: ModelUsage = {};
+    const sessionCounts: Record<string, number> = {};
+    let filesWithUsage = 0;
+    for (const f of matching) {
+      if (!f.modelUsage) { continue; }
+      filesWithUsage++;
+      for (const [model, usage] of Object.entries(f.modelUsage)) {
+        CopilotTokenTracker.mergeModelUsageEntry(aggregated, model, usage);
+        sessionCounts[model] = (sessionCounts[model] || 0) + 1;
+      }
+    }
+    return { aggregated, filesWithUsage, sessionCounts };
+  }
+
+  /**
+   * Computes [startMs, endMs) bounds for a Model Usage time-range filter, using the
+   * user's local calendar (not UTC) so "today"/"this week"/etc. match their wall clock.
+   * Returns null for 'all' (no filtering). Weeks start on Monday (ISO-8601 convention).
+   */
+  private getModelUsageTimeRangeBounds(range: string, now: Date = new Date()): { startMs: number; endMs: number } | null {
+    const startOfDay = (d: Date) => new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime();
+    const todayStart = startOfDay(now);
+    switch (range) {
+      case 'today':
+        return { startMs: todayStart, endMs: now.getTime() };
+      case 'yesterday': {
+        const yesterdayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 1).getTime();
+        return { startMs: yesterdayStart, endMs: todayStart };
+      }
+      case 'week': {
+        // ISO week: Monday = start. getDay() is 0=Sun..6=Sat; convert to days-since-Monday.
+        const dayOfWeek = (now.getDay() + 6) % 7;
+        const weekStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - dayOfWeek).getTime();
+        return { startMs: weekStart, endMs: now.getTime() };
+      }
+      case 'month':
+        return { startMs: new Date(now.getFullYear(), now.getMonth(), 1).getTime(), endMs: now.getTime() };
+      case 'lastMonth':
+        return {
+          startMs: new Date(now.getFullYear(), now.getMonth() - 1, 1).getTime(),
+          endMs: new Date(now.getFullYear(), now.getMonth(), 1).getTime(),
+        };
+      default:
+        return null;
+    }
+  }
+
+  /** Resolves the best available timestamp (ms) for a session file, for time-range filtering. */
+  private getSessionFileTimestampMs(f: SessionFileDetails): number | null {
+    const raw = f.lastInteraction || f.firstInteraction || f.modified;
+    if (!raw) { return null; }
+    const parsed = Date.parse(raw);
+    return Number.isNaN(parsed) ? null : parsed;
+  }
+
+  /**
+   * Aggregates per-model token usage (and estimated cost) across the already-loaded
+   * diagnostics session files, optionally filtered to a single editor. Reuses the same
+   * modelUsage data + calculateEstimatedCost() the dashboard uses, so the breakdown a
+   * user sees here matches what drove their cost figures — useful for self-diagnosing
+   * "why does my cost look wrong" reports without a separate script.
+   *
+   * Note on Copilot CLI: "0 files with model attribution" for this editor is often
+   * expected, not a bug. Copilot CLI has two storage backends — events.jsonl (project/
+   * worktree sessions, rich per-model data) and session-store.db (chat-only sessions
+   * with no workspace). The DB schema has no model/token columns at all, so
+   * CopilotCliAdapter.getModelUsage() legitimately returns {} for those files — see the
+   * comment there for the verified schema. A mixed editor total can therefore show many
+   * "matched, 0 attributed" files simply because a large fraction are DB-only sessions.
+   */
+  private async diagHandleAnalyzeModelUsage(message: any): Promise<void> {
+    const editor = typeof message?.editor === 'string' && message.editor ? message.editor : 'all';
+    const timeRange = typeof message?.timeRange === 'string' && message.timeRange ? message.timeRange : 'all';
+    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
+
+    if (!this.diagnosticsHasLoadedFiles) {
+      this.diagnosticsPanel.webview.postMessage({
+        command: 'modelUsageResult', editor, timeRange, fileCount: 0, filesWithUsage: 0, rows: [], totalCost: 0, stillLoading: true,
+      });
+      return;
+    }
+
+    const files = this.diagnosticsCachedFiles;
+    const editorMatching = editor === 'all' ? files : files.filter(f => (f.editorSource || 'Unknown') === editor);
+    const bounds = this.getModelUsageTimeRangeBounds(timeRange);
+    const matching = bounds
+      ? editorMatching.filter(f => {
+        const ts = this.getSessionFileTimestampMs(f);
+        return ts !== null && ts >= bounds.startMs && ts < bounds.endMs;
+      })
+      : editorMatching;
+    const { aggregated, filesWithUsage, sessionCounts } = this.aggregateModelUsage(matching);
+
+    const rows = Object.entries(aggregated).map(([model, usage]) => ({
+      model,
+      sessionCount: sessionCounts[model] || 0,
+      inputTokens: usage.inputTokens,
+      outputTokens: usage.outputTokens,
+      cachedReadTokens: usage.cachedReadTokens || 0,
+      cacheCreationTokens: usage.cacheCreationTokens || 0,
+      cacheCreation1hTokens: usage.cacheCreation1hTokens || 0,
+      estimatedCost: this.calculateEstimatedCost({ [model]: usage }),
+    })).sort((a, b) => b.estimatedCost - a.estimatedCost);
+
+    const totalCost = this.calculateEstimatedCost(aggregated);
+    // Only Anthropic/Claude models expose a 1-hour cache-TTL pricing tier. If none of the
+    // models in this result set have that pricing field, the column would always be a
+    // wall of zeros for this provider — hide it instead of showing dead data.
+    const supportsCache1h = Object.keys(aggregated).some(model => this.modelPricing[model]?.cacheCreation1hCostPerMillion !== undefined);
+
+    this.diagnosticsPanel.webview.postMessage({
+      command: 'modelUsageResult',
+      editor,
+      timeRange,
+      fileCount: matching.length,
+      filesWithUsage,
+      rows,
+      totalCost,
+      supportsCache1h,
+    });
   }
 
   private async diagHandlePickWorktreeRoot(): Promise<void> {
@@ -8809,14 +8961,24 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     const detailedSessionFiles: SessionFileDetails[] = [];
     const initialCacheHits = this._cacheHits;
     const initialCacheMisses = this._cacheMisses;
-    const sortedFiles = await this.sortSessionFilesByMtime(sessionFiles);
-    for (const file of sortedFiles.slice(0, 500)) {
+    const filesToProcess = await this.selectSessionFilesRoundRobin(sessionFiles, fourteenDaysAgo.getTime());
+    const total = filesToProcess.length;
+    let processed = 0;
+    let lastProgressPost = Date.now();
+    for (const file of filesToProcess) {
       if (!this.isPanelOpen(panel)) { this.log("Diagnostic panel closed, stopping background load"); return; }
       try {
         const details = await this.getSessionFileDetails(file);
         const lastActivity = details.lastInteraction ? new Date(details.lastInteraction) : new Date(details.modified);
         if (lastActivity >= fourteenDaysAgo) { detailedSessionFiles.push(details); }
       } catch { /* Skip inaccessible files */ }
+      processed++;
+      // Throttle progress updates to ~5/sec so large scans don't flood the webview with messages.
+      const now = Date.now();
+      if (now - lastProgressPost >= 200 || processed === total) {
+        lastProgressPost = now;
+        panel.webview.postMessage({ command: "sessionFilesLoadProgress", processed, total });
+      }
     }
     await this.enrichSessionHierarchy(detailedSessionFiles);
     await this.enrichPiSessionHierarchy(detailedSessionFiles);
@@ -8951,14 +9113,70 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     }
   }
 
-  private async sortSessionFilesByMtime(sessionFiles: string[]): Promise<string[]> {
-    const fileStats = await Promise.all(
+  /**
+   * Groups stat'd session files by editor, sorted most-recent-first within each
+   * group, filtered to those newer than `cutoffMs`. Helper for
+   * selectSessionFilesRoundRobin() below.
+   */
+  private groupSessionFilesByEditor(
+    withStats: ({ file: string; mtime: number } | null)[],
+    cutoffMs: number
+  ): Map<string, { file: string; mtime: number }[]> {
+    const byEditor = new Map<string, { file: string; mtime: number }[]>();
+    for (const entry of withStats) {
+      if (!entry || entry.mtime < cutoffMs) { continue; }
+      const editor = this.detectEditorSource(entry.file) || 'Unknown';
+      if (!byEditor.has(editor)) { byEditor.set(editor, []); }
+      byEditor.get(editor)!.push(entry);
+    }
+    for (const list of byEditor.values()) { list.sort((a, b) => b.mtime - a.mtime); }
+    return byEditor;
+  }
+
+  /** Round-robins through each editor's (already sorted, most-recent-first) file list, up to `maxFiles` total. */
+  private roundRobinSelect(byEditor: Map<string, { file: string; mtime: number }[]>, maxFiles: number): string[] {
+    const editors = [...byEditor.keys()];
+    const cursors = new Map<string, number>(editors.map((e) => [e, 0]));
+    const selected: string[] = [];
+    let anyLeft = true;
+    while (selected.length < maxFiles && anyLeft) {
+      anyLeft = false;
+      for (const editor of editors) {
+        if (selected.length >= maxFiles) { break; }
+        const idx = cursors.get(editor)!;
+        const list = byEditor.get(editor)!;
+        if (idx < list.length) {
+          selected.push(list[idx].file);
+          cursors.set(editor, idx + 1);
+          anyLeft = true;
+        }
+      }
+    }
+    return selected;
+  }
+
+  /**
+   * Selects up to 500 session files, within the last 14 days, round-robin across
+   * editors (most-recent-first within each editor) instead of a flat global
+   * mtime sort.
+   *
+   * Why: a flat "top 500 by mtime across all editors" sort lets a single
+   * high-volume editor crowd out every other editor entirely once its file
+   * count exceeds 500 — this starved the Diagnostics screen's session cache
+   * (Session Files list + Model Usage dropdown) of any files from lower-volume
+   * editors (e.g. Claude Code) whenever a heavier editor (e.g. Copilot CLI, with
+   * thousands of sessions) dominated the global sort. Round-robining by editor
+   * guarantees every discovered editor gets fair representation up to the cap.
+   */
+  private async selectSessionFilesRoundRobin(sessionFiles: string[], cutoffMs: number): Promise<string[]> {
+    const withStats = await Promise.all(
       sessionFiles.map(async (file) => {
         try { const stat = await this.statSessionFile(file); return { file, mtime: stat.mtime.getTime() }; }
-        catch { return { file, mtime: 0 }; }
+        catch { return null; }
       })
     );
-    return fileStats.sort((a, b) => b.mtime - a.mtime).map((item) => item.file);
+    const byEditor = this.groupSessionFilesByEditor(withStats, cutoffMs);
+    return this.roundRobinSelect(byEditor, 500);
   }
 
   private async sendBgLoadResults(panel: vscode.WebviewPanel, detailedSessionFiles: SessionFileDetails[], initialCacheHits: number, initialCacheMisses: number): Promise<void> {

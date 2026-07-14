@@ -44,6 +44,17 @@ type SessionFileDetails = {
   modelUsage?: { [model: string]: { inputTokens: number; outputTokens: number } };
 };
 
+type ModelUsageRow = {
+  model: string;
+  sessionCount: number;
+  inputTokens: number;
+  outputTokens: number;
+  cachedReadTokens: number;
+  cacheCreationTokens: number;
+  cacheCreation1hTokens: number;
+  estimatedCost: number;
+};
+
 type CacheInfo = {
   size: number;
   sizeInMB: number;
@@ -638,7 +649,7 @@ function renderSessionTable(
   detailedFiles: SessionFileDetails[],
   isLoading: boolean = false,
 ): string {
-  if (isLoading) { return `<div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`; }
+  if (isLoading) { return `<div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="session-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`; }
   if (detailedFiles.length === 0) { return '<p style="color: #999;">No session files with activity in the last 14 days.</p>'; }
   const editorStats = getEditorStats(detailedFiles);
   const editors = Object.keys(editorStats).sort();
@@ -1007,6 +1018,149 @@ function renderFolderAnalysisResults(
             <tbody>${tableRows}</tbody>
           </table>
         </div>`}
+    </div>`;
+}
+
+function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessions: boolean = false): string {
+  const editorStats = getEditorStats(detailedFiles);
+  const editorOptions = Object.keys(editorStats).sort()
+    .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
+    .join("");
+  const statusText = isLoadingSessions ? "⏳ Loading sessions…" : "";
+  const timeRangeOptions = [
+    { value: "all", label: "🕐 All Time" },
+    { value: "lastMonth", label: "📅 Last Month" },
+    { value: "month", label: "📆 Current Month" },
+    { value: "week", label: "🗓️ This Week" },
+    { value: "today", label: "☀️ Today" },
+    { value: "yesterday", label: "🌙 Yesterday" },
+  ].map((o) => `<option value="${o.value}">${o.label}</option>`).join("");
+  return `
+    <div class="info-box">
+      <div class="info-box-title">🧮 Model Usage Breakdown</div>
+      <div>
+        Aggregates the exact per-model token usage and estimated cost the dashboard uses,
+        for a single editor or across all of them. Handy for spotting model/pricing
+        mismatches behind an unexpected cost total (e.g. tokens attributed to the wrong model tier).
+        Updates automatically when you change the editor or time range below.
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">🎯 Select Editor &amp; Time Range</div>
+      <div class="folder-input-row">
+        <select id="model-usage-editor-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
+          <option value="all">🌐 All Editors</option>
+          ${editorOptions}
+        </select>
+        <select id="model-usage-time-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
+          ${timeRangeOptions}
+        </select>
+        <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${escapeHtml(statusText)}</span>
+      </div>
+    </div>
+    <div id="model-usage-results"></div>
+  `;
+}
+
+function buildModelUsageTableRow(row: ModelUsageRow, showCache1h: boolean): string {
+  return `
+    <tr>
+      <td>${escapeHtml(row.model)}</td>
+      <td title="${row.sessionCount} session(s)">${row.sessionCount.toLocaleString()}</td>
+      <td title="${row.inputTokens.toLocaleString()} tokens">${formatTokenCount(row.inputTokens)}</td>
+      <td title="${row.outputTokens.toLocaleString()} tokens">${formatTokenCount(row.outputTokens)}</td>
+      <td title="${row.cacheCreationTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreationTokens)}</td>
+      ${showCache1h ? `<td title="${row.cacheCreation1hTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreation1hTokens)}</td>` : ""}
+      <td title="${row.cachedReadTokens.toLocaleString()} tokens">${formatTokenCount(row.cachedReadTokens)}</td>
+      <td>$${row.estimatedCost.toFixed(2)}</td>
+    </tr>`;
+}
+
+function buildModelUsageExplanation(fileCount: number, filesWithUsage: number): string {
+  const missing = fileCount - filesWithUsage;
+  if (missing <= 0) { return ""; }
+  return `
+    <div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">ℹ️ ${missing} session(s) have no per-model data</div>
+      <div>
+        This is often expected, not a bug. Common causes: chat-only sessions stored in a
+        database with no model/token columns (e.g. Copilot CLI's session-store.db), older
+        or truncated session logs written before an editor started recording per-model
+        attribution, or sessions that never made a model-backed request (e.g. empty/aborted
+        chats).
+      </div>
+    </div>`;
+}
+
+const TIME_RANGE_LABELS: Record<string, string> = {
+  all: "All Time",
+  lastMonth: "Last Month",
+  month: "Current Month",
+  week: "This Week",
+  today: "Today",
+  yesterday: "Yesterday",
+};
+
+function renderModelUsageResults(
+  editor: string,
+  fileCount: number,
+  filesWithUsage: number,
+  rows: ModelUsageRow[],
+  totalCost: number,
+  supportsCache1h: boolean = true,
+  timeRange: string = "all",
+): string {
+  const editorLabel = editor === "all" ? "All Editors" : editor;
+  const timeLabel = TIME_RANGE_LABELS[timeRange] || "All Time";
+  const scopeLabel = timeRange === "all" ? editorLabel : `${editorLabel} — ${timeLabel}`;
+  if (rows.length === 0) {
+    return `
+      <div class="section" style="margin-top: 0;">
+        <div style="padding: 32px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 36px; margin-bottom: 12px;">📭</div>
+          <div style="font-size: 14px;">No per-model usage data found for ${escapeHtml(scopeLabel)}.</div>
+          <div style="font-size: 12px; margin-top: 8px;">${fileCount} session file(s) matched, ${filesWithUsage} had model attribution data.</div>
+        </div>
+      </div>
+      ${buildModelUsageExplanation(fileCount, filesWithUsage)}`;
+  }
+  const tableRows = rows.map((r) => buildModelUsageTableRow(r, supportsCache1h)).join("");
+  return `
+    <div class="section" style="margin-top: 0;">
+      <div class="section-title">📊 Results — ${escapeHtml(scopeLabel)}</div>
+      <div class="summary-cards">
+        <div class="summary-card">
+          <div class="summary-label">📄 Session Files</div>
+          <div class="summary-value">${fileCount}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${filesWithUsage} with model data</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">🧩 Models</div>
+          <div class="summary-value">${rows.length}</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">💰 Est. Total Cost</div>
+          <div class="summary-value">$${totalCost.toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="table-container" style="margin-top: 12px; max-height: 420px;">
+        <table class="session-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Sessions</th>
+              <th>Input</th>
+              <th>Output</th>
+              <th>Cache Create</th>
+              ${supportsCache1h ? "<th>Cache Create (1h)</th>" : ""}
+              <th>Cache Read</th>
+              <th>Est. Cost</th>
+            </tr>
+          </thead>
+          <tbody>${tableRows}</tbody>
+        </table>
+      </div>
+      ${buildModelUsageExplanation(fileCount, filesWithUsage)}
     </div>`;
 }
 
@@ -1641,6 +1795,56 @@ function setupFolderAnalyzerHandlers(): void {
   });
 }
 
+function triggerModelUsageAnalysis(): void {
+  const select = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
+  const timeSelect = document.getElementById("model-usage-time-select") as HTMLSelectElement | null;
+  if (!select || select.disabled) { return; }
+  const editor = select.value || "all";
+  const timeRange = timeSelect?.value || "all";
+
+  const resultsDiv = document.getElementById("model-usage-results");
+  if (resultsDiv) {
+    resultsDiv.innerHTML = `
+        <div class="analyzer-loading">
+          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+          <span>Aggregating model usage…</span>
+        </div>`;
+  }
+
+  vscode.postMessage({ command: "analyzeModelUsage", editor, timeRange });
+}
+
+function setupModelUsageHandlers(): void {
+  document.getElementById("model-usage-editor-select")?.addEventListener("change", () => {
+    triggerModelUsageAnalysis();
+  });
+  document.getElementById("model-usage-time-select")?.addEventListener("change", () => {
+    triggerModelUsageAnalysis();
+  });
+}
+
+function handleModelUsageResult(message: DiagMessage): void {
+  const resultsDiv = document.getElementById("model-usage-results");
+  if (!resultsDiv) { return; }
+  if (message.stillLoading) {
+    resultsDiv.innerHTML = `
+      <div class="info-box" style="margin-top: 12px;">
+        <div class="info-box-title">⏳ Still loading session files</div>
+        <div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>
+      </div>`;
+    return;
+  }
+  resultsDiv.innerHTML = renderModelUsageResults(
+    String(message.editor || "all"),
+    Number(message.fileCount || 0),
+    Number(message.filesWithUsage || 0),
+    (message.rows || []) as ModelUsageRow[],
+    Number(message.totalCost || 0),
+    message.supportsCache1h !== false,
+    String(message.timeRange || "all"),
+  );
+}
+
 function updateWorktreeControls(): void {
   const controlsEl = document.getElementById("worktree-controls");
   if (controlsEl) { controlsEl.innerHTML = renderWorktreeControls(); }
@@ -1820,6 +2024,10 @@ function setupTabHandlers(): void {
 
       if (tabId && activateTab(tabId)) {
         diagState.patch({ activeTab: tabId });
+        if (tabId === "model-usage") {
+          const resultsDiv = document.getElementById("model-usage-results");
+          if (resultsDiv && !resultsDiv.innerHTML.trim()) { triggerModelUsageAnalysis(); }
+        }
       }
     });
   });
@@ -2220,6 +2428,20 @@ function sanitizeDetailedSessionFiles(input: unknown): SessionFileDetails[] {
   return input.map(sanitizeSessionFileItem);
 }
 
+function handleSessionFilesLoadProgress(message: DiagMessage): void {
+  const processed = Number(message.processed || 0);
+  const total = Number(message.total || 0);
+  const progressText = total > 0 ? `Analyzing files… (${processed} / ${total})` : "Analyzing files…";
+
+  const sessionSubtext = document.getElementById("session-loading-subtext");
+  if (sessionSubtext) { sessionSubtext.textContent = progressText; }
+
+  const modelUsageStatus = document.getElementById("model-usage-status");
+  if (modelUsageStatus) {
+    modelUsageStatus.textContent = total > 0 ? `⏳ Loading sessions… (${processed}/${total})` : "⏳ Loading sessions…";
+  }
+}
+
 function handleSessionFilesLoaded(message: DiagMessage): void {
   storedDetailedFiles = sanitizeDetailedSessionFiles(message.detailedSessionFiles);
   isLoading = false;
@@ -2228,6 +2450,22 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
   if (sessionsTab) {
     sessionsTab.textContent = `📁 Session Files (${storedDetailedFiles.length})`;
   }
+
+  const modelUsageSelect = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
+  if (modelUsageSelect) {
+    const editorStats = getEditorStats(storedDetailedFiles);
+    const editorOptions = Object.keys(editorStats).sort()
+      .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
+      .join("");
+    modelUsageSelect.innerHTML = `<option value="all">🌐 All Editors</option>${editorOptions}`;
+    modelUsageSelect.disabled = false;
+  }
+  const modelUsageTimeSelect = document.getElementById("model-usage-time-select") as HTMLSelectElement | null;
+  if (modelUsageTimeSelect) { modelUsageTimeSelect.disabled = false; }
+  const modelUsageStatus = document.getElementById("model-usage-status");
+  if (modelUsageStatus) { modelUsageStatus.textContent = ""; }
+
+  triggerModelUsageAnalysis();
 
   reRenderTable();
 }
@@ -2349,6 +2587,8 @@ function setupMessageHandlers(): void {
       handleDiagnosticDataError(message);
     } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
       handleSessionFilesLoaded(message);
+    } else if (message.command === "sessionFilesLoadProgress") {
+      handleSessionFilesLoadProgress(message);
     } else if (message.command === "cacheCleared") {
       handleCacheCleared();
     } else if (message.command === "cacheRefreshed") {
@@ -2357,6 +2597,8 @@ function setupMessageHandlers(): void {
       handleFolderPicked(message);
     } else if (message.command === "folderAnalysisResult") {
       handleFolderAnalysisResult(message);
+    } else if (message.command === "modelUsageResult") {
+      handleModelUsageResult(message);
     } else {
       handleWorktreeMessage(message);
     }
@@ -2884,6 +3126,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <button class="tab" data-tab="github">🔑 GitHub Auth</button>
 <button class="tab" data-tab="display">⚙️ Settings</button>
 <button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
+<button class="tab" data-tab="model-usage">🧮 Model Usage</button>
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
 <button class="tab" data-tab="worktrees">🌳 Worktrees</button>
 <button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
@@ -2915,6 +3158,9 @@ ${renderDiagDisplayTabHtml(data)}
 ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 <div id="tab-path-analyzer" class="tab-content">
 ${renderFolderAnalyzerTab()}
+</div>
+<div id="tab-model-usage" class="tab-content">
+${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
 ${renderWorktreesTab()}
@@ -2968,6 +3214,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupStorageLinkHandlers();
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
+  setupModelUsageHandlers();
   setupWorktreesHandlers();
   setupButtonHandlers();
   setupDisplaySettingHandlers();

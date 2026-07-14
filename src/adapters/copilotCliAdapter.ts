@@ -102,8 +102,9 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		// session-store.db does not store token counts; OpenTelemetry file export
-		// (when enabled) gives exact numbers for the same session UUID.
+		// session-store.db does not store token counts (see getModelUsage() below for the
+		// full schema rationale — chat-only sessions have no token/model data to surface).
+		// OpenTelemetry file export (when enabled) gives exact numbers for the same session UUID.
 		const otel = await getCopilotCliOtelUsage(sessionFile);
 		if (otel) { return { tokens: otel.actualTokens, thinkingTokens: 0, actualTokens: otel.actualTokens }; }
 		return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
@@ -116,6 +117,11 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		return 0;
 	}
 
+	// session-store.db has no model or token columns at all (sessions: id, cwd, repository,
+	// branch, summary, created_at, updated_at; turns: session_id, turn_index, user_message,
+	// assistant_response, timestamp — verified directly against the SQLite schema). Chat-only
+	// sessions therefore have no data to attribute per model from the DB alone; OpenTelemetry
+	// file export (when enabled) fills that gap with exact numbers for the same session UUID.
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
 		const otel = await getCopilotCliOtelUsage(sessionFile);
 		return otel?.modelUsage ?? {};
