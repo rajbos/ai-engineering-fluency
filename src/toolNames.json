@@ -1062,4 +1062,6 @@
   ,"mcp__Claude_Browser__preview_start": "MCP Claude Browser: Preview Start"
   ,"mcp__ccd_session__dismiss_task": "MCP: Ccd Session Dismiss Task"
   ,"mcp__plugin_Notion_notion__authenticate": "MCP Notion: Notion  Authenticate"
+  ,"configure_notebook": "Notebook Configure"
+  ,"restart_notebook_kernel": "Kernel Restart"
 }
