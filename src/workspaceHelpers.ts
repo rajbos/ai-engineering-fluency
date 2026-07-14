@@ -493,6 +493,16 @@ export function getEditorNameFromRoot(rootPath: string): string {
 	// Eclipse roots contain "copilot" (com.microsoft.copilot.eclipse.core), so they
 	// must be matched before the generic Copilot CLI check below.
 	if (lower.includes('com.microsoft.copilot.eclipse')) { return 'Eclipse'; }
+	// Devin (Cognition Labs' desktop IDE, a fork/rebrand of Windsurf) has its own
+	// dataFolderName '.devin' / install marker 'devin-desktop'. Neither substring
+	// collides with 'copilot' or 'code', but it is checked early for consistency
+	// with the other editor-specific guards in this function.
+	if (lower.includes('.devin') || lower.includes('devin-desktop')) { return 'Devin'; }
+	// Devin CLI (separate ACP-based CLI agent tool, distinct from the Devin desktop app
+	// above) stores its global sessions.db under a 'devin/cli' data dir. Checked before
+	// the generic checks below since 'devin' alone would otherwise be ambiguous with the
+	// desktop app guard above (that one requires '.devin' or 'devin-desktop' specifically).
+	if (lower.includes('devin/cli')) { return 'Devin CLI'; }
 	// Check obvious markers first (JetBrains must precede Copilot CLI)
 	if (isJetBrainsRoot(lower)) { return 'JetBrains'; }
 	if (isCopilotCliRoot(lower)) { return 'Copilot CLI'; }
@@ -987,6 +997,11 @@ function detectToolEditorFromPath(
 	if (copilotFamily) { return copilotFamily; }
 	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Devin CLI virtual paths: <...>/devin/cli/sessions.db#<id>. Checked here (not merely
+	// the generic 'devin' substring match in detectIDEEditorSource) so it always wins over
+	// the desktop app's devin:// scheme / Windsurf family checks, which are handled earlier
+	// in getEditorTypeFromPath/detectEditorSource before this function is even called.
+	if (lowerPath.includes('devin/cli/sessions.db#')) { return 'Devin CLI'; }
 	// Cursor virtual paths must be checked before the generic /cursor/ match in detectVSCodeVariantFromPath.
 	if (lowerPath.includes('/cursor/user/globalstorage/state.vscdb#')) { return 'Cursor'; }
 	if (lowerPath.includes('/.pi/agent/sessions/')) { return 'Pi'; }
@@ -1033,6 +1048,11 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
  */
 export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);
+	// Devin (Cognition Labs' desktop IDE, a fork/rebrand of Windsurf) uses its own
+	// devin://trajectory/{id} virtual path scheme — check before the windsurf:// check
+	// since they are disjoint prefixes, order does not matter here, but keeping the
+	// two paired makes the shared-lineage relationship clear.
+	if (lowerPath.startsWith('devin://')) { return 'Devin'; }
 	if (lowerPath.startsWith('windsurf://')) { return 'Windsurf'; }
 	// Eclipse Copilot conversations live in the workspace metadata; check before
 	// the generic VS Code match (the path can pass through a 'code' folder).
@@ -1053,6 +1073,9 @@ function detectIDEEditorSource(lowerPath: string): string | undefined {
 	if (lowerPath.includes('cursor')) { return 'Cursor'; }
 	if (isCodeInsidersSource(lowerPath)) { return 'VS Code Insiders'; }
 	if (lowerPath.includes('vscodium')) { return 'VSCodium'; }
+	// Devin must be checked before the generic 'windsurf' substring match below is
+	// irrelevant here (disjoint word), but Devin's own data folder is named '.devin'.
+	if (lowerPath.includes('devin')) { return 'Devin'; }
 	if (lowerPath.includes('windsurf')) { return 'Windsurf'; }
 	if (isVisualStudioPath(lowerPath)) { return 'Visual Studio'; }
 	if (lowerPath.includes('code')) { return 'VS Code'; }
@@ -1064,6 +1087,7 @@ function detectIDEEditorSource(lowerPath: string): string | undefined {
  */
 export function detectEditorSource(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);
+	if (lowerPath.startsWith('devin://')) { return 'Devin'; }
 	if (lowerPath.startsWith('windsurf://')) { return 'Windsurf'; }
 	if (lowerPath.includes('com.microsoft.copilot.eclipse')) { return 'Eclipse'; }
 	// Delegate to the shared tool-editor detector (handles JetBrains, Copilot CLI, OpenCode,

@@ -107,10 +107,15 @@ export class SessionDiscovery {
 
 		if (this.deps.windsurf) {
 			const cascadeDir = this.deps.windsurf.getCascadeDir();
+			// Devin (Cognition Labs' desktop IDE) is a fork/rebrand of Windsurf that writes
+			// its Cascade trajectories into this exact same shared folder — there is no
+			// separate Devin-specific session directory to scan. Label the row per the app
+			// we're actually running in so the diagnostics panel reflects reality.
+			const source = this.deps.windsurf.isRunningInDevin() ? 'Devin Cascade (shared with Windsurf)' : 'Windsurf Cascade';
 			candidates.push({
 				path: cascadeDir,
-				exists: this.pathExistsWithLogging(cascadeDir, 'Windsurf Cascade'),
-				source: 'Windsurf Cascade',
+				exists: this.pathExistsWithLogging(cascadeDir, source),
+				source,
 			});
 		}
 

@@ -509,17 +509,17 @@
     "cli": "cd cli && node dist/cli.js"
   },
   "devDependencies": {
-    "@github/copilot": "^1.0.68",
+    "@github/copilot": "^1.0.70",
     "@stryker-mutator/core": "^9.6.1",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^26.1.0",
+    "@types/node": "^26.1.1",
     "@types/sql.js": "1.4.11",
     "@types/vscode": "1.125.0",
-    "@typescript-eslint/eslint-plugin": "^8.62.1",
+    "@typescript-eslint/eslint-plugin": "^8.63.0",
     "@typescript-eslint/parser": "^8.42.0",
     "@vscode/vsce": "^3.7.1",
     "esbuild": "^0.28.1",
-    "eslint": "^10.6.0",
+    "eslint": "^10.7.0",
     "eslint-plugin-sonarjs": "4.1.0",
     "npm-run-all": "^4.1.5",
     "ovsx": "1.0.2",
@@ -555,5 +555,10 @@
     "serialize-javascript": ">=7.0.3",
     "undici": "7.28.0",
     "uuid": "^14.0.0"
+  },
+  "allowScripts": {
+    "core-js@3.49.0": true,
+    "esbuild@0.28.1": true,
+    "keytar@7.9.0": true
   }
 }

@@ -1,5 +1,5 @@
 // @ts-nocheck // Chart.js ESM bundle is loaded dynamically; skip CJS resolution noise
-import { el, createButton } from '../shared/domUtils';
+import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
@@ -298,11 +298,11 @@ function renderLayout(data: InitialChartData): void {
 	const periodData = getActivePeriodData(data);
 	const periodMeta = PERIOD_LABELS[currentPeriod];
 	const summarySection = el('div', 'section');
-	summarySection.append(el('h3', '', '📊 Summary'), buildSummaryCards(periodData, periodMeta));
+	summarySection.append(iconHeading('h3', 'graph', 'Summary'), buildSummaryCards(periodData, periodMeta));
 	const editorCards = buildEditorCards(data.editorTotalsMap);
 	if (editorCards) { summarySection.append(editorCards); }
 	const chartSectionHeader = el('div', 'chart-section-header');
-	chartSectionHeader.append(el('h3', '', '📊 Charts'), buildPeriodToggles(data.periodsReady !== false));
+	chartSectionHeader.append(iconHeading('h3', 'graph-line', 'Charts'), buildPeriodToggles(data.periodsReady !== false));
 	const canvasWrap = el('div', 'canvas-wrap');
 	const canvas = document.createElement('canvas'); canvas.id = 'token-chart'; canvasWrap.append(canvas);
 	const heatmapContainer = el('div', 'heatmap-container hidden');

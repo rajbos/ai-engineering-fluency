@@ -86,6 +86,19 @@ type EvaluatedInsight = {
 	allowToast?: boolean;
 };
 
+type CopilotApiBalance = {
+	/** Monthly budget in USD (entitlement / 100). */
+	budgetUsd: number;
+	/** Monthly budget in AI Credits (budgetUsd * 100). */
+	budgetAiCredits: number;
+	/** Remaining AI Credits from the API quota snapshot. */
+	remainingAiCredits: number;
+	/** AI Credits consumed across all channels (IDE, web, cloud agent, review agent). */
+	usedAiCredits: number;
+	/** Percentage of budget still available. */
+	pctAvailable: number;
+};
+
 type UsageAnalysisStats = {
 	today: UsageAnalysisPeriod;
 	last30Days: UsageAnalysisPeriod;
@@ -104,6 +117,10 @@ type UsageAnalysisStats = {
 	curationAnalysis?: ToolCurationAnalysis | null;
 	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
 	sessionColumnSettings?: { enabledColumns?: string[] };
+	/** Copilot API quota balance snapshot (available when the extension has fetched quota data). */
+	copilotApiBalance?: CopilotApiBalance | null;
+	/** Current-month billing group costs in USD from the extension's local session tracking. */
+	monthBillingGroupCosts?: Record<string, number> | null;
 };
 
 // ── Tool Curation types ──────────────────────────────────────────────────────
@@ -2484,7 +2501,7 @@ function updateTabButtonCount(insights: EvaluatedInsight[]): void {
 	const badgeHtml = newCount > 0
 		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>`
 		: '';
-	const titleOnly = '💡 Insights';
+	const titleOnly = '<span class="codicon codicon-lightbulb"></span> Insights';
 	tabButton.innerHTML = titleOnly + badgeHtml;
 }
 
@@ -2630,13 +2647,13 @@ function buildUsageRootHtml(
 			</div>
 
 			<div class="tab-bar">
-				<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity">📊 My Activity</button>
-				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions">📋 Recent Sessions</button>
-				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools">🔧 Tools &amp; Integrations</button>
-				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health">🏗️ Workspace Health</button>
-				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos">🔀 Repository PRs</button>
-				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent">☁️ Cloud Agent</button>
-				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights">💡 Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
+				<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity"><span class="codicon codicon-pulse"></span> My Activity</button>
+				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions"><span class="codicon codicon-history"></span> Recent Sessions</button>
+				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools"><span class="codicon codicon-tools"></span> Tools &amp; Integrations</button>
+				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health"><span class="codicon codicon-server-environment"></span> Workspace Health</button>
+				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos"><span class="codicon codicon-git-pull-request"></span> Repository PRs</button>
+				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
+				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
 			</div>
 
 			${buildSessionsTabPanelHtml(stats)}
@@ -2678,6 +2695,126 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 		</div>`;
 }
 
+function _billingApiBalanceHtml(api: CopilotApiBalance): string {
+	const pct = formatFixed(api.pctAvailable, 1);
+	const usedPct = formatFixed(100 - api.pctAvailable, 1);
+	const barFill = Math.min(100 - api.pctAvailable, 100);
+	const barColor = barFill > 90 ? 'var(--error-color, #f14c4c)' : barFill > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
+	return `
+		<div style="margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub Copilot API (all channels)</div>
+			<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:8px;">
+				<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:10px 16px; text-align:center; min-width:80px;">
+					<div style="font-size:18px; font-weight:700; color:var(--text-primary);">${formatNumber(api.usedAiCredits)}</div>
+					<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Credits used</div>
+				</div>
+				<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:10px 16px; text-align:center; min-width:80px;">
+					<div style="font-size:18px; font-weight:700; color:var(--text-primary);">${formatNumber(api.remainingAiCredits)}</div>
+					<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Credits remaining</div>
+				</div>
+				<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:10px 16px; text-align:center; min-width:80px;">
+					<div style="font-size:18px; font-weight:700; color:var(--text-primary);">${formatNumber(api.budgetAiCredits)}</div>
+					<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Monthly budget</div>
+				</div>
+			</div>
+			<div style="margin-bottom:4px; font-size:11px; color:var(--text-secondary); display:flex; justify-content:space-between;">
+				<span>${usedPct}% used</span><span>${pct}% available</span>
+			</div>
+			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
+				<div style="height:100%; width:100%; background:${barColor}; border-radius:4px; transform-origin:left; transform:scaleX(${formatFixed(barFill / 100, 4)});"></div>
+			</div>
+			<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
+				1 AI Credit = $0.01 · Budget = $${formatFixed(api.budgetUsd, 2)}/month
+			</div>
+		</div>`;
+}
+
+function _billingExtGroupCostsHtml(groupCosts: Record<string, number>): string {
+	const totalCostUsd = Object.values(groupCosts).reduce((s, v) => s + v, 0);
+	const rows = Object.entries(groupCosts)
+		.sort(([, a], [, b]) => b - a)
+		.map(([group, cost]) => `
+			<tr>
+				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(group)}</td>
+				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
+			</tr>`).join('');
+	return `
+		<div style="margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
+			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
+				<thead>
+					<tr style="background:var(--bg-tertiary);">
+						<th style="padding:6px 8px; text-align:left; font-size:11px; color:var(--text-secondary); font-weight:600;">Provider</th>
+						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
+					</tr>
+				</thead>
+				<tbody>${rows}</tbody>
+				<tfoot>
+					<tr style="border-top:1px solid var(--border-color);">
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${formatFixed(totalCostUsd, 2)}</td>
+					</tr>
+				</tfoot>
+			</table>
+		</div>`;
+}
+
+function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined, copilotCostUsd: number, nonCopilotCostUsd: number): string {
+	if (!api) {
+		return `
+			<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.5;">
+				ℹ️ No Copilot API quota data available yet. The API balance appears after the extension fetches your Copilot plan info.
+				The extension only tracks local IDE sessions — it cannot see web chat, cloud agent, or review agent usage.
+			</div>`;
+	}
+	if (copilotCostUsd <= 0) { return ''; }
+	const apiUsedUsd = api.usedAiCredits * 0.01;
+	const gapUsd = apiUsedUsd - copilotCostUsd;
+	const gapCredits = Math.round(gapUsd * 100);
+	const gapRow = gapCredits > 0
+		? `<div style="display:flex; justify-content:space-between; padding-top:6px; border-top:1px solid var(--border-subtle); color:var(--text-secondary);"><span>Gap (untracked Copilot usage)</span><span>$${formatFixed(gapUsd, 2)} (${formatNumber(gapCredits)} credits)</span></div>`
+		: '';
+	const otherRow = nonCopilotCostUsd > 0.001
+		? `<div style="display:flex; justify-content:space-between;"><span>Other providers (not in Copilot API)</span><span>$${formatFixed(nonCopilotCostUsd, 2)}</span></div>`
+		: '';
+	const note = gapCredits > 0
+		? `<div style="margin-top:8px; font-size:11px; color:var(--text-muted); line-height:1.5;">ℹ️ The gap represents Copilot usage the extension cannot track: <strong>github.com/copilot</strong> web chat, <strong>cloud agent</strong> sessions, and <strong>Copilot review agent</strong> — all counted against your AI Credit budget.</div>`
+		: `<div style="margin-top:8px; font-size:11px; color:var(--text-muted);">✅ Extension-tracked Copilot usage matches the API — no significant untracked usage from web chat, cloud agent, or review agent.</div>`;
+	return `
+		<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:12px 14px; margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">Coverage analysis</div>
+			<div style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--text-primary);">
+				<div style="display:flex; justify-content:space-between;"><span>API total Copilot usage</span><span style="font-weight:600;">$${formatFixed(apiUsedUsd, 2)} (${formatNumber(api.usedAiCredits)} credits)</span></div>
+				<div style="display:flex; justify-content:space-between;"><span>Extension tracked (Copilot IDE sessions)</span><span style="font-weight:600;">$${formatFixed(copilotCostUsd, 2)} (${formatNumber(Math.round(copilotCostUsd * 100))} credits)</span></div>
+				${gapRow}${otherRow}
+			</div>
+			${note}
+		</div>`;
+}
+
+function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
+	const api = stats.copilotApiBalance;
+	const groupCosts = stats.monthBillingGroupCosts;
+	if (!api && (!groupCosts || Object.keys(groupCosts).length === 0)) { return ''; }
+
+	const copilotCostUsd = groupCosts?.['GitHub Copilot'] ?? 0;
+	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
+	const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
+
+	const apiHtml = api ? _billingApiBalanceHtml(api) : '';
+	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts) : '';
+	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
+
+	return `
+		<div class="section">
+			<div class="section-title"><span>💳</span><span>Copilot Billing Coverage</span></div>
+			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs.</div>
+			${apiHtml}
+			${extHtml}
+			${deltaHtml}
+		</div>`;
+}
+
 function buildActivityTabPanelHtml(
 	stats: UsageAnalysisStats,
 	multiModelHtml: string,
@@ -2687,9 +2824,11 @@ function buildActivityTabPanelHtml(
 	last30DaysTotalRefs: number,
 ): string {
 	const modelCostHtml = buildModelCostSectionHtml(stats);
+	const billingComparisonHtml = buildBillingComparisonSectionHtml(stats);
 	return `
 		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
 			${sessionsSummaryHtml}
+			${billingComparisonHtml}
 			<!-- Mode Usage Section -->
 			<div class="section">
 				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>

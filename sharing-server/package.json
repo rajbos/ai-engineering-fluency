@@ -21,10 +21,10 @@
   },
   "dependencies": {
     "@hono/node-server": "^2.0.8",
-    "hono": "^4.12.28"
+    "hono": "^4.12.30"
   },
   "devDependencies": {
-    "@types/node": "^26.1.0",
+    "@types/node": "^26.1.1",
     "chart.js": "^4.4.7",
     "esbuild": "^0.28.1",
     "typescript": "^5.8.0"

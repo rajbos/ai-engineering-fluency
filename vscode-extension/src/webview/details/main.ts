@@ -1,7 +1,7 @@
 // Import shared utilities
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumber, formatCost, formatCompact, setCompactNumbers } from '../shared/formatUtils';
-import { el, createButton } from '../shared/domUtils';
+import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
@@ -417,7 +417,7 @@ stats: DetailedStats,
 projections: Projections
 ): HTMLElement {
 const section = el('div', 'section');
-section.append(el('h3', '', '📊 Key Metrics'));
+section.append(iconHeading('h3', 'graph', 'Key Metrics'));
 const table = document.createElement('table');
 table.className = 'stats-table';
 const thead = document.createElement('thead');
@@ -543,8 +543,7 @@ return null;
 }
 
 const section = el('div', 'section');
-const heading = el('h3');
-heading.textContent = '💻 Usage by Editor';
+const heading = iconHeading('h3', 'device-desktop', 'Usage by Editor');
 section.append(heading);
 
 const table = document.createElement('table');
@@ -732,8 +731,7 @@ const topModels = sortedByLast30Days.slice(0, TOP_N_MODELS);
 const otherModels = sortedByLast30Days.slice(TOP_N_MODELS);
 
 const section = el('div', 'section');
-const heading = el('h3');
-heading.textContent = '🎯 Model Usage (Tokens)';
+const heading = iconHeading('h3', 'symbol-numeric', 'Model Usage (Tokens)');
 section.append(heading);
 
 const table = document.createElement('table');
@@ -842,8 +840,7 @@ return section;
 
 function buildEstimatesSection(): HTMLElement {
 const section = el('div', 'section');
-const heading = el('h3');
-heading.textContent = '💡 Calculation & Estimates';
+const heading = iconHeading('h3', 'lightbulb', 'Calculation & Estimates');
 section.append(heading);
 
 const notes = document.createElement('ul');

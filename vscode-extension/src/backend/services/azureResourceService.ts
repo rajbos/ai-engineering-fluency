@@ -202,11 +202,28 @@ export class AzureResourceService {
 		authMode: BackendAuthMode
 	): Promise<string | null> {
 		const storageMgmt = new StorageManagementClient(credential, subscriptionId);
+		const saNames = await this._listStorageAccountNames(storageMgmt, resourceGroup);
+
+		const saPick = await this._promptStorageAccountChoice(saNames);
+		if (!saPick) { return null; }
+		if (!saPick.createNew) { return saPick.label; }
+
+		const newAccount = await this._promptNewStorageAccountDetails(location);
+		if (!newAccount) { return null; }
+
+		return this._createStorageAccount(storageMgmt, resourceGroup, newAccount.name, newAccount.location, authMode, saNames);
+	}
+
+	private async _listStorageAccountNames(storageMgmt: StorageManagementClient, resourceGroup: string): Promise<string[]> {
 		const saNames: string[] = [];
 		for await (const sa of storageMgmt.storageAccounts.listByResourceGroup(resourceGroup)) {
 			if (sa.name) { saNames.push(sa.name); }
 		}
 		saNames.sort();
+		return saNames;
+	}
+
+	private async _promptStorageAccountChoice(saNames: string[]): Promise<{ createNew: boolean; label: string } | null> {
 		const saPick = await vscode.window.showQuickPick(
 			[
 				{ label: '$(add) Create new storage account…', description: '' },
@@ -215,8 +232,10 @@ export class AzureResourceService {
 			{ title: 'Step 6 of 7: Choose Storage Account' }
 		);
 		if (!saPick) { return null; }
-		if (!saPick.label.includes('Create new storage account')) { return saPick.label; }
+		return { createNew: saPick.label.includes('Create new storage account'), label: saPick.label };
+	}
 
+	private async _promptNewStorageAccountDetails(location: string): Promise<{ name: string; location: string } | null> {
 		const RESERVED_NAMES = ['microsoft', 'azure', 'windows', 'test', 'prod', 'admin'];
 		const name = await vscode.window.showInputBox({
 			title: 'Step 6 of 7: New Storage Account Name',
@@ -237,6 +256,17 @@ export class AzureResourceService {
 		);
 		if (!loc) { return null; }
 
+		return { name, location: loc };
+	}
+
+	private async _createStorageAccount(
+		storageMgmt: StorageManagementClient,
+		resourceGroup: string,
+		name: string,
+		loc: string,
+		authMode: BackendAuthMode,
+		saNames: string[]
+	): Promise<string | null> {
 		const createStorageAccountParams = {
 			location: loc,
 			sku: { name: 'Standard_LRS' },

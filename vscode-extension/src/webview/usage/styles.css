@@ -397,6 +397,9 @@ flex-wrap: wrap;
 }
 
 .tab-button {
+display: inline-flex;
+align-items: center;
+gap: 4px;
 background: transparent;
 border: none;
 border-bottom: 3px solid transparent;

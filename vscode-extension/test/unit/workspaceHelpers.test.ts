@@ -251,6 +251,21 @@ test('getEditorNameFromRoot: opencode path returns OpenCode', () => {
 test('getEditorNameFromRoot: .gemini path returns Gemini CLI', () => {
     assert.equal(getEditorNameFromRoot('/home/user/.gemini'), 'Gemini CLI');
 });
+
+test('getEditorNameFromRoot: .devin path returns Devin', () => {
+    assert.equal(getEditorNameFromRoot('/home/user/.devin'), 'Devin');
+});
+
+test('getEditorNameFromRoot: devin-desktop install path returns Devin (not misclassified as Copilot CLI)', () => {
+    // Devin bundles the 'codeium.windsurf' extension and a plugin id that does NOT
+    // contain 'copilot', so this mainly guards against future substring collisions.
+    assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Local\\Programs\\devin-desktop'), 'Devin');
+});
+
+test('getEditorNameFromRoot: Devin CLI config dir returns "Devin CLI" (distinct from the desktop app)', () => {
+    assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Roaming\\devin\\cli'), 'Devin CLI');
+    assert.equal(getEditorNameFromRoot('/home/user/.local/share/devin/cli'), 'Devin CLI');
+});
 // ── Mutation-killing tests ──────────────────────────────────────────────
 
 import {
@@ -432,6 +447,15 @@ test('detectEditorSource: detects VS Code from Code path', () => {
 
 test('detectEditorSource: detects Windsurf', () => {
         assert.equal(detectEditorSource('/home/user/.config/Windsurf/User/workspaceStorage/abc/session.json'), 'Windsurf');
+});
+
+test('detectEditorSource: detects Devin (Cognition Labs fork/rebrand of Windsurf)', () => {
+        assert.equal(detectEditorSource('/home/user/.devin/User/workspaceStorage/abc/session.json'), 'Devin');
+});
+
+test('detectEditorSource: detects Devin CLI virtual sessions.db paths (distinct from the desktop app)', () => {
+        const p = 'C:\\Users\\alice\\AppData\\Roaming\\devin\\cli\\sessions.db#sess-abc123';
+        assert.equal(detectEditorSource(p), 'Devin CLI');
 });
 
 test('detectEditorSource: detects VSCodium', () => {
@@ -1322,6 +1346,15 @@ test('getEditorTypeFromPath: windsurf:// URI returns Windsurf', () => {
     assert.equal(getEditorTypeFromPath('windsurf://some/path/session.json'), 'Windsurf');
 });
 
+test('getEditorTypeFromPath: devin:// URI returns Devin', () => {
+    assert.equal(getEditorTypeFromPath('devin://trajectory/session.json'), 'Devin');
+});
+
+test('getEditorTypeFromPath: Devin CLI sessions.db virtual path returns "Devin CLI"', () => {
+    const p = 'C:\\Users\\alice\\AppData\\Roaming\\devin\\cli\\sessions.db#sess-abc123';
+    assert.equal(getEditorTypeFromPath(p), 'Devin CLI');
+});
+
 test('getEditorTypeFromPath: isGeminiCliPath requires all three conditions (missing /chats/session-)', () => {
     // Has /.gemini/tmp/ and ends with .jsonl, but NO /chats/session- -> NOT Gemini CLI
     const path = '/home/user/.gemini/tmp/project/other/file.jsonl';
@@ -1354,6 +1387,15 @@ test('getEditorTypeFromPath: Windows path with .copilot\\jb returns JetBrains', 
 
 test('detectEditorSource: windsurf:// URI returns Windsurf', () => {
     assert.equal(detectEditorSource('windsurf://some/path'), 'Windsurf');
+});
+
+test('detectEditorSource: devin:// URI returns Devin', () => {
+    assert.equal(detectEditorSource('devin://trajectory/abc123'), 'Devin');
+});
+
+test('detectEditorSource: Devin CLI sessions.db virtual path is not misclassified as VS Code or Devin desktop', () => {
+    const p = '/home/alice/.local/share/devin/cli/sessions.db#sess-abc123';
+    assert.equal(detectEditorSource(p), 'Devin CLI');
 });
 
 test('detectEditorSource: isGeminiCliPath requires all three conditions', () => {
