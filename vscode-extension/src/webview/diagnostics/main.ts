@@ -2315,17 +2315,28 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   }
 }
 
-const worktreeMessageHandlers = new Map<string, (message: DiagMessage) => void>([
-  ["worktreeRootPicked", handleWorktreeRootPicked],
-  ["worktreeScanStarted", () => handleWorktreeScanStarted()],
-  ["worktreeScanRootStarted", handleWorktreeScanRootStarted],
-  ["worktreeScanRootMarkersFound", handleWorktreeScanRootMarkersFound],
-  ["worktreeScanRootSkipped", handleWorktreeScanRootSkipped],
-  ["worktreeScanProgress", handleWorktreeScanProgress],
-  ["worktreeFound", handleWorktreeFound],
-  ["worktreeScanComplete", () => handleWorktreeScanComplete()],
-  ["worktreeScanCancelled", () => handleWorktreeScanCancelled()],
-]);
+/** Dispatches worktree-tab messages via static, literal command comparisons (no dynamic method lookup). */
+function handleWorktreeMessage(message: DiagMessage): void {
+  if (message.command === "worktreeRootPicked") {
+    handleWorktreeRootPicked(message);
+  } else if (message.command === "worktreeScanStarted") {
+    handleWorktreeScanStarted();
+  } else if (message.command === "worktreeScanRootStarted") {
+    handleWorktreeScanRootStarted(message);
+  } else if (message.command === "worktreeScanRootMarkersFound") {
+    handleWorktreeScanRootMarkersFound(message);
+  } else if (message.command === "worktreeScanRootSkipped") {
+    handleWorktreeScanRootSkipped(message);
+  } else if (message.command === "worktreeScanProgress") {
+    handleWorktreeScanProgress(message);
+  } else if (message.command === "worktreeFound") {
+    handleWorktreeFound(message);
+  } else if (message.command === "worktreeScanComplete") {
+    handleWorktreeScanComplete();
+  } else if (message.command === "worktreeScanCancelled") {
+    handleWorktreeScanCancelled();
+  }
+}
 
 function setupMessageHandlers(): void {
   window.addEventListener("message", (event) => {
@@ -2347,8 +2358,7 @@ function setupMessageHandlers(): void {
     } else if (message.command === "folderAnalysisResult") {
       handleFolderAnalysisResult(message);
     } else {
-      const worktreeHandler = worktreeMessageHandlers.get(message.command);
-      if (worktreeHandler) { worktreeHandler(message); }
+      handleWorktreeMessage(message);
     }
   });
 }
