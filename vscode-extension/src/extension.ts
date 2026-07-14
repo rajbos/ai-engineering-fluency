@@ -2304,7 +2304,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					// climbing percentage stays visible in the status bar text instead.
 					// Skip entirely when the loading panel is already open — it shows progress itself.
 					if (!this._detailsPanelIsLoading) {
-						this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing');
+						if (!silent) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing'); }
 					}
 				}
 			}
