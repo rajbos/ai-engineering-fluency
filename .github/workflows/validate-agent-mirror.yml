@@ -1,0 +1,144 @@
+name: Validate Agent Mirror
+
+# Keeps .github/agents ↔ .claude/agents and .github/skills ↔ .claude/skills in
+# sync, per the mirroring rule in .github/copilot-instructions.md.
+#
+# - On pull_request/push: report-only. Hard-fails on name-set parity or
+#   SKILL.md mismatches; agent body drift is reported as a warning only,
+#   since intentional platform adaptation is allowed.
+# - On schedule/workflow_dispatch: additionally attempts a mechanical fix for
+#   SKILL.md violations (.github side wins as source of truth) and opens a
+#   PR. Missing agent mirrors can't be fixed mechanically (frontmatter needs
+#   judgement) — those are listed for manual follow-up instead.
+
+on:
+  pull_request:
+    paths:
+      - ".github/agents/**"
+      - ".claude/agents/**"
+      - ".github/skills/**/SKILL.md"
+      - ".claude/skills/**/SKILL.md"
+      - ".github/workflows/validate-agent-mirror.yml"
+      - ".github/workflows/scripts/check_agent_mirror.py"
+  push:
+    branches: [main]
+    paths:
+      - ".github/agents/**"
+      - ".claude/agents/**"
+      - ".github/skills/**/SKILL.md"
+      - ".claude/skills/**/SKILL.md"
+      - ".github/workflows/validate-agent-mirror.yml"
+      - ".github/workflows/scripts/check_agent_mirror.py"
+  schedule:
+    - cron: "0 6 * * 1" # Monday 06:00 UTC
+  workflow_dispatch:
+
+concurrency:
+  group: validate-agent-mirror-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft != true && github.actor != 'dependabot[bot]'
+    outputs:
+      hard_fail: ${{ steps.check.outputs.hard_fail }}
+      missing_agent_count: ${{ steps.check.outputs.missing_agent_count }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check agent/skill mirror
+        id: check
+        env:
+          REPO_ROOT: ${{ github.workspace }}
+        run: python3 .github/workflows/scripts/check_agent_mirror.py
+
+  propose-fix:
+    needs: check
+    # The check job intentionally fails (non-zero exit) when a hard violation
+    # exists, so a human watching PR/branch-protection checks sees red. That
+    # means this job's default "needs must succeed" gate would skip it — use
+    # always() so it still runs and inspects the outputs itself.
+    if: >
+      always() &&
+      github.repository == 'rajbos/ai-engineering-fluency' &&
+      (github.event_name == 'schedule' || github.event_name == 'workflow_dispatch') &&
+      needs.check.outputs.hard_fail == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Apply mechanical SKILL.md fixes
+        id: fix
+        env:
+          REPO_ROOT: ${{ github.workspace }}
+        run: |
+          # Exit code reflects whether hard violations remain after the fix
+          # (e.g. missing agent mirrors, which are never auto-fixed) — don't
+          # fail the job on that, we still want to open the PR/report below.
+          python3 .github/workflows/scripts/check_agent_mirror.py --fix || true
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet; then
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build PR body
+        id: body
+        env:
+          MISSING_AGENT_COUNT: ${{ needs.check.outputs.missing_agent_count }}
+        run: |
+          {
+            echo "This PR was opened automatically by the **Validate Agent Mirror** workflow."
+            echo
+            echo "It mechanically resyncs \`SKILL.md\` mismatches — the \`.github/skills/\` side"
+            echo "wins as source of truth, per \`.github/copilot-instructions.md\`."
+            echo
+            if [ "${MISSING_AGENT_COUNT:-0}" != "0" ]; then
+              echo "> ⚠️ **${MISSING_AGENT_COUNT} agent mirror(s) are still missing** and could **not**"
+              echo "> be fixed mechanically — frontmatter conversion between Copilot and Claude"
+              echo "> formats needs human judgement. See the job summary for names, and add the"
+              echo "> missing \`.github/agents/<name>.agent.md\` or \`.claude/agents/<name>.md\` by hand."
+              echo
+            fi
+            echo "See the workflow run's job summary for the full parity/drift report."
+          } > /tmp/pr-body.md
+
+      - name: Create Pull Request
+        if: steps.changes.outputs.changed == 'true'
+        uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
+        with:
+          branch: fix-agent-mirror-drift
+          add-paths: |
+            .claude/skills/**
+          commit-message: |
+            chore: resync SKILL.md mirrors between .github and .claude
+
+            Automatically applied by the Validate Agent Mirror workflow.
+            .github/skills/ is the source of truth per copilot-instructions.md.
+          title: "chore: resync SKILL.md mirrors between .github and .claude"
+          body-path: /tmp/pr-body.md
+          labels: |
+            autogenerated

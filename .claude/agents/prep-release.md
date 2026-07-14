@@ -112,7 +112,7 @@ npm version <bump-type> --no-git-tag-version
 cd ..
 ```
 
-For Visual Studio extension (if changed), update the `Version` attribute in the `<Identity>` element of `visualstudio-extension/src/CopilotTokenTracker/source.extension.vsixmanifest`. Use the edit tool to make a targeted string replacement. The current value will be something like `Version="1.0.4"` — replace only the version number, not the whole line.
+For Visual Studio extension (if changed), update the `Version` attribute in the `<Identity>` element of `visualstudio-extension/src/CopilotTokenTracker/source.extension.vsixmanifest`. Use the `edit` tool to make a targeted string replacement. The current value will be something like `Version="1.0.4"` — replace only the version number, not the whole line.
 
 ### Step 7 — Create a release-prep branch
 
