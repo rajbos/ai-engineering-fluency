@@ -106,6 +106,65 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 **Contents:**
 - `validate-editor-names.js` — dependency-free Node.js script that statically extracts path detection rules from both source files, runs 18 canonical test paths through the CLI rules, checks cross-function consistency, validates EDITOR_ICON_MAP coverage, and warns about ordering invariants (broad patterns shadowing specific ones)
 
+### check-urls
+
+**Purpose**: Find all hardcoded URLs in TypeScript source files and verify they resolve (return HTTP 2xx/3xx).
+
+**Use this skill when:**
+- Validating links added to fluency hints or tips in `src/maturityScoring.ts`
+- Checking that VS Code docs URLs, tech.hub.ms video links, or other hardcoded URLs are still live
+- Auditing the codebase after bulk URL changes to catch 404s before a release
+- Routinely health-checking external references as part of a maintenance pass
+
+**Contents:**
+- `check-urls.js` — Node.js script that scans every `*.ts` file under `src/`, extracts unique URLs, and sends HTTP HEAD requests (retrying with GET on 4xx) with a 10-second timeout
+- Summary output marking each URL as ✅ OK, ⚠️ REDIRECT, or ❌ BROKEN; exits with code `1` when any URL is broken
+- Guidance for fixing broken tech.hub.ms and code.visualstudio.com links
+
+### validate-app-db-schema
+
+**Purpose**: Validate that `~/.copilot/data.db` still exposes the tables and columns the session hierarchy feature depends on (`workspace_parent_links`, `workspaces`, `sessions`).
+
+**Use this skill when:**
+- A Copilot app update may have changed the private `data.db` schema (it is not part of any public API)
+- Session hierarchy enrichment stops working or parent/child workspace links go missing
+- Running on a periodic schedule to detect breaking schema changes early
+
+**Contents:**
+- `validate-schema.js` — script that reads `data.db` via `sql.js` (pure WASM, no native SQLite binaries) and checks file existence, required tables and columns, and runs the actual JOIN query used by the extension against the last 24h of data
+- Clear PASS / FAIL reporting with a `--json` flag for CI or automated processing
+- References to the runtime code that depends on the schema (`vscode-extension/src/copilotAppData.ts`, `enrichSessionHierarchy()`)
+
+### validate-session-schemas
+
+**Purpose**: Loop over recent local AI-coding session log files for every supported file-based platform and validate they still match the documented schema, while surfacing newly-discovered fields we could start using.
+
+**Use this skill when:**
+- After an editor or CLI update that may have changed session log formats
+- Adding or modifying a session file parser/adapter
+- Running on a schedule to catch schema drift early
+- Looking for new fields (e.g. real token counts, new model metadata, new event types) worth wiring into the adapters
+
+**Contents:**
+- `validate-session-schemas.js` — dependency-free Node.js validator covering Copilot Chat, Copilot CLI, JetBrains, Claude Code, Gemini CLI, Antigravity, and OpenCode
+- `schema-baselines.json` — per-platform `contracts` (hand-maintained fields our parsers depend on) and `knownFields` (last-known observed fields, refreshable with `--update-baseline`)
+- Recency window and per-platform limits (`--days`, `--max`, `--platform`), CI-friendly exit codes, and `--json` output
+- Per-platform statuses (`PASS`, `DRIFT`, `NO_FILES`, `NO_RECENT_FILES`, `INCONCLUSIVE`) plus a "Not validated" list for DB/binary formats so coverage is never overstated
+
+### validate-model-pricing
+
+**Purpose**: Find all model IDs referenced in local AI-coding session log files and debug logs, then compare them against the keys in `src/modelPricing.json`.
+
+**Use this skill when:**
+- After adding a new model to `modelPricing.json`, to confirm coverage
+- Seeing unexpected cost attributions (models without a pricing entry fall back to `gpt-4o-mini` pricing)
+- Discovering which new models have appeared in recent sessions
+
+**Contents:**
+- `validate-model-pricing.js` — Node.js script that scans the same file-based platforms as the [`validate-session-schemas`](#validate-session-schemas) skill, plus Copilot Chat debug logs (`llm_request` events with `attrs.model`)
+- Reports **UNKNOWN** models (found in logs but missing a pricing entry) and **UNUSED LOCALLY** pricing entries — both informational, not errors
+- `--days`, `--max`, `--verbose`, and `--json` options with CI-friendly exit codes
+
 ### load-cache-data
 
 **Purpose**: Load and inspect the last 10 rows from the local session file cache to iterate with real data.
