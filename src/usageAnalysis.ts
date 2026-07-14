@@ -2178,7 +2178,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		if (eco && isAnalyzable(eco)) {
 			return eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
 		}
-		if (sessionFile.startsWith('windsurf://')) {
+		if (sessionFile.startsWith('windsurf://') || sessionFile.startsWith('devin://')) {
 			return analysis;
 		}
 
@@ -2514,7 +2514,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco) { return eco.getModelUsage(sessionFile); }
 	}
-	if (sessionFile.startsWith('windsurf://')) {
+	if (sessionFile.startsWith('windsurf://') || sessionFile.startsWith('devin://')) {
 		return modelUsage;
 	}
 	try {

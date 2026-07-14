@@ -4833,7 +4833,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 		if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
-			details.editorName = 'Windsurf';
+			details.editorName = this.windsurf.getFamilyEditorName(sessionFile);
 			return;
 		}
 		try {
@@ -5041,8 +5041,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (session) {
 			details.title = session.title;
 			details.interactions = session.interactions;
-			details.editorSource = 'windsurf';
-			details.editorName = 'Windsurf';
+			// editorSource/editorName come from the resolved session, which already
+			// attributes to Windsurf or Devin correctly (see WindsurfDataAccess.resolveSession).
+			details.editorSource = session.editorSource;
+			details.editorName = session.editorName;
 			details.firstInteraction = session.firstInteraction ?? stat.mtime.toISOString();
 			details.lastInteraction = session.lastInteraction ?? stat.mtime.toISOString();
 		}
@@ -6531,10 +6533,11 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 	public async showLogViewer(sessionFilePath: string): Promise<void> {
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
-			const trajectoryId = sessionFilePath.replace('windsurf://trajectory/', '');
+			const trajectoryId = this.windsurf.extractTrajectoryId(sessionFilePath);
 			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
+			const editorLabel = this.windsurf.getFamilyEditorName(sessionFilePath);
 			vscode.window.showInformationMessage(
-				`Windsurf sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
+				`${editorLabel} sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
 				'Reveal in Explorer'
 			).then(choice => {
 				if (choice === 'Reveal in Explorer') {
@@ -6667,12 +6670,13 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Does not modify the original file.
 	 */
 	public async showFormattedJsonlFile(sessionFilePath: string): Promise<void> {
-		// Windsurf sessions are binary protobuf files — open the real .pb file in the OS
+		// Windsurf/Devin sessions are binary protobuf files — open the real .pb file in the OS
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
-			const trajectoryId = sessionFilePath.replace('windsurf://trajectory/', '');
+			const trajectoryId = this.windsurf.extractTrajectoryId(sessionFilePath);
 			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
+			const editorLabel = this.windsurf.getFamilyEditorName(sessionFilePath);
 			vscode.window.showInformationMessage(
-				`Windsurf sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
+				`${editorLabel} sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
 				'Reveal in Explorer'
 			).then(choice => {
 				if (choice === 'Reveal in Explorer') {
@@ -9409,6 +9413,7 @@ Generated: ${new Date().toISOString()}
 
 ## Environment
 - Running in Windsurf: ${diagnostics.environment.isRunningInWindsurf}
+- Running in Devin: ${diagnostics.environment.isRunningInDevin}
 - App Name: ${diagnostics.environment.appName}
 
 ## Extension Status
