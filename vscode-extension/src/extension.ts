@@ -99,6 +99,7 @@ import { PiDataAccess } from '../../src/pi';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
+import { extractCopilotCliSessionId, getCopilotCliOtelUsage, getCopilotCliOtelStatus } from '../../src/copilotCliOtel';
 import { createWakeupGate } from './utils/promises';
 
 // --- Session parsing & token estimation ---
@@ -331,6 +332,32 @@ function _scdlDistributeToDays(
 	return result;
 }
 
+/** One Copilot CLI session where OTel export data was found, for the diagnostics "OTel Delta" tab. */
+interface CopilotCliOtelComparisonSession {
+	file: string;
+	sessionId: string;
+	/** Token count the extension would have reported before OTel enrichment (0 for DB-only chat sessions). */
+	baselineTokens: number;
+	otelTokens: number;
+	delta: number;
+	models: string[];
+	/** Session file mtime (ISO string), used for the tab's date-range filter. Null if stat failed. */
+	lastActivity: string | null;
+}
+
+/** Summary of how much more/different token tracking is with the OTel export versus the estimate-only path. */
+interface CopilotCliOtelComparison {
+	otelDirExists: boolean;
+	otelFileCount: number;
+	otelSessionsIndexed: number;
+	sessionsChecked: number;
+	sessionsMatched: number;
+	totalBaselineTokens: number;
+	totalOtelTokens: number;
+	deltaTokens: number;
+	sessions: CopilotCliOtelComparisonSession[];
+}
+
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
 	private static readonly CACHE_VERSION = 59; // Detect Auto model and Foundry local models from request-level fields
@@ -371,6 +398,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private readonly extensionUri: vscode.Uri;
 	private readonly context: vscode.ExtensionContext;
 	private _devBranch: string | undefined;
+	/** Dev-mode-only path for debugCrashLog(); undefined disables it entirely (never set outside Development mode). */
+	private _crashDebugLogPath: string | undefined;
 	private localRegressionSampleDataDir?: string;
 	private pendingLocalViewRegressionProbe?: ViewRegressionProbeConfig;
 	private readonly localViewRegressionResolvers = new Map<string, (result: LocalViewRegressionProbeResult) => void>();
@@ -1136,6 +1165,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._cacheLoadPromise = this.cacheManager.loadCacheFromStorage().finally(() => {
 			this._cacheLoadPromise = undefined;
 		});
+		// Best-effort housekeeping: reclaim cache/lock files orphaned by previous
+		// Extension Development Host sessions. Never blocks activation.
+		void this.cacheManager.cleanupStaleDevCacheFiles().catch((e) => this.warn(`Stale dev cache cleanup failed: ${e}`));
 		this._sessionRestorePromise = this.restoreGitHubSession();
 		this.setupGitHubAuthListener(context);
 		this.sessionDiscovery.checkCopilotExtension();
@@ -1189,6 +1221,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					cwd: context.extensionUri.fsPath, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
 				}).trim();
 			} catch { /* Ignore git errors in dev mode */ }
+			this.initializeCrashDebugLog(context);
 		}
 		this.outputChannel = vscode.window.createOutputChannel('AI Engineering Fluency');
 		context.subscriptions.push(this.outputChannel);
@@ -1206,6 +1239,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 			} catch { /* git unavailable */ }
 		}
 		this.log(startupInfo);
+	}
+
+	/**
+	 * Sets up debugCrashLog()'s target file and truncates it for this session. Dev
+	 * mode only, called once from initializeOutputChannel(). Left unset (debugCrashLog
+	 * becomes a no-op) if this fails, e.g. globalStorage isn't writable yet.
+	 */
+	private initializeCrashDebugLog(context: vscode.ExtensionContext): void {
+		const logPath = path.join(context.globalStorageUri.fsPath, 'crash-debug.log');
+		try {
+			fs.mkdirSync(path.dirname(logPath), { recursive: true });
+			fs.writeFileSync(logPath, `=== session ${vscode.env.sessionId} started ${new Date().toISOString()} ===\n`);
+			this._crashDebugLogPath = logPath;
+		} catch { /* best-effort — debugCrashLog stays a no-op */ }
+	}
+
+	/**
+	 * Synchronous, crash-safe logging for the session-file scan loop. Unlike this.log()
+	 * (the OutputChannel, which buffers in the renderer and can be lost entirely if the
+	 * extension host process dies before it flushes), this hits disk immediately via a
+	 * blocking write — so the last few lines survive even a hard native crash. Dev mode
+	 * only (debugCrashLogPath is never set otherwise): the synchronous I/O cost per call
+	 * is not acceptable for real users, only for diagnosing a crash during development.
+	 */
+	private debugCrashLog(msg: string): void {
+		if (!this._crashDebugLogPath) { return; }
+		try { fs.appendFileSync(this._crashDebugLogPath, `${new Date().toISOString()} ${msg}\n`); } catch { /* best-effort */ }
 	}
 
 	private setupGitHubAuthListener(context: vscode.ExtensionContext): void {
@@ -2045,7 +2105,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					continue;
 				}
 				const sessionFile = queue[readIndex++];
-				try { await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget); } catch { /* skip files that fail to stat/parse */ }
+				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
 			}
@@ -2069,6 +2129,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		return { sessionFiles, preloaded };
+	}
+
+	/**
+	 * Wraps processPreloadQueueFile() with crash-safe start/done/error logging
+	 * (see debugCrashLog) so a hard native crash mid-scan still leaves a trace of
+	 * which file(s) were in flight. A "start" line with no matching "done"/"error"
+	 * for the same file means the process died while processing it.
+	 */
+	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
+		this.debugCrashLog(`start ${sessionFile}`);
+		try {
+			await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+			this.debugCrashLog(`done  ${sessionFile}`);
+		} catch (e) {
+			this.debugCrashLog(`error ${sessionFile}: ${e}`);
+		}
 	}
 
 	private async processPreloadQueueFile(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
@@ -2804,15 +2880,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (sessionFiles.length === 0) { this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?'); }
 		return this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
 			if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
+			this.debugCrashLog(`start [${i + 1}/${sessionFiles.length}] ${sessionFile}`);
 			const fileStats = await this.statSessionFile(sessionFile);
 			const mtime = fileStats.mtime.getTime();
 			const fileSize = fileStats.size;
-			if (mtime < fileLoadCutoffMs) { return null; }
+			if (mtime < fileLoadCutoffMs) { this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile} (too old, skipped)`); return null; }
 			const cachedData = this.getCachedSessionData(sessionFile);
 			const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
 			const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-			if (sessionData.interactions === 0) { return null; }
+			if (sessionData.interactions === 0) { this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile} (0 interactions, skipped)`); return null; }
 			const details = await this.getSessionFileDetails(sessionFile);
+			this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile}`);
 			return { sessionFile, sessionData, details, mtime, wasCached };
 		});
 	}
@@ -5548,7 +5626,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFilePath, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) { return { tokens: 0, thinkingTokens: 0, actualTokens: 0 }; }
 			if (sessionFilePath.endsWith('.jsonl') || this.isJsonlContent(fileContent)) {
-				return this.estimateTokensFromJsonlSession(fileContent);
+				const otelUsage = extractCopilotCliSessionId(sessionFilePath) ? await getCopilotCliOtelUsage(sessionFilePath) : null;
+				return this.estimateTokensFromJsonlSession(fileContent, otelUsage);
 			}
 			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
 			return this.estimateTokensFromJsonSession(sessionContent);
@@ -5623,8 +5702,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return 0;
 	}
 
-	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string } {
-		return _estimateTokensFromJsonlSession(fileContent);
+	private estimateTokensFromJsonlSession(fileContent: string, otelUsage?: Awaited<ReturnType<typeof getCopilotCliOtelUsage>>): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string } {
+		return _estimateTokensFromJsonlSession(fileContent, otelUsage);
 	}
 
 	/**
@@ -8191,6 +8270,76 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   /**
+   * Compare "normal" (ratio-based estimate, or 0 for DB-only chat sessions) token
+   * counts against exact counts from the Copilot CLI OpenTelemetry file export, for
+   * every Copilot CLI session where OTel data is available. Powers the diagnostics
+   * "OTel Delta" tab, which shows how much more accurate/complete the OTel export
+   * makes token tracking versus the estimate-only path.
+   */
+  private async computeCopilotCliOtelComparison(sessionFiles: string[]): Promise<CopilotCliOtelComparison> {
+    const status = await getCopilotCliOtelStatus();
+    const candidates = sessionFiles
+      .map(file => ({ file, sessionId: extractCopilotCliSessionId(file) }))
+      .filter((c): c is { file: string; sessionId: string } => !!c.sessionId);
+
+    const sessions: CopilotCliOtelComparisonSession[] = [];
+    let totalBaselineTokens = 0;
+    let totalOtelTokens = 0;
+
+    for (const { file, sessionId } of candidates) {
+      const otel = await getCopilotCliOtelUsage(file);
+      if (!otel) { continue; }
+
+      // DB-only chat sessions (session-store.db#uuid) have no token data of their own
+      // and previously always reported 0 — that IS the "normal way" baseline for them.
+      let baselineTokens = 0;
+      if (file.endsWith('.jsonl')) {
+        try {
+          const content = await fs.promises.readFile(file, 'utf8');
+          baselineTokens = this.estimateTokensFromJsonlSession(content).actualTokens;
+        } catch { /* unreadable session file — treat baseline as 0 */ }
+      }
+
+      let lastActivity: string | null = null;
+      try { lastActivity = (await this.statSessionFile(file)).mtime.toISOString(); } catch { /* stat failed — leave null, filter treats as unknown */ }
+
+      totalBaselineTokens += baselineTokens;
+      totalOtelTokens += otel.actualTokens;
+      sessions.push({
+        file, sessionId, baselineTokens,
+        otelTokens: otel.actualTokens,
+        delta: otel.actualTokens - baselineTokens,
+        models: Object.keys(otel.modelUsage),
+        lastActivity,
+      });
+    }
+
+    sessions.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    return {
+      otelDirExists: status.dirExists,
+      otelFileCount: status.fileCount,
+      otelSessionsIndexed: status.sessionsIndexed,
+      sessionsChecked: candidates.length,
+      sessionsMatched: sessions.length,
+      totalBaselineTokens,
+      totalOtelTokens,
+      deltaTokens: totalOtelTokens - totalBaselineTokens,
+      sessions: sessions.slice(0, 100),
+    };
+  }
+
+  /** Computes the Copilot CLI OTel comparison, swallowing errors — this is an optional diagnostics enrichment. */
+  private async tryComputeCopilotCliOtelComparison(sessionFiles: string[]): Promise<CopilotCliOtelComparison | null> {
+    try {
+      return await this.computeCopilotCliOtelComparison(sessionFiles);
+    } catch (error) {
+      this.warn(`Failed to compute Copilot CLI OTel comparison: ${error}`);
+      return null;
+    }
+  }
+
+  /**
    * Load all diagnostic data in the background and update the webview progressively.
    */
   private async loadDiagnosticDataInBackground(
@@ -8230,6 +8379,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       );
 
       const githubAuthStatus = this.getGitHubAuthStatus();
+      const otelComparison = await this.tryComputeCopilotCliOtelComparison(sessionFiles);
 
       if (!this.isPanelOpen(panel)) {
         this.log("Diagnostic panel closed during data load, aborting update");
@@ -8249,6 +8399,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         githubAuth: githubAuthStatus,
         toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
         toolFamilies: getToolFamilies(),
+        otelComparison,
       });
 
       this.log("✅ Diagnostic data loaded and sent to webview");
