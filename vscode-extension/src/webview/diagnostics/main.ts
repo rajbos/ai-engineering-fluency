@@ -2315,17 +2315,17 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   }
 }
 
-const worktreeMessageHandlers: Record<string, (message: DiagMessage) => void> = {
-  worktreeRootPicked: handleWorktreeRootPicked,
-  worktreeScanStarted: () => handleWorktreeScanStarted(),
-  worktreeScanRootStarted: handleWorktreeScanRootStarted,
-  worktreeScanRootMarkersFound: handleWorktreeScanRootMarkersFound,
-  worktreeScanRootSkipped: handleWorktreeScanRootSkipped,
-  worktreeScanProgress: handleWorktreeScanProgress,
-  worktreeFound: handleWorktreeFound,
-  worktreeScanComplete: () => handleWorktreeScanComplete(),
-  worktreeScanCancelled: () => handleWorktreeScanCancelled(),
-};
+const worktreeMessageHandlers = new Map<string, (message: DiagMessage) => void>([
+  ["worktreeRootPicked", handleWorktreeRootPicked],
+  ["worktreeScanStarted", () => handleWorktreeScanStarted()],
+  ["worktreeScanRootStarted", handleWorktreeScanRootStarted],
+  ["worktreeScanRootMarkersFound", handleWorktreeScanRootMarkersFound],
+  ["worktreeScanRootSkipped", handleWorktreeScanRootSkipped],
+  ["worktreeScanProgress", handleWorktreeScanProgress],
+  ["worktreeFound", handleWorktreeFound],
+  ["worktreeScanComplete", () => handleWorktreeScanComplete()],
+  ["worktreeScanCancelled", () => handleWorktreeScanCancelled()],
+]);
 
 function setupMessageHandlers(): void {
   window.addEventListener("message", (event) => {
@@ -2346,8 +2346,9 @@ function setupMessageHandlers(): void {
       handleFolderPicked(message);
     } else if (message.command === "folderAnalysisResult") {
       handleFolderAnalysisResult(message);
-    } else if (worktreeMessageHandlers[message.command]) {
-      worktreeMessageHandlers[message.command](message);
+    } else {
+      const worktreeHandler = worktreeMessageHandlers.get(message.command);
+      if (worktreeHandler) { worktreeHandler(message); }
     }
   });
 }
