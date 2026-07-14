@@ -25,6 +25,7 @@ import type {
 	UsageAnalysisAdapterContext,
 } from '../ecosystemAdapter';
 import { CopilotCliStoreAccess, isMicrosoftScoutCwd } from '../copilotCliStore';
+import { getCopilotCliOtelUsage } from '../copilotCliOtel';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
 import { normalizePath } from '../utils/pathUtils';
@@ -100,8 +101,11 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		return fs.promises.stat(sessionFile);
 	}
 
-	async getTokens(_sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		// session-store.db does not store token counts
+	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
+		// session-store.db does not store token counts; OpenTelemetry file export
+		// (when enabled) gives exact numbers for the same session UUID.
+		const otel = await getCopilotCliOtelUsage(sessionFile);
+		if (otel) { return { tokens: otel.actualTokens, thinkingTokens: 0, actualTokens: otel.actualTokens }; }
 		return { tokens: 0, thinkingTokens: 0, actualTokens: 0 };
 	}
 
@@ -112,8 +116,9 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		return 0;
 	}
 
-	async getModelUsage(_sessionFile: string): Promise<ModelUsage> {
-		return {};
+	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
+		const otel = await getCopilotCliOtelUsage(sessionFile);
+		return otel?.modelUsage ?? {};
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {

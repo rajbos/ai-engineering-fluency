@@ -275,6 +275,23 @@ body {
 	margin-top: 6px;
 }
 
+.otel-delta-positive {
+	color: var(--success-fg);
+}
+
+.otel-delta-negative {
+	color: var(--error-fg);
+}
+
+.info-box pre {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 8px 10px;
+	font-size: 12px;
+	overflow-x: auto;
+}
+
 .context-ref-filter {
 	cursor: pointer;
 	padding: 2px 6px;
@@ -785,6 +802,28 @@ border: 1px solid #1f6feb;
 	min-width: 280px;
 }
 
+.otel-delta-period-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 20px;
+}
+
+.otel-delta-period-row label {
+	color: var(--text-secondary);
+	font-size: 13px;
+}
+
+.otel-delta-period-select {
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, var(--border-color));
+	border-radius: 4px;
+	padding: 4px 8px;
+	font-size: 13px;
+	cursor: pointer;
+}
+
 .analyzer-loading {
 	display: flex;
 	align-items: center;
@@ -796,6 +835,70 @@ border: 1px solid #1f6feb;
 
 @keyframes spin {
 	to { transform: rotate(360deg); }
+}
+
+/* Worktrees tab */
+.worktree-roots-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.worktree-root-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 6px 10px;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+}
+
+.worktree-root-item span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.worktree-progress-bar {
+	height: 6px;
+	border-radius: 3px;
+	background: var(--bg-tertiary);
+	overflow: hidden;
+	margin-top: 8px;
+}
+
+.worktree-progress-fill {
+	height: 100%;
+	background: var(--link-color);
+	transition: width 0.2s ease;
+}
+
+.worktree-group {
+	margin-bottom: 16px;
+}
+
+.worktree-group-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	padding: 6px 4px;
+	border-bottom: 1px solid var(--border-color);
+	margin-bottom: 6px;
+}
+
+.worktree-group-title {
+	font-weight: 700;
+	font-size: 13px;
+	color: var(--text-primary);
+}
+
+.worktree-group-stats {
+	font-size: 12px;
+	color: var(--text-muted);
 }
 
 

@@ -1090,4 +1090,6 @@
   ,"mcp__microsoft_playwright-mcp__browser_take_screenshot": "Playwright MCP: Browser Take Screenshot"
   ,"mcp__microsoft_playwright-mcp__browser_wait_for": "Playwright MCP: Browser Wait For"
   ,"tool_search_tool": "Tool Search"
+  ,"configure_notebook": "Notebook Configure"
+  ,"restart_notebook_kernel": "Kernel Restart"
 }

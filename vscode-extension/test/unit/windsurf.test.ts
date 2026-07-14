@@ -218,3 +218,59 @@ test('countToolCalls: returns an empty breakdown when there are no tool steps', 
 	assert.deepEqual(windsurf.countToolCalls(steps), { total: 0, byTool: {} });
 });
 
+
+// ----- Devin (Cognition Labs desktop IDE — fork/rebrand of Windsurf) support -----
+// Devin bundles the same codeium.windsurf extension and shares the exact same
+// ~/.codeium/windsurf/cascade storage. It is distinguished only by vscode.env.appName
+// and by the devin://trajectory/{id} virtual-path scheme used for live API sessions.
+
+test('isRunningInDevin: true only when appName contains "devin"', () => {
+	const originalAppName = (vscode.env as any).appName;
+	try {
+		(vscode.env as any).appName = 'Devin';
+		assert.equal(windsurf.isRunningInDevin(), true);
+		assert.equal(windsurf.isRunningInWindsurf(), false);
+
+		(vscode.env as any).appName = 'Windsurf';
+		assert.equal(windsurf.isRunningInDevin(), false);
+		assert.equal(windsurf.isRunningInWindsurf(), true);
+
+		(vscode.env as any).appName = 'Visual Studio Code';
+		assert.equal(windsurf.isRunningInDevin(), false);
+		assert.equal(windsurf.isRunningInWindsurf(), false);
+	} finally {
+		(vscode.env as any).appName = originalAppName;
+	}
+});
+
+test('isRunningInWindsurfFamily: true for either Windsurf or Devin, false otherwise', () => {
+	const originalAppName = (vscode.env as any).appName;
+	try {
+		(vscode.env as any).appName = 'Devin';
+		assert.equal(windsurf.isRunningInWindsurfFamily(), true);
+
+		(vscode.env as any).appName = 'Windsurf';
+		assert.equal(windsurf.isRunningInWindsurfFamily(), true);
+
+		(vscode.env as any).appName = 'Visual Studio Code';
+		assert.equal(windsurf.isRunningInWindsurfFamily(), false);
+	} finally {
+		(vscode.env as any).appName = originalAppName;
+	}
+});
+
+test('isWindsurfSessionFile: recognises both windsurf:// and devin:// trajectory schemes', () => {
+	assert.equal(windsurf.isWindsurfSessionFile('windsurf://trajectory/abc123'), true);
+	assert.equal(windsurf.isWindsurfSessionFile('devin://trajectory/abc123'), true);
+	assert.equal(windsurf.isWindsurfSessionFile('/some/other/path.json'), false);
+});
+
+test('getFamilyEditorName: labels sessions per their virtual-path scheme', () => {
+	assert.equal(windsurf.getFamilyEditorName('devin://trajectory/abc123'), 'Devin');
+	assert.equal(windsurf.getFamilyEditorName('windsurf://trajectory/abc123'), 'Windsurf');
+});
+
+test('extractTrajectoryId: strips either windsurf:// or devin:// trajectory prefix', () => {
+	assert.equal(windsurf.extractTrajectoryId('windsurf://trajectory/abc123'), 'abc123');
+	assert.equal(windsurf.extractTrajectoryId('devin://trajectory/abc123'), 'abc123');
+});

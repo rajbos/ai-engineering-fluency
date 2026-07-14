@@ -1,7 +1,7 @@
 ---
 title: Documentation Index
 created: 2026-01-19
-updated: 2026-05-15
+updated: 2026-07-12
 status: active
 type: reference
 tags: [documentation, index]
@@ -22,6 +22,7 @@ Essential reference documents covering the data model, scoring rules, and tracke
 | [TRACKABLE-DATA.md](TRACKABLE-DATA.md) | All metrics extractable from GitHub Copilot Chat session logs |
 | [USAGE-ANALYSIS.md](USAGE-ANALYSIS.md) | Guide to the Usage Analysis Dashboard features and tracked metrics |
 | [COPILOT-CLI-FORMAT-CHANGES.md](COPILOT-CLI-FORMAT-CHANGES.md) | Breaking changes to Copilot CLI session log format and their impact |
+| [COPILOT-CLI-OTEL-EXPORT.md](COPILOT-CLI-OTEL-EXPORT.md) | Enabling Copilot CLI's OpenTelemetry file export for exact token counts |
 
 ## Component Documentation
 
