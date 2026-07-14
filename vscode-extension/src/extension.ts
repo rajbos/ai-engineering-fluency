@@ -221,6 +221,7 @@ import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webview
 import { isGuidMcpTool } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { determineOnboardingAction } from './onboarding';
+import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -363,6 +364,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private static readonly CACHE_VERSION = 59; // Detect Auto model and Foundry local models from request-level fields
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
+	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
+	private static readonly NOTIFIED_EDITORS_STATE_KEY = 'discovery.notifiedEditors';
 
 	private diagnosticsPanel?: vscode.WebviewPanel;
 	// Tracks whether the diagnostics panel has already received its session files
@@ -1496,6 +1499,43 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	private async storeDiscoveredEditorsAndNotify(discoveredEditors: Iterable<string>): Promise<void> {
+		const existingSeenEditors = this.context.globalState.get<string[] | undefined>(
+			CopilotTokenTracker.SEEN_EDITORS_STATE_KEY,
+			undefined,
+		);
+		const existingNotifiedEditors = this.context.globalState.get<string[] | undefined>(
+			CopilotTokenTracker.NOTIFIED_EDITORS_STATE_KEY,
+			undefined,
+		);
+		const { seenEditors, newEditors } = mergeSeenEditors(existingSeenEditors, discoveredEditors);
+
+		const changed =
+			existingSeenEditors === undefined ||
+			existingSeenEditors.length !== seenEditors.length ||
+			existingSeenEditors.some((editor, i) => editor !== seenEditors[i]);
+		if (changed) {
+			await this.context.globalState.update(CopilotTokenTracker.SEEN_EDITORS_STATE_KEY, seenEditors);
+		}
+		const { notifiedEditors, editorsToNotify } = mergeNotifiedEditors(existingNotifiedEditors, newEditors);
+		const notifiedChanged =
+			existingNotifiedEditors === undefined ||
+			existingNotifiedEditors.length !== notifiedEditors.length ||
+			existingNotifiedEditors.some((editor, i) => editor !== notifiedEditors[i]);
+		if (notifiedChanged) {
+			await this.context.globalState.update(CopilotTokenTracker.NOTIFIED_EDITORS_STATE_KEY, notifiedEditors);
+		}
+		if (editorsToNotify.length === 0) { return; }
+
+		const names = editorsToNotify.join(', ');
+		this.log(`🆕 New editor${editorsToNotify.length > 1 ? 's' : ''} discovered: ${names}`);
+		void vscode.window.showInformationMessage(
+			editorsToNotify.length === 1
+				? `🆕 New editor detected: ${editorsToNotify[0]}. New session data from this editor is now included in your stats.`
+				: `🆕 New editors detected: ${names}. New session data from these editors is now included in your stats.`
+		);
+	}
+
 	private setStatusBarText(text: string): void {
 		this._statusBarBaseText = text;
 		this.statusBarItem.text = this._devBranch ? `${text} [${this._devBranch}]` : text;
@@ -2255,6 +2295,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
 		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
+		try {
+			await this.storeDiscoveredEditorsAndNotify(discoveredEditorSet);
+		} catch (error) {
+			this.warn(`Failed to update seen-editor state: ${error}`);
+		}
 
 		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
 		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
@@ -8082,6 +8127,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       openDisplaySettings: () => this.dispatch('openDisplaySettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.display")),
       openToolFamiliesSettings: () => this.dispatch('openToolFamiliesSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.toolFamilies")),
       resetDebugCounters: () => this.dispatch('resetDebugCounters:diagnostics', () => this.diagHandleResetDebugCounters()),
+      resetDiscoveredEditors: () => this.dispatch('resetDiscoveredEditors:diagnostics', () => this.diagHandleResetDiscoveredEditors()),
       authenticateGitHub: () => this.dispatch('authenticateGitHub:diagnostics', () => this.diagHandleGitHubAuth(true)),
       signOutGitHub: () => this.dispatch('signOutGitHub:diagnostics', () => this.diagHandleGitHubAuth(false)),
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
@@ -8220,6 +8266,13 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     await this.context.globalState.update('news.fluencyScoreBanner.v1.dismissed', false);
     await this.context.globalState.update('news.unknownMcpTools.dismissedVersion', undefined);
     vscode.window.showInformationMessage('Debug counters and dismissed flags have been reset.');
+    await this.showDiagnosticReport();
+  }
+
+  private async diagHandleResetDiscoveredEditors(): Promise<void> {
+    await this.context.globalState.update(CopilotTokenTracker.SEEN_EDITORS_STATE_KEY, undefined);
+    await this.context.globalState.update(CopilotTokenTracker.NOTIFIED_EDITORS_STATE_KEY, undefined);
+    vscode.window.showInformationMessage('Discovered editor tracking has been reset.');
     await this.showDiagnosticReport();
   }
 

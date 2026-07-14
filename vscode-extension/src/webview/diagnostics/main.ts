@@ -1541,6 +1541,9 @@ function handleGlobalClickEvent(event: MouseEvent): void {
   if (target.id === "btn-reset-debug-counters") {
     vscode.postMessage({ command: "resetDebugCounters" });
   }
+  if (target.id === "btn-reset-discovered-editors") {
+    vscode.postMessage({ command: "resetDiscoveredEditors" });
+  }
   if (target.classList.contains("debug-counter-set")) {
     handleDebugCounterSetClick(target);
   }
@@ -2093,6 +2096,22 @@ ${quotaContent}
 </div>`;
 }
 
+function renderEditorDiscoveryCardHtml(): string {
+  return `<div class="backend-card">
+<h4>🆕 Editor Discovery Notifications</h4>
+<p>
+The extension remembers which editors it has already seen so each editor triggers a discovery notification only once.
+Use this reset to clear that memory and start tracking from scratch.
+</p>
+<div class="button-group">
+<button class="button secondary" id="btn-reset-discovered-editors">
+<span>♻️</span>
+<span>Reset Discovered Editors</span>
+</button>
+</div>
+</div>`;
+}
+
 function renderDiagDisplayTabHtml(data: DiagnosticsData): string {
   const showTokens = data.displaySettings?.showTokens ?? 'both';
   const showCost = data.displaySettings?.showCost ?? 'none';
@@ -2151,6 +2170,7 @@ ${
 }
 </div>
 ${renderQuotaCardHtml(data)}
+${renderEditorDiscoveryCardHtml()}
 <div class="backend-card">
 <h4>🔢 Number Formatting</h4>
 <p>
