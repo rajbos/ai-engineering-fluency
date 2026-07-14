@@ -2441,18 +2441,25 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (typeof this._followerResyncTimer.unref === 'function') { this._followerResyncTimer.unref(); }
 	}
 
-	private buildProgressCallback(silent: boolean, getEditors?: () => { icon: string; name: string }[]): ((completed: number, total: number) => void) | undefined {
-		if (silent) { return undefined; }
+	private buildProgressCallback(silent: boolean, getEditors?: () => { icon: string; name: string }[]): (completed: number, total: number) => void {
+		// Always build a callback regardless of `silent` so that a silent background
+		// refresh that coalesces with an open loading panel still sends progress
+		// messages to it.  Status-bar updates remain gated on !silent; loading-panel
+		// messages are gated inside sendLoadingPanelMessage (checks
+		// _detailsPanelIsLoading), so they are only delivered when the panel is
+		// actually visible.
 		let parsingStepNotified = false;
 		let lastProgressSentMs = 0;
 		let lastPercentage = -1;
 		return (completed: number, total: number) => {
 			const percentage = Math.round((completed / total) * 100);
-			// Only touch the status bar text when the rounded percentage actually changes,
-			// to avoid needless status-bar relayout on every callback.
-			if (percentage !== lastPercentage) {
-				lastPercentage = percentage;
-				this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
+			if (!silent) {
+				// Only touch the status bar text when the rounded percentage actually
+				// changes, to avoid needless status-bar relayout on every callback.
+				if (percentage !== lastPercentage) {
+					lastPercentage = percentage;
+					this.setStatusBarText(`$(loading~spin) Analyzing Logs: ${percentage}%`);
+				}
 			}
 			if (!parsingStepNotified) {
 				parsingStepNotified = true;
@@ -2460,15 +2467,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this._loadingEditors = editors;
 				const msg: Record<string, unknown> = { command: 'loadingStep', step: 'parsing', total, editors };
 				this.sendLoadingPanelMessage(msg);
-				// Set the hover tooltip exactly once when parsing starts, using the
-				// indeterminate (self-animating SMIL) variant. The tooltip is never
-				// reassigned during parsing, so the hover popup no longer flickers on
-				// every progress redraw — the previous per-500ms reassignment forced
-				// VS Code to rebuild the hover and reload the data-URI <img>. The live
-				// climbing percentage stays visible in the status bar text instead.
-				// Skip entirely when the loading panel is already open — it shows progress itself.
-				if (!this._detailsPanelIsLoading) {
-					this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing');
+				if (!silent) {
+					// Set the hover tooltip exactly once when parsing starts, using the
+					// indeterminate (self-animating SMIL) variant. The tooltip is never
+					// reassigned during parsing, so the hover popup no longer flickers on
+					// every progress redraw — the previous per-500ms reassignment forced
+					// VS Code to rebuild the hover and reload the data-URI <img>. The live
+					// climbing percentage stays visible in the status bar text instead.
+					// Skip entirely when the loading panel is already open — it shows progress itself.
+					if (!this._detailsPanelIsLoading) {
+						if (!silent) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('parsing'); }
+					}
 				}
 			}
 			// The hover popup intentionally stays put during parsing; only the live
