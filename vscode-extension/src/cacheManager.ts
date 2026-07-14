@@ -89,7 +89,9 @@ export class CacheManager {
 	 * so we only need to distinguish between production and development (debug) mode.
 	 * In development mode, each VS Code window gets a unique cache identifier using
 	 * the session ID, preventing the Extension Development Host from sharing/fighting
-	 * with the main dev window's cache.
+	 * with the main dev window's cache. Each such session's snapshot/lock files are
+	 * orphaned once that window closes — see cleanupStaleDevCacheFiles(), which is
+	 * responsible for reclaiming them.
 	 */
 	getCacheIdentifier(): string {
 		if (this.context.extensionMode === vscode.ExtensionMode.Development) {
@@ -99,6 +101,39 @@ export class CacheManager {
 			return `dev-${hash}`;
 		}
 		return 'prod';
+	}
+
+	/**
+	 * Deletes dev-mode cache/lock files left behind by previous Extension Development
+	 * Host sessions (getCacheIdentifier() mints a new dev-<hash> identifier per launch,
+	 * so every past debug session's snapshot is orphaned once that window closes).
+	 * Only touches files older than STALE_DEV_CACHE_AGE_MS, so the current and any
+	 * still-running sessions' files are never at risk. Best-effort: failures (e.g. a
+	 * file locked by another window) are swallowed, not surfaced.
+	 */
+	async cleanupStaleDevCacheFiles(): Promise<void> {
+		if (this.context.extensionMode !== vscode.ExtensionMode.Development) { return; }
+		const STALE_DEV_CACHE_AGE_MS = 24 * 60 * 60 * 1000;
+		const dir = this.context.globalStorageUri.fsPath;
+		try {
+			const entries = await fs.promises.readdir(dir);
+			const now = Date.now();
+			let removedCount = 0;
+			for (const name of entries) {
+				if (!/^(cache|refresh)_dev-[0-9a-f]+\.(snapshot\.json|lock)$/.test(name)) { continue; }
+				const filePath = path.join(dir, name);
+				try {
+					const stat = await fs.promises.stat(filePath);
+					if (now - stat.mtimeMs > STALE_DEV_CACHE_AGE_MS) {
+						await fs.promises.unlink(filePath);
+						removedCount++;
+					}
+				} catch { /* file removed/locked concurrently — skip */ }
+			}
+			if (removedCount > 0) {
+				this.deps.log(`Cleaned up ${removedCount} stale dev cache file(s) from previous debug sessions`);
+			}
+		} catch { /* globalStorage dir missing or unreadable — nothing to clean up */ }
 	}
 
 	/**

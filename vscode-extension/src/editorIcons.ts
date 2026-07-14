@@ -15,6 +15,8 @@ export const EDITOR_ICON_MAP: Record<string, string> = {
 	'Copilot CLI': '🤖',
 	'Crush': '🦾',
 	'Cursor': '🖱️',
+	'Devin': '🧠',
+	'Devin CLI': '🧠',
 	'Eclipse': '🌑',
 	'Gemini CLI': '💎',
 	'JetBrains': '🧩',

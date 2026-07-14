@@ -35,6 +35,7 @@ import {
 	buildReasoningEffortTimeline,
 	extractResponseItemText,
 } from './tokenEstimation';
+import { extractCopilotCliSessionId, getCopilotCliOtelUsage } from './copilotCliOtel';
 import { getModelBillingProvider } from './chartDataBuilder';
 import {
 	getModeType,
@@ -2177,7 +2178,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		if (eco && isAnalyzable(eco)) {
 			return eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
 		}
-		if (sessionFile.startsWith('windsurf://')) {
+		if (sessionFile.startsWith('windsurf://') || sessionFile.startsWith('devin://')) {
 			return analysis;
 		}
 
@@ -2513,7 +2514,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco) { return eco.getModelUsage(sessionFile); }
 	}
-	if (sessionFile.startsWith('windsurf://')) {
+	if (sessionFile.startsWith('windsurf://') || sessionFile.startsWith('devin://')) {
 		return modelUsage;
 	}
 	try {
@@ -2521,6 +2522,12 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 		if (isUuidPointerFile(fileContent)) { return modelUsage; }
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
 		if (isJsonl) {
+			// Copilot CLI events.jsonl: prefer exact per-model usage from the OpenTelemetry
+			// file export (when enabled) over the ratio-based estimate below.
+			if (extractCopilotCliSessionId(sessionFile)) {
+				const otel = await getCopilotCliOtelUsage(sessionFile);
+				if (otel && Object.keys(otel.modelUsage).length > 0) { return otel.modelUsage; }
+			}
 			const lines = fileContent.trim().split('\n');
 			const result = _gmusProcessJsonlContent(lines, modelUsage, deps);
 			return result ?? modelUsage;
