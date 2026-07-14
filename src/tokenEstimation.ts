@@ -4,6 +4,7 @@
  */
 import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
+import type { CopilotCliOtelSessionUsage } from './copilotCliOtel';
 
 /** Minimum request shape needed by getModelFromRequest. */
 interface ModelRequestSource {
@@ -693,12 +694,26 @@ export function selectTokenEstimationStrategy(lines: string[]): TokenEstimationS
 
 /**
  * Estimate tokens from a JSONL session file (used by Copilot CLI/Agent mode and VS Code incremental format)
- * Each line is a separate JSON object representing an event in the session
+ * Each line is a separate JSON object representing an event in the session.
+ *
+ * `otelUsage`, when supplied by the caller (resolved via getCopilotCliOtelUsage against
+ * the session's file path), overrides actualTokens/cacheReadTokens/copilotNanoAiu with
+ * exact counts from the Copilot CLI OpenTelemetry file export instead of the ratio-based
+ * estimate below — the same "exact data wins" precedent as a session.shutdown event.
  */
-export function estimateTokensFromJsonlSession(fileContent: string): TokenEstimationResult {
+export function estimateTokensFromJsonlSession(fileContent: string, otelUsage?: CopilotCliOtelSessionUsage | null): TokenEstimationResult {
 	const lines = fileContent.trim().split('\n');
 	const strategy = selectTokenEstimationStrategy(lines);
-	return strategy.estimate(lines);
+	const result = strategy.estimate(lines);
+	if (otelUsage) {
+		return {
+			...result,
+			actualTokens: otelUsage.actualTokens,
+			cacheReadTokens: otelUsage.cacheReadTokens,
+			copilotNanoAiu: otelUsage.nanoAiu || result.copilotNanoAiu,
+		};
+	}
+	return result;
 }
 
 /**

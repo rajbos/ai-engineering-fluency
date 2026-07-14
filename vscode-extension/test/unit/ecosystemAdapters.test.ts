@@ -27,6 +27,7 @@ import { CopilotCliAdapter } from '../../../src/adapters/copilotCliAdapter';
 import { AntigravityAdapter } from '../../../src/adapters/antigravityAdapter';
 import { KiroAdapter } from '../../../src/adapters/kiroAdapter';
 import { KiroCliAdapter } from '../../../src/adapters/kiroCliAdapter';
+import { DevinCliAdapter } from '../../../src/adapters/devinCliAdapter';
 
 import { OpenCodeDataAccess } from '../../../src/opencode';
 import { CrushDataAccess } from '../../../src/crush';
@@ -40,6 +41,7 @@ import { GeminiCliDataAccess } from '../../../src/geminicli';
 import { AntigravityDataAccess } from '../../../src/antigravity';
 import { KiroDataAccess } from '../../../src/kiro';
 import { KiroCliDataAccess } from '../../../src/kirocli';
+import { DevinCliDataAccess } from '../../../src/devinCli';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -59,6 +61,7 @@ const geminiCliDA = new GeminiCliDataAccess();
 const antigravityDA = new AntigravityDataAccess();
 const kiroDA = new KiroDataAccess();
 const kiroCliDA = new KiroCliDataAccess();
+const devinCliDA = new DevinCliDataAccess();
 
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
 const crushAdapter = new CrushAdapter(crushDA);
@@ -74,22 +77,23 @@ const copilotCliAdapter = new CopilotCliAdapter();
 const antigravityAdapter = new AntigravityAdapter(antigravityDA);
 const kiroAdapter = new KiroAdapter(kiroDA);
 const kiroCliAdapter = new KiroCliAdapter(kiroCliDA);
+const devinCliAdapter = new DevinCliAdapter(devinCliDA);
 
 const allAdapters: IEcosystemAdapter[] = [
     openCodeAdapter, crushAdapter, continueAdapter, eclipseAdapter,
     claudeCodeAdapter, claudeDesktopAdapter, visualStudioAdapter, mistralVibeAdapter, geminiCliAdapter,
-    copilotChatAdapter, copilotCliAdapter, antigravityAdapter, kiroAdapter, kiroCliAdapter,
+    copilotChatAdapter, copilotCliAdapter, antigravityAdapter, kiroAdapter, kiroCliAdapter, devinCliAdapter,
 ];
 
 // ---------------------------------------------------------------------------
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 14 adapters', () => {
+test('isDiscoverable: returns true for all 15 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 14);
+    assert.equal(allAdapters.length, 15);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -123,6 +127,7 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(antigravityAdapter.id, 'antigravity');
     assert.equal(kiroAdapter.id, 'kiro');
     assert.equal(kiroCliAdapter.id, 'kirocli');
+    assert.equal(devinCliAdapter.id, 'devincli');
 });
 
 // ---------------------------------------------------------------------------
@@ -239,6 +244,17 @@ test('KiroCliAdapter.handles: recognises ~/.kiro/sessions/cli metadata paths', (
 test('KiroCliAdapter.handles: rejects the .jsonl message log and unrelated paths', () => {
     assert.ok(!kiroCliAdapter.handles(path.join(os.homedir(), '.kiro', 'sessions', 'cli', 'abc.jsonl')));
     assert.ok(!kiroCliAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
+});
+
+test('DevinCliAdapter.handles: recognises the sessions.db virtual path scheme', () => {
+    const p = `${devinCliDA.getDbPath()}#sess-abc123`;
+    assert.ok(devinCliAdapter.handles(p));
+});
+
+test('DevinCliAdapter.handles: rejects unrelated paths and the Devin desktop devin:// scheme', () => {
+    assert.ok(!devinCliAdapter.handles('devin://trajectory/abc123'));
+    assert.ok(!devinCliAdapter.handles(path.join(os.homedir(), '.crush', 'crush.db#abc')));
+    assert.ok(!devinCliAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
 });
 
 test('KiroAdapter.handles: recognises kiro.kiroagent workspace-sessions paths', () => {

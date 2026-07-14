@@ -99,6 +99,7 @@ import { PiDataAccess } from '../../src/pi';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
+import { extractCopilotCliSessionId, getCopilotCliOtelUsage, getCopilotCliOtelStatus } from '../../src/copilotCliOtel';
 import { createWakeupGate } from './utils/promises';
 
 // --- Session parsing & token estimation ---
@@ -220,6 +221,7 @@ import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webview
 import { isGuidMcpTool } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { determineOnboardingAction } from './onboarding';
+import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 
 type LocalViewRegressionProbeResult = {
   pass: boolean;
@@ -331,11 +333,39 @@ function _scdlDistributeToDays(
 	return result;
 }
 
+/** One Copilot CLI session where OTel export data was found, for the diagnostics "OTel Delta" tab. */
+interface CopilotCliOtelComparisonSession {
+	file: string;
+	sessionId: string;
+	/** Token count the extension would have reported before OTel enrichment (0 for DB-only chat sessions). */
+	baselineTokens: number;
+	otelTokens: number;
+	delta: number;
+	models: string[];
+	/** Session file mtime (ISO string), used for the tab's date-range filter. Null if stat failed. */
+	lastActivity: string | null;
+}
+
+/** Summary of how much more/different token tracking is with the OTel export versus the estimate-only path. */
+interface CopilotCliOtelComparison {
+	otelDirExists: boolean;
+	otelFileCount: number;
+	otelSessionsIndexed: number;
+	sessionsChecked: number;
+	sessionsMatched: number;
+	totalBaselineTokens: number;
+	totalOtelTokens: number;
+	deltaTokens: number;
+	sessions: CopilotCliOtelComparisonSession[];
+}
+
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
 	private static readonly CACHE_VERSION = 59; // Detect Auto model and Foundry local models from request-level fields
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
+	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
+	private static readonly NOTIFIED_EDITORS_STATE_KEY = 'discovery.notifiedEditors';
 
 	private diagnosticsPanel?: vscode.WebviewPanel;
 	// Tracks whether the diagnostics panel has already received its session files
@@ -371,6 +401,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private readonly extensionUri: vscode.Uri;
 	private readonly context: vscode.ExtensionContext;
 	private _devBranch: string | undefined;
+	/** Dev-mode-only path for debugCrashLog(); undefined disables it entirely (never set outside Development mode). */
+	private _crashDebugLogPath: string | undefined;
 	private localRegressionSampleDataDir?: string;
 	private pendingLocalViewRegressionProbe?: ViewRegressionProbeConfig;
 	private readonly localViewRegressionResolvers = new Map<string, (result: LocalViewRegressionProbeResult) => void>();
@@ -500,12 +532,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _sessionRestorePromise: Promise<void> | undefined;
 	// Promise that resolves when the initial cache load from disk completes
 	private _cacheLoadPromise: Promise<void> | undefined;
+	/**
+	 * OpenCode DB virtual session paths discovered at startup that are missing from the
+	 * persisted cache. These paths bypass the mtime cutoff once so new DB sessions are
+	 * picked up even when opencode.db's file mtime lags behind per-session updates.
+	 */
+	private readonly _startupOpenCodeDbMisses = new Set<string>();
 	/** True when the user explicitly signed out from our extension this VS Code session. Gated by globalState so it survives reloads. */
 	private _githubSignedOutByUser: boolean = false;
 	/** Resolved Copilot plan details fetched from copilot_internal/user after sign-in. */
 	private _copilotPlanResolved: { planId: string; planName: string; monthlyAiCreditsUsd: number; monthlyPremiumRequests: number | null; isMCPEnabled?: boolean } | undefined;
 	/** Quota entitlements from copilot_internal/user response (e.g., premium_interactions entitlement). */
-	private _copilotQuotaEntitlements: { premium_interactions?: number; completions?: number } = {};
+	private _copilotQuotaEntitlements: {
+		premium_interactions?: number;
+		completions?: number;
+		/** Raw quota_remaining from the premium_interactions snapshot (in AI Credits). */
+		premium_interactions_remaining?: number;
+	} = {};
 
 	// Cached PR stats result for the repos tab
 	private _lastRepoPrStats?: RepoPrStatsResult;
@@ -1133,9 +1176,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.context = context;
 		this.initializeAdapters(extensionUri, context);
 		this.initializeOutputChannel(context);
-		this._cacheLoadPromise = this.cacheManager.loadCacheFromStorage().finally(() => {
+		this._cacheLoadPromise = this.cacheManager.loadCacheFromStorage().then(async () => {
+			await this.queueMissingOpenCodeDbSessionsFromCache();
+		}).finally(() => {
 			this._cacheLoadPromise = undefined;
 		});
+		// Best-effort housekeeping: reclaim cache/lock files orphaned by previous
+		// Extension Development Host sessions. Never blocks activation.
+		void this.cacheManager.cleanupStaleDevCacheFiles().catch((e) => this.warn(`Stale dev cache cleanup failed: ${e}`));
 		this._sessionRestorePromise = this.restoreGitHubSession();
 		this.setupGitHubAuthListener(context);
 		this.sessionDiscovery.checkCopilotExtension();
@@ -1189,6 +1237,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					cwd: context.extensionUri.fsPath, encoding: 'utf8', timeout: 5000, stdio: ['pipe', 'pipe', 'pipe']
 				}).trim();
 			} catch { /* Ignore git errors in dev mode */ }
+			this.initializeCrashDebugLog(context);
 		}
 		this.outputChannel = vscode.window.createOutputChannel('AI Engineering Fluency');
 		context.subscriptions.push(this.outputChannel);
@@ -1206,6 +1255,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 			} catch { /* git unavailable */ }
 		}
 		this.log(startupInfo);
+	}
+
+	/**
+	 * Sets up debugCrashLog()'s target file and truncates it for this session. Dev
+	 * mode only, called once from initializeOutputChannel(). Left unset (debugCrashLog
+	 * becomes a no-op) if this fails, e.g. globalStorage isn't writable yet.
+	 */
+	private initializeCrashDebugLog(context: vscode.ExtensionContext): void {
+		const logPath = path.join(context.globalStorageUri.fsPath, 'crash-debug.log');
+		try {
+			fs.mkdirSync(path.dirname(logPath), { recursive: true });
+			fs.writeFileSync(logPath, `=== session ${vscode.env.sessionId} started ${new Date().toISOString()} ===\n`);
+			this._crashDebugLogPath = logPath;
+		} catch { /* best-effort — debugCrashLog stays a no-op */ }
+	}
+
+	/**
+	 * Synchronous, crash-safe logging for the session-file scan loop. Unlike this.log()
+	 * (the OutputChannel, which buffers in the renderer and can be lost entirely if the
+	 * extension host process dies before it flushes), this hits disk immediately via a
+	 * blocking write — so the last few lines survive even a hard native crash. Dev mode
+	 * only (debugCrashLogPath is never set otherwise): the synchronous I/O cost per call
+	 * is not acceptable for real users, only for diagnosing a crash during development.
+	 */
+	private debugCrashLog(msg: string): void {
+		if (!this._crashDebugLogPath) { return; }
+		try { fs.appendFileSync(this._crashDebugLogPath, `${new Date().toISOString()} ${msg}\n`); } catch { /* best-effort */ }
 	}
 
 	private setupGitHubAuthListener(context: vscode.ExtensionContext): void {
@@ -1290,6 +1366,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this.error('Error in initial update:', error);
 			}
 		}, 3000);
+	}
+
+	private async queueMissingOpenCodeDbSessionsFromCache(): Promise<void> {
+		try {
+			const dbSessionIds = await this.openCode.discoverOpenCodeDbSessions();
+			if (dbSessionIds.length === 0) { return; }
+			const cachedOpenCodeIds = new Set<string>();
+			for (const filePath of this.cacheManager.cache.keys()) {
+				if (!this.openCode.isOpenCodeDbSession(filePath)) { continue; }
+				const sessionId = this.openCode.getOpenCodeSessionId(filePath);
+				if (sessionId) { cachedOpenCodeIds.add(sessionId); }
+			}
+			const dataDir = this.openCode.getOpenCodeDataDir();
+			let queued = 0;
+			for (const sessionId of dbSessionIds) {
+				if (cachedOpenCodeIds.has(sessionId)) { continue; }
+				this._startupOpenCodeDbMisses.add(path.join(dataDir, `opencode.db#${sessionId}`));
+				queued++;
+			}
+			if (queued > 0) {
+				if (queued > 0) {
+			this.log(`Queued ${queued} uncached OpenCode DB session(s) for startup refresh`);
+		}
+				this.sessionDiscovery.clearCache();
+			}
+		} catch (error) {
+			this.warn(`OpenCode startup DB check skipped: ${error}`);
+		}
 	}
 
 	/**
@@ -1434,6 +1538,43 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this.analysisPanel?.webview.postMessage({ command: 'highlightUnknownTools' });
 			}, 500);
 		}
+	}
+
+	private async storeDiscoveredEditorsAndNotify(discoveredEditors: Iterable<string>): Promise<void> {
+		const existingSeenEditors = this.context.globalState.get<string[] | undefined>(
+			CopilotTokenTracker.SEEN_EDITORS_STATE_KEY,
+			undefined,
+		);
+		const existingNotifiedEditors = this.context.globalState.get<string[] | undefined>(
+			CopilotTokenTracker.NOTIFIED_EDITORS_STATE_KEY,
+			undefined,
+		);
+		const { seenEditors, newEditors } = mergeSeenEditors(existingSeenEditors, discoveredEditors);
+
+		const changed =
+			existingSeenEditors === undefined ||
+			existingSeenEditors.length !== seenEditors.length ||
+			existingSeenEditors.some((editor, i) => editor !== seenEditors[i]);
+		if (changed) {
+			await this.context.globalState.update(CopilotTokenTracker.SEEN_EDITORS_STATE_KEY, seenEditors);
+		}
+		const { notifiedEditors, editorsToNotify } = mergeNotifiedEditors(existingNotifiedEditors, newEditors);
+		const notifiedChanged =
+			existingNotifiedEditors === undefined ||
+			existingNotifiedEditors.length !== notifiedEditors.length ||
+			existingNotifiedEditors.some((editor, i) => editor !== notifiedEditors[i]);
+		if (notifiedChanged) {
+			await this.context.globalState.update(CopilotTokenTracker.NOTIFIED_EDITORS_STATE_KEY, notifiedEditors);
+		}
+		if (editorsToNotify.length === 0) { return; }
+
+		const names = editorsToNotify.join(', ');
+		this.log(`🆕 New editor${editorsToNotify.length > 1 ? 's' : ''} discovered: ${names}`);
+		void vscode.window.showInformationMessage(
+			editorsToNotify.length === 1
+				? `🆕 New editor detected: ${editorsToNotify[0]}. New session data from this editor is now included in your stats.`
+				: `🆕 New editors detected: ${names}. New session data from these editors is now included in your stats.`
+		);
 	}
 
 	private setStatusBarText(text: string): void {
@@ -1919,6 +2060,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (qs.entitlement === null || qs.entitlement === undefined) { return; }
 		if (key === 'premium_interactions') {
 			this._copilotQuotaEntitlements.premium_interactions = qs.entitlement / 100;
+			if (qs.quota_remaining !== null && qs.quota_remaining !== undefined) {
+				this._copilotQuotaEntitlements.premium_interactions_remaining = Number(qs.quota_remaining);
+			}
 		} else if (key === 'completions') {
 			this._copilotQuotaEntitlements.completions = qs.entitlement / 100;
 		}
@@ -2045,7 +2189,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 					continue;
 				}
 				const sessionFile = queue[readIndex++];
-				try { await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget); } catch { /* skip files that fail to stat/parse */ }
+				await this.processPreloadQueueFileWithCrashLog(sessionFile, cutoffMs, preloaded, missBudget);
 				processed++;
 				if (progressCallback) { progressCallback(processed, totalDiscovered); }
 			}
@@ -2071,17 +2215,37 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return { sessionFiles, preloaded };
 	}
 
+	/**
+	 * Wraps processPreloadQueueFile() with crash-safe start/done/error logging
+	 * (see debugCrashLog) so a hard native crash mid-scan still leaves a trace of
+	 * which file(s) were in flight. A "start" line with no matching "done"/"error"
+	 * for the same file means the process died while processing it.
+	 */
+	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
+		this.debugCrashLog(`start ${sessionFile}`);
+		try {
+			await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+			this.debugCrashLog(`done  ${sessionFile}`);
+		} catch (e) {
+			this.debugCrashLog(`error ${sessionFile}: ${e}`);
+		}
+	}
+
 	private async processPreloadQueueFile(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
 		const fileStats = await this.statSessionFile(sessionFile);
 		const mtime = fileStats.mtime.getTime();
 		const fileSize = fileStats.size;
-		if (mtime < cutoffMs) { return; }
+		const forceStartupOpenCodeLoad = this._startupOpenCodeDbMisses.has(sessionFile);
+		if (mtime < cutoffMs && !forceStartupOpenCodeLoad) { return; }
 		const cachedData = this.getCachedSessionData(sessionFile);
 		const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
+		if (forceStartupOpenCodeLoad && wasCached) {
+			this._startupOpenCodeDbMisses.delete(sessionFile);
+		}
 		// Follower mode (missBudget defined): avoid the N-windows-parse-everything
 		// stampede. Serve cache hits freely, but only parse a bounded number of
 		// cache-miss files; skip the rest until the leader publishes a snapshot.
-		if (!wasCached && missBudget) {
+		if (!wasCached && missBudget && !forceStartupOpenCodeLoad) {
 			if (missBudget.remaining <= 0) { return; }
 			missBudget.remaining--;
 		}
@@ -2094,6 +2258,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			? ((await this.getSessionFileDetailsFromCache(sessionFile, fileStats)) ?? this.buildMinimalPreloadDetails(sessionFile, fileStats, sessionData))
 			: undefined;
 		preloaded.push({ sessionFile, mtime, fileSize, sessionData, wasCached, details } as SessionFilePreload);
+		if (forceStartupOpenCodeLoad) {
+			this._startupOpenCodeDbMisses.delete(sessionFile);
+		}
 		if (!wasCached) {
 			// Yield after CPU-intensive cache-miss work to keep VS Code responsive
 			await new Promise(r => setImmediate(r));
@@ -2179,6 +2346,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
 		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
+		try {
+			await this.storeDiscoveredEditorsAndNotify(discoveredEditorSet);
+		} catch (error) {
+			this.warn(`Failed to update seen-editor state: ${error}`);
+		}
 
 		this.sendLoadingPanelMessage({ command: 'loadingStep', step: 'computing' });
 		if (!silent && !this._detailsPanelIsLoading) { this.statusBarItem.tooltip = this.buildLoadingTooltipMarkdown('computing'); }
@@ -2813,15 +2985,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (sessionFiles.length === 0) { this.warn('⚠️ No session files found - Have you used GitHub Copilot Chat yet?'); }
 		return this.runWithConcurrency(sessionFiles, async (sessionFile, i) => {
 			if (progressCallback) { progressCallback(i + 1, sessionFiles.length); }
+			this.debugCrashLog(`start [${i + 1}/${sessionFiles.length}] ${sessionFile}`);
 			const fileStats = await this.statSessionFile(sessionFile);
 			const mtime = fileStats.mtime.getTime();
 			const fileSize = fileStats.size;
-			if (mtime < fileLoadCutoffMs) { return null; }
+			if (mtime < fileLoadCutoffMs) { this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile} (too old, skipped)`); return null; }
 			const cachedData = this.getCachedSessionData(sessionFile);
 			const wasCached = cachedData !== undefined && cachedData.mtime === mtime && cachedData.size === fileSize;
 			const sessionData = await this.getSessionFileDataCached(sessionFile, mtime, fileSize);
-			if (sessionData.interactions === 0) { return null; }
+			if (sessionData.interactions === 0) { this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile} (0 interactions, skipped)`); return null; }
 			const details = await this.getSessionFileDetails(sessionFile);
+			this.debugCrashLog(`done  [${i + 1}/${sessionFiles.length}] ${sessionFile}`);
 			return { sessionFile, sessionData, details, mtime, wasCached };
 		});
 	}
@@ -4711,7 +4885,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 		if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
-			details.editorName = 'Windsurf';
+			details.editorName = this.windsurf.getFamilyEditorName(sessionFile);
 			return;
 		}
 		try {
@@ -4919,8 +5093,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (session) {
 			details.title = session.title;
 			details.interactions = session.interactions;
-			details.editorSource = 'windsurf';
-			details.editorName = 'Windsurf';
+			// editorSource/editorName come from the resolved session, which already
+			// attributes to Windsurf or Devin correctly (see WindsurfDataAccess.resolveSession).
+			details.editorSource = session.editorSource;
+			details.editorName = session.editorName;
 			details.firstInteraction = session.firstInteraction ?? stat.mtime.toISOString();
 			details.lastInteraction = session.lastInteraction ?? stat.mtime.toISOString();
 		}
@@ -5557,7 +5733,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFilePath, 'utf8');
 			if (this.isUuidPointerFile(fileContent)) { return { tokens: 0, thinkingTokens: 0, actualTokens: 0 }; }
 			if (sessionFilePath.endsWith('.jsonl') || this.isJsonlContent(fileContent)) {
-				return this.estimateTokensFromJsonlSession(fileContent);
+				const otelUsage = extractCopilotCliSessionId(sessionFilePath) ? await getCopilotCliOtelUsage(sessionFilePath) : null;
+				return this.estimateTokensFromJsonlSession(fileContent, otelUsage);
 			}
 			const sessionContent = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
 			return this.estimateTokensFromJsonSession(sessionContent);
@@ -5632,8 +5809,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return 0;
 	}
 
-	private estimateTokensFromJsonlSession(fileContent: string): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string } {
-		return _estimateTokensFromJsonlSession(fileContent);
+	private estimateTokensFromJsonlSession(fileContent: string, otelUsage?: Awaited<ReturnType<typeof getCopilotCliOtelUsage>>): { tokens: number; thinkingTokens: number; actualTokens: number; cacheReadTokens: number; copilotNanoAiu: number; truncationCount?: number; messagesRemovedByTruncation?: number; maxRequestInputTokens?: number; contextTier?: string } {
+		return _estimateTokensFromJsonlSession(fileContent, otelUsage);
 	}
 
 	/**
@@ -6094,7 +6271,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 			todaySessions: analysisStats.todaySessions || [],
 			insights: this.buildCurrentInsights(analysisStats),
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
+			copilotApiBalance: this._buildCopilotApiBalance(),
+			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
 		};
+	}
+
+	/**
+	 * Returns a snapshot of the Copilot API quota balance for the usage view.
+	 * budgetUsd: monthly entitlement in USD (entitlement / 100).
+	 * budgetAiCredits: monthly entitlement in AI Credits (budgetUsd * 100).
+	 * remainingAiCredits: raw quota_remaining from the API (AI Credits).
+	 * usedAiCredits: budgetAiCredits - remainingAiCredits.
+	 * Returns null when no entitlement data is available.
+	 */
+	private _buildCopilotApiBalance(): { budgetUsd: number; budgetAiCredits: number; remainingAiCredits: number; usedAiCredits: number; pctAvailable: number } | null {
+		const budgetUsd = this._copilotQuotaEntitlements.premium_interactions;
+		if (!budgetUsd) { return null; }
+		const budgetAiCredits = Math.round(budgetUsd * 100);
+		const remainingAiCredits = this._copilotQuotaEntitlements.premium_interactions_remaining ?? budgetAiCredits;
+		const usedAiCredits = Math.max(0, budgetAiCredits - remainingAiCredits);
+		const pctAvailable = budgetAiCredits > 0 ? (remainingAiCredits / budgetAiCredits) * 100 : 0;
+		return { budgetUsd, budgetAiCredits, remainingAiCredits, usedAiCredits, pctAvailable };
 	}
 
 	private async loadAnalysisStatsInBackground(panel: vscode.WebviewPanel): Promise<void> {
@@ -6388,10 +6585,11 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 
 	public async showLogViewer(sessionFilePath: string): Promise<void> {
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
-			const trajectoryId = sessionFilePath.replace('windsurf://trajectory/', '');
+			const trajectoryId = this.windsurf.extractTrajectoryId(sessionFilePath);
 			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
+			const editorLabel = this.windsurf.getFamilyEditorName(sessionFilePath);
 			vscode.window.showInformationMessage(
-				`Windsurf sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
+				`${editorLabel} sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
 				'Reveal in Explorer'
 			).then(choice => {
 				if (choice === 'Reveal in Explorer') {
@@ -6524,12 +6722,13 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 * Does not modify the original file.
 	 */
 	public async showFormattedJsonlFile(sessionFilePath: string): Promise<void> {
-		// Windsurf sessions are binary protobuf files — open the real .pb file in the OS
+		// Windsurf/Devin sessions are binary protobuf files — open the real .pb file in the OS
 		if (this.windsurf.isWindsurfSessionFile(sessionFilePath)) {
-			const trajectoryId = sessionFilePath.replace('windsurf://trajectory/', '');
+			const trajectoryId = this.windsurf.extractTrajectoryId(sessionFilePath);
 			const pbPath = path.join(os.homedir(), '.codeium', 'windsurf', 'cascade', `${trajectoryId}.pb`);
+			const editorLabel = this.windsurf.getFamilyEditorName(sessionFilePath);
 			vscode.window.showInformationMessage(
-				`Windsurf sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
+				`${editorLabel} sessions are stored as binary protobuf files and cannot be viewed as text. The session file is: ${pbPath}`,
 				'Reveal in Explorer'
 			).then(choice => {
 				if (choice === 'Reveal in Explorer') {
@@ -8012,6 +8211,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       openDisplaySettings: () => this.dispatch('openDisplaySettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.display")),
       openToolFamiliesSettings: () => this.dispatch('openToolFamiliesSettings:diagnostics', () => vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.toolFamilies")),
       resetDebugCounters: () => this.dispatch('resetDebugCounters:diagnostics', () => this.diagHandleResetDebugCounters()),
+      resetDiscoveredEditors: () => this.dispatch('resetDiscoveredEditors:diagnostics', () => this.diagHandleResetDiscoveredEditors()),
       authenticateGitHub: () => this.dispatch('authenticateGitHub:diagnostics', () => this.diagHandleGitHubAuth(true)),
       signOutGitHub: () => this.dispatch('signOutGitHub:diagnostics', () => this.diagHandleGitHubAuth(false)),
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
@@ -8153,6 +8353,13 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     await this.showDiagnosticReport();
   }
 
+  private async diagHandleResetDiscoveredEditors(): Promise<void> {
+    await this.context.globalState.update(CopilotTokenTracker.SEEN_EDITORS_STATE_KEY, undefined);
+    await this.context.globalState.update(CopilotTokenTracker.NOTIFIED_EDITORS_STATE_KEY, undefined);
+    vscode.window.showInformationMessage('Discovered editor tracking has been reset.');
+    await this.showDiagnosticReport();
+  }
+
   private async diagHandleSetDebugCounter(key: string, value: number): Promise<void> {
     await this.context.globalState.update(key, value);
     vscode.window.showInformationMessage(`Set ${key} = ${value}`);
@@ -8200,6 +8407,76 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   /**
+   * Compare "normal" (ratio-based estimate, or 0 for DB-only chat sessions) token
+   * counts against exact counts from the Copilot CLI OpenTelemetry file export, for
+   * every Copilot CLI session where OTel data is available. Powers the diagnostics
+   * "OTel Delta" tab, which shows how much more accurate/complete the OTel export
+   * makes token tracking versus the estimate-only path.
+   */
+  private async computeCopilotCliOtelComparison(sessionFiles: string[]): Promise<CopilotCliOtelComparison> {
+    const status = await getCopilotCliOtelStatus();
+    const candidates = sessionFiles
+      .map(file => ({ file, sessionId: extractCopilotCliSessionId(file) }))
+      .filter((c): c is { file: string; sessionId: string } => !!c.sessionId);
+
+    const sessions: CopilotCliOtelComparisonSession[] = [];
+    let totalBaselineTokens = 0;
+    let totalOtelTokens = 0;
+
+    for (const { file, sessionId } of candidates) {
+      const otel = await getCopilotCliOtelUsage(file);
+      if (!otel) { continue; }
+
+      // DB-only chat sessions (session-store.db#uuid) have no token data of their own
+      // and previously always reported 0 — that IS the "normal way" baseline for them.
+      let baselineTokens = 0;
+      if (file.endsWith('.jsonl')) {
+        try {
+          const content = await fs.promises.readFile(file, 'utf8');
+          baselineTokens = this.estimateTokensFromJsonlSession(content).actualTokens;
+        } catch { /* unreadable session file — treat baseline as 0 */ }
+      }
+
+      let lastActivity: string | null = null;
+      try { lastActivity = (await this.statSessionFile(file)).mtime.toISOString(); } catch { /* stat failed — leave null, filter treats as unknown */ }
+
+      totalBaselineTokens += baselineTokens;
+      totalOtelTokens += otel.actualTokens;
+      sessions.push({
+        file, sessionId, baselineTokens,
+        otelTokens: otel.actualTokens,
+        delta: otel.actualTokens - baselineTokens,
+        models: Object.keys(otel.modelUsage),
+        lastActivity,
+      });
+    }
+
+    sessions.sort((a, b) => Math.abs(b.delta) - Math.abs(a.delta));
+
+    return {
+      otelDirExists: status.dirExists,
+      otelFileCount: status.fileCount,
+      otelSessionsIndexed: status.sessionsIndexed,
+      sessionsChecked: candidates.length,
+      sessionsMatched: sessions.length,
+      totalBaselineTokens,
+      totalOtelTokens,
+      deltaTokens: totalOtelTokens - totalBaselineTokens,
+      sessions: sessions.slice(0, 100),
+    };
+  }
+
+  /** Computes the Copilot CLI OTel comparison, swallowing errors — this is an optional diagnostics enrichment. */
+  private async tryComputeCopilotCliOtelComparison(sessionFiles: string[]): Promise<CopilotCliOtelComparison | null> {
+    try {
+      return await this.computeCopilotCliOtelComparison(sessionFiles);
+    } catch (error) {
+      this.warn(`Failed to compute Copilot CLI OTel comparison: ${error}`);
+      return null;
+    }
+  }
+
+  /**
    * Load all diagnostic data in the background and update the webview progressively.
    */
   private async loadDiagnosticDataInBackground(
@@ -8239,6 +8516,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       );
 
       const githubAuthStatus = this.getGitHubAuthStatus();
+      const otelComparison = await this.tryComputeCopilotCliOtelComparison(sessionFiles);
 
       if (!this.isPanelOpen(panel)) {
         this.log("Diagnostic panel closed during data load, aborting update");
@@ -8258,6 +8536,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         githubAuth: githubAuthStatus,
         toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
         toolFamilies: getToolFamilies(),
+        otelComparison,
       });
 
       this.log("✅ Diagnostic data loaded and sent to webview");
@@ -8806,6 +9085,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       insights: this.buildCurrentInsights(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
       sessionColumnSettings,
+      copilotApiBalance: this._buildCopilotApiBalance(),
+      monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
     }).replace(/</g, "\\u003c") : 'null';
 
     return `<!DOCTYPE html>
@@ -9184,6 +9465,7 @@ Generated: ${new Date().toISOString()}
 
 ## Environment
 - Running in Windsurf: ${diagnostics.environment.isRunningInWindsurf}
+- Running in Devin: ${diagnostics.environment.isRunningInDevin}
 - App Name: ${diagnostics.environment.appName}
 
 ## Extension Status
