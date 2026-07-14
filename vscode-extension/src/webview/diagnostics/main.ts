@@ -128,6 +128,27 @@ type DiagnosticsData = {
   quotaEntitlements?: QuotaEntitlements;
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
   toolFamilies?: ToolFamilyConfig[];
+  worktreeScanRoots?: string[];
+};
+
+type WorktreeResult = {
+  path: string;
+  repoLabel: string;
+  branch: string;
+  lastCommit: string;
+  lastCommitDate: string | null;
+  pushed: "yes" | "no" | "?";
+  files: number;
+  folders: number;
+  bytes: number;
+};
+
+type WorktreeScanStatus = {
+  root: string;
+  checked: number;
+  total: number;
+  foundCount: number;
+  elapsedMs: number;
 };
 
 type ToolFamilyConfig = {
@@ -184,6 +205,14 @@ let storedDetailedFiles: SessionFileDetails[] = [];
 let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
+
+// Worktree discovery tab state
+let worktreeRoots: string[] = initialData?.worktreeScanRoots ? [...initialData.worktreeScanRoots] : [];
+let worktreeResults: WorktreeResult[] = [];
+let worktreeScanInProgress = false;
+let worktreeScanStatus: WorktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
+let worktreeScanError: string | null = null;
+let worktreeRenderPending = false;
 
 function removeSessionFilesSection(reportText: string): string {
   return reportText.replace(SESSION_FILES_SECTION_REGEX, "");
@@ -951,6 +980,132 @@ function renderFolderAnalysisResults(
     </div>`;
 }
 
+function renderWorktreeRootsList(): string {
+  if (worktreeRoots.length === 0) {
+    return `<div style="color: var(--text-muted); font-size: 12px; margin: 8px 0;">No root folders added yet. Add a folder to scan for worktrees.</div>`;
+  }
+  return `<div class="worktree-roots-list">${worktreeRoots
+    .map(
+      (r, i) =>
+        `<div class="worktree-root-item"><span title="${escapeHtml(r)}">${escapeHtml(r)}</span><button class="button secondary worktree-remove-root" data-index="${i}" ${worktreeScanInProgress ? "disabled" : ""}>✕</button></div>`,
+    )
+    .join("")}</div>`;
+}
+
+function renderWorktreeProgress(): string {
+  if (!worktreeScanInProgress) { return ""; }
+  const pct = worktreeScanStatus.total > 0 ? Math.round((worktreeScanStatus.checked / worktreeScanStatus.total) * 100) : 0;
+  return `
+    <div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">⏳ Scanning…</div>
+      <div>Root: <span style="font-family: var(--vscode-editor-font-family, monospace);">${escapeHtml(worktreeScanStatus.root || "…")}</span></div>
+      <div>${worktreeScanStatus.checked} / ${worktreeScanStatus.total || "?"} .git markers checked — ${worktreeScanStatus.foundCount} worktree${worktreeScanStatus.foundCount === 1 ? "" : "s"} found so far (${(worktreeScanStatus.elapsedMs / 1000).toFixed(1)}s)</div>
+      <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${pct}%;"></div></div>
+    </div>`;
+}
+
+function renderWorktreeControls(): string {
+  return `
+    <div class="section">
+      <div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Root Folders</span></div>
+      <div id="worktree-roots-list">${renderWorktreeRootsList()}</div>
+      <div class="folder-input-row" style="margin-top: 8px;">
+        <input
+          type="text"
+          id="worktree-root-input"
+          class="folder-input"
+          placeholder="Paste a root folder path here, e.g. C:\\code\\repos"
+          ${worktreeScanInProgress ? "disabled" : ""}
+        />
+        <button class="button secondary" id="btn-browse-worktree-root" ${worktreeScanInProgress ? "disabled" : ""}>📂 Browse…</button>
+        <button class="button secondary" id="btn-add-worktree-root" ${worktreeScanInProgress ? "disabled" : ""}>➕ Add</button>
+      </div>
+      <div style="margin-top: 16px;">
+        <button class="button" id="btn-scan-worktrees" ${worktreeScanInProgress || worktreeRoots.length === 0 ? "disabled" : ""}>🔍 Scan for Worktrees</button>
+        ${worktreeScanInProgress ? '<button class="button secondary" id="btn-cancel-worktree-scan">✕ Cancel</button>' : ""}
+      </div>
+      ${worktreeScanError ? `<div class="info-box" style="margin-top: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);"><div>⚠️ ${escapeHtml(worktreeScanError)}</div></div>` : ""}
+      <div id="worktree-progress-area">${renderWorktreeProgress()}</div>
+    </div>`;
+}
+
+function groupWorktreesByRepo(results: WorktreeResult[]): Map<string, WorktreeResult[]> {
+  const groups = new Map<string, WorktreeResult[]>();
+  for (const wt of results) {
+    const key = wt.repoLabel || "Unknown";
+    if (!groups.has(key)) { groups.set(key, []); }
+    groups.get(key)!.push(wt);
+  }
+  return groups;
+}
+
+function buildWorktreeRowHtml(w: WorktreeResult): string {
+  const pushedIcon = w.pushed === "yes" ? "✅" : w.pushed === "no" ? "🔴" : "❓";
+  return `<tr>
+    <td title="${escapeHtml(w.path)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(w.path)}</td>
+    <td>${escapeHtml(w.branch)}</td>
+    <td>${escapeHtml(w.lastCommit)}</td>
+    <td>${pushedIcon} ${escapeHtml(w.pushed)}</td>
+    <td>${escapeHtml(String(w.files))}</td>
+    <td title="${w.bytes.toLocaleString()} bytes">${formatFileSize(w.bytes)}</td>
+    <td><a href="#" class="worktree-reveal-link" data-path="${encodeURIComponent(w.path)}">Open</a></td>
+  </tr>`;
+}
+
+function buildWorktreeGroupHtml(repoLabel: string, worktrees: WorktreeResult[]): string {
+  const totalBytes = worktrees.reduce((s, w) => s + w.bytes, 0);
+  const sorted = [...worktrees].sort((a, b) => b.bytes - a.bytes);
+  const rows = sorted.map(buildWorktreeRowHtml).join("");
+  return `
+    <div class="worktree-group">
+      <div class="worktree-group-header">
+        <span class="worktree-group-title">${escapeHtml(repoLabel)}</span>
+        <span class="worktree-group-stats">${worktrees.length} worktree${worktrees.length === 1 ? "" : "s"} · ${formatFileSize(totalBytes)}</span>
+      </div>
+      <div class="table-container">
+        <table class="session-table">
+          <thead><tr><th>Path</th><th>Branch</th><th>Last Commit</th><th>Pushed</th><th>Files</th><th>Size</th><th>Actions</th></tr></thead>
+          <tbody>${rows}</tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+function renderWorktreeResults(): string {
+  if (worktreeResults.length === 0) {
+    if (worktreeScanInProgress) { return '<div style="padding: 16px; color: var(--text-muted);">Discovering worktrees…</div>'; }
+    return '<div style="padding: 16px; color: var(--text-muted);">No worktrees found yet. Add root folders above and click Scan.</div>';
+  }
+  const groups = groupWorktreesByRepo(worktreeResults);
+  const totalBytes = worktreeResults.reduce((s, w) => s + w.bytes, 0);
+  const summary = `<div class="summary-cards">
+    <div class="summary-card"><div class="summary-label">🌳 Worktrees</div><div class="summary-value">${worktreeResults.length}</div></div>
+    <div class="summary-card"><div class="summary-label">📦 Repositories</div><div class="summary-value">${groups.size}</div></div>
+    <div class="summary-card"><div class="summary-label">💾 Total Size</div><div class="summary-value" title="${totalBytes.toLocaleString()} bytes">${formatFileSize(totalBytes)}</div></div>
+  </div>`;
+  const sortedGroups = [...groups.entries()].sort((a, b) => {
+    const aBytes = a[1].reduce((s, w) => s + w.bytes, 0);
+    const bBytes = b[1].reduce((s, w) => s + w.bytes, 0);
+    return bBytes - aBytes;
+  });
+  return summary + sortedGroups.map(([repo, wts]) => buildWorktreeGroupHtml(repo, wts)).join("");
+}
+
+function renderWorktreesTab(): string {
+  return `
+    <div id="tab-worktrees" class="tab-content">
+      <div class="info-box">
+        <div class="info-box-title">🌳 Worktree Discovery</div>
+        <div>
+          Scans folders for uncleaned git worktrees and reports disk usage grouped by repository (based on each
+          worktree's git remote). Add one or more root folders below, then click Scan. Results stream in as they're found.
+        </div>
+      </div>
+      <div id="worktree-controls">${renderWorktreeControls()}</div>
+      <div id="worktree-results">${renderWorktreeResults()}</div>
+    </div>`;
+}
+
 function groupSessionFolders(
   raw: Array<{ dir: string; count: number; editorName?: string }>,
 ): Array<{ dir: string; count: number; editorName?: string }> {
@@ -1456,6 +1611,178 @@ function setupFolderAnalyzerHandlers(): void {
   });
 }
 
+function updateWorktreeControls(): void {
+  const controlsEl = document.getElementById("worktree-controls");
+  if (controlsEl) { controlsEl.innerHTML = renderWorktreeControls(); }
+}
+
+function updateWorktreeResults(): void {
+  const resultsEl = document.getElementById("worktree-results");
+  if (resultsEl) { resultsEl.innerHTML = renderWorktreeResults(); }
+}
+
+function updateWorktreeProgressArea(): void {
+  const el = document.getElementById("worktree-progress-area");
+  if (el) { el.innerHTML = renderWorktreeProgress(); }
+}
+
+function scheduleWorktreeResultsRender(): void {
+  if (worktreeRenderPending) { return; }
+  worktreeRenderPending = true;
+  requestAnimationFrame(() => {
+    worktreeRenderPending = false;
+    updateWorktreeResults();
+  });
+}
+
+function addWorktreeRootFromInput(): void {
+  const input = document.getElementById("worktree-root-input") as HTMLInputElement | null;
+  const value = input?.value.trim();
+  if (!value) { return; }
+  if (!worktreeRoots.some((r) => r.toLowerCase() === value.toLowerCase())) {
+    worktreeRoots.push(value);
+  }
+  if (input) { input.value = ""; }
+  updateWorktreeControls();
+}
+
+function startWorktreeScan(): void {
+  if (worktreeRoots.length === 0 || worktreeScanInProgress) { return; }
+  worktreeScanInProgress = true;
+  worktreeResults = [];
+  worktreeScanError = null;
+  worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
+  updateWorktreeControls();
+  updateWorktreeResults();
+  vscode.postMessage({ command: "scanWorktrees", rootPaths: worktreeRoots });
+}
+
+function handleWorktreeTabClick(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null;
+  if (!target) { return; }
+  if (target.id === "btn-browse-worktree-root") {
+    vscode.postMessage({ command: "pickWorktreeRoot" });
+    return;
+  }
+  if (target.id === "btn-add-worktree-root") {
+    addWorktreeRootFromInput();
+    return;
+  }
+  if (target.id === "btn-scan-worktrees") {
+    startWorktreeScan();
+    return;
+  }
+  if (target.id === "btn-cancel-worktree-scan") {
+    vscode.postMessage({ command: "cancelWorktreeScan" });
+    return;
+  }
+  if (target.classList.contains("worktree-remove-root")) {
+    const idx = Number(target.getAttribute("data-index"));
+    if (!isNaN(idx)) {
+      worktreeRoots.splice(idx, 1);
+      updateWorktreeControls();
+    }
+    return;
+  }
+  const revealLink = target.closest(".worktree-reveal-link") as HTMLElement | null;
+  if (revealLink) {
+    event.preventDefault();
+    const p = decodeURIComponent(revealLink.getAttribute("data-path") || "");
+    if (p) { vscode.postMessage({ command: "revealPath", path: p }); }
+  }
+}
+
+function setupWorktreesHandlers(): void {
+  const tabEl = document.getElementById("tab-worktrees");
+  if (!tabEl) { return; }
+  tabEl.addEventListener("click", handleWorktreeTabClick);
+  tabEl.addEventListener("keydown", (event) => {
+    const target = event.target as HTMLElement | null;
+    if (target?.id === "worktree-root-input" && (event as KeyboardEvent).key === "Enter") {
+      event.preventDefault();
+      addWorktreeRootFromInput();
+    }
+  });
+}
+
+function sanitizeWorktreeResult(item: unknown): WorktreeResult {
+  const w = (item ?? {}) as Record<string, unknown>;
+  const pushedRaw = String(w.pushed ?? "?");
+  const pushed: WorktreeResult["pushed"] = pushedRaw === "yes" || pushedRaw === "no" ? pushedRaw : "?";
+  return {
+    path: String(w.path ?? ""),
+    repoLabel: String(w.repoLabel ?? "Unknown"),
+    branch: String(w.branch ?? "?"),
+    lastCommit: String(w.lastCommit ?? "?"),
+    lastCommitDate: w.lastCommitDate ? String(w.lastCommitDate) : null,
+    pushed,
+    files: numField(w.files),
+    folders: numField(w.folders),
+    bytes: numField(w.bytes),
+  };
+}
+
+function handleWorktreeRootPicked(message: DiagMessage): void {
+  if (!message.folderPath) { return; }
+  const folderPath = String(message.folderPath);
+  if (!worktreeRoots.some((r) => r.toLowerCase() === folderPath.toLowerCase())) {
+    worktreeRoots.push(folderPath);
+  }
+  updateWorktreeControls();
+}
+
+function handleWorktreeScanStarted(): void {
+  worktreeScanInProgress = true;
+  worktreeResults = [];
+  worktreeScanError = null;
+  worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
+  updateWorktreeControls();
+  updateWorktreeResults();
+}
+
+function handleWorktreeScanRootStarted(message: DiagMessage): void {
+  worktreeScanStatus = { ...worktreeScanStatus, root: String(message.root || ""), checked: 0, total: 0 };
+  updateWorktreeProgressArea();
+}
+
+function handleWorktreeScanRootMarkersFound(message: DiagMessage): void {
+  worktreeScanStatus = { ...worktreeScanStatus, total: numField(message.count) };
+  updateWorktreeProgressArea();
+}
+
+function handleWorktreeScanRootSkipped(message: DiagMessage): void {
+  worktreeScanError = `Skipped "${message.root}": ${message.reason || "not accessible"}`;
+  updateWorktreeControls();
+}
+
+function handleWorktreeScanProgress(message: DiagMessage): void {
+  worktreeScanStatus = {
+    root: String(message.root ?? worktreeScanStatus.root),
+    checked: numField(message.checked),
+    total: message.total !== undefined ? numField(message.total) : worktreeScanStatus.total,
+    foundCount: numField(message.foundCount),
+    elapsedMs: numField(message.elapsedMs),
+  };
+  updateWorktreeProgressArea();
+}
+
+function handleWorktreeFound(message: DiagMessage): void {
+  if (!message.worktree) { return; }
+  worktreeResults.push(sanitizeWorktreeResult(message.worktree));
+  scheduleWorktreeResultsRender();
+}
+
+function handleWorktreeScanComplete(): void {
+  worktreeScanInProgress = false;
+  updateWorktreeControls();
+  updateWorktreeResults();
+}
+
+function handleWorktreeScanCancelled(): void {
+  worktreeScanInProgress = false;
+  updateWorktreeControls();
+}
+
 function setupTabHandlers(): void {
   document.querySelectorAll(".tab").forEach((tab) => {
     tab.addEventListener("click", () => {
@@ -1917,6 +2244,18 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   }
 }
 
+const worktreeMessageHandlers: Record<string, (message: DiagMessage) => void> = {
+  worktreeRootPicked: handleWorktreeRootPicked,
+  worktreeScanStarted: () => handleWorktreeScanStarted(),
+  worktreeScanRootStarted: handleWorktreeScanRootStarted,
+  worktreeScanRootMarkersFound: handleWorktreeScanRootMarkersFound,
+  worktreeScanRootSkipped: handleWorktreeScanRootSkipped,
+  worktreeScanProgress: handleWorktreeScanProgress,
+  worktreeFound: handleWorktreeFound,
+  worktreeScanComplete: () => handleWorktreeScanComplete(),
+  worktreeScanCancelled: () => handleWorktreeScanCancelled(),
+};
+
 function setupMessageHandlers(): void {
   window.addEventListener("message", (event) => {
     const message = event.data as DiagMessage;
@@ -1936,6 +2275,8 @@ function setupMessageHandlers(): void {
       handleFolderPicked(message);
     } else if (message.command === "folderAnalysisResult") {
       handleFolderAnalysisResult(message);
+    } else if (worktreeMessageHandlers[message.command]) {
+      worktreeMessageHandlers[message.command](message);
     }
   });
 }
@@ -2284,6 +2625,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <button class="tab" data-tab="display">⚙️ Settings</button>
 <button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
+<button class="tab" data-tab="worktrees">🌳 Worktrees</button>
 ${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
 </div>
 
@@ -2314,6 +2656,7 @@ ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 ${renderFolderAnalyzerTab()}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+${renderWorktreesTab()}
 </div>
 `;
 }
@@ -2362,6 +2705,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupStorageLinkHandlers();
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
+  setupWorktreesHandlers();
   setupButtonHandlers();
   setupDisplaySettingHandlers();
   setupToolAnalysisSortHandlers();
