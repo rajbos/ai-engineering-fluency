@@ -65,19 +65,22 @@ async function withHomedir<T>(t: import('node:test').TestContext, fn: (homeDir: 
 	return fn(homeDir);
 }
 
+// extractCopilotCliSessionId's events.jsonl branch uses path.dirname/path.basename, which are
+// separator-sensitive — paths here must be built with path.join (not hardcoded Windows-style
+// backslash literals) so these tests are meaningful on POSIX CI runners too.
 test('extractCopilotCliSessionId: matches events.jsonl paths', () => {
-	const file = 'C:\\Users\\x\\.copilot\\session-state\\a19abe35-b44e-4713-bf70-27f015393772\\events.jsonl';
-	assert.equal(extractCopilotCliSessionId(file), 'a19abe35-b44e-4713-bf70-27f015393772');
+	const file = eventsJsonlPath('C:\\Users\\x', SESSION_ID);
+	assert.equal(extractCopilotCliSessionId(file), SESSION_ID);
 });
 
 test('extractCopilotCliSessionId: matches session-store.db virtual paths', () => {
-	const file = 'C:\\Users\\x\\.copilot\\session-store.db#a19abe35-b44e-4713-bf70-27f015393772';
-	assert.equal(extractCopilotCliSessionId(file), 'a19abe35-b44e-4713-bf70-27f015393772');
+	const file = dbVirtualPath('C:\\Users\\x', SESSION_ID);
+	assert.equal(extractCopilotCliSessionId(file), SESSION_ID);
 });
 
 test('extractCopilotCliSessionId: returns null for non-Copilot-CLI paths', () => {
-	assert.equal(extractCopilotCliSessionId('C:\\Users\\x\\.claude\\projects\\foo\\session.jsonl'), null);
-	assert.equal(extractCopilotCliSessionId('C:\\Users\\x\\.copilot\\session-state\\not-a-uuid\\events.jsonl'), null);
+	assert.equal(extractCopilotCliSessionId(path.join('C:\\Users\\x', '.claude', 'projects', 'foo', 'session.jsonl')), null);
+	assert.equal(extractCopilotCliSessionId(eventsJsonlPath('C:\\Users\\x', 'not-a-uuid')), null);
 });
 
 test('getCopilotCliOtelUsage: aggregates multiple chat spans for the same session', async (t) => {
@@ -119,7 +122,7 @@ test('getCopilotCliOtelUsage: returns null when no OTel export directory exists'
 
 test('getCopilotCliOtelUsage: returns null for a non-Copilot-CLI path without touching disk', async (t) => {
 	await withHomedir(t, async () => {
-		const usage = await getCopilotCliOtelUsage('C:\\Users\\x\\.claude\\projects\\foo\\session.jsonl');
+		const usage = await getCopilotCliOtelUsage(path.join('C:\\Users\\x', '.claude', 'projects', 'foo', 'session.jsonl'));
 		assert.equal(usage, null);
 	});
 });

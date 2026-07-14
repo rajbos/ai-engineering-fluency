@@ -1699,7 +1699,14 @@ function handleCandidatePathsSection(message: DiagMessage): void {
   }
 }
 
-/** Replaces a tab's content element with freshly rendered HTML, preserving its active state. */
+/**
+ * Replaces a tab's content element with freshly rendered HTML, preserving its active state.
+ * Security contract: `newContent` is built entirely by this file's own render*() functions
+ * from structured (non-HTML) data sent by the extension host over postMessage — every
+ * interpolated string field is passed through escapeHtml(), and every numeric field through
+ * an explicit Number() cast, before being placed into a template literal. Never pass raw
+ * message field values into this function directly.
+ */
 function replaceTabContent(tabId: string, newContent: string, onReplaced?: () => void): void {
   const tabContent = document.getElementById(`tab-${tabId}`);
   if (!tabContent) { return; }
@@ -2195,7 +2202,7 @@ function renderToolRow(r: ToolAnalysisRow, builtInBaseline: number): string {
   let ratioHtml = '<td class="tool-ratio">—</td>';
   if (!r.isBuiltIn && !isNaN(builtInBaseline) && builtInBaseline > 0 && r.calls > 0) {
     const ratio = (r.totalTokens / r.calls) / builtInBaseline;
-    const pct = Math.round(ratio * 100);
+    const pct = Number(Math.round(ratio * 100)) || 0;
     const cls = ratio < 0.85 ? 'ratio-better' : ratio > 1.15 ? 'ratio-worse' : 'ratio-neutral';
     ratioHtml = `<td class="tool-ratio ${cls}" title="${pct}% of built-in average">${pct}%</td>`;
   } else if (r.isBuiltIn) {
@@ -2300,7 +2307,7 @@ ${sectionsHtml}
 function renderOtelDeltaSetupNotice(comparison: CopilotCliOtelComparison | null | undefined): string {
   if (comparison && comparison.otelSessionsIndexed > 0) { return ''; }
   const dirStatus = comparison?.otelDirExists
-    ? `The export directory exists but no session data has been indexed from it yet (${comparison.otelFileCount} file(s) found).`
+    ? `The export directory exists but no session data has been indexed from it yet (${Number(comparison.otelFileCount)} file(s) found).`
     : `No <code>~/.copilot/otel</code> directory was found — the export isn't enabled yet.`;
   return `<div class="info-box">
 <div class="info-box-title">📡 Copilot CLI OpenTelemetry Export Not Detected</div>
@@ -2316,7 +2323,8 @@ See <code>docs/COPILOT-CLI-OTEL-EXPORT.md</code> in the repo for full setup step
 }
 
 /** Formats a signed token delta as e.g. "+12.3K" / "-4.0K" / "0", with a class for coloring. */
-function formatTokenDelta(delta: number): { text: string; cssClass: string } {
+function formatTokenDelta(rawDelta: number): { text: string; cssClass: string } {
+  const delta = Number(rawDelta) || 0;
   if (delta === 0) { return { text: '0', cssClass: '' }; }
   const sign = delta > 0 ? '+' : '-';
   const cssClass = delta > 0 ? 'otel-delta-positive' : 'otel-delta-negative';
@@ -2383,22 +2391,26 @@ function renderOtelDeltaPeriodSelector(period: OtelDeltaPeriod): string {
 
 function renderOtelDeltaSummaryCards(comparison: CopilotCliOtelComparison): string {
   const delta = formatTokenDelta(comparison.deltaTokens);
+  const sessionsMatched = Number(comparison.sessionsMatched) || 0;
+  const totalBaselineTokens = Number(comparison.totalBaselineTokens) || 0;
+  const totalOtelTokens = Number(comparison.totalOtelTokens) || 0;
+  const deltaTokens = Number(comparison.deltaTokens) || 0;
   return `<div class="summary-cards">
 <div class="summary-card">
 <div class="summary-label">📡 Sessions With OTel Data</div>
-<div class="summary-value">${comparison.sessionsMatched.toLocaleString()}</div>
+<div class="summary-value">${sessionsMatched.toLocaleString()}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">📊 Previous Estimate (Total)</div>
-<div class="summary-value" title="${comparison.totalBaselineTokens.toLocaleString()} tokens">${formatTokenCount(comparison.totalBaselineTokens)}</div>
+<div class="summary-value" title="${totalBaselineTokens.toLocaleString()} tokens">${formatTokenCount(totalBaselineTokens)}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">🎯 OTel Exact (Total)</div>
-<div class="summary-value" title="${comparison.totalOtelTokens.toLocaleString()} tokens">${formatTokenCount(comparison.totalOtelTokens)}</div>
+<div class="summary-value" title="${totalOtelTokens.toLocaleString()} tokens">${formatTokenCount(totalOtelTokens)}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">Δ Delta</div>
-<div class="summary-value ${delta.cssClass}" title="${comparison.deltaTokens.toLocaleString()} tokens">${delta.text}</div>
+<div class="summary-value ${delta.cssClass}" title="${deltaTokens.toLocaleString()} tokens">${delta.text}</div>
 </div>
 </div>`;
 }
@@ -2406,14 +2418,16 @@ function renderOtelDeltaSummaryCards(comparison: CopilotCliOtelComparison): stri
 function renderOtelDeltaSessionRows(sessions: CopilotCliOtelComparisonSession[]): string {
   return sessions.map(s => {
     const delta = formatTokenDelta(s.delta);
-    const shortId = escapeHtml(s.sessionId.slice(0, 8));
-    const models = escapeHtml(s.models.join(', ') || '—');
+    const shortId = escapeHtml(String(s.sessionId ?? '').slice(0, 8));
+    const models = escapeHtml((Array.isArray(s.models) ? s.models : []).map(m => String(m)).join(', ') || '—');
+    const baselineTokens = Number(s.baselineTokens) || 0;
+    const otelTokens = Number(s.otelTokens) || 0;
     return `<tr>
-<td title="${escapeHtml(s.sessionId)}"><code>${shortId}</code></td>
+<td title="${escapeHtml(String(s.sessionId ?? ''))}"><code>${shortId}</code></td>
 <td>${models}</td>
-<td title="${s.baselineTokens.toLocaleString()} tokens">${formatTokenCount(s.baselineTokens)}</td>
-<td title="${s.otelTokens.toLocaleString()} tokens">${formatTokenCount(s.otelTokens)}</td>
-<td class="${delta.cssClass}" title="${s.delta.toLocaleString()} tokens">${delta.text}</td>
+<td title="${baselineTokens.toLocaleString()} tokens">${formatTokenCount(baselineTokens)}</td>
+<td title="${otelTokens.toLocaleString()} tokens">${formatTokenCount(otelTokens)}</td>
+<td class="${delta.cssClass}" title="${(Number(s.delta) || 0).toLocaleString()} tokens">${delta.text}</td>
 </tr>`;
   }).join('');
 }
@@ -2441,7 +2455,7 @@ ${setupNotice}
 <div class="info-box-title">📡 OTel vs. Estimated Token Counts</div>
 <div>
 Compares the token counts this extension would normally estimate for each Copilot CLI session against the exact counts read from Copilot CLI's OpenTelemetry file export. A positive delta means OTel revealed usage the estimate missed entirely (e.g. chat-only sessions, which previously reported 0 tokens); near-zero deltas mean the estimate already had exact numbers from a session.shutdown event.<br/>
-Checked ${comparison.sessionsChecked.toLocaleString()} Copilot CLI session(s) found locally; ${comparison.otelSessionsIndexed.toLocaleString()} session(s) are present in the OTel export.
+Checked ${(Number(comparison.sessionsChecked) || 0).toLocaleString()} Copilot CLI session(s) found locally; ${(Number(comparison.otelSessionsIndexed) || 0).toLocaleString()} session(s) are present in the OTel export.
 </div>
 </div>
 ${setupNotice}
