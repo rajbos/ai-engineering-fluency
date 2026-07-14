@@ -126,8 +126,6 @@ When adding a new tool to `toolNames.json`, also determine if it belongs in `aut
 - Keep related tool variants together (e.g., all variants of `read_file`)
 - **Case-insensitive deduplication**: Before adding a tool ID, check if a differently-cased variant (e.g., lowercase equivalent) is already in the array. If `grep` is already there, do **not** add `Grep`. Only add a capitalized variant if the lowercase form is absent.
 
-
-
 ### Style Rules
 
 - Use leading comma style: `,"new_tool": "Friendly Name"`
