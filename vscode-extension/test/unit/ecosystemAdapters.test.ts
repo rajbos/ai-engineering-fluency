@@ -162,6 +162,32 @@ test('ClaudeCodeAdapter.handles: rejects ~/.claude/stats-cache.json', () => {
     assert.ok(!claudeCodeAdapter.handles(path.join(os.homedir(), '.claude', 'stats-cache.json')));
 });
 
+test('ClaudeCodeAdapter.getDisplayName: returns Claude Desktop for entrypoint claude-desktop', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-adapter-'));
+    const projectsDir = path.join(dir, '.claude', 'projects', 'hash');
+    fs.mkdirSync(projectsDir, { recursive: true });
+    const file = path.join(projectsDir, 'session.jsonl');
+    fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-desktop', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+    try {
+        assert.equal(claudeCodeAdapter.getDisplayName(file), 'Claude Desktop');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
+test('ClaudeCodeAdapter.getDisplayName: returns Claude Code for entrypoint claude-cli', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-adapter-'));
+    const projectsDir = path.join(dir, '.claude', 'projects', 'hash');
+    fs.mkdirSync(projectsDir, { recursive: true });
+    const file = path.join(projectsDir, 'session.jsonl');
+    fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+    try {
+        assert.equal(claudeCodeAdapter.getDisplayName(file), 'Claude Code');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+
 test('MistralVibeAdapter.handles: recognises ~/.vibe/logs/session paths', () => {
     const p = path.join(os.homedir(), '.vibe', 'logs', 'session', 'session_20240101_120000_abc12345', 'meta.json');
     assert.ok(mistralVibeAdapter.handles(p));

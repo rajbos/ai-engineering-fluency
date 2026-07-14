@@ -1,5 +1,5 @@
 // Environmental Impact webview
-import { el, createButton } from '../shared/domUtils';
+import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { formatFixed, formatNumber, formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
@@ -197,8 +197,7 @@ function buildImpactCards(
 	projectedTrees: number
 ): HTMLElement {
 	const section = el('div', 'section');
-	const heading = el('h3');
-	heading.textContent = '🌍 Impact at a Glance';
+	const heading = iconHeading('h3', 'globe', 'Impact at a Glance');
 	section.append(heading);
 
 	const intro = el('p', 'section-intro');
@@ -247,8 +246,7 @@ function buildImpactCards(
 
 function buildEstimatesSection(): HTMLElement {
 	const section = el('div', 'section');
-	const heading = el('h3');
-	heading.textContent = '💡 Calculation & Estimates';
+	const heading = iconHeading('h3', 'lightbulb', 'Calculation & Estimates');
 	section.append(heading);
 
 	const notes = document.createElement('ul');

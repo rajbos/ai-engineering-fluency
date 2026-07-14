@@ -9,6 +9,7 @@
 export const EDITOR_ICON_MAP: Record<string, string> = {
 	'Antigravity': '🚀',
 	'Claude Code': '🟠',
+	'Claude Desktop': '🟠',
 	'Claude Desktop Cowork': '🟠',
 	'Continue': '▶️',
 	'Copilot CLI': '🤖',

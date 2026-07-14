@@ -6,7 +6,7 @@
  * bootstrap-dependent logic lives in helpers.ts.
  */
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
-import { normalizePathForComparison } from '../../src/workspaceHelpers';
+import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
@@ -52,6 +52,40 @@ export interface DailyEntry {
 	sessions: number;
 	modelUsage: ModelUsage;
 	editorUsage: { [editor: string]: { tokens: number; sessions: number } };
+	editorModelUsage?: { [editor: string]: ModelUsage };
+}
+
+// ── Billing group helpers (mirrors chartDataBuilder.ts) ──────────────────────────────────────
+
+/** Editor display names that bill through GitHub Copilot's AI-Credit system. */
+const COPILOT_EDITOR_NAMES = new Set([
+	'VS Code', 'VS Code Insiders', 'VS Code Exploration',
+	'VS Code Server', 'VS Code Server (Insiders)', 'VSCodium',
+	'Visual Studio', 'JetBrains', 'Copilot CLI', 'MS Scout (Copilot CLI)',
+]);
+
+const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [
+	['claude', 'Anthropic'], ['anthropic', 'Anthropic'],
+	['gemini', 'Google'], ['google', 'Google'],
+	['mistral', 'Mistral AI'], ['codestral', 'Mistral AI'], ['magistral', 'Mistral AI'],
+	['ministral', 'Mistral AI'], ['devstral', 'Mistral AI'], ['pixtral', 'Mistral AI'],
+	['gpt', 'OpenAI'], ['o1', 'OpenAI'], ['o3', 'OpenAI'], ['o4', 'OpenAI'],
+	['grok', 'xAI'], ['raptor', 'xAI'], ['goldeneye', 'xAI'],
+	['qwen', 'Alibaba'], ['mai-', 'Microsoft'],
+];
+
+function getPricingSourceForEditor(editor: string): 'provider' | 'copilot' {
+	return COPILOT_EDITOR_NAMES.has(editor) ? 'copilot' : 'provider';
+}
+
+function getModelBillingProvider(modelId: string): string {
+	const id = modelId.toLowerCase();
+	const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
+	return match ? match[1] : 'Other';
+}
+
+function getBillingGroup(editor: string, modelId: string): string {
+	return COPILOT_EDITOR_NAMES.has(editor) ? 'GitHub Copilot' : getModelBillingProvider(modelId);
 }
 
 // ── Pure helpers ───────────────────────────────────────────────────────────────────────────────────────
@@ -77,7 +111,7 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
 	if (normalized.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (normalized.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
-	if (normalized.includes('/.claude/projects/')) { return 'Claude Code'; }
+	if (normalized.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
 	if (normalized.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
 	// Antigravity must be checked before Gemini CLI: both live under ~/.gemini/.
 	if (normalized.includes('/.gemini/antigravity/brain/')) { return 'Antigravity'; }
@@ -187,6 +221,11 @@ export function createEmptyUsageAnalysisPeriod(): UsageAnalysisPeriod {
 			maxModelsPerSession: 0,
 			minModelsPerSession: 0,
 			switchingFrequency: 0,
+			autoSessions: 0,
+			foundryWindowsSessions: 0,
+			unknownProviderSessions: 0,
+			selectedModelExtensions: [],
+			unknownProviderModels: [],
 			standardModels: [],
 			premiumModels: [],
 			lowCostModels: [],
@@ -202,11 +241,6 @@ export function createEmptyUsageAnalysisPeriod(): UsageAnalysisPeriod {
 			lowCostRequests: 0,
 			mediumCostRequests: 0,
 			highCostRequests: 0,
-			autoSessions: 0,
-			foundryWindowsSessions: 0,
-			unknownProviderSessions: 0,
-			selectedModelExtensions: [],
-			unknownProviderModels: [],
 		},
 		repositories: [],
 		repositoriesWithCustomization: [],
@@ -296,7 +330,70 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 		const costData = entries.map(e => calculateEstimatedCost(e.modelUsage, modelPricing, 'copilot'));
 		const totalCost = costData.reduce((a, b) => a + b, 0);
 		const avgCostPerPeriod = periodCount > 0 ? totalCost / periodCount : 0;
-		return { labels: bLabels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets: [], periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod };
+
+		// Editor cost datasets (cost per editor using per-editor model breakdown)
+		const allEditorsForCost = new Set<string>();
+		entries.forEach(e => { if (e.editorModelUsage) { Object.keys(e.editorModelUsage).forEach(ed => allEditorsForCost.add(ed)); } });
+		const editorCostTotals = new Map<string, number>();
+		for (const editor of allEditorsForCost) {
+			const total = entries.reduce((sum, e) => sum + calculateEstimatedCost(e.editorModelUsage?.[editor] ?? {}, modelPricing, getPricingSourceForEditor(editor)), 0);
+			editorCostTotals.set(editor, total);
+		}
+		const sortedCostEditors = Array.from(allEditorsForCost).sort((a, b) => (editorCostTotals.get(b) || 0) - (editorCostTotals.get(a) || 0));
+		const editorCostDatasets = sortedCostEditors.map((editor, idx) => {
+			const color = CHART_COLORS[idx % CHART_COLORS.length];
+			return { label: editor, data: entries.map(e => calculateEstimatedCost(e.editorModelUsage?.[editor] ?? {}, modelPricing, getPricingSourceForEditor(editor))), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+		});
+
+		// Billing group cost datasets (cost per provider: "GitHub Copilot", "Anthropic", etc.)
+		const allGroups = new Set<string>();
+		entries.forEach(e => {
+			if (!e.editorModelUsage) { return; }
+			for (const [editor, mu] of Object.entries(e.editorModelUsage)) {
+				for (const modelId of Object.keys(mu)) { allGroups.add(getBillingGroup(editor, modelId)); }
+			}
+		});
+		const groupTotals = new Map<string, number>();
+		for (const group of allGroups) {
+			groupTotals.set(group, entries.reduce((sum, e) => {
+				if (!e.editorModelUsage) { return sum; }
+				const grouped: ModelUsage = {};
+				for (const [editor, mu] of Object.entries(e.editorModelUsage)) {
+					for (const [modelId, usage] of Object.entries(mu)) {
+						if (getBillingGroup(editor, modelId) !== group) { continue; }
+						if (!grouped[modelId]) { grouped[modelId] = { inputTokens: 0, outputTokens: 0 }; }
+						grouped[modelId].inputTokens += usage.inputTokens;
+						grouped[modelId].outputTokens += usage.outputTokens;
+					}
+				}
+				const pricingSource = group === 'GitHub Copilot' ? 'copilot' : 'provider';
+				return sum + calculateEstimatedCost(grouped, modelPricing, pricingSource);
+			}, 0));
+		}
+		const sortedGroups = Array.from(allGroups).sort((a, b) => (groupTotals.get(b) || 0) - (groupTotals.get(a) || 0));
+		const billingGroupCostDatasets = sortedGroups.map((group, idx) => {
+			const color = CHART_COLORS[idx % CHART_COLORS.length];
+			const pricingSource = group === 'GitHub Copilot' ? 'copilot' : 'provider';
+			return {
+				label: group,
+				data: entries.map(e => {
+					if (!e.editorModelUsage) { return 0; }
+					const grouped: ModelUsage = {};
+					for (const [editor, mu] of Object.entries(e.editorModelUsage)) {
+						for (const [modelId, usage] of Object.entries(mu)) {
+							if (getBillingGroup(editor, modelId) !== group) { continue; }
+							if (!grouped[modelId]) { grouped[modelId] = { inputTokens: 0, outputTokens: 0 }; }
+							grouped[modelId].inputTokens += usage.inputTokens;
+							grouped[modelId].outputTokens += usage.outputTokens;
+						}
+					}
+					return calculateEstimatedCost(grouped, modelPricing, pricingSource);
+				}),
+				backgroundColor: color.bg, borderColor: color.border, borderWidth: 1,
+			};
+		});
+
+		return { labels: bLabels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets: [], periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod, editorCostDatasets, billingGroupCostDatasets };
 	};
 
 	const mergeEntry = (target: DailyEntry, src: DailyEntry) => {
@@ -317,6 +414,17 @@ export function buildChartPayload(labels: string[], days: DailyEntry[], allDaysM
 			if (!target.editorUsage[e]) { target.editorUsage[e] = { tokens: 0, sessions: 0 }; }
 			target.editorUsage[e].tokens += u.tokens;
 			target.editorUsage[e].sessions += u.sessions;
+		}
+		if (src.editorModelUsage) {
+			if (!target.editorModelUsage) { target.editorModelUsage = {}; }
+			for (const [editor, mu] of Object.entries(src.editorModelUsage)) {
+				if (!target.editorModelUsage[editor]) { target.editorModelUsage[editor] = {}; }
+				for (const [model, u] of Object.entries(mu)) {
+					if (!target.editorModelUsage[editor][model]) { target.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0 }; }
+					target.editorModelUsage[editor][model].inputTokens += u.inputTokens;
+					target.editorModelUsage[editor][model].outputTokens += u.outputTokens;
+				}
+			}
 		}
 	};
 

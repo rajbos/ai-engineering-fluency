@@ -195,12 +195,17 @@ export class ClaudeDesktopCoworkDataAccess {
 		return { tokens: totalInputTokens + totalOutputTokens, thinkingTokens: 0 };
 	}
 
-	private computeCoworkTokenCounts(usage: any): { inputTokens: number; outputTokens: number; cacheCreation: number; cachedRead: number } {
+	private computeCoworkTokenCounts(usage: any): { inputTokens: number; outputTokens: number; cacheCreation: number; cachedRead: number; cacheCreation1h: number } {
 		const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+		// Split out the 1-hour TTL portion of cache-creation tokens (billed at a higher
+		// rate than the default 5-minute TTL) — see calculateEstimatedCost() in tokenEstimation.ts.
+		const cacheCreation1h = typeof usage.cache_creation?.ephemeral_1h_input_tokens === 'number'
+			? usage.cache_creation.ephemeral_1h_input_tokens
+			: 0;
 		const cachedRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
 		const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0) + cacheCreation + cachedRead;
 		const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
-		return { inputTokens, outputTokens, cacheCreation, cachedRead };
+		return { inputTokens, outputTokens, cacheCreation, cachedRead, cacheCreation1h };
 	}
 
 	private extractCoworkEventTokens(event: any, seenRequestIds: Set<string>): { inputTokens: number; outputTokens: number } | null {
@@ -256,19 +261,28 @@ export class ClaudeDesktopCoworkDataAccess {
 		if (event.type !== 'assistant') { return; }
 		const usage = event.message?.usage;
 		if (!usage) { return; }
-		const requestId = event.requestId;
-		if (requestId) {
-			if (!event.message?.stop_reason) { return; }
-			if (seenRequestIds.has(requestId)) { return; }
-			seenRequestIds.add(requestId);
-		}
+		if (!this.shouldCountCoworkRequest(event, seenRequestIds)) { return; }
 		const model = normalizeClaudeModelId(event.message?.model || 'unknown');
 		if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
-		const { inputTokens, outputTokens, cacheCreation, cachedRead } = this.computeCoworkTokenCounts(usage);
-		modelUsage[model].inputTokens += inputTokens;
-		modelUsage[model].outputTokens += outputTokens;
-		if (cacheCreation > 0) { modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + cacheCreation; }
-		if (cachedRead > 0) { modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + cachedRead; }
+		this.applyCoworkTokenCounts(modelUsage[model], usage);
+	}
+
+	private shouldCountCoworkRequest(event: any, seenRequestIds: Set<string>): boolean {
+		const requestId = event.requestId;
+		if (!requestId) { return true; }
+		if (!event.message?.stop_reason) { return false; }
+		if (seenRequestIds.has(requestId)) { return false; }
+		seenRequestIds.add(requestId);
+		return true;
+	}
+
+	private applyCoworkTokenCounts(entry: ModelUsage[string], usage: any): void {
+		const { inputTokens, outputTokens, cacheCreation, cachedRead, cacheCreation1h } = this.computeCoworkTokenCounts(usage);
+		entry.inputTokens += inputTokens;
+		entry.outputTokens += outputTokens;
+		if (cacheCreation > 0) { entry.cacheCreationTokens = (entry.cacheCreationTokens ?? 0) + cacheCreation; }
+		if (cacheCreation1h > 0) { entry.cacheCreation1hTokens = (entry.cacheCreation1hTokens ?? 0) + cacheCreation1h; }
+		if (cachedRead > 0) { entry.cachedReadTokens = (entry.cachedReadTokens ?? 0) + cachedRead; }
 	}
 
 	/**

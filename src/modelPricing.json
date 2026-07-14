@@ -358,6 +358,7 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "unknown",
       "multiplier": 1,
@@ -370,6 +371,7 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "unknown",
       "multiplier": 1,
@@ -382,6 +384,7 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "premium",
       "multiplier": 1,
@@ -402,6 +405,7 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 1,
@@ -422,6 +426,7 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 1.0,
@@ -442,6 +447,7 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 1.0,
@@ -462,6 +468,7 @@
       "outputCostPerMillion": 1.25,
       "cachedInputCostPerMillion": 0.025,
       "cacheCreationCostPerMillion": 0.3125,
+      "cacheCreation1hCostPerMillion": 0.5,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 0,
@@ -474,6 +481,7 @@
       "outputCostPerMillion": 5.0,
       "cachedInputCostPerMillion": 0.1,
       "cacheCreationCostPerMillion": 1.25,
+      "cacheCreation1hCostPerMillion": 2,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 0.33,
@@ -494,6 +502,7 @@
       "outputCostPerMillion": 5.0,
       "cachedInputCostPerMillion": 0.1,
       "cacheCreationCostPerMillion": 1.25,
+      "cacheCreation1hCostPerMillion": 2,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 0.33,
@@ -514,6 +523,7 @@
       "outputCostPerMillion": 75.0,
       "cachedInputCostPerMillion": 1.5,
       "cacheCreationCostPerMillion": 18.75,
+      "cacheCreation1hCostPerMillion": 30,
       "category": "Claude models (Anthropic)",
       "tier": "premium",
       "multiplier": 10,
@@ -526,6 +536,7 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 3,
@@ -546,6 +557,7 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 3,
@@ -566,6 +578,7 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 15.0,
@@ -586,6 +599,7 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "multiplier": 30,
@@ -606,6 +620,7 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "premium",
       "multiplier": 30,
@@ -1068,7 +1083,8 @@
         "Claude Opus 4.8"
       ],
       "cachedInputCostPerMillion": 0.5,
-      "cacheCreationCostPerMillion": 6.25
+      "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10
     },
     "qwen2.5": {
       "inputCostPerMillion": 0.0,
@@ -1111,7 +1127,8 @@
         "Claude Fable 5"
       ],
       "cachedInputCostPerMillion": 1.0,
-      "cacheCreationCostPerMillion": 12.5
+      "cacheCreationCostPerMillion": 12.5,
+      "cacheCreation1hCostPerMillion": 20
     },
     "deepseek-v4-flash": {
       "inputCostPerMillion": 0.14,
@@ -1144,7 +1161,8 @@
         "Claude Sonnet 5"
       ],
       "cachedInputCostPerMillion": 0.2,
-      "cacheCreationCostPerMillion": 2.5
+      "cacheCreationCostPerMillion": 2.5,
+      "cacheCreation1hCostPerMillion": 4
     },
     "claude-opus-4.8-(fast-mode)-(preview)": {
       "inputCostPerMillion": 10.0,
@@ -1156,7 +1174,8 @@
         "Claude Opus 4.8 (fast mode) (preview)"
       ],
       "cachedInputCostPerMillion": 1.0,
-      "cacheCreationCostPerMillion": 12.5
+      "cacheCreationCostPerMillion": 12.5,
+      "cacheCreation1hCostPerMillion": 20
     },
     "kimi-k2.7-code": {
       "inputCostPerMillion": 0.95,

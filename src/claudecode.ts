@@ -216,6 +216,49 @@ export class ClaudeCodeDataAccess {
 	}
 
 	/**
+	 * Extract the cache-related token breakdown from an Anthropic usage object:
+	 * total cache-creation tokens, the portion written under the 1-hour TTL, and
+	 * cache-read tokens. Anthropic bills cache-creation at different rates depending
+	 * on TTL, so the 1-hour portion is tracked separately from the total.
+	 */
+	private extractCacheTokenBreakdown(usage: any): { cacheCreation: number; cacheCreation1h: number; cachedRead: number } {
+		const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+		const cacheCreation1h = typeof usage.cache_creation?.ephemeral_1h_input_tokens === 'number'
+			? usage.cache_creation.ephemeral_1h_input_tokens
+			: 0;
+		const cachedRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+		return { cacheCreation, cacheCreation1h, cachedRead };
+	}
+
+	private addModelUsageEntry(
+		modelUsage: ModelUsage,
+		model: string,
+		usage: any
+	): void {
+		if (!modelUsage[model]) {
+			modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+		}
+
+		const { cacheCreation, cacheCreation1h, cachedRead } = this.extractCacheTokenBreakdown(usage);
+		const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
+			+ cacheCreation
+			+ cachedRead;
+		const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+
+		modelUsage[model].inputTokens += inputTokens;
+		modelUsage[model].outputTokens += outputTokens;
+		if (cacheCreation > 0) {
+			modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + cacheCreation;
+		}
+		if (cacheCreation1h > 0) {
+			modelUsage[model].cacheCreation1hTokens = (modelUsage[model].cacheCreation1hTokens ?? 0) + cacheCreation1h;
+		}
+		if (cachedRead > 0) {
+			modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + cachedRead;
+		}
+	}
+
+	/**
 	 * Get per-model token usage from a Claude Code session.
 	 * Uses the model field from assistant event message objects.
 	 * De-duplicates by message.id (last-wins) — see deduplicateAssistantEvents.
@@ -227,26 +270,7 @@ export class ClaudeCodeDataAccess {
 		for (const event of this.deduplicateAssistantEvents(events)) {
 			const usage = event.message.usage;
 			const model = normalizeClaudeModelId(event.message?.model || 'unknown');
-
-			if (!modelUsage[model]) {
-				modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
-			}
-
-			const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
-			const cachedRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
-			const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
-				+ cacheCreation
-				+ cachedRead;
-			const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
-
-			modelUsage[model].inputTokens += inputTokens;
-			modelUsage[model].outputTokens += outputTokens;
-			if (cacheCreation > 0) {
-				modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + cacheCreation;
-			}
-			if (cachedRead > 0) {
-				modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + cachedRead;
-			}
+			this.addModelUsageEntry(modelUsage, model, usage);
 		}
 
 		return modelUsage;
