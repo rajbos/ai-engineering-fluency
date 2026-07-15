@@ -4,7 +4,8 @@ import * as assert from 'node:assert/strict';
 
 import { DataPlaneService } from '../../src/backend/services/dataPlaneService';
 import { BackendUtility } from '../../src/backend/services/utilityService';
-import type { TableClientLike } from '../../src/backend/storageTables';
+import { getAzureBlobStorageEndpoint } from '../../src/utils/azureEndpoints';
+import type { TableClientLike, BackendAggDailyEntityLike } from '../../src/backend/storageTables';
 
 function makeService(log?: (msg: string) => void): DataPlaneService {
 	return new DataPlaneService(
@@ -18,31 +19,29 @@ function makeService(log?: (msg: string) => void): DataPlaneService {
  * Create a mock TableClientLike with configurable behavior.
  */
 function makeMockTableClient(overrides?: {
-	entities?: any[];
-	upsertFn?: (entity: any, mode?: string) => Promise<any>;
-	deleteFn?: (pk: string, rk: string) => Promise<any>;
+	entities?: Partial<BackendAggDailyEntityLike>[];
+	upsertFn?: (entity: BackendAggDailyEntityLike, mode?: 'Merge' | 'Replace') => Promise<void>;
+	deleteFn?: (pk: string, rk: string) => Promise<void>;
 }): TableClientLike {
 	const entities = overrides?.entities ?? [];
 	return {
 		async *listEntities() {
 			for (const e of entities) { yield e; }
 		},
-		upsertEntity: overrides?.upsertFn ?? (async () => ({})),
-		deleteEntity: overrides?.deleteFn ?? (async () => ({})),
+		upsertEntity: overrides?.upsertFn ?? (async () => {}),
+		deleteEntity: overrides?.deleteFn ?? (async () => {}),
 	};
 }
 
-// ── getStorageBlobEndpoint ───────────────────────────────────────────────
+// ── azureEndpoints utility ───────────────────────────────────────────────
 
-test('getStorageBlobEndpoint returns correct URL', () => {
-	const svc = makeService();
-	assert.equal(svc.getStorageBlobEndpoint('mystorageacct'), 'https://mystorageacct.blob.core.windows.net');
+test('getAzureBlobStorageEndpoint returns correct URL', () => {
+	assert.equal(getAzureBlobStorageEndpoint('mystorageacct'), 'https://mystorageacct.blob.core.windows.net');
 });
 
-test('getStorageBlobEndpoint handles various account names', () => {
-	const svc = makeService();
-	assert.equal(svc.getStorageBlobEndpoint('a'), 'https://a.blob.core.windows.net');
-	assert.equal(svc.getStorageBlobEndpoint('longstorageaccountname12345'), 'https://longstorageaccountname12345.blob.core.windows.net');
+test('getAzureBlobStorageEndpoint handles various account names', () => {
+	assert.equal(getAzureBlobStorageEndpoint('a'), 'https://a.blob.core.windows.net');
+	assert.equal(getAzureBlobStorageEndpoint('longstorageaccountname12345'), 'https://longstorageaccountname12345.blob.core.windows.net');
 });
 
 // ── createTableClient ────────────────────────────────────────────────────
@@ -66,8 +65,8 @@ test('listEntitiesForRange returns entities for a single-day range', async () =>
 		async *listEntities() {
 			yield { partitionKey: 'pk', rowKey: 'rk', model: 'gpt-4o', workspaceId: 'ws1', machineId: 'm1', inputTokens: 100, outputTokens: 200, interactions: 5 };
 		},
-		upsertEntity: async () => ({}),
-		deleteEntity: async () => ({}),
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
 	} satisfies TableClientLike;
 
 	const result = await svc.listEntitiesForRange({
@@ -84,13 +83,13 @@ test('listEntitiesForRange iterates over multiple days', async () => {
 	const svc = makeService();
 	let queriedPartitions: string[] = [];
 	const mockClient: TableClientLike = {
-		async *listEntities(options: any) {
+		async *listEntities(options?) {
 			const filter = options?.queryOptions?.filter ?? '';
 			queriedPartitions.push(filter);
 			yield { partitionKey: 'pk', rowKey: 'rk', model: 'gpt-4o', workspaceId: 'ws1', machineId: 'm1', inputTokens: 10, outputTokens: 20, interactions: 1 };
 		},
-		upsertEntity: async () => ({}),
-		deleteEntity: async () => ({}),
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
 	};
 
 	const result = await svc.listEntitiesForRange({
@@ -127,6 +126,7 @@ test('listAllEntitiesForRange parses partition and row keys correctly', async ()
 		entities: [{
 			partitionKey: 'myDataset|2024-06-15',
 			rowKey: 'gpt-4o|ws1|m1|user1',
+			day: '2024-06-15',
 			inputTokens: 500,
 			outputTokens: 1000,
 			interactions: 10,
@@ -147,12 +147,34 @@ test('listAllEntitiesForRange parses partition and row keys correctly', async ()
 	assert.equal(result[0].userId, 'user1');
 });
 
+test('listAllEntitiesForRange uses day field range filter (not Timestamp)', async () => {
+	const svc = makeService();
+	let capturedFilter = '';
+	const mockClient: TableClientLike = {
+		async *listEntities(options?) {
+			capturedFilter = options?.queryOptions?.filter ?? '';
+			yield { partitionKey: 'ds:myds|d:2024-06-15', rowKey: 'm:gpt-4o|w:ws1|mc:m1|u:u1', day: '2024-06-15', inputTokens: 100, outputTokens: 200, interactions: 1 };
+		},
+		upsertEntity: async () => {},
+		deleteEntity: async () => {},
+	};
+
+	await svc.listAllEntitiesForRange({ tableClient: mockClient, startDayKey: '2024-06-10', endDayKey: '2024-06-20' });
+
+	// Verify the filter uses `day` field (not Timestamp which is incompatible with Cosmos DB Tables API)
+	assert.ok(capturedFilter.includes("day ge '2024-06-10'"), `Expected day ge filter, got: ${capturedFilter}`);
+	assert.ok(capturedFilter.includes("day le '2024-06-20'"), `Expected day le filter, got: ${capturedFilter}`);
+	assert.ok(!capturedFilter.includes('Timestamp'), `Filter should not use Timestamp: ${capturedFilter}`);
+	assert.ok(!capturedFilter.includes("datetime'"), `Filter should not use datetime type annotation: ${capturedFilter}`);
+});
+
 test('listAllEntitiesForRange includes fluency metrics when present', async () => {
 	const svc = makeService();
 	const mockClient = makeMockTableClient({
 		entities: [{
 			partitionKey: 'ds1|2024-06-15',
 			rowKey: 'gpt-4o|ws1|m1|',
+			day: '2024-06-15',
 			inputTokens: 100,
 			outputTokens: 200,
 			interactions: 5,
@@ -198,7 +220,7 @@ test('deleteEntitiesForUserDataset deletes matching entities', async () => {
 			yield { partitionKey: 'ds:myds|d:2024-06-15', rowKey: 'm:gpt-4o|u:bob' };
 			yield { partitionKey: 'ds:other|d:2024-06-15', rowKey: 'm:gpt-4o|u:alice' };
 		},
-		upsertEntity: async () => ({}),
+		upsertEntity: async () => {},
 		deleteEntity: async (pk, rk) => { deletedKeys.push(`${pk}/${rk}`); },
 	};
 
@@ -223,7 +245,7 @@ test('deleteEntitiesForUserDataset reports errors for failed deletes', async () 
 		async *listEntities() {
 			yield { partitionKey: 'ds:myds|d:2024-06-15', rowKey: 'm:gpt-4o|u:alice' };
 		},
-		upsertEntity: async () => ({}),
+		upsertEntity: async () => {},
 		deleteEntity: async () => { throw new Error('delete failed'); },
 	};
 

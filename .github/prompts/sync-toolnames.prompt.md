@@ -1,5 +1,4 @@
 ---
-mode: 'agent'
 description: 'Scan microsoft/vscode-copilot-chat for model-facing tool identifiers and update src/toolNames.json with any missing entries.'
 tools: ['read_file', 'write_file', 'search_files', 'run_in_terminal']
 ---
@@ -40,7 +39,8 @@ Scan `microsoft/vscode-copilot-chat` repo for model-facing tool identifiers, com
 8. Also print (as plain text, after the delta or NO_DELTA) the upstream commit SHA used for the scan and the exact file path scanned in upstream, for traceability.
 
 ## Constraints
-- Only modify our toolNames.json file.
+- Only modify `toolNames.json` and `automaticTools.json`.
 - Do not open a PR.
 - Do not include tools in the list that are not model-facing (only those defined in upstream `ToolName` / `ContributedToolName` string values).
 - Be resilient to minor refactors (enum order changes, added comments, etc.).
+- For each new tool added to `toolNames.json`, also determine if it is **automatic** (agent calls it on its own: file reads, searches, error checks, confirmations) or **intentional** (user configures it: terminal execution, file editing, websearch, MCP tools). Add automatic tools to `automaticTools.json`.

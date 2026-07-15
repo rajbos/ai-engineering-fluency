@@ -1,4 +1,4 @@
-# Copilot Token Tracker — Visual Studio Extension: Debugging Guide
+﻿# Copilot Token Tracker — Visual Studio Extension: Debugging Guide
 
 ## Prerequisites
 
@@ -36,7 +36,7 @@ After a successful build the files `dist/webview/details.js`, `chart.js`, `usage
 ## Opening the solution
 
 ```
-visualstudio-extension/CopilotTokenTracker.sln
+visualstudio-extension/AIEngineeringFluency.sln
 ```
 
 Open this in **Visual Studio 2022**.  The project file contains an MSBuild target
@@ -47,7 +47,7 @@ into the local `webview/` folder before each build.
 
 ## Running / debugging (F5)
 
-1. Set **CopilotTokenTracker** as the startup project (it already is).
+1. Set **AIEngineeringFluency** as the startup project (it already is).
 2. Press **F5**.
 3. An **Experimental Instance** of Visual Studio launches with the extension installed.
 4. In the Experimental Instance: **View → Copilot Token Tracker**.
@@ -81,9 +81,9 @@ Alternatively, close and re-open the tool window, or call `RefreshAsync()` from 
 Window:
 
 ```csharp
-((CopilotTokenTracker.ToolWindow.TokenTrackerToolWindow)
+((AIEngineeringFluency.ToolWindow.TokenTrackerToolWindow)
     Microsoft.VisualStudio.Shell.Package.GetGlobalService(
-        typeof(CopilotTokenTracker.ToolWindow.TokenTrackerToolWindow)))
+        typeof(AIEngineeringFluency.ToolWindow.TokenTrackerToolWindow)))
     .RefreshAsync().Wait();
 ```
 
@@ -100,7 +100,7 @@ Window:
 ### The dashboard shows "Loading…" and stays blank
 
 - The webview JS bundle was not found.  Verify that
-  `visualstudio-extension/src/CopilotTokenTracker/webview/details.js` exists.
+  `visualstudio-extension/src/AIEngineeringFluency/webview/details.js` exists.
 - Re-run `npm run compile` in `vscode-extension/` and rebuild the C# project.
 
 ### "Session data not available" / empty charts
@@ -127,11 +127,11 @@ Window:
 ## Building a .vsix package for distribution
 
 ```powershell
-cd visualstudio-extension/src/CopilotTokenTracker
+cd visualstudio-extension/src/AIEngineeringFluency
 dotnet build -c Release
 ```
 
 The `.vsix` file is written to `bin/Release/net472/`.  Install it with:
 ```powershell
-& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\VSIXInstaller.exe" CopilotTokenTracker.vsix
+& "C:\Program Files\Microsoft Visual Studio\2022\Community\Common7\IDE\VSIXInstaller.exe" AIEngineeringFluency.vsix
 ```

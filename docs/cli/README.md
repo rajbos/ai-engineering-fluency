@@ -1,6 +1,10 @@
 # Copilot Token Tracker — CLI
 
+![AI Engineering Fluency](../../assets/AI%20Engineering%20Fluency%20-%20Transparent.png)
+
 Command-line interface for analyzing GitHub Copilot token usage from local session files. Works anywhere Copilot Chat stores its session data — no VS Code required.
+
+📦 **npm**: [@rajbos/ai-engineering-fluency](https://www.npmjs.com/package/@rajbos/ai-engineering-fluency)
 
 ## Quick Start
 
@@ -24,6 +28,7 @@ Show discovered session files, sessions, chat turns, and token counts.
 ```bash
 ai-engineering-fluency stats
 ai-engineering-fluency stats --verbose  # Show per-folder breakdown
+ai-engineering-fluency stats --json     # Machine-readable JSON output
 ```
 
 ```
@@ -37,6 +42,25 @@ Editor Breakdown:
 
 ──────────────────────────────────────────────────────────────────────────────
 Total                     53 files   │  397 sessions  │  5,917 turns  │  2.6M tokens
+```
+
+With `--json`, outputs a machine-readable payload suitable for scripting:
+
+```json
+{
+  "totalFiles": 53,
+  "processedFiles": 50,
+  "emptyFiles": 3,
+  "totalTokens": 2600000,
+  "totalThinkingTokens": 0,
+  "totalInteractions": 5917,
+  "byEditor": {
+    "vscode":          { "files": 42, "tokens": 2100000, "interactions": 4821 },
+    "vscode-insiders": { "files":  8, "tokens":  401000, "interactions":  892 },
+    "opencode":        { "files":  3, "tokens":   87000, "interactions":  204 }
+  },
+  "lastUpdated": "2025-01-15T10:30:00.000Z"
+}
 ```
 
 ---
@@ -157,6 +181,9 @@ The CLI scans the same session files as the [VS Code extension](../vscode-extens
 - **VS Code Remote** / Codespaces sessions
 - **Copilot CLI** agent mode sessions
 - **OpenCode** sessions (JSON and SQLite)
+- **Claude Code** sessions (Anthropic CLI/IDE extension, actual API token counts)
+- **Gemini CLI** sessions (JSONL, actual token counts from assistant events)
+- **Claude Desktop Cowork** sessions (Windows only, local agent mode sessions with actual API token counts)
 
 ---
 

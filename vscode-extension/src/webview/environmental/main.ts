@@ -1,10 +1,13 @@
 // Environmental Impact webview
-import { el, createButton } from '../shared/domUtils';
-import { BUTTONS } from '../shared/buttonConfig';
+import { el, createButton, iconHeading } from '../shared/domUtils';
+import { getNavButtons } from '../shared/buttonConfig';
 import { formatFixed, formatNumber, formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import { wireExtensionPointButtons } from '../shared/extensionPoints';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
+import { registerMessageHandler } from '../shared/messageHandler';
 
 // --- Analogy constants ---
 /** Average EU petrol car CO₂ emissions per km (grams) */
@@ -57,14 +60,8 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 
 type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
-declare global {
-	interface Window {
-		__INITIAL_ENVIRONMENTAL__?: EnvironmentalStats;
-	}
-}
-
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = window.__INITIAL_ENVIRONMENTAL__;
+const initialData = getWindowData<EnvironmentalStats>('__INITIAL_ENVIRONMENTAL__');
 
 function calculateProjection(last30DaysValue: number): number {
 	return (last30DaysValue / 30) * 365.25;
@@ -77,6 +74,14 @@ function smartFixed(value: number): string {
 	if (value <= 100) { return formatFixed(value, 2); }
 	if (value <= 1000) { return formatFixed(value, 1); }
 	return formatFixed(Math.round(value), 0);
+}
+
+/** Format CO₂ in grams, switching to kg notation when ≥ 1 000 g */
+function formatCo2Grams(grams: number): string {
+	if (grams >= 1000) {
+		return `${smartFixed(grams / 1000)} kg`;
+	}
+	return `${smartFixed(grams)} g`;
 }
 
 type AnalogyItem = { icon: string; text: string };
@@ -137,17 +142,7 @@ function render(stats: EnvironmentalStats): void {
 	const title = el('div', 'title', '🌿 Environmental Impact');
 
 	const buttonRow = el('div', 'button-row');
-	buttonRow.append(
-		createButton(BUTTONS['btn-refresh']),
-		createButton(BUTTONS['btn-details']),
-		createButton(BUTTONS['btn-chart']),
-		createButton(BUTTONS['btn-usage']),
-		createButton(BUTTONS['btn-diagnostics']),
-		createButton(BUTTONS['btn-maturity'])
-	);
-	if (stats.backendConfigured) {
-		buttonRow.append(createButton(BUTTONS['btn-dashboard']));
-	}
+	buttonRow.append(...getNavButtons('btn-environmental', !!stats.backendConfigured).map(config => createButton(config)));
 	header.append(title, buttonRow);
 
 	const footer = el('div', 'footer', `Last updated: ${lastUpdated.toLocaleString()} · Updates every 5 minutes`);
@@ -162,6 +157,38 @@ function render(stats: EnvironmentalStats): void {
 	wireButtons();
 }
 
+function buildAnalogyColumn(periodLabel: string, primaryValue: string, analogies: AnalogyItem[] | null): HTMLElement {
+	const col = el('div', 'analogy-col');
+	col.append(el('div', 'analogy-col-header', periodLabel));
+	col.append(el('div', 'metric-primary-value', primaryValue));
+	if (analogies) {
+		for (const item of analogies) {
+			const itemEl = el('div', 'analogy-item');
+			itemEl.append(el('span', 'analogy-icon', item.icon));
+			const itemText = document.createElement('span');
+			itemText.textContent = item.text;
+			itemEl.append(itemText);
+			col.append(itemEl);
+		}
+	}
+	return col;
+}
+
+function buildMetricCard(periodCols: Array<[string, string, AnalogyItem[] | null]>, header: { icon: string; label: string; color: string }): HTMLElement {
+	const card = el('div', 'metric-card');
+	const cardHeader = el('div', 'metric-card-header');
+	const iconEl = el('span', 'metric-card-icon', header.icon);
+	iconEl.style.color = header.color;
+	cardHeader.append(iconEl, el('span', 'metric-card-label', header.label));
+	card.append(cardHeader);
+	const grid = el('div', 'analogy-grid');
+	for (const [periodLabel, primaryValue, analogies] of periodCols) {
+		grid.append(buildAnalogyColumn(periodLabel, primaryValue, analogies));
+	}
+	card.append(grid);
+	return card;
+}
+
 function buildImpactCards(
 	stats: EnvironmentalStats,
 	projectedTokens: number,
@@ -170,8 +197,7 @@ function buildImpactCards(
 	projectedTrees: number
 ): HTMLElement {
 	const section = el('div', 'section');
-	const heading = el('h3');
-	heading.textContent = '🌍 Impact at a Glance';
+	const heading = iconHeading('h3', 'globe', 'Impact at a Glance');
 	section.append(heading);
 
 	const intro = el('p', 'section-intro');
@@ -179,28 +205,24 @@ function buildImpactCards(
 	section.append(intro);
 
 	const periods: Array<[string, string, AnalogyItem[] | null]>[] = [
-		// Tokens card: 4 periods, no analogies
 		[
 			['📅 Today', formatCompact(stats.today.tokens), null],
 			['📈 Last 30 Days', formatCompact(stats.last30Days.tokens), null],
 			['📆 Previous Month', formatCompact(stats.lastMonth.tokens), null],
 			['🌍 Projected Year', formatCompact(projectedTokens), null],
 		],
-		// CO₂ card
 		[
-			['📅 Today', `${smartFixed(stats.today.co2)} g`, co2AnalogyItems(stats.today.co2)],
-			['📈 Last 30 Days', `${smartFixed(stats.last30Days.co2)} g`, co2AnalogyItems(stats.last30Days.co2)],
-			['📆 Previous Month', `${smartFixed(stats.lastMonth.co2)} g`, co2AnalogyItems(stats.lastMonth.co2)],
-			['🌍 Projected Year', `${smartFixed(projectedCo2)} g`, co2AnalogyItems(projectedCo2)],
+			['📅 Today', formatCo2Grams(stats.today.co2), co2AnalogyItems(stats.today.co2)],
+			['📈 Last 30 Days', formatCo2Grams(stats.last30Days.co2), co2AnalogyItems(stats.last30Days.co2)],
+			['📆 Previous Month', formatCo2Grams(stats.lastMonth.co2), co2AnalogyItems(stats.lastMonth.co2)],
+			['🌍 Projected Year', formatCo2Grams(projectedCo2), co2AnalogyItems(projectedCo2)],
 		],
-		// Water card
 		[
 			['📅 Today', `${smartFixed(stats.today.waterUsage)} L`, waterAnalogyItems(stats.today.waterUsage)],
 			['📈 Last 30 Days', `${smartFixed(stats.last30Days.waterUsage)} L`, waterAnalogyItems(stats.last30Days.waterUsage)],
 			['📆 Previous Month', `${smartFixed(stats.lastMonth.waterUsage)} L`, waterAnalogyItems(stats.lastMonth.waterUsage)],
 			['🌍 Projected Year', `${smartFixed(projectedWater)} L`, waterAnalogyItems(projectedWater)],
 		],
-		// Trees card
 		[
 			['📅 Today', `${smartFixed(stats.today.treesEquivalent)} 🌳`, treeAnalogyItems(stats.today.treesEquivalent)],
 			['📈 Last 30 Days', `${smartFixed(stats.last30Days.treesEquivalent)} 🌳`, treeAnalogyItems(stats.last30Days.treesEquivalent)],
@@ -217,53 +239,21 @@ function buildImpactCards(
 	];
 
 	const cards = el('div', 'metric-cards');
-
-	periods.forEach((periodCols, i) => {
-		const card = el('div', 'metric-card');
-
-		const cardHeader = el('div', 'metric-card-header');
-		const iconEl = el('span', 'metric-card-icon', metricHeaders[i].icon);
-		iconEl.style.color = metricHeaders[i].color;
-		const labelEl = el('span', 'metric-card-label', metricHeaders[i].label);
-		cardHeader.append(iconEl, labelEl);
-		card.append(cardHeader);
-
-		const grid = el('div', 'analogy-grid');
-		periodCols.forEach(([periodLabel, primaryValue, analogies]) => {
-			const col = el('div', 'analogy-col');
-			col.append(el('div', 'analogy-col-header', periodLabel));
-			col.append(el('div', 'metric-primary-value', primaryValue));
-			if (analogies) {
-				analogies.forEach(item => {
-					const itemEl = el('div', 'analogy-item');
-					const itemIcon = el('span', 'analogy-icon', item.icon);
-					const itemText = document.createElement('span');
-					itemText.textContent = item.text;
-					itemEl.append(itemIcon, itemText);
-					col.append(itemEl);
-				});
-			}
-			grid.append(col);
-		});
-		card.append(grid);
-		cards.append(card);
-	});
-
+	periods.forEach((periodCols, i) => cards.append(buildMetricCard(periodCols, metricHeaders[i])));
 	section.append(cards);
 	return section;
 }
 
 function buildEstimatesSection(): HTMLElement {
 	const section = el('div', 'section');
-	const heading = el('h3');
-	heading.textContent = '💡 Calculation & Estimates';
+	const heading = iconHeading('h3', 'lightbulb', 'Calculation & Estimates');
 	section.append(heading);
 
 	const notes = document.createElement('ul');
 	notes.className = 'notes';
 
 	const items = [
-		'Cost estimate uses public API pricing with input/output token counts; GitHub Copilot billing may differ from direct API usage.',
+		'Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) under Usage Based Billing.',
 		'Estimated CO₂ is based on ~0.2 g CO₂e per 1,000 tokens (average data center energy mix and PUE).',
 		'Estimated water usage is based on ~0.3 L per 1,000 tokens (data center cooling estimates).',
 		'Tree equivalent represents the fraction of a single mature tree\'s annual CO₂ absorption (~21 kg/year).',
@@ -290,18 +280,17 @@ function wireButtons(): void {
 	document.getElementById('btn-diagnostics')?.addEventListener('click', () => vscode.postMessage({ command: 'showDiagnostics' }));
 	document.getElementById('btn-maturity')?.addEventListener('click', () => vscode.postMessage({ command: 'showMaturity' }));
 	document.getElementById('btn-dashboard')?.addEventListener('click', () => vscode.postMessage({ command: 'showDashboard' }));
+	wireExtensionPointButtons(vscode);
 }
 
-window.addEventListener('message', (event: MessageEvent) => {
-	const message = event.data;
+registerMessageHandler<{ command: string; data?: EnvironmentalStats }>((message) => {
 	if (message.command === 'updateStats') {
 		render(message.data as EnvironmentalStats);
 	}
 });
 
 async function bootstrap(): Promise<void> {
-	const { provideVSCodeDesignSystem, vsCodeButton } = await import('@vscode/webview-ui-toolkit');
-	provideVSCodeDesignSystem().register(vsCodeButton());
+	await import('@vscode-elements/elements/dist/vscode-button/index.js');
 
 	if (initialData) {
 		render(initialData);

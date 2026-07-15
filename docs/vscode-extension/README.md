@@ -1,10 +1,12 @@
 # AI Engineering Fluency — VS Code Extension
 
+![AI Engineering Fluency](../../assets/AI%20Engineering%20Fluency%20-%20Transparent.png)
+
 Track your AI Engineering Fluency — daily and monthly token usage, cost estimates, and productivity insights directly inside VS Code. Reads local session logs and displays today's and monthly usage in the status bar, with rich detail views and optional cloud sync.
 
 ## Install
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/RobBos.copilot-token-tracker)](https://marketplace.visualstudio.com/items?itemName=RobBos.copilot-token-tracker)
+[![VS Code Marketplace](https://badgen.net/vs-marketplace/v/RobBos.ai-engineering-fluency)](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency)
 
 Search for **"AI Engineering Fluency"** in the VS Code Extensions panel, or install via the Marketplace link above.
 
@@ -23,6 +25,19 @@ Search for **"AI Engineering Fluency"** in the VS Code Extensions panel, or inst
 - **Smart Estimation**: Uses character-based analysis with model-specific ratios for token estimation
 - **Intelligent Caching**: Caches processed session files to speed up subsequent updates
 - **Diagnostic Reporting**: Generate comprehensive diagnostic reports to help troubleshoot issues
+- **GitHub Authentication**: Authenticate with your GitHub account to unlock future features
+
+### GitHub Authentication (Opt-in)
+
+- **Opt-in Authentication**: Sign in with your configured GitHub account in VS Code
+- **Built-in VS Code Integration**: Uses VS Code's native authentication provider for GitHub
+- **Stored State**: Authentication state is stored in VS Code global state (no tokens stored)
+- **Future Features**: Foundation for upcoming GitHub-specific features such as:
+  - Repository-specific usage tracking
+  - Team collaboration features
+  - Advanced analytics and insights
+
+To authenticate, open the Command Palette (`Ctrl+Shift+P` / `Cmd+Shift+P`) and search for "AI Engineering Fluency: Authenticate with GitHub", or access it through the Diagnostic Report's **GitHub Auth** tab.
 
 ### Cloud Backend (Opt-in)
 
@@ -77,6 +92,8 @@ Supported editors shown in the chart:
 - `Cursor` — Cursor editor
 - `OpenCode` — Terminal-based coding agent
 - `Crush` — Terminal-based coding agent
+- `Claude Code` — Anthropic CLI/IDE extension (actual API token counts, no estimation)
+- `Gemini CLI` — Google's CLI coding agent (actual token counts from session JSONL)
 - `Visual Studio` — Visual Studio IDE (2022+); token counts are **estimated** from prompt and response text length
 
 ---
@@ -104,6 +121,42 @@ A debug-only tool that displays all fluency score rules, thresholds, and tips fo
 - **Use Cases**: Test scoring logic, debug scoring issues, plan improvements
 
 For detailed scoring rules, see [Fluency Levels Documentation](../FLUENCY-LEVELS.md).
+
+---
+
+## Session Log Viewer
+
+The extension includes a session log viewer for inspecting individual Copilot Chat or Copilot CLI session files in detail.
+
+**To open:** In the **Diagnostics** view → session files tab, click the **📄 View** link next to any session.
+
+### What you see
+
+Each chat turn is shown as a card with:
+- Input, output, and (where applicable) thinking token counts
+- The model used
+- A summary of tool calls and sub-agent activity
+
+### Sub-Agent tracking
+
+When a turn launched sub-agents, the summary card shows:
+
+> 🤖 Sub-Agents: N started · M tool calls
+
+Sub-agent tool rows are displayed with friendly names:
+- `task` → **Sub-Agent**
+- `read_agent` → **Sub-Agent (read)**
+- `write_agent` → **Sub-Agent (write)**
+- `list_agents` → **Sub-Agent (list)**
+
+Each sub-agent row also shows a green **↑N ↓M tokens** badge with the estimated input/output token usage for that specific sub-agent invocation.
+
+### Tool call pill filters
+
+Each turn with tool calls shows clickable pill badges (e.g. `read_file: 3`, `🤖 Sub-Agents: 2`). Clicking a pill:
+- Opens the tool calls panel for that turn if it is not already open
+- Filters the list to show only tool rows of that type
+- Click the same pill again to clear the filter and show all rows
 
 ---
 
@@ -169,9 +222,9 @@ The extension can also upload your local session log files to Azure Blob Storage
 To enable log file uploads:
 ```json
 {
-  "copilotTokenTracker.backend.blobUploadEnabled": true,
-  "copilotTokenTracker.backend.blobContainerName": "copilot-session-logs",
-  "copilotTokenTracker.backend.blobUploadFrequencyHours": 24
+  "aiEngineeringFluency.backend.blobUploadEnabled": true,
+  "aiEngineeringFluency.backend.blobContainerName": "copilot-session-logs",
+  "aiEngineeringFluency.backend.blobUploadFrequencyHours": 24
 }
 ```
 
@@ -249,7 +302,7 @@ The extension uses intelligent caching to improve performance:
 
 ## Known Issues
 
-- Numbers shown use **actual token counts** from the LLM API when available (e.g. Copilot Chat JSONL sessions and OpenCode sessions). When actual token data is not available, the extension falls back to **estimates** computed from text in the session logs.
+- Numbers shown use **actual token counts** from the LLM API when available (e.g. Copilot Chat JSONL sessions, OpenCode sessions, and Claude Code sessions). When actual token data is not available, the extension falls back to **estimates** computed from text in the session logs.
 - If you use multiple machines (or multiple VS Code profiles/windows), local-only mode will only reflect what's on the current machine. The cloud backend improves cross-device coverage.
 - Premium Requests are not tracked.
 - Dev Containers: Copilot Chat session logs are written to the host machine's user profile (outside the container). The extension currently does not read from host paths, so token tracking will not work inside a Dev Container. Run VS Code locally (outside the container) or mount the host user data directories into the container at the expected locations.

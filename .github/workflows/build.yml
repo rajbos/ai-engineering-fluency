@@ -16,23 +16,30 @@ jobs:
     strategy:
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
-        node-version: [18.x, 20.x]
+        node-version: [22.x, 24.x]
     
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
       with:
         egress-policy: audit
 
     - name: Checkout code
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       
     - name: Setup Node.js ${{ matrix.node-version }}
-      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      if: matrix.os != 'windows-latest'
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
         node-version: ${{ matrix.node-version }}
         cache: 'npm'
         cache-dependency-path: vscode-extension/package-lock.json
+
+    - name: Setup Node.js ${{ matrix.node-version }} (Windows)
+      if: matrix.os == 'windows-latest'
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+      with:
+        node-version: ${{ matrix.node-version }}
         
     - name: Install dependencies
       working-directory: vscode-extension
@@ -45,7 +52,17 @@ jobs:
     - name: Run linting
       working-directory: vscode-extension
       run: npm run lint
-      
+
+    - name: Run complexity analysis
+      working-directory: vscode-extension
+      shell: bash
+      run: npm run --silent lint:report > "$RUNNER_TEMP/lint-output.json" 2>/dev/null || true
+
+    - name: Publish complexity results to step summary
+      if: always() && matrix.os == 'ubuntu-latest' && matrix.node-version == '24.x'
+      shell: bash
+      run: node scripts/parse-lint-output.js "$RUNNER_TEMP/lint-output.json" >> "$GITHUB_STEP_SUMMARY"
+
     - name: Run type checking
       working-directory: vscode-extension
       run: npm run check-types
@@ -62,6 +79,28 @@ jobs:
       working-directory: vscode-extension
       run: npm run compile-tests
       
+    - name: Run Node.js unit tests
+      working-directory: vscode-extension
+      shell: bash
+      run: |
+        set +e
+        node --require ./out/vscode-extension/test/unit/vscode-shim-register.js \
+          --experimental-test-coverage \
+          --test \
+          --test-force-exit \
+          --test-coverage-include=out/vscode-extension/src/backend/**/*.js \
+          --test-coverage-include=out/vscode-extension/src/utils/**/*.js \
+          --test-coverage-include=out/src/utils/**/*.js \
+          out/vscode-extension/test/unit/*.test.js 2>&1 | tee "$RUNNER_TEMP/test-output.txt"
+        status=${PIPESTATUS[0]}
+        set -e
+        exit "$status"
+
+    - name: Publish test results to step summary
+      if: always()
+      shell: bash
+      run: node scripts/parse-test-output.js "$RUNNER_TEMP/test-output.txt" >> "$GITHUB_STEP_SUMMARY"
+
     - name: Verify build outputs exist
       shell: bash
       run: |
@@ -76,8 +115,8 @@ jobs:
         echo "✅ Build outputs verified"
         
     - name: Upload build artifacts
-      uses: actions/upload-artifact@bbbca2ddaa5d8feaa63e36b76fdaad77386f024f # v7.0.0
-      if: matrix.os == 'ubuntu-latest' && matrix.node-version == '20.x'
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      if: matrix.os == 'ubuntu-latest' && matrix.node-version == '24.x'
       with:
         name: build-artifacts
         path: |

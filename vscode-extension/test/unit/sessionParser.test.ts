@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { parseSessionFileContent } from '../../src/sessionParser';
+import { parseSessionFileContent } from '../../../src/sessionParser';
 
 function estimateTokensByLength(text: string): number {
 	return text.length;
@@ -302,14 +302,46 @@ test('invalid JSON returns zeros', () => {
 	assert.equal(result.interactions, 0);
 });
 
-test('JSON session: missing model defaults to gpt-4o', () => {
+// ── Input validation tests ──────────────────────────────────────────────
+
+test('null JSON content returns zeros without throwing (JSON path)', () => {
+	// JSON.parse("null") returns null — accessing .requests on null must not throw
+	const result = parseSessionFileContent('s.json', 'null', estimateTokensByLength);
+	assert.equal(result.tokens, 0);
+	assert.equal(result.interactions, 0);
+	assert.deepEqual(result.modelUsage, {});
+});
+
+test('null JSON content returns zeros without throwing (JSONL fallback path)', () => {
+	// .jsonl file whose content parses to null via the fallback (non-delta) branch
+	const result = parseSessionFileContent('s.jsonl', 'null', estimateTokensByLength);
+	assert.equal(result.tokens, 0);
+	assert.equal(result.interactions, 0);
+	assert.deepEqual(result.modelUsage, {});
+});
+
+test('empty fileContent returns zeros without throwing', () => {
+	const result = parseSessionFileContent('s.json', '', estimateTokensByLength);
+	assert.equal(result.tokens, 0);
+	assert.equal(result.interactions, 0);
+});
+
+test('array root JSON returns zeros without throwing', () => {
+	// An array at the root is not a valid session object
+	const result = parseSessionFileContent('s.json', '[]', estimateTokensByLength);
+	assert.equal(result.tokens, 0);
+	assert.equal(result.interactions, 0);
+	assert.deepEqual(result.modelUsage, {});
+});
+
+test('JSON session: missing model defaults to unknown', () => {
 	const content = JSON.stringify({
 		requests: [
 			{ message: { text: 'hi' }, response: [{ value: 'yo' }] }
 		]
 	});
 	const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
-	assert.ok(result.modelUsage['gpt-4o'], 'should default to gpt-4o');
+	assert.ok(result.modelUsage['unknown'], 'should default to unknown');
 });
 
 test('JSON session: uses message.parts when message.text is absent', () => {
@@ -457,4 +489,296 @@ test('JSON session: actualTokens is 0 when no result usage fields present', () =
 	});
 	const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
 	assert.equal(result.actualTokens, 0);
+});
+
+// Sub-agent token tracking tests
+
+test('JSON session: sub-agent with plain string result is counted under sub-agent model', () => {
+	const subAgentItem = {
+		kind: 'toolInvocationSerialized',
+		toolSpecificData: {
+			kind: 'subagent',
+			modelName: 'Claude Haiku 4.5',
+			prompt: 'find files',        // 10 chars
+			result: 'here are files',    // 14 chars
+		}
+	};
+	const content = JSON.stringify({
+		requests: [
+			{
+				model: 'claude-opus-4',
+				message: { text: 'go' },            // 2 input chars under opus
+				response: [
+					{ value: 'ok' },                  // 2 output chars under opus
+					subAgentItem,
+				]
+			}
+		]
+	});
+	const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
+	// Sub-agent model name normalized: "claude-haiku-4.5"
+	assert.ok(result.modelUsage['claude-haiku-4.5'], 'sub-agent model should have usage');
+	assert.equal(result.modelUsage['claude-haiku-4.5'].inputTokens, 10, 'sub-agent prompt chars');
+	assert.equal(result.modelUsage['claude-haiku-4.5'].outputTokens, 14, 'sub-agent result chars');
+	// Parent model still has its own tokens
+	assert.equal(result.modelUsage['claude-opus-4'].outputTokens, 2);
+});
+
+test('JSON session: sub-agent with streaming char object result is counted correctly', () => {
+	// Build streaming char result: "Hi" => {"0":"H","1":"i"}
+	const streamingResult: Record<string, string> = {};
+	Array.from('Hi').forEach((c, i) => { streamingResult[String(i)] = c; });
+	const subAgentItem = {
+		kind: 'toolInvocationSerialized',
+		toolSpecificData: {
+			kind: 'subagent',
+			modelName: 'Claude Haiku 4.5',
+			prompt: 'ping',
+			result: streamingResult,
+		}
+	};
+	const content = JSON.stringify({
+		requests: [{ model: 'gpt-4o', message: { text: 'x' }, response: [subAgentItem] }]
+	});
+	const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
+	assert.ok(result.modelUsage['claude-haiku-4.5']);
+	assert.equal(result.modelUsage['claude-haiku-4.5'].inputTokens, 4, 'prompt: "ping"');
+	assert.equal(result.modelUsage['claude-haiku-4.5'].outputTokens, 2, 'result: "Hi"');
+});
+
+test('JSON session: sub-agent with missing modelName falls back to parent model', () => {
+	const subAgentItem = {
+		kind: 'toolInvocationSerialized',
+		toolSpecificData: {
+			kind: 'subagent',
+			// no modelName
+			prompt: 'search',
+			result: 'found it',
+		}
+	};
+	const content = JSON.stringify({
+		requests: [{ model: 'gpt-4o', message: { text: 'do' }, response: [subAgentItem] }]
+	});
+	const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
+	assert.ok(result.modelUsage['gpt-4o']);
+	// Falls back to parent model
+	assert.equal(result.modelUsage['gpt-4o'].inputTokens, 2 + 6, 'parent input + sub-agent prompt');
+	assert.equal(result.modelUsage['gpt-4o'].outputTokens, 8, 'sub-agent result under parent');
+});
+
+test('delta-based JSONL: sub-agent tokens are counted from reconstructed state', () => {
+	const subAgentItem = {
+		kind: 'toolInvocationSerialized',
+		toolSpecificData: {
+			kind: 'subagent',
+			modelName: 'Claude Haiku 4.5',
+			prompt: 'list',       // 4 chars
+			result: 'file.ts',   // 7 chars
+		}
+	};
+	const filePath = 'C:/tmp/session.jsonl';
+	const content = [
+		JSON.stringify({ kind: 0, v: { requests: [] } }),
+		JSON.stringify({
+			kind: 2,
+			k: ['requests'],
+			v: [{
+				requestId: 'r1',
+				modelId: 'copilot/claude-opus-4.6',
+				message: { text: 'go' },
+				response: [subAgentItem],
+			}]
+		})
+	].join('\n');
+
+	const result = parseSessionFileContent(filePath, content, estimateTokensByLength);
+	assert.ok(result.modelUsage['claude-haiku-4.5'], 'sub-agent model should appear in delta path');
+	assert.equal(result.modelUsage['claude-haiku-4.5'].inputTokens, 4);
+	assert.equal(result.modelUsage['claude-haiku-4.5'].outputTokens, 7);
+});
+
+test('delta-based JSONL: sub-agent items do not contribute to parent model output', () => {
+	const subAgentItem = {
+		kind: 'toolInvocationSerialized',
+		toolSpecificData: {
+			kind: 'subagent',
+			modelName: 'Claude Haiku 4.5',
+			prompt: 'search query',
+			result: 'search results here',
+		}
+	};
+	const filePath = 'C:/tmp/session.jsonl';
+	const content = [
+		JSON.stringify({ kind: 0, v: { requests: [] } }),
+		JSON.stringify({
+			kind: 2,
+			k: ['requests'],
+			v: [{
+				requestId: 'r1',
+				modelId: 'copilot/claude-opus-4.6',
+				message: { text: 'help' },
+				response: [
+					{ kind: 'markdownContent', content: { value: 'sure' } },
+					subAgentItem,
+				],
+			}]
+		})
+	].join('\n');
+
+	const result = parseSessionFileContent(filePath, content, estimateTokensByLength);
+	// Parent model only has "sure" (4 chars) as output, not the sub-agent text
+	assert.equal(result.modelUsage['claude-opus-4.6'].outputTokens, 4, 'parent output should not include sub-agent result');
+	// Sub-agent is tracked separately
+	assert.ok(result.modelUsage['claude-haiku-4.5']);
+});
+
+// ── Mutation-killing tests ──────────────────────────────────────────────
+
+test('delta-based JSONL: kind 1 (update) sets value at key path', () => {
+        const filePath = 'C:/tmp/session.jsonl';
+        const content = [
+                JSON.stringify({ kind: 0, v: { requests: [{ model: 'gpt-4o', message: { text: 'aaa' }, response: [] }] } }),
+                JSON.stringify({ kind: 1, k: ['requests', '0', 'response'], v: [{ value: 'bbb' }] })
+        ].join('\n');
+
+        const result = parseSessionFileContent(filePath, content, estimateTokensByLength);
+        assert.equal(result.interactions, 1);
+        assert.ok(result.modelUsage['gpt-4o']);
+        assert.equal(result.modelUsage['gpt-4o'].outputTokens, 3);
+});
+
+test('delta-based JSONL: multiple kind 2 appends accumulate requests', () => {
+        const filePath = 'C:/tmp/session.jsonl';
+        const content = [
+                JSON.stringify({ kind: 0, v: { requests: [] } }),
+                JSON.stringify({
+                        kind: 2,
+                        k: ['requests'],
+                        v: [{ modelId: 'copilot/gpt-4o', message: { text: 'q1' }, response: [{ kind: 'markdownContent', content: { value: 'a1' } }] }]
+                }),
+                JSON.stringify({
+                        kind: 2,
+                        k: ['requests'],
+                        v: [{ modelId: 'copilot/gpt-4o', message: { text: 'q2' }, response: [{ kind: 'markdownContent', content: { value: 'a2' } }] }]
+                })
+        ].join('\n');
+
+        const result = parseSessionFileContent(filePath, content, estimateTokensByLength);
+        assert.equal(result.interactions, 2);
+        assert.equal(result.modelUsage['gpt-4o'].inputTokens, 4); // q1(2) + q2(2)
+        assert.equal(result.modelUsage['gpt-4o'].outputTokens, 4); // a1(2) + a2(2)
+});
+
+test('JSON session: normalizes copilot/ prefix in model field', () => {
+        const content = JSON.stringify({
+                requests: [
+                        { model: 'copilot/claude-sonnet-4.5', message: { text: 'hi' }, response: [{ value: 'hello' }] }
+                ]
+        });
+        const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
+        assert.ok(result.modelUsage['claude-sonnet-4.5']);
+        assert.ok(!result.modelUsage['copilot/claude-sonnet-4.5']);
+});
+
+test('JSON session: uses default model when model field is empty string', () => {
+        const content = JSON.stringify({
+                requests: [
+                        { model: '', message: { text: 'hi' }, response: [{ value: 'world' }] }
+                ]
+        });
+        const result = parseSessionFileContent('s.json', content, estimateTokensByLength, () => 'fallback-model');
+        assert.ok(result.modelUsage['fallback-model']);
+});
+
+test('JSON session: uses default model when model field is whitespace', () => {
+        const content = JSON.stringify({
+                requests: [
+                        { model: '   ', message: { text: 'hi' }, response: [{ value: 'world' }] }
+                ]
+        });
+        const result = parseSessionFileContent('s.json', content, estimateTokensByLength, () => 'fallback-model');
+        assert.ok(result.modelUsage['fallback-model']);
+});
+
+test('JSON session: uses default model when model field is not a string', () => {
+        const content = JSON.stringify({
+                requests: [
+                        { model: 42, message: { text: 'hi' }, response: [{ value: 'world' }] }
+                ]
+        });
+        const result = parseSessionFileContent('s.json', content, estimateTokensByLength, () => 'fallback-model');
+        assert.ok(result.modelUsage['fallback-model']);
+});
+
+test('JSON session: empty requests array returns zero stats', () => {
+        const content = JSON.stringify({ requests: [] });
+        const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
+        assert.equal(result.tokens, 0);
+        assert.equal(result.interactions, 0);
+        assert.equal(result.thinkingTokens, 0);
+        assert.deepEqual(result.modelUsage, {});
+});
+
+test('JSON session: request with empty message text and response', () => {
+        const content = JSON.stringify({
+                requests: [
+                        { model: 'gpt-4o', message: { text: '' }, response: [] }
+                ]
+        });
+        const result = parseSessionFileContent('s.json', content, estimateTokensByLength);
+        assert.equal(result.interactions, 1);
+        assert.equal(result.tokens, 0);
+});
+
+test('delta-based JSONL: kind 0 replaces entire state', () => {
+        const filePath = 'C:/tmp/session.jsonl';
+        const content = [
+                JSON.stringify({ kind: 0, v: { requests: [{ modelId: 'copilot/gpt-4o', message: { text: 'old' }, response: [{ kind: 'markdownContent', content: { value: 'old-resp' } }] }] } }),
+                JSON.stringify({ kind: 0, v: { requests: [{ modelId: 'copilot/claude-sonnet-4.5', message: { text: 'new' }, response: [{ kind: 'markdownContent', content: { value: 'new-resp' } }] }] } })
+        ].join('\n');
+
+        const result = parseSessionFileContent(filePath, content, estimateTokensByLength);
+        // Second kind:0 replaces state, so only claude-sonnet-4.5 should be present
+        assert.equal(result.interactions, 1);
+        assert.ok(result.modelUsage['claude-sonnet-4.5']);
+        assert.ok(!result.modelUsage['gpt-4o']);
+});
+
+test('delta-based JSONL: ignores deltas with non-object value', () => {
+        const filePath = 'C:/tmp/session.jsonl';
+        const content = [
+                JSON.stringify({ kind: 0, v: { requests: [] } }),
+                'not valid json at all',
+                JSON.stringify({
+                        kind: 2,
+                        k: ['requests'],
+                        v: [{ modelId: 'copilot/gpt-4o', message: { text: 'q' }, response: [{ kind: 'markdownContent', content: { value: 'a' } }] }]
+                })
+        ].join('\n');
+
+        const result = parseSessionFileContent(filePath, content, estimateTokensByLength);
+        assert.equal(result.interactions, 1);
+});
+
+test('delta-based JSONL: handles response with both value and content.value', () => {
+        const filePath = 'C:/tmp/session.jsonl';
+        const content = [
+                JSON.stringify({ kind: 0, v: { requests: [] } }),
+                JSON.stringify({
+                        kind: 2,
+                        k: ['requests'],
+                        v: [{
+                                modelId: 'copilot/gpt-4o',
+                                message: { text: 'question' },
+                                response: [
+                                        { kind: 'markdownContent', value: 'should-be-ignored', content: { value: 'preferred' } },
+                                        { kind: 'markdownContent', content: { value: ' answer' } }
+                                ]
+                        }]
+                })
+        ].join('\n');
+
+        const result = parseSessionFileContent(filePath, content, estimateTokensByLength);
+        // Should use content.value (preferred + answer = 16), not value
+        assert.equal(result.modelUsage['gpt-4o'].outputTokens, 'preferred answer'.length);
 });

@@ -373,61 +373,61 @@ All settings in VS Code user settings (global scope, Settings Sync compatible):
 #### Core Settings
 ```json
 {
-  "copilotTokenTracker.backend.enabled": false,
-  "copilotTokenTracker.backend.backend": "storageTables",
-  "copilotTokenTracker.backend.authMode": "entraId",  // or "sharedKey"
-  "copilotTokenTracker.backend.datasetId": "default"
+  "aiEngineeringFluency.backend.enabled": false,
+  "aiEngineeringFluency.backend.backend": "storageTables",
+  "aiEngineeringFluency.backend.authMode": "entraId",  // or "sharedKey"
+  "aiEngineeringFluency.backend.datasetId": "default"
 }
 ```
 
 #### Azure Resource Identifiers (wizard-managed)
 ```json
 {
-  "copilotTokenTracker.backend.subscriptionId": "",
-  "copilotTokenTracker.backend.resourceGroup": "",
-  "copilotTokenTracker.backend.storageAccount": "",
-  "copilotTokenTracker.backend.aggTable": "usageAggDaily",
-  "copilotTokenTracker.backend.eventsTable": "usageEvents"
+  "aiEngineeringFluency.backend.subscriptionId": "",
+  "aiEngineeringFluency.backend.resourceGroup": "",
+  "aiEngineeringFluency.backend.storageAccount": "",
+  "aiEngineeringFluency.backend.aggTable": "usageAggDaily",
+  "aiEngineeringFluency.backend.eventsTable": "usageEvents"
 }
 ```
 
 #### Privacy Settings
 ```json
 {
-  "copilotTokenTracker.backend.shareWithTeam": false,
-  "copilotTokenTracker.backend.shareConsentAt": "",
-  "copilotTokenTracker.backend.sharingProfile": "off",
-  "copilotTokenTracker.backend.userIdentityMode": "pseudonymous",
-  "copilotTokenTracker.backend.anonymizeWorkspaceMachineNames": false
+  "aiEngineeringFluency.backend.shareWithTeam": false,
+  "aiEngineeringFluency.backend.shareConsentAt": "",
+  "aiEngineeringFluency.backend.sharingProfile": "off",
+  "aiEngineeringFluency.backend.userIdentityMode": "pseudonymous",
+  "aiEngineeringFluency.backend.anonymizeWorkspaceMachineNames": false
 }
 ```
 
 #### Behavior Settings
 ```json
 {
-  "copilotTokenTracker.backend.lookbackDays": 30,      // min: 1, max: 365
-  "copilotTokenTracker.backend.includeMachineBreakdown": true
+  "aiEngineeringFluency.backend.lookbackDays": 30,      // min: 1, max: 365
+  "aiEngineeringFluency.backend.includeMachineBreakdown": true
 }
 ```
 
 #### Secrets (NOT in settings, stored in SecretStorage)
-- `copilotTokenTracker.backend.storageSharedKey:{storageAccount}`
+- `aiEngineeringFluency.backend.storageSharedKey:{storageAccount}`
 
 ### Commands
 
 #### Core Commands
-- `copilot-token-tracker.configureBackend` - Guided setup wizard
-- `copilot-token-tracker.copyBackendConfig` - Copy config (secrets redacted)
-- `copilot-token-tracker.exportCurrentView` - Export filtered view as JSON
-- `copilot-token-tracker.setSharingProfile` - Change sharing profile
+- `` - Guided setup wizard
+- `` - Copy config (secrets redacted)
+- `` - Export filtered view as JSON
+- `` - Change sharing profile
 
 #### Shared Key Management (advanced)
-- `copilot-token-tracker.setBackendSharedKey` - Set/update key
-- `copilot-token-tracker.rotateBackendSharedKey` - Rotate key
-- `copilot-token-tracker.clearBackendSharedKey` - Clear key
+- `` - Set/update key
+- `` - Rotate key
+- `` - Clear key
 
 #### Data Management
-- `copilot-token-tracker.deleteMyData` - Delete all user data from dataset (GDPR right to erasure)
+- `aiEngineeringFluency.deleteMyData` - Delete all user data from dataset (GDPR right to erasure)
 
 ---
 
@@ -825,7 +825,7 @@ test('validateTeamAlias rejects common name patterns', () => {
 - ✅ This document consolidates all backend documentation
 
 ### External References
-- [GitHub Issue #121](https://github.com/rajbos/github-copilot-token-usage/issues/121) - Original feature request
+- [GitHub Issue #121](https://github.com/rajbos/ai-engineering-fluency/issues/121) - Original feature request
 - [Session File Schema](../logFilesSchema/session-file-schema.json) - Log file format
 - [VS Code Variants](../logFilesSchema/VSCODE-VARIANTS.md) - Supported editors
 

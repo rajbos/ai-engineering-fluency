@@ -96,6 +96,35 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - Cost estimation using model pricing data
 - Data availability checks
 
+### refactor-large-function
+
+**Purpose**: Pick one large function flagged by ESLint `max-lines-per-function` and refactor it into smaller, focused private helpers without breaking tests.
+
+**Use this skill when:**
+- An ESLint `max-lines-per-function` warning needs to be resolved
+- A function has grown too long and needs to be decomposed
+- You want to improve code readability and maintainability in the VS Code extension
+
+**Contents:**
+- Step-by-step workflow: identify target → baseline tests → refactor → lint → full build → commit → PR
+- Rules for private helper extraction (naming, return types, API preservation)
+- ESLint commands to identify violation candidates
+- Commit message and PR description templates
+
+### validate-editor-names
+
+**Purpose**: Verify that the CLI and VS Code extension always agree on editor display names, and every name has an icon in the webview icon map.
+
+**Use this skill when:**
+- Adding support for a new editor or AI coding tool
+- After modifying `getEditorSourceFromPath` in `cli/src/analysis.ts`
+- After modifying `getEditorTypeFromPath` in `src/workspaceHelpers.ts`
+- After updating `EDITOR_ICON_MAP` in `formatUtils.ts`
+- When JetBrains or another CLI-based consumer shows raw editor keys instead of friendly names
+
+**Contents:**
+- `validate-editor-names.js` — dependency-free Node.js script that statically extracts path detection rules from both source files, runs 18 canonical test paths through the CLI rules, checks cross-function consistency, validates EDITOR_ICON_MAP coverage, and warns about ordering invariants (broad patterns shadowing specific ones)
+
 ### load-cache-data
 
 **Purpose**: Load and inspect the last 10 rows from the local session file cache to iterate with real data.
@@ -113,6 +142,23 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - Example scripts demonstrating cache data access
 - Cache validation and lifecycle documentation
 - Integration with the extension's token tracking
+
+### sync-host-views
+
+**Purpose**: Keep the Visual Studio and JetBrains webview views (screens) in sync with the VS Code views, while preserving the exact set of views each host ships. New VS Code views are detected and surfaced for a human decision — never auto-added.
+
+**Use this skill when:**
+- After building or updating the VS Code webviews (`vscode-extension/esbuild.js` `entryPoints`)
+- Before a Visual Studio or JetBrains release, to ensure their shipped screens are current
+- When a host shows stale screens, or you suspect VS Code added a screen the hosts are missing
+- After changing the host include lists (`CopilotTokenTracker.csproj`, `jetbrains-plugin/build.gradle.kts`)
+
+**Contents:**
+- `sync-host-views.js` — dependency-free Node.js detector that parses the canonical view set from `esbuild.js` and compares it to the Visual Studio (`csproj` + committed `webview/*.js`) and JetBrains (`build.gradle.kts`) host lists
+- Classifies each view as tracked / NEW (ask the user) / orphan; checks committed VS bundles for staleness vs `dist/webview` (sha256)
+- `--refresh` copies only already-tracked bundles into the Visual Studio `webview/` folder (never adds a view); `--json` for CI
+- Exit codes: `0` in sync · `1` mechanical drift · `2` config error · `3` NEW views (human decision required)
+- Workflow for refreshing existing screens and the ask-before-adding procedure for new screens, including the navigation wiring needed in each host
 
 ## Using Agent Skills
 

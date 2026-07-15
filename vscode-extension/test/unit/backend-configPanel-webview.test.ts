@@ -10,27 +10,39 @@ function createPanelHtml(): string {
 		draft: {
 			enabled: true,
 			authMode: 'entraId' as const,
-			sharingProfile: 'soloFull' as const,
-			shareWorkspaceMachineNames: true,
-			includeMachineBreakdown: true,
+			backend: 'storageTables' as const,
 			datasetId: 'test-dataset',
 			lookbackDays: 30,
-			subscriptionId: 'sub-123',
-			resourceGroup: 'rg-test',
-			storageAccount: 'testaccount',
-			aggTable: 'usageAggDaily',
-			eventsTable: 'usageEvents',
-			userIdentityMode: 'pseudonymous' as const,
-			userId: 'testuser',
-			blobUploadEnabled: false,
-			blobContainerName: 'copilot-session-logs',
-			blobUploadFrequencyHours: 24,
-			blobCompressFiles: true
+			includeMachineBreakdown: true,
+			azureResources: {
+				subscriptionId: 'sub-123',
+				resourceGroup: 'rg-test',
+				storageAccount: 'testaccount',
+				aggTable: 'usageAggDaily',
+				eventsTable: 'usageEvents',
+			},
+			identity: {
+				userIdentityMode: 'pseudonymous' as const,
+				userId: 'testuser',
+			},
+			blobUpload: {
+				blobUploadEnabled: false,
+				blobContainerName: 'copilot-session-logs',
+				blobUploadFrequencyHours: 24,
+				blobCompressFiles: true,
+			},
+			sharing: {
+				sharingProfile: 'soloFull' as const,
+				shareWorkspaceMachineNames: true,
+				sharingServerEnabled: false,
+				sharingServerEndpointUrl: '',
+			},
 		},
 		sharedKeySet: false,
 		privacyBadge: 'Solo',
 		isConfigured: true,
-		authStatus: 'Entra ID'
+		authStatus: 'Entra ID',
+		githubTokenAvailable: false
 	};
 
 	const webview = {
@@ -60,11 +72,11 @@ describe('Backend Config Panel Webview (node:test)', { concurrency: false }, () 
 	describe('HTML Structure', () => {
 		beforeEach(() => { setupDom(); });
 
-		test('has all 5 navigation buttons with correct targets', () => {
+		test('has all 6 navigation buttons with correct targets', () => {
 			const navButtons = document.querySelectorAll('.nav-btn');
-			assert.equal(navButtons.length, 5);
+			assert.equal(navButtons.length, 6);
 			const targets = Array.from(navButtons).map(btn => btn.getAttribute('data-target'));
-			assert.deepEqual(targets, ['overview', 'azure', 'sharing', 'advanced', 'review']);
+			assert.deepEqual(targets, ['overview', 'azure', 'teamserver', 'sharing', 'advanced', 'review']);
 			teardownDom();
 		});
 

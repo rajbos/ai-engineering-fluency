@@ -1,25 +1,57 @@
-# GitHub Copilot Token Tracker
+# AI Engineering Fluency
+
+(Previously known as the "GitHub Copilot Token Tracker")
+![AI Engineering Fluency](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/assets/AI%20Engineering%20Fluency%20-%20Transparent.png)
 
 Track your GitHub Copilot token usage and AI Fluency across VS Code, Visual Studio, and the command line. All data is read from local session logs — nothing leaves your machine unless you opt in to cloud sync.
 
-[![Build](https://github.com/rajbos/github-copilot-token-usage/actions/workflows/build.yml/badge.svg)](https://github.com/rajbos/github-copilot-token-usage/actions/workflows/build.yml)
+[![Build](https://github.com/rajbos/ai-engineering-fluency/actions/workflows/build.yml/badge.svg)](https://github.com/rajbos/ai-engineering-fluency/actions/workflows/build.yml) [![Watch the Explainer Video](https://img.shields.io/badge/Watch-Explainer%20Video-FF0000?logo=youtube)](https://youtu.be/Odm3wNursCY)
 
 ## Supported AI engineering tools
 
 - VS Code + GitHub Copilot (Stable, Insiders, Exploration)
 - VSCodium / Cursor
 - GitHub Copilot CLI
-- OpenCode + GitHub Copilot
-- Crush + GitHub Copilot
+- JetBrains IDEs + GitHub Copilot
+- Continue
+- OpenCode
+- Crush
+- Pi CLI (pi.dev)
+- Claude Code (Anthropic)
+- Gemini CLI (Google)
+- Claude Desktop Cowork (Anthropic)
+- Mistral Vibe
+- Kiro IDE + Kiro CLI (AWS)
 - Visual Studio + GitHub Copilot
+
+<p align="left">
+  <img src="assets/tool-logos/vscode.svg" alt="VS Code" title="VS Code" height="30" />&nbsp;
+  <img src="assets/tool-logos/vscodium.svg" alt="VSCodium" title="VSCodium" height="30" />&nbsp;
+  <img src="assets/tool-logos/cursor.svg" alt="Cursor" title="Cursor" height="28" />&nbsp;
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/tool-logos/github-copilot-dark.svg" />
+    <img src="assets/tool-logos/github-copilot.svg" alt="GitHub Copilot" title="GitHub Copilot" height="30" />
+  </picture>&nbsp;
+  <img src="assets/tool-logos/jetbrains.png" alt="JetBrains" title="JetBrains" height="30" />&nbsp;
+  <img src="assets/tool-logos/continue.png" alt="Continue" title="Continue" height="30" />&nbsp;
+  <img src="assets/tool-logos/opencode.png" alt="OpenCode" title="OpenCode" height="30" />&nbsp;
+  <img src="assets/tool-logos/crush.svg" alt="Crush" title="Crush" height="26" />&nbsp;
+  <img src="assets/tool-logos/claude.png" alt="Claude" title="Claude" height="30" />&nbsp;
+  <img src="assets/tool-logos/gemini.svg" alt="Gemini" title="Gemini" height="30" />&nbsp;
+  <img src="assets/tool-logos/mistral.png" alt="Mistral" title="Mistral" height="30" />&nbsp;
+  <img src="assets/tool-logos/kiro.svg" alt="Kiro" title="Kiro" height="30" />&nbsp;
+  <img src="assets/tool-logos/visual-studio.svg" alt="Visual Studio" title="Visual Studio" height="30" />
+</p>
 
 ---
 
 ## Pick your tool
 
-### 🖥️ VS Code Extension
+### 🖥️ VS Code Extension (Chromium)
 
-Real-time token usage in the status bar, fluency score dashboard, usage analysis, cloud sync, and more.
+Real-time token usage in the status bar, fluency score dashboard, usage analysis, cloud sync, and more. Works with all Chromium-based VS Code forks — VS Code, Windsurf, Cursor, VSCodium, Trae, Kiro, Void, and more.
+
+[![Install - VS Code](https://img.shields.io/badge/Install-VS%20Code-007ACC?logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency) [![VS Code installs](https://badgen.net/vs-marketplace/i/RobBos.ai-engineering-fluency)](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency) [![Install - Windsurf (Open VSX)](https://img.shields.io/badge/Install-Windsurf-00B4D8?logo=open-vsx)](https://open-vsx.org/extension/RobBos/ai-engineering-fluency) [![Open VSX installs](https://img.shields.io/open-vsx/dt/RobBos/ai-engineering-fluency?label=Open%20VSX%20installs)](https://open-vsx.org/extension/RobBos/ai-engineering-fluency)
 
 ### Generating Screenshots
 
@@ -27,10 +59,50 @@ The extension includes test data and automation tools for generating documentati
 
 ```bash
 # Install from the VS Code Marketplace
-ext install RobBos.copilot-token-tracker
+ext install RobBos.ai-engineering-fluency
 ```
 
+<details>
+<summary>📦 Install in other Chromium-based editors (Open VSX)</summary>
+
+```bash
+# VSCodium
+codium --install-extension RobBos.ai-engineering-fluency
+
+# Code OSS
+code --install-extension RobBos.ai-engineering-fluency
+
+# Windsurf
+windsurf --install-extension RobBos.ai-engineering-fluency
+
+# Cursor
+cursor --install-extension RobBos.ai-engineering-fluency
+
+# Trae (ByteDance)
+trae --install-extension RobBos.ai-engineering-fluency
+
+# Kiro (AWS)
+kiro --install-extension RobBos.ai-engineering-fluency
+
+# Void
+void --install-extension RobBos.ai-engineering-fluency
+```
+
+</details>
+
 📖 [Full VS Code extension documentation](docs/vscode-extension/README.md)
+
+> **Previously known as `copilot-token-tracker` (deprecated):** [![legacy installs](https://badgen.net/vs-marketplace/i/RobBos.copilot-token-tracker)](https://marketplace.visualstudio.com/items?itemName=RobBos.copilot-token-tracker) — If you still have it installed, the extension will prompt you to migrate.
+
+---
+
+### 🐦 JetBrains IDE Plugin
+
+Token usage and fluency dashboards inside any JetBrains IDE (IntelliJ IDEA, Rider, PyCharm, WebStorm, GoLand, RubyMine, CLion, …). Built as a thin Kotlin/JCEF host that reuses the same webview bundles as the VS Code extension and the same bundled CLI as the Visual Studio extension.
+
+[![Install - JetBrains](https://img.shields.io/badge/Install-JetBrains-000000?logo=jetbrains)](https://plugins.jetbrains.com/plugin/31580-ai-engineering-fluency) [![JetBrains installs](https://img.shields.io/jetbrains/plugin/d/31580?label=JetBrains%20installs)](https://plugins.jetbrains.com/plugin/31580-ai-engineering-fluency)
+
+📖 [JetBrains plugin docs](jetbrains-plugin/README.md) · [Debugging guide](jetbrains-plugin/DEBUGGING-GUIDE.md)
 
 ---
 
@@ -38,7 +110,7 @@ ext install RobBos.copilot-token-tracker
 
 Token usage tracking inside Visual Studio 2022+, reading Copilot Chat session files directly.
 
-> Counts are **estimated** — VS session files do not store raw LLM token counts.
+[![Visual Studio Marketplace Installs](https://badgen.net/vs-marketplace/i/RobBos.AIEngineeringFluency)](https://marketplace.visualstudio.com/items?itemName=RobBos.AIEngineeringFluency)
 
 📖 [Full Visual Studio extension documentation](docs/visual-studio/README.md)
 
@@ -48,11 +120,112 @@ Token usage tracking inside Visual Studio 2022+, reading Copilot Chat session fi
 
 Run anywhere with Node.js — no editor required. Get usage stats, fluency scores, and environmental impact from the terminal.
 
+[![npm downloads](https://img.shields.io/npm/dm/@rajbos/ai-engineering-fluency)](https://www.npmjs.com/package/@rajbos/ai-engineering-fluency)
+
 ```bash
 npx @rajbos/ai-engineering-fluency stats
 ```
 
 📖 [Full CLI documentation](docs/cli/README.md)
+
+---
+
+### 🐚 Oh-My-Posh Segment
+
+Display today's and 30-day token usage directly in your terminal prompt, powered by the CLI npm package.
+
+```
+ 󱊤 1.2K today · 45.3K 30d 
+```
+
+```powershell
+# Install the CLI globally first
+npm install -g @rajbos/ai-engineering-fluency
+```
+
+Then add the segment to your oh-my-posh theme:
+
+```json
+{
+  "type": "text",
+  "style": "diamond",
+  "leading_diamond": "\ue0b6",
+  "trailing_diamond": "\ue0b4",
+  "foreground": "#ffffff",
+  "background": "#005ca5",
+  "cache": { "duration": "5m", "strategy": "session" },
+  "template": " \uec1e {{ cmd \"ai-engineering-fluency\" \"segment\" }} "
+}
+```
+
+📖 [Full Oh-My-Posh segment setup & options](omp-segment/README.md)
+
+---
+
+### 💬 GitHub Copilot CLI Statusline (Experimental)
+
+Show token usage in the GitHub Copilot CLI status bar via the experimental `STATUS_LINE` feature. Combines context tokens, session duration, line changes, and daily/30-day totals in one compact line.
+
+```
+main +2/-1 > ctx 123.5k/200.0k > ######.... > 00:12:34 > +42/-8 > 12.9M today · 1443.5M 30d
+```
+
+Configure `%USERPROFILE%\.copilot\settings.json` to point at the included scripts:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "C:\\Users\\YOURUSER\\.copilot\\statusline.cmd",
+    "padding": 1
+  },
+  "feature_flags": { "enabled": ["STATUS_LINE"] },
+  "experimental": true
+}
+```
+
+📖 [Full Copilot CLI statusline setup](omp-segment/README.md#github-copilot-cli-statusline-experimental)
+
+---
+
+### 🔗 Self-Hosted Sharing Server
+
+Share usage data with your team without an Azure account. Run a lightweight API server
+on your own infrastructure — team members configure a single endpoint URL and upload
+automatically via their existing GitHub session.
+
+- **Zero Azure required** — SQLite + Docker, runs anywhere
+- **Auth via GitHub** — reuses the session already held by VS Code/Copilot, no API keys
+- **Optional org gating** — restrict uploads to GitHub org members
+- **Web dashboard** — see aggregated usage across your team
+
+```yaml
+# docker-compose.yml
+services:
+  sharing-server:
+    image: ghcr.io/rajbos/copilot-sharing-server:latest
+    ports:
+      - "3000:3000"
+    environment:
+      - GITHUB_CLIENT_ID=...
+      - GITHUB_CLIENT_SECRET=...
+      - SESSION_SECRET=...
+      - BASE_URL=https://copilot.example.com
+    volumes:
+      - sharing_data:/data
+volumes:
+  sharing_data:
+```
+
+```json
+// VS Code settings — the only thing team members configure
+{
+  "aiEngineeringFluency.backend.sharingServer.enabled": true,
+  "aiEngineeringFluency.backend.sharingServer.endpointUrl": "https://copilot.example.com"
+}
+```
+
+📖 [Setup & configuration guide](docs/sharing-server/README.md) · [Server developer docs](sharing-server/README.md)
 
 ---
 

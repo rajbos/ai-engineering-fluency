@@ -22,27 +22,27 @@ jobs:
       
     steps:
     - name: Harden the runner (Audit all outbound calls)
-      uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+      uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
       with:
         egress-policy: audit
 
     - name: Checkout current repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         path: current-repo
         fetch-depth: 0
         
     - name: Checkout vscode-copilot-chat repository
-      uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
       with:
         repository: microsoft/vscode-copilot-chat
         path: vscode-copilot-chat
         fetch-depth: 1
         
     - name: Setup Node.js
-      uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+      uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
       with:
-        node-version: '20.x'
+        node-version-file: 'current-repo/.nvmrc'
 
     - name: Authenticate GitHub CLI
       env:
@@ -66,14 +66,9 @@ jobs:
           exit 1
         fi
 
-    - name: Install dependencies
-      working-directory: current-repo
-      run: npm ci
-      
     - name: Check Copilot CLI version
       env:
         GH_TOKEN: ${{ secrets.GH_PAT }}
-        COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
       run: |
         npx @github/copilot --version
         
@@ -82,7 +77,6 @@ jobs:
       working-directory: current-repo
       env:
         GH_TOKEN: ${{ secrets.GH_PAT }}
-        COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
       run: |
         # Read the prompt from the file
         PROMPT=$(cat .github/prompts/sync-toolnames.prompt.md)
@@ -123,7 +117,7 @@ jobs:
         npx @github/copilot -p "$COPILOT_PROMPT_TEXT" --silent --allow-all --add-dir "${UPSTREAM_PATH}" --add-dir "${GITHUB_WORKSPACE}/current-repo" --no-ask-user  2>&1 || {
           EXIT_CODE=$?
           echo "Warning: gh copilot command exited with code $EXIT_CODE, but continuing to check output"
-          cat /tmp/copilot-output.txt
+          cat /tmp/copilot-output.txt 2>/dev/null || true
         }
         
     - name: Check for changes
@@ -140,7 +134,7 @@ jobs:
 
     - name: Create Pull Request
       if: steps.changes.outputs.changed == 'true'
-      uses: peter-evans/create-pull-request@c0f553fe549906ede9cf27b5156039d195d2ece0 # v8.1.0
+      uses: peter-evans/create-pull-request@5f6978faf089d4d20b00c7766989d076bb2fc7f1 # v8.1.1
       with:
         path: current-repo
         branch: sync-toolnames

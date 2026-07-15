@@ -3,16 +3,22 @@
  */
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { discoverSessionFiles, processSessionFile, getDiagnosticPaths, fmt, formatTokens, getCacheStats } from '../helpers';
+import { discoverSessionFiles, processSessionFile, effectiveTokens, getDiagnosticPaths, fmt, formatTokens, getCacheStats } from '../helpers';
+import { ProgressTracker } from '../progress';
+import { shouldOutputJson } from '../commandUtils';
 
 export const statsCommand = new Command('stats')
 	.description('Show overview of discovered session files, sessions, chat turns, and tokens')
 	.option('-v, --verbose', 'Show detailed per-folder breakdown')
+	.option('--json', 'Output raw JSON (for machine consumption)')
 	.action(async (options) => {
-		console.log(chalk.bold.cyan('\n🔍 Copilot Token Tracker - Session Statistics\n'));
+		const json = shouldOutputJson(options);
+		if (!json) {
+			console.log(chalk.bold.cyan('\n🔍 Copilot Token Tracker - Session Statistics\n'));
+		}
 
 		// Show search paths if verbose
-		if (options.verbose) {
+		if (options.verbose && !json) {
 			const paths = getDiagnosticPaths();
 			console.log(chalk.dim('Search paths:'));
 			for (const p of paths) {
@@ -23,17 +29,24 @@ export const statsCommand = new Command('stats')
 		}
 
 		// Discover session files
-		process.stdout.write(chalk.dim('Scanning for session files...'));
+		const progress = new ProgressTracker(json);
+		progress.show('Scanning for session files...');
 		const files = await discoverSessionFiles();
-		process.stdout.write('\r' + ' '.repeat(50) + '\r'); // Clear line
+		progress.done();
 
 		if (files.length === 0) {
-			console.log(chalk.yellow('⚠️  No session files found.'));
-			console.log(chalk.dim('Have you used GitHub Copilot Chat in VS Code yet?'));
+			if (json) {
+				process.stdout.write('{}');
+			} else {
+				console.log(chalk.yellow('⚠️  No session files found.'));
+				console.log(chalk.dim('Have you used GitHub Copilot Chat in VS Code yet?'));
+			}
 			return;
 		}
 
-		console.log(chalk.green(`📂 Found ${chalk.bold(fmt(files.length))} session file(s)\n`));
+		if (!json) {
+			console.log(chalk.green(`📂 Found ${chalk.bold(fmt(files.length))} session file(s)\n`));
+		}
 
 		// Process files and gather stats
 		let totalTokens = 0;
@@ -53,7 +66,7 @@ export const statsCommand = new Command('stats')
 			}
 
 			processedCount++;
-			totalTokens += data.tokens;
+			totalTokens += effectiveTokens(data);
 			totalThinkingTokens += data.thinkingTokens;
 			totalInteractions += data.interactions;
 
@@ -62,7 +75,7 @@ export const statsCommand = new Command('stats')
 				editorCounts[data.editorSource] = { files: 0, tokens: 0, interactions: 0 };
 			}
 			editorCounts[data.editorSource].files++;
-			editorCounts[data.editorSource].tokens += data.tokens;
+			editorCounts[data.editorSource].tokens += effectiveTokens(data);
 			editorCounts[data.editorSource].interactions += data.interactions;
 
 			// Track by parent folder
@@ -72,15 +85,31 @@ export const statsCommand = new Command('stats')
 					folderCounts[folder] = { files: 0, tokens: 0 };
 				}
 				folderCounts[folder].files++;
-				folderCounts[folder].tokens += data.tokens;
+				folderCounts[folder].tokens += effectiveTokens(data);
 			}
 
-			// Progress indicator
-			if ((i + 1) % 50 === 0 || i === files.length - 1) {
-				process.stdout.write(`\r${chalk.dim(`Processing: ${i + 1}/${files.length}`)}`);
+			// Progress indicator (human-readable only)
+		if ((i + 1) % 50 === 0 || i === files.length - 1) {
+				progress.update(`Processing: ${i + 1}/${files.length}`);
 			}
 		}
-		process.stdout.write('\r' + ' '.repeat(50) + '\r'); // Clear progress line
+		progress.done();
+
+		if (json) {
+			// Machine-readable output: emit pure JSON to stdout and exit
+			const payload = {
+				totalFiles: files.length,
+				processedFiles: processedCount,
+				emptyFiles: emptyCount,
+				totalTokens,
+				totalThinkingTokens,
+				totalInteractions,
+				byEditor: editorCounts,
+				lastUpdated: new Date().toISOString(),
+			};
+			process.stdout.write(JSON.stringify(payload));
+			return;
+		}
 
 		// Summary table
 		console.log(chalk.bold('📊 Summary'));
@@ -90,7 +119,7 @@ export const statsCommand = new Command('stats')
 			console.log(`  Empty/skipped files:        ${chalk.dim(fmt(emptyCount))}`);
 		}
 		console.log(`  Total chat turns:           ${chalk.bold(fmt(totalInteractions))}`);
-		console.log(`  Total estimated tokens:     ${chalk.bold.yellow(formatTokens(totalTokens))}`);
+		console.log(`  Total tokens:               ${chalk.bold.yellow(formatTokens(totalTokens))}`);
 		if (totalThinkingTokens > 0) {
 			console.log(`  Thinking tokens (included): ${chalk.dim(formatTokens(totalThinkingTokens))}`);
 		}
@@ -128,6 +157,7 @@ export const statsCommand = new Command('stats')
 	});
 
 function getEditorDisplayName(source: string): string {
+	if (!source) { return 'Unknown'; }
 	const names: Record<string, string> = {
 		'vscode': 'VS Code',
 		'vscode-insiders': 'VS Code Insiders',
@@ -137,6 +167,10 @@ function getEditorDisplayName(source: string): string {
 		'cursor': 'Cursor',
 		'copilot-cli': 'Copilot CLI',
 		'opencode': 'OpenCode',
+		'claude-code': 'Claude Code',
+		'claude-desktop-cowork': 'Claude Desktop (Cowork)',
+		'mistral-vibe': 'Mistral Vibe',
+		'gemini-cli': 'Gemini CLI',
 	};
 	return names[source] || source;
 }

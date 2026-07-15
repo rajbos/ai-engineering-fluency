@@ -1,7 +1,3 @@
-// A launch configuration that compiles the extension and then opens it inside a new window
-// Use IntelliSense to learn about possible attributes.
-// Hover to view descriptions of existing attributes.
-// For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
 {
 	"version": "0.2.0",
 	"configurations": [
@@ -9,9 +5,13 @@
 			"name": "Run Extension",
 			"type": "extensionHost",
 			"request": "launch",
-			"preLaunchTask": "npm compile",
+			"preLaunchTask": "esbuild",
 			"args": [
-				"--extensionDevelopmentPath=${workspaceFolder}/vscode-extension"
+				"--extensionDevelopmentPath=${workspaceFolder}/vscode-extension",
+				"--disable-extension",
+				"RobBos.ai-engineering-fluency",
+				"--disable-extension",
+				"RobBos.copilot-token-tracker"
 			],
 			"outFiles": [
 				"${workspaceFolder}/vscode-extension/dist/**/*.js"

@@ -4,6 +4,7 @@
  */
 
 import type { DailyRollupValue } from './types';
+import { isObject } from '../../../src/utils/typeGuards';
 
 /**
  * Key identifying a unique daily rollup (dimensions).
@@ -14,6 +15,7 @@ export interface DailyRollupKey {
 	workspaceId: string;
 	machineId: string;
 	userId?: string;
+	editor?: string;       // Friendly editor name (e.g. 'VS Code', 'Copilot CLI'). Optional — omit for Azure Storage path.
 }
 
 /**
@@ -38,6 +40,7 @@ export interface DailyRollupValueLike {
 		agentModeCount?: number;
 		planModeCount?: number;
 		customAgentModeCount?: number;
+		cliModeCount?: number;
 		toolCallsJson?: string;
 		contextRefsJson?: string;
 		mcpToolsJson?: string;
@@ -66,13 +69,19 @@ export interface DailyRollupValueLike {
  */
 export function dailyRollupMapKey(key: DailyRollupKey): string {
 	const userId = (key.userId ?? '').trim();
-	return JSON.stringify({
+	const entry: Record<string, unknown> = {
 		day: key.day,
 		model: key.model,
 		workspaceId: key.workspaceId,
 		machineId: key.machineId,
-		userId: userId || undefined
-	});
+		userId: userId || undefined,
+	};
+	// Only include editor in the map key when it is explicitly set.
+	// This keeps Azure Storage rollups (which omit editor) unchanged.
+	if (key.editor) {
+		entry.editor = key.editor;
+	}
+	return JSON.stringify(entry);
 }
 
 /**
@@ -96,80 +105,13 @@ export function upsertDailyRollup(
 		existing.value.inputTokens += value.inputTokens;
 		existing.value.outputTokens += value.outputTokens;
 		existing.value.interactions += value.interactions;
-		
-		// Merge fluency metrics if provided
+
 		if (value.fluencyMetrics) {
 			if (!existing.value.fluencyMetrics) {
 				existing.value.fluencyMetrics = {};
 			}
-			const ex = existing.value.fluencyMetrics;
-			const val = value.fluencyMetrics;
-			
-			// Add numeric counts
-			if (val.askModeCount !== undefined) {
-				ex.askModeCount = (ex.askModeCount || 0) + val.askModeCount;
-			}
-			if (val.editModeCount !== undefined) {
-				ex.editModeCount = (ex.editModeCount || 0) + val.editModeCount;
-			}
-			if (val.agentModeCount !== undefined) {
-				ex.agentModeCount = (ex.agentModeCount || 0) + val.agentModeCount;
-			}
-			if (val.planModeCount !== undefined) {
-				ex.planModeCount = (ex.planModeCount || 0) + val.planModeCount;
-			}
-			if (val.customAgentModeCount !== undefined) {
-				ex.customAgentModeCount = (ex.customAgentModeCount || 0) + val.customAgentModeCount;
-			}
-			if (val.multiTurnSessions !== undefined) {
-				ex.multiTurnSessions = (ex.multiTurnSessions || 0) + val.multiTurnSessions;
-			}
-			if (val.multiFileEdits !== undefined) {
-				ex.multiFileEdits = (ex.multiFileEdits || 0) + val.multiFileEdits;
-			}
-			if (val.sessionCount !== undefined) {
-				ex.sessionCount = (ex.sessionCount || 0) + val.sessionCount;
-			}
-			
-			// Merge JSON objects (parse, merge, serialize)
-			if (val.toolCallsJson) {
-				ex.toolCallsJson = mergeJsonMetrics(ex.toolCallsJson, val.toolCallsJson);
-			}
-			if (val.contextRefsJson) {
-				ex.contextRefsJson = mergeJsonMetrics(ex.contextRefsJson, val.contextRefsJson);
-			}
-			if (val.mcpToolsJson) {
-				ex.mcpToolsJson = mergeJsonMetrics(ex.mcpToolsJson, val.mcpToolsJson);
-			}
-			if (val.modelSwitchingJson) {
-				ex.modelSwitchingJson = mergeJsonMetrics(ex.modelSwitchingJson, val.modelSwitchingJson);
-			}
-			if (val.editScopeJson) {
-				ex.editScopeJson = mergeJsonMetrics(ex.editScopeJson, val.editScopeJson);
-			}
-			if (val.agentTypesJson) {
-				ex.agentTypesJson = mergeJsonMetrics(ex.agentTypesJson, val.agentTypesJson);
-			}
-			if (val.repositoriesJson) {
-				// For repositories, merge arrays and deduplicate
-				ex.repositoriesJson = mergeRepositoriesJson(ex.repositoriesJson, val.repositoriesJson);
-			}
-			if (val.applyUsageJson) {
-				ex.applyUsageJson = mergeJsonMetrics(ex.applyUsageJson, val.applyUsageJson);
-			}
-			if (val.sessionDurationJson) {
-				ex.sessionDurationJson = mergeJsonMetrics(ex.sessionDurationJson, val.sessionDurationJson);
-			}
-			
-			// Re-calculate averages and rates from totals
-			if (ex.sessionCount && ex.sessionCount > 0) {
-				if (ex.multiTurnSessions !== undefined) {
-					// avgTurnsPerSession will be recalculated from aggregated data
-				}
-				if (ex.multiFileEdits !== undefined) {
-					// avgFilesPerEdit will be recalculated from aggregated data
-				}
-			}
+			_mergeNumericFluencyMetrics(existing.value.fluencyMetrics, value.fluencyMetrics);
+			_mergeJsonFluencyMetrics(existing.value.fluencyMetrics, value.fluencyMetrics);
 		}
 	} else {
 		map.set(mapKey, {
@@ -184,41 +126,98 @@ export function upsertDailyRollup(
 	}
 }
 
+function _addCount(existing: number | undefined, delta: number): number {
+	return (existing || 0) + delta;
+}
+
+type FluencyMetrics = NonNullable<DailyRollupValue['fluencyMetrics']>;
+
+/** Fluency metric keys representing simple counts that are summed during rollup merge. */
+const NUMERIC_FLUENCY_FIELDS = [
+	'askModeCount', 'editModeCount', 'agentModeCount', 'planModeCount',
+	'customAgentModeCount', 'cliModeCount', 'multiTurnSessions', 'multiFileEdits', 'sessionCount'
+] as const satisfies ReadonlyArray<keyof FluencyMetrics>;
+
+type NumericFluencyMetricKey = typeof NUMERIC_FLUENCY_FIELDS[number];
+
+/** Fluency metric keys that are JSON-serialized objects, paired with their merge strategy. */
+const JSON_FLUENCY_FIELD_MERGERS = [
+	{ key: 'toolCallsJson', merge: mergeJsonMetrics },
+	{ key: 'contextRefsJson', merge: mergeJsonMetrics },
+	{ key: 'mcpToolsJson', merge: mergeJsonMetrics },
+	{ key: 'modelSwitchingJson', merge: mergeJsonMetrics },
+	{ key: 'editScopeJson', merge: mergeJsonMetrics },
+	{ key: 'agentTypesJson', merge: mergeJsonMetrics },
+	{ key: 'repositoriesJson', merge: mergeRepositoriesJson },
+	{ key: 'applyUsageJson', merge: mergeJsonMetrics },
+	{ key: 'sessionDurationJson', merge: mergeJsonMetrics },
+] as const satisfies ReadonlyArray<{
+	key: keyof FluencyMetrics;
+	merge: (existing: string | undefined, incoming: string) => string;
+}>;
+
+function _mergeNumericFluencyMetrics(ex: FluencyMetrics, val: FluencyMetrics): void {
+	for (const field of NUMERIC_FLUENCY_FIELDS) {
+		const incoming = val[field as NumericFluencyMetricKey];
+		if (incoming !== undefined) {
+			ex[field as NumericFluencyMetricKey] = _addCount(ex[field as NumericFluencyMetricKey], incoming);
+		}
+	}
+}
+
+function _mergeJsonFluencyMetrics(ex: FluencyMetrics, val: FluencyMetrics): void {
+	const exR = ex as Record<string, string | undefined>;
+	const valR = val as Record<string, string | undefined>;
+	for (const { key, merge } of JSON_FLUENCY_FIELD_MERGERS) {
+		const incoming = valR[key];
+		if (incoming) {
+			exR[key] = merge(exR[key], incoming);
+		}
+	}
+}
+
+function mergeNumericValues(existing: unknown, delta: number): number {
+	return (typeof existing === 'number' ? existing : 0) + delta;
+}
+
+function mergeNestedObject(
+	existing: Record<string, unknown>,
+	incoming: Record<string, unknown>
+): Record<string, unknown> {
+	const merged = { ...existing };
+	for (const key in incoming) {
+		const incomingVal = incoming[key];
+		merged[key] = typeof incomingVal === 'number'
+			? mergeNumericValues(existing[key], incomingVal)
+			: incomingVal;
+	}
+	return merged;
+}
+
+function mergeMetricEntry(existing: unknown, incoming: unknown): unknown {
+	if (typeof incoming === 'number') {
+		return mergeNumericValues(existing, incoming);
+	}
+	if (isObject(incoming) && isObject(existing)) {
+		return mergeNestedObject(existing, incoming);
+	}
+	return incoming;
+}
+
 /**
  * Helper function to merge JSON-serialized metrics objects.
  * Parses both JSONs, merges numeric values by adding them, and re-serializes.
  */
 function mergeJsonMetrics(existing: string | undefined, incoming: string): string {
 	try {
-		const existingObj = existing ? JSON.parse(existing) : {};
-		const incomingObj = JSON.parse(incoming);
-		
-		// Merge objects by adding numeric values
-		const merged: any = { ...existingObj };
+		const existingObj: Record<string, unknown> = existing ? JSON.parse(existing) : {};
+		const incomingObj: Record<string, unknown> = JSON.parse(incoming);
+
+		const merged: Record<string, unknown> = { ...existingObj };
 		for (const key in incomingObj) {
-			if (typeof incomingObj[key] === 'number') {
-				merged[key] = (merged[key] || 0) + incomingObj[key];
-			} else if (typeof incomingObj[key] === 'object' && incomingObj[key] !== null) {
-				// Recursively merge nested objects
-				if (typeof merged[key] === 'object' && merged[key] !== null) {
-					for (const subKey in incomingObj[key]) {
-						if (typeof incomingObj[key][subKey] === 'number') {
-							if (typeof merged[key][subKey] !== 'number') {
-								merged[key][subKey] = 0;
-							}
-							merged[key][subKey] += incomingObj[key][subKey];
-						} else {
-							merged[key][subKey] = incomingObj[key][subKey];
-						}
-					}
-				} else {
-					merged[key] = incomingObj[key];
-				}
-			} else {
-				merged[key] = incomingObj[key];
-			}
+			merged[key] = mergeMetricEntry(merged[key], incomingObj[key]);
 		}
-		
+
 		return JSON.stringify(merged);
 	} catch {
 		// If parsing fails, return the incoming value

@@ -36,7 +36,7 @@ const TEST_RELEASES = [
   {
     tagName: "v0.0.1",
     name: "First draft",
-    body: "First rough version, not complete of course! \r\n\r\n- Only tested on windows\r\n- Use at your own risk 😄\r\n- Screenshots in the README\r\n- VS Code v1.104 or higher\r\n\r\n**Full Changelog**: https://github.com/rajbos/github-copilot-token-usage/commits/v0.0.1",
+    body: "First rough version, not complete of course! \r\n\r\n- Only tested on windows\r\n- Use at your own risk 😄\r\n- Screenshots in the README\r\n- VS Code v1.104 or higher\r\n\r\n**Full Changelog**: https://github.com/rajbos/ai-engineering-fluency/commits/v0.0.1",
     createdAt: "2025-09-26T21:55:29Z",
     isPrerelease: true
   }
@@ -293,25 +293,7 @@ async function writeChangelog(changelogPath, releases) {
     console.log('💡 Could not show diff, but file was updated');
   }
 }
-    
-    // Build new changelog content
-    let newChangelog = header + unreleasedSection + '\n';
-    
-    console.log('✏️ Building changelog entries from releases...');
-    
-    // Add releases
-    for (const release of releases) {
-      const version = release.tagName.startsWith('v') ? release.tagName.substring(1) : release.tagName;
-      const releaseType = release.isPrerelease ? ' - Pre-release' : '';
-      
-      newChangelog += `## [${version}]${releaseType}\n\n`;
-      
-      if (release.body && release.body.trim()) {
-        // Clean up the release body
-        let body = release.body.trim();
-        
-        // Remove any "Full Changelog" links at the end
-        body = body.replace(/\*\*Full Changelog\*\*:.*$/gm, '').trim();
+
 // Run the sync if this script is executed directly
 if (require.main === module) {
   syncReleaseNotes();

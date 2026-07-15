@@ -37,8 +37,8 @@ You have two options for setting up your development environment:
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/rajbos/github-copilot-token-usage.git
-   cd github-copilot-token-usage
+   git clone https://github.com/rajbos/ai-engineering-fluency.git
+   cd ai-engineering-fluency
    ```
 
 2. **Open in VS Code:**
@@ -150,8 +150,8 @@ If you prefer not to use the devcontainer, you can set up the extension locally:
 1. **Clone the repository:**
 
    ```bash
-   git clone https://github.com/rajbos/github-copilot-token-usage.git
-   cd github-copilot-token-usage
+   git clone https://github.com/rajbos/ai-engineering-fluency.git
+   cd ai-engineering-fluency
    ```
 
 2. **Install dependencies:**
@@ -206,6 +206,7 @@ To test and debug the extension in a local VS Code environment:
 3. **Press `F5`** in VS Code to launch the Extension Development Host
    - This opens a new VS Code window with the extension running
    - The original window shows debug output and allows you to set breakpoints
+   - The launch profile disables both published extension IDs so the dev build does not fight an installed marketplace copy for the same commands
 
 4. **In the Extension Development Host window:**
    - The extension will be active and you'll see the token tracker in the status bar
@@ -313,10 +314,11 @@ Some dependencies (like `@vscode/webview-ui-toolkit`) declare peer dependencies 
 
 ### Project Structure
 
-- **All extension logic** is in `src/extension.ts` in the `CopilotTokenTracker` class
-- **Data files** are in JSON format: `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`
-- **Webview code** is in `src/webview/` organized by feature
-- **See `src/README.md`** for detailed guidance on updating JSON data files
+- **All extension logic** is in `vscode-extension/src/extension.ts` in the `CopilotTokenTracker` class
+- **Shared code** (session parsing, token estimation, adapters) lives in the repo-root `src/` folder and is consumed by both the VS Code extension and the CLI
+- **Data files** are in JSON format in the repo-root `src/` folder: `tokenEstimators.json`, `modelPricing.json`, `toolNames.json`
+- **Webview code** is in `vscode-extension/src/webview/` organized by feature
+- **See the repo-root `src/README.md`** for detailed guidance on updating JSON data files
 
 ### Development Principles
 
@@ -379,7 +381,7 @@ The project includes comprehensive GitHub Actions workflows:
 - **Platforms:** Tests on Ubuntu, Windows, and macOS
 - **Node Versions:** 18.x and 20.x
 - **Checks:** Linting, type checking, compilation, and packaging
-- **Badge:** [![Build](https://github.com/rajbos/github-copilot-token-usage/actions/workflows/build.yml/badge.svg)](https://github.com/rajbos/github-copilot-token-usage/actions/workflows/build.yml)
+- **Badge:** [![Build](https://github.com/rajbos/ai-engineering-fluency/actions/workflows/build.yml/badge.svg)](https://github.com/rajbos/ai-engineering-fluency/actions/workflows/build.yml)
 
 ### What Gets Tested
 
@@ -415,7 +417,7 @@ The project uses a fully automated release pipeline via GitHub Actions.
 
 The workflow inputs:
 - `create_tag` — Creates a git tag from the `package.json` version (default: true)
-- `publish_marketplace` — Publishes to the VS Code Marketplace (default: true)
+- `publish_marketplace` — Publishes to the VS Code Marketplace and Open VSX (default: true)
 
 The workflow automatically:
 
@@ -425,13 +427,14 @@ The workflow automatically:
 4. Runs the full build pipeline (lint, type-check, compile, test)
 5. Creates a GitHub Release with the VSIX attached
 6. Publishes to the VS Code Marketplace (using the `VSCE_PAT` secret)
-7. Opens a PR to sync `CHANGELOG.md` in the repository
+7. Publishes to the Open VSX Registry (using the `OPEN_VSX_TOKEN` secret)
+8. Opens a PR to sync `CHANGELOG.md` in the repository
 
-> **Security:** Only users with repository write access can trigger the `workflow_dispatch`. The `VSCE_PAT` secret must be configured in repository settings (Settings → Secrets and variables → Actions). Create a PAT at https://dev.azure.com with the "Marketplace (Publish)" scope.
+> **Security:** Only users with repository write access can trigger the `workflow_dispatch`. The `VSCE_PAT` secret must be configured in repository settings (Settings → Secrets and variables → Actions). Create a PAT at https://dev.azure.com with the "Marketplace (Publish)" scope. The `OPEN_VSX_TOKEN` secret must also be configured; create a token at https://open-vsx.org/user-settings/tokens.
 
 ### Tag-Based Release (Build Only)
 
-Pushing a version tag (e.g., `git push origin v0.0.19`) triggers the build and creates a GitHub release, but does **not** publish to the marketplace. Use the workflow dispatch for the full pipeline.
+Pushing a version tag (e.g., `git push origin v0.0.19`) triggers the build and creates a GitHub release, but does **not** publish to the marketplaces. Use the workflow dispatch for the full pipeline.
 
 ### Manual Changelog Sync
 
@@ -448,7 +451,7 @@ Or trigger the **Sync Release Notes** workflow from the Actions tab.
 If you need to re-publish manually (e.g., after a marketplace upload failure):
 
 ```powershell
-.\publish.ps1 -VsixPath ".\copilot-token-tracker-0.0.19.vsix"
+.\publish.ps1 -VsixPath ".\ai-engineering-fluency-0.0.19.vsix"
 ```
 
 ## Submitting Changes
@@ -471,7 +474,7 @@ If you need to re-publish manually (e.g., after a marketplace upload failure):
 
 ## Questions or Issues?
 
-- **Bug Reports:** Open an issue on [GitHub Issues](https://github.com/rajbos/github-copilot-token-usage/issues)
+- **Bug Reports:** Open an issue on [GitHub Issues](https://github.com/rajbos/ai-engineering-fluency/issues)
 - **Feature Requests:** Submit as a GitHub issue with the "enhancement" label
 - **Questions:** Ask in the issue comments or discussions
 

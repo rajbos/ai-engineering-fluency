@@ -7,45 +7,58 @@ import type { TokenCredential } from "@azure/core-auth";
 import { AzureNamedKeyCredential } from "@azure/core-auth";
 import { TableClient, TableServiceClient } from "@azure/data-tables";
 import * as vscode from "vscode";
-import { withErrorHandling } from "../../utils/errors";
+import { withErrorHandling, isConflictError, isAuthError, isRetryableError, getErrorStatusCode, getErrorCode } from "../../../../src/utils/errors";
+import { getAzureTableStorageEndpoint, getAzureBlobStorageEndpoint } from "../../utils/azureEndpoints";
+import { withTimeout } from "../../utils/promises";
 import { AZURE_SDK_QUERY_TIMEOUT_MS } from "../constants";
 import type { BackendSettings } from "../settings";
 import type {
   BackendAggDailyEntityLike,
   TableClientLike,
-} from "../storageTables";
-import {
+} from "../storageTables";import {
   buildAggPartitionKey,
   listAggDailyEntitiesFromTableClient,
 } from "../storageTables";
 import { BackendUtility } from "./utilityService";
 
-/**
- * Wraps a promise with a timeout to prevent indefinite hangs.
- * @param promise - The promise to wrap
- * @param timeoutMs - Timeout in milliseconds
- * @param operation - Description of the operation for error messages
- * @returns Promise that rejects if timeout is exceeded
- */
-function withTimeout<T>(
-  promise: Promise<T>,
-  timeoutMs: number,
-  operation: string,
-): Promise<T> {
-  let timeoutHandle: NodeJS.Timeout | undefined;
-  return Promise.race([
-    promise.finally(() => {
-      if (timeoutHandle) {
-        clearTimeout(timeoutHandle);
-      }
-    }),
-    new Promise<never>((_, reject) => {
-      timeoutHandle = setTimeout(
-        () => reject(new Error(`${operation} timed out after ${timeoutMs}ms`)),
-        timeoutMs,
-      );
-    }),
-  ]);
+/** Conditionally include a numeric property from a raw entity. */
+function pickNum(entity: any, key: string): Record<string, number> {
+  return typeof entity[key] === 'number' ? { [key]: entity[key] as number } : {};
+}
+
+/** Conditionally include a string property from a raw entity (calls toString). */
+function pickStr(entity: any, key: string): Record<string, string> {
+  return entity[key] ? { [key]: entity[key].toString() as string } : {};
+}
+
+/** Map a raw Azure Table entity to a typed BackendAggDailyEntityLike. */
+function mapEntityToAggDailyEntity(entity: any): BackendAggDailyEntityLike {
+  const pk = entity.partitionKey;
+  const rk = entity.rowKey;
+  const pkParts = (pk ?? "").toString().split("|");
+  const day = pkParts.length === 2 ? pkParts[1] : "";
+  const datasetId = pkParts[0] ?? "";
+  const rkParts = (rk ?? "").toString().split("|");
+  return {
+    partitionKey: (pk ?? "").toString(), rowKey: (rk ?? "").toString(),
+    datasetId, day, model: rkParts[0] ?? "", workspaceId: rkParts[1] ?? "",
+    machineId: rkParts[2] ?? "", userId: rkParts[3] ?? "",
+    inputTokens: entity.inputTokens, outputTokens: entity.outputTokens,
+    interactions: entity.interactions, workspaceName: entity.workspaceName,
+    machineName: entity.machineName,
+    schemaVersion: typeof entity.schemaVersion === "number" ? entity.schemaVersion : undefined,
+    ...pickNum(entity, 'askModeCount'), ...pickNum(entity, 'editModeCount'),
+    ...pickNum(entity, 'agentModeCount'), ...pickNum(entity, 'planModeCount'),
+    ...pickNum(entity, 'customAgentModeCount'), ...pickStr(entity, 'toolCallsJson'),
+    ...pickStr(entity, 'contextRefsJson'), ...pickStr(entity, 'mcpToolsJson'),
+    ...pickStr(entity, 'modelSwitchingJson'), ...pickStr(entity, 'editScopeJson'),
+    ...pickStr(entity, 'agentTypesJson'), ...pickStr(entity, 'repositoriesJson'),
+    ...pickStr(entity, 'applyUsageJson'), ...pickStr(entity, 'sessionDurationJson'),
+    ...pickNum(entity, 'repoCustomizationRate'), ...pickNum(entity, 'multiTurnSessions'),
+    ...pickNum(entity, 'avgTurnsPerSession'), ...pickNum(entity, 'multiFileEdits'),
+    ...pickNum(entity, 'avgFilesPerEdit'), ...pickNum(entity, 'codeBlockApplyRate'),
+    ...pickNum(entity, 'sessionCount'),
+  };
 }
 
 /**
@@ -61,20 +74,6 @@ export class DataPlaneService {
   ) {}
 
   /**
-   * Get the Azure Table Storage endpoint for a storage account.
-   */
-  private getStorageTableEndpoint(storageAccount: string): string {
-    return `https://${storageAccount}.table.core.windows.net`;
-  }
-
-  /**
-   * Get the Azure Blob Storage endpoint for a storage account.
-   */
-  getStorageBlobEndpoint(storageAccount: string): string {
-    return `https://${storageAccount}.blob.core.windows.net`;
-  }
-
-  /**
    * Create a TableClient for the backend aggregate table.
    * @param settings - Backend settings with storage account and table names
    * @param credential - Azure credential (TokenCredential or AzureNamedKeyCredential)
@@ -85,7 +84,7 @@ export class DataPlaneService {
     credential: TokenCredential | AzureNamedKeyCredential,
   ): TableClient {
     return new TableClient(
-      this.getStorageTableEndpoint(settings.storageAccount),
+      getAzureTableStorageEndpoint(settings.storageAccount),
       settings.aggTable,
       credential as TokenCredential,
     );
@@ -102,7 +101,7 @@ export class DataPlaneService {
     credential: TokenCredential | AzureNamedKeyCredential,
   ): Promise<void> {
     const serviceClient = new TableServiceClient(
-      this.getStorageTableEndpoint(settings.storageAccount),
+      getAzureTableStorageEndpoint(settings.storageAccount),
       credential as TokenCredential,
     );
     await withErrorHandling(
@@ -110,10 +109,9 @@ export class DataPlaneService {
         try {
           await serviceClient.createTable(settings.aggTable);
           this.log(`Backend sync: created table ${settings.aggTable}`);
-        } catch (e: any) {
+        } catch (e: unknown) {
           // 409 = already exists
-          const status = e?.statusCode ?? e?.code;
-          if (status === 409 || e?.code === "TableAlreadyExists") {
+          if (isConflictError(e)) {
             this.log(
               `Backend sync: table ${settings.aggTable} already exists (OK)`,
             );
@@ -161,9 +159,8 @@ export class DataPlaneService {
         AZURE_SDK_QUERY_TIMEOUT_MS,
         "Table entity delete",
       );
-    } catch (e: any) {
-      const status = e?.statusCode;
-      if (status === 403) {
+    } catch (e: unknown) {
+      if (isAuthError(e)) {
         throw new Error(
           `Missing Azure RBAC data-plane permissions for Tables. Assign 'Storage Table Data Contributor' (read/write) or 'Storage Table Data Reader' (read-only) on the Storage account or table service.`,
         );
@@ -210,13 +207,13 @@ export class DataPlaneService {
   }): Promise<BackendAggDailyEntityLike[]> {
     const { tableClient, startDayKey, endDayKey } = args;
 
-    // Query all entities in the date range without filtering by dataset
-    // Filter by timestamp to limit the scan
-    const startDate = new Date(startDayKey);
-    const endDate = new Date(endDayKey);
-    endDate.setUTCHours(23, 59, 59, 999); // End of day
-
-    const filter = `Timestamp ge datetime'${startDate.toISOString()}' and Timestamp le datetime'${endDate.toISOString()}'`;
+    // Query all entities in the date range without filtering by dataset.
+    // Filter by the `day` entity field (plain YYYY-MM-DD string).
+    // Filtering by Timestamp (the system write-time property) using the OData `datetime'...'`
+    // type annotation is not supported by Cosmos DB Tables API, which silently returns zero
+    // results. Using the `day` field works reliably across both Azure Storage Tables and
+    // Cosmos DB Tables API.
+    const filter = `day ge '${startDayKey}' and day le '${endDayKey}'`;
 
     this.log(
       `Querying all datasets for date range ${startDayKey} to ${endDayKey}`,
@@ -226,59 +223,7 @@ export class DataPlaneService {
     const iterator = tableClient.listEntities({ queryOptions: { filter } });
 
     for await (const entity of iterator) {
-      const pk = entity.partitionKey;
-      const rk = entity.rowKey;
-
-      // Extract day from partition key (format: datasetId|day)
-      const pkParts = (pk ?? "").toString().split("|");
-      const day = pkParts.length === 2 ? pkParts[1] : "";
-      const datasetId = pkParts[0] ?? "";
-
-      // Parse RowKey: model|workspaceId|machineId|userId
-      const rkParts = (rk ?? "").toString().split("|");
-      const model = rkParts[0] ?? "";
-      const workspaceId = rkParts[1] ?? "";
-      const machineId = rkParts[2] ?? "";
-      const userId = rkParts[3] ?? "";
-
-      entities.push({
-        partitionKey: (pk ?? "").toString(),
-        rowKey: (rk ?? "").toString(),
-        datasetId,
-        day,
-        model,
-        workspaceId,
-        machineId,
-        userId,
-        inputTokens: entity.inputTokens,
-        outputTokens: entity.outputTokens,
-        interactions: entity.interactions,
-        workspaceName: entity.workspaceName,
-        machineName: entity.machineName,
-        schemaVersion: typeof entity.schemaVersion === "number" ? entity.schemaVersion : undefined,
-        // Fluency metrics (schema version 4+)
-        ...(typeof entity.askModeCount === "number" ? { askModeCount: entity.askModeCount } : {}),
-        ...(typeof entity.editModeCount === "number" ? { editModeCount: entity.editModeCount } : {}),
-        ...(typeof entity.agentModeCount === "number" ? { agentModeCount: entity.agentModeCount } : {}),
-        ...(typeof entity.planModeCount === "number" ? { planModeCount: entity.planModeCount } : {}),
-        ...(typeof entity.customAgentModeCount === "number" ? { customAgentModeCount: entity.customAgentModeCount } : {}),
-        ...(entity.toolCallsJson ? { toolCallsJson: entity.toolCallsJson.toString() } : {}),
-        ...(entity.contextRefsJson ? { contextRefsJson: entity.contextRefsJson.toString() } : {}),
-        ...(entity.mcpToolsJson ? { mcpToolsJson: entity.mcpToolsJson.toString() } : {}),
-        ...(entity.modelSwitchingJson ? { modelSwitchingJson: entity.modelSwitchingJson.toString() } : {}),
-        ...(entity.editScopeJson ? { editScopeJson: entity.editScopeJson.toString() } : {}),
-        ...(entity.agentTypesJson ? { agentTypesJson: entity.agentTypesJson.toString() } : {}),
-        ...(entity.repositoriesJson ? { repositoriesJson: entity.repositoriesJson.toString() } : {}),
-        ...(entity.applyUsageJson ? { applyUsageJson: entity.applyUsageJson.toString() } : {}),
-        ...(entity.sessionDurationJson ? { sessionDurationJson: entity.sessionDurationJson.toString() } : {}),
-        ...(typeof entity.repoCustomizationRate === "number" ? { repoCustomizationRate: entity.repoCustomizationRate } : {}),
-        ...(typeof entity.multiTurnSessions === "number" ? { multiTurnSessions: entity.multiTurnSessions } : {}),
-        ...(typeof entity.avgTurnsPerSession === "number" ? { avgTurnsPerSession: entity.avgTurnsPerSession } : {}),
-        ...(typeof entity.multiFileEdits === "number" ? { multiFileEdits: entity.multiFileEdits } : {}),
-        ...(typeof entity.avgFilesPerEdit === "number" ? { avgFilesPerEdit: entity.avgFilesPerEdit } : {}),
-        ...(typeof entity.codeBlockApplyRate === "number" ? { codeBlockApplyRate: entity.codeBlockApplyRate } : {}),
-        ...(typeof entity.sessionCount === "number" ? { sessionCount: entity.sessionCount } : {}),
-      });
+      entities.push(mapEntityToAggDailyEntity(entity));
     }
 
     this.log(`Found ${entities.length} entities across all datasets`);
@@ -309,11 +254,13 @@ export class DataPlaneService {
     const dsPrefix = `ds:${datasetId}`;
     const uPrefix = `u:${userId}`;
 
-    const startDate = new Date(startDayKey);
-    const endDate = new Date(endDayKey);
-    endDate.setUTCHours(23, 59, 59, 999);
-
-    const filter = `Timestamp ge datetime'${startDate.toISOString()}' and Timestamp le datetime'${endDate.toISOString()}'`;
+    // Filter by PartitionKey range instead of system Timestamp.
+    // PartitionKey format is "ds:{datasetId}|d:{YYYY-MM-DD}".
+    // Using system Timestamp would miss entities written by older syncs (e.g. written March 1
+    // for day "2026-03-15") because their Timestamp predates the startDayKey.
+    const pkStart = buildAggPartitionKey(datasetId, startDayKey);
+    const pkEnd = buildAggPartitionKey(datasetId, endDayKey);
+    const filter = `PartitionKey ge '${pkStart}' and PartitionKey le '${pkEnd}'`;
 
     this.log(
       `Deleting entities for user "${userId}" in dataset "${datasetId}" (${startDayKey} to ${endDayKey})`,
@@ -351,7 +298,7 @@ export class DataPlaneService {
           "Table entity delete",
         );
         deletedCount++;
-      } catch (error: any) {
+      } catch (error: unknown) {
         const err = error instanceof Error ? error : new Error(String(error));
         errors.push({ partitionKey, rowKey, error: err });
         this.log(
@@ -375,16 +322,16 @@ export class DataPlaneService {
    */
   async upsertEntitiesBatch(
     tableClient: TableClientLike,
-    entities: any[],
+    entities: BackendAggDailyEntityLike[],
   ): Promise<{
     successCount: number;
-    errors: Array<{ entity: any; error: Error }>;
+    errors: Array<{ entity: BackendAggDailyEntityLike; error: Error }>;
   }> {
     let successCount = 0;
-    const errors: Array<{ entity: any; error: Error }> = [];
+    const errors: Array<{ entity: BackendAggDailyEntityLike; error: Error }> = [];
 
     // Group entities by partition key for potential future batch optimization
-    const byPartition = new Map<string, any[]>();
+    const byPartition = new Map<string, BackendAggDailyEntityLike[]>();
     for (const entity of entities) {
       const pk = entity.partitionKey;
       if (!byPartition.has(pk)) {
@@ -423,7 +370,7 @@ export class DataPlaneService {
    */
   private async upsertEntityWithRetry(
     tableClient: TableClientLike,
-    entity: any,
+    entity: BackendAggDailyEntityLike,
     maxRetries: number = 3,
   ): Promise<void> {
     let lastError: Error | undefined;
@@ -436,16 +383,11 @@ export class DataPlaneService {
           "Table entity upsert",
         );
         return; // Success
-      } catch (error: any) {
+      } catch (error: unknown) {
         lastError = error instanceof Error ? error : new Error(String(error));
 
         // Check if error is retryable (429 throttling, 503 unavailable)
-        const statusCode = error?.statusCode ?? error?.code;
-        const isRetryable =
-          statusCode === 429 ||
-          statusCode === 503 ||
-          statusCode === "ETIMEDOUT";
-
+        const isRetryable = isRetryableError(error);
         if (!isRetryable || attempt === maxRetries) {
           throw lastError;
         }
