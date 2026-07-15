@@ -2,7 +2,13 @@ import './vscode-shim-register';
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { VsCodeCachePolicy, CliCachePolicy } from '../../../src/cachePolicy';
+import {
+	CliCachePolicy,
+	VS_CODE_CACHE_EVICT_BATCH,
+	VS_CODE_CACHE_MAX_ENTRIES,
+	VS_CODE_CACHE_TRIGGER_THRESHOLD,
+	VsCodeCachePolicy,
+} from '../../../src/cachePolicy';
 
 // ---------------------------------------------------------------------------
 // Shared helpers
@@ -53,37 +59,37 @@ function makeVsCodeCache(count: number): Map<string, TestEntry> {
 	return m;
 }
 
-test('VsCodeCachePolicy.evict: no-op when size is at the threshold (3100)', () => {
+test('VsCodeCachePolicy.evict: no-op when size is at the threshold', () => {
 	const logs: string[] = [];
 	const policy = new VsCodeCachePolicy((m) => logs.push(m));
-	const cache = makeVsCodeCache(3100);
+	const cache = makeVsCodeCache(VS_CODE_CACHE_TRIGGER_THRESHOLD);
 	policy.evict(cache);
-	assert.equal(cache.size, 3100, 'Should not evict when at threshold');
+	assert.equal(cache.size, VS_CODE_CACHE_TRIGGER_THRESHOLD, 'Should not evict when at threshold');
 	assert.equal(logs.length, 0, 'Should not log when no eviction');
 });
 
-test('VsCodeCachePolicy.evict: triggers when size exceeds threshold (3101)', () => {
+test('VsCodeCachePolicy.evict: triggers when size exceeds threshold', () => {
 	const logs: string[] = [];
 	const policy = new VsCodeCachePolicy((m) => logs.push(m));
-	const cache = makeVsCodeCache(3101);
+	const cache = makeVsCodeCache(VS_CODE_CACHE_TRIGGER_THRESHOLD + 1);
 	policy.evict(cache);
-	assert.equal(cache.size, 3001, 'Should evict 100 entries from 3101 → 3001');
+	assert.equal(cache.size, VS_CODE_CACHE_MAX_ENTRIES, 'Should evict one batch back to the steady-state cap');
 	assert.ok(logs.some(l => l.includes('removed 100 oldest entries')), 'Should log eviction');
 });
 
 test('VsCodeCachePolicy.evict: removes oldest by insertion order, not by mtime', () => {
 	const logs: string[] = [];
-	const policy = new VsCodeCachePolicy((m) => logs.push(m), 3100, 100);
+	const policy = new VsCodeCachePolicy((m) => logs.push(m), VS_CODE_CACHE_TRIGGER_THRESHOLD, VS_CODE_CACHE_EVICT_BATCH);
 	const cache = new Map<string, TestEntry>();
-	// Insert 3101 entries, with the "oldest" by insertion having the highest mtime
-	for (let i = 3100; i >= 0; i--) {
+	// Insert threshold+1 entries, with the "oldest" by insertion having the highest mtime
+	for (let i = VS_CODE_CACHE_TRIGGER_THRESHOLD; i >= 0; i--) {
 		cache.set(`file${i}`, { mtime: i * 1000, size: i });
 	}
 	policy.evict(cache);
-	// The first-inserted keys are file3100..file3001 (oldest by insertion order)
-	assert.equal(cache.has('file3100'), false, 'First inserted key should be evicted');
-	assert.equal(cache.has('file3001'), false, 'Insertion-oldest keys should be evicted');
-	assert.equal(cache.has('file3000'), true, 'key inserted at position 101 should survive');
+	// The first-inserted keys are file20099..file20000 (oldest by insertion order)
+	assert.equal(cache.has(`file${VS_CODE_CACHE_TRIGGER_THRESHOLD}`), false, 'First inserted key should be evicted');
+	assert.equal(cache.has(`file${VS_CODE_CACHE_MAX_ENTRIES}`), false, 'Insertion-oldest keys should be evicted');
+	assert.equal(cache.has(`file${VS_CODE_CACHE_MAX_ENTRIES - 1}`), true, 'key inserted just after the eviction batch should survive');
 	assert.equal(cache.has('file0'), true, 'Last-inserted key should survive');
 });
 
