@@ -11,6 +11,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { Worker } from 'worker_threads';
 import type { ModelUsage } from './types';
 
 /** Per-session usage aggregated from OTel `chat <model>` spans. */
@@ -111,19 +112,34 @@ function accumulateOtelChatSpanUsage(index: Map<string, CopilotCliOtelSessionUsa
 	entry.nanoAiu += usage.nanoAiu;
 }
 
+/**
+ * Substring that every Copilot CLI `chat <model>` span line contains. The export interleaves
+ * these few spans with tens of thousands of metric/log/other-span lines we never use, so this
+ * cheap string test lets us skip JSON.parse on the ~99.8% of lines that can't be a chat span
+ * (measured: 165 of 108,112 lines on a real 134 MB export). It's only a pre-filter —
+ * consolidateOtelRecord still fully validates each candidate — so a stray substring match at
+ * worst costs one wasted parse.
+ */
+const OTEL_CHAT_LINE_HINT = '"name":"chat ';
+
+/** Merges one already-parsed OTel record into `index` when it's a `chat <model>` span; ignores anything else. */
+function consolidateOtelRecord(record: OtelSpanRecord, index: Map<string, CopilotCliOtelSessionUsage>): void {
+	if (record.type !== 'span' || !record.name?.startsWith('chat ')) { return; }
+	const sessionId = record.attributes?.['gen_ai.conversation.id'];
+	if (!sessionId) { return; }
+	accumulateOtelChatSpanUsage(index, sessionId, readOtelChatSpanUsage(record.attributes));
+}
+
 /** Parses one line of an OTel export file, merging its usage into `index` if it's a `chat <model>` span. */
 function parseOtelLine(line: string, index: Map<string, CopilotCliOtelSessionUsage>): void {
-	if (!line.trim()) { return; }
+	if (!line.includes(OTEL_CHAT_LINE_HINT)) { return; }
 	let record: OtelSpanRecord;
 	try {
 		record = JSON.parse(line);
 	} catch {
 		return;
 	}
-	if (record.type !== 'span' || !record.name?.startsWith('chat ')) { return; }
-	const sessionId = record.attributes?.['gen_ai.conversation.id'];
-	if (!sessionId) { return; }
-	accumulateOtelChatSpanUsage(index, sessionId, readOtelChatSpanUsage(record.attributes));
+	consolidateOtelRecord(record, index);
 }
 
 /** Parses one OTel export file's `chat <model>` spans, merging per-session totals into `index`. */
@@ -131,6 +147,68 @@ function parseOtelFileInto(content: string, index: Map<string, CopilotCliOtelSes
 	for (const line of content.split('\n')) {
 		parseOtelLine(line, index);
 	}
+}
+
+/**
+ * Source for the OTel-parsing worker, run via `new Worker(src, { eval: true })`. Kept as a
+ * self-contained string that touches only Node built-ins so it needs no separate entry point
+ * or runtime path resolution — it bundles identically across every build layout (tsc → out/,
+ * esbuild → extension dist/, esbuild → cli dist/). It does the expensive part off the caller's
+ * main thread: streaming each export file line-by-line (never holding the whole 100+ MB file
+ * in memory), cheaply pre-filtering, and JSON.parsing only the handful of `chat <model>`
+ * candidate lines. It posts that small candidate array back for the main thread to consolidate.
+ */
+const OTEL_WORKER_SOURCE = `
+const { parentPort, workerData } = require('worker_threads');
+const fs = require('fs');
+const path = require('path');
+const readline = require('readline');
+const HINT = ${JSON.stringify(OTEL_CHAT_LINE_HINT)};
+async function run() {
+	const records = [];
+	let entries;
+	try { entries = await fs.promises.readdir(workerData.dir); }
+	catch { parentPort.postMessage(records); return; }
+	for (const name of entries) {
+		if (!name.endsWith('.jsonl')) { continue; }
+		try {
+			const rl = readline.createInterface({ input: fs.createReadStream(path.join(workerData.dir, name), { encoding: 'utf8' }), crlfDelay: Infinity });
+			for await (const line of rl) {
+				if (!line.includes(HINT)) { continue; }
+				try { records.push(JSON.parse(line)); } catch { /* malformed line — skip */ }
+			}
+		} catch { /* unreadable file — skip */ }
+	}
+	parentPort.postMessage(records);
+}
+run().catch(() => { try { parentPort.postMessage([]); } catch { /* worker tearing down */ } });
+`;
+
+/**
+ * Runs the OTel read+filter+parse in a worker thread, resolving the parsed `chat <model>`
+ * candidate records. Rejects if the worker can't be created or dies before posting, so the
+ * caller can fall back to an in-process read.
+ */
+function loadOtelRecordsViaWorker(dir: string): Promise<OtelSpanRecord[]> {
+	return new Promise<OtelSpanRecord[]>((resolve, reject) => {
+		let worker: Worker;
+		try {
+			worker = new Worker(OTEL_WORKER_SOURCE, { eval: true, workerData: { dir } });
+		} catch (err) {
+			reject(err);
+			return;
+		}
+		let settled = false;
+		const finish = (done: () => void): void => {
+			if (settled) { return; }
+			settled = true;
+			void worker.terminate();
+			done();
+		};
+		worker.once('message', (records: OtelSpanRecord[]) => finish(() => resolve(Array.isArray(records) ? records : [])));
+		worker.once('error', (err) => finish(() => reject(err)));
+		worker.once('exit', (code) => finish(() => reject(new Error(`OTel worker exited before posting results (code ${code})`))));
+	});
 }
 
 let cachedIndex: Map<string, CopilotCliOtelSessionUsage> | null = null;
@@ -148,6 +226,21 @@ let inFlightLoad: Promise<Map<string, CopilotCliOtelSessionUsage>> | null = null
 async function readCopilotCliOtelIndex(): Promise<Map<string, CopilotCliOtelSessionUsage>> {
 	const index = new Map<string, CopilotCliOtelSessionUsage>();
 	const dir = getCopilotCliOtelDir();
+	try {
+		// Do the heavy streaming read+parse off the main thread; consolidate the small result here.
+		const records = await loadOtelRecordsViaWorker(dir);
+		for (const record of records) { consolidateOtelRecord(record, index); }
+		return index;
+	} catch {
+		// Worker unavailable or failed (e.g. constrained runtime) — fall back to an in-process read
+		// so callers still get data, just without the off-thread benefit.
+		return readCopilotCliOtelIndexInProcess(dir);
+	}
+}
+
+/** In-process read+parse of the OTel export, used only when the worker thread can't be used. */
+async function readCopilotCliOtelIndexInProcess(dir: string): Promise<Map<string, CopilotCliOtelSessionUsage>> {
+	const index = new Map<string, CopilotCliOtelSessionUsage>();
 	try {
 		const entries = await fs.promises.readdir(dir);
 		for (const name of entries) {

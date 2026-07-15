@@ -127,28 +127,18 @@ test('getCopilotCliOtelUsage: returns null for a non-Copilot-CLI path without to
 	});
 });
 
-test('loadCopilotCliOtelIndex: concurrent callers on a cold cache share one read, not N', async (t) => {
+test('loadCopilotCliOtelIndex: concurrent callers on a cold cache share one load, not N', async (t) => {
 	await withHomedir(t, async (homeDir) => {
 		const otelDir = path.join(homeDir, '.copilot', 'otel');
 		fs.mkdirSync(otelDir, { recursive: true });
 		fs.writeFileSync(path.join(otelDir, 'copilot-otel.jsonl'), chatSpan(SESSION_ID));
 
-		let readFileCalls = 0;
-		const originalReadFile = fs.promises.readFile;
-		(fs.promises as { readFile: typeof fs.promises.readFile }).readFile = (async (...args: Parameters<typeof fs.promises.readFile>) => {
-			readFileCalls++;
-			// Yield to let other concurrent callers reach loadCopilotCliOtelIndex before this resolves,
-			// so a buggy (non-deduplicating) implementation would have already kicked off its own reads.
-			await new Promise((r) => setImmediate(r));
-			return originalReadFile(...args);
-		}) as typeof fs.promises.readFile;
-
-		try {
-			// Fire 10 concurrent loads before any of them can populate the cache.
-			await Promise.all(Array.from({ length: 10 }, () => loadCopilotCliOtelIndex()));
-			assert.equal(readFileCalls, 1, 'the OTel export file should be read exactly once, not once per concurrent caller');
-		} finally {
-			(fs.promises as { readFile: typeof fs.promises.readFile }).readFile = originalReadFile;
-		}
+		// Fire 10 concurrent loads before any of them can populate the cache. The load runs off
+		// the main thread now, so we can't count read calls here — instead assert the dedup
+		// guarantee directly: every concurrent caller resolves to the *same* index instance. A
+		// non-deduplicating implementation would build (and return) a distinct Map per caller.
+		const results = await Promise.all(Array.from({ length: 10 }, () => loadCopilotCliOtelIndex()));
+		assert.ok(results.every((r) => r === results[0]), 'concurrent cold-cache loads should share one index instance, not one per caller');
+		assert.equal(results[0].get(SESSION_ID)?.actualTokens, 110, 'the shared index should hold the parsed span usage');
 	});
 });
