@@ -9,9 +9,23 @@ import {
 	getCopilotCliOtelUsage,
 	loadCopilotCliOtelIndex,
 	clearCopilotCliOtelCache,
+	expireCopilotCliOtelCacheForTests,
 } from '../../../src/copilotCliOtel';
 
 const SESSION_ID = 'a19abe35-b44e-4713-bf70-27f015393772';
+const SESSION_ID_2 = 'b28cf946-c55b-5824-cf81-38f126404883';
+const OTEL_FILE = 'copilot-otel.jsonl';
+
+/** Writes spans as a fresh newline-terminated .jsonl file (real exports terminate every record with \n). */
+function writeOtelSpans(otelDir: string, spans: string[], filename = OTEL_FILE): void {
+	fs.mkdirSync(otelDir, { recursive: true });
+	fs.writeFileSync(path.join(otelDir, filename), spans.map((s) => s + '\n').join(''));
+}
+
+/** Appends more newline-terminated spans to an existing export file. */
+function appendOtelSpans(otelDir: string, spans: string[], filename = OTEL_FILE): void {
+	fs.appendFileSync(path.join(otelDir, filename), spans.map((s) => s + '\n').join(''));
+}
 
 function eventsJsonlPath(homeDir: string, sessionId: string): string {
 	return path.join(homeDir, '.copilot', 'session-state', sessionId, 'events.jsonl');
@@ -86,11 +100,10 @@ test('extractCopilotCliSessionId: returns null for non-Copilot-CLI paths', () =>
 test('getCopilotCliOtelUsage: aggregates multiple chat spans for the same session', async (t) => {
 	await withHomedir(t, async (homeDir) => {
 		const otelDir = path.join(homeDir, '.copilot', 'otel');
-		fs.mkdirSync(otelDir, { recursive: true });
-		fs.writeFileSync(
-			path.join(otelDir, 'copilot-otel.jsonl'),
-			[chatSpan(SESSION_ID), chatSpan(SESSION_ID, { 'gen_ai.usage.input_tokens': 50, 'gen_ai.usage.output_tokens': 5 })].join('\n')
-		);
+		writeOtelSpans(otelDir, [
+			chatSpan(SESSION_ID),
+			chatSpan(SESSION_ID, { 'gen_ai.usage.input_tokens': 50, 'gen_ai.usage.output_tokens': 5 }),
+		]);
 
 		const usage = await getCopilotCliOtelUsage(eventsJsonlPath(homeDir, SESSION_ID));
 		assert.ok(usage);
@@ -104,8 +117,7 @@ test('getCopilotCliOtelUsage: aggregates multiple chat spans for the same sessio
 test('getCopilotCliOtelUsage: matches session-store.db virtual paths against the same session id', async (t) => {
 	await withHomedir(t, async (homeDir) => {
 		const otelDir = path.join(homeDir, '.copilot', 'otel');
-		fs.mkdirSync(otelDir, { recursive: true });
-		fs.writeFileSync(path.join(otelDir, 'copilot-otel.jsonl'), chatSpan(SESSION_ID));
+		writeOtelSpans(otelDir, [chatSpan(SESSION_ID)]);
 
 		const usage = await getCopilotCliOtelUsage(dbVirtualPath(homeDir, SESSION_ID));
 		assert.ok(usage);
@@ -130,8 +142,7 @@ test('getCopilotCliOtelUsage: returns null for a non-Copilot-CLI path without to
 test('loadCopilotCliOtelIndex: concurrent callers on a cold cache share one load, not N', async (t) => {
 	await withHomedir(t, async (homeDir) => {
 		const otelDir = path.join(homeDir, '.copilot', 'otel');
-		fs.mkdirSync(otelDir, { recursive: true });
-		fs.writeFileSync(path.join(otelDir, 'copilot-otel.jsonl'), chatSpan(SESSION_ID));
+		writeOtelSpans(otelDir, [chatSpan(SESSION_ID)]);
 
 		// Fire 10 concurrent loads before any of them can populate the cache. The load runs off
 		// the main thread now, so we can't count read calls here — instead assert the dedup
@@ -140,5 +151,60 @@ test('loadCopilotCliOtelIndex: concurrent callers on a cold cache share one load
 		const results = await Promise.all(Array.from({ length: 10 }, () => loadCopilotCliOtelIndex()));
 		assert.ok(results.every((r) => r === results[0]), 'concurrent cold-cache loads should share one index instance, not one per caller');
 		assert.equal(results[0].get(SESSION_ID)?.actualTokens, 110, 'the shared index should hold the parsed span usage');
+	});
+});
+
+test('loadCopilotCliOtelIndex: parses a large export via the worker path', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const otelDir = path.join(homeDir, '.copilot', 'otel');
+		// Exceed the in-process byte threshold (1 MB) so the load routes through the worker thread.
+		// Each span is a few hundred bytes, so a few thousand of them is comfortably over 1 MB.
+		const spanCount = 4000;
+		writeOtelSpans(otelDir, Array.from({ length: spanCount }, () => chatSpan(SESSION_ID)));
+		assert.ok(fs.statSync(path.join(otelDir, OTEL_FILE)).size > 1_000_000, 'test fixture should exceed the worker threshold');
+
+		const usage = await getCopilotCliOtelUsage(eventsJsonlPath(homeDir, SESSION_ID));
+		assert.ok(usage);
+		assert.equal(usage!.actualTokens, spanCount * 110, 'every span across the large file should be aggregated exactly once');
+		assert.equal(usage!.modelUsage['claude-sonnet-5'].inputTokens, spanCount * 100);
+	});
+});
+
+test('loadCopilotCliOtelIndex: an incremental refresh reads only appended spans, without re-counting old ones', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const otelDir = path.join(homeDir, '.copilot', 'otel');
+		writeOtelSpans(otelDir, [chatSpan(SESSION_ID)]);
+
+		const first = await getCopilotCliOtelUsage(eventsJsonlPath(homeDir, SESSION_ID));
+		assert.equal(first!.actualTokens, 110);
+
+		// Append a second span, then expire the TTL (keeping offsets) to force a refresh. If the
+		// refresh re-read the whole file instead of just the tail, the first span would be counted
+		// twice (110 + 110 + 55 = 275) rather than once (110 + 55 = 165).
+		appendOtelSpans(otelDir, [chatSpan(SESSION_ID, { 'gen_ai.usage.input_tokens': 50, 'gen_ai.usage.output_tokens': 5 })]);
+		expireCopilotCliOtelCacheForTests();
+
+		const second = await getCopilotCliOtelUsage(eventsJsonlPath(homeDir, SESSION_ID));
+		assert.equal(second!.actualTokens, 110 + 55, 'the appended span should be added once, and the original not re-counted');
+		assert.equal(second!.modelUsage['claude-sonnet-5'].inputTokens, 150);
+	});
+});
+
+test('loadCopilotCliOtelIndex: a shrunken (rotated/truncated) export triggers a full rebuild', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const otelDir = path.join(homeDir, '.copilot', 'otel');
+		// Start with two spans for SESSION_ID so the file (and tracked offset) is comparatively large.
+		writeOtelSpans(otelDir, [chatSpan(SESSION_ID), chatSpan(SESSION_ID)]);
+		const before = await loadCopilotCliOtelIndex();
+		assert.equal(before.get(SESSION_ID)?.actualTokens, 220);
+
+		// Overwrite with a single, smaller span for a different session: size now < tracked offset,
+		// which must be detected as rotation and rebuilt from scratch (dropping the stale session).
+		writeOtelSpans(otelDir, [chatSpan(SESSION_ID_2)]);
+		expireCopilotCliOtelCacheForTests();
+
+		const after = await loadCopilotCliOtelIndex();
+		assert.equal(after.get(SESSION_ID), undefined, 'the pre-rotation session should be gone after a rebuild');
+		assert.equal(after.get(SESSION_ID_2)?.actualTokens, 110, 'the post-rotation session should be parsed fresh');
 	});
 });

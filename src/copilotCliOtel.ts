@@ -122,6 +122,9 @@ function accumulateOtelChatSpanUsage(index: Map<string, CopilotCliOtelSessionUsa
  */
 const OTEL_CHAT_LINE_HINT = '"name":"chat ';
 
+/** ASCII newline byte, used for byte-level line scanning of the export files. */
+const NEWLINE_BYTE = 0x0a;
+
 /** Merges one already-parsed OTel record into `index` when it's a `chat <model>` span; ignores anything else. */
 function consolidateOtelRecord(record: OtelSpanRecord, index: Map<string, CopilotCliOtelSessionUsage>): void {
 	if (record.type !== 'span' || !record.name?.startsWith('chat ')) { return; }
@@ -130,23 +133,29 @@ function consolidateOtelRecord(record: OtelSpanRecord, index: Map<string, Copilo
 	accumulateOtelChatSpanUsage(index, sessionId, readOtelChatSpanUsage(record.attributes));
 }
 
-/** Parses one line of an OTel export file, merging its usage into `index` if it's a `chat <model>` span. */
-function parseOtelLine(line: string, index: Map<string, CopilotCliOtelSessionUsage>): void {
-	if (!line.includes(OTEL_CHAT_LINE_HINT)) { return; }
-	let record: OtelSpanRecord;
-	try {
-		record = JSON.parse(line);
-	} catch {
-		return;
-	}
-	consolidateOtelRecord(record, index);
+/** Parses one export line into a `chat <model>` candidate record, or null when it can't be one. */
+function parseChatCandidateLine(line: string): OtelSpanRecord | null {
+	if (!line.includes(OTEL_CHAT_LINE_HINT)) { return null; }
+	try { return JSON.parse(line) as OtelSpanRecord; } catch { return null; }
 }
 
-/** Parses one OTel export file's `chat <model>` spans, merging per-session totals into `index`. */
-function parseOtelFileInto(content: string, index: Map<string, CopilotCliOtelSessionUsage>): void {
-	for (const line of content.split('\n')) {
-		parseOtelLine(line, index);
-	}
+/** One export file to read, over the half-open byte range [start, end). */
+interface OtelReadPlanItem { name: string; start: number; end: number; }
+
+/**
+ * Result of reading a plan: the parsed `chat <model>` candidate records, plus, per file, the
+ * byte offset just past the last complete (newline-terminated) line we consumed. A trailing
+ * partial line (still being appended) is left unconsumed so it's re-read once it completes.
+ */
+interface OtelReadResult { records: OtelSpanRecord[]; consumed: Record<string, number>; }
+
+/** Coerces an untrusted worker payload into a well-formed OtelReadResult. */
+function normalizeReadResult(result: unknown): OtelReadResult {
+	const r = result as Partial<OtelReadResult> | undefined;
+	return {
+		records: Array.isArray(r?.records) ? r!.records : [],
+		consumed: r?.consumed && typeof r.consumed === 'object' ? r.consumed : {},
+	};
 }
 
 /**
@@ -154,46 +163,67 @@ function parseOtelFileInto(content: string, index: Map<string, CopilotCliOtelSes
  * self-contained string that touches only Node built-ins so it needs no separate entry point
  * or runtime path resolution — it bundles identically across every build layout (tsc → out/,
  * esbuild → extension dist/, esbuild → cli dist/). It does the expensive part off the caller's
- * main thread: streaming each export file line-by-line (never holding the whole 100+ MB file
- * in memory), cheaply pre-filtering, and JSON.parsing only the handful of `chat <model>`
- * candidate lines. It posts that small candidate array back for the main thread to consolidate.
+ * main thread: for each planned byte range it streams the file in chunks (never holding the
+ * whole 100+ MB file in memory), scans for line boundaries at the byte level, cheaply
+ * pre-filters, and JSON.parses only the handful of `chat <model>` candidate lines. It posts
+ * back the small candidate array plus how far it consumed each file, so the main thread can
+ * consolidate and remember offsets for the next (incremental) refresh.
  */
 const OTEL_WORKER_SOURCE = `
 const { parentPort, workerData } = require('worker_threads');
 const fs = require('fs');
 const path = require('path');
-const readline = require('readline');
-const HINT = ${JSON.stringify(OTEL_CHAT_LINE_HINT)};
+const HINT = Buffer.from(${JSON.stringify(OTEL_CHAT_LINE_HINT)});
+const NL = 0x0a;
+function readRange(full, start, end) {
+	return new Promise((resolve) => {
+		const records = [];
+		if (end <= start) { resolve({ records, consumed: start }); return; }
+		const stream = fs.createReadStream(full, { start, end: end - 1 });
+		let carry = null;
+		let consumed = start;
+		stream.on('data', (chunk) => {
+			const buf = carry ? Buffer.concat([carry, chunk]) : chunk;
+			let from = 0, nl;
+			while ((nl = buf.indexOf(NL, from)) !== -1) {
+				const line = buf.subarray(from, nl);
+				if (line.indexOf(HINT) !== -1) {
+					try { records.push(JSON.parse(line.toString('utf8'))); } catch { /* malformed line — skip */ }
+				}
+				consumed += (nl - from) + 1;
+				from = nl + 1;
+			}
+			carry = from < buf.length ? buf.subarray(from) : null;
+		});
+		stream.on('end', () => resolve({ records, consumed }));
+		stream.on('error', () => resolve({ records, consumed }));
+	});
+}
 async function run() {
 	const records = [];
-	let entries;
-	try { entries = await fs.promises.readdir(workerData.dir); }
-	catch { parentPort.postMessage(records); return; }
-	for (const name of entries) {
-		if (!name.endsWith('.jsonl')) { continue; }
+	const consumed = {};
+	for (const item of workerData.plan) {
 		try {
-			const rl = readline.createInterface({ input: fs.createReadStream(path.join(workerData.dir, name), { encoding: 'utf8' }), crlfDelay: Infinity });
-			for await (const line of rl) {
-				if (!line.includes(HINT)) { continue; }
-				try { records.push(JSON.parse(line)); } catch { /* malformed line — skip */ }
-			}
-		} catch { /* unreadable file — skip */ }
+			const r = await readRange(path.join(workerData.dir, item.name), item.start, item.end);
+			for (const rec of r.records) { records.push(rec); }
+			consumed[item.name] = r.consumed;
+		} catch { /* unreadable file — leave its offset untouched */ }
 	}
-	parentPort.postMessage(records);
+	parentPort.postMessage({ records, consumed });
 }
-run().catch(() => { try { parentPort.postMessage([]); } catch { /* worker tearing down */ } });
+run().catch(() => { try { parentPort.postMessage({ records: [], consumed: {} }); } catch { /* worker tearing down */ } });
 `;
 
 /**
- * Runs the OTel read+filter+parse in a worker thread, resolving the parsed `chat <model>`
- * candidate records. Rejects if the worker can't be created or dies before posting, so the
- * caller can fall back to an in-process read.
+ * Runs a read plan in a worker thread, resolving the parsed candidate records and per-file
+ * consumed offsets. Rejects if the worker can't be created or dies before posting, so the
+ * caller can fall back to an in-process read of the same plan.
  */
-function loadOtelRecordsViaWorker(dir: string): Promise<OtelSpanRecord[]> {
-	return new Promise<OtelSpanRecord[]>((resolve, reject) => {
+function loadOtelRecordsViaWorker(dir: string, plan: OtelReadPlanItem[]): Promise<OtelReadResult> {
+	return new Promise<OtelReadResult>((resolve, reject) => {
 		let worker: Worker;
 		try {
-			worker = new Worker(OTEL_WORKER_SOURCE, { eval: true, workerData: { dir } });
+			worker = new Worker(OTEL_WORKER_SOURCE, { eval: true, workerData: { dir, plan } });
 		} catch (err) {
 			reject(err);
 			return;
@@ -205,16 +235,61 @@ function loadOtelRecordsViaWorker(dir: string): Promise<OtelSpanRecord[]> {
 			void worker.terminate();
 			done();
 		};
-		worker.once('message', (records: OtelSpanRecord[]) => finish(() => resolve(Array.isArray(records) ? records : [])));
+		worker.once('message', (result: unknown) => finish(() => resolve(normalizeReadResult(result))));
 		worker.once('error', (err) => finish(() => reject(err)));
 		worker.once('exit', (code) => finish(() => reject(new Error(`OTel worker exited before posting results (code ${code})`))));
 	});
 }
 
+/** Reads bytes [start, end) of a file into a Buffer (used for small incremental tails read in-process). */
+async function readByteRange(file: string, start: number, end: number): Promise<Buffer> {
+	if (end <= start) { return Buffer.alloc(0); }
+	const fh = await fs.promises.open(file, 'r');
+	try {
+		const length = end - start;
+		const buf = Buffer.allocUnsafe(length);
+		const { bytesRead } = await fh.read(buf, 0, length, start);
+		return bytesRead === length ? buf : buf.subarray(0, bytesRead);
+	} finally {
+		await fh.close();
+	}
+}
+
+/**
+ * In-process reader for a plan, used for small tails (where a worker's spawn cost would dwarf
+ * the work) and as the fallback when a worker can't be spawned. Mirrors the worker's contract:
+ * parse `chat <model>` candidate lines and report how far each file was consumed.
+ */
+async function loadOtelRecordsInProcess(dir: string, plan: OtelReadPlanItem[]): Promise<OtelReadResult> {
+	const records: OtelSpanRecord[] = [];
+	const consumed: Record<string, number> = {};
+	for (const item of plan) {
+		try {
+			const buf = await readByteRange(path.join(dir, item.name), item.start, item.end);
+			const lastNl = buf.lastIndexOf(NEWLINE_BYTE);
+			if (lastNl === -1) { consumed[item.name] = item.start; continue; } // no complete line yet
+			for (const line of buf.subarray(0, lastNl + 1).toString('utf8').split('\n')) {
+				const record = parseChatCandidateLine(line);
+				if (record) { records.push(record); }
+			}
+			consumed[item.name] = item.start + lastNl + 1;
+		} catch { /* unreadable file — leave its offset untouched */ }
+	}
+	return { records, consumed };
+}
+
 let cachedIndex: Map<string, CopilotCliOtelSessionUsage> | null = null;
 let cachedAt = 0;
+/**
+ * Bytes we've already consumed from each export file, keyed by filename. Lets a refresh read
+ * only the newly-appended tail instead of re-reading the whole (ever-growing) file, since the
+ * Copilot CLI export is strictly append-only. Reset on a full rebuild.
+ */
+let fileOffsets = new Map<string, number>();
 /** Re-scan the OTel directory at most this often; the export file grows across a live CLI session. */
 const CACHE_TTL_MS = 30_000;
+/** Reads larger than this go to a worker thread; smaller tails are parsed in-process (sub-ms, no spawn cost). */
+const OTEL_WORKER_MIN_BYTES = 1_000_000;
 /**
  * In-flight load, cached (not just the resolved value) so concurrent callers on a cold
  * cache all await the same read+parse instead of each independently reading the OTel
@@ -223,38 +298,90 @@ const CACHE_TTL_MS = 30_000;
  */
 let inFlightLoad: Promise<Map<string, CopilotCliOtelSessionUsage>> | null = null;
 
-async function readCopilotCliOtelIndex(): Promise<Map<string, CopilotCliOtelSessionUsage>> {
-	const index = new Map<string, CopilotCliOtelSessionUsage>();
-	const dir = getCopilotCliOtelDir();
+/** Current byte size of each named export file in `dir` (skipping any that vanished mid-scan). */
+async function statOtelFiles(dir: string, names: string[]): Promise<Map<string, number>> {
+	const sizes = new Map<string, number>();
+	for (const name of names) {
+		try { sizes.set(name, (await fs.promises.stat(path.join(dir, name))).size); }
+		catch { /* vanished between readdir and stat — skip */ }
+	}
+	return sizes;
+}
+
+/**
+ * Whether to rebuild the index from scratch rather than append incrementally: true on a cold
+ * cache, or when a tracked file shrank or vanished (log rotation / truncation), since the
+ * cached totals then include bytes that no longer exist.
+ */
+function otelNeedsRebuild(sizes: Map<string, number>): boolean {
+	if (cachedIndex === null) { return true; }
+	for (const [name, off] of fileOffsets) {
+		const size = sizes.get(name);
+		if (size === undefined || size < off) { return true; }
+	}
+	return false;
+}
+
+/** Plans the byte range to read for each file that grew past its consumed offset (the whole file on a rebuild). */
+function buildOtelReadPlan(sizes: Map<string, number>, baseOffsets: Map<string, number>): { plan: OtelReadPlanItem[]; totalBytes: number } {
+	const plan: OtelReadPlanItem[] = [];
+	let totalBytes = 0;
+	for (const [name, size] of sizes) {
+		const start = baseOffsets.get(name) ?? 0;
+		if (size > start) { plan.push({ name, start, end: size }); totalBytes += size - start; }
+	}
+	return { plan, totalBytes };
+}
+
+/** Reads a plan off the main thread for large tails, in-process for small ones, falling back to in-process if the worker fails. */
+async function runOtelReadPlan(dir: string, plan: OtelReadPlanItem[], totalBytes: number): Promise<OtelReadResult> {
 	try {
-		// Do the heavy streaming read+parse off the main thread; consolidate the small result here.
-		const records = await loadOtelRecordsViaWorker(dir);
-		for (const record of records) { consolidateOtelRecord(record, index); }
-		return index;
+		return totalBytes > OTEL_WORKER_MIN_BYTES
+			? await loadOtelRecordsViaWorker(dir, plan)
+			: await loadOtelRecordsInProcess(dir, plan);
 	} catch {
-		// Worker unavailable or failed (e.g. constrained runtime) — fall back to an in-process read
-		// so callers still get data, just without the off-thread benefit.
-		return readCopilotCliOtelIndexInProcess(dir);
+		// Worker path failed (e.g. constrained runtime) — retry the same plan in-process.
+		return loadOtelRecordsInProcess(dir, plan);
 	}
 }
 
-/** In-process read+parse of the OTel export, used only when the worker thread can't be used. */
-async function readCopilotCliOtelIndexInProcess(dir: string): Promise<Map<string, CopilotCliOtelSessionUsage>> {
-	const index = new Map<string, CopilotCliOtelSessionUsage>();
+async function readCopilotCliOtelIndex(): Promise<Map<string, CopilotCliOtelSessionUsage>> {
+	const dir = getCopilotCliOtelDir();
+	let names: string[];
 	try {
-		const entries = await fs.promises.readdir(dir);
-		for (const name of entries) {
-			if (!name.endsWith('.jsonl')) { continue; }
-			try {
-				const content = await fs.promises.readFile(path.join(dir, name), 'utf8');
-				parseOtelFileInto(content, index);
-			} catch { /* unreadable file — skip */ }
-		}
-	} catch { /* ~/.copilot/otel doesn't exist — OTel export not enabled, no data available */ }
+		names = (await fs.promises.readdir(dir)).filter((n) => n.endsWith('.jsonl'));
+	} catch {
+		// ~/.copilot/otel doesn't exist — OTel export not enabled. Forget any prior offsets.
+		fileOffsets = new Map();
+		return new Map();
+	}
+
+	const sizes = await statOtelFiles(dir, names);
+	const rebuild = otelNeedsRebuild(sizes);
+	const index = rebuild ? new Map<string, CopilotCliOtelSessionUsage>() : cachedIndex!;
+	const baseOffsets = rebuild ? new Map<string, number>() : fileOffsets;
+
+	const { plan, totalBytes } = buildOtelReadPlan(sizes, baseOffsets);
+	if (plan.length === 0) {
+		// Nothing new to read; keep the current (possibly freshly-rebuilt-empty) index and offsets.
+		fileOffsets = baseOffsets;
+		return index;
+	}
+
+	const result = await runOtelReadPlan(dir, plan, totalBytes);
+	for (const record of result.records) { consolidateOtelRecord(record, index); }
+
+	const nextOffsets = new Map(baseOffsets);
+	for (const [name, off] of Object.entries(result.consumed)) { nextOffsets.set(name, off); }
+	fileOffsets = nextOffsets;
 	return index;
 }
 
-/** Loads (and caches) the OTel usage index by scanning every .jsonl file under ~/.copilot/otel/. */
+/**
+ * Loads (and caches) the OTel usage index. The first load reads every .jsonl file under
+ * ~/.copilot/otel/ off the main thread; later refreshes (after the TTL) read only the bytes
+ * appended since, since the export is append-only.
+ */
 export async function loadCopilotCliOtelIndex(): Promise<Map<string, CopilotCliOtelSessionUsage>> {
 	const now = Date.now();
 	if (cachedIndex && now - cachedAt < CACHE_TTL_MS) { return cachedIndex; }
@@ -270,9 +397,19 @@ export async function loadCopilotCliOtelIndex(): Promise<Map<string, CopilotCliO
 	return inFlightLoad;
 }
 
-/** Clears the cached OTel index. Exposed for tests. */
+/** Clears the cached OTel index and per-file offsets. Exposed for tests. */
 export function clearCopilotCliOtelCache(): void {
 	cachedIndex = null;
+	cachedAt = 0;
+	inFlightLoad = null;
+	fileOffsets = new Map();
+}
+
+/**
+ * Expires the cache TTL while keeping the index and per-file offsets, so the next
+ * loadCopilotCliOtelIndex() performs an incremental refresh. Exposed for tests.
+ */
+export function expireCopilotCliOtelCacheForTests(): void {
 	cachedAt = 0;
 	inFlightLoad = null;
 }
