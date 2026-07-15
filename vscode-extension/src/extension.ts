@@ -99,7 +99,7 @@ import { PiDataAccess } from '../../src/pi';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
-import { extractCopilotCliSessionId, getCopilotCliOtelUsage, getCopilotCliOtelStatus } from '../../src/copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliOtelUsage, getCopilotCliOtelStatus, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
 import { createWakeupGate } from './utils/promises';
 
 // --- Session parsing & token estimation ---
@@ -10005,6 +10005,12 @@ function registerDiagnosticAndAuthCommands(context: vscode.ExtensionContext, tok
 }
 
 export async function activate(context: vscode.ExtensionContext): Promise<AiFluencyExtensionApi> {
+  // Kick off the Copilot CLI OTel export load immediately, on a worker thread, so the heavy
+  // streaming read+parse of the (100+ MB, ever-growing) export file overlaps the rest of
+  // activation instead of blocking the first usage analysis. Fire-and-forget: the result is
+  // cached inside the module, and every consumer already awaits loadCopilotCliOtelIndex() lazily.
+  void loadCopilotCliOtelIndex().catch(() => { /* off-by-default export; degrades to no data */ });
+
   // Create the token tracker
   const tokenTracker = new CopilotTokenTracker(context.extensionUri, context);
 
