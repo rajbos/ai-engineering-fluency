@@ -1,12 +1,12 @@
 # AI Engineering Fluency — VS Code Extension
 
-![AI Engineering Fluency](../assets/AI%20Engineering%20Fluency%20-%20Transparent.png)
+![AI Engineering Fluency](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/vscode-extension/assets/logo.png)
 
 Track your AI Engineering Fluency — daily and monthly token usage, cost estimates, and productivity insights directly inside VS Code. Reads local session logs and displays today's and monthly usage in the status bar, with rich detail views and optional cloud sync.
 
 ## Install
 
-[![VS Code Marketplace](https://img.shields.io/visual-studio-marketplace/v/RobBos.copilot-token-tracker)](https://marketplace.visualstudio.com/items?itemName=RobBos.copilot-token-tracker)
+[![VS Code Marketplace](https://badgen.net/vs-marketplace/v/RobBos.ai-engineering-fluency)](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency)
 
 Search for **"AI Engineering Fluency"** in the VS Code Extensions panel, or install via the Marketplace link above.
 
@@ -20,6 +20,7 @@ Search for **"AI Engineering Fluency"** in the VS Code Extensions panel, or inst
 - **Social Media Sharing**: Share your Fluency Score achievements on LinkedIn, Bluesky, and Mastodon with #CopilotFluencyScore
 - **Usage Analysis Dashboard**: Comprehensive analytics on how you use Copilot (modes, tool calls, context references, MCP tools)
 - **Fluency Level Viewer**: Debug-only tool to explore all scoring rules and thresholds (requires active debugger)
+- **Local View Regression**: Debug-only check that opens the main views with bundled sample data and reports whether each webview rendered non-empty output
 - **Automatic Updates**: Refreshes every 5 minutes to show the latest usage
 - **Click to Refresh**: Click the status bar item to manually refresh the token count
 - **Smart Estimation**: Uses character-based analysis with model-specific ratios for token estimation
@@ -52,23 +53,23 @@ Search for **"AI Engineering Fluency"** in the VS Code Extensions panel, or inst
 
 The extension shows token usage in the format: `# <today> | <last 30 days>` in the status bar:
 
-![Status Bar Display](https://raw.githubusercontent.com/rajbos/github-copilot-token-usage/main/docs/images/01%20Toolbar%20info.png)
+![Status Bar Display](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/docs/images/01%20Toolbar%20info.png)
 
 Hovering on the status bar item shows a detailed breakdown of token usage:
 
-![Hover Details](https://raw.githubusercontent.com/rajbos/github-copilot-token-usage/main/docs/images/02%20Popup.png)
+![Hover Details](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/docs/images/02%20Popup.png)
 
 Clicking the status bar item opens a detailed view with comprehensive statistics:
 
-![Detailed View](https://raw.githubusercontent.com/rajbos/github-copilot-token-usage/main/docs/images/03%20Detail%20panel.png)
+![Detailed View](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/docs/images/03%20Detail%20panel.png)
 
 Chart overview per day, with option to view per model as well:
 
-![Chart View](https://raw.githubusercontent.com/rajbos/github-copilot-token-usage/main/docs/images/04%20Chart.png)
+![Chart View](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/docs/images/04%20Chart.png)
 
 Or per supported editor:
 
-![Chart View per Editor](https://raw.githubusercontent.com/rajbos/github-copilot-token-usage/main/docs/images/04%20Chart_02.png)
+![Chart View per Editor](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/docs/images/04%20Chart_02.png)
 
 Supported editors shown in the chart:
 
@@ -79,6 +80,12 @@ Supported editors shown in the chart:
 - `Cursor` — Cursor editor
 - `OpenCode` — Terminal-based coding agent
 - `Crush` — Terminal-based coding agent
+- `Pi` — Pi CLI coding agent (actual token counts from session JSONL)
+- `Claude Code` — Anthropic CLI/IDE extension (actual API token counts, no estimation)
+- `Gemini CLI` — Google's CLI coding agent (actual token counts from session JSONL)
+- `Kiro` — AWS's agentic IDE (tokens estimated from agent execution records; Kiro meters credits, not tokens)
+- `Kiro CLI` — AWS's terminal coding agent (tokens estimated from the session message log)
+- `Windsurf` — Windsurf editor (running sessions discovered via Windsurf integration; file fallback available from local Cascade data)
 - `Visual Studio` — Visual Studio IDE (2022+); token counts are **estimated** from prompt and response text length
 
 ---
@@ -95,7 +102,7 @@ The extension includes a **Copilot Fluency Score** dashboard that evaluates your
 - ⚙️ **Customization**: Repository customization and model selection
 - 🔄 **Workflow Integration**: Regular usage and mode diversity
 
-![Fluency Score](https://raw.githubusercontent.com/rajbos/github-copilot-token-usage/main/docs/images/05%20Fluency%20Score.png)
+![Fluency Score](https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/docs/images/05%20Fluency%20Score.png)
 
 **Fluency Level Viewer (Debug Mode)**
 
@@ -105,7 +112,17 @@ A debug-only tool that displays all fluency score rules, thresholds, and tips fo
 - **Features**: View all stage requirements and advancement tips for each category
 - **Use Cases**: Test scoring logic, debug scoring issues, plan improvements
 
-For detailed scoring rules, see [Fluency Levels Documentation](https://github.com/rajbos/github-copilot-token-usage/blob/main/docs/FLUENCY-LEVELS.md).
+For detailed scoring rules, see [Fluency Levels Documentation](https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/FLUENCY-LEVELS.md).
+
+**Local View Regression (Debug Mode)**
+
+A debug-only regression helper that opens the main local views in the Extension Development Host and reports whether each webview rendered non-empty content.
+
+- **Access**: Run `AI Engineering Fluency: Run Local View Regression (Debug Only)` from the Command Palette while debugging the extension
+- **Data Source**: Uses your real local session data first; if none is found, it falls back to the bundled sample session fixtures under `vscode-extension/test/fixtures/sample-session-data/chatSessions`
+- **Coverage**: Details, Chart, Usage Analysis, Fluency Score, Environmental Impact, Diagnostics, and Fluency Level Viewer
+- **Output**: Shows a pass/fail summary in the extension output channel and leaves the opened views visible for quick manual inspection
+- **Note**: Team Dashboard is intentionally skipped because it requires a configured backend
 
 ---
 
@@ -126,7 +143,7 @@ The extension includes a comprehensive usage analysis dashboard that helps you u
 2. Click the **"📊 Usage Analysis"** button
 3. Or use the Command Palette: `AI Engineering Fluency: Show Usage Analysis Dashboard`
 
-For detailed information about the metrics, see [Usage Analysis Documentation](https://github.com/rajbos/github-copilot-token-usage/blob/main/docs/USAGE-ANALYSIS.md).
+For detailed information about the metrics, see [Usage Analysis Documentation](https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/USAGE-ANALYSIS.md).
 
 ---
 
@@ -171,13 +188,13 @@ The extension can also upload your local session log files to Azure Blob Storage
 To enable log file uploads:
 ```json
 {
-  "copilotTokenTracker.backend.blobUploadEnabled": true,
-  "copilotTokenTracker.backend.blobContainerName": "copilot-session-logs",
-  "copilotTokenTracker.backend.blobUploadFrequencyHours": 24
+  "aiEngineeringFluency.backend.blobUploadEnabled": true,
+  "aiEngineeringFluency.backend.blobContainerName": "copilot-session-logs",
+  "aiEngineeringFluency.backend.blobUploadFrequencyHours": 24
 }
 ```
 
-See [Blob Upload Guide](https://github.com/rajbos/github-copilot-token-usage/blob/main/docs/BLOB-UPLOAD.md) for detailed setup instructions and security considerations.
+See [Blob Upload Guide](https://github.com/rajbos/ai-engineering-fluency/blob/main/docs/BLOB-UPLOAD.md) for detailed setup instructions and security considerations.
 
 ### Authentication
 
@@ -251,11 +268,12 @@ The extension uses intelligent caching to improve performance:
 
 ## Known Issues
 
-- Numbers shown use **actual token counts** from the LLM API when available (e.g. Copilot Chat JSONL sessions and OpenCode sessions). When actual token data is not available, the extension falls back to **estimates** computed from text in the session logs.
+- Numbers shown use **actual token counts** from the LLM API when available (e.g. Copilot Chat JSONL sessions, OpenCode sessions, and Pi CLI sessions). When actual token data is not available, the extension falls back to **estimates** computed from text in the session logs.
 - If you use multiple machines (or multiple VS Code profiles/windows), local-only mode will only reflect what's on the current machine. The cloud backend improves cross-device coverage.
 - Premium Requests are not tracked.
 - Dev Containers: Copilot Chat session logs are written to the host machine's user profile (outside the container). The extension currently does not read from host paths, so token tracking will not work inside a Dev Container. Run VS Code locally (outside the container) or mount the host user data directories into the container at the expected locations.
 - Windows with WSL: The extension can only show information when VS Code, Copilot CLI, and OpenCode run in the same environment as the VS Code host. To track usage properly, either run VS Code from within WSL using the [Remote - WSL extension](https://marketplace.visualstudio.com/items?itemName=ms-vscode-remote.remote-wsl) (recommended), or run all tools natively on Windows. See the [VS Code WSL documentation](https://code.visualstudio.com/docs/remote/wsl) for setup instructions.
+- Windsurf sessions are surfaced as virtual `windsurf://trajectory/...` entries. Their underlying `.pb` Cascade files are binary protobuf data, so the text log viewer reveals the backing file instead of rendering the session as plain text.
 
 > **⚠️ Warning**
 >

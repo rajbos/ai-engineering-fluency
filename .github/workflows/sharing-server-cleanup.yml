@@ -1,0 +1,156 @@
+name: Cleanup Sharing Server
+
+# Destroys per-branch test Container Apps environments:
+#   1. Automatically when a branch is deleted (e.g. after PR merge)
+#   2. Manually via workflow_dispatch for ad-hoc cleanup
+# Production (main) and the stable test environment are intentionally excluded.
+on:
+  delete: {}
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch name whose test environment should be destroyed'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+jobs:
+  cleanup:
+    name: Destroy test environment
+    runs-on: ubuntu-latest
+    # Only run for branch deletions (not tag deletions), and never for main.
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.event.inputs.branch != 'main')
+      || (github.event_name == 'delete' && github.event.ref_type == 'branch' && github.event.ref != 'main')
+    environment: testing
+    permissions:
+      contents: read
+    env:
+      ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_CLIENT_SECRET:   ${{ secrets.AZURE_CLIENT_SECRET }}
+      ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check Azure credentials
+        id: prereqs
+        run: |
+          if [[ -z "$ARM_CLIENT_ID" ]]; then
+            echo "⚠️ Azure credentials not configured for 'testing' environment — skipping cleanup." >> "$GITHUB_STEP_SUMMARY"
+            echo "configured=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "configured=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Reproduce the exact same slug+hash logic used by the deploy workflow
+      # so the state key resolves to the same tfstate file.
+      - name: Compute state key for branch
+        id: env
+        run: |
+          if [[ "${{ github.event_name }}" == "delete" ]]; then
+            BRANCH="${{ github.event.ref }}"
+          else
+            BRANCH="${{ github.event.inputs.branch }}"
+          fi
+          echo "branch=${BRANCH}" >> "$GITHUB_OUTPUT"
+          SLUG=$(echo "$BRANCH" | tr '[:upper:]' '[:lower:]' | sed 's/[^a-z0-9]/-/g' | sed 's/-\+/-/g' | sed 's/^-//;s/-$//')
+          SLUG_TRUNC=$(echo "$SLUG" | cut -c1-13 | sed 's/-$//')
+          HASH=$(echo -n "$BRANCH" | sha256sum | cut -c1-6)
+          APP_NAME="sharing-test-${SLUG_TRUNC}${HASH}"
+          echo "app_name=${APP_NAME}"                                           >> "$GITHUB_OUTPUT"
+          echo "state_key=sharing-server/test-${SLUG_TRUNC}${HASH}.tfstate"    >> "$GITHUB_OUTPUT"
+
+      - name: Setup Terraform
+        if: steps.prereqs.outputs.configured == 'true'
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+
+      - name: Terraform init
+        if: steps.prereqs.outputs.configured == 'true'
+        id: init
+        working-directory: sharing-server/infra
+        run: |
+          terraform init -reconfigure \
+            -backend-config="resource_group_name=${{ vars.TF_STATE_RESOURCE_GROUP }}" \
+            -backend-config="storage_account_name=${{ vars.TF_STATE_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ vars.TF_STATE_CONTAINER }}" \
+            -backend-config="key=${{ steps.env.outputs.state_key }}"
+
+      # Azure CLI login is needed to detach custom domain bindings and delete managed
+      # certs before Terraform destroy. ACA rejects cert deletion while a hostname
+      # binding still references the cert (400 CertificateInUse), which breaks
+      # terraform destroy. We must unbind all hostnames and delete all certs first.
+      - name: Azure CLI login
+        if: steps.prereqs.outputs.configured == 'true'
+        run: az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
+
+      - name: Pre-destroy - unbind custom domains and delete managed certs
+        if: steps.prereqs.outputs.configured == 'true'
+        env:
+          APP_NAME: ${{ steps.env.outputs.app_name }}
+          RG:       ${{ vars.AZURE_RESOURCE_GROUP }}
+        run: |
+          ENV_NAME="${APP_NAME}-env"
+
+          # Remove any custom hostname bindings from the container app.
+          # Terraform destroy fails to delete managed certs while hostnames still reference them.
+          if az containerapp show --name "$APP_NAME" --resource-group "$RG" --output none 2>/dev/null; then
+            HOSTNAMES=$(az containerapp hostname list \
+              --name "$APP_NAME" --resource-group "$RG" \
+              --query "[].name" -o tsv 2>/dev/null || true)
+            for HOSTNAME in $HOSTNAMES; do
+              echo "Removing hostname binding: $HOSTNAME"
+              az containerapp hostname delete \
+                --name "$APP_NAME" --resource-group "$RG" \
+                --hostname "$HOSTNAME" --yes 2>/dev/null || true
+            done
+          else
+            echo "Container app '${APP_NAME}' not found — skipping hostname cleanup."
+          fi
+
+          # Delete all managed certs from the environment so Terraform can destroy it cleanly.
+          if az containerapp env show --name "$ENV_NAME" --resource-group "$RG" --output none 2>/dev/null; then
+            CERTS=$(az containerapp env certificate list \
+              --name "$ENV_NAME" --resource-group "$RG" \
+              --query "[].name" -o tsv 2>/dev/null || true)
+            for CERT in $CERTS; do
+              echo "Deleting managed cert: $CERT"
+              az containerapp env certificate delete \
+                --name "$ENV_NAME" --resource-group "$RG" \
+                --certificate "$CERT" --yes 2>/dev/null || true
+            done
+          else
+            echo "Container app environment '${ENV_NAME}' not found — skipping cert cleanup."
+          fi
+
+      - name: Destroy resources (if any exist)
+        if: steps.prereqs.outputs.configured == 'true'
+        working-directory: sharing-server/infra
+        env:
+          # Variables are required by Terraform even for destroy; use safe placeholders
+          # for values that only affect resource creation (image, secrets).
+          TF_VAR_resource_group_name: ${{ vars.AZURE_RESOURCE_GROUP }}
+          TF_VAR_location:            ${{ vars.AZURE_LOCATION || 'westeurope' }}
+          TF_VAR_app_name:            ${{ steps.env.outputs.app_name }}
+          TF_VAR_container_image:     "ghcr.io/${{ github.repository_owner }}/copilot-sharing-server:latest"
+          TF_VAR_github_client_id:    ${{ secrets.SHARING_GITHUB_CLIENT_ID }}
+          TF_VAR_github_client_secret: ${{ secrets.SHARING_GITHUB_CLIENT_SECRET }}
+          TF_VAR_session_secret:      ${{ secrets.SHARING_SESSION_SECRET }}
+        run: |
+          RESOURCE_COUNT=$(terraform state list 2>/dev/null | wc -l)
+          if [ "$RESOURCE_COUNT" -gt 0 ]; then
+            echo "Found ${RESOURCE_COUNT} resource(s) in state — running destroy..."
+            terraform destroy -auto-approve
+            echo "✅ Environment destroyed: ${{ steps.env.outputs.app_name }}" >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "No resources found in state for branch '${{ steps.env.outputs.branch }}' — nothing to destroy."
+            echo "ℹ️ No resources found for branch \`${{ steps.env.outputs.branch }}\` — nothing to destroy." >> "$GITHUB_STEP_SUMMARY"
+          fi

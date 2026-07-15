@@ -30,6 +30,7 @@ Measures how you interact with Copilot through prompts, slash commands, and mode
 - Average 3+ exchanges per session → at least Stage 2
 - Average 5+ exchanges per session → at least Stage 3
 - Model switching across tiers → at least Stage 3
+- Any Auto model usage → at least Stage 2; Auto model used in 50%+ of sessions → at least Stage 3; Auto model used in 80%+ of sessions (with 5+ sessions) → Stage 4
 
 **Recognised slash commands:** `/explain`, `/fix`, `/tests`, `/doc`, `/generate`, `/optimize`, `/new`, `/newNotebook`, `/search`, `/fixTestFailure`, `/setupTests`
 
@@ -46,13 +47,13 @@ Measures how you provide context to Copilot using explicit references.
 | 3 | 3+ different reference types **and** 10+ total references |
 | 4 | 5+ different reference types **and** 30+ total references |
 
-**Tracked reference types:** `#file`, `#selection`, `#symbol`, `#codebase`, `@workspace`, `@terminal`, `@vscode`, `#clipboard`, `#changes`, `#problemsPanel`, `#outputPanel`, `#terminalLastCommand`, `#terminalSelection`
+**Tracked reference types:** `#file`, `#selection`, `#symbol`, `#codebase`, `@workspace`, `@terminal`, `@vscode`, `#clipboard`, `#changes`, `#problemsPanel`, `#outputPanel`, `#terminalLastCommand`, `#terminalSelection`, image attachments (`copilot.image`), prompt files (`promptFile`), custom prompt commands (`prompt`)
 
-**Evidence:** All tracked reference types are shown in the evidence panel when used (not just the basic ones).
+**Evidence:** All tracked reference types are shown in the evidence panel when used (not just the basic ones). The panel also shows the total lines of code referenced through `#file:` range selections.
 
-**Booster:** Using image references (`copilot.image`) → at least Stage 3
+**Boosters:** Using image references (`copilot.image`) → at least Stage 3; using prompt files (`promptFile`) → at least Stage 3
 
-**Stage 3 hint behaviour:** The "try specialized context variables" tip is dynamic — it only lists the specific variables the user hasn't tried yet. If the user has already used 2 or more of the specialized set (`image attachments`, `#changes`, `#problemsPanel`, `#outputPanel`, `#terminalLastCommand`, `#terminalSelection`, `#clipboard`, `@vscode`), the hint is suppressed entirely.
+**Stage 3 hint behaviour:** The "try specialized context variables" tip is dynamic — it only lists the specific variables the user hasn't tried yet. If the user has already used 2 or more of the specialized set (`image attachments`, `prompt files`, `custom prompt commands`, `#changes`, `#problemsPanel`, `#outputPanel`, `#terminalLastCommand`, `#terminalSelection`, `#clipboard`, `@vscode`), the hint is suppressed entirely.
 
 ---
 
@@ -71,6 +72,9 @@ Measures adoption of autonomous, multi-step agent mode workflows.
 - Multi-file edit sessions detected → at least Stage 2
 - Average 3+ files per edit session → at least Stage 3
 - 20+ multi-file edits with average 3+ files per session → Stage 4
+- Sessions with 2+ child workspaces (multi-agent orchestration) → at least Stage 3; 3+ such sessions → at least Stage 4
+
+> **Note about multi-agent orchestration:** This signal is read from `~/.copilot/data.db` (Copilot app only). It counts sessions where you were the *parent* of 2 or more child workspaces — covering both sessions where you manually launched child sessions and sessions where an agent autonomously spawned a subagent fleet. It is absent (and does not affect scoring) when `data.db` is not available.
 
 > **Note:** Only *intentional* tools count toward the unique tool thresholds — tools that Copilot calls automatically (file reads, searches, error lookups, confirmations, memory, etc.) are excluded. See [Automatic vs. Intentional Tools](#automatic-vs-intentional-tools) below.
 
@@ -113,7 +117,7 @@ Copilot calls many tools on its own during agentic sessions to gather context �
 - Browser: `open_integrated_browser`, `renderMermaidDiagram`
 - Extensions and packages: `install_extension`, `install_python_packages`
 
-The full list of automatic tool IDs is maintained in `vscode-extension/src/automaticTools.json`.
+The full list of automatic tool IDs is maintained in `src/automaticTools.json`.
 
 ### 5. ⚙️ Customization
 
@@ -126,7 +130,10 @@ Measures how you tailor Copilot to your projects (custom instructions, model sel
 | 3 | 30%+ of repositories customized (minimum 2 repos) |
 | 4 | 70%+ of repositories customized (minimum 3 repos) |
 
-**Booster:** Using 3+ different models → at least Stage 3; using 5+ models with 3+ customized repos → Stage 4
+**Boosters:**
+- Using 3+ different models → at least Stage 3; using 5+ models with 3+ customized repos → Stage 4
+- Microsoft Foundry / local model usage → at least Stage 2
+- Unknown provider model usage → at least Stage 2
 
 ---
 

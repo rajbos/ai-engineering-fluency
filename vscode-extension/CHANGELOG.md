@@ -2,13 +2,280 @@
 
 All notable changes to the VS Code extension will be documented in this file.
 
-Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how to structure this file.
-
 ## [Unreleased]
+
+## [0.13.0] - 2026-07-11
+
+### Features
+- Long-context pricing discovery, insights, and Context Window section
+- Added friendly tool names from multiple community issues (#1571, #1573, #1577, #1581)
+- Clarified provider cost tooltip: unified budget/spend bars, add totals
+
+### Bug Fixes
+- Use notifier's real pricing data instead of hardcoded 0.00 stubs
+
+## [0.11.6] - 2026-06-07
+
+### Features
+- Track session.truncation events as a negative fluency signal (#1354)
+- Add refresh button to log viewer for on-demand session reload (#1349)
+- Show context references as a readable table in usage analysis (#1348)
+- Add friendly tool names (#1352, #1347)
+- Replace premium/standard tier with cost-based model classification (#1345)
+- Surface exact Copilot billing cost from nanoAiu data (#1344)
+
+### Bug Fixes
+- Use modelUsage input+output sum for Tokens (input+output) display (#1353)
+
+## [0.11.3] - 2026-05-22
+
+### Maintenance
+- Patch version bump
+
+## [0.11.2] - 2026-05-22
+
+### Bug Fixes
+- fix(vscode): use getConfiguration() with full key for statusBar update() calls (#1046)
+
+## [0.11.1] - 2026-05-22
+
+### Bug Fixes
+- fix(vscode): use leaf-key getConfiguration for statusBar settings to fix 'not registered' error (#1044)
+- fix: muting unknown tool now instant, skips full stats recalc (#1043)
+
+## [0.11.0] - 2026-05-22
+
+### Features
+- Configurable status bar: independently show token counts and/or cost (#1036)
+- Added 17+ friendly tool names for Claude in Chrome, Cowork, M365 Connector, and other tools (#1037, #1038, #1039)
+
+### Security
+- Added HTML escaping to prevent XSS in configPanel webview
+
+### Maintenance
+- Enhanced token tracking: extract all tokens from debug log and update session cache structure (#1040)
+- Centralised adapter session path predicates to adapterPredicates.ts (#1034)
+- Refactored extension.ts activate() into focused registration helpers (#1035)
+- Extracted pathExists helper to utils/fsAsync.ts (#1031)
+- Extracted settings validation helpers to backend/settingsValidation.ts (#1030)
+- Consolidated path normalisation helpers to utils/pathUtils.ts (#1032)
+- Consolidated duplicated webview type definitions to shared/types.ts (#1033)
+- Added isNonNegativeInt type guard and safeJsonParse utility (#1029, #1013)
+- Extracted registerMessageHandler helper from webview message listeners (#1022)
+- Centralised Azure error classification in azureErrorClassifier.ts (#1017)
+- Introduced ValidationResult<T> discriminated union for type-safe validation (#1021)
+- Extracted Azure Storage endpoint URL builders to shared utility (#1005)
+- Multiple additional refactoring improvements for maintainability and type safety
+
+## [0.10.2] - 2026-05-13
+
+### Maintenance
+- Internal refactoring and dependency updates
+
+## [0.10.1] - 2026-05-19
+
+### Bug Fixes
+- Implement IAnalyzableEcosystem on CopilotCliAdapter to prevent ENOENT errors on virtual session paths (#931)
+
+## [0.10.0] - 2026-05-19
+
+### Features
+- Surface Copilot CLI chat-only sessions from session-store.db (#915)
+- Add friendly display names for additional tools (#920)
+- Persist chart view/period/displayMode selection across navigation (#911)
+
+### Bug Fixes
+- Propagate cachedReadTokens/cacheCreationTokens in calculateDailyStats (#907)
+- Fix N+1 inefficiency in processing OpenCode sessions (#922)
+
+### Performance
+- Apply mtime-based DB caching to crush adapter to fix N+1 inefficiency (#924)
+- Eliminate redundant JSON.parse calls in session analysis (#910)
+
+## [0.9.0] - 2026-05-14
+
+### Features
+- Add oh-my-posh segment command and Copilot CLI statusline support (#876)
+- Post-process SLM output to fix acronym capitalization (MCP, GitHub, etc.) (#880)
+- Add SLM-powered job to generate friendly tool names from issues (#875)
+
+### Bug Fixes
+- Populate cache tokens from CLI session.shutdown events (#869)
+- Pin Ollama install to versioned GitHub release with SHA256 verification (#881)
+
+### Improvements
+- Add friendly display names for 50+ tools (#862, #864, #865, #866, #867, #868, #872, #873, #874, #879)
+
+## [0.8.0] - 2026-05-12
+
+### Features
+- Team dashboard now supports both Azure and Team Server backends (#854)
+- Surface cached tokens from all providers in Details view (#851)
+- Extract cached tokens from Copilot Chat debug logs (#851)
+- Remove cost estimate row and rename TBB to UBB (#847)
+- Add diagnostic logging to Details panel creation to aid blank-panel diagnosis (#845)
+
+### Bug Fixes
+- Replace team server iframe with launch card (#854)
+- Use PID-based liveness check to break stale cache lock after force-kill (#844)
+
+### Improvements
+- Move action buttons to top and reduce report height in diagnostics view (#853)
+- Sync latest model data (#852)
+- Address npm audit warning
+- Exclude `stryker.config.mjs` and `vs-session-sample.json` from VSIX package (#843)
+
+## [0.7.0] - 2026-05-28
+
+### Features
+- Add rolling average toggle for Total Tokens and Est. Cost chart views (#836)
+- Add Copilot Cloud Agent sessions view (#835)
+
+## [0.5.2] - 2026-05-09
+
+### Security
+- Bumped `fast-uri` to ≥3.1.2 to fix GHSA-v39h-62p7-jpjc and GHSA-q3j6-qgpj-74h6
+
+### Improvements
+- Added friendly display names for `list_bash`, `read_bash`, and `stop_bash` tools (#822)
+- Bumped `fast-xml-builder` dependency (#819)
+- Cleaned up legacy code references (#821)
+
+## [0.5.1] - 2026-05-08
+
+### Features
+- Show cached input tokens in log viewer summary bar — a "Cached Input" card now appears for Copilot CLI sessions that have `cacheReadTokens` data (#807)
+
+### Improvements
+- Added friendly display names for additional tools: ADO MCP, MSSQL, Copilot search/memory tools, `mcp_git_git_log`, `mcp_git_git_show`, and Claude in Chrome MCP tools
+- Cleaned up publish script and removed legacy deprecation popup (#809)
+
+## [0.5.0] - 2026-05-06
+
+### Features
+- Cost basis toggle moved into Sessions by category panel; chart title updates to reflect active mode
+- Added sort indicator to active column header in session table
+
+### Improvements
+- Added Mistral AI model pricing and token estimators (#796)
+- Added missing friendly names for 17 additional tools (TaskCreate, TaskUpdate, dismiss_deployment_notifications, Claude in Chrome MCP, and 13 others)
+- Scatter chart: dark border on dots for readability, crisp rendering, variable circle size restored
+
+### Bug Fixes
+- Fixed duplicate loading sessions appearing in the status bar
+- Fixed sort indicator wrapping to new line in session table headers
+
+## [0.4.4] - 2026-05-05
+
+### Bug Fixes
+- Fixed Cowork (Claude) token over-count caused by duplicate `requestId` entries in `buildTurns` — each request is now counted exactly once (#790)
+- Fixed sharing server sync being skipped when Azure Storage sync fails — both backends now sync independently (#789)
+
+## [0.4.3] - 2026-05-05
+
+### Bug Fixes
+- Fixed concurrent sync being blocked when VS Code and VS Code Insiders are configured to different server URLs — the sync lock now stores the server URL and treats locks from a different URL as non-blocking (#787)
+- Fixed sync to sharing server being skipped when both Azure Storage and the sharing server backends are configured simultaneously — both backends are now synced additively (#787)
+
+## [0.4.2] - 2026-05-05
+
+### Bug Fixes
+- Fixed team dashboard showing empty results with Cosmos DB backend — replaced unsupported OData `datetime'...'` filter with `day` field string comparison (#783)
+- Fixed `workspaceId` `w:` prefix not being stripped in extension dashboard entity processing (#783)
+- Fixed logo image URL in VS Code Marketplace README (#782)
+
+### Improvements
+- Team Server diagnostics panel now shows GitHub auth status and a clickable warning banner when backend is configured but GitHub is not authenticated (#783)
+- Added friendly display names for 10 additional tools (#784)
+- Added friendly names for two missing GitHub MCP (Local) tools (#781)
+- Pinned `vsce` and `ovsx` as exact devDependencies for reproducible builds (#785)
+
+## [0.4.1] - 2026-05-05
+
+### Fixes
+- Fixed README badges: replaced retired vsmarketplacebadges.dev with shields.io
+- Updated all VS Code install links and commands to the current extension ID (`ai-engineering-fluency`)
+- Disabled legacy `copilot-token-tracker` VSIX creation and publishing in the release workflow (migration flow complete)
+
+## [0.4.0] - 2026-05-04
+
+### Features and Improvements
+- Added Gemini CLI support as a trackable ecosystem
+- Added JetBrains IDE Copilot session discovery with ask/agent mode detection, per-turn model tracking, and tooltips for data limits
+- Added Copilot PR chat context references detection — surfaces #pr context in session log viewer (#760)
+- Added Path Analyzer tab to diagnostics panel (#713)
+- Added Editor Mode summary card to log viewer
+- Added daily auto-sync of model multipliers from github-copilot-model-notifier (#718)
+- Dual-publish VS Code extension under new AI Engineering Fluency marketplace ID (#731)
+- Added detection of legacy copilot-token-tracker extension with prompt to uninstall and migration notice
+- Added friendly display names for mcp_context7, mcp_microsoftdocs, Slidev, Copilot CLI built-in tools, and JetBrains tools (#723, #726)
+- Added missing friendly names for additional tools (#771)
+- Surface subagent count in log viewer; fixed subagent tool-result token estimation (#720)
+- Added weekly/monthly chart periods and fixed usage analysis routing
+
+### Bug Fixes
+- Fixed: only suppress deprecation notice on explicit Dismiss
+- Fixed: show correct editor name for eco sessions in diagnostics directory table
+- Fixed: eco-session token count in diagnostics matches file viewer
+- Fixed: replace hardcoded dark backgrounds in log viewer with theme CSS variables (#716)
+- Fixed: populate estimated cost data in chart view for all periods
+- Fixed: cost estimate reason display
+
+## [0.3.0] - 2026-04-30
+
+### Features and Improvements
+- Added "💰 Est. Cost" view to the chart page: shows estimated daily/weekly/monthly API cost based on per-model token usage and provider pricing data (#703)
+- Added first-value onboarding empty-state guidance and Scoring Guide panel (#710)
+- Added macOS path support for Claude Desktop Cowork sessions (#714)
+
+### Bug Fixes
+- Fixed: show Configure Backend button when backend storage info is unavailable
+- Fixed: exclude suppressed tools from unknown tools alert banner
+
+## [0.1.1] - 2026-04-10
+
+### Features and Improvements
+- Added GitHub authentication support using VS Code's built-in authentication provider (#182)
+- New commands: Authenticate with GitHub and Sign Out from GitHub
+- GitHub Auth tab in Diagnostic Report panel showing authentication status
+- Foundation for future GitHub-specific features (repository tracking, team collaboration, advanced analytics)
+- Added Claude Desktop Cowork session support (#572)
+- Added per-tool suppression for unknown tool name notifications (#563)
+- Show git branch in status bar when running in debug mode (#576)
+
+### Bug Fixes
+- Fixed tracking of token usage from sub-agent calls in Copilot agent mode (#573)
+- Fixed long MCP tool names wrapping in session viewer (#574)
+- Fixed Copilot CLI session titles showing empty (#575)
+- Hide 0-interaction sessions in diagnostics view
+
+### Dependencies
+- Bumped basic-ftp (#577)
+
+## [0.1.0]
+
+Release notes: https://github.com/rajbos/ai-engineering-fluency/compare/vscode/v0.0.23...vscode/v0.1.0
+
+## [0.0.27] - 2026-04-07
+
+### Features and Improvements
+- Added friendly display names for mcp_gitkraken_git_log_or_diff, copilot_runInTerminal, mcp_laravel-boost_tinker, and Power BI MCP tools (#553, #554, #555)
+
+### Bug Fixes
+- Fixed integration test activation timing (#548)
+
+## [0.0.26] - 2026-04-04
+
+### Features and Improvements
+- Split usage analysis view into 3 tabs for better navigation (#540)
+- Added missing friendly display names for MCP and VS Code tools (#539)
+
+### Bug Fixes
+- Fixed loading stalls during session discovery (#545)
 
 ## [0.0.24] - 2026-03-28
 
-### ✨ Features & Improvements
+### Features and Improvements
 - Added Claude Code session file support as a usage analysis data source
 - Added formatting options to details and log viewer panels
 - Added friendly display names for container-tools and github-pull-request tools
@@ -16,8 +283,8 @@ Check [Keep a Changelog](http://keepachangelog.com/) for recommendations on how 
 
 ## [0.0.23] - 2026-03-26
 
-### ✨ Features & Improvements
-- Renamed extension to **AI Engineering Fluency** (was "Copilot Token Tracker")
+### Features and Improvements
+- Renamed extension to AI Engineering Fluency (was Copilot Token Tracker)
 - Added friendly display names for CMakeTools and misc non-MCP tools
 - Added friendly display names for Python and Pylance MCP tools
 - Improved maturity scoring view with updated labels and layout

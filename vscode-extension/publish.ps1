@@ -7,11 +7,15 @@
 # Use this script only when you need to manually publish a pre-built VSIX
 # (e.g., re-publishing after a marketplace upload failure).
 #
+# The extension is published under a single ID:
+#   - RobBos.ai-engineering-fluency  (primary ID)
+#
 # Usage:
-#   .\publish.ps1 -VsixPath ".\copilot-token-tracker-0.0.18.vsix"
+#   .\publish.ps1 -VsixPath ".\ai-engineering-fluency-0.3.0.vsix"
+#   .\publish.ps1  # auto-detect VSIX in the current directory
 
 param(
-    [string]$VsixPath  # Path to the .vsix downloaded from the GitHub release
+    [string]$VsixPath        # Path to the primary (ai-engineering-fluency) .vsix
 )
 
 $ErrorActionPreference = "Stop"
@@ -21,18 +25,17 @@ $packageJson  = Get-Content -Path "package.json" -Raw | ConvertFrom-Json
 $version      = $packageJson.version
 $expectedTag  = "v$version"
 $owner        = "rajbos"
-$repo         = "github-copilot-token-usage"
+$repo         = "ai-engineering-fluency"
 $publisherName = "RobBos"
 
-# ── Resolve / prompt for VSIX path ───────────────────────────────────────────
+# ── Resolve / prompt for primary VSIX path ───────────────────────────────────
 if ([string]::IsNullOrWhiteSpace($VsixPath)) {
-    # Default: look for a matching VSIX in the current directory
-    $defaultVsix = ".\copilot-token-tracker-$version.vsix"
+    $defaultVsix = ".\ai-engineering-fluency-$version.vsix"
     if (Test-Path $defaultVsix) {
         $VsixPath = $defaultVsix
-        Write-Host "Found VSIX: $VsixPath" -ForegroundColor Green
+        Write-Host "Found primary VSIX: $VsixPath" -ForegroundColor Green
     } else {
-        $VsixPath = Read-Host "Enter path to the .vsix downloaded from the GitHub release"
+        $VsixPath = Read-Host "Enter path to the primary (ai-engineering-fluency) .vsix"
     }
 }
 
@@ -118,20 +121,20 @@ if ([string]::IsNullOrWhiteSpace($pat)) {
     Write-Host "✅ VSCE_PAT environment variable found." -ForegroundColor Green
 }
 
-# ── Step 4: Publish the downloaded VSIX ──────────────────────────────────────
-Write-Host "`nPublishing $VsixPath to the VS Code Marketplace..." -ForegroundColor Cyan
+# ── Step 4: Publish the primary VSIX (ai-engineering-fluency) ────────────────
+Write-Host "`nPublishing $VsixPath to the VS Code Marketplace (primary ID)..." -ForegroundColor Cyan
 npx vsce publish --packagePath $VsixPath --pat $pat
 
-if ($LASTEXITCODE -eq 0) {
-    Write-Host "`n✅ Extension published successfully!" -ForegroundColor Green
-    Write-Host "It may take a few minutes to appear in the marketplace." -ForegroundColor Gray
-    Write-Host ""
-    Write-Host "📝 Commit and push the updated CHANGELOG.md:" -ForegroundColor Cyan
-    Write-Host "   git add CHANGELOG.md" -ForegroundColor Gray
-    Write-Host "   git commit -m 'chore: sync changelog for $expectedTag'" -ForegroundColor Gray
-    Write-Host "   git push" -ForegroundColor Gray
-} else {
-    Write-Host "`n❌ Publishing failed. Check the error messages above." -ForegroundColor Red
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "`n❌ Publishing primary VSIX failed. Check the error messages above." -ForegroundColor Red
     exit 1
 }
+Write-Host "✅ Primary extension published successfully!" -ForegroundColor Green
 
+Write-Host ""
+Write-Host "It may take a few minutes to appear in the marketplace." -ForegroundColor Gray
+Write-Host ""
+Write-Host "📝 Commit and push the updated CHANGELOG.md:" -ForegroundColor Cyan
+Write-Host "   git add CHANGELOG.md" -ForegroundColor Gray
+Write-Host "   git commit -m 'chore: sync changelog for $expectedTag'" -ForegroundColor Gray
+Write-Host "   git push" -ForegroundColor Gray

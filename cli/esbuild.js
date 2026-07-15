@@ -14,7 +14,7 @@ async function main() {
   ];
 
   for (const file of dataFiles) {
-    const srcPath = path.join(__dirname, "..", "vscode-extension", "src", file);
+    const srcPath = path.join(__dirname, "..", "src", file);
     const destPath = path.join(__dirname, "src", file);
     if (fs.existsSync(srcPath) && !fs.existsSync(destPath)) {
       fs.copyFileSync(srcPath, destPath);
@@ -53,6 +53,9 @@ async function main() {
       js: "#!/usr/bin/env node",
     },
     external: ["vscode"],
+    // The CLI bundles shared sources from ../src (repo root), so tell esbuild
+    // to resolve package imports from the CLI's own node_modules as well.
+    nodePaths: [path.join(__dirname, "node_modules")],
     // Resolve the parent src/ directory modules
     alias: {
       vscode: path.join(__dirname, "src", "vscode-stub.ts"),

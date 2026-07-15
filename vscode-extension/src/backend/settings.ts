@@ -2,8 +2,9 @@ import * as vscode from 'vscode';
 import { MIN_LOOKBACK_DAYS, MAX_LOOKBACK_DAYS, DEFAULT_LOOKBACK_DAYS } from './constants';
 import type { BackendUserIdentityMode } from './identity';
 import { parseBackendSharingProfile, type BackendSharingProfile } from './sharingProfile';
+import { inferSharingProfile } from './settingsValidation';
 
-export type BackendType = 'storageTables';
+export type BackendType = 'storageTables' | 'sharingServer';
 
 export type BackendAuthMode = 'entraId' | 'sharedKey';
 
@@ -43,6 +44,9 @@ export interface BackendSettings {
 	blobContainerName: string;
 	blobUploadFrequencyHours: number;
 	blobCompressFiles: boolean;
+	// Sharing server settings
+	sharingServerEnabled: boolean;
+	sharingServerEndpointUrl: string;
 }
 
 export interface BackendQueryFilters {
@@ -54,7 +58,7 @@ export interface BackendQueryFilters {
 }
 
 export function getBackendSettings(): BackendSettings {
-	const config = vscode.workspace.getConfiguration('copilotTokenTracker');
+	const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
 	const sharingProfileInspect = typeof (config as any).inspect === 'function'
 		? config.inspect<string>('backend.sharingProfile')
 		: undefined;
@@ -70,16 +74,7 @@ export function getBackendSettings(): BackendSettings {
 	// always default to teamAnonymized (hashed IDs, no user dimension, names off).
 	// Legacy shareWithTeam only affects the profile when an explicit userIdentityMode is set.
 	const backendEnabled = config.get<boolean>('backend.enabled', false);
-	const inferredSharingProfile: BackendSharingProfile = parsedSharingProfile
-		?? (
-			!backendEnabled
-				? 'off'
-				: (shareWithTeam && userIdentityMode !== 'pseudonymous'
-					? 'teamIdentified'
-					: (shareWithTeam && userIdentityMode === 'pseudonymous'
-						? 'teamPseudonymous'
-						: 'teamAnonymized'))
-		);
+	const inferredSharingProfile: BackendSharingProfile = inferSharingProfile(parsedSharingProfile, backendEnabled, shareWithTeam, userIdentityMode);
 
 	return {
 		enabled: config.get<boolean>('backend.enabled', false),
@@ -104,10 +99,16 @@ export function getBackendSettings(): BackendSettings {
 		blobUploadEnabled: config.get<boolean>('backend.blobUploadEnabled', false),
 		blobContainerName: config.get<string>('backend.blobContainerName', 'copilot-session-logs').trim() || 'copilot-session-logs',
 		blobUploadFrequencyHours: Math.max(1, config.get<number>('backend.blobUploadFrequencyHours', 24)),
-		blobCompressFiles: config.get<boolean>('backend.blobCompressFiles', true)
+		blobCompressFiles: config.get<boolean>('backend.blobCompressFiles', true),
+		// Sharing server settings
+		sharingServerEnabled: config.get<boolean>('backend.sharingServer.enabled', false),
+		sharingServerEndpointUrl: config.get<string>('backend.sharingServer.endpointUrl', '').trim(),
 	};
 }
 
 export function isBackendConfigured(settings: BackendSettings): boolean {
+	if (settings.backend === 'sharingServer') {
+		return !!(settings.sharingServerEndpointUrl);
+	}
 	return !!(settings.subscriptionId && settings.resourceGroup && settings.storageAccount && settings.aggTable);
 }

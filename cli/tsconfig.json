@@ -4,17 +4,45 @@
     "moduleResolution": "bundler",
     "target": "ES2022",
     "lib": ["ES2022"],
+    "types": ["node"],
+    "typeRoots": [
+      "./node_modules/@types",
+      "../vscode-extension/node_modules/@types"
+    ],
     "sourceMap": true,
-    "rootDir": "src",
+    "rootDir": "..",
     "outDir": "dist",
     "strict": true,
     "resolveJsonModule": true,
     "esModuleInterop": true,
     "declaration": false,
+    "skipLibCheck": true,
     "paths": {
-      "../vscode-extension/src/*": ["../vscode-extension/src/*"]
+      "../src/*": ["../src/*"],
+      "vscode": ["../vscode-extension/node_modules/@types/vscode/index.d.ts"],
+      "@msgpack/msgpack": ["./node_modules/@msgpack/msgpack/dist.esm/index.d.ts"]
     }
   },
-  "include": ["src/**/*.ts"],
-  "exclude": ["node_modules", "dist"]
+  "include": [
+    "src/**/*.ts",
+    "../src/types.ts",
+    "../src/cachePolicy.ts",
+    "../src/sessionDiscovery.ts",
+    "../src/sessionParser.ts",
+    "../src/dailyAttribution.ts",
+    "../src/tokenEstimation.ts",
+    "../src/workspaceHelpers.ts",
+    "../src/statsHelpers.ts",
+    "../src/adapters/**/*.ts",
+    "../src/modelPricing.json",
+    "../src/toolCuration.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "dist",
+    "../vscode-extension/node_modules",
+    "../src/copilotCliStore.ts",
+    "../src/crush.ts",
+    "../src/opencode.ts"
+  ]
 }

@@ -39,16 +39,27 @@ The entire extension's logic is contained within the `CopilotTokenTracker` class
 
 - **UI Components**:
   1. **Status Bar**: A `vscode.StatusBarItem` (`statusBarItem`) shows a brief summary. Its tooltip provides more detail.
-  2. **Details Panel**: The `copilot-token-tracker.showDetails` command opens a `vscode.WebviewPanel`. The content for this panel is generated dynamically as an HTML string by the `getDetailsHtml` method.
+  2. **Details Panel**: The `aiEngineeringFluency.showDetails` command opens a `vscode.WebviewPanel`. The content for this panel is generated dynamically as an HTML string by the `getDetailsHtml` method.
+
+- **Multi-window cache coordination** (`cacheManager.ts` + `_runUpdateTokenStats`): When several VS Code/Codium windows of the same edition are open, only one performs the heavy discover+parse pass per refresh; the others reuse its results instead of re-parsing every session file (which would multiply CPU usage by the number of windows).
+  - **Why globalState isn't enough**: `context.globalState` is loaded into memory once at activation and is **not** propagated live between windows. So cross-window sharing goes through a **shared on-disk snapshot** file `cache_<id>.snapshot.json` in `globalStorageUri` (a path shared per edition), written atomically (temp file + `rename`) with a versioned envelope (`schemaVersion`, `cacheVersion`). `readSharedSnapshot` ignores snapshots with a mismatched version or a corrupt/partial body.
+  - **Leader election**: Before parsing, a window calls `acquireRefreshLock()` (a `refresh_<id>.lock` file using the same atomic O_EXCL + PID/timestamp staleness logic as the cache-save lock). The **leader** (lock acquired) parses everything, publishes the snapshot, and renews the lock via a 30s heartbeat (`renewRefreshLock`) so a long parse isn't mistaken for stale. **Followers** (lock held by another window) warm their in-memory cache from the snapshot (`loadSharedSnapshotIfChanged`) and parse at most `FOLLOWER_MISS_BUDGET` newly-changed files (the "hybrid" freshness policy), then `scheduleFollowerResync` reloads the snapshot a few times to pick up the leader's results. A lone window always wins the election, so single-window behaviour is unchanged.
+  - **No-regression invariant**: `writeSharedSnapshot` merges with the existing on-disk snapshot keeping the newer entry by `mtime`, so a window with a partial/stale cache can never drop entries another window published. Only the leader writes the snapshot during a refresh; the merge keeps dispose-time saves safe too.
 
 ## Developer Workflow
 
 - **Setup**: Run `npm install` inside `vscode-extension/` to install dependencies.
 - **Build**: Run `npm run compile` from `vscode-extension/` to lint and build the extension using `esbuild`. The output is a single file: `vscode-extension/dist/extension.js`.
 - **Watch Mode**: For active development, use `npm run watch` from `vscode-extension/`. This will automatically recompile the extension on file changes.
-- **Testing/Debugging**: Press `F5` in VS Code to open the Extension Development Host. This will launch a new VS Code window with the extension running. `console.log` statements from `vscode-extension/src/extension.ts` will appear in the Developer Tools console of this new window (Help > Toggle Developer Tools).
+- **Testing/Debugging (human developers only)**: Press `F5` in VS Code to open the Extension Development Host. This will launch a new VS Code window with the extension running. `console.log` statements from `vscode-extension/src/extension.ts` will appear in the Developer Tools console of this new window (Help > Toggle Developer Tools). **AI agents must never do this** — see "Never launch a real editor/IDE instance" in the root `.github/copilot-instructions.md`. Use `npm run compile` and `npm run test:node` / `npm run test:coverage` to validate changes instead.
 
-**Important build guidance:** After making changes to source code or related files (TypeScript, JavaScript, JSON, or other code files used by the extension), always run `npm run compile` from `vscode-extension/` to validate that the project still builds and lints cleanly before opening a pull request or releasing. You do not need to run the full compile step for documentation-only changes (Markdown files), but you should run it after any edits that touch source, configuration, or JSON data files.
+**Important build guidance:** After making changes to source code or related files (TypeScript, JavaScript, JSON, or other code files used by the extension), always run both `npm ci` and then `npm run compile` from `vscode-extension/` to validate that the project still builds and lints cleanly before opening a pull request or releasing. Also run the unit tests with `npm run test:node` to catch any regressions. You do not need to run the full compile step for documentation-only changes (Markdown files), but you should run it after any edits that touch source, configuration, or JSON data files.
+
+**Zero warnings policy:** `npm run compile` must report `0 problems (0 errors, 0 warnings)`. ESLint warnings count as failures — do not leave new warnings in the codebase. If `compile` outputs `✖ N problems`, fix all of them before committing.
+
+**Always use `npm ci` (not `npm install`) when validating a build** — `npm ci` installs from the lockfile exactly, mirroring what CI does, and will catch any dependency drift. Use `npm install` only when intentionally adding or updating packages.
+
+> ⚠️ **Common mistake**: The `edit` tool's old_str/new_str replacement can accidentally drop comment delimiters (e.g. `/**` opening a JSDoc block) when the match boundary falls exactly at that line. After editing `tokenEstimation.ts` or any file with JSDoc comments, always verify the file compiles before committing.
 
 ## Development Guidelines
 
@@ -97,10 +108,42 @@ These are two completely separate logging systems:
 
 ### Debugging Without Logs
 
-Prefer VS Code's debugger with breakpoints rather than adding log statements:
+For human developers, prefer VS Code's debugger with breakpoints rather than adding log statements:
 1. Press `F5` to launch Extension Development Host
 2. Set breakpoints in `vscode-extension/src/extension.ts`
 3. Use the Debug Console to inspect variables
+
+AI agents cannot use the interactive debugger and must never launch the Extension Development Host (no `F5`, no `code .`, no editing `.vscode/launch.json` to auto-run). Rely on the unit test suite (`npm run test:node`) and, where needed, temporary `console.log`/assertions inside a test file — removed before committing.
+
+## Parallel Model Usage Aggregation Paths
+
+Multiple places in `extension.ts` accumulate per-model token counts into a `ModelUsage` map. Historically these were written as inline `for` loops, which caused bugs when new token fields were added (e.g. cache tokens) because not all copies were updated.
+
+**The shared helper** — `addModelUsage(target: ModelUsage, source: ModelUsage): void` — lives in `src/statsHelpers.ts` and handles all four token fields:
+- `inputTokens`
+- `outputTokens`
+- `cachedReadTokens` (optional)
+- `cacheCreationTokens` (optional)
+
+All accumulation sites must call this helper. The current locations are:
+
+| Location | Call |
+|---|---|
+| `calculateDailyStats()` — per-UTC-day rollup path | `addModelUsage(dailyEntry.modelUsage, dayRollup.modelUsage)` |
+| `calculateDailyStats()` — session-level fallback path | `addModelUsage(dailyEntry.modelUsage, modelUsage)` |
+| `buildChartData()` — `mergeInto()` local helper | `addModelUsage(target.modelUsage, src.modelUsage)` |
+| Backend sharing-server aggregation | `addModelUsage(personalModelUsage, { [model]: { inputTokens, outputTokens } })` |
+
+`aggregatePeriodStats()` in `statsHelpers.ts` also uses `addModelUsage` internally.
+
+**Rule**: Any new token type added to the `ModelUsage` interface **must** be handled inside `addModelUsage`. This ensures all accumulation sites are covered automatically.
+
+To find all accumulation sites, grep for:
+```
+modelUsage\[model\]\.inputTokens \+=
+```
+
+If you find any match outside of `addModelUsage` itself, convert it to use the helper.
 
 ## Key Files & Conventions
 
@@ -108,9 +151,9 @@ Prefer VS Code's debugger with breakpoints rather than adding log statements:
   - `CopilotTokenTracker`: The main class.
   - `calculateDetailedStats()`: The primary data aggregation method.
   - `getDetailsHtml()`: The method responsible for rendering the webview's HTML content. All styling is inlined within this method's template string.
-- **`vscode-extension/src/README.md`**: **IMPORTANT**: Contains detailed instructions for updating the JSON data files. Always consult this file when updating tokenEstimators.json or modelPricing.json. It includes structure definitions, update procedures, and current pricing information.
-- **`vscode-extension/src/tokenEstimators.json`**: Character-to-token ratio estimators for different AI models. See `vscode-extension/src/README.md` for update instructions.
-- **`vscode-extension/src/modelPricing.json`**: Model pricing data with input/output costs per million tokens. Includes metadata about pricing sources and last update date. See `vscode-extension/src/README.md` for detailed update instructions and current pricing sources.
+- **`src/README.md`**: **IMPORTANT**: Contains detailed instructions for updating the JSON data files. Always consult this file when updating tokenEstimators.json or modelPricing.json. It includes structure definitions, update procedures, and current pricing information.
+- **`src/tokenEstimators.json`**: Character-to-token ratio estimators for different AI models. See `src/README.md` for update instructions.
+- **`src/modelPricing.json`**: Model pricing data with input/output costs per million tokens. Includes metadata about pricing sources and last update date. See `src/README.md` for detailed update instructions and current pricing sources.
 - **`docs/FLUENCY-LEVELS.md`**: Documents the scoring rules for the Copilot Fluency Score dashboard (4 stages, 6 categories, thresholds, and boosters). **Keep this file up to date** when changing the `calculateMaturityScores()` method in `vscode-extension/src/extension.ts`.
 - **`vscode-extension/package.json`**: Defines activation events, commands, and build scripts.
 - **`vscode-extension/LICENSE`**: A copy of the root `LICENSE` file that must exist in `vscode-extension/` so that `vsce package` can include it in the VSIX and satisfy the VS Code Marketplace license check. If the root LICENSE changes, keep this file in sync.
@@ -144,6 +187,102 @@ To maintain a consistent, VS Code-native look across all webview panels (Details
   - Run `npm run compile` and verify TypeScript and ESLint pass.
   - Visually compare the header with the Details and other panels to confirm parity.
 
+## Webview State Persistence
+
+Webview panels are created with `retainContextWhenHidden: false`. When the user switches to a different tab (e.g. navigates from Chart to Details), VS Code **destroys the webview's JavaScript context**. When they switch back, the JS module re-executes with all variables reset to their defaults.
+
+`vscode.setState()` / `vscode.getState()` survive this cycle (and VS Code restarts). They are the correct mechanism for preserving user UI selections.
+
+### Standard pattern — `createViewStateManager`
+
+Use the shared factory from `vscode-extension/src/webview/shared/viewState.ts`:
+
+```ts
+import { createViewStateManager } from '../shared/viewState';
+
+// 1. Declare the state shape and its defaults (module-level, after acquireVsCodeApi())
+type MyViewState = {
+  activeTab: string;
+  sortDir: 'asc' | 'desc';
+};
+
+const viewState = createViewStateManager<MyViewState>(vscode, {
+  activeTab: 'report',
+  sortDir: 'asc',
+});
+
+// 2. In bootstrap() — restore before rendering:
+const { activeTab, sortDir } = viewState.restore();
+
+// 3. When the user changes a single field (safe partial update):
+viewState.patch({ activeTab: newTab });
+
+// 4. When saving the full state at once:
+viewState.save({ activeTab: currentTab, sortDir: currentSort });
+```
+
+**`restore()`** merges saved state with defaults, so adding new fields to the state type never breaks older persisted values.
+
+**`patch()`** does a read-modify-write atomically — no need to spread `vscode.getState()` manually. Always prefer `patch()` over raw `vscode.setState()` calls.
+
+### Two-layer persistence (for critical preferences)
+
+Some preferences (e.g. chart period, chart view) are also stored in the extension backend so they survive panel close/reopen:
+
+1. **Webview → extension**: post a `setXxxPreference` message when the value changes.
+2. **Extension**: handle the message and store it in a `lastXxx` field (e.g. `lastChartPeriod`, `lastChartView`).
+3. **Extension → webview**: inject the saved value into `__INITIAL_DATA__` as `initialXxx` when the panel is created.
+4. **Webview `bootstrap()`**: use `viewState.restore()` first (for tab-switch navigation); fall back to `initialData.initialXxx` when no saved state exists (fresh panel).
+
+Only add the backend layer for preferences the user would expect to persist across sessions. Tab selections and sort orders within a panel usually only need the `vscode.setState()` layer.
+
+### What state to save
+
+| ✅ Save | ❌ Don't save |
+|--------|--------------|
+| Active tab / subtab selection | Loading flags (`isLoading`, `isFetching`) |
+| Selected view / period | Cached API responses |
+| Sort column & direction | DOM element references |
+| Filter values | `setTimeout` / interval IDs |
+| Toggle states (e.g. rolling avg, demo mode) | Transient error messages |
+
+### Webview status
+
+| Webview | State manager | Notes |
+|---------|--------------|-------|
+| `chart/main.ts` | ✅ `createViewStateManager` | period, view, displayMode; also backend-persisted |
+| `diagnostics/main.ts` | ✅ `createViewStateManager` | activeTab, activeSubtab |
+| `usage/main.ts` | ⬜ Not yet wired | activeTab, selectedRepo, sort prefs |
+| `details/main.ts` | ⬜ Not yet wired | sort column/dir, expansion state |
+| `maturity/main.ts` | ⬜ Not yet wired | demo mode, stage overrides |
+| `fluency-level-viewer/main.ts` | ⬜ Not yet wired | selectedCategoryIndex |
+| `environmental/main.ts` | N/A | Stateless — data-driven view |
+| `logviewer/main.ts` | N/A | Ephemeral session-specific view |
+| `dashboard/main.ts` | N/A | Always re-fetches live backend data |
+
+When adding state to an unwired view, use `createViewStateManager` — do not call `vscode.setState` directly.
+
 ## Adding a New Editor / Data Source
 
-When adding support for a new editor or data source, you must wire it into **both** this extension (`vscode-extension/src/`) **and** the CLI (`cli/src/`). See `.github/instructions/cli.instructions.md` for the CLI integration checklist.
+When adding support for a new editor or data source, you must wire it into **both** the shared sources (`src/`) **and** the CLI (`cli/src/`). See `.github/instructions/cli.instructions.md` for the CLI integration checklist.
+
+### Adapter architecture (issue #654)
+
+All editor integrations live as adapters under `src/adapters/` implementing `IEcosystemAdapter` (and `IDiscoverableEcosystem` when discovery is needed). `sessionDiscovery.ts` is intentionally a thin generic loop: it iterates the adapters registered in `extension.ts` (`this.ecosystems`) and dedupes the resulting paths. There are **no hardcoded editor paths in `sessionDiscovery.ts`**.
+
+Current adapter set (9):
+- `OpenCodeAdapter`, `CrushAdapter`, `ContinueAdapter`, `ClaudeCodeAdapter`, `ClaudeDesktopAdapter`, `VisualStudioAdapter`, `MistralVibeAdapter`
+- `CopilotChatAdapter` — VS Code Copilot Chat (workspaceStorage chatSessions in 3 layouts, globalStorage emptyWindowChatSessions, globalStorage `{GitHub,github}.copilot-chat` recursive scan, WSL Windows-side paths)
+- `CopilotCliAdapter` — `~/.copilot/session-state/` flat `.json`/`.jsonl` plus UUID subdirs with `events.jsonl`
+
+**Adapter ordering matters**: register more-specific adapters first. `CopilotChatAdapter` and `CopilotCliAdapter` are registered **last** in `this.ecosystems`.
+
+### Checklist when adding a new adapter
+
+- [ ] Add adapter class under `src/adapters/`
+- [ ] Register adapter in `extension.ts` `this.ecosystems` (before Copilot adapters)
+- [ ] `docs/vscode-extension/README.md` — add the new editor to the "Supported editors shown in the chart" list in the **Chart View** section
+- [ ] Also update the CLI side — see `.github/instructions/cli.instructions.md`
+
+**`handles()` for CopilotChat/Cli currently returns `false`**: discovery is owned by the adapters, but per-session parsing is still routed through the existing fallback path in `extension.ts` (`countInteractionsInSession`, `estimateTokensFromSession`, `getSessionFileDataCached`). A future PR can flip `handles()` to use the exported `isCopilotChatSessionPath` / `isCopilotCliSessionPath` predicates once the JSON parser helpers are extracted from `extension.ts`. When you flip `handles()`, also fix `_detectEditorSource(filePath, (p) => !!this.findEcosystem(p))` at extension.ts:~3224 — the predicate must check `?.id === 'opencode'` (or use `getEditorTypeFromPath` convention) so that VS Code paths are still labeled "VS Code", not "OpenCode".
+

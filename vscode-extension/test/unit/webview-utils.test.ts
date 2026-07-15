@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { getModelDisplayName } from '../../src/webview/shared/modelUtils';
+import { getModelDisplayName } from '../../../src/webview/shared/modelUtils';
 import {
 	setFormatLocale,
 	getEditorIcon,
@@ -9,7 +9,12 @@ import {
 	formatFixed,
 	formatPercent,
 	formatNumber,
-	formatCost
+	formatCost,
+	formatDurationShort,
+	escapeHtml,
+	markdownToHtml,
+	STAGE_LABELS,
+	STAGE_DESCRIPTIONS
 } from '../../src/webview/shared/formatUtils';
 
 // ── getModelDisplayName ─────────────────────────────────────────────────
@@ -26,12 +31,49 @@ test('getModelDisplayName: returns raw model ID for unknown models', () => {
 	assert.equal(getModelDisplayName(''), '');
 });
 
+test('getModelDisplayName: decodes URI-encoded segments in unknown model IDs', () => {
+	assert.equal(
+		getModelDisplayName('unify-chat-provider/OpenCode%20Go%20(Anthropic%20Messages)/qwen3.7-max'),
+		'unify-chat-provider/OpenCode Go (Anthropic Messages)/qwen3.7-max'
+	);
+	assert.equal(getModelDisplayName('provider/Model%20Name'), 'provider/Model Name');
+});
+
+test('getModelDisplayName: returns raw ID when URI decoding fails (malformed percent)', () => {
+	assert.equal(getModelDisplayName('bad%2model'), 'bad%2model');
+});
+
+// ── formatDurationShort ─────────────────────────────────────────────────
+
+test('formatDurationShort: formats minutes-only durations', () => {
+	assert.equal(formatDurationShort(12 * 60 * 1000), '12m');
+	assert.equal(formatDurationShort(59 * 60 * 1000), '59m');
+});
+
+test('formatDurationShort: formats hour durations with zero-padded minutes', () => {
+	assert.equal(formatDurationShort(64 * 60 * 1000), '1h 04m');
+	assert.equal(formatDurationShort(2 * 60 * 60 * 1000), '2h 00m');
+	assert.equal(formatDurationShort((60 + 30) * 60 * 1000), '1h 30m');
+});
+
+test('formatDurationShort: formats sub-minute durations as <1m', () => {
+	assert.equal(formatDurationShort(0), '<1m');
+	assert.equal(formatDurationShort(29 * 1000), '<1m');
+});
+
+test('formatDurationShort: returns em dash for missing or invalid values', () => {
+	assert.equal(formatDurationShort(undefined), '—');
+	assert.equal(formatDurationShort(-1), '—');
+	assert.equal(formatDurationShort(Number.NaN), '—');
+});
+
 // ── getEditorIcon ───────────────────────────────────────────────────────
 
 test('getEditorIcon: returns correct icons for known editors', () => {
 	assert.equal(getEditorIcon('VS Code'), '💙');
-	assert.equal(getEditorIcon('Cursor'), '⚡');
+	assert.equal(getEditorIcon('Cursor'), '🖱️');
 	assert.equal(getEditorIcon('OpenCode'), '🟢');
+	assert.equal(getEditorIcon('Gemini CLI'), '💎');
 	assert.equal(getEditorIcon('Unknown'), '❓');
 });
 
@@ -82,16 +124,77 @@ test('formatNumber: adds thousand separators', () => {
 
 // ── formatCost ──────────────────────────────────────────────────────────
 
-test('formatCost: formats as USD with 4 decimal places', () => {
+test('formatCost: formats as USD with 2 decimal places', () => {
 	setFormatLocale('en-US');
 	const result = formatCost(1.23456789);
 	assert.ok(result.includes('$'), 'should contain dollar sign');
-	assert.ok(result.includes('1.2346'), 'should round to 4 decimal places');
+	assert.ok(result.includes('1.23'), 'should round to 2 decimal places');
 });
 
 test('formatCost: zero cost', () => {
 	setFormatLocale('en-US');
 	const result = formatCost(0);
 	assert.ok(result.includes('$'), 'should contain dollar sign');
-	assert.ok(result.includes('0.0000'), 'should show four decimal zeros');
+	assert.ok(result.includes('0.00'), 'should show two decimal zeros');
+});
+
+// ── escapeHtml ──────────────────────────────────────────────────────────
+
+test('escapeHtml: escapes ampersand, angle brackets, double quote, single quote', () => {
+	assert.equal(escapeHtml('a & b'), 'a &amp; b');
+	assert.equal(escapeHtml('<div>'), '&lt;div&gt;');
+	assert.equal(escapeHtml('"quoted"'), '&quot;quoted&quot;');
+	assert.equal(escapeHtml("it's"), 'it&#039;s');
+});
+
+test('escapeHtml: leaves safe text unchanged', () => {
+	assert.equal(escapeHtml('hello world'), 'hello world');
+});
+
+test('escapeHtml: neutralises a script injection attempt', () => {
+	const result = escapeHtml('<script>alert("xss")</script>');
+	assert.ok(!result.includes('<script'));
+	assert.equal(result, '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+});
+
+// ── markdownToHtml ──────────────────────────────────────────────────────
+
+test('markdownToHtml: converts markdown link to anchor tag', () => {
+	const result = markdownToHtml('[click here](https://example.com)');
+	assert.equal(result, '<a href="https://example.com" target="_blank" rel="noopener noreferrer">click here</a>');
+});
+
+test('markdownToHtml: escapes HTML outside of links', () => {
+	const result = markdownToHtml('See <this> & [link](https://example.com)');
+	assert.ok(result.includes('&lt;this&gt;'));
+	assert.ok(result.includes('&amp;'));
+	assert.ok(result.includes('<a href='));
+});
+
+test('markdownToHtml: plain text without links is just HTML-escaped', () => {
+	assert.equal(markdownToHtml('hello & world'), 'hello &amp; world');
+});
+
+test('markdownToHtml: generated anchor has target=_blank and rel=noopener noreferrer', () => {
+	const result = markdownToHtml('[docs](https://docs.example.com)');
+	assert.ok(result.includes('target="_blank"'));
+	assert.ok(result.includes('rel="noopener noreferrer"'));
+});
+
+// ── STAGE_LABELS ────────────────────────────────────────────────────────
+
+test('STAGE_LABELS: defines labels for all four stages', () => {
+	assert.equal(STAGE_LABELS[1], 'Stage 1: AI Skeptic');
+	assert.equal(STAGE_LABELS[2], 'Stage 2: AI Explorer');
+	assert.equal(STAGE_LABELS[3], 'Stage 3: AI Collaborator');
+	assert.equal(STAGE_LABELS[4], 'Stage 4: AI Strategist');
+});
+
+// ── STAGE_DESCRIPTIONS ──────────────────────────────────────────────────
+
+test('STAGE_DESCRIPTIONS: defines descriptions for all four stages', () => {
+	assert.ok(STAGE_DESCRIPTIONS[1].length > 0);
+	assert.ok(STAGE_DESCRIPTIONS[2].length > 0);
+	assert.ok(STAGE_DESCRIPTIONS[3].length > 0);
+	assert.ok(STAGE_DESCRIPTIONS[4].length > 0);
 });

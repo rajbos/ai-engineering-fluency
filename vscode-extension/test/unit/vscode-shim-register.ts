@@ -113,6 +113,7 @@ function attachMock(target: any): void {
 	};
 
 	target.ConfigurationTarget = target.ConfigurationTarget ?? { Global: 1 };
+	target.ExtensionMode = target.ExtensionMode ?? { Production: 1, Development: 2, Test: 3 };
 	target.ProgressLocation = target.ProgressLocation ?? { Notification: 15 };
 	target.ViewColumn = target.ViewColumn ?? { Active: -1, Beside: -2, One: 1, Two: 2, Three: 3 };
 
@@ -269,11 +270,22 @@ function attachMock(target: any): void {
 
 	target.extensions = target.extensions ?? {};
 	target.extensions.getExtension = target.extensions.getExtension ?? ((id: string) => {
-		if (id === 'RobBos.copilot-token-tracker') {
-			return { packageJSON: { version: '0.0.0-test' } };
+		if (id === 'RobBos.ai-engineering-fluency' || id === 'RobBos.copilot-token-tracker') {
+			return { isActive: true, packageJSON: { version: '0.0.0-test' }, activate: async () => {} };
 		}
 		return state.extensions[id] as any;
 	});
+
+	target.commands = target.commands ?? {};
+	target.commands.getCommands = target.commands.getCommands ?? (async (_filterInternal?: boolean) => [
+		'aiEngineeringFluency.refresh',
+		'aiEngineeringFluency.showDetails',
+		'aiEngineeringFluency.showChart',
+		'aiEngineeringFluency.showMaturity',
+		'aiEngineeringFluency.showFluencyLevelViewer',
+		'aiEngineeringFluency.runLocalViewRegression',
+		'aiEngineeringFluency.generateDiagnosticReport'
+	]);
 }
 
 const vscodeStub: any = {};
@@ -311,3 +323,13 @@ try {
 // imported extension code) prevent the process from exiting after tests.
 // The timer is unref()'d so it won't keep the process alive on its own.
 setTimeout(() => process.exit(process.exitCode ?? 0), 30_000).unref();
+
+// Set up a minimal browser-like `window` global so webview utilities that
+// call getWindowData() (modelUtils, formatUtils, etc.) work in Node.js tests.
+// We populate the JSON config globals so tests that exercise model/estimator
+// lookups get the real data rather than empty fallbacks.
+(global as any).window = (global as any).window ?? {};
+(global as any).window.__TOKEN_ESTIMATORS__ = require('../../../src/tokenEstimators.json');
+(global as any).window.__MODEL_PRICING__    = require('../../../src/modelPricing.json');
+(global as any).window.__TOOL_NAMES__       = require('../../../src/toolNames.json');
+(global as any).window.__AUTOMATIC_TOOLS__  = require('../../../src/automaticTools.json');

@@ -1,9 +1,15 @@
 {
   "title": "Claude Code Session File Schema Documentation",
   "description": "This document describes the structure of session log files created by Claude Code (Anthropic's CLI/IDE extension). These files contain actual Anthropic API token counts and can be used by the Copilot Token Tracker extension to report on Claude Code token usage.",
-  "version": "1.1",
-  "lastUpdated": "2026-03-28",
+  "version": "1.2",
+  "lastUpdated": "2026-06-03",
   "schemaChanges": {
+    "1.2": {
+      "date": "2026-06-03",
+      "changes": [
+        "Added systemEventSchema documenting the type: 'system' / subtype: 'compact_boundary' event written when Claude Code compacts a session"
+      ]
+    },
     "1.1": {
       "date": "2026-03-28",
       "changes": [
@@ -131,7 +137,7 @@
   "eventTypes": {
     "description": "Each line in the JSONL file is one of the following event types, distinguished by the 'type' field",
     "discriminatorField": "type",
-    "types": ["user", "assistant", "queue-operation", "file-history-snapshot", "ai-title"]
+    "types": ["user", "assistant", "system", "queue-operation", "file-history-snapshot", "ai-title"]
   },
   "commonFields": {
     "description": "Fields present on most or all event types",
@@ -558,6 +564,87 @@
       "sessionId": "4817b4d3-a794-4be1-ac45-ea05f7dc9f00",
       "version": "2.1.86",
       "gitBranch": "team-dashboard"
+    }
+  },
+  "systemEventSchema": {
+    "description": "A system-emitted metadata event. Not a user or assistant turn. Used to record internal Claude Code lifecycle events such as context compaction.",
+    "type_value": "system",
+    "usedBy": "Parse to detect context compaction events and attribute them to auto vs manual triggers",
+    "subtypes": {
+      "compact_boundary": {
+        "description": "Emitted when a session is compacted (context window summarised). The compactMetadata.trigger field distinguishes auto-compaction (context window exhausted) from manual compaction (user ran /compact).",
+        "fields": {
+          "subtype": {
+            "type": "string",
+            "value": "compact_boundary"
+          },
+          "content": {
+            "type": "string",
+            "example": "Conversation compacted",
+            "usedBy": "Informational only"
+          },
+          "isMeta": {
+            "type": "boolean",
+            "value": false
+          },
+          "uuid": {
+            "type": "string",
+            "format": "UUID"
+          },
+          "timestamp": {
+            "type": "string",
+            "format": "ISO 8601"
+          },
+          "entrypoint": {
+            "type": "string",
+            "description": "Which Claude Code client emitted this event",
+            "example": "claude-desktop",
+            "values": ["claude-desktop", "claude-vscode", "claude-cli"]
+          },
+          "compactMetadata": {
+            "type": "object",
+            "description": "Metadata about the compaction operation",
+            "properties": {
+              "trigger": {
+                "type": "string",
+                "values": ["auto", "manual"],
+                "description": "What triggered the compaction. 'auto' = context window limit reached without user action (negative signal — user was not proactively managing context). 'manual' = user explicitly ran /compact (positive signal).",
+                "usedBy": "Use to distinguish proactive context management (manual) from reactive auto-compaction (auto). Store auto count in toolCalls.byTool['__auto_compact__']."
+              },
+              "preTokens": {
+                "type": "number",
+                "description": "Token count of the conversation before compaction. Indicates how deep the session was when it hit the limit.",
+                "example": 170679
+              },
+              "postTokens": {
+                "type": "number",
+                "description": "Token count of the resulting summary after compaction.",
+                "example": 8697
+              },
+              "durationMs": {
+                "type": "number",
+                "description": "How long the compaction operation took in milliseconds.",
+                "example": 72528
+              }
+            }
+          }
+        },
+        "example": {
+          "type": "system",
+          "subtype": "compact_boundary",
+          "content": "Conversation compacted",
+          "isMeta": false,
+          "timestamp": "2026-05-06T10:15:34.700Z",
+          "uuid": "1d887419-0000-0000-0000-000000000000",
+          "compactMetadata": {
+            "trigger": "auto",
+            "preTokens": 170679,
+            "postTokens": 8697,
+            "durationMs": 72528
+          },
+          "entrypoint": "claude-desktop"
+        }
+      }
     }
   },
   "queueOperationEventSchema": {

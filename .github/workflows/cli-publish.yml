@@ -44,16 +44,16 @@ jobs:
         working-directory: cli
     steps:
       - name: Harden Runner
-        uses: step-security/harden-runner@fa2e9d605c4eeb9fcad4c99c224cee0c6c7f3594 # v2.16.0
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
           egress-policy: audit
 
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@53b83947a5a98c8d113130e565377fae1a50d02f # v6.3.0
+        uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         with:
-          node-version: 24
+          node-version-file: '.nvmrc'
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install extension dependencies
@@ -125,11 +125,11 @@ jobs:
 
       - name: Publish to npm
         if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' }}
-        run: NODE_AUTH_TOKEN="" npm publish
+        run: npm publish --provenance --access public
 
       - name: Dry run publish
         if: ${{ inputs.dry_run }}
-        run: NODE_AUTH_TOKEN="" npm publish public --dry-run
+        run: npm publish --provenance --access public --dry-run
 
       - name: Commit version bump and create PR
         if: ${{ !inputs.dry_run && steps.check_published.outputs.already_published != 'true' && steps.trigger_type.outputs.is_tag != 'true' }}

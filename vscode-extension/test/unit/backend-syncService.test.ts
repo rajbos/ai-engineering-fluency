@@ -9,36 +9,68 @@ import * as vscode from 'vscode';
 
 // We can test timer management and the syncQueue serialization.
 // Most sync methods require heavy I/O mocking.
-import { SyncService, type SyncServiceDeps } from '../../src/backend/services/syncService';
+import { SyncService, parseConsentTimestamp, type SyncServiceDeps } from '../../src/backend/services/syncService';
 import { CredentialService } from '../../src/backend/services/credentialService';
 import { DataPlaneService } from '../../src/backend/services/dataPlaneService';
 import { BackendUtility } from '../../src/backend/services/utilityService';
 
-function makeDeps(overrides?: Partial<SyncServiceDeps>): SyncServiceDeps {
+/** Flat override shape that mirrors the original SyncServiceDeps properties for convenient test setup. */
+interface FlatDepsOverrides {
+	context?: vscode.ExtensionContext | undefined;
+	log?: (message: string) => void;
+	warn?: (message: string) => void;
+	getCopilotSessionFiles?: () => Promise<string[]>;
+	estimateTokensFromText?: (text: string, model: string) => number;
+	getModelFromRequest?: (request: any) => string;
+	getSessionFileDataCached?: (sessionFilePath: string, mtime: number, fileSize: number) => Promise<any>;
+	updateTokenStats?: () => Promise<void>;
+	statSessionFile?: (sessionFile: string) => Promise<any>;
+	isOpenCodeSession?: (sessionFile: string) => boolean;
+	getOpenCodeSessionData?: (sessionFile: string) => Promise<any>;
+	isCrushSession?: (sessionFile: string) => boolean;
+	getCrushSessionData?: (sessionFile: string) => Promise<any>;
+	isVSSessionFile?: (sessionFile: string) => boolean;
+	getGithubToken?: () => string | undefined;
+}
+
+function makeDeps(overrides?: FlatDepsOverrides): SyncServiceDeps {
 	return {
-		context: undefined,
-		log: () => {},
-		warn: () => {},
-		getCopilotSessionFiles: async () => [],
-		estimateTokensFromText: () => 0,
-		getModelFromRequest: () => 'gpt-4o',
-		statSessionFile: async () => ({ mtimeMs: Date.now(), size: 100 } as any),
-		...overrides
+		context: overrides?.context ?? undefined,
+		logger: {
+			log: overrides?.log ?? (() => {}),
+			warn: overrides?.warn ?? (() => {}),
+		},
+		sessionHandlers: {
+			getCopilotSessionFiles: overrides?.getCopilotSessionFiles ?? (async () => []),
+			estimateTokensFromText: overrides?.estimateTokensFromText ?? (() => 0),
+			getModelFromRequest: overrides?.getModelFromRequest ?? (() => 'gpt-4o'),
+			getSessionFileDataCached: overrides?.getSessionFileDataCached,
+			statSessionFile: overrides?.statSessionFile ?? (async () => ({ mtimeMs: Date.now(), size: 100 } as any)),
+		},
+		editorHandlers: {
+			isOpenCodeSession: overrides?.isOpenCodeSession,
+			getOpenCodeSessionData: overrides?.getOpenCodeSessionData,
+			isCrushSession: overrides?.isCrushSession,
+			getCrushSessionData: overrides?.getCrushSessionData,
+			isVSSessionFile: overrides?.isVSSessionFile,
+		},
+		updateTokenStats: overrides?.updateTokenStats,
+		getGithubToken: overrides?.getGithubToken,
 	};
 }
 
-function makeService(depsOverrides?: Partial<SyncServiceDeps>): SyncService {
+function makeService(depsOverrides?: FlatDepsOverrides): SyncService {
 	const deps = makeDeps(depsOverrides);
 	const credSvc = new CredentialService(undefined as any);
 	const dataSvc = new DataPlaneService(BackendUtility, () => {}, async () => []);
-	return new SyncService(deps, credSvc, dataSvc, undefined, BackendUtility);
+	return new SyncService(deps, credSvc, dataSvc, undefined, BackendUtility, undefined);
 }
 
 /**
  * Create a SyncService with custom credential/data-plane/blob services for integration-level tests.
  */
 function makeServiceWithServices(
-	depsOverrides?: Partial<SyncServiceDeps>,
+	depsOverrides?: FlatDepsOverrides,
 	credSvcOverride?: any,
 	dataSvcOverride?: any,
 	blobSvcOverride?: any
@@ -46,7 +78,7 @@ function makeServiceWithServices(
 	const deps = makeDeps(depsOverrides);
 	const credSvc = credSvcOverride ?? new CredentialService(undefined as any);
 	const dataSvc = dataSvcOverride ?? new DataPlaneService(BackendUtility, () => {}, async () => []);
-	return new SyncService(deps, credSvc, dataSvc, blobSvcOverride ?? undefined, BackendUtility);
+	return new SyncService(deps, credSvc, dataSvc, blobSvcOverride ?? undefined, BackendUtility, undefined);
 }
 
 /**
@@ -157,7 +189,7 @@ test('extractFluencyMetricsFromCache extracts mode usage with ratio=1', () => {
 	const svc = makeService();
 	const cached = {
 		usageAnalysis: {
-			modeUsage: { ask: 10, edit: 5, agent: 3, plan: 2, customAgent: 1 }
+			modeUsage: { ask: 10, edit: 5, agent: 3, plan: 2, customAgent: 1, cli: 0 }
 		}
 	};
 	const result = (svc as any).extractFluencyMetricsFromCache(cached, 1);
@@ -279,7 +311,7 @@ test('extractFluencyMetricsFromCache handles all metrics combined', () => {
 	const svc = makeService();
 	const cached = {
 		usageAnalysis: {
-			modeUsage: { ask: 1, edit: 2, agent: 3, plan: 0, customAgent: 0 },
+			modeUsage: { ask: 1, edit: 2, agent: 3, plan: 0, customAgent: 0, cli: 0 },
 			toolCalls: { search: 1 },
 			contextReferences: { file: 1 },
 			mcpTools: { t: 1 },
@@ -514,6 +546,75 @@ test('processCachedSessionFile returns false on unexpected error', async () => {
 	assert.ok(warns.some(m => m.includes('cache error')));
 });
 
+// Ecosystem sessions (Mistral Vibe, Claude Desktop Cowork) always have dailyRollups
+// populated by getSessionFileDataCached via the firstInteraction fallback. These tests verify
+// that processCachedSessionFile fast path correctly handles that data structure — without
+// needing a real session file on disk.
+
+test('processCachedSessionFile fast path handles Mistral Vibe-style dailyRollups', async () => {
+	const now = new Date();
+	const dayKey = now.toISOString().slice(0, 10);
+	const startMs = new Date(dayKey + 'T00:00:00Z').getTime() - 1000; // day started before startMs check
+	const svc = makeService({
+		getSessionFileDataCached: async () => ({
+			tokens: 8000, mtime: Date.now(),
+			interactions: 5,
+			modelUsage: { 'devstral-2': { inputTokens: 5000, outputTokens: 3000 } },
+			dailyRollups: {
+				[dayKey]: {
+					tokens: 8000,
+					actualTokens: 8000,
+					thinkingTokens: 0,
+					interactions: 5,
+					modelUsage: { 'devstral-2': { inputTokens: 5000, outputTokens: 3000 } },
+				}
+			}
+		}),
+	});
+	const rollups = new Map();
+	const result = await (svc as any).processCachedSessionFile(
+		'/home/user/.vibe/logs/session/session_20250101_120000_abc/meta.json',
+		Date.now(), 100, 'ws', 'machine', undefined, rollups, startMs, now
+	);
+	assert.equal(result, true);
+	assert.equal(rollups.size, 1);
+	const entry = Array.from(rollups.values())[0] as any;
+	assert.equal(entry.key.model, 'devstral-2');
+	assert.equal(entry.value.inputTokens, 5000);
+	assert.equal(entry.value.outputTokens, 3000);
+	assert.equal(entry.value.interactions, 5);
+});
+
+test('processCachedSessionFile fast path skips day before startMs', async () => {
+	const now = new Date();
+	const yesterdayKey = new Date(now.getTime() - 86400000).toISOString().slice(0, 10);
+	// startMs = today midnight → yesterday is excluded
+	const todayMidnightMs = new Date(now.toISOString().slice(0, 10) + 'T00:00:00Z').getTime();
+	const svc = makeService({
+		getSessionFileDataCached: async () => ({
+			tokens: 1000, mtime: Date.now(),
+			interactions: 2,
+			modelUsage: { 'devstral': { inputTokens: 600, outputTokens: 400 } },
+			dailyRollups: {
+				[yesterdayKey]: {
+					tokens: 1000,
+					actualTokens: 1000,
+					thinkingTokens: 0,
+					interactions: 2,
+					modelUsage: { 'devstral': { inputTokens: 600, outputTokens: 400 } },
+				}
+			}
+		}),
+	});
+	const rollups = new Map();
+	const result = await (svc as any).processCachedSessionFile(
+		'/home/user/.vibe/logs/session/session_20250101_120000_abc/meta.json',
+		Date.now(), 100, 'ws', 'machine', undefined, rollups, todayMidnightMs, now
+	);
+	assert.equal(result, true);
+	assert.equal(rollups.size, 0, 'yesterday session should be filtered out by startMs');
+});
+
 // ── computeDailyRollupsFromLocalSessions (private, fallback path) ────────
 
 test('computeDailyRollupsFromLocalSessions processes JSON files in fallback path', async () => {
@@ -698,6 +799,91 @@ test('computeDailyRollupsFromLocalSessions skips OpenCode sessions without handl
 	assert.equal(result.rollups.size, 0);
 });
 
+// ── Ecosystem session pipeline regression tests ───────────────────────────
+// These tests verify the full pipeline for Mistral Vibe and Claude Desktop
+// Cowork sessions. Before the fix, getSessionFileDataCached returned no
+// dailyRollups for ecosystem sessions, causing processCachedSessionFile to
+// fall through to the slow path which could not parse meta.json/custom JSONL
+// files, and silently returned true with zero rollups.
+//
+// The fix populates dailyRollups in getSessionFileDataCached using
+// firstInteraction when dailyInteractions is empty (always the case for
+// ecosystem sessions). These tests verify the full cached pipeline round-trip.
+
+test('computeDailyRollupsFromLocalSessions: Mistral Vibe session produces non-zero rollups (regression)', async () => {
+	const now = new Date();
+	const dayKey = now.toISOString().slice(0, 10);
+	// Mistral Vibe session — no actual file on disk needed; fast path uses dailyRollups from cache.
+	const sessionFile = '/home/user/.vibe/logs/session/session_20260101_120000_abcdef/meta.json';
+	const svc = makeService({
+		getCopilotSessionFiles: async () => [sessionFile],
+		statSessionFile: async () => ({ mtimeMs: Date.now(), size: 1024 } as any),
+		getSessionFileDataCached: async () => ({
+			tokens: 12000,
+			interactions: 7,
+			modelUsage: { 'devstral-2': { inputTokens: 8000, outputTokens: 4000 } },
+			mtime: Date.now(),
+			size: 1024,
+			firstInteraction: now.toISOString(),
+			dailyRollups: {
+				[dayKey]: {
+					tokens: 12000,
+					actualTokens: 12000,
+					thinkingTokens: 0,
+					interactions: 7,
+					modelUsage: { 'devstral-2': { inputTokens: 8000, outputTokens: 4000 } },
+				}
+			}
+		}),
+	});
+	const result = await (svc as any).computeDailyRollupsFromLocalSessions({
+		lookbackDays: 7,
+		userId: undefined
+	});
+	assert.ok(result.rollups.size > 0, 'Mistral Vibe session must produce at least one rollup');
+	const entry = Array.from(result.rollups.values())[0] as any;
+	assert.equal(entry.key.model, 'devstral-2');
+	assert.equal(entry.value.inputTokens, 8000);
+	assert.equal(entry.value.outputTokens, 4000);
+	assert.equal(entry.value.interactions, 7);
+});
+
+test('computeDailyRollupsFromLocalSessions: Claude Desktop Cowork session produces non-zero rollups (regression)', async () => {
+	const now = new Date();
+	const dayKey = now.toISOString().slice(0, 10);
+	const sessionFile = '/home/user/AppData/Local/Packages/Claude_abc/LocalCache/Roaming/claude/local-agent-mode-sessions/session.jsonl';
+	const svc = makeService({
+		getCopilotSessionFiles: async () => [sessionFile],
+		statSessionFile: async () => ({ mtimeMs: Date.now(), size: 2048 } as any),
+		getSessionFileDataCached: async () => ({
+			tokens: 5000,
+			interactions: 3,
+			modelUsage: { 'claude-sonnet-4': { inputTokens: 3000, outputTokens: 2000 } },
+			mtime: Date.now(),
+			size: 2048,
+			firstInteraction: now.toISOString(),
+			dailyRollups: {
+				[dayKey]: {
+					tokens: 5000,
+					actualTokens: 5000,
+					thinkingTokens: 0,
+					interactions: 3,
+					modelUsage: { 'claude-sonnet-4': { inputTokens: 3000, outputTokens: 2000 } },
+				}
+			}
+		}),
+	});
+	const result = await (svc as any).computeDailyRollupsFromLocalSessions({
+		lookbackDays: 7,
+		userId: undefined
+	});
+	assert.ok(result.rollups.size > 0, 'Claude Desktop Cowork session must produce at least one rollup');
+	const entry = Array.from(result.rollups.values())[0] as any;
+	assert.equal(entry.key.model, 'claude-sonnet-4');
+	assert.equal(entry.value.inputTokens, 3000);
+	assert.equal(entry.value.outputTokens, 2000);
+});
+
 test('computeDailyRollupsFromLocalSessions handles malformed JSON gracefully', async () => {
 	const tmpFile = createTempFile('not valid json');
 	try {
@@ -792,7 +978,6 @@ test('syncToBackendStore completes full sync flow with mocked services', async (
 					upsertedEntities = entities;
 					return { successCount: entities.length, errors: [] };
 				},
-				getStorageBlobEndpoint: () => 'https://sa1.blob.core.windows.net',
 			}
 		);
 		await svc.syncToBackendStore(true, {
@@ -850,7 +1035,6 @@ test('syncToBackendStore logs warning when upsertEntitiesBatch has errors', asyn
 					successCount: 0,
 					errors: entities.map((e: any) => ({ entity: e, error: new Error('write failed') })),
 				}),
-				getStorageBlobEndpoint: () => 'https://sa.blob.core.windows.net',
 			}
 		);
 		await svc.syncToBackendStore(true, {
@@ -889,7 +1073,6 @@ test('syncToBackendStore handles ensureTableExists or validateAccess failure gra
 			validateAccess: async () => {},
 			createTableClient: () => ({}),
 			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
-			getStorageBlobEndpoint: () => 'https://sa.blob.core.windows.net',
 		}
 	);
 	await svc.syncToBackendStore(true, {
@@ -903,6 +1086,68 @@ test('syncToBackendStore handles ensureTableExists or validateAccess failure gra
 		blobUploadEnabled: false,
 	} as any, true);
 	assert.ok(warns.some(m => m.includes('network error')));
+});
+
+test('syncToBackendStore still attempts sharing server sync when Azure sync fails', async () => {
+	const logs: string[] = [];
+	const warns: string[] = [];
+	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const svc = new SyncService(
+		makeDeps({
+			log: (m) => logs.push(m),
+			warn: (m) => warns.push(m),
+			getGithubToken: () => undefined,
+		}),
+		{
+			getBackendDataPlaneCredentials: async () => ({
+				tableCredential: {},
+				blobCredential: {},
+				secretsToRedact: [],
+			}),
+			getBackendSecretsToRedactForError: async () => [],
+		} as any,
+		{
+			ensureTableExists: async () => { throw new Error('Azure connection failed'); },
+			validateAccess: async () => {},
+			createTableClient: () => ({}),
+			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
+		} as any,
+		undefined,
+		BackendUtility,
+		sharingServerSvc as any,
+	);
+	await svc.syncToBackendStore(true, {
+		enabled: true,
+		backend: 'storageTables',
+		sharingProfile: 'teamIdentified',
+		shareWorkspaceMachineNames: false,
+		storageAccount: 'sa1',
+		subscriptionId: 'sub1',
+		resourceGroup: 'rg1',
+		aggTable: 'usageAgg',
+		eventsTable: 'usageEvents',
+		lookbackDays: 7,
+		sharingServerEnabled: true,
+		sharingServerEndpointUrl: 'https://test-sharing-server/',
+		shareWithTeam: true,
+		userIdentityMode: 'pseudonymous',
+		userId: '',
+		userIdMode: 'alias',
+		datasetId: 'default',
+		shareConsentAt: '',
+		includeMachineBreakdown: false,
+		blobUploadEnabled: false,
+		blobContainerName: '',
+		blobUploadFrequencyHours: 24,
+		blobCompressFiles: true,
+		authMode: 'entraId',
+	} as any, true);
+	assert.ok(warns.some(m => m.includes('Azure connection failed')), `Expected Azure error in warns. Got: ${warns.join('\n')}`);
+	// Sharing server sync should still be attempted (no GitHub token → skipping log appears)
+	assert.ok(
+		logs.some(m => m.includes('Sharing server upload: skipping')),
+		`Expected sharing server sync attempt even after Azure failure. Logs: ${logs.join('\n')}`
+	);
 });
 
 // ── Sync lock management ─────────────────────────────────────────────────
@@ -983,8 +1228,205 @@ test('acquireSyncLock breaks stale lock', async () => {
 	}
 });
 
+test('acquireSyncLock returns false when same server URL is locked by another session', async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	try {
+		const lockPath = path.join(dir, 'backend_sync.lock');
+		fs.writeFileSync(lockPath, JSON.stringify({
+			sessionId: 'other-session',
+			timestamp: Date.now(),
+			serverUrl: 'https://mystorage.table.core.windows.net',
+		}));
+
+		const mockContext = { globalStorageUri: { fsPath: dir } };
+		const svc = makeService({ context: mockContext as any });
+
+		const acquired = await (svc as any).acquireSyncLock(undefined, 'https://mystorage.table.core.windows.net');
+		assert.equal(acquired, false, 'should be blocked when same server URL is locked');
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('acquireSyncLock returns true when lock is held for a different server URL', async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	try {
+		const lockPath = path.join(dir, 'backend_sync.lock');
+		// Simulate VS Code stable holding the lock for server A
+		fs.writeFileSync(lockPath, JSON.stringify({
+			sessionId: 'other-session',
+			timestamp: Date.now(),
+			serverUrl: 'https://server-a.table.core.windows.net',
+		}));
+
+		const mockContext = { globalStorageUri: { fsPath: dir } };
+		const svc = makeService({ context: mockContext as any });
+
+		// VS Code Insiders is configured for server B — should not be blocked
+		const acquired = await (svc as any).acquireSyncLock(undefined, 'https://server-b.table.core.windows.net');
+		assert.equal(acquired, true, 'should be allowed when lock is for a different server URL');
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test('releaseSyncLock does nothing when no context', async () => {
 	const svc = makeService({ context: undefined });
 	// Should not throw
 	await (svc as any).releaseSyncLock();
+});
+
+// -- Dual-backend sync (Azure + Sharing Server together) -------
+
+test(`syncToBackendStore also syncs to sharing server when backend=storageTables and sharingServerEnabled=true`, async () => {
+	const logs: string[] = [];
+	const tmpFile = createTempFile(JSON.stringify({
+		requests: [{
+			timestamp: Date.now() - 60000,
+			model: 'gpt-4o',
+			type: 'conversational',
+			result: { type: 'success' },
+			response: [{ inputTokens: 10, outputTokens: 20 }]
+		}]
+	}));
+	try {
+		const deps = makeDeps({
+			log: (m) => logs.push(m),
+			getCopilotSessionFiles: async () => [tmpFile.filePath],
+			getGithubToken: () => undefined,
+		});
+		const credSvc = {
+			getBackendDataPlaneCredentials: async () => ({ tableCredential: {}, blobCredential: {} }),
+			getBackendSecretsToRedactForError: async () => [],
+		};
+		const dataSvc = {
+			ensureTableExists: async () => {},
+			validateAccess: async () => {},
+			createTableClient: () => ({}),
+			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
+			deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
+		};
+		const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+		const svc = new SyncService(deps, credSvc as any, dataSvc as any, undefined, BackendUtility, sharingServerSvc as any);
+		await svc.syncToBackendStore(true, {
+			enabled: true,
+			backend: 'storageTables',
+			sharingProfile: 'teamIdentified',
+			shareWorkspaceMachineNames: false,
+			storageAccount: 'sa1',
+			subscriptionId: 'sub1',
+			resourceGroup: 'rg1',
+			aggTable: 'usageAgg',
+			eventsTable: 'usageEvents',
+			lookbackDays: 7,
+			sharingServerEnabled: true,
+			sharingServerEndpointUrl: 'https://test-sharing-server/',
+			shareWithTeam: true,
+			userIdentityMode: 'pseudonymous',
+			userId: '',
+			userIdMode: 'alias',
+			datasetId: 'default',
+			shareConsentAt: '',
+			includeMachineBreakdown: false,
+			blobUploadEnabled: false,
+			blobContainerName: '',
+			blobUploadFrequencyHours: 24,
+			blobCompressFiles: true,
+			authMode: 'entraId',
+		} as any, true);
+		assert.ok(
+			logs.some(m => m.includes('Sharing server upload: skipping')),
+			`Expected sharing server skip log. Got: ${logs.join('\n')}`
+		);
+	} finally {
+		tmpFile.cleanup();
+	}
+});
+
+test(`syncToBackendStore does NOT sync to sharing server when sharingServerEnabled=false`, async () => {
+	const logs: string[] = [];
+	const svc = makeServiceWithServices(
+		{ log: (m) => logs.push(m) },
+		{
+			getBackendDataPlaneCredentials: async () => ({ tableCredential: {}, blobCredential: {} }),
+			getBackendSecretsToRedactForError: async () => [],
+		},
+		{
+			ensureTableExists: async () => {},
+			validateAccess: async () => {},
+			createTableClient: () => ({}),
+			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
+			deleteEntitiesForUserDataset: async () => ({ deletedCount: 0, errors: [] }),
+		}
+	);
+	await svc.syncToBackendStore(true, {
+		enabled: true,
+		backend: 'storageTables',
+		sharingProfile: 'soloFull',
+		shareWorkspaceMachineNames: false,
+		storageAccount: 'sa1',
+		subscriptionId: 'sub1',
+		resourceGroup: 'rg1',
+		aggTable: 'usageAgg',
+		eventsTable: 'usageEvents',
+		lookbackDays: 7,
+		sharingServerEnabled: false,
+		sharingServerEndpointUrl: '',
+		authMode: 'entraId',
+	} as any, true);
+	assert.ok(
+		!logs.some(m => m.includes('Sharing server')),
+		`Expected no sharing server logs but got: ${logs.join('\n')}`
+	);
+});
+
+// ── parseConsentTimestamp ─────────────────────────────────────────────────
+
+test('parseConsentTimestamp returns Error for undefined', () => {
+	const result = parseConsentTimestamp(undefined);
+	assert.ok(result instanceof Error);
+});
+
+test('parseConsentTimestamp returns Error for null', () => {
+	const result = parseConsentTimestamp(null);
+	assert.ok(result instanceof Error);
+});
+
+test('parseConsentTimestamp returns Error for empty string', () => {
+	const result = parseConsentTimestamp('');
+	assert.ok(result instanceof Error);
+});
+
+test('parseConsentTimestamp returns Error for invalid date string', () => {
+	const result = parseConsentTimestamp('not-a-date');
+	assert.ok(result instanceof Error);
+	assert.ok(result.message.includes('not a valid date'));
+});
+
+test('parseConsentTimestamp returns Error for future date', () => {
+	const future = new Date(Date.now() + 86_400_000).toISOString();
+	const result = parseConsentTimestamp(future);
+	assert.ok(result instanceof Error);
+	assert.ok(result.message.includes('future date'));
+});
+
+test('parseConsentTimestamp returns Date for valid past timestamp', () => {
+	const past = new Date(Date.now() - 86_400_000).toISOString();
+	const result = parseConsentTimestamp(past);
+	assert.ok(result instanceof Date);
+	assert.ok(!isNaN(result.getTime()));
+});
+
+test('parseConsentTimestamp coerces Date object to string before parsing', () => {
+	// A Date object stringifies to a locale date string that new Date() can re-parse
+	const pastDate = new Date(Date.now() - 86_400_000);
+	const result = parseConsentTimestamp(pastDate);
+	assert.ok(result instanceof Date);
+});
+
+test('parseConsentTimestamp returned Date matches input ISO string', () => {
+	const isoString = '2023-01-15T10:30:00.000Z';
+	const result = parseConsentTimestamp(isoString);
+	assert.ok(result instanceof Date);
+	assert.equal((result as Date).toISOString(), isoString);
 });

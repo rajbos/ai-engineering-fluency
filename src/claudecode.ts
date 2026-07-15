@@ -1,0 +1,347 @@
+/**
+ * Claude Code data access layer.
+ * Handles reading session data from Claude Code (Anthropic CLI/IDE extension) JSONL session files.
+ * Sessions are stored at: ~/.claude/projects/{project-hash}/{session-uuid}.jsonl
+ * Token data is ACTUAL Anthropic API counts — no estimation needed.
+ */
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
+import type { ModelUsage } from './types';
+import { withErrorRecovery } from './utils/errors';
+import { normalizePathForComparison } from './workspaceHelpers';
+
+/**
+ * Normalize a Claude Code API model ID to the dot-notation format used throughout this codebase.
+ *
+ * Claude Code returns the full Anthropic API model ID, which uses hyphens as separators
+ * everywhere — including for version numbers that other sources express with a decimal dot.
+ *
+ * Examples:
+ *   claude-sonnet-4-6           → claude-sonnet-4.6
+ *   claude-haiku-4-5-20250929   → claude-haiku-4.5
+ *   claude-opus-4-6             → claude-opus-4.6
+ *   claude-sonnet-4.6           → claude-sonnet-4.6  (already normalised — no-op)
+ *
+ * The pattern matched is: claude-{family}-{major}-{minor}[-{YYYYMMDD}]
+ * where {major} and {minor} are single digits.  This avoids mismatching
+ * legacy IDs like `claude-3-5-sonnet-20241022` whose version is embedded
+ * differently.
+ */
+export function normalizeClaudeModelId(model: string): string {
+	if (!model) { return model; }
+	// Already in dot notation — nothing to do
+	if (/claude-.+-\d+\.\d+/.test(model)) { return model; }
+	// Match: claude-{family}-{digit}-{digit}[-{8-digit date}]
+	const m = model.match(/^(claude-.+)-(\d)-(\d)(-\d{8})?$/);
+	if (m) {
+		return `${m[1]}-${m[2]}.${m[3]}`;
+	}
+	return model;
+}
+
+export class ClaudeCodeDataAccess {
+
+	/**
+	 * Get the Claude Code data directory path (~/.claude).
+	 */
+	getClaudeCodeDataDir(): string {
+		return path.join(os.homedir(), '.claude');
+	}
+
+	/**
+	 * Get the Claude Code projects directory path (~/.claude/projects).
+	 */
+	getClaudeCodeProjectsDir(): string {
+		return path.join(this.getClaudeCodeDataDir(), 'projects');
+	}
+
+	/**
+	 * Check if a file path is a Claude Code session file.
+	 * Requires the path to be under the user's ~/.claude/projects/ directory to avoid
+	 * false-positives on Cowork sessions that have a nested .claude/projects/ sub-path.
+	 */
+	isClaudeCodeSessionFile(filePath: string): boolean {
+		const normalized = normalizePathForComparison(filePath);
+		const projectsDir = normalizePathForComparison(this.getClaudeCodeProjectsDir());
+		return normalized.startsWith(projectsDir) && normalized.endsWith('.jsonl');
+	}
+
+	/**
+	 * Get all Claude Code session file paths (top-level session files, excluding subagent files).
+	 */
+	async getClaudeCodeSessionFiles(): Promise<string[]> {
+		const projectsDir = this.getClaudeCodeProjectsDir();
+		try {
+			await fs.promises.access(projectsDir);
+		} catch {
+			return [];
+		}
+		try {
+			const projectDirs = await fs.promises.readdir(projectsDir, { withFileTypes: true });
+			const results = await Promise.all(
+				projectDirs
+					.filter(d => d.isDirectory())
+					.map(d => this.collectJsonlFilesFromProject(path.join(projectsDir, d.name)))
+			);
+			return results.flat();
+		} catch (err) {
+			console.error('[claudecode] Failed to read projects dir:', err);
+			return [];
+		}
+	}
+
+	private async collectJsonlFilesFromProject(projectPath: string): Promise<string[]> {
+		try {
+			const entries = await fs.promises.readdir(projectPath, { withFileTypes: true });
+			const results = await Promise.all(
+				entries
+					.filter(e => !e.isDirectory() && e.name.endsWith('.jsonl'))
+					.map(async e => {
+						const fullPath = path.join(projectPath, e.name);
+						try {
+							const st = await fs.promises.stat(fullPath);
+							return st.size > 0 ? [fullPath] : [];
+						} catch (err) {
+							console.error(`[claudecode] Failed to stat ${fullPath}:`, err);
+							return [] as string[];
+						}
+					})
+			);
+			return results.flat();
+		} catch (err) {
+			console.error(`[claudecode] Failed to read project dir ${projectPath}:`, err);
+			return [];
+		}
+	}
+
+	/**
+	 * Parse a Claude Code session JSONL file and return all events.
+	 */
+	private async readSessionEvents(sessionFilePath: string): Promise<any[]> {
+		return withErrorRecovery(
+			async () => {
+				const content = await fs.promises.readFile(sessionFilePath, 'utf8');
+				const lines = content.trim().split('\n');
+				const events: any[] = [];
+				for (const line of lines) {
+					if (!line.trim()) { continue; }
+					try {
+						events.push(JSON.parse(line));
+					} catch { /* skip malformed lines */ }
+				}
+				return events;
+			},
+			[],
+			`claudecode readSessionEvents(${sessionFilePath})`
+		);
+	}
+
+	/**
+	 * Deduplicate assistant events using Anthropic's message.id (last-wins).
+	 *
+	 * Claude Code writes multiple JSONL entries per API request:
+	 *   - Streaming fragments (stop_reason=null) during streaming
+	 *   - The final complete event (non-null stop_reason, complete token counts)
+	 *   - Sometimes the same complete event is written multiple times identically
+	 *
+	 * Using message.id last-wins handles all cases correctly:
+	 *   - Normal request:  last event has complete output_tokens and non-null stop_reason ✓
+	 *   - Crashed request: last known event has partial tokens — better than zero ✓
+	 *   - Duplicate write: identical content, last-wins is a no-op ✓
+	 *   - No requestId:    message.id (100% present) catches what requestId (87%) misses ✓
+	 */
+	private deduplicateAssistantEvents(events: any[]): any[] {
+		const byMessageId = new Map<string, any>();
+		const noMessageId: any[] = [];
+		for (const event of events) {
+			if (event.type !== 'assistant' || !event.message?.usage) { continue; }
+			const msgId: string | undefined = event.message?.id;
+			if (msgId) {
+				byMessageId.set(msgId, event); // last-wins
+			} else {
+				noMessageId.push(event);
+			}
+		}
+		return [...byMessageId.values(), ...noMessageId];
+	}
+
+	/**
+	 * Get token counts from a Claude Code session.
+	 * Uses ACTUAL Anthropic API token counts from assistant event message.usage.
+	 * De-duplicates by message.id (last-wins) — see deduplicateAssistantEvents.
+	 */
+	async getTokensFromClaudeCodeSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
+		const events = await this.readSessionEvents(sessionFilePath);
+		let totalInputTokens = 0;
+		let totalOutputTokens = 0;
+
+		for (const event of this.deduplicateAssistantEvents(events)) {
+			const usage = event.message.usage;
+			const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
+				+ (typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0)
+				+ (typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0);
+			const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+			totalInputTokens += inputTokens;
+			totalOutputTokens += outputTokens;
+		}
+
+		// Claude Code does not separate thinking tokens — they are included in output_tokens
+		return { tokens: totalInputTokens + totalOutputTokens, thinkingTokens: 0 };
+	}
+
+	/**
+	 * Count user interactions in a Claude Code session.
+	 * Counts user events that are not sidechain (main conversation only).
+	 */
+	async countClaudeCodeInteractions(sessionFilePath: string): Promise<number> {
+		const events = await this.readSessionEvents(sessionFilePath);
+		let count = 0;
+		for (const event of events) {
+			if (event.type === 'user' && !event.isSidechain && event.message?.role === 'user') {
+				// Only count actual user text messages (not tool results)
+				const content = event.message?.content;
+				if (typeof content === 'string') {
+					count++;
+				} else if (Array.isArray(content)) {
+					// Count if any content block is a text block (not tool_result)
+					const hasText = content.some((c: any) => c.type === 'text');
+					if (hasText && !content.some((c: any) => c.type === 'tool_result')) {
+						count++;
+					}
+				}
+			}
+		}
+		return count;
+	}
+
+	/**
+	 * Extract the cache-related token breakdown from an Anthropic usage object:
+	 * total cache-creation tokens, the portion written under the 1-hour TTL, and
+	 * cache-read tokens. Anthropic bills cache-creation at different rates depending
+	 * on TTL, so the 1-hour portion is tracked separately from the total.
+	 */
+	private extractCacheTokenBreakdown(usage: any): { cacheCreation: number; cacheCreation1h: number; cachedRead: number } {
+		const cacheCreation = typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0;
+		const cacheCreation1h = typeof usage.cache_creation?.ephemeral_1h_input_tokens === 'number'
+			? usage.cache_creation.ephemeral_1h_input_tokens
+			: 0;
+		const cachedRead = typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0;
+		return { cacheCreation, cacheCreation1h, cachedRead };
+	}
+
+	private addModelUsageEntry(
+		modelUsage: ModelUsage,
+		model: string,
+		usage: any
+	): void {
+		if (!modelUsage[model]) {
+			modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+		}
+
+		const { cacheCreation, cacheCreation1h, cachedRead } = this.extractCacheTokenBreakdown(usage);
+		const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
+			+ cacheCreation
+			+ cachedRead;
+		const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+
+		modelUsage[model].inputTokens += inputTokens;
+		modelUsage[model].outputTokens += outputTokens;
+		if (cacheCreation > 0) {
+			modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + cacheCreation;
+		}
+		if (cacheCreation1h > 0) {
+			modelUsage[model].cacheCreation1hTokens = (modelUsage[model].cacheCreation1hTokens ?? 0) + cacheCreation1h;
+		}
+		if (cachedRead > 0) {
+			modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + cachedRead;
+		}
+	}
+
+	/**
+	 * Get per-model token usage from a Claude Code session.
+	 * Uses the model field from assistant event message objects.
+	 * De-duplicates by message.id (last-wins) — see deduplicateAssistantEvents.
+	 */
+	async getClaudeCodeModelUsage(sessionFilePath: string): Promise<ModelUsage> {
+		const events = await this.readSessionEvents(sessionFilePath);
+		const modelUsage: ModelUsage = {};
+
+		for (const event of this.deduplicateAssistantEvents(events)) {
+			const usage = event.message.usage;
+			const model = normalizeClaudeModelId(event.message?.model || 'unknown');
+			this.addModelUsageEntry(modelUsage, model, usage);
+		}
+
+		return modelUsage;
+	}
+
+	/**
+	 * Read session metadata (title, timestamps, entrypoint) from a Claude Code session.
+	 */
+	async getClaudeCodeSessionMeta(sessionFilePath: string): Promise<{
+		title?: string;
+		entrypoint?: string;
+		firstInteraction?: string;
+		lastInteraction?: string;
+		cwd?: string;
+	} | null> {
+		const events = await this.readSessionEvents(sessionFilePath);
+		if (events.length === 0) { return null; }
+		const { title, entrypoint, cwd, timestamps } = this.extractMetaFieldsFromEvents(events);
+		let firstInteraction: string | undefined;
+		let lastInteraction: string | undefined;
+		if (timestamps.length > 0) {
+			timestamps.sort((a, b) => a - b);
+			firstInteraction = new Date(timestamps[0]).toISOString();
+			lastInteraction = new Date(timestamps[timestamps.length - 1]).toISOString();
+		}
+		return { title, entrypoint, firstInteraction, lastInteraction, cwd };
+	}
+
+	private extractMetaFieldsFromEvents(events: any[]): { title?: string; entrypoint?: string; cwd?: string; timestamps: number[] } {
+		let title: string | undefined;
+		let entrypoint: string | undefined;
+		let cwd: string | undefined;
+		const timestamps: number[] = [];
+		for (const event of events) {
+			if (event.type === 'ai-title' && event.aiTitle) { title = event.aiTitle; }
+			if (!entrypoint && event.entrypoint) { entrypoint = event.entrypoint; }
+			if (!cwd && event.cwd) { cwd = event.cwd; }
+			if (event.timestamp) {
+				const ts = new Date(event.timestamp).getTime();
+				if (!isNaN(ts)) { timestamps.push(ts); }
+			}
+		}
+		return { title, entrypoint, cwd, timestamps };
+	}
+
+	/**
+	 * Get the session ID (UUID) from a Claude Code session file path.
+	 */
+	getClaudeCodeSessionId(sessionFilePath: string): string {
+		return path.basename(sessionFilePath, '.jsonl');
+	}
+
+	/**
+	 * Reverse the project hash to recover the original working directory path.
+	 * The hash is: lowercase path with drive colon removed, separators replaced with dashes.
+	 */
+	getProjectPathFromHash(projectHash: string): string {
+		// Best-effort reverse engineering: replace dashes with path separators
+		// The exact reversal is ambiguous (dashes in real paths), but works for display
+		const platform = os.platform();
+		if (platform === 'win32') {
+			// Windows: first segment is drive letter, e.g., "c--Users-..." → "C:\Users\..."
+			const parts = projectHash.split('-');
+			if (parts.length >= 2 && parts[0].length === 1 && parts[1] === '') {
+				// Drive letter pattern: "c--rest" → parts = ["c", "", "rest", ...]
+				const drive = parts[0].toUpperCase();
+				const rest = parts.slice(2).join('\\');
+				return `${drive}:\\${rest}`;
+			}
+		}
+		// Unix: replace leading segment dashes with /
+		return '/' + projectHash.replace(/-/g, '/');
+	}
+}

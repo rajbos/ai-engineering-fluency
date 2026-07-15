@@ -1,10 +1,15 @@
 // @ts-nocheck // Chart.js ESM bundle is loaded dynamically; skip CJS resolution noise
-import { el, createButton } from '../shared/domUtils';
-import { BUTTONS } from '../shared/buttonConfig';
+import { el, createButton, iconHeading } from '../shared/domUtils';
+import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
+import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
+import { createViewStateManager } from '../shared/viewState';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
+import { registerMessageHandler } from '../shared/messageHandler';
 
 type ChartModule = typeof import('chart.js/auto');
 type ChartConstructor = ChartModule['default'];
@@ -14,6 +19,35 @@ type ChartConfig = import('chart.js').ChartConfiguration<'bar' | 'line', number[
 type ModelDataset = { label: string; data: number[]; backgroundColor: string; borderColor: string; borderWidth: number };
 type EditorDataset = ModelDataset;
 type RepositoryDataset = ModelDataset & { fullRepo?: string };
+
+type ChartPeriodData = {
+	labels: string[];
+	tokensData: number[];
+	sessionsData: number[];
+	modelDatasets: ModelDataset[];
+	editorDatasets: EditorDataset[];
+	repositoryDatasets: RepositoryDataset[];
+	periodCount: number;
+	totalTokens: number;
+	totalSessions: number;
+	avgPerPeriod: number;
+	costData: number[];
+	totalCost: number;
+	avgCostPerPeriod: number;
+	locData?: number[];
+	linesAddedData?: number[];
+	linesRemovedData?: number[];
+	languageDatasets?: ModelDataset[];
+	locEditorDatasets?: ModelDataset[];
+	locRepositoryDatasets?: RepositoryDataset[];
+	totalLinesAdded?: number;
+	totalLinesRemoved?: number;
+	avgLocPerPeriod?: number;
+	editorCostDatasets?: ModelDataset[];
+	billingGroupCostDatasets?: ModelDataset[];
+};
+
+type ChartPeriod = import('./projectionUtils').ChartPeriod;
 
 type InitialChartData = {
 	labels: string[];
@@ -31,6 +65,19 @@ type InitialChartData = {
 	lastUpdated: string;
 	backendConfigured?: boolean;
 	compactNumbers?: boolean;
+	monthlyCostBudget?: number;
+	periodsReady?: boolean;
+	hasLocData?: boolean;
+	initialPeriod?: ChartPeriod;
+	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
+	initialMetric?: 'tokens' | 'output' | 'cost';
+	initialSplit?: 'total' | 'model' | 'editor' | 'repository' | 'language';
+	monthlyBudget?: number;
+	periods?: {
+		day: ChartPeriodData;
+		week: ChartPeriodData;
+		month: ChartPeriodData;
+	};
 };
 
 // VS Code injects this in the webview environment
@@ -42,12 +89,8 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 
 type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
-declare global {
-	interface Window { __INITIAL_CHART__?: InitialChartData; }
-}
-
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = window.__INITIAL_CHART__;
+const initialData = getWindowData<InitialChartData>('__INITIAL_CHART__');
 
 let chart: ChartInstance | undefined;
 let Chart: ChartConstructor | undefined;
@@ -59,94 +102,228 @@ async function loadChartModule(): Promise<void> {
 	const mod = await import('chart.js/auto');
 	Chart = mod.default;
 }
-let currentView: 'total' | 'model' | 'editor' | 'repository' = 'total';
-// Stores the view to restore after a background data update re-initializes the chart
-let pendingView: typeof currentView | null = null;
+let currentMetric: 'tokens' | 'output' | 'cost' = 'tokens';
+let currentSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' = 'total';
+let currentPeriod: ChartPeriod = 'day';
+// Stores state to restore after a background data update re-initializes the chart
+let pendingMetric: typeof currentMetric | null = null;
+let pendingSplit: typeof currentSplit | null = null;
+let pendingPeriod: ChartPeriod | null = null;
+
+type DisplayMode = 'actual' | 'rolling';
+let currentDisplayMode: DisplayMode = 'actual';
+
+type ChartWebviewState = {
+	period: ChartPeriod;
+	metric: 'tokens' | 'output' | 'cost';
+	split: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider';
+	displayMode: DisplayMode;
+	/** @deprecated Use metric + split instead. Kept for migration of old saved state. */
+	view?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
+};
+
+const chartState = createViewStateManager<ChartWebviewState>(vscode, {
+	period: 'day',
+	metric: 'tokens',
+	split: 'total',
+	displayMode: 'actual',
+});
+
+function saveWebviewState(): void {
+	chartState.save({ period: currentPeriod, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode });
+}
+const ROLLING_WINDOW: Record<ChartPeriod, number> = { day: 7, week: 4, month: 3 };
+
+function computeRollingAverage(data: number[], window: number): number[] {
+	return data.map((_, i) => {
+		const start = Math.max(0, i - window + 1);
+		const slice = data.slice(start, i + 1);
+		return Math.round(slice.reduce((a, b) => a + b, 0) / slice.length);
+	});
+}
+
+function getRollingLabel(): string {
+	const w = ROLLING_WINDOW[currentPeriod];
+	const unit = currentPeriod === 'day' ? 'day' : currentPeriod === 'week' ? 'week' : 'month';
+	return `${w}-${unit} rolling avg`;
+}
+
+function getChartTitle(): string {
+	const periodMeta = PERIOD_LABELS[currentPeriod];
+	if (currentMetric === 'cost') {
+		let titleText: string;
+		if (currentSplit === 'editor') {
+			titleText = periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Editor');
+		} else if (currentSplit === 'provider') {
+			titleText = periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Provider');
+		} else {
+			titleText = periodMeta.costTitle;
+		}
+		if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
+			titleText += ` (${getRollingLabel()})`;
+		}
+		return titleText;
+	}
+	if (currentMetric === 'output') {
+		return periodMeta.outputTitle;
+	}
+	let titleText = periodMeta.title;
+	if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
+		titleText += ` (${getRollingLabel()})`;
+	}
+	return titleText;
+}
+
+/** Returns period data for the current period, falling back to legacy flat fields. */
+function getActivePeriodData(data: InitialChartData): ChartPeriodData {
+	if (data.periods) {
+		return data.periods[currentPeriod];
+	}
+	// Fallback for backward compat (no periods field)
+	return {
+		labels: data.labels,
+		tokensData: data.tokensData,
+		sessionsData: data.sessionsData,
+		modelDatasets: data.modelDatasets,
+		editorDatasets: data.editorDatasets,
+		repositoryDatasets: data.repositoryDatasets,
+		periodCount: data.dailyCount,
+		totalTokens: data.totalTokens,
+		totalSessions: data.totalSessions,
+		avgPerPeriod: data.avgTokensPerDay,
+		costData: [],
+		totalCost: 0,
+		avgCostPerPeriod: 0,
+	};
+}
+
+const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string }> = {
+	day:   { title: 'Token Usage – Last 30 Days',  footer: 'Day-by-day token usage for the last 30 days',   countLabel: 'Total Days',   avgLabel: 'Avg Tokens / Day',   costTitle: 'Est. Cost – Last 30 Days',  avgCostLabel: 'Avg Cost / Day',   outputTitle: 'Lines of Code – Last 30 Days',  avgLocLabel: 'Avg Lines / Day'   },
+	week:  { title: 'Token Usage – Last 6 Weeks',  footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks',  avgLabel: 'Avg Tokens / Week',  costTitle: 'Est. Cost – Last 6 Weeks',  avgCostLabel: 'Avg Cost / Week',  outputTitle: 'Lines of Code – Last 6 Weeks',  avgLocLabel: 'Avg Lines / Week'  },
+	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month' },
+};
+
+function isComboSupported(metric: string, split: string): boolean {
+	if (metric === 'cost') { return split === 'total' || split === 'editor' || split === 'provider'; }
+	if (metric === 'output') { return split !== 'model' && split !== 'provider'; }
+	return split !== 'language' && split !== 'provider';
+}
+
+function buildChartHeader(data: InitialChartData): HTMLElement {
+	const header = el('div', 'header');
+	const headerLeft = el('div', 'header-left');
+	const title = el('span', 'header-title', getChartTitle());
+	title.id = 'chart-title';
+	headerLeft.append(el('span', 'header-icon', '📈'), title);
+	const buttons = el('div', 'button-row');
+	buttons.append(...getNavButtons('btn-chart', !!data.backendConfigured).map(config => createButton(config)));
+	header.append(headerLeft, buttons);
+	return header;
+}
+
+function buildSummaryCards(periodData: ChartPeriodData, periodMeta: typeof PERIOD_LABELS[ChartPeriod]): HTMLElement {
+	const totalLabel = currentMetric === 'cost' ? 'Total Cost (est.)' : currentMetric === 'output' ? 'Total Lines (AI)' : 'Total Tokens';
+	const totalValue = currentMetric === 'cost' ? `$${periodData.totalCost.toFixed(2)}`
+		: currentMetric === 'output' ? ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString()
+		: formatCompact(periodData.totalTokens);
+	const avgLabel = currentMetric === 'cost' ? periodMeta.avgCostLabel : currentMetric === 'output' ? periodMeta.avgLocLabel : periodMeta.avgLabel;
+	const avgValue = currentMetric === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}`
+		: currentMetric === 'output' ? Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString()
+		: formatCompact(periodData.avgPerPeriod);
+	const cards = el('div', 'cards');
+	cards.id = 'summary-cards';
+	cards.append(
+		buildCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString()),
+		buildCard('card-total-tokens', totalLabel, totalValue),
+		buildCard('card-avg-tokens', avgLabel, avgValue),
+		buildCard('card-total-sessions', 'Total Sessions', periodData.totalSessions.toLocaleString()),
+	);
+	return cards;
+}
+
+function buildPeriodToggles(periodsReady: boolean): HTMLElement {
+	const periodToggles = el('div', 'period-controls');
+	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, '📅 Day');
+	dayBtn.id = 'period-day';
+	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, periodsReady ? '🗓️ Week' : '🗓️ Week ⌛');
+	weekBtn.id = 'period-week';
+	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, periodsReady ? '📆 Month' : '📆 Month ⌛');
+	monthBtn.id = 'period-month';
+	if (!periodsReady) {
+		(weekBtn as HTMLButtonElement).disabled = true; weekBtn.title = 'Loading historical data…';
+		(monthBtn as HTMLButtonElement).disabled = true; monthBtn.title = 'Loading historical data…';
+	}
+	periodToggles.append(dayBtn, weekBtn, monthBtn);
+	return periodToggles;
+}
+
+function buildChartControls(data: InitialChartData): HTMLElement {
+	const toggles = el('div', 'chart-controls');
+	const metricGroup = el('div', 'control-group');
+	const tokensBtn = el('button', `toggle${currentMetric === 'tokens' ? ' active' : ''}`, 'Tokens');
+	tokensBtn.id = 'metric-tokens';
+	const outputBtn = el('button', `toggle${currentMetric === 'output' ? ' active' : ''}${!data.hasLocData ? ' dim' : ''}`, '✏️ Output');
+	outputBtn.id = 'metric-output';
+	if (!data.hasLocData) { outputBtn.title = 'No edit data available yet (VS Code edit/agent sessions only)'; }
+	const costBtn = el('button', `toggle${currentMetric === 'cost' ? ' active' : ''}`, '💰 Cost');
+	costBtn.id = 'metric-cost';
+	metricGroup.append(tokensBtn, outputBtn, costBtn);
+	const splitGroup = el('div', 'control-group');
+	const mkSplit = (id: string, split: string, label: string) => {
+		const supported = isComboSupported(currentMetric, split);
+		const btn = el('button', `toggle${currentSplit === split ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
+		btn.id = id;
+		if (!supported) { (btn as HTMLButtonElement).disabled = true; btn.title = `Not available for ${currentMetric} metric`; }
+		return btn;
+	};
+	splitGroup.append(mkSplit('split-total', 'total', 'Total'), mkSplit('split-model', 'model', 'By Model'),
+		mkSplit('split-editor', 'editor', 'By Editor'), mkSplit('split-provider', 'provider', '🏷️ By Provider'),
+		mkSplit('split-repository', 'repository', 'By Repository'), mkSplit('split-language', 'language', 'By Language'));
+	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output';
+	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicable ? '' : ' hidden'}`, '📈 Rolling Avg');
+	rollingBtn.id = 'view-rolling';
+	const rollingGroup = el('div', 'control-group');
+	rollingGroup.append(rollingBtn);
+	toggles.append(metricGroup, el('div', 'control-group-separator'), splitGroup, el('div', 'control-group-separator'), rollingGroup);
+	return toggles;
+}
 
 function renderLayout(data: InitialChartData): void {
 	setCompactNumbers(data.compactNumbers !== false);
 	const root = document.getElementById('root');
-	if (!root) {
-		return;
-	}
-
+	if (!root) { return; }
 	root.replaceChildren();
-
-	const themeStyle = document.createElement('style');
-	themeStyle.textContent = themeStyles;
-	const style = document.createElement('style');
-	style.textContent = styles;
-
-	const container = el('div', 'container');
-	const header = el('div', 'header');
-	const headerLeft = el('div', 'header-left');
-	const icon = el('span', 'header-icon', '📈');
-	const title = el('span', 'header-title', 'Token Usage - Last 30 Days');
-	headerLeft.append(icon, title);
-	const buttons = el('div', 'button-row');
-	buttons.append(
-		createButton(BUTTONS['btn-refresh']),
-		createButton(BUTTONS['btn-details']),
-		createButton(BUTTONS['btn-usage']),
-		createButton(BUTTONS['btn-environmental']),
-		createButton(BUTTONS['btn-diagnostics']),
-		createButton(BUTTONS['btn-maturity'])
-	);
-	if (data.backendConfigured) {
-		buttons.append(createButton(BUTTONS['btn-dashboard']));
-	}
-	header.append(headerLeft, buttons);
-
+	const themeStyle = document.createElement('style'); themeStyle.textContent = themeStyles;
+	const style = document.createElement('style'); style.textContent = styles;
+	const periodData = getActivePeriodData(data);
+	const periodMeta = PERIOD_LABELS[currentPeriod];
 	const summarySection = el('div', 'section');
-	summarySection.append(el('h3', '', '📊 Summary'));
-	const cards = el('div', 'cards');
-	cards.append(
-		buildCard('Total Days', data.dailyCount.toLocaleString()),
-		buildCard('Total Tokens', formatCompact(data.totalTokens)),
-		buildCard('Avg Tokens / Day', formatCompact(data.avgTokensPerDay)),
-		buildCard('Total Sessions', data.totalSessions.toLocaleString())
-	);
-	summarySection.append(cards);
-
+	summarySection.append(iconHeading('h3', 'graph', 'Summary'), buildSummaryCards(periodData, periodMeta));
 	const editorCards = buildEditorCards(data.editorTotalsMap);
-	if (editorCards) {
-		summarySection.append(editorCards);
-	}
-
-	const chartSection = el('div', 'section');
-	chartSection.append(el('h3', '', '📊 Charts'));
-
-	const chartShell = el('div', 'chart-shell');
-	const toggles = el('div', 'chart-controls');
-	const totalBtn = el('button', 'toggle active', 'Total Tokens');
-	totalBtn.id = 'view-total';
-	const modelBtn = el('button', 'toggle', 'By Model');
-	modelBtn.id = 'view-model';
-	const editorBtn = el('button', 'toggle', 'By Editor');
-	editorBtn.id = 'view-editor';
-	const repoBtn = el('button', 'toggle', 'By Repository');
-	repoBtn.id = 'view-repository';
-	toggles.append(totalBtn, modelBtn, editorBtn, repoBtn);
-
+	if (editorCards) { summarySection.append(editorCards); }
+	const chartSectionHeader = el('div', 'chart-section-header');
+	chartSectionHeader.append(iconHeading('h3', 'graph-line', 'Charts'), buildPeriodToggles(data.periodsReady !== false));
 	const canvasWrap = el('div', 'canvas-wrap');
-	const canvas = document.createElement('canvas');
-	canvas.id = 'token-chart';
-	canvasWrap.append(canvas);
-
-	chartShell.append(toggles, canvasWrap);
-	chartSection.append(chartShell);
-
-	const footer = el('div', 'footer', `Day-by-day token usage for the last 30 days\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`);
-
-	container.append(header, summarySection, chartSection, footer);
+	const canvas = document.createElement('canvas'); canvas.id = 'token-chart'; canvasWrap.append(canvas);
+	const heatmapContainer = el('div', 'heatmap-container hidden');
+	heatmapContainer.id = 'heatmap-container';
+	const chartShell = el('div', 'chart-shell');
+	chartShell.append(buildChartControls(data), canvasWrap, heatmapContainer);
+	const chartSection = el('div', 'section');
+	chartSection.append(chartSectionHeader, chartShell);
+	const footer = el('div', 'footer',
+		`${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`);
+	footer.id = 'chart-footer';
+	const container = el('div', 'container');
+	container.append(buildChartHeader(data), summarySection, chartSection, footer);
 	root.append(themeStyle, style, container);
-
 	wireInteractions(data);
 	void setupChart(canvas, data);
 }
 
-function buildCard(label: string, value: string): HTMLElement {
+function buildCard(id: string, label: string, value: string): HTMLElement {
 	const card = el('div', 'card');
+	card.id = id;
 	card.append(el('div', 'card-label', label), el('div', 'card-value', value));
 	return card;
 }
@@ -158,9 +335,63 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 	}
 	const wrap = el('div', 'cards');
 	entries.forEach(([editor, tokens]) => {
-		wrap.append(buildCard(editor, formatCompact(tokens)));
+		const card = buildCard(`editor-${editor}`, editor, formatCompact(tokens));
+		// JetBrains only persists user messages + assistant text in its JSONL
+		// — no API counts, no thinking tokens. Flag the caveat with an
+		// info marker on the card so users don't compare apples-to-oranges.
+		if (editor === 'JetBrains') {
+			card.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.';
+			const labelEl = card.querySelector('.card-label');
+			if (labelEl) { labelEl.textContent = `${editor} ⓘ`; }
+		}
+		if (editor === 'Antigravity') {
+			card.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.';
+			const labelEl = card.querySelector('.card-label');
+			if (labelEl) { labelEl.textContent = `${editor} ⓘ`; }
+		}
+		wrap.append(card);
 	});
 	return wrap;
+}
+
+function updateSummaryCards(data: InitialChartData): void {
+	const periodData = getActivePeriodData(data);
+	const periodMeta = PERIOD_LABELS[currentPeriod];
+
+	const updateCard = (id: string, label: string | null, value: string) => {
+		const card = document.getElementById(id);
+		if (!card) { return; }
+		if (label !== null) {
+			const labelEl = card.querySelector('.card-label');
+			if (labelEl) { labelEl.textContent = label; }
+		}
+		const valueEl = card.querySelector('.card-value');
+		if (valueEl) { valueEl.textContent = value; }
+	};
+
+	updateCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString());
+
+	if (currentMetric === 'cost') {
+		updateCard('card-total-tokens', 'Total Cost (est.)', `$${periodData.totalCost.toFixed(2)}`);
+		updateCard('card-avg-tokens', periodMeta.avgCostLabel, `$${periodData.avgCostPerPeriod.toFixed(2)}`);
+	} else if (currentMetric === 'output') {
+		const totalLines = (periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0);
+		updateCard('card-total-tokens', 'Total Lines (AI)', totalLines.toLocaleString());
+		updateCard('card-avg-tokens', periodMeta.avgLocLabel, Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString());
+	} else {
+		updateCard('card-total-tokens', 'Total Tokens', formatCompact(periodData.totalTokens));
+		updateCard('card-avg-tokens', periodMeta.avgLabel, formatCompact(periodData.avgPerPeriod));
+	}
+
+	updateCard('card-total-sessions', null, periodData.totalSessions.toLocaleString());
+
+	const title = document.getElementById('chart-title');
+	if (title) { title.textContent = getChartTitle(); }
+
+	const footer = document.getElementById('chart-footer');
+	if (footer) {
+		footer.textContent = `${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`;
+	}
 }
 
 function wireInteractions(data: InitialChartData): void {
@@ -185,17 +416,46 @@ function wireInteractions(data: InitialChartData): void {
 	const environmental = document.getElementById('btn-environmental');
 	environmental?.addEventListener('click', () => vscode.postMessage({ command: 'showEnvironmental' }));
 
-	const viewButtons = [
-		{ id: 'view-total', view: 'total' as const },
-		{ id: 'view-model', view: 'model' as const },
-		{ id: 'view-editor', view: 'editor' as const },
-		{ id: 'view-repository', view: 'repository' as const },
-	];
+	wireExtensionPointButtons(vscode);
 
-	viewButtons.forEach(({ id, view }) => {
+	// Period toggle buttons
+	const periodButtons: Array<{ id: string; period: ChartPeriod }> = [
+		{ id: 'period-day',   period: 'day'   },
+		{ id: 'period-week',  period: 'week'  },
+		{ id: 'period-month', period: 'month' },
+	];
+	periodButtons.forEach(({ id, period }) => {
 		const btn = document.getElementById(id);
-		btn?.addEventListener('click', () => { void switchView(view, data); });
+		btn?.addEventListener('click', () => { void switchPeriod(period, data); });
 	});
+
+	// Chart metric toggle buttons
+	const metricButtons: Array<{ id: string; metric: typeof currentMetric }> = [
+		{ id: 'metric-tokens', metric: 'tokens' },
+		{ id: 'metric-output', metric: 'output' },
+		{ id: 'metric-cost',   metric: 'cost'   },
+	];
+	metricButtons.forEach(({ id, metric }) => {
+		const btn = document.getElementById(id);
+		btn?.addEventListener('click', () => { void switchMetric(metric, data); });
+	});
+
+	// Chart split toggle buttons
+	const splitButtons: Array<{ id: string; split: typeof currentSplit }> = [
+		{ id: 'split-total',      split: 'total'      },
+		{ id: 'split-model',      split: 'model'      },
+		{ id: 'split-editor',     split: 'editor'     },
+		{ id: 'split-repository', split: 'repository' },
+		{ id: 'split-language',   split: 'language'   },
+		{ id: 'split-provider',   split: 'provider'   },
+	];
+	splitButtons.forEach(({ id, split }) => {
+		const btn = document.getElementById(id);
+		btn?.addEventListener('click', () => { void switchSplit(split, data); });
+	});
+
+	const rollingToggle = document.getElementById('view-rolling');
+	rollingToggle?.addEventListener('click', () => { void switchDisplayMode(data); });
 }
 
 async function setupChart(canvas: HTMLCanvasElement, data: InitialChartData): Promise<void> {
@@ -207,22 +467,39 @@ async function setupChart(canvas: HTMLCanvasElement, data: InitialChartData): Pr
 	if (!Chart) {
 		return;
 	}
-	chart = new Chart(ctx, createConfig('total', data));
-	// Restore the previously active view if a background update triggered a re-render
-	if (pendingView !== null && pendingView !== 'total') {
-		const viewToRestore = pendingView;
-		currentView = 'total'; // Reset so switchView does not short-circuit
-		await switchView(viewToRestore, data);
+	chart = new Chart(ctx, createConfig(data));
+	// Restore the previously active period and view if a background update triggered a re-render
+	if (pendingPeriod !== null && pendingPeriod !== 'day') {
+		const periodToRestore = pendingPeriod;
+		currentPeriod = 'day';
+		await switchPeriod(periodToRestore, data);
+	} else if (pendingMetric !== null || pendingSplit !== null) {
+		const metricToRestore = pendingMetric ?? currentMetric;
+		const splitToRestore = pendingSplit ?? currentSplit;
+		currentMetric = 'tokens';
+		currentSplit = 'total';
+		await switchMetric(metricToRestore, data);
+		if (splitToRestore !== 'total') {
+			await switchSplit(splitToRestore, data);
+		}
 	}
-	pendingView = null;
+	pendingMetric = null;
+	pendingSplit = null;
+	pendingPeriod = null;
+	refreshHeatmapView(data);
 }
 
-async function switchView(view: 'total' | 'model' | 'editor' | 'repository', data: InitialChartData): Promise<void> {
-	if (currentView === view) {
+async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promise<void> {
+	if (currentPeriod === period) {
 		return;
 	}
-	currentView = view;
-	setActive(view);
+	currentPeriod = period;
+	vscode.postMessage({ command: 'setPeriodPreference', period });
+	saveWebviewState();
+	setActivePeriod(period);
+	updateSummaryCards(data);
+	refreshHeatmapView(data);
+	if (isHeatmapView()) { return; }
 	if (!chart) {
 		return;
 	}
@@ -239,168 +516,534 @@ async function switchView(view: 'total' | 'model' | 'editor' | 'repository', dat
 	if (!Chart) {
 		return;
 	}
-	chart = new Chart(ctx, createConfig(view, data));
+	chart = new Chart(ctx, createConfig(data));
 }
 
-function setActive(view: 'total' | 'model' | 'editor' | 'repository'): void {
-	['view-total', 'view-model', 'view-editor', 'view-repository'].forEach(id => {
+async function switchMetric(metric: typeof currentMetric, data: InitialChartData): Promise<void> {
+	if (currentMetric === metric) { return; }
+	// When switching to cost, keep editor/provider split if active; otherwise fall back to total
+	if (metric === 'cost' && currentSplit !== 'editor' && currentSplit !== 'provider') { currentSplit = 'total'; }
+	// When switching to output, disable unsupported splits
+	if (metric === 'output' && currentSplit === 'model') { currentSplit = 'total'; }
+	// When switching to tokens, disable language split
+	if (metric === 'tokens' && currentSplit === 'language') { currentSplit = 'total'; }
+	currentMetric = metric;
+	const rollingApplicable = currentSplit === 'total' && metric !== 'output';
+	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
+	vscode.postMessage({ command: 'setViewPreference', metric: currentMetric, split: currentSplit });
+	saveWebviewState();
+	setActiveMetric(metric);
+	setActiveSplit(currentSplit);
+	updateSplitButtonStates();
+	const rollingBtnEl = document.getElementById('view-rolling');
+	if (rollingBtnEl) {
+		rollingBtnEl.classList.toggle('hidden', !rollingApplicable);
+		rollingBtnEl.classList.toggle('active', rollingApplicable && currentDisplayMode === 'rolling');
+	}
+	updateSummaryCards(data);
+	await reinitChart(data);
+}
+
+function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
+	return (metric === 'cost' && (split === 'total' || split === 'editor' || split === 'provider')) ||
+		(metric === 'output' && split !== 'model' && split !== 'provider') ||
+		(metric === 'tokens' && split !== 'language' && split !== 'provider');
+}
+
+async function reinitChart(data: InitialChartData): Promise<void> {
+	refreshHeatmapView(data);
+	if (isHeatmapView()) {
+		if (chart) { chart.destroy(); chart = undefined; }
+		return;
+	}
+	if (!chart) {
+		// May have come from heatmap view with no active chart — get canvas from DOM
+		const canvasEl = document.getElementById('token-chart') as HTMLCanvasElement | null;
+		if (!canvasEl) { return; }
+		await loadChartModule();
+		if (!Chart) { return; }
+		const ctx = canvasEl.getContext('2d');
+		if (!ctx) { return; }
+		chart = new Chart(ctx, createConfig(data));
+		return;
+	}
+	const canvas = chart.canvas as HTMLCanvasElement | null;
+	chart.destroy();
+	if (!canvas) { return; }
+	const ctx = canvas.getContext('2d');
+	if (!ctx) { return; }
+	await loadChartModule();
+	if (!Chart) { return; }
+	chart = new Chart(ctx, createConfig(data));
+}
+
+async function switchSplit(split: typeof currentSplit, data: InitialChartData): Promise<void> {
+	if (currentSplit === split) { return; }
+	if (!isSplitSupported(currentMetric, split)) { return; }
+	currentSplit = split;
+	const rollingApplicable = split === 'total' && currentMetric !== 'output';
+	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
+	vscode.postMessage({ command: 'setViewPreference', metric: currentMetric, split: currentSplit });
+	saveWebviewState();
+	setActiveSplit(split);
+	const rollingBtnEl = document.getElementById('view-rolling');
+	if (rollingBtnEl) {
+		rollingBtnEl.classList.toggle('hidden', !rollingApplicable);
+		rollingBtnEl.classList.toggle('active', rollingApplicable && currentDisplayMode === 'rolling');
+	}
+	updateSummaryCards(data);
+	await reinitChart(data);
+}
+
+function setActivePeriod(period: ChartPeriod): void {
+	(['period-day', 'period-week', 'period-month'] as const).forEach(id => {
 		const btn = document.getElementById(id);
-		if (!btn) {
-			return;
-		}
-		btn.classList.toggle('active', id === `view-${view}`);
+		if (!btn) { return; }
+		btn.classList.toggle('active', id === `period-${period}`);
 	});
 }
 
-function createConfig(view: 'total' | 'model' | 'editor' | 'repository', data: InitialChartData): ChartConfig {
-	// Get CSS variables for theme-aware colors
-	const styles = getComputedStyle(document.body);
-	const textColor = styles.getPropertyValue('--text-primary') || '#e0e0e0';
-	const mutedColor = styles.getPropertyValue('--text-muted') || '#999999';
-	const borderColor = styles.getPropertyValue('--border-subtle') || '#3a3a40';
-	const bgColor = styles.getPropertyValue('--bg-tertiary') || '#1e1e1e';
-	
-	// Make grid lines very subtle with low opacity
-	const gridColor = 'rgba(128, 128, 128, 0.15)';
-	
-	const baseOptions = {
-		responsive: true,
-		maintainAspectRatio: false,
+function setActiveMetric(metric: typeof currentMetric): void {
+	(['metric-tokens', 'metric-output', 'metric-cost'] as const).forEach(id => {
+		const btn = document.getElementById(id);
+		if (!btn) { return; }
+		btn.classList.toggle('active', id === `metric-${metric}`);
+	});
+}
+
+function setActiveSplit(split: typeof currentSplit): void {
+	(['split-total', 'split-model', 'split-editor', 'split-repository', 'split-language', 'split-provider'] as const).forEach(id => {
+		const btn = document.getElementById(id);
+		if (!btn) { return; }
+		btn.classList.toggle('active', id === `split-${split}`);
+	});
+}
+
+function updateSplitButtonStates(): void {
+	const splits: Array<{ id: string; split: string }> = [
+		{ id: 'split-total',      split: 'total'      },
+		{ id: 'split-model',      split: 'model'      },
+		{ id: 'split-editor',     split: 'editor'     },
+		{ id: 'split-repository', split: 'repository' },
+		{ id: 'split-language',   split: 'language'   },
+		{ id: 'split-provider',   split: 'provider'   },
+	];
+	splits.forEach(({ id, split }) => {
+		const btn = document.getElementById(id) as HTMLButtonElement | null;
+		if (!btn) { return; }
+		const supported = isSplitSupported(currentMetric, split as typeof currentSplit);
+		btn.disabled = !supported;
+		btn.classList.toggle('disabled', !supported);
+		btn.title = supported ? '' : `Not available for ${currentMetric} metric`;
+	});
+}
+
+function setActiveDisplayMode(mode: DisplayMode): void {
+	const btn = document.getElementById('view-rolling');
+	if (!btn) { return; }
+	btn.classList.toggle('active', mode === 'rolling');
+}
+
+async function switchDisplayMode(data: InitialChartData): Promise<void> {
+	currentDisplayMode = currentDisplayMode === 'actual' ? 'rolling' : 'actual';
+	setActiveDisplayMode(currentDisplayMode);
+	saveWebviewState();
+	updateSummaryCards(data);
+	if (!chart) { return; }
+	const canvas = chart.canvas as HTMLCanvasElement | null;
+	chart.destroy();
+	if (!canvas) { return; }
+	const ctx = canvas.getContext('2d');
+	if (!ctx) { return; }
+	await loadChartModule();
+	if (!Chart) { return; }
+	chart = new Chart(ctx, createConfig(data));
+}
+
+const PROJECTION_LABELS: Record<ChartPeriod, string> = {
+	day: '📈 Projected (today)', week: '📈 Projected (this week)', month: '📈 Projected (this month)',
+};
+
+type ChartColors = { textColor: string; gridColor: string; borderColor: string; bgColor: string };
+
+function getChartColors(): ChartColors {
+	const s = getComputedStyle(document.body);
+	return {
+		textColor: s.getPropertyValue('--text-primary') || '#e0e0e0',
+		gridColor: 'rgba(128, 128, 128, 0.15)',
+		borderColor: s.getPropertyValue('--border-subtle') || '#3a3a40',
+		bgColor: s.getPropertyValue('--bg-tertiary') || '#1e1e1e',
+	};
+}
+
+function buildBaseOptions(c: ChartColors) {
+	return {
+		responsive: true, maintainAspectRatio: false,
 		interaction: { mode: 'index' as const, intersect: false },
 		plugins: {
-			legend: { position: 'top' as const, labels: { color: textColor, font: { size: 12 } } },
-			tooltip: {
-				backgroundColor: bgColor,
-				titleColor: textColor,
-				bodyColor: textColor,
-				borderColor: borderColor,
-				borderWidth: 1,
-				padding: 10,
-				displayColors: true
-			}
+			legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } },
+			tooltip: { backgroundColor: c.bgColor, titleColor: c.textColor, bodyColor: c.textColor, borderColor: c.borderColor, borderWidth: 1, padding: 10, displayColors: true }
 		},
-		scales: {
-			x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } }
-		} as const
+		scales: { x: { grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } } } as const
 	};
+}
 
-	if (view === 'total') {
-		return {
-			type: 'bar' as const,
-			data: {
-				labels: data.labels,
-				datasets: [
-					{
-						label: 'Tokens',
-						data: data.tokensData,
-						backgroundColor: 'rgba(54, 162, 235, 0.6)',
-						borderColor: 'rgba(54, 162, 235, 1)',
-						borderWidth: 1,
-						yAxisID: 'y'
-					},
-					{
-						label: 'Sessions',
-						data: data.sessionsData,
-						backgroundColor: 'rgba(255, 99, 132, 0.6)',
-						borderColor: 'rgba(255, 99, 132, 1)',
-						borderWidth: 1,
-						type: 'line' as const,
-						yAxisID: 'y1'
-					}
-				]
-			},
-			options: {
-				...baseOptions,
-				scales: {
-					...baseOptions.scales,
-					y: {
-						type: 'linear' as const,
-						display: true,
-						position: 'left' as const,
-						grid: { color: gridColor },
-						ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() },
-						title: { display: true, text: 'Tokens', color: textColor, font: { size: 12, weight: 'bold' } }
-					},
-					y1: {
-						type: 'linear' as const,
-						display: true,
-						position: 'right' as const,
-						grid: { drawOnChartArea: false },
-						ticks: { color: textColor, font: { size: 11 } },
-						title: { display: true, text: 'Sessions', color: textColor, font: { size: 12, weight: 'bold' } }
-					}
-				}
-			}
-		};
-	}
-
-	const datasets = view === 'model' ? data.modelDatasets : view === 'repository' ? data.repositoryDatasets : data.editorDatasets;
-	
-	// Add sessions line as an overlay on all stacked views
-	const sessionsDataset = {
-		label: 'Sessions',
-		data: data.sessionsData,
-		backgroundColor: 'rgba(255, 99, 132, 0.6)',
-		borderColor: 'rgba(255, 99, 132, 1)',
-		borderWidth: 2,
-		type: 'line' as const,
-		yAxisID: 'y1',
-		stack: undefined // Don't stack the line
-	};
-	
+function buildTotalViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const isRolling = currentDisplayMode === 'rolling';
+	const tokenData = isRolling ? computeRollingAverage(period.tokensData, ROLLING_WINDOW[currentPeriod]) : period.tokensData;
+	const lastIdx = period.tokensData.length - 1;
+	const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0), backgroundColor: 'rgba(54, 162, 235, 0.2)', borderColor: 'rgba(54, 162, 235, 0.5)', borderWidth: 1, yAxisID: 'y' }] : [];
+	const rollingLabel = getRollingLabel();
 	return {
 		type: 'bar' as const,
-		data: { labels: data.labels, datasets: [...datasets, sessionsDataset] },
+		data: { labels: period.labels, datasets: [
+			{ label: isRolling ? rollingLabel : 'Tokens', data: tokenData, backgroundColor: isRolling ? 'rgba(54, 162, 235, 0.15)' : 'rgba(54, 162, 235, 0.6)', borderColor: 'rgba(54, 162, 235, 1)', borderWidth: isRolling ? 2 : 1, type: isRolling ? 'line' as const : undefined, tension: isRolling ? 0.4 : undefined, fill: isRolling ? false : undefined, yAxisID: 'y' },
+			...projDs,
+			{ label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 1, type: 'line' as const, yAxisID: 'y1' }
+		] },
+		options: { ...baseOptions, scales: {
+			x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+			y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Tokens', color: c.textColor, font: { size: 12, weight: 'bold' } } },
+			y1: { type: 'linear' as const, display: true, position: 'right' as const, grid: { drawOnChartArea: false }, ticks: { color: c.textColor, font: { size: 11 } }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
+		} }
+	};
+}
+
+function buildBudgetLinePlugin(monthlyBudget: number) {
+	return {
+		id: 'budgetLine',
+		afterDraw(ch: any) {
+			const { ctx, chartArea, scales: { y } } = ch;
+			if (!y || !chartArea) { return; }
+			const yPos = y.getPixelForValue(monthlyBudget);
+			if (yPos < chartArea.top || yPos > chartArea.bottom) { return; }
+			ctx.save();
+			ctx.strokeStyle = 'rgba(255, 80, 80, 0.9)';
+			ctx.lineWidth = 2;
+			ctx.setLineDash([6, 4]);
+			ctx.beginPath();
+			ctx.moveTo(chartArea.left, yPos);
+			ctx.lineTo(chartArea.right, yPos);
+			ctx.stroke();
+			ctx.setLineDash([]);
+			ctx.fillStyle = 'rgba(255, 80, 80, 0.9)';
+			ctx.font = 'bold 11px sans-serif';
+			ctx.textAlign = 'left';
+			ctx.fillText(`Budget: $${monthlyBudget.toFixed(2)}`, chartArea.left + 6, yPos - 5);
+			ctx.restore();
+		},
+	};
+}
+
+function buildCostDataset(isRolling: boolean, rollingLabel: string, costData: number[]) {
+	return {
+		label: isRolling ? `${rollingLabel} (UBB)` : 'Est. Cost (UBB)',
+		data: costData,
+		backgroundColor: isRolling ? 'rgba(34, 197, 94, 0.15)' : 'rgba(34, 197, 94, 0.6)',
+		borderColor: 'rgba(34, 197, 94, 1)',
+		borderWidth: isRolling ? 2 : 1,
+		type: isRolling ? 'line' as const : undefined,
+		tension: isRolling ? 0.4 : undefined,
+		fill: isRolling ? false : undefined,
+		yAxisID: 'y' as const,
+	};
+}
+
+function buildCostProviderViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = (period.billingGroupCostDatasets ?? []) as ModelDataset[];
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: datasets as any },
 		options: {
 			...baseOptions,
 			plugins: {
 				...baseOptions.plugins,
-				legend: { position: 'top' as const, labels: { color: textColor, font: { size: 11 } } }
+				legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
+				tooltip: {
+					...baseOptions.plugins.tooltip,
+					callbacks: {
+						label: (ctx: any) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
+						footer: (items: any[]) => {
+							const total = items.reduce((sum: number, i: any) => sum + (Number(i.parsed.y) || 0), 0);
+							return `Total: $${total.toFixed(4)}`;
+						}
+					}
+				}
 			},
 			scales: {
-				...baseOptions.scales,
-				y: { 
-					stacked: true, 
-					grid: { color: gridColor }, 
-					ticks: { color: textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() },
-					title: { display: true, text: 'Tokens', color: textColor, font: { size: 12, weight: 'bold' } }
-				},
-				x: { stacked: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 11 } } },
-				y1: {
-					type: 'linear' as const,
-					display: true,
-					position: 'right' as const,
-					grid: { drawOnChartArea: false },
-					ticks: { color: textColor, font: { size: 11 } },
-					title: { display: true, text: 'Sessions', color: textColor, font: { size: 12, weight: 'bold' } }
-				}
+				x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (USD)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } }
 			}
+		}
+	} as ChartConfig;
+}
+
+function buildCostEditorViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = (period.editorCostDatasets ?? []) as ModelDataset[];
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: datasets as any },
+		options: {
+			...baseOptions,
+			plugins: {
+				...baseOptions.plugins,
+				legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
+				tooltip: {
+					...baseOptions.plugins.tooltip,
+					callbacks: {
+						label: (ctx: any) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
+						footer: (items: any[]) => {
+							const total = items.reduce((sum: number, i: any) => sum + (Number(i.parsed.y) || 0), 0);
+							return `Total: $${total.toFixed(4)}`;
+						}
+					}
+				}
+			},
+			scales: {
+				x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (USD)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } }
+			}
+		}
+	} as ChartConfig;
+}
+
+function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors, monthlyBudget = 0): ChartConfig {
+	const isRolling = currentDisplayMode === 'rolling';
+	const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
+	const lastIdx = period.costData.length - 1;
+	const projExtra = !isRolling && lastIdx >= 0 ? computeProjectionExtra(period.costData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.costData.map((_: number, i: number) => i === lastIdx ? projExtra : 0), backgroundColor: 'rgba(34, 197, 94, 0.2)', borderColor: 'rgba(34, 197, 94, 0.5)', borderWidth: 1, yAxisID: 'y' }] : [];
+	const budget = monthlyBudget;
+	const budgetDs = budget > 0 && currentPeriod === 'month' ? [{ label: `Monthly Budget ($${budget.toFixed(2)})`, data: period.labels.map(() => budget), type: 'line' as const, borderColor: 'rgba(255, 165, 0, 0.9)', borderWidth: 2, borderDash: [6, 4], pointRadius: 0, fill: false, yAxisID: 'y' }] : [];
+	const rollingLabel = getRollingLabel();
+	const showBudgetLine = currentPeriod === 'month' && monthlyBudget > 0;
+	const budgetLinePlugin = showBudgetLine ? buildBudgetLinePlugin(monthlyBudget) : null;
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: [buildCostDataset(isRolling, rollingLabel, costData), ...projDs] },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` $${Number(ctx.parsed.y).toFixed(4)}` } } },
+			scales: { x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (UBB)', color: c.textColor, font: { size: 12, weight: 'bold' as const } }, ...(showBudgetLine ? { suggestedMax: monthlyBudget * 1.05 } : {}) } }
+		},
+		...(budgetLinePlugin ? { plugins: [budgetLinePlugin] } : {}),
+	} as ChartConfig;
+}
+
+function buildOutputViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const locDatasets = view === 'output-language' ? (period.languageDatasets ?? []) : view === 'output-editor' ? (period.locEditorDatasets ?? []) : view === 'output-repository' ? (period.locRepositoryDatasets ?? []) :
+		[{ label: 'Lines Added', data: period.linesAddedData ?? [], backgroundColor: 'rgba(75, 192, 192, 0.6)', borderColor: 'rgba(75, 192, 192, 1)', borderWidth: 1 },
+		 { label: 'Lines Removed', data: (period.linesRemovedData ?? []).map((v: number) => -v), backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 1 }];
+	const stacked = view === 'output-total';
+	return {
+		type: 'bar' as const, data: { labels: period.labels, datasets: locDatasets as any },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } }, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` ${Math.abs(Number(ctx.parsed.y)).toLocaleString()} lines` } } },
+			scales: { x: { stacked, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y: { stacked, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Math.abs(Number(value)).toLocaleString() }, title: { display: true, text: 'Lines of Code', color: c.textColor, font: { size: 12, weight: 'bold' } } } }
 		}
 	};
 }
 
+function getHeatmapColor(value: number, maxValue: number): string {
+	if (maxValue === 0 || value === 0) { return 'rgba(128, 128, 128, 0.06)'; }
+	// Log scale, dark forest green → bright green accent (#22c55e)
+	const f = Math.log1p(value) / Math.log1p(maxValue);
+	const r = Math.round(5 + (34 - 5) * f);
+	const g = Math.round(60 + (197 - 60) * f);
+	const b = Math.round(30 + (94 - 30) * f);
+	const a = (0.55 + 0.45 * f).toFixed(2);
+	return `rgba(${r}, ${g}, ${b}, ${a})`;
+}
 
-async function bootstrap(): Promise<void> {
-	const { provideVSCodeDesignSystem, vsCodeButton } = await import('@vscode/webview-ui-toolkit');
-	provideVSCodeDesignSystem().register(vsCodeButton());
+const HEATMAP_TOP_LANGUAGES = 10;
 
-	if (!initialData) {
-		const root = document.getElementById('root');
-		if (root) {
-			root.textContent = 'No data available.';
+function shortenDateLabel(label: string): string {
+	const m = /^\d{4}-(\d{2})-(\d{2})$/.exec(label);
+	if (m) { return `${parseInt(m[1])}/${parseInt(m[2])}`; }
+	return label;
+}
+
+function buildLanguageHeatmap(period: ChartPeriodData): HTMLElement {
+	const datasets = (period.languageDatasets ?? []) as ModelDataset[];
+	const withTotals = datasets
+		.map(ds => ({ label: ds.label, data: ds.data as number[], total: (ds.data as number[]).reduce((a, b) => a + b, 0) }))
+		.filter(ds => ds.total > 0)
+		.sort((a, b) => b.total - a.total);
+	const topLangs = withTotals.slice(0, HEATMAP_TOP_LANGUAGES);
+	const otherLangs = withTotals.slice(HEATMAP_TOP_LANGUAGES);
+	if (otherLangs.length > 0) {
+		const otherData = otherLangs[0].data.map((_, i) => otherLangs.reduce((sum, ds) => sum + ds.data[i], 0));
+		const otherTotal = otherData.reduce((a, b) => a + b, 0);
+		if (otherTotal > 0) { topLangs.push({ label: 'Other', data: otherData, total: otherTotal }); }
+	}
+	const labels = period.labels;
+	const shortLabels = labels.map(shortenDateLabel);
+	const wrap = el('div', 'heatmap-wrap');
+	if (!topLangs.length) {
+		wrap.append(el('div', 'heatmap-empty', 'No language data for this period.'));
+		return wrap;
+	}
+	const maxValue = Math.max(...topLangs.flatMap(ds => ds.data));
+	const table = document.createElement('table');
+	table.className = 'heatmap-table';
+	const thead = document.createElement('thead');
+	const headerRow = document.createElement('tr');
+	const cornerTh = document.createElement('th');
+	cornerTh.className = 'heatmap-lang-header';
+	headerRow.append(cornerTh);
+	labels.forEach((label, i) => {
+		const th = document.createElement('th');
+		th.className = 'heatmap-date-header';
+		const span = document.createElement('span');
+		span.textContent = shortLabels[i];
+		th.title = label;
+		th.append(span);
+		headerRow.append(th);
+	});
+	thead.append(headerRow);
+	table.append(thead);
+	const tbody = document.createElement('tbody');
+	topLangs.forEach(ds => {
+		const tr = document.createElement('tr');
+		const langTd = document.createElement('td');
+		langTd.className = 'heatmap-lang-label';
+		langTd.textContent = ds.label;
+		tr.append(langTd);
+		ds.data.forEach((value, i) => {
+			const td = document.createElement('td');
+			td.className = 'heatmap-data-cell';
+			td.style.backgroundColor = getHeatmapColor(value, maxValue);
+			if (value > 0) {
+				td.title = `${ds.label} · ${labels[i]}: ${value.toLocaleString()} lines`;
+			}
+			tr.append(td);
+		});
+		tbody.append(tr);
+	});
+	table.append(tbody);
+	wrap.append(table);
+	return wrap;
+}
+
+function isHeatmapView(): boolean {
+	return currentMetric === 'output' && currentSplit === 'language';
+}
+
+function refreshHeatmapView(data: InitialChartData): void {
+	const canvasWrap = document.querySelector('.canvas-wrap') as HTMLElement | null;
+	const heatmapContainer = document.getElementById('heatmap-container');
+	if (!canvasWrap || !heatmapContainer) { return; }
+	const show = isHeatmapView();
+	canvasWrap.classList.toggle('hidden', show);
+	heatmapContainer.classList.toggle('hidden', !show);
+	if (show) {
+		heatmapContainer.replaceChildren(buildLanguageHeatmap(getActivePeriodData(data)));
+	}
+}
+
+function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = view === 'model' ? period.modelDatasets : view === 'repository' ? period.repositoryDatasets : period.editorDatasets;
+	const lastIdx = period.tokensData.length - 1;
+	const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
+	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0), backgroundColor: 'rgba(200, 200, 200, 0.25)', borderColor: 'rgba(200, 200, 200, 0.5)', borderWidth: 1 }] : [];
+	const sessionsDs = { label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(255, 99, 132, 0.6)', borderColor: 'rgba(255, 99, 132, 1)', borderWidth: 2, type: 'line' as const, yAxisID: 'y1', stack: undefined };
+	return {
+		type: 'bar' as const, data: { labels: period.labels, datasets: [...datasets, ...projDs, sessionsDs] },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
+			tooltip: { ...baseOptions.plugins.tooltip, callbacks: { footer: (items: any[]) => {
+				if (currentSplit !== 'editor') { return ''; }
+				if (items.some(i => i?.dataset?.label === 'JetBrains')) { return 'JetBrains: estimates from user messages + assistant text only.\nActual API counts and thinking tokens are not available.'; }
+				if (items.some(i => i?.dataset?.label === 'Antigravity')) { return 'Antigravity: estimates from transcript content.\nActual API counts are not stored locally.'; }
+				return '';
+			} } } },
+			scales: { ...baseOptions.scales, y: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Tokens', color: c.textColor, font: { size: 12, weight: 'bold' } } }, x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } }, y1: { type: 'linear' as const, display: true, position: 'right' as const, grid: { drawOnChartArea: false }, ticks: { color: c.textColor, font: { size: 11 } }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } } }
+		}
+	};
+}
+
+function resolveChartView(metric: typeof currentMetric, split: typeof currentSplit): string {
+	if (metric === 'tokens') {
+		if (split === 'model') { return 'model'; }
+		if (split === 'editor') { return 'editor'; }
+		if (split === 'repository') { return 'repository'; }
+		return 'total';
+	}
+	if (metric === 'cost') {
+		if (split === 'editor') { return 'cost-editor'; }
+		if (split === 'provider') { return 'cost-provider'; }
+		return 'cost';
+	}
+	return `output-${split}`;
+}
+
+function createConfig(data: InitialChartData): ChartConfig {
+	const period = getActivePeriodData(data);
+	const view = resolveChartView(currentMetric, currentSplit);
+	const c = getChartColors();
+	const baseOptions = buildBaseOptions(c);
+	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
+	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c, data.monthlyBudget ?? 0); }
+	if (view === 'cost-editor') { return buildCostEditorViewConfig(period, baseOptions, c); }
+	if (view === 'cost-provider') { return buildCostProviderViewConfig(period, baseOptions, c); }
+	if (view.startsWith('output-')) { return buildOutputViewConfig(view, period, baseOptions, c); }
+	return buildStackedViewConfig(view, period, baseOptions, c);
+}
+
+
+type MetricSplit = { metric: typeof currentMetric; split: typeof currentSplit };
+
+function migrateViewKey(view: string): MetricSplit {
+	const map: Record<string, MetricSplit> = {
+		total: { metric: 'tokens', split: 'total' }, model: { metric: 'tokens', split: 'model' },
+		editor: { metric: 'tokens', split: 'editor' }, repository: { metric: 'tokens', split: 'repository' },
+		cost: { metric: 'cost', split: 'total' },
+	};
+	return map[view] ?? { metric: 'tokens', split: 'total' };
+}
+
+function restoreChartState(initialData: InitialChartData): void {
+	const saved = chartState.restore();
+	if (!vscode.getState()) {
+		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
+		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
+		if (initialData.initialSplit) { currentSplit = initialData.initialSplit; }
+		else if (initialData.initialView) {
+			const m = migrateViewKey(initialData.initialView);
+			currentMetric = m.metric; currentSplit = m.split;
 		}
 		return;
 	}
+	currentPeriod = saved.period;
+	currentDisplayMode = saved.displayMode;
+	if (saved.view && !saved.metric) {
+		const m = migrateViewKey(saved.view);
+		currentMetric = m.metric; currentSplit = m.split;
+	} else {
+		currentMetric = saved.metric ?? 'tokens';
+		currentSplit = saved.split ?? 'total';
+	}
+}
+
+async function bootstrap(): Promise<void> {
+	await import('@vscode-elements/elements/dist/vscode-button/index.js');
+
+	if (!initialData) {
+		const root = document.getElementById('root');
+		if (root) { root.textContent = 'No data available.'; }
+		return;
+	}
+
+	restoreChartState(initialData);
 	renderLayout(initialData);
 }
 
 void bootstrap();
 
 // Listen for background data updates from the extension
-window.addEventListener('message', (event: MessageEvent) => {
-	const message = event.data;
+registerMessageHandler((message) => {
 	if (message.command === 'updateChartData') {
-		pendingView = currentView; // Save current toggle view for restoration after chart re-initializes
+		// Save current toggles for restoration after chart re-initializes
+		pendingMetric = currentMetric;
+		pendingSplit = currentSplit;
+		pendingPeriod = currentPeriod;
 		renderLayout(message.data as InitialChartData);
 	}
 });

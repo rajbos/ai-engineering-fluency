@@ -1,0 +1,59 @@
+{
+  "properties": {
+    "aiEngineeringFluency.display.compactNumbers": {
+      "title": "Use compact numbers",
+      "type": "boolean",
+      "default": true,
+      "order": 0,
+      "migration": {
+        "pass": {
+          "input": {
+            "store": "SettingsManager",
+            "path": "AIEngineeringFluency.Options.GeneralOptions.CompactNumbers"
+          }
+        }
+      }
+    },
+    "aiEngineeringFluency.toolbar.showCostInToolbar": {
+      "title": "Show estimated cost in toolbar",
+      "type": "boolean",
+      "default": true,
+      "order": 0,
+      "migration": {
+        "pass": {
+          "input": {
+            "store": "SettingsManager",
+            "path": "AIEngineeringFluency.Options.GeneralOptions.ShowCostInToolbar"
+          }
+        }
+      }
+    },
+    "aiEngineeringFluency.toolbar.toolbarComparisonPeriod": {
+      "title": "Toolbar comparison period",
+      "type": "string",
+      "enum": [ "Last30Days", "CurrentMonth" ],
+      "enumItemLabels": [ "Last 30 days", "Current calendar month" ],
+      "default": "Last30Days",
+      "order": 1,
+      "migration": {
+        "pass": {
+          "input": {
+            "store": "SettingsManager",
+            "path": "AIEngineeringFluency.Options.GeneralOptions.ToolbarComparisonPeriod"
+          }
+        }
+      }
+    }
+  },
+  "categories": {
+    "aiEngineeringFluency": {
+      "title": "AI Engineering Fluency"
+    },
+    "aiEngineeringFluency.display": {
+      "title": "Display"
+    },
+    "aiEngineeringFluency.toolbar": {
+      "title": "Toolbar"
+    }
+  }
+}

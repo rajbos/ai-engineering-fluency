@@ -4,7 +4,9 @@
 import { Command } from 'commander';
 import chalk from 'chalk';
 import * as path from 'path';
-import { discoverSessionFiles, getDiagnosticPaths, processSessionFile, fmt, formatTokens } from '../helpers';
+import { discoverSessionFiles, getDiagnosticPaths, processSessionFile, effectiveTokens, fmt, formatTokens } from '../helpers';
+import { ProgressTracker } from '../progress';
+import { normalizePathSeparators } from '../../../src/workspaceHelpers';
 
 interface LocationStats {
 	label: string;
@@ -23,7 +25,7 @@ function matchToCandidatePath(
 	filePath: string,
 	candidates: { path: string; exists: boolean; source: string }[]
 ): { path: string; source: string } | null {
-	const normalized = filePath.replace(/\\/g, '/');
+	const normalized = normalizePathSeparators(filePath);
 	// For OpenCode DB virtual paths, resolve to the db file path
 	const effectivePath = normalized.includes('opencode.db#') ? normalized.split('#')[0] : normalized;
 
@@ -31,7 +33,7 @@ function matchToCandidatePath(
 	let best: { path: string; source: string } | null = null;
 	let bestLen = 0;
 	for (const cand of candidates) {
-		const candNorm = cand.path.replace(/\\/g, '/');
+		const candNorm = normalizePathSeparators(cand.path);
 		if (effectivePath.startsWith(candNorm) && candNorm.length > bestLen) {
 			best = { path: cand.path, source: cand.source };
 			bestLen = candNorm.length;
@@ -42,6 +44,7 @@ function matchToCandidatePath(
 
 /** Truncate a path for display, keeping the last N segments */
 function truncatePath(p: string, maxLen = 55): string {
+	if (!p) { return ''; }
 	if (p.length <= maxLen) { return p; }
 	const parts = p.replace(/\\/g, '/').split('/');
 	let result = p;
@@ -54,6 +57,10 @@ function truncatePath(p: string, maxLen = 55): string {
 
 /** Print a simple aligned table to stdout */
 function printTable(headers: string[], rows: string[][], colWidths: number[]): void {
+	if (!headers || !rows || !colWidths) { return; }
+	if (headers.length !== colWidths.length) {
+		throw new Error(`printTable: headers.length (${headers.length}) !== colWidths.length (${colWidths.length})`);
+	}
 	const sep = chalk.dim('─'.repeat(colWidths.reduce((a, b) => a + b + 3, -1)));
 
 	// Header
@@ -102,9 +109,10 @@ export const diagnosticsCommand = new Command('diagnostics')
 		}
 
 		// --- Discover and process files ---
-		process.stdout.write(chalk.dim('Scanning for session files...'));
+		const progress = new ProgressTracker();
+		progress.show('Scanning for session files...');
 		const files = await discoverSessionFiles();
-		process.stdout.write('\r' + ' '.repeat(60) + '\r');
+		progress.done();
 
 		if (files.length === 0) {
 			console.log(chalk.yellow('⚠️  No session files found in any search path.'));
@@ -134,7 +142,7 @@ export const diagnosticsCommand = new Command('diagnostics')
 		for (let i = 0; i < files.length; i++) {
 			// Progress
 			if ((i + 1) % 25 === 0 || i === files.length - 1) {
-				process.stdout.write(`\r${chalk.dim(`Processing: ${i + 1}/${files.length} files...`)}`);
+				progress.update(`Processing: ${i + 1}/${files.length} files...`);
 			}
 
 			const match = matchToCandidatePath(files[i], candidates);
@@ -159,14 +167,14 @@ export const diagnosticsCommand = new Command('diagnostics')
 			if (data && data.tokens > 0) {
 				loc.sessions++;
 				loc.interactions += data.interactions;
-				loc.tokens += data.tokens;
+				loc.tokens += effectiveTokens(data);
 				totalSessions++;
 				totalInteractions += data.interactions;
-				totalTokens += data.tokens;
+				totalTokens += effectiveTokens(data);
 			}
 		}
 
-		process.stdout.write('\r' + ' '.repeat(60) + '\r');
+		progress.done();
 
 		// --- Per-location table ---
 		console.log(chalk.bold(`📊 Stats per Search Location`));
@@ -204,7 +212,7 @@ export const diagnosticsCommand = new Command('diagnostics')
 		console.log(`  Total files found:      ${chalk.bold(fmt(totalFiles))}`);
 		console.log(`  Files with data:        ${chalk.bold(fmt(totalSessions))}`);
 		console.log(`  Total chat turns:       ${chalk.bold(fmt(totalInteractions))}`);
-		console.log(`  Total tokens (est.):    ${chalk.bold.yellow(formatTokens(totalTokens))}`);
+		console.log(`  Total tokens:           ${chalk.bold.yellow(formatTokens(totalTokens))}`);
 
 		if (missing.length > 0) {
 			console.log();

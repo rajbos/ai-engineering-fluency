@@ -9,6 +9,10 @@
     "scrape": "node scrape-models.js"
   },
   "dependencies": {
-    "puppeteer": "^24.40.0"
+    "puppeteer": "^25.0.4"
+  },
+  "overrides": {
+    "js-yaml": ">=4.2.0",
+    "ws": ">=8.21.0"
   }
 }

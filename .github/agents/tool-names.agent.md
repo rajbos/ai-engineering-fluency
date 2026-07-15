@@ -1,7 +1,7 @@
 ---
 description: "Add friendly display names for unknown MCP and VS Code tools detected in session logs. Handles tool name mapping in src/toolNames.json."
 name: "Tool Names - Add Missing Friendly Names"
-tools: ["execute/runInTerminal", "execute/getTerminalOutput", "search/codebase", "read/problems"]
+tools: [execute/getTerminalOutput, execute/runInTerminal, read, search/codebase]
 ---
 
 # Tool Names - Add Missing Friendly Names
@@ -32,7 +32,8 @@ MCP tools follow predictable naming patterns. The raw tool identifier encodes th
 | `mcp.io.github.git.` or `mcp_io_github_git_` | `GitHub MCP (Local):` | [github/github-mcp-server](https://github.com/github/github-mcp-server) |
 | `mcp_github_github_` | `GitHub MCP (Remote):` | [github/github-mcp-server](https://github.com/github/github-mcp-server) |
 | `mcp_github-code-s_` | `GitHub MCP (Code Scanning):` | [github/github-mcp-server](https://github.com/github/github-mcp-server) |
-| `mcp_com_microsoft_` | `GitHub MCP:` | Microsoft internal MCP server |
+| `mcp_com_microsoft_` | `Microsoft MCP:` | Microsoft internal MCP server |
+| `mcp_microsoftdocs_microsoft_` | `Microsoft Docs MCP:` | Microsoft MCP server for official documentation retrieval |
 | `mcp_gitkraken_` | `GitKraken MCP:` | GitKraken (no public MCP server repo; tools come from the GitKraken VS Code extension) |
 | `mcp_oraios_serena_` | `Serena:` | [oraios/serena](https://github.com/oraios/serena) |
 | `mcp_microsoft_pla_` | `Playwright MCP:` | [microsoft/playwright-mcp](https://github.com/microsoft/playwright-mcp) |
@@ -123,6 +124,7 @@ When adding a new tool to `toolNames.json`, also determine if it belongs in `aut
 - The file is a plain JSON array of tool ID strings
 - Add new entries at the end of the array (before the closing `]`)
 - Keep related tool variants together (e.g., all variants of `read_file`)
+- **Case-insensitive deduplication**: Before adding a tool ID, check if a differently-cased variant (e.g., lowercase equivalent) is already in the array. If `grep` is already there, do **not** add `Grep`. Only add a capitalized variant if the lowercase form is absent.
 
 
 
@@ -133,6 +135,7 @@ When adding a new tool to `toolNames.json`, also determine if it belongs in `aut
 - Insert new MCP entries near existing entries with the same prefix
 - Insert new non-MCP entries alphabetically or near logically related tools
 - Never remove existing entries
+- **Case-insensitive deduplication**: Before adding a new tool ID, check whether a lowercase (or differently-cased) variant already exists. If `grep` is already mapped, do **not** add `Grep`. If `tool_search` is already mapped, do **not** add `ToolSearch`. The lookup code handles exact-match only, so capitalized variants do map differently — but if both would resolve to the *exact same friendly name*, skip the duplicate. Only add a capitalized variant when it has a meaningfully different name or the lowercase form does not exist at all.
 
 ### Validation
 
@@ -145,6 +148,38 @@ After editing `src/toolNames.json`:
 ## Upstream Sync Reference
 
 The `sync-toolnames` workflow (`.github/workflows/sync-toolnames.yml`) automatically syncs tool IDs from `microsoft/vscode-copilot-chat` using the prompt at `.github/workflows/prompts/sync-toolnames-prompt.md`. This covers VS Code built-in and Copilot tools. MCP tool names from user sessions are **not** covered by this sync and must be added manually via issues.
+
+## Antigravity Tool Names
+
+Antigravity (Google's closed-source successor to Gemini CLI, released May 2026) surfaces tool names via the `tool_calls[].name` field in `PLANNER_RESPONSE` entries of its `transcript.jsonl` session files. These are **not** MCP tools — they are built-in Antigravity agent capabilities.
+
+### Prefix Pattern
+
+Antigravity tools have **no prefix** — they use plain snake_case identifiers.
+
+| Raw name | Friendly name | Notes |
+|---|---|---|
+| `search_web` | `Search Web` | Built-in web search; called automatically by the agent |
+
+### Where These Names Appear
+
+The Antigravity adapter (`src/adapters/antigravityAdapter.ts`) counts tool calls from `tool_calls[].name` in parsed transcript entries and stores them in `analysis.toolCalls.byTool[tc.name]`. Any `tool_calls[].name` value that is not in `toolNames.json` will display as **"Unknown"** in the tool usage panel.
+
+### Automatic vs. Intentional
+
+All Antigravity built-in tools are **automatic** — the agent invokes them without user configuration. Add them to `automaticTools.json`.
+
+### How to Discover New Antigravity Tools
+
+1. Open `~/.gemini/antigravity/brain/*/. system_generated/logs/transcript.jsonl` for any session.
+2. Search for `"tool_calls"` — each entry's `name` field is a new tool candidate.
+3. Add the raw name to `toolNames.json` and to `automaticTools.json`.
+
+### Session Path Pattern
+
+Antigravity session paths match: `/.gemini/antigravity/brain/{uuid}/.system_generated/logs/transcript.jsonl`
+
+This is already handled by `workspaceHelpers.ts` (`detectToolEditorFromPath`, `detectEditorSource`, `getEditorNameFromRoot`) which all check for `/.gemini/antigravity/brain/` **before** the generic `/.gemini/` check used for Gemini CLI.
 
 ## Checklist
 

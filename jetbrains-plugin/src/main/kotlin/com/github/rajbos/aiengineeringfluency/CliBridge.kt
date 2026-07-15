@@ -1,0 +1,294 @@
+package com.github.rajbos.aiengineeringfluency
+
+import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.ide.util.PropertiesComponent
+import com.intellij.openapi.diagnostic.Logger
+import com.intellij.openapi.extensions.PluginId
+import com.intellij.openapi.util.SystemInfo
+import com.intellij.util.io.createDirectories
+import java.io.IOException
+import java.nio.file.Files
+import java.nio.file.Path
+import java.nio.file.StandardCopyOption
+import java.util.concurrent.TimeUnit
+
+/**
+ * Spawns the bundled `copilot-token-tracker` CLI for a given view and returns
+ * its JSON stdout as a string ready to splice into the webview.
+ *
+ * Direct port of `visualstudio-extension/.../Data/CliBridge.cs`; the JSON
+ * contract on stdout is identical so the shared webview bundles consume both
+ * outputs unchanged.
+ *
+ * The CLI is shipped inside the plugin jar as
+ *   /cli-bundle/<os-id>/copilot-token-tracker[.exe]
+ *   /cli-bundle/<os-id>/sql-wasm.wasm
+ *
+ * On first use we extract the OS-appropriate copy to the IDE's temp dir,
+ * mark it executable, and re-use that path for subsequent calls.
+ */
+object CliBridge {
+
+    private val log = Logger.getInstance(CliBridge::class.java)
+    private const val DEFAULT_TIMEOUT_SECONDS = 120L
+    private const val PREFERENCES_KEY_TIMEOUT = "ai-engineering-fluency.cli.timeout.seconds"
+
+    /** Timeout used for CLI invocations; can be overridden (e.g. for "wait longer" retry). */
+    @Volatile var timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS
+
+    init {
+        // Load the stored timeout preference on startup, defaulting to 120 seconds
+        val storedTimeout = PropertiesComponent.getInstance().getValue(PREFERENCES_KEY_TIMEOUT)
+        if (storedTimeout != null) {
+            try {
+                timeoutSeconds = storedTimeout.toLong()
+                log.info("Loaded stored timeout preference: ${timeoutSeconds}s")
+            } catch (e: NumberFormatException) {
+                log.warn("Invalid stored timeout value: $storedTimeout, using default")
+                timeoutSeconds = DEFAULT_TIMEOUT_SECONDS
+            }
+        }
+    }
+
+    /** Persists the given timeout and updates [timeoutSeconds]. */
+    fun setPersistentTimeout(seconds: Long) {
+        timeoutSeconds = seconds
+        PropertiesComponent.getInstance().setValue(PREFERENCES_KEY_TIMEOUT, seconds.toString())
+        log.info("Persisted new timeout preference: ${seconds}s")
+    }
+
+    /** Resets [timeoutSeconds] back to the default (120 s) without affecting stored preference. */
+    fun resetTimeout() {
+        timeoutSeconds = DEFAULT_TIMEOUT_SECONDS
+    }
+
+    @Volatile private var cachedExePath: Path? = null
+
+    /** Cached result of `all --json` (covers details, chart, usage, environmental). */
+    @Volatile var cachedAllJson: String? = null
+
+    /** Cached result of `fluency --json` (covers maturity). */
+    @Volatile var cachedFluencyJson: String? = null
+
+    /** True once [prefetchAll] has completed successfully. */
+    @Volatile var prefetchDone: Boolean = false
+
+    /** Clears both caches so the next fetch goes to the CLI again. */
+    fun invalidateCache() {
+        cachedAllJson = null
+        cachedFluencyJson = null
+        prefetchDone = false
+    }
+
+    /**
+     * Fetches `all --json` and `fluency --json` in parallel on the current
+     * (background) thread. Populates [cachedAllJson] and [cachedFluencyJson].
+     *
+     * @throws IOException if either CLI invocation fails.
+     */
+    fun prefetchAll() {
+        val allFuture = java.util.concurrent.FutureTask { fetchRaw("all") }
+        val fluencyFuture = java.util.concurrent.FutureTask { fetchRaw("fluency") }
+        val allThread = Thread(allFuture, "cli-prefetch-all").apply { isDaemon = true; start() }
+        val fluencyThread = Thread(fluencyFuture, "cli-prefetch-fluency").apply { isDaemon = true; start() }
+        allThread.join()
+        fluencyThread.join()
+        cachedAllJson = allFuture.get()
+        cachedFluencyJson = fluencyFuture.get()
+        prefetchDone = true
+    }
+
+    /**
+     * Runs the CLI for [view] and returns the parsed JSON string from stdout.
+     * Uses [cachedAllJson] / [cachedFluencyJson] when available.
+     *
+     * @throws IllegalStateException if the OS is unsupported or the CLI
+     *         binary failed to extract / execute.
+     */
+    @Throws(IOException::class)
+    fun fetchStats(view: String): String {
+        return when (viewToCommand(view)) {
+            "all" -> cachedAllJson ?: fetchRaw("all").also { cachedAllJson = it }
+            "fluency" -> cachedFluencyJson ?: fetchRaw("fluency").also { cachedFluencyJson = it }
+            else -> fetchRaw(viewToCommand(view))
+        }
+    }
+
+    /**
+     * Invokes the CLI sub-command directly (no cache) and returns stdout.
+     */
+    @Throws(IOException::class)
+    fun fetchRaw(command: String): String {
+        val exe = ensureExtracted()
+        val cmd = listOf(exe.toString(), command, "--json")
+
+        log.info("Running CLI: ${cmd.joinToString(" ")}")
+        val startMs = System.currentTimeMillis()
+        val process = ProcessBuilder(cmd)
+            .directory(exe.parent.toFile())   // working dir = exe dir so it finds sql-wasm.wasm
+            .redirectErrorStream(false)
+            .start()
+
+        // Close stdin immediately — the CLI doesn't read from it, but
+        // leaving the pipe open can prevent Node.js SEA from exiting.
+        process.outputStream.close()
+
+        // Read stdout/stderr on dedicated daemon threads to avoid pipe-buffer
+        // deadlock. The `all --json` output can exceed the OS pipe buffer
+        // (64 KB on Windows), so we must drain both streams while the process runs.
+        val stdoutBuilder = StringBuilder()
+        val stderrBuilder = StringBuilder()
+        val stdoutThread = Thread({
+            process.inputStream.bufferedReader().use { stdoutBuilder.append(it.readText()) }
+        }, "cli-stdout-reader").apply { isDaemon = true; start() }
+        val stderrThread = Thread({
+            process.errorStream.bufferedReader().use { stderrBuilder.append(it.readText()) }
+        }, "cli-stderr-reader").apply { isDaemon = true; start() }
+
+        val finished = process.waitFor(timeoutSeconds, TimeUnit.SECONDS)
+        val elapsedMs = System.currentTimeMillis() - startMs
+        if (!finished) {
+            process.destroyForcibly()
+            throw IOException("CLI timed out after ${timeoutSeconds}s")
+        }
+
+        // Wait for reader threads to finish (they should complete almost
+        // immediately once the process has exited and closed its streams).
+        stdoutThread.join(5_000)
+        stderrThread.join(5_000)
+
+        val stdout = stdoutBuilder.toString()
+        val stderr = stderrBuilder.toString()
+        log.info("CLI completed in ${elapsedMs}ms, exit=${process.exitValue()}, stdout=${stdout.length} chars, stderr=${stderr.length} chars")
+        if (process.exitValue() != 0) {
+            throw IOException("CLI exited ${process.exitValue()}: $stderr")
+        }
+        if (stderr.isNotBlank()) log.debug("CLI stderr: $stderr")
+        return stdout.trim().ifEmpty { "{}" }
+    }
+
+    /**
+     * Returns the path to the extracted CLI binary, extracting it on first use.
+     * Cached for the lifetime of the IDE so repeated calls are cheap.
+     */
+
+    /** Plugin version string, used to version the extraction directory so upgrades don't reuse stale binaries. */
+    private val pluginVersion: String by lazy {
+        PluginManagerCore.getPlugin(PluginId.getId("com.github.rajbos.ai-engineering-fluency"))
+            ?.version
+            ?: "unknown"
+    }
+
+    private fun ensureExtracted(): Path {
+        cachedExePath?.let { return it }
+        synchronized(this) {
+            cachedExePath?.let { return it }
+
+            val osDir = osBundleDir()
+            val exeName = if (SystemInfo.isWindows) "copilot-token-tracker.exe" else "copilot-token-tracker"
+            val resourcePrefix = "/cli-bundle/$osDir"
+
+            // Include plugin version in the path so each upgrade extracts a fresh copy
+            // instead of reusing a potentially stale binary from a previous version.
+            val targetDir = Path.of(System.getProperty("java.io.tmpdir"), "ai-engineering-fluency", pluginVersion, osDir)
+            targetDir.createDirectories()
+
+            val exePath = copyResource("$resourcePrefix/$exeName", targetDir.resolve(exeName))
+            // sql-wasm.wasm sits next to the binary; loaded at runtime by the CLI.
+            copyResourceIfPresent("$resourcePrefix/sql-wasm.wasm", targetDir.resolve("sql-wasm.wasm"))
+
+            if (!SystemInfo.isWindows) {
+                exePath.toFile().setExecutable(true, /* ownerOnly = */ false)
+            }
+
+            cachedExePath = exePath
+            return exePath
+        }
+    }
+
+    private fun copyResource(resourcePath: String, target: Path): Path {
+        val url = CliBridge::class.java.getResource(resourcePath)
+            ?: throw IllegalStateException(
+                "Bundled CLI not found at classpath:$resourcePath — " +
+                    "this OS may not be supported by this build of the plugin."
+            )
+        // Re-extract when the on-disk file is absent, empty, or a different size
+        // than the bundled resource. This catches stale dev-iteration copies
+        // without requiring a version bump.
+        val bundledSize: Long = url.openConnection().contentLengthLong
+        val diskSize: Long = if (Files.exists(target)) Files.size(target) else -1L
+        if (diskSize > 0 && bundledSize > 0 && diskSize == bundledSize) {
+            log.info("CLI binary already up-to-date at $target ($diskSize bytes), skipping extraction")
+            return target
+        }
+        url.openStream().use {
+            log.info("Extracting CLI from $resourcePath -> $target (bundled=$bundledSize, disk=$diskSize)")
+            Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING)
+        }
+        return target
+    }
+
+    private fun copyResourceIfPresent(resourcePath: String, target: Path) {
+        val url = CliBridge::class.java.getResource(resourcePath) ?: return
+        val bundledSize: Long = url.openConnection().contentLengthLong
+        val diskSize: Long = if (Files.exists(target)) Files.size(target) else -1L
+        if (diskSize > 0 && bundledSize > 0 && diskSize == bundledSize) return
+        url.openStream().use {
+            try {
+                Files.copy(it, target, StandardCopyOption.REPLACE_EXISTING)
+            } catch (_: java.nio.file.AccessDeniedException) {
+                log.warn("Could not overwrite $target (locked), using existing copy")
+            }
+        }
+    }
+
+    private fun osBundleDir(): String = when {
+        SystemInfo.isWindows -> "win-x64"
+        SystemInfo.isMac -> if (isArm64Runtime()) "darwin-arm64" else "darwin-x64"
+        SystemInfo.isLinux -> "linux-x64"
+        else -> throw IllegalStateException("Unsupported OS: ${SystemInfo.OS_NAME}")
+    }
+
+    /**
+     * Returns true when this JVM process is running as an ARM64 (aarch64) binary.
+     *
+     * On Apple Silicon Macs running IntelliJ under Rosetta 2, [System.getProperty]
+     * returns "x86_64", so the x64 CLI bundle is correctly selected in that scenario.
+     * Only a natively-running ARM64 JVM returns "aarch64" here.
+     */
+    private fun isArm64Runtime(): Boolean {
+        val arch = System.getProperty("os.arch", "")
+        return arch.equals("aarch64", ignoreCase = true) || arch.equals("arm64", ignoreCase = true)
+    }
+
+    /**
+     * Maps the webview id to the CLI sub-command that produces its data.
+     * Keep in sync with [WebviewResources.viewToGlobalKey] and the VS
+     * extension's `CliBridge.cs`.
+     */
+    private fun viewToCommand(view: String): String = when (view) {
+        "details" -> "all"
+        "chart" -> "all"    // all --json includes chart data with weekly/monthly periods
+        "usage" -> "all"    // all --json includes proper usage analysis data
+        "diagnostics" -> "all"
+        "environmental" -> "all"
+        "maturity" -> "fluency"
+        else -> "all"
+    }
+
+    /**
+     * When the CLI command is `all`, the response is a combined object
+     * `{ details, chart, usage, fluency }`. This returns the JSON key
+     * to extract for a given view, or `null` when the CLI returns the
+     * view data directly (individual commands like `fluency`).
+     */
+    fun viewToAllJsonKey(view: String): String? = when (viewToCommand(view)) {
+        "all" -> when (view) {
+            "details", "diagnostics", "environmental" -> "details"
+            "chart" -> "chart"
+            "usage" -> "usage"
+            else -> "details"
+        }
+        else -> null // individual commands return data directly
+    }
+}

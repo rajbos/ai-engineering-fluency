@@ -1,31 +1,37 @@
-﻿// Usage Analysis webview
+// Usage Analysis webview
 import { el } from '../shared/domUtils';
-import { buttonHtml } from '../shared/buttonConfig';
+import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatDurationShort, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
+import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
+import { getWindowData } from '../../../../src/webview/shared/dataLoader';
+import { registerMessageHandler } from '../shared/messageHandler';
+import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
+import { getLongContextInfo } from '../../../../src/tokenEstimation';
+import type { ModelPricing } from '../../../../src/types';
+import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 
-type ModeUsage = { ask: number; edit: number; agent: number; plan: number; customAgent: number };
-type ToolCallUsage = { total: number; byTool: { [key: string]: number } };
-type McpToolUsage = { total: number; byServer: { [key: string]: number }; byTool: { [key: string]: number } };
-
-type ModelSwitchingAnalysis = {
-	modelsPerSession: number[];
-	totalSessions: number;
-	averageModelsPerSession: number;
-	maxModelsPerSession: number;
+type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
-	switchingFrequency: number;
-	standardModels: string[];
-	premiumModels: string[];
-	unknownModels: string[];
-	mixedTierSessions: number;
 	standardRequests: number;
 	premiumRequests: number;
+	highCostRequests: number;
+	lowCostRequests: number;
+	mediumCostRequests: number;
 	unknownRequests: number;
 	totalRequests: number;
+};
+
+type ContextWindowStats = {
+	maxRequestInputTokens: number;
+	maxRequestModels: string[];
+	tierCounts: { [tier: string]: number };
+	maxReachedTokens?: number;
+	maxReachedWindowLimit?: number;
 };
 
 type UsageAnalysisPeriod = {
@@ -35,19 +41,125 @@ type UsageAnalysisPeriod = {
 	contextReferences: ContextReferenceUsage;
 	mcpTools: McpToolUsage;
 	modelSwitching: ModelSwitchingAnalysis;
+	thinkingEffortUsage?: {
+		byEffort: { [effort: string]: number };
+		sessionCount: number;
+		switchCount: number;
+	};
+	contextWindow?: ContextWindowStats;
+};
+
+type TodaySessionSummary = {
+	title: string | null;
+	filePath: string;
+	interactions: number;
+	toolCalls: number;
+	inputTokens: number;
+	outputTokens: number;
+	thinkingTokens: number;
+	cachedTokens: number;
+	totalTokens: number;
+	estimatedCost: number;
+	editor: string;
+	models: string[];
+	lastActivity: string;
+	maxRequestInputTokens?: number;
+	contextTier?: string;
+	contextWindowLimit?: number;
+	contextReachedTokens?: number;
+	durationMs?: number;
+	workspace?: string;
+};
+
+type InsightSeverity = 'tip' | 'opportunity' | 'celebration';
+type InsightStatus = 'new' | 'seen' | 'dismissed' | 'snoozed' | 'done';
+
+type EvaluatedInsight = {
+	id: string;
+	category: string;
+	severity: InsightSeverity;
+	title: string;
+	body: string;
+	actionLabel?: string;
+	actionCommand?: string;
+	status: InsightStatus;
+	allowToast?: boolean;
+};
+
+type CopilotApiBalance = {
+	/** Monthly budget in USD (entitlement / 100). */
+	budgetUsd: number;
+	/** Monthly budget in AI Credits (budgetUsd * 100). */
+	budgetAiCredits: number;
+	/** Remaining AI Credits from the API quota snapshot. */
+	remainingAiCredits: number;
+	/** AI Credits consumed across all channels (IDE, web, cloud agent, review agent). */
+	usedAiCredits: number;
+	/** Percentage of budget still available. */
+	pctAvailable: number;
 };
 
 type UsageAnalysisStats = {
 	today: UsageAnalysisPeriod;
 	last30Days: UsageAnalysisPeriod;
 	month: UsageAnalysisPeriod;
+	lastMonth: UsageAnalysisPeriod;
 	locale?: string;
 	lastUpdated: string;
 	customizationMatrix?: WorkspaceCustomizationMatrix | null;
 	missedPotential?: MissedPotentialWorkspace[];
 	backendConfigured?: boolean;
 	currentWorkspacePaths?: string[];
+	suppressedUnknownTools?: string[];
+	todaySessions?: TodaySessionSummary[];
+	use24HourTime?: boolean;
+	insights?: EvaluatedInsight[];
+	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
+	sessionColumnSettings?: { enabledColumns?: string[] };
+	/** Copilot API quota balance snapshot (available when the extension has fetched quota data). */
+	copilotApiBalance?: CopilotApiBalance | null;
+	/** Current-month billing group costs in USD from the extension's local session tracking. */
+	monthBillingGroupCosts?: Record<string, number> | null;
 };
+
+// ── Tool Curation types ──────────────────────────────────────────────────────
+// These mirror the interfaces in vscode-extension/src/types.ts.
+// They must be kept in sync manually because the webview bundle cannot import
+// extension-side TypeScript modules directly.
+
+type AvailableToolSource = 'builtin' | 'mcp' | 'extension' | 'skill';
+
+interface AvailableToolEntry {
+	name: string;
+	description: string;
+	source: AvailableToolSource;
+	server?: string;
+	extensionId?: string;
+	skillPath?: string;
+	pluginName?: string;
+	configFiles?: string[];
+	enabled?: boolean;
+	extensionActive?: boolean;
+}
+
+interface ToolCurationRecommendation {
+	type: 'disable-mcp-server' | 'disable-extension' | 'refine-skill' | 'remove-skill';
+	target: string;
+	reason: string;
+	estimatedTokenSavings?: number;
+}
+
+interface ToolCurationAnalysis {
+	windowDays: number;
+	availableTools: AvailableToolEntry[];
+	usedTools: { name: string; count: number }[];
+	unusedTools: AvailableToolEntry[];
+	underusedMcpServers: { server: string; availableToolCount: number; usedToolCount: number; configFiles?: string[]; extensionId?: string; enabled?: boolean; extensionActive?: boolean }[];
+	underusedAgentPlugins: { pluginName: string; availableSkillCount: number; usedSkillCount: number }[];
+	estimatedPromptBloat: { totalTokens: number; byServer: Record<string, number> };
+	recommendations: ToolCurationRecommendation[];
+}
 
 declare function acquireVsCodeApi<TState = unknown>(): {
 	postMessage: (message: unknown) => void;
@@ -68,6 +180,22 @@ interface CustomizationFileEntry {
 }
 
 type CustomizationTypeStatus = '✅' | '⚠️' | '❌';
+
+/**
+ * Returns a modern styled HTML badge for a status value, replacing plain emoji icons.
+ * Pass/fresh → green ✓, warning/stale → amber !, fail/missing → red ✕
+ */
+function statusBadgeHtml(status: CustomizationTypeStatus | string, label?: string): string {
+	const titleAttr = label ? ` title="${escapeHtml(label)}"` : '';
+	const base = 'display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font-weight:700;flex-shrink:0;';
+	if (status === '✅') {
+		return `<span style="${base}background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#4ade80;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Present and fresh')}">✓</span>`;
+	} else if (status === '⚠️') {
+		return `<span style="${base}background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Present but stale')}">!</span>`;
+	} else {
+		return `<span style="${base}background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);color:#f87171;font-size:12px;"${titleAttr} aria-label="${escapeHtml(label ?? 'Missing')}">✕</span>`;
+	}
+}
 
 interface WorkspaceCustomizationRow {
 	workspacePath: string;
@@ -92,22 +220,71 @@ interface MissedPotentialWorkspace {
 	nonCopilotFiles: CustomizationFileEntry[];
 }
 
-declare global {
-	interface Window { 
-		__INITIAL_USAGE__?: UsageAnalysisStats & { 
-			customizationMatrix?: WorkspaceCustomizationMatrix | null;
-			missedPotential?: MissedPotentialWorkspace[];
-		} 
-	}
+/** Shape of hygiene check items returned by the extension host. */
+interface RepoHygieneCheck {
+	readonly id?: string;
+	readonly label?: string;
+	readonly detail?: string;
+	readonly hint?: string;
+	readonly weight?: number;
+	readonly status?: string;
+	readonly category?: string;
 }
 
+/** Shape of recommendation items returned by the extension host. */
+interface RepoHygieneRecommendation {
+	readonly action?: string;
+	readonly impact?: string;
+	readonly weight?: number;
+	readonly priority?: string;
+}
+
+/** Shape of a full repo-hygiene analysis result. */
+interface RepoAnalysisData {
+	summary?: {
+		percentage?: number;
+		passedChecks?: number;
+		warningChecks?: number;
+		failedChecks?: number;
+		totalScore?: number;
+		maxScore?: number;
+		categories?: Record<string, { percentage?: number }>;
+	};
+	checks?: RepoHygieneCheck[];
+	recommendations?: RepoHygieneRecommendation[];
+}
 interface RepoAnalysisRecord {
-	data?: any;
+	data?: RepoAnalysisData;
 	error?: string;
 }
 
-const vscode = acquireVsCodeApi();
-const initialData = window.__INITIAL_USAGE__;
+/** Webview state persisted by VS Code across tab switches (survives the panel being hidden). */
+interface UsageWebviewState {
+	aboutCollapsed?: boolean;
+}
+
+const vscode = acquireVsCodeApi<UsageWebviewState>();
+const curationTraceOnceKeys = new Set<string>();
+
+/** Collapsed state of the "About This Dashboard" info box, restored from webview state. */
+let aboutCollapsed = vscode.getState()?.aboutCollapsed ?? false;
+
+function traceCuration(stage: string, details?: Record<string, unknown>): void {
+	try {
+		vscode.postMessage({ command: 'traceUsageCuration', stage, details: details ?? {} });
+	} catch {
+		// ignore tracing failures
+	}
+}
+
+function traceCurationOnce(key: string, stage: string, details?: Record<string, unknown>): void {
+	if (curationTraceOnceKeys.has(key)) { return; }
+	curationTraceOnceKeys.add(key);
+	traceCuration(stage, details);
+}
+
+type InitialUsageData = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null; missedPotential?: MissedPotentialWorkspace[] };
+const initialData = getWindowData<InitialUsageData>('__INITIAL_USAGE__');
 let hygieneMatrixState: WorkspaceCustomizationMatrix | null = null;
 const repoAnalysisState = new Map<string, RepoAnalysisRecord>();
 let selectedRepoPath: string | null = null;
@@ -115,27 +292,304 @@ let isSwitchingRepository = false;
 let isBatchAnalysisInProgress = false;
 let currentWorkspacePaths: string[] = [];
 let activeTab = 'activity';
+let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
+let currentInsights: EvaluatedInsight[] = [];
+// Persisted across stats refreshes so the curation section doesn't disappear
+// when a periodic updateStats message omits curationAnalysis.
+let currentCurationAnalysis: ToolCurationAnalysis | null = null;
 
-function escapeHtml(text: string): string {
-	return text
-		.replace(/&/g, '&amp;')
-		.replace(/</g, '&lt;')
-		.replace(/>/g, '&gt;')
-		.replace(/"/g, '&quot;')
-		.replace(/'/g, '&#039;');
+const USAGE_LOADING_CSS = `
+<style id="usage-loading-css">
+:root {
+  --ul-bg: var(--vscode-sideBar-background, #181825);
+  --ul-card: var(--vscode-editorWidget-background, #24273a);
+  --ul-fg: var(--vscode-editor-foreground, #cdd6f4);
+  --ul-muted: var(--vscode-descriptionForeground, #9399b2);
+  --ul-accent: var(--vscode-textLink-foreground, #89b4fa);
+  --ul-success: var(--vscode-terminal-ansiGreen, #a6e3a1);
+  --ul-border: var(--vscode-panel-border, #313244);
+  --ul-badge-bg: var(--vscode-badge-background, #313244);
+}
+#usage-loading-wrap {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  display: flex; align-items: flex-start; justify-content: center; padding: 28px 20px;
+}
+#usage-loading-card {
+  width: 100%; max-width: 680px;
+  background: var(--ul-card); border: 1px solid var(--ul-border);
+  border-radius: 16px; padding: 24px 28px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.3); color: var(--ul-fg);
+}
+#ul-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; gap: 16px; }
+#ul-badge { font-size: 11px; font-weight: 700; letter-spacing: 0.15em; text-transform: uppercase; color: var(--ul-accent); margin-bottom: 4px; }
+#ul-title { font-size: 22px; font-weight: 700; color: var(--ul-fg); margin-bottom: 4px; }
+#ul-subtitle { font-size: 12px; color: var(--ul-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 360px; }
+#ul-right { display: flex; flex-direction: column; align-items: flex-end; gap: 6px; flex-shrink: 0; }
+#ul-pct { font-size: 32px; font-weight: 800; color: var(--ul-fg); line-height: 1; min-width: 60px; text-align: right; font-variant-numeric: tabular-nums; }
+.ul-meta-badge { font-size: 11px; padding: 3px 10px; border: 1px solid var(--ul-border); border-radius: 20px; color: var(--ul-muted); background: var(--vscode-editor-background, #1e1e2e); white-space: nowrap; }
+#ul-track { height: 6px; background: var(--ul-border); border-radius: 3px; overflow: hidden; margin: 16px 0; }
+#ul-fill { height: 100%; border-radius: 3px; background: linear-gradient(90deg, var(--ul-accent), var(--ul-success)); transition: width 0.4s ease; width: 3%; }
+#ul-fill.ul-indeterminate { width: 25%; animation: ul-shimmer 1.8s ease-in-out infinite; background: linear-gradient(90deg, transparent, var(--ul-accent), var(--ul-success), transparent); }
+@keyframes ul-shimmer { 0% { margin-left: -30%; } 100% { margin-left: 110%; } }
+#ul-steps { background: var(--ul-bg); border: 1px solid var(--ul-border); border-radius: 10px; padding: 14px 16px; }
+.ul-step { display: flex; align-items: center; gap: 10px; padding: 5px 0; color: var(--ul-muted); font-size: 13px; transition: color 0.25s; }
+.ul-step.ul-done   { color: var(--ul-success); }
+.ul-step.ul-active { color: var(--ul-accent); font-weight: 600; }
+.ul-ico { width: 18px; text-align: center; flex-shrink: 0; }
+.ul-spin { display: inline-block; animation: ul-spin 0.75s linear infinite; }
+@keyframes ul-spin { to { transform: rotate(360deg); } }
+.ul-lbl { flex: 1; }
+.ul-cnt { font-size: 11px; opacity: 0.75; font-variant-numeric: tabular-nums; }
+@keyframes ul-pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.3); } 100% { transform: scale(1); opacity: 1; } }
+.ul-pop { animation: ul-pop 0.3s ease both; }
+</style>`;
+
+const USAGE_LOADING_STEPS = [
+	{ id: 'ul-s-start',  label: 'Starting usage analysis' },
+	{ id: 'ul-s-tools',  label: 'Collecting runtime tools' },
+	{ id: 'ul-s-mcp',    label: 'Discovering MCP servers' },
+	{ id: 'ul-s-skills', label: 'Scanning skill directories' },
+	{ id: 'ul-s-crunch', label: 'Computing curation analysis' },
+	{ id: 'ul-s-ready',  label: 'Ready!' },
+] as const;
+
+type UsageLoadingStepId = typeof USAGE_LOADING_STEPS[number]['id'];
+
+const USAGE_STAGE_MAP: Record<string, { pct: number; stepId: UsageLoadingStepId; subtitle: string }> = {
+	start:                     { pct:  5, stepId: 'ul-s-start',  subtitle: 'Starting usage analysis…' },
+	'curation:start':          { pct: 20, stepId: 'ul-s-tools',  subtitle: 'Collecting tools and skills…' },
+	'curation:runtimeTools':   { pct: 32, stepId: 'ul-s-tools',  subtitle: 'Collected runtime tools' },
+	'curation:mcpJson':        { pct: 44, stepId: 'ul-s-mcp',    subtitle: 'Scanning MCP config files…' },
+	'curation:mcpSources':     { pct: 55, stepId: 'ul-s-mcp',    subtitle: 'Collected MCP servers' },
+	'curation:skillsScanStart':{ pct: 63, stepId: 'ul-s-skills', subtitle: 'Scanning skill directories…' },
+	'curation:skillsScanDone': { pct: 75, stepId: 'ul-s-skills', subtitle: 'Skill discovery complete' },
+	'curation:analyzing':      { pct: 85, stepId: 'ul-s-crunch', subtitle: 'Analyzing tool usage patterns…' },
+	'curation:done':           { pct: 96, stepId: 'ul-s-crunch', subtitle: 'Curation analysis complete' },
+	ready:                     { pct:100, stepId: 'ul-s-ready',  subtitle: 'Usage analysis ready' },
+	error:                     { pct:100, stepId: 'ul-s-ready',  subtitle: 'Analysis completed with errors' },
+	'curation:error':          { pct: 85, stepId: 'ul-s-crunch', subtitle: 'Curation analysis skipped' },
+};
+
+function renderUsageLoadingState(initialMessage = 'Loading usage analysis...'): void {
+	const root = document.getElementById('root');
+	if (!root) { return; }
+	_ulLoadingActive = true;
+
+	const stepsHtml = USAGE_LOADING_STEPS.map((s, i) => {
+		const isFirst = i === 0;
+		const cls = isFirst ? 'ul-step ul-active' : 'ul-step';
+		const ico = isFirst ? '<span class="ul-spin">↻</span>' : '○';
+		return `<div class="${cls}" id="${s.id}"><span class="ul-ico">${ico}</span><span class="ul-lbl">${escapeHtml(s.label)}</span><span class="ul-cnt" id="${s.id}-cnt"></span></div>`;
+	}).join('');
+
+	root.innerHTML = `${USAGE_LOADING_CSS}
+<div id="usage-loading-wrap">
+  <div id="usage-loading-card">
+    <div id="ul-header">
+      <div>
+        <div id="ul-badge">📊 Analyzing Usage Data</div>
+        <div id="ul-title">${escapeHtml(initialMessage)}</div>
+        <div id="ul-subtitle">Initializing…</div>
+      </div>
+      <div id="ul-right">
+        <div id="ul-pct">–</div>
+        <div style="display:flex;gap:6px;" id="ul-meta"></div>
+      </div>
+    </div>
+    <div id="ul-track"><div id="ul-fill" class="ul-indeterminate"></div></div>
+    <div id="ul-steps">${stepsHtml}</div>
+  </div>
+</div>`;
 }
 
-import toolNames from '../../toolNames.json';
-import automaticToolIds from '../../automaticTools.json';
+function _ulSetDone(id: string): void {
+	const el = document.getElementById(id);
+	if (!el) { return; }
+	el.className = 'ul-step ul-done';
+	const ico = el.querySelector('.ul-ico');
+	if (ico) { ico.innerHTML = '<span class="ul-pop">✓</span>'; }
+}
 
-let TOOL_NAME_MAP: { [key: string]: string } | null = toolNames || null;
-const AUTOMATIC_TOOL_SET_WV = new Set<string>(automaticToolIds as string[]);
+function _ulSetActive(id: string): void {
+	const el = document.getElementById(id);
+	if (!el) { return; }
+	el.className = 'ul-step ul-active';
+	const ico = el.querySelector('.ul-ico');
+	if (ico) { ico.innerHTML = '<span class="ul-spin">↻</span>'; }
+}
+
+function _ulSetCnt(id: string, text: string): void {
+	const el = document.getElementById(`${id}-cnt`);
+	if (el) { el.textContent = text; }
+}
+
+let _ulLastStepIdx = 0;
+// True while the loading card is the active view. Once real content is
+// rendered (updateStats) this is cleared, so stray progress events from a
+// background silent recompute never re-create the loading card over content.
+let _ulLoadingActive = false;
+
+function _ulAdvanceSteps(targetIdx: number, pct: number): void {
+	for (let i = _ulLastStepIdx; i < targetIdx; i++) { _ulSetDone(USAGE_LOADING_STEPS[i].id); }
+	if (targetIdx > _ulLastStepIdx) { _ulLastStepIdx = targetIdx; }
+	if (pct < 100) { _ulSetActive(USAGE_LOADING_STEPS[targetIdx].id); }
+	else { _ulSetDone(USAGE_LOADING_STEPS[targetIdx].id); }
+}
+
+function _ulDetailCnt(details: Record<string, unknown>): string {
+	if (typeof details.count === 'number') { return `${details.count}`; }
+	if (typeof details.skills === 'number') { return `${details.skills} skills`; }
+	if (typeof details.availableTools === 'number') { return `${details.availableTools} tools`; }
+	return '';
+}
+
+// Ensures the loading card exists before applying a progress event. Returns
+// false when the event should be ignored because content has already replaced
+// the card (stray events from a background silent recompute), preventing the
+// loading card from flashing back over the rendered analysis.
+function _ulEnsureCard(): boolean {
+	const root = document.getElementById('root');
+	if (!root) { return false; }
+	if (root.querySelector('#usage-loading-card')) { return true; }
+	if (!_ulLoadingActive) { return false; }
+	renderUsageLoadingState('Building Usage Analysis');
+	_ulLastStepIdx = 0;
+	return true;
+}
+
+function updateUsageLoadingProgress(message: any): void {
+	if (!_ulEnsureCard()) { return; }
+	const stage = typeof message?.stage === 'string' ? message.stage : '';
+	const mapped = USAGE_STAGE_MAP[stage];
+	if (!mapped) { return; }
+
+	const pct = mapped.pct;
+	const fill = document.getElementById('ul-fill');
+	if (fill) { fill.classList.remove('ul-indeterminate'); fill.style.width = `${Math.max(pct, 3)}%`; }
+	const pctEl = document.getElementById('ul-pct');
+	if (pctEl) { pctEl.textContent = pct === 100 ? '100%' : `${pct}%`; }
+	const subtitleEl = document.getElementById('ul-subtitle');
+	if (subtitleEl) { subtitleEl.textContent = mapped.subtitle; }
+
+	const targetIdx = USAGE_LOADING_STEPS.findIndex(s => s.id === mapped.stepId);
+	if (targetIdx >= 0) { _ulAdvanceSteps(targetIdx, pct); }
+
+	const details = message?.details;
+	if (details && typeof details === 'object') {
+		const cnt = _ulDetailCnt(details as Record<string, unknown>);
+		if (cnt) { _ulSetCnt(mapped.stepId, `(${cnt})`); }
+	}
+}
+
+function clearLoadingTimeout(): void {
+	if (loadingTimeoutId !== null) {
+		clearTimeout(loadingTimeoutId);
+		loadingTimeoutId = null;
+	}
+}
+
+/** Creates a styled Refresh button that posts `refresh` to the extension host. */
+function createRefreshButton(): HTMLButtonElement {
+	const btn = document.createElement('button');
+	btn.textContent = '🔄 Refresh';
+	btn.style.cssText = 'padding: 6px 16px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); border-radius: 2px; font-size: 13px;';
+	btn.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
+	return btn;
+}
+
+function showLoadError(message: string): void {
+	const root = document.getElementById('root');
+	if (!root) { return; }
+	const container = document.createElement('div');
+	container.style.cssText = 'padding: 32px; text-align: center; font-size: 14px;';
+	const icon = document.createElement('div');
+	icon.style.cssText = 'font-size: 24px; margin-bottom: 12px;';
+	icon.innerHTML = statusBadgeHtml('❌', 'Error');
+	const msg = document.createElement('div');
+	msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
+	msg.textContent = message;
+	container.append(icon, msg, createRefreshButton());
+	root.textContent = '';
+	root.append(container);
+}
+
+// State for the Repository PRs tab
+let repoPrStatsLoaded = false;
+let repoPrStatsData: RepoPrStatsResult | null = null;
+
+// State for the Cloud Agent tab
+let agentSessionsLoaded = false;
+let agentSessionsData: AgentSessionsResult | null = null;
+
+type RepoPrDetail = {
+  number: number;
+  title: string;
+  url: string;
+  aiType: 'copilot' | 'claude' | 'openai' | 'other-ai';
+  role: 'author' | 'reviewer-requested';
+};
+
+type RepoPrInfo = {
+  owner: string;
+  repo: string;
+  repoUrl: string;
+  totalPrs: number;
+  aiAuthoredPrs: number;
+  aiReviewRequestedPrs: number;
+  aiDetails: RepoPrDetail[];
+  error?: string;
+};
+
+type RepoPrStatsResult = {
+  repos: RepoPrInfo[];
+  authenticated: boolean;
+  since: string;
+};
+
+type AgentRepoSummary = {
+  owner: string;
+  repo: string;
+  /** Pre-validated safe https URL for this repo. */
+  repoUrl: string;
+  totalTasks: number;
+  totalSessions: number;
+  totalCredits: number;
+  tasksScanned: number;
+  tasksTotal: number;
+  partial: boolean;
+  error?: string;
+};
+
+type AgentSessionsResult = {
+  repos: AgentRepoSummary[];
+  totalTasks: number;
+  totalSessions: number;
+  totalCredits: number;
+  authenticated: boolean;
+  since: string;
+  fetchedAt: string;
+};
+
+const EFFORT_DISPLAY_NAMES: Record<string, string> = {
+	xhigh: 'Extra High',
+};
+
+function getEffortDisplayName(level: string): string {
+	return EFFORT_DISPLAY_NAMES[level] ?? level;
+}
+
+import { resolveGuidMcpToolName, isGuidMcpTool } from '../../../../src/utils/toolUtils';
+
+// Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
+const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
+const _automaticToolIds = getWindowData<string[]>('__AUTOMATIC_TOOLS__') ?? [];
+const AUTOMATIC_TOOL_SET_WV = new Set<string>(_automaticToolIds.map(id => id.toLowerCase()));
 
 function lookupToolName(id: string): string {
 	if (!TOOL_NAME_MAP) {
 		return id;
 	}
-	return TOOL_NAME_MAP[id] || id;
+	return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? id;
 }
 
 function lookupMcpToolName(id: string): string {
@@ -159,13 +613,15 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.month.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
+
+	const suppressed = new Set<string>(stats.suppressedUnknownTools ?? []);
 	
-	// Filter to only unknown tools (where lookupToolName returns the same value)
-	return Array.from(allTools).filter(tool => lookupToolName(tool) === tool).sort();
+	// Filter to only unknown tools (not a key in the map, case-insensitively) and not suppressed
+	return Array.from(allTools).filter(tool => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !suppressed.has(tool)).sort();
 }
 
 function createMcpToolIssueUrl(unknownTools: string[]): string {
-	const repoUrl = 'https://github.com/rajbos/github-copilot-token-usage';
+	const repoUrl = 'https://github.com/rajbos/ai-engineering-fluency';
 	const title = encodeURIComponent('Add missing friendly names for tools');
 	const toolList = unknownTools.map(tool => `- \`${tool}\``).join('\n');
 	const body = encodeURIComponent(
@@ -179,13 +635,216 @@ function createMcpToolIssueUrl(unknownTools: string[]): string {
 	return `${repoUrl}/issues/new?title=${title}&body=${body}&labels=${labels}`;
 }
 
+// ─── Mode bar chart helpers ────────────────────────────────────────────────────
+
+type ModeBarConfig = {
+readonly label: string;
+readonly key: keyof ModeUsage;
+readonly gradient: string;
+};
+
+const MODE_BAR_CONFIGS: readonly ModeBarConfig[] = [
+{ label: '\u{1F4AC} Ask Mode',    key: 'ask',         gradient: 'linear-gradient(90deg, #3b82f6, #60a5fa)' },
+{ label: '\u270F\uFE0F Edit Mode',   key: 'edit',        gradient: 'linear-gradient(90deg, #10b981, #34d399)' },
+{ label: '\u{1F916} Agent Mode',  key: 'agent',       gradient: 'linear-gradient(90deg, #7c3aed, #a855f7)' },
+{ label: '\u{1F4CB} Plan Mode',   key: 'plan',        gradient: 'linear-gradient(90deg, #f59e0b, #fbbf24)' },
+{ label: '\u26A1 Custom Agent',   key: 'customAgent', gradient: 'linear-gradient(90deg, #ec4899, #f472b6)' },
+{ label: '\u{1F5A5}\uFE0F CLI',   key: 'cli',         gradient: 'linear-gradient(90deg, #06b6d4, #22d3ee)' },
+];
+
+/** Renders a single horizontal bar item for the mode usage chart. */
+function renderModeBarItem(label: string, count: number, total: number, gradient: string): string {
+const pct = total > 0 ? (count / total) * 100 : 0;
+return `
+<div class="bar-item">
+<div class="bar-label"><span>${label}</span><span><strong>${formatNumber(count)}</strong> (${formatPercent(pct, 0)})</span></div>
+<div class="bar-track"><div class="bar-fill" style="width: ${pct.toFixed(1)}%; background: ${gradient};"></div></div>
+</div>`;
+}
+
+/** Renders the full bar-chart column for a single time period's mode usage. */
+function renderModeBarChart(modeUsage: ModeUsage, title: string): string {
+const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli;
+const bars = MODE_BAR_CONFIGS
+.map(({ label, key, gradient }) => renderModeBarItem(label, modeUsage[key], total, gradient))
+.join('');
+return `
+<div>
+<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
+<div class="bar-chart">${bars}
+</div>
+</div>`;
+}
+
+// ─── Multi-model period helper ──────────────────────────────────────────────────
+
+/** Renders the top stats-grid section (avg models, switching frequency, max models). */
+function _renderMultiModelStatCards(switching: ModelSwitchingAnalysis): string {
+return `
+<div class="stats-grid" style="grid-template-columns: 1fr;">
+<div class="stat-card">
+<div class="stat-label">\u{1F4CA} Avg Models per Conversation</div>
+<div class="stat-value">${formatFixed(switching.averageModelsPerSession, 1)}</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">\u{1F504} Switching Frequency</div>
+<div class="stat-value">${formatPercent(switching.switchingFrequency, 0)}</div>
+<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with &gt;1 model</div>
+</div>
+<div class="stat-card">
+<div class="stat-label">\u{1F4C8} Max Models in Session</div>
+<div class="stat-value">${formatNumber(switching.maxModelsPerSession || 0)}</div>
+</div>
+</div>`;
+}
+
+/** Renders the "Models by Cost Level" breakdown listing model names per cost tier. */
+function _renderMultiModelCostLevelBreakdown(
+allLowCostModels: readonly string[],
+allMediumCostModels: readonly string[],
+allHighCostModels: readonly string[],
+allUnknownModels: readonly string[],
+): string {
+return `
+<div style="min-height: 110px;">
+${allLowCostModels.length > 0 ? `
+<div style="margin-bottom: 6px;">
+<span style="color: #4ade80;">💚 Low cost:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allLowCostModels.map(escapeHtml).join(', ')}</span>
+</div>
+` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
+${allMediumCostModels.length > 0 ? `
+<div style="margin-bottom: 6px;">
+<span style="color: var(--link-color);">🟡 Medium cost:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allMediumCostModels.map(escapeHtml).join(', ')}</span>
+</div>
+` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
+${allHighCostModels.length > 0 ? `
+<div style="margin-bottom: 6px;">
+<span style="color: var(--warning-fg);">💸 High cost:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allHighCostModels.map(escapeHtml).join(', ')}</span>
+</div>
+` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
+${allUnknownModels.length > 0 ? `
+<div style="margin-bottom: 6px;">
+<span style="color: var(--text-muted);">❓ Unknown:</span>
+<span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
+</div>
+` : ''}
+</div>`;
+}
+
+/** Renders the "Request Count" breakdown by cost tier, or an empty string if there were no requests. */
+function _renderMultiModelRequestCountBreakdown(switching: ModelSwitchingAnalysis): string {
+if (switching.totalRequests <= 0) {
+return '';
+}
+return `
+<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 85px;">
+<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
+${switching.lowCostRequests > 0 ? `
+<div style="margin-bottom: 4px; font-size: 11px;">
+<span style="color: #4ade80;">💚 Low cost: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.lowCostRequests)} (${formatPercent((switching.lowCostRequests / switching.totalRequests) * 100)})</span>
+</div>
+` : ''}
+${switching.mediumCostRequests > 0 ? `
+<div style="margin-bottom: 4px; font-size: 11px;">
+<span style="color: var(--link-color);">🟡 Medium cost: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.mediumCostRequests)} (${formatPercent((switching.mediumCostRequests / switching.totalRequests) * 100)})</span>
+</div>
+` : ''}
+${switching.highCostRequests > 0 ? `
+<div style="margin-bottom: 4px; font-size: 11px;">
+<span style="color: var(--warning-fg);">💸 High cost: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.highCostRequests)} (${formatPercent((switching.highCostRequests / switching.totalRequests) * 100)})</span>
+</div>
+` : ''}
+${switching.unknownRequests > 0 ? `
+<div style="margin-bottom: 4px; font-size: 11px;">
+<span style="color: var(--text-muted);">❓ Unknown: </span>
+<span style="color: var(--text-primary);">${formatNumber(switching.unknownRequests)} (${formatPercent((switching.unknownRequests / switching.totalRequests) * 100)})</span>
+</div>
+` : ''}
+</div>`;
+}
+
+/** Renders the mixed-cost-sessions callout line, or an empty string if there were none. */
+function _renderMultiModelMixedCostSessions(switching: ModelSwitchingAnalysis): string {
+if (switching.mixedCostSessions <= 0) {
+return '';
+}
+return `
+<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
+<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed cost sessions: ${formatNumber(switching.mixedCostSessions)}</span>
+</div>`;
+}
+
+/** Renders one column of the Multi-Model Usage section for a single time period. */
+function renderMultiModelPeriod(
+title: string,
+switching: ModelSwitchingAnalysis,
+allLowCostModels: readonly string[],
+allMediumCostModels: readonly string[],
+allHighCostModels: readonly string[],
+allUnknownModels: readonly string[],
+): string {
+return `
+<div>
+<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
+${_renderMultiModelStatCards(switching)}
+<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>
+${_renderMultiModelCostLevelBreakdown(allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
+${_renderMultiModelRequestCountBreakdown(switching)}
+${_renderMultiModelMixedCostSessions(switching)}
+</div>
+</div>`;
+}
+
+// ─── Progress panel helper ──────────────────────────────────────────────────────
+
+/**
+ * Updates (or creates) a progress indicator inside a container element.
+ * Strips existing non-title/subtitle children on first call; updates text on subsequent calls.
+ */
+function updateProgressPanel(
+selector: string,
+progressClass: string,
+messagePrefix: string,
+done: number,
+total: number,
+): void {
+const container = document.querySelector(selector);
+if (!container) { return; }
+const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+const message = `${messagePrefix} ${done}/${total} repos (${pct}%)`;
+const existing = container.querySelector(`.${progressClass}`);
+if (existing) {
+existing.textContent = message;
+} else {
+// First progress update — remove static placeholder content (keep title/subtitle divs)
+Array.from(container.children).forEach(child => {
+const htmlEl = child as HTMLElement;
+if (!htmlEl.classList.contains('section-title') && !htmlEl.classList.contains('section-subtitle')) {
+htmlEl.remove();
+}
+});
+const div = document.createElement('div');
+div.className = progressClass;
+div.style.cssText = 'margin-top:8px; font-size:12px; color:var(--text-secondary);';
+div.textContent = message;
+container.appendChild(div);
+}
+}
+
 function renderMissedPotential(stats: UsageAnalysisStats): string {
-	const missed = stats.missedPotential || window.__INITIAL_USAGE__?.missedPotential || [];
+	const missed = stats.missedPotential || initialData?.missedPotential || [];
 	if (missed.length === 0) {
 		return `
 			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px;">
-				<div style="font-size: 13px; font-weight: 600; color: var(--success-fg); margin-bottom: 8px;">
-					✅ No other AI tool configs missing a Copilot counterpart
+				<div style="font-size: 13px; font-weight: 600; color: var(--success-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+					${statusBadgeHtml('✅')} No other AI tool configs missing a Copilot counterpart
 				</div>
 				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
 					All active workspaces that contain instruction files for other AI tools (e.g. .cursorrules, CLAUDE.md, AGENTS.md) also have Copilot customization files configured.
@@ -199,8 +858,8 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
 
 	return `
         <div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px;">
-            <div style="font-size: 13px; font-weight: 600; color: var(--warning-fg); margin-bottom: 8px;">
-                ⚠️ Missed Potential: Non-Copilot Instruction Files
+            <div style="font-size: 13px; font-weight: 600; color: var(--warning-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
+                ${statusBadgeHtml('⚠️')} Missed Potential: Non-Copilot Instruction Files
             </div>
             <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
                 These active workspaces use other AI tools but lack Copilot customizations. <a href="https://code.visualstudio.com/docs/copilot/customization/custom-instructions" style="color: var(--link-color);" target="_blank">Learn how to add Copilot instructions</a>.
@@ -231,7 +890,7 @@ function renderMissedPotential(stats: UsageAnalysisStats): string {
                                     <div style="display: flex; flex-direction: column; gap: 4px;">
                                         ${ws.nonCopilotFiles.map(f => `
                                             <div style="font-size: 11px; display: flex; align-items: center; gap: 6px;">
-                                                <span>${f.icon || '📄'}</span>
+                                                <span>${escapeHtml(f.icon || '📄')}</span>
                                                 <span style="font-weight: 500;">${escapeHtml(f.label || '')}:</span>
                                                 <span style="font-family: monospace; color: var(--text-muted);">${escapeHtml(f.relativePath)}</span>
                                             </div>
@@ -259,8 +918,8 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 	    const rows = sortedTools.map(([tool, count], idx) => {
 		const friendly = escapeHtml(nameResolver(tool));
 		const idEscaped = escapeHtml(tool);
-		const autoBadge = AUTOMATIC_TOOL_SET_WV.has(tool)
-			? `<span title="Automatic tool — Copilot uses this internally and it does not count toward fluency scoring" style="margin-left:6px; padding:1px 5px; font-size:10px; border-radius:3px; background:var(--bg-secondary); color:var(--text-muted); border:1px solid var(--border-subtle); vertical-align:middle;">auto</span>`
+		const autoBadge = AUTOMATIC_TOOL_SET_WV.has(tool.toLowerCase())
+			? `<span class="auto-badge" title="Automatic tool — Copilot uses this internally and it does not count toward fluency scoring">auto</span>`
 			: '';
 		return `
 		    <tr>
@@ -285,10 +944,277 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 		</table>`;
 }
 
-/**
- * Return a copy of `map` with every key from `keys` present (defaulting to 0).
- * Used to build cross-period tables where every item found in any period is shown in all.
- */
+// --- Recent Sessions table with sortable, toggleable columns ---
+type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity';
+type SessionsLookback = 'today' | '7' | '30';
+
+/** Optional (toggleable) session table columns. Title is always shown and is not part of this set. */
+type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity';
+
+type SessionColumnDef = {
+	id: SessionColumnId;
+	label: string;
+	/** Absent for columns that cannot be sorted (Models). */
+	sortKey?: SessionSortColumn;
+	align: 'left' | 'right';
+	/** Extra inline style appended after the base cell style (later declarations win). */
+	cellStyle?: string;
+	render: (s: TodaySessionSummary) => { html: string; title?: string };
+};
+
+const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
+	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => ({ html: formatNumber(s.interactions) }) },
+	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => ({ html: formatNumber(s.toolCalls) }) },
+	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => ({ html: formatNumber(s.inputTokens) }) },
+	{ id: 'outputTokens', label: 'Output', sortKey: 'outputTokens', align: 'right', render: s => ({ html: formatNumber(s.outputTokens) }) },
+	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => ({ html: formatNumber(s.thinkingTokens) }) },
+	{ id: 'cachedTokens', label: 'Cached', sortKey: 'cachedTokens', align: 'right', render: s => ({ html: formatNumber(s.cachedTokens) }) },
+	{ id: 'totalTokens', label: 'Total', sortKey: 'totalTokens', align: 'right', render: s => ({ html: formatNumber(s.totalTokens) }) },
+	{ id: 'estimatedCost', label: 'Cost', sortKey: 'estimatedCost', align: 'right', render: s => ({ html: s.estimatedCost > 0 ? `$${s.estimatedCost.toFixed(4)}` : '—' }) },
+	{ id: 'editor', label: 'Editor', sortKey: 'editor', align: 'left', render: s => ({ html: escapeHtml(s.editor || 'unknown') }) },
+	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
+	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
+	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => ({ html: formatDurationShort(s.durationMs) }) },
+	{
+		id: 'lastActivity', label: 'Last Active', sortKey: 'lastActivity', align: 'right', cellStyle: 'white-space:nowrap;',
+		render: s => ({
+			html: s.lastActivity
+				? (sessionsLookback === 'today'
+					? new Date(s.lastActivity).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', hour12: !use24HourTime })
+					: new Date(s.lastActivity).toLocaleString([], { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: !use24HourTime }))
+				: '—'
+		}),
+	},
+];
+
+const ALL_SESSION_COLUMN_IDS: SessionColumnId[] = SESSION_COLUMN_DEFS.map(c => c.id);
+
+let sessionSortColumn: SessionSortColumn = 'interactions';
+let sessionSortDirection: 'asc' | 'desc' = 'desc';
+let cachedTodaySessions: TodaySessionSummary[] = [];
+let use24HourTime = true;
+// Lookback selector state: "today" renders the summaries bundled with updateStats;
+// longer windows are lazily requested from the extension host and cached here.
+let sessionsLookback: SessionsLookback = 'today';
+let latestTodaySessions: TodaySessionSummary[] = [];
+const recentSessionsCache: { [days: string]: TodaySessionSummary[] } = {};
+/** Which optional columns are currently visible. Title (and the row number) are always shown. */
+let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
+
+function saveSessionColumnSettings(): void {
+	vscode.postMessage({ command: 'saveSessionColumnSettings', settings: { enabledColumns: Array.from(enabledSessionColumns) } });
+}
+
+function getSessionSortIndicator(column: SessionSortColumn): string {
+	if (sessionSortColumn !== column) { return ''; }
+	return sessionSortDirection === 'desc' ? ' ▼' : ' ▲';
+}
+
+function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary[] {
+	return [...sessions].sort((a, b) => {
+		let cmp = 0;
+		switch (sessionSortColumn) {
+			case 'title':
+				cmp = (a.title || '').localeCompare(b.title || '');
+				break;
+			case 'editor':
+				cmp = (a.editor || '').localeCompare(b.editor || '');
+				break;
+			case 'workspace':
+				cmp = (a.workspace || '').localeCompare(b.workspace || '');
+				break;
+			case 'durationMs':
+				cmp = (a.durationMs ?? -1) - (b.durationMs ?? -1);
+				break;
+			case 'lastActivity':
+				cmp = (a.lastActivity || '').localeCompare(b.lastActivity || '');
+				break;
+			default:
+				cmp = (a[sessionSortColumn] as number) - (b[sessionSortColumn] as number);
+				break;
+		}
+		return sessionSortDirection === 'desc' ? -cmp : cmp;
+	});
+}
+
+function renderTodaySessionsTable(sessions: TodaySessionSummary[]): string {
+	cachedTodaySessions = sessions;
+	if (!sessions || sessions.length === 0) {
+		const emptyMessage = sessionsLookback === 'today' ? 'No sessions recorded today yet.' : 'No sessions recorded in this period.';
+		return `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">${emptyMessage}</div>`;
+	}
+	return `<div id="sessions-table-container">${buildSessionsTableHtml(sessions)}</div>`;
+}
+
+function buildSessionsTableHtml(sessions: TodaySessionSummary[]): string {
+	const sorted = sortTodaySessions(sessions);
+	const visibleColumns = SESSION_COLUMN_DEFS.filter(c => enabledSessionColumns.has(c.id));
+
+	const rows = sorted.map((s, idx) => {
+		const title = escapeHtml(s.title || 'Untitled session');
+		const filePath = escapeHtml(s.filePath || '');
+		const optionalCells = visibleColumns.map(col => {
+			const { html, title: cellTitle } = col.render(s);
+			const alignStyle = col.align === 'right' ? 'text-align:right;' : '';
+			const titleAttr = cellTitle !== undefined ? ` title="${cellTitle}"` : '';
+			return `<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${alignStyle}${col.cellStyle || ''}"${titleAttr}>${html}</td>`;
+		}).join('');
+		return `<tr>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; color:var(--text-secondary);">${idx + 1}</td>
+			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Open viewer for session &quot;${title}&quot;"><a href="#" class="session-title-link" data-file="${filePath}" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${title}</a></td>
+			${optionalCells}
+		</tr>`;
+	}).join('');
+
+	const headerCells = visibleColumns.map(col => {
+		const alignStyle = col.align === 'right' ? ' text-align:right;' : '';
+		if (!col.sortKey) { return `<th style="padding:6px 8px;${alignStyle}">${col.label}</th>`; }
+		return `<th class="sortable" data-sort="${col.sortKey}" style="padding:6px 8px;${alignStyle}">${col.label}${getSessionSortIndicator(col.sortKey)}</th>`;
+	}).join('');
+
+	return `
+		<div style="overflow-x:auto;">
+		<table class="sessions-table" style="width:100%; border-collapse:collapse; min-width:1050px;">
+			<thead>
+				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">
+					<th style="padding:6px 8px;">#</th>
+					<th class="sortable" data-sort="title" style="padding:6px 8px;">Title${getSessionSortIndicator('title')}</th>
+					${headerCells}
+				</tr>
+			</thead>
+			<tbody>
+				${rows}
+			</tbody>
+		</table>
+		</div>`;
+}
+
+/** Builds the "Columns" toggle button and its checkbox dropdown for showing/hiding optional columns. */
+function buildSessionColumnsMenuHtml(): string {
+	const items = SESSION_COLUMN_DEFS.map(col => `
+		<label style="display:flex; align-items:center; gap:6px; padding:4px 8px; font-size:12px; white-space:nowrap; cursor:pointer;">
+			<input type="checkbox" data-column="${col.id}"${enabledSessionColumns.has(col.id) ? ' checked' : ''} />
+			<span>${col.label}</span>
+		</label>`).join('');
+	return `
+		<div class="columns-menu-wrap" style="position:relative;">
+			<button id="sessions-columns-toggle" type="button" style="font-size:12px; padding:2px 8px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px; cursor:pointer;">⚙ Columns</button>
+			<div id="sessions-columns-menu" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; z-index:20; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; box-shadow:0 4px 10px var(--shadow-color); padding:4px 0; min-width:160px;">
+				${items}
+			</div>
+		</div>`;
+}
+
+function setupSessionsTableSort(): void {
+	// Delegate from the stable panel body so listeners survive lookback re-renders,
+	// which replace the inner #sessions-table-container element.
+	const body = document.getElementById('sessions-panel-body');
+	if (!body) { return; }
+	body.addEventListener('click', (e) => {
+		// Handle session title link clicks → open in log viewer
+		const link = (e.target as HTMLElement).closest<HTMLAnchorElement>('a.session-title-link');
+		if (link) {
+			e.preventDefault();
+			const file = link.getAttribute('data-file');
+			if (file) {
+				vscode.postMessage({ command: 'openSessionFile', file });
+			}
+			return;
+		}
+		// Handle sortable column header clicks
+		const th = (e.target as HTMLElement).closest<HTMLElement>('th.sortable');
+		if (!th) { return; }
+		const col = th.getAttribute('data-sort') as SessionSortColumn;
+		if (!col) { return; }
+		if (sessionSortColumn === col) {
+			sessionSortDirection = sessionSortDirection === 'desc' ? 'asc' : 'desc';
+		} else {
+			sessionSortColumn = col;
+			sessionSortDirection = 'desc';
+		}
+		const container = document.getElementById('sessions-table-container');
+		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+	});
+	setupSessionsLookbackSelector();
+	setupSessionColumnsMenu();
+}
+
+let _documentClickClosesColumnsMenu = false;
+
+function setupSessionColumnsMenu(): void {
+	const toggle = document.getElementById('sessions-columns-toggle');
+	const menu = document.getElementById('sessions-columns-menu');
+	if (!toggle || !menu) { return; }
+	toggle.addEventListener('click', (e) => {
+		e.stopPropagation();
+		menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+	});
+	menu.addEventListener('click', (e) => e.stopPropagation());
+	menu.addEventListener('change', (e) => {
+		const checkbox = e.target as HTMLInputElement;
+		const columnId = checkbox.getAttribute('data-column') as SessionColumnId | null;
+		if (!columnId) { return; }
+		if (checkbox.checked) { enabledSessionColumns.add(columnId); } else { enabledSessionColumns.delete(columnId); }
+		const container = document.getElementById('sessions-table-container');
+		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+		saveSessionColumnSettings();
+	});
+	// Attached once ever (not per re-render) and re-queries the live menu element on
+	// each click, so it keeps working across full DOM rebuilds without leaking listeners.
+	if (!_documentClickClosesColumnsMenu) {
+		_documentClickClosesColumnsMenu = true;
+		document.addEventListener('click', () => {
+			const liveMenu = document.getElementById('sessions-columns-menu');
+			if (liveMenu) { liveMenu.style.display = 'none'; }
+		});
+	}
+}
+
+function setupSessionsLookbackSelector(): void {
+	const select = document.getElementById('sessions-lookback') as HTMLSelectElement | null;
+	if (!select) { return; }
+	select.value = sessionsLookback;
+	select.addEventListener('change', () => {
+		const value = select.value;
+		sessionsLookback = (value === '7' || value === '30') ? value : 'today';
+		refreshSessionsPanelBody();
+	});
+	// A full re-render may have restored a non-today lookback whose data was
+	// rendered from cache already; if the cache is empty, request it now.
+	if (sessionsLookback !== 'today' && !recentSessionsCache[sessionsLookback]) {
+		refreshSessionsPanelBody();
+	}
+}
+
+/** Renders the sessions table for the current lookback, requesting host data when needed. */
+function refreshSessionsPanelBody(): void {
+	const body = document.getElementById('sessions-panel-body');
+	if (!body) { return; }
+	if (sessionsLookback === 'today') {
+		body.innerHTML = renderTodaySessionsTable(latestTodaySessions);
+		return;
+	}
+	const cached = recentSessionsCache[sessionsLookback];
+	if (cached) {
+		body.innerHTML = renderTodaySessionsTable(cached);
+		return;
+	}
+	body.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
+	vscode.postMessage({ command: 'loadRecentSessions', days: Number(sessionsLookback) });
+}
+
+function handleRecentSessionsLoaded(message: any): void {
+	const days = Number(message.days);
+	if (days !== 7 && days !== 30) { return; }
+	const sessions = Array.isArray(message.sessions)
+		? message.sessions.filter((s: any) => s && typeof s === 'object' && typeof s.interactions === 'number') as TodaySessionSummary[]
+		: [];
+	recentSessionsCache[String(days)] = sessions;
+	if (sessionsLookback === String(days)) {
+		refreshSessionsPanelBody();
+	}
+}
+
 function unionFill(map: { [key: string]: number }, keys: string[]): { [key: string]: number } {
 	const result: { [key: string]: number } = { ...map };
 	for (const k of keys) {
@@ -297,59 +1223,66 @@ function unionFill(map: { [key: string]: number }, keys: string[]): { [key: stri
 	return result;
 }
 
-function sanitizeStats(raw: any): UsageAnalysisStats | null {
-	if (!raw || typeof raw !== 'object') {
-		return null;
-	}
+function coerceNumber(value: any): number {
+	const n = Number(value);
+	return Number.isFinite(n) ? n : 0;
+}
 
-	const coerceNumber = (value: any): number => {
-		const n = Number(value);
-		return Number.isFinite(n) ? n : 0;
+function sanitizeModeUsage(mode: any): ModeUsage {
+	const m = (mode && typeof mode === 'object') ? mode : {};
+	return {
+		ask: coerceNumber(m.ask),
+		edit: coerceNumber(m.edit),
+		agent: coerceNumber(m.agent),
+		plan: coerceNumber(m.plan),
+		customAgent: coerceNumber(m.customAgent),
+		cli: coerceNumber(m.cli),
 	};
+}
 
-	const sanitizeModeUsage = (mode: any): ModeUsage => ({
-		ask: coerceNumber(mode?.ask),
-		edit: coerceNumber(mode?.edit),
-		agent: coerceNumber(mode?.agent),
-		plan: coerceNumber(mode?.plan),
-		customAgent: coerceNumber(mode?.customAgent),
-	});
+function sanitizeContextRefs(refs: any): ContextReferenceUsage {
+	const r = (refs && typeof refs === 'object') ? refs : {};
+	return {
+		file: coerceNumber(r.file),
+		selection: coerceNumber(r.selection),
+		implicitSelection: coerceNumber(r.implicitSelection),
+		symbol: coerceNumber(r.symbol),
+		codebase: coerceNumber(r.codebase),
+		workspace: coerceNumber(r.workspace),
+		terminal: coerceNumber(r.terminal),
+		vscode: coerceNumber(r.vscode),
+		terminalLastCommand: coerceNumber(r.terminalLastCommand),
+		terminalSelection: coerceNumber(r.terminalSelection),
+		clipboard: coerceNumber(r.clipboard),
+		changes: coerceNumber(r.changes),
+		outputPanel: coerceNumber(r.outputPanel),
+		problemsPanel: coerceNumber(r.problemsPanel),
+		pullRequest: coerceNumber(r.pullRequest),
+		byKind: r.byKind ?? {},
+		copilotInstructions: coerceNumber(r.copilotInstructions),
+		agentsMd: coerceNumber(r.agentsMd),
+		byPath: r.byPath ?? {},
+	};
+}
 
-	const sanitizeContextRefs = (refs: any): ContextReferenceUsage => ({
-		file: coerceNumber(refs?.file),
-		selection: coerceNumber(refs?.selection),
-		implicitSelection: coerceNumber(refs?.implicitSelection),
-		symbol: coerceNumber(refs?.symbol),
-		codebase: coerceNumber(refs?.codebase),
-		workspace: coerceNumber(refs?.workspace),
-		terminal: coerceNumber(refs?.terminal),
-		vscode: coerceNumber(refs?.vscode),
-		terminalLastCommand: coerceNumber(refs?.terminalLastCommand),
-		terminalSelection: coerceNumber(refs?.terminalSelection),
-		clipboard: coerceNumber(refs?.clipboard),
-		changes: coerceNumber(refs?.changes),
-		outputPanel: coerceNumber(refs?.outputPanel),
-		problemsPanel: coerceNumber(refs?.problemsPanel),
-		byKind: refs?.byKind ?? {},
-		copilotInstructions: coerceNumber(refs?.copilotInstructions),
-		agentsMd: coerceNumber(refs?.agentsMd),
-		byPath: refs?.byPath ?? {},
-	});
-
-	const sanitizePeriod = (period: any): UsageAnalysisPeriod => ({
-		sessions: coerceNumber(period?.sessions),
-		modeUsage: sanitizeModeUsage(period?.modeUsage ?? {}),
-		contextReferences: sanitizeContextRefs(period?.contextReferences ?? {}),
+function sanitizePeriod(period: any): UsageAnalysisPeriod {
+	const p = (period && typeof period === 'object') ? period : {};
+	const toolCalls = (p.toolCalls && typeof p.toolCalls === 'object') ? p.toolCalls : {};
+	const mcpTools = (p.mcpTools && typeof p.mcpTools === 'object') ? p.mcpTools : {};
+	return {
+		sessions: coerceNumber(p.sessions),
+		modeUsage: sanitizeModeUsage(p.modeUsage),
+		contextReferences: sanitizeContextRefs(p.contextReferences),
 		toolCalls: {
-			total: coerceNumber(period?.toolCalls?.total),
-			byTool: period?.toolCalls?.byTool ?? {},
+			total: coerceNumber(toolCalls.total),
+			byTool: toolCalls.byTool ?? {},
 		},
 		mcpTools: {
-			total: coerceNumber(period?.mcpTools?.total),
-			byServer: period?.mcpTools?.byServer ?? {},
-			byTool: period?.mcpTools?.byTool ?? {},
+			total: coerceNumber(mcpTools.total),
+			byServer: mcpTools.byServer ?? {},
+			byTool: mcpTools.byTool ?? {},
 		},
-		modelSwitching: period?.modelSwitching ?? {
+		modelSwitching: {
 			modelsPerSession: [],
 			totalSessions: 0,
 			averageModelsPerSession: 0,
@@ -360,24 +1293,125 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			premiumModels: [],
 			unknownModels: [],
 			mixedTierSessions: 0,
+			lowCostModels: [],
+			mediumCostModels: [],
+			highCostModels: [],
+			mixedCostSessions: 0,
 			standardRequests: 0,
 			premiumRequests: 0,
+			lowCostRequests: 0,
+			mediumCostRequests: 0,
+			highCostRequests: 0,
 			unknownRequests: 0,
 			totalRequests: 0,
+			...(p.modelSwitching ?? {}),
 		},
-	});
+		thinkingEffortUsage: p.thinkingEffortUsage,
+	};
+}
+
+function sanitizeInsights(rawInsights: any[]): EvaluatedInsight[] {
+	return rawInsights
+		.filter((i: any) => i && typeof i === 'object' && typeof i.id === 'string')
+		.map((i: any): EvaluatedInsight => ({
+			id: String(i.id),
+			category: typeof i.category === 'string' ? i.category : 'general',
+			severity: (['tip', 'opportunity', 'celebration'].includes(i.severity) ? i.severity : 'tip') as InsightSeverity,
+			title: typeof i.title === 'string' ? i.title : '',
+			body: typeof i.body === 'string' ? i.body : '',
+			actionLabel: typeof i.actionLabel === 'string' ? i.actionLabel : undefined,
+			actionCommand: typeof i.actionCommand === 'string' ? i.actionCommand : undefined,
+			status: (['new', 'seen', 'dismissed', 'snoozed', 'done'].includes(i.status) ? i.status : 'new') as InsightStatus,
+			allowToast: !!i.allowToast,
+		}));
+}
+
+function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null {
+	if (!rawCa || typeof rawCa !== 'object') { return null; }
+	const ca = rawCa as Partial<ToolCurationAnalysis>;
+	return {
+		windowDays: typeof ca.windowDays === 'number' ? ca.windowDays : 30,
+		availableTools: Array.isArray(ca.availableTools) ? ca.availableTools : [],
+		usedTools: Array.isArray(ca.usedTools) ? ca.usedTools : [],
+		unusedTools: Array.isArray(ca.unusedTools) ? ca.unusedTools : [],
+		underusedMcpServers: Array.isArray(ca.underusedMcpServers) ? ca.underusedMcpServers : [],
+		underusedAgentPlugins: Array.isArray(ca.underusedAgentPlugins) ? ca.underusedAgentPlugins : [],
+		estimatedPromptBloat: ca.estimatedPromptBloat && typeof ca.estimatedPromptBloat === 'object'
+			? ca.estimatedPromptBloat
+			: { totalTokens: 0, byServer: {} },
+		recommendations: Array.isArray(ca.recommendations) ? ca.recommendations : [],
+	};
+}
+
+function sanitizeStats(raw: any): UsageAnalysisStats | null {
+	if (!raw || typeof raw !== 'object') {
+		traceCurationOnce('sanitize-invalid-root', 'sanitizeStats.invalidRoot');
+		return null;
+	}
 
 	try {
 		const sanitized: UsageAnalysisStats = {
 			today: sanitizePeriod(raw.today),
 			last30Days: sanitizePeriod(raw.last30Days),
 			month: sanitizePeriod(raw.month),
+			lastMonth: sanitizePeriod(raw.lastMonth),
 			lastUpdated: typeof raw.lastUpdated === 'string' ? raw.lastUpdated : '',
 			backendConfigured: !!raw.backendConfigured,
+			locale: typeof raw.locale === 'string' ? raw.locale : undefined,
+			currentWorkspacePaths: Array.isArray(raw.currentWorkspacePaths)
+				? raw.currentWorkspacePaths.filter((p: unknown) => typeof p === 'string') as string[]
+				: undefined,
+			suppressedUnknownTools: Array.isArray(raw.suppressedUnknownTools)
+				? raw.suppressedUnknownTools.filter((t: unknown) => typeof t === 'string') as string[]
+				: undefined,
 		};
 
+		// Sanitize customizationMatrix (avoid pass-through of untrusted nested fields)
+		const safeMatrix = sanitizeCustomizationMatrix(raw.customizationMatrix);
+		if (safeMatrix) {
+			// sanitizeCustomizationMatrix returns WorkspaceCustomizationMatrix from types.ts;
+			// the local WorkspaceCustomizationMatrix interface is structurally identical.
+			sanitized.customizationMatrix = safeMatrix as WorkspaceCustomizationMatrix;
+		}
+
+		// Validated pass-through for missedPotential (array of objects)
+		if (Array.isArray(raw.missedPotential)) {
+			sanitized.missedPotential = raw.missedPotential.filter(
+				(w: any) => w && typeof w === 'object' && typeof w.workspacePath === 'string'
+			) as MissedPotentialWorkspace[];
+		}
+
+		// Pass-through todaySessions (array of session summary objects)
+		if (Array.isArray(raw.todaySessions)) {
+			sanitized.todaySessions = raw.todaySessions.filter(
+				(s: any) => s && typeof s === 'object' && typeof s.interactions === 'number'
+			) as TodaySessionSummary[];
+		}
+
+		// Sanitize insights
+		if (Array.isArray(raw.insights)) {
+			sanitized.insights = sanitizeInsights(raw.insights);
+		}
+
+		// Pass through curationAnalysis (already structured server-side).
+		// Normalize required array/object fields so rendering paths don't throw on partial payloads.
+		const curationAnalysis = _sanitizeCurationAnalysis(raw.curationAnalysis);
+		if (curationAnalysis) {
+			sanitized.curationAnalysis = curationAnalysis;
+			traceCuration('sanitizeStats.curation.present', {
+				availableTools: curationAnalysis.availableTools.length,
+				unusedTools: curationAnalysis.unusedTools.length,
+				unusedServers: curationAnalysis.underusedMcpServers.filter(s => s && s.usedToolCount === 0).length,
+			});
+		} else {
+			traceCurationOnce('sanitize-no-curation', 'sanitizeStats.curation.missing');
+		}
+
 		return sanitized;
-	} catch {
+	} catch (error) {
+		traceCurationOnce('sanitize-error', 'sanitizeStats.error', {
+			error: error instanceof Error ? error.message : String(error),
+		});
 		return null;
 	}
 }
@@ -395,370 +1429,1198 @@ function setupTabs(): void {
 			});
 			const activePanel = document.getElementById(`tab-panel-${tab}`);
 			if (activePanel) { activePanel.style.display = 'block'; }
+			// Lazy-load repo PR stats on first visit to the tab
+			if (tab === 'repos' && !repoPrStatsLoaded) {
+				repoPrStatsLoaded = true;
+				vscode.postMessage({ command: 'loadRepoPrStats' });
+			}
+			// Lazy-load cloud agent sessions on first visit to the tab
+			if (tab === 'agent' && !agentSessionsLoaded) {
+				agentSessionsLoaded = true;
+				vscode.postMessage({ command: 'loadAgentSessions' });
+			}
+			// Mark new insights as seen when visiting the Insights tab
+			if (tab === 'insights') {
+				currentInsights
+					.filter(i => i.status === 'new')
+					.forEach(i => vscode.postMessage({ command: 'insightAction', id: i.id, action: 'seen' }));
+			}
 		});
 	});
 }
 
-function renderLayout(stats: UsageAnalysisStats): void {
-	const root = document.getElementById('root');
-	if (!root) {
-		return;
+function toSafeNumber(value: unknown): number {
+	const n = Number(value);
+	return Number.isFinite(n) && n >= 0 ? n : 0;
+}
+
+function toSafeHttpUrl(value: unknown): string {
+	const raw = typeof value === 'string' ? value.trim() : '';
+	try {
+		const parsed = new URL(raw);
+		if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+			return parsed.toString();
+		}
+	} catch {
+		// Ignore invalid URL and fall back to placeholder.
+	}
+	return '#';
+}
+
+function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
+	const src = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {};
+	const repos = Array.isArray(src.repos) ? src.repos : [];
+	return {
+		authenticated: Boolean(src.authenticated),
+		since: typeof src.since === 'string' || typeof src.since === 'number' ? src.since : Date.now(),
+		repos: repos.map((repo) => {
+			const r = (repo && typeof repo === 'object') ? (repo as Record<string, unknown>) : {};
+			const aiDetails = Array.isArray(r.aiDetails) ? r.aiDetails : [];
+			return {
+				repoUrl: toSafeHttpUrl(r.repoUrl),
+				owner: escapeHtml(typeof r.owner === 'string' ? r.owner : ''),
+				repo: escapeHtml(typeof r.repo === 'string' ? r.repo : ''),
+				error: typeof r.error === 'string' ? escapeHtml(r.error) : '',
+				totalPrs: toSafeNumber(r.totalPrs),
+				aiAuthoredPrs: toSafeNumber(r.aiAuthoredPrs),
+				aiReviewRequestedPrs: toSafeNumber(r.aiReviewRequestedPrs),
+				aiDetails: aiDetails.map((d) => {
+					const detail = (d && typeof d === 'object') ? (d as Record<string, unknown>) : {};
+					const validAiTypes = ['copilot', 'claude', 'openai', 'other-ai'] as const;
+					const validRoles = ['author', 'reviewer-requested'] as const;
+					const aiType = validAiTypes.includes(detail.aiType as typeof validAiTypes[number])
+						? detail.aiType as typeof validAiTypes[number]
+						: 'other-ai';
+					const role = validRoles.includes(detail.role as typeof validRoles[number])
+						? detail.role as typeof validRoles[number]
+						: 'author';
+					return {
+						number: toSafeNumber(detail.number),
+						title: escapeHtml(typeof detail.title === 'string' ? detail.title : ''),
+						url: toSafeHttpUrl(detail.url),
+						aiType,
+						role,
+					};
+				}),
+			};
+		}),
+	} as RepoPrStatsResult;
+}
+
+function renderReposPrContent(data: RepoPrStatsResult): string {
+	const sinceDate = escapeHtml(new Date(data.since).toLocaleDateString());
+	if (!data.authenticated) {
+		return `
+			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
+				<strong>🔒 GitHub authentication required</strong><br/>
+				Sign in with GitHub (via the Diagnostics tab) to see AI PR activity across your repositories.
+			</div>`;
+	}
+	if (data.repos.length === 0) {
+		return `
+			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
+				No GitHub repositories detected in your workspace folders.
+			</div>`;
 	}
 
-	const matrix =
-		((stats as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined | null) ??
-		((window.__INITIAL_USAGE__ as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined | null);
-	hygieneMatrixState = matrix ?? null;
-	if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
-		selectedRepoPath = null;
+	const aiLabel: Record<string, string> = {
+		copilot: '🤖 Copilot',
+		claude: '🧠 Claude',
+		openai: '✨ Codex',
+		'other-ai': '🤖 AI',
+	};
+
+	// Cell style shared across data rows — matches the customization matrix look
+	const cell = 'padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);';
+	const cellCenter = `${cell} text-align: center;`;
+
+	const rows = data.repos.map((r) => {
+		const repoLink = `<a href="${escapeHtml(r.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${escapeHtml(r.owner)}/${escapeHtml(r.repo)}</a>`;
+		if (r.error) {
+			return `<tr>
+				<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+				<td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r.error)}</td>
+			</tr>`;
+		}
+		// Collapsible detail list
+		let detailsHtml = '';
+		if (r.aiDetails.length > 0) {
+			const items = r.aiDetails.map(d =>
+				`<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${aiLabel[d.aiType] ?? escapeHtml(String(d.aiType))} (${d.role === 'author' ? 'authored' : 'review requested'})</li>`
+			).join('');
+			detailsHtml = `
+				<details style="margin-top:4px; font-size:11px;">
+					<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r.aiDetails.length} detail(s)</summary>
+					<ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${items}</ul>
+				</details>`;
+		}
+		return `<tr>
+			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${detailsHtml}</td>
+			<td style="${cellCenter} font-weight:600;">${r.totalPrs}</td>
+			<td style="${cellCenter}">${r.aiAuthoredPrs > 0 ? `<span style="font-weight:600;">${r.aiAuthoredPrs}</span>` : '0'}</td>
+			<td style="${cellCenter}">${r.aiReviewRequestedPrs > 0 ? `<span style="font-weight:600;">${r.aiReviewRequestedPrs}</span>` : '0'}</td>
+		</tr>`;
+	}).join('');
+
+	return `
+		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
+			Showing PRs created since ${sinceDate}.
+			Reviewer requests are only visible for <strong>open</strong> PRs — the GitHub API clears this field after a PR is merged or closed.
+		</div>
+		<div class="customization-matrix-container">
+			<table class="customization-matrix" style="width:100%; border-collapse:collapse;">
+				<thead>
+					<tr>
+						<th style="text-align:left; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">📂 Repository</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">PRs</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs where the PR author's GitHub login matches a known AI agent (e.g. copilot-swe-agent, claude-code-action, openai-code-agent)">🤖 Cloud Agent Authored</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Open PRs where an AI agent was listed as a requested reviewer">👁 Copilot Review Agent requested†</th>
+					</tr>
+				</thead>
+				<tbody>
+					${rows}
+				</tbody>
+			</table>
+		</div>
+		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
+			† Copilot Review Agent requested counts are for open PRs only. GitHub removes reviewer data after a PR is merged or closed.<br/>
+			🤖 Cloud Agent Authored = PR author's GitHub login matches a known cloud agent (e.g. <code>copilot-swe-agent</code>, <code>claude-code-action</code>, <code>openai-code-agent</code>).
+		</div>`;
+}
+
+/** Sanitize agent sessions data received from the extension host — escapes all string fields at
+ *  the trust boundary so render functions can interpolate them directly into innerHTML safely. */
+function sanitizeAgentSessionsData(input: unknown): AgentSessionsResult {
+	const src = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {};
+	const repos = Array.isArray(src.repos) ? src.repos : [];
+	return {
+		authenticated: Boolean(src.authenticated),
+		since: typeof src.since === 'string' ? escapeHtml(src.since) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
+		fetchedAt: typeof src.fetchedAt === 'string' ? src.fetchedAt : '',
+		totalTasks: toSafeNumber(src.totalTasks),
+		totalSessions: toSafeNumber(src.totalSessions),
+		totalCredits: toSafeNumber(src.totalCredits),
+		repos: repos.map((repo) => {
+			const r = (repo && typeof repo === 'object') ? (repo as Record<string, unknown>) : {};
+			const owner = escapeHtml(typeof r.owner === 'string' ? r.owner : '');
+			const repoName = escapeHtml(typeof r.repo === 'string' ? r.repo : '');
+			return {
+				owner,
+				repo: repoName,
+				repoUrl: toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
+				totalTasks: toSafeNumber(r.totalTasks),
+				totalSessions: toSafeNumber(r.totalSessions),
+				totalCredits: toSafeNumber(r.totalCredits),
+				tasksScanned: toSafeNumber(r.tasksScanned),
+				tasksTotal: toSafeNumber(r.tasksTotal),
+				partial: Boolean(r.partial),
+				error: typeof r.error === 'string' ? escapeHtml(r.error) : undefined,
+			};
+		}),
+	};
+}
+
+function updateReposPrPanel(data: RepoPrStatsResult): void {
+	const container = document.querySelector('#repos-pr-content');
+	if (!container) { return; }
+	container.innerHTML = `
+		<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
+		<div class="section-subtitle">
+			PRs from the last 30 days across your known repositories, showing how many were <strong>authored by cloud agents</strong>
+			(i.e. opened by a bot account like <code>copilot-swe-agent</code>, <code>claude-code-action</code>, or <code>openai-code-agent</code>)
+			or had an AI agent requested as a reviewer.
+		</div>
+		${renderReposPrContent(data)}
+	`;
+}
+
+// ---------------------------------------------------------------------------
+// Cloud Agent Sessions tab
+// ---------------------------------------------------------------------------
+
+function buildAgentSessionRows(data: AgentSessionsResult, cell: string, cellCenter: string): string {
+  return data.repos.map((r) => {
+    // r.owner, r.repo, r.repoUrl and r.error are pre-sanitized by sanitizeAgentSessionsData
+    const repoLink = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r.owner}/${r.repo}</a>`;
+    if (r.error) {
+      return `<tr>
+        <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+        <td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r.error}</td>
+      </tr>`;
+    }
+    const partialNote = r.partial
+      ? ` <span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}/${r.tasksTotal} tasks scanned)</span>`
+      : '';
+    return `<tr>
+      <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
+      <td style="${cellCenter} font-weight:600;">${r.totalTasks}</td>
+      <td style="${cellCenter} font-weight:600;">${r.totalSessions}</td>
+      <td style="${cellCenter}">${r.totalCredits > 0 ? r.totalCredits.toFixed(1) : '—'}</td>
+    </tr>`;
+  }).join('');
+}
+
+function renderAgentSessionsContent(data: AgentSessionsResult): string {
+	if (!data.authenticated) {
+		return `
+			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
+				<strong>🔒 GitHub authentication required</strong><br/>
+				Sign in with GitHub (via the Diagnostics tab) to see Copilot cloud agent session data.
+			</div>`;
 	}
-	if (Array.isArray(stats.currentWorkspacePaths)) {
-		currentWorkspacePaths = stats.currentWorkspacePaths;
+	if (data.repos.length === 0) {
+		return `
+			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
+				No GitHub repositories detected in your workspace folders.
+			</div>`;
 	}
-	let customizationHtml = '';
+
+	const sinceDate = new Date(data.since).toLocaleDateString();
+	const cell = 'padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);';
+	const cellCenter = `${cell} text-align: center;`;
+
+	const summaryTotals = data.repos.reduce((acc, r) => {
+		if (!r.error) {
+			acc.tasks += r.totalTasks;
+			acc.sessions += r.totalSessions;
+			acc.credits += r.totalCredits;
+		}
+		return acc;
+	}, { tasks: 0, sessions: 0, credits: 0 });
+
+	const hasPartial = data.repos.some(r => r.partial && !r.error);
+
+	const rows = buildAgentSessionRows(data, cell, cellCenter);
+
+	return `
+		<div style="margin-bottom:12px; display:flex; gap:24px; flex-wrap:wrap;">
+			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.tasks}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Tasks</div>
+			</div>
+			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.sessions}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Sessions</div>
+			</div>
+			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.credits > 0 ? summaryTotals.credits.toFixed(1) : '—'}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">AI Credits</div>
+			</div>
+		</div>
+		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
+			Showing cloud-agent sessions from ${sinceDate} to now.
+			${hasPartial ? '<strong>Note:</strong> Some repos were capped at 50 tasks — totals may be lower bounds. ' : ''}
+		</div>
+		<div class="customization-matrix-container">
+			<table class="customization-matrix" style="width:100%; border-collapse:collapse;">
+				<thead>
+					<tr>
+						<th style="text-align:left; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">📂 Repository</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Number of Copilot cloud agent tasks (each task = one user prompt to the agent)">Tasks</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Number of agent sessions (each session = one autonomous coding run)">Sessions</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="AI credits consumed (1 credit = $0.01). Only available when the API reports usage data.">AI Credits</th>
+					</tr>
+				</thead>
+				<tbody>${rows}</tbody>
+			</table>
+		</div>
+		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
+			ℹ️ <strong>No double-counting:</strong> These are cloud agent sessions only. CLI/remote sessions and local IDE chat sessions (shown in "My Activity") are excluded.<br/>
+			ℹ️ <strong>Action minutes</strong> (GitHub Actions compute used by the agent) are not shown here — they require additional per-branch API calls.
+		</div>`;
+}
+
+function updateAgentSessionsPanel(data: AgentSessionsResult): void {
+	const container = document.querySelector('#agent-sessions-content');
+	if (!container) { return; }
+	container.innerHTML = `
+		<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
+		<div class="section-subtitle">
+			Cloud agent tasks and sessions from the last 30 days. Each <strong>task</strong> is a user request to the agent;
+			each <strong>session</strong> is an autonomous coding run within that task.
+			<strong>CLI/remote sessions are excluded</strong> — they are separate from these cloud agent sessions.
+		</div>
+		${renderAgentSessionsContent(data)}
+	`;
+}
+
+function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
 	if (!matrix || !matrix.workspaces || matrix.workspaces.length === 0) {
-		customizationHtml = `
+		return `
 			<div class="section">
 				<div class="section-title"><span>🛠️</span><span>Copilot Customization Files</span></div>
 				<div class="section-subtitle">Showing workspace customization status for active workspaces</div>
 				<div style="color: var(--text-muted); padding:12px;">No workspaces with customization files detected in the last 30 days.</div>
 			</div>`;
-	} else {
-		customizationHtml = `
-			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
-				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-					🛠️ Copilot Customization Files
+	}
+	const workspaceRows = matrix.workspaces.map(ws => {
+		const statuses = ws.typeStatuses ?? {};
+		const hasNoCustomization = Object.values(statuses).every(s => s === '❌');
+		const typeCells = (matrix.customizationTypes ?? []).map(type => {
+			const status = statuses[type.id] || '❓';
+			const statusLabel =
+				status === '✅' ? 'Present and fresh'
+				: status === '⚠️' ? 'Present but stale'
+				: status === '❌' ? 'Missing'
+				: 'Status unknown';
+			return `
+				<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center;">
+					${statusBadgeHtml(status, statusLabel)}
+				</td>`;
+		}).join('');
+		return `
+			<tr>
+				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
+					${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ` <span style="font-family: sans-serif; vertical-align: middle;">${statusBadgeHtml('⚠️', 'No customization files')}</span>` : ''}
+				</td>
+				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
+					${ws.sessionCount}
+				</td>
+				${typeCells}
+			</tr>`;
+	}).join('');
+	return `
+		<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
+				🛠️ Copilot Customization Files
+			</div>
+			<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
+				Showing ${matrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
+				${matrix.workspacesWithIssues > 0
+					? `<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
+					: `<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} All workspaces have up-to-date customizations.</span>`}
+			</div>
+			<div class="customization-matrix-container">
+				<table class="customization-matrix">
+					<thead>
+						<tr>
+							<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>
+							<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>
+							${(matrix.customizationTypes ?? []).map(type => `
+								<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);" title="${escapeHtml(type.label)}">
+									${escapeHtml(type.icon)}
+								</th>
+							`).join('')}
+						</tr>
+					</thead>
+					<tbody>
+						${workspaceRows}
+					</tbody>
+				</table>
+			</div>
+			<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
+				<div style="display: flex; gap: 16px; flex-wrap: wrap;">
+					${(matrix.customizationTypes ?? []).map(type => `
+						<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
+					`).join('')}
 				</div>
-				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
-					Showing ${matrix.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
-					${matrix.workspacesWithIssues > 0
-						? `<span class="stale-warning">⚠️ ${matrix.workspacesWithIssues} workspace(s) have no customization files.</span>`
-						: '✅ All workspaces have up-to-date customizations.'}
+				<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('✅')} = Present &amp; Fresh</span>
+					<span style="color: var(--text-muted);">•</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('⚠️')} = Present but Stale</span>
+					<span style="color: var(--text-muted);">•</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${statusBadgeHtml('❌')} = Missing</span>
 				</div>
-				<div class="customization-matrix-container">
-					<table class="customization-matrix">
-						<thead>
-							<tr>
-								<th style="text-align: left; padding: 8px; border-bottom: 2px solid var(--border-color);">📂 Workspace</th>
-								<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);">Sessions</th>
-								${matrix.customizationTypes.map(type => `
-									<th style="text-align: center; padding: 8px; border-bottom: 2px solid var(--border-color);" title="${escapeHtml(type.label)}">
-										${escapeHtml(type.icon)}
-									</th>
-								`).join('')}
-							</tr>
-						</thead>
-						<tbody>
-							${matrix.workspaces.map(ws => {
-								const hasNoCustomization = Object.values(ws.typeStatuses).every(s => s === '❌');
-								return `
-								<tr>
-									<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
-										${escapeHtml(ws.workspaceName)}${hasNoCustomization ? ' <span title="No customization files" style="font-family: sans-serif;">⚠️</span>' : ''}
-									</td>
-									<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
-										${ws.sessionCount}
-									</td>
-									${matrix.customizationTypes.map(type => {
-										const status = ws.typeStatuses[type.id] || '❓';
-										const statusLabel =
-											status === '✅'
-												? 'Present and fresh'
-												: status === '⚠️'
-													? 'Present but stale'
-													: status === '❌'
-														? 'Missing'
-														: 'Status unknown';
-										return `
-										<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; font-size: 16px;" title="${statusLabel}" aria-label="${statusLabel}">
-											<span aria-hidden="true">${escapeHtml(status)}</span>
-											<span style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">${statusLabel}</span>
-										</td>
-										`;
-									}).join('')}
-								</tr>
-							`; }).join('')}
-						</tbody>
-					</table>
+			</div>
+		</div>`;
+}
+
+/** Renders a compact three-period model cost breakdown for the Activity tab. */
+function buildModelCostSectionHtml(stats: UsageAnalysisStats): string {
+	const p30 = stats.last30Days.modelSwitching;
+	const today = stats.today.modelSwitching;
+	// Only show if we have any request data
+	if ((p30.totalRequests ?? 0) === 0 && (today.totalRequests ?? 0) === 0) { return ''; }
+
+	function renderCostPeriod(ms: ModelSwitchingAnalysis): string {
+		const total = ms.totalRequests ?? 0;
+		if (total === 0) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+		const buckets: { label: string; count: number; color: string }[] = [
+			{ label: '💚 Low cost', count: ms.lowCostRequests ?? 0, color: '#4ade80' },
+			{ label: '🔵 Medium cost', count: ms.mediumCostRequests ?? 0, color: 'var(--link-color)' },
+			{ label: '💸 High cost', count: ms.highCostRequests ?? 0, color: 'var(--warning-fg)' },
+			{ label: '❓ Unknown', count: ms.unknownRequests ?? 0, color: 'var(--text-muted)' },
+		].filter(b => b.count > 0);
+		const rows = buckets.map(b => {
+			const pct = total > 0 ? Math.round((b.count / total) * 100) : 0;
+			return `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+				<span style="width: 90px; font-size: 12px; font-weight: 600; color: ${b.color};">${b.label}</span>
+				<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
+					<div style="width: ${pct}%; background: ${b.color}; height: 100%; border-radius: 4px;"></div>
 				</div>
-				<div style="margin-top: 12px; font-size: 10px; color: var(--text-muted); border-top: 1px solid var(--border-subtle); padding-top: 8px;">
-					<div style="display: flex; gap: 16px; flex-wrap: wrap;">
-						${matrix.customizationTypes.map(type => `
-							<span>${escapeHtml(type.icon)} ${escapeHtml(type.label)}</span>
-						`).join('')}
-					</div>
-					<div style="margin-top: 8px;">
-						✅ = Present &amp; Fresh&nbsp;&nbsp;•&nbsp;&nbsp;⚠️ = Present but Stale&nbsp;&nbsp;•&nbsp;&nbsp;❌ = Missing
-					</div>
-				</div>
+				<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${formatNumber(b.count)} <span style="color: var(--text-secondary); font-weight: 400;">(${pct}%)</span></span>
 			</div>`;
+		}).join('');
+		const mixedNote = (ms.mixedCostSessions ?? 0) > 0
+			? `<div style="font-size: 11px; color: var(--link-color); margin-top: 6px;">🔀 ${formatNumber(ms.mixedCostSessions)} mixed-cost session${ms.mixedCostSessions !== 1 ? 's' : ''}</div>`
+			: '';
+		return `${rows}<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${formatNumber(total)} total requests</div>${mixedNote}`;
 	}
 
-	// Compute union of keys across all periods so every column shows every known item
-	const allToolKeys = [...new Set([
-		...Object.keys(stats.today.toolCalls.byTool),
-		...Object.keys(stats.last30Days.toolCalls.byTool),
-		...Object.keys(stats.month.toolCalls.byTool),
-	])];
-	const allMcpToolKeys = [...new Set([
-		...Object.keys(stats.today.mcpTools.byTool),
-		...Object.keys(stats.last30Days.mcpTools.byTool),
-		...Object.keys(stats.month.mcpTools.byTool),
-	])];
-	const allMcpServerKeys = [...new Set([
-		...Object.keys(stats.today.mcpTools.byServer),
-		...Object.keys(stats.last30Days.mcpTools.byServer),
-		...Object.keys(stats.month.mcpTools.byServer),
-	])];
-	const allStandardModels = [...new Set([
-		...stats.today.modelSwitching.standardModels,
-		...stats.last30Days.modelSwitching.standardModels,
-		...stats.month.modelSwitching.standardModels,
-	])];
-	const allPremiumModels = [...new Set([
-		...stats.today.modelSwitching.premiumModels,
-		...stats.last30Days.modelSwitching.premiumModels,
-		...stats.month.modelSwitching.premiumModels,
-	])];
-	const allUnknownModels = [...new Set([
-		...stats.today.modelSwitching.unknownModels,
-		...stats.last30Days.modelSwitching.unknownModels,
-		...stats.month.modelSwitching.unknownModels,
-	])];
+	return `
+		<!-- Model Cost Section -->
+		<div class="section">
+			<div class="section-title"><span>💰</span><span>Model Cost Usage</span></div>
+			<div class="section-subtitle">Request distribution across cost levels — low (&lt;$2/M tokens), medium ($2–5/M), high (≥$5/M)</div>
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					${renderCostPeriod(today)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					${renderCostPeriod(p30)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					${renderCostPeriod(stats.month.modelSwitching)}
+				</div>
+			</div>
+		</div>`;
+}
 
-	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
-	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
-	const todayTotalModes = stats.today.modeUsage.ask + stats.today.modeUsage.edit + stats.today.modeUsage.agent + stats.today.modeUsage.plan + stats.today.modeUsage.customAgent;
-	const last30DaysTotalModes = stats.last30Days.modeUsage.ask + stats.last30Days.modeUsage.edit + stats.last30Days.modeUsage.agent + stats.last30Days.modeUsage.plan + stats.last30Days.modeUsage.customAgent;
+function buildThinkingEffortSectionHtml(stats: UsageAnalysisStats): string {
+	const effortData = stats.last30Days.thinkingEffortUsage || stats.today.thinkingEffortUsage || stats.month.thinkingEffortUsage;
+	if (!effortData) { return ''; }
+	return `
+		<!-- Thinking Effort Section -->
+		<div class="section">
+			<div class="section-title"><span>💡</span><span>Thinking Effort (Reasoning)</span></div>
+			<div class="section-subtitle">How often each reasoning effort level was used (requests per level)</div>
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					${renderEffortPeriodHtml(stats.today.thinkingEffortUsage)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					${renderEffortPeriodHtml(stats.last30Days.thinkingEffortUsage)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					${renderEffortPeriodHtml(stats.month.thinkingEffortUsage)}
+				</div>
+			</div>
+		</div>`;
+}
 
-	const multiModelHtml = `
-			<!-- Multi-Model Usage Section -->
-			<div class="section">
-				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
-				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
-				<div class="three-column">
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-						<div class="stats-grid" style="grid-template-columns: 1fr;">
-							<div class="stat-card">
-								<div class="stat-label">📊 Avg Models per Conversation</div>
-								<div class="stat-value">${formatFixed(stats.today.modelSwitching.averageModelsPerSession, 1)}</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">🔄 Switching Frequency</div>
-								<div class="stat-value">${formatPercent(stats.today.modelSwitching.switchingFrequency, 0)}</div>
-								<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with >1 model</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">📈 Max Models in Session</div>
-								<div class="stat-value">${formatNumber(stats.today.modelSwitching.maxModelsPerSession || 0)}</div>
-							</div>
-						</div>
-						<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Tier:</div>
-							<div style="min-height: 90px;">
-								${allStandardModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--link-color);">🔵 Standard:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allStandardModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allPremiumModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--warning-fg);">⭐ Premium:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allPremiumModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allUnknownModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--text-muted);">❓ Unknown:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : ''}
-							</div>
-							${stats.today.modelSwitching.totalRequests > 0 ? `
-								<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 65px;">
-									<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
-									${stats.today.modelSwitching.standardRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--link-color);">🔵 Standard: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.today.modelSwitching.standardRequests)} (${formatPercent((stats.today.modelSwitching.standardRequests / stats.today.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.today.modelSwitching.premiumRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--warning-fg);">⭐ Premium: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.today.modelSwitching.premiumRequests)} (${formatPercent((stats.today.modelSwitching.premiumRequests / stats.today.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.today.modelSwitching.unknownRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--text-muted);">❓ Unknown: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.today.modelSwitching.unknownRequests)} (${formatPercent((stats.today.modelSwitching.unknownRequests / stats.today.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-								</div>
-							` : ''}
-							${stats.today.modelSwitching.mixedTierSessions > 0 ? `
-								<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-									<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed tier sessions: ${formatNumber(stats.today.modelSwitching.mixedTierSessions)}</span>
-								</div>
-							` : ''}
-						</div>
+function renderEffortPeriodHtml(teu: { byEffort: { [effort: string]: number }; sessionCount: number; switchCount: number } | undefined): string {
+	const EFFORT_ORDER = ['minimal', 'low', 'medium', 'high', 'max', 'xhigh'];
+	if (!teu || teu.sessionCount === 0) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	const total = Object.values(teu.byEffort).reduce((s, v) => s + v, 0);
+	const sorted = EFFORT_ORDER
+		.filter(k => teu.byEffort[k] > 0)
+		.concat(Object.keys(teu.byEffort).filter(k => !EFFORT_ORDER.includes(k) && teu.byEffort[k] > 0));
+	return `
+		${sorted.map(level => {
+			const count = teu.byEffort[level] || 0;
+			const pct = total > 0 ? Math.round((count / total) * 100) : 0;
+			return `<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+				<span style="width: 56px; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: capitalize;">${escapeHtml(getEffortDisplayName(level))}</span>
+				<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
+					<div style="width: ${pct}%; background: var(--link-color); height: 100%; border-radius: 4px;"></div>
+				</div>
+				<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${count} <span style="color: var(--text-secondary); font-weight: 400;">(${pct}%)</span></span>
+			</div>`;
+		}).join('')}
+		<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${teu.sessionCount} session${teu.sessionCount !== 1 ? 's' : ''} · ${teu.switchCount} effort switch${teu.switchCount !== 1 ? 'es' : ''}</div>
+	`;
+}
+
+function buildUsageAllKeysSets(stats: UsageAnalysisStats): {
+	allToolKeys: string[];
+	allMcpToolKeys: string[];
+	allMcpServerKeys: string[];
+	allStandardModels: string[];
+	allHighCostModels: string[];
+	allLowCostModels: string[];
+	allMediumCostModels: string[];
+	allUnknownModels: string[];
+} {
+	return {
+		allToolKeys: [...new Set([...Object.keys(stats.today.toolCalls.byTool), ...Object.keys(stats.last30Days.toolCalls.byTool), ...Object.keys(stats.month.toolCalls.byTool)])].sort(),
+		allMcpToolKeys: [...new Set([...Object.keys(stats.today.mcpTools.byTool), ...Object.keys(stats.last30Days.mcpTools.byTool), ...Object.keys(stats.month.mcpTools.byTool)])].sort(),
+		allMcpServerKeys: [...new Set([...Object.keys(stats.today.mcpTools.byServer), ...Object.keys(stats.last30Days.mcpTools.byServer), ...Object.keys(stats.month.mcpTools.byServer)])].sort(),
+		allStandardModels: [...new Set([...stats.today.modelSwitching.standardModels, ...stats.last30Days.modelSwitching.standardModels, ...stats.month.modelSwitching.standardModels])].sort(),
+		allHighCostModels: [...new Set([...stats.today.modelSwitching.highCostModels, ...stats.last30Days.modelSwitching.highCostModels, ...stats.month.modelSwitching.highCostModels])].sort(),
+		allLowCostModels: [...new Set([...stats.today.modelSwitching.lowCostModels, ...stats.last30Days.modelSwitching.lowCostModels, ...stats.month.modelSwitching.lowCostModels])].sort(),
+		allMediumCostModels: [...new Set([...stats.today.modelSwitching.mediumCostModels, ...stats.last30Days.modelSwitching.mediumCostModels, ...stats.month.modelSwitching.mediumCostModels])].sort(),
+		allUnknownModels: [...new Set([...stats.today.modelSwitching.unknownModels, ...stats.last30Days.modelSwitching.unknownModels, ...stats.month.modelSwitching.unknownModels])].sort(),
+	};
+}
+
+function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysisStats): string {
+	return `
+		<div id="tab-panel-health" class="tab-panel"${activeTab !== 'health' ? ' style="display:none"' : ''}>
+			${customizationHtml}
+			${renderMissedPotential(stats)}
+
+			<!-- Repository Setup Section -->
+			<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
+				<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
+					🏗️ Repository Hygiene Analysis
+				</div>
+				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
+					Analyze repository hygiene and structure to identify missing configuration files and best practices.
+				</div>
+				${hygieneMatrixState && hygieneMatrixState.workspaces && hygieneMatrixState.workspaces.length > 0 ? `
+					<div style="margin-bottom: 12px;">
+						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${hygieneMatrixState.workspaces.length})</vscode-button>
 					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-						<div class="stats-grid" style="grid-template-columns: 1fr;">
-							<div class="stat-card">
-								<div class="stat-label">📊 Avg Models per Conversation</div>
-								<div class="stat-value">${formatFixed(stats.last30Days.modelSwitching.averageModelsPerSession, 1)}</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">🔄 Switching Frequency</div>
-								<div class="stat-value">${formatPercent(stats.last30Days.modelSwitching.switchingFrequency, 0)}</div>
-								<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with >1 model</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">📈 Max Models in Session</div>
-								<div class="stat-value">${formatNumber(stats.last30Days.modelSwitching.maxModelsPerSession || 0)}</div>
-							</div>
-						</div>
-						<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Tier:</div>
-							<div style="min-height: 90px;">
-								${allStandardModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--link-color);">🔵 Standard:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allStandardModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allPremiumModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--warning-fg);">⭐ Premium:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allPremiumModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allUnknownModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--text-muted);">❓ Unknown:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : ''}
-							</div>
-							${stats.last30Days.modelSwitching.totalRequests > 0 ? `
-								<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 65px;">
-									<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
-									${stats.last30Days.modelSwitching.standardRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--link-color);">🔵 Standard: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.last30Days.modelSwitching.standardRequests)} (${formatPercent((stats.last30Days.modelSwitching.standardRequests / stats.last30Days.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.last30Days.modelSwitching.premiumRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--warning-fg);">⭐ Premium: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.last30Days.modelSwitching.premiumRequests)} (${formatPercent((stats.last30Days.modelSwitching.premiumRequests / stats.last30Days.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.last30Days.modelSwitching.unknownRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--text-muted);">❓ Unknown: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.last30Days.modelSwitching.unknownRequests)} (${formatPercent((stats.last30Days.modelSwitching.unknownRequests / stats.last30Days.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-								</div>
-							` : ''}
-							${stats.last30Days.modelSwitching.mixedTierSessions > 0 ? `
-								<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-									<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed tier sessions: ${formatNumber(stats.last30Days.modelSwitching.mixedTierSessions)}</span>
-								</div>
-							` : ''}
-						</div>
+					<div id="repo-list-pane-container" class="repo-hygiene-pane">
+						<div class="repo-hygiene-pane-header">📁 Repository List</div>
+						<div id="repo-list-pane" class="repo-hygiene-pane-body"></div>
 					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-						<div class="stats-grid" style="grid-template-columns: 1fr;">
-							<div class="stat-card">
-								<div class="stat-label">📊 Avg Models per Conversation</div>
-								<div class="stat-value">${formatFixed(stats.month.modelSwitching.averageModelsPerSession, 1)}</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">🔄 Switching Frequency</div>
-								<div class="stat-value">${formatPercent(stats.month.modelSwitching.switchingFrequency, 0)}</div>
-								<div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with >1 model</div>
-							</div>
-							<div class="stat-card">
-								<div class="stat-label">📈 Max Models in Session</div>
-								<div class="stat-value">${formatNumber(stats.month.modelSwitching.maxModelsPerSession || 0)}</div>
-							</div>
-						</div>
-						<div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Tier:</div>
-							<div style="min-height: 90px;">
-								${allStandardModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--link-color);">🔵 Standard:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allStandardModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allPremiumModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--warning-fg);">⭐ Premium:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allPremiumModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : '<div style="margin-bottom: 6px; height: 21px;"></div>'}
-								${allUnknownModels.length > 0 ? `
-									<div style="margin-bottom: 6px;">
-										<span style="color: var(--text-muted);">❓ Unknown:</span>
-										<span style="font-size: 11px; color: var(--text-primary);">${allUnknownModels.map(escapeHtml).join(', ')}</span>
-									</div>
-								` : ''}
-							</div>
-							${stats.month.modelSwitching.totalRequests > 0 ? `
-								<div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 65px;">
-									<div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
-									${stats.month.modelSwitching.standardRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--link-color);">🔵 Standard: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.month.modelSwitching.standardRequests)} (${formatPercent((stats.month.modelSwitching.standardRequests / stats.month.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.month.modelSwitching.premiumRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--warning-fg);">⭐ Premium: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.month.modelSwitching.premiumRequests)} (${formatPercent((stats.month.modelSwitching.premiumRequests / stats.month.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-									${stats.month.modelSwitching.unknownRequests > 0 ? `
-										<div style="margin-bottom: 4px; font-size: 11px;">
-											<span style="color: var(--text-muted);">❓ Unknown: </span>
-											<span style="color: var(--text-primary);">${formatNumber(stats.month.modelSwitching.unknownRequests)} (${formatPercent((stats.month.modelSwitching.unknownRequests / stats.month.modelSwitching.totalRequests) * 100)})</span>
-										</div>
-									` : ''}
-								</div>
-							` : ''}
-							${stats.month.modelSwitching.mixedTierSessions > 0 ? `
-								<div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
-									<span style="font-size: 11px; color: var(--link-color);">🔀 Mixed tier sessions: ${formatNumber(stats.month.modelSwitching.mixedTierSessions)}</span>
-								</div>
-							` : ''}
-						</div>
+					<div id="repo-details-pane-container" class="repo-hygiene-pane repo-hygiene-pane-collapsed">
+						<div class="repo-hygiene-pane-header">📊 Repository Details</div>
+						<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
+					</div>
+				` : `
+					<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
+					<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
+				`}
+			</div>
+		</div>`;
+}
+
+function buildMcpToolsSectionHtml(
+	stats: UsageAnalysisStats,
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+): string {
+	return `
+		<!-- MCP Tools Section -->
+		<div class="section">
+			<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>
+			<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
+			${buildUnknownMcpToolsBannerHtml(stats)}
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.today.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
 					</div>
 				</div>
-			</div>`;
-
-	const sessionsSummaryHtml = `
-			<!-- Summary Section -->
-			<div class="section">
-				<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
-				<div class="stats-grid">
-					<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
-					<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
-					<div class="stat-card"><div class="stat-label">📅 Previous Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.last30Days.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
+					</div>
 				</div>
-			</div>`;
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.month.mcpTools.total)}</div>
+						${allMcpServerKeys.length > 0 ? `
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
+						` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
+					</div>
+				</div>
+			</div>
+			<div class="three-column" style="margin-top: 12px;">
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+				<div>
+					${allMcpToolKeys.length > 0 ? `
+						<div class="list">
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
+						</div>
+					` : ''}
+				</div>
+			</div>
+		</div>`;
+}
 
-	root.innerHTML = `
+function buildCurationSummaryHtml(availableTools: AvailableToolEntry[], unusedTools: AvailableToolEntry[], bloat: ToolCurationAnalysis['estimatedPromptBloat']): string {
+	const usedCount = availableTools.length - unusedTools.length;
+	const severityColor = unusedTools.length > 0 ? 'rgba(251,191,36,0.12)' : 'rgba(74,222,128,0.12)';
+	const severityBorder = unusedTools.length > 0 ? 'rgba(251,191,36,0.4)' : 'rgba(74,222,128,0.4)';
+	const unusedColor = unusedTools.length > 0 ? '#fbbf24' : '#4ade80';
+	const totalBloat = bloat.totalTokens;
+	const skillBloat = bloat.byServer['skill'] ?? 0;
+	const builtinBloat = bloat.byServer['builtin'] ?? 0;
+	const mcpBloat = totalBloat - skillBloat - builtinBloat;
+	const fmt = (n: number) => n >= 1000 ? `~${Math.round(n / 1000)}K` : `~${n}`;
+	const actionableBloat = mcpBloat + skillBloat;
+	const actionableParts: string[] = [];
+	if (mcpBloat > 0) { actionableParts.push(`${fmt(mcpBloat)} MCP`); }
+	if (skillBloat > 0) { actionableParts.push(`${fmt(skillBloat)} skills`); }
+	return `<div style="display:flex; gap:16px; flex-wrap:wrap; margin:12px 0;">
+		<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:10px 16px; min-width:120px; text-align:center;">
+			<div style="font-size:20px; font-weight:700; color:var(--text-primary);">${formatNumber(availableTools.length)}</div>
+			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Available</div>
+		</div>
+		<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:10px 16px; min-width:120px; text-align:center;">
+			<div style="font-size:20px; font-weight:700; color:#4ade80;">${formatNumber(usedCount)}</div>
+			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Used</div>
+		</div>
+		<div style="background:${severityColor}; border:1px solid ${severityBorder}; border-radius:6px; padding:10px 16px; min-width:120px; text-align:center;">
+			<div style="font-size:20px; font-weight:700; color:${unusedColor};">${formatNumber(unusedTools.length)}</div>
+			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Unused</div>
+		</div>
+		${actionableBloat > 0 ? `<div style="background:rgba(239,68,68,0.1); border:1px solid rgba(239,68,68,0.3); border-radius:6px; padding:10px 16px; min-width:140px; text-align:center;" title="Overhead you can reduce by disabling unused MCP servers or removing unused skills">
+			<div style="font-size:20px; font-weight:700; color:#f87171;">${fmt(actionableBloat)}</div>
+			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Actionable overhead</div>
+			${actionableParts.length > 0 ? `<div style="font-size:10px; color:var(--text-secondary); margin-top:2px;">${escapeHtml(actionableParts.join(' + '))}</div>` : ''}
+		</div>` : ''}
+		${builtinBloat > 0 ? `<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:10px 16px; min-width:140px; text-align:center; opacity:0.7;" title="Overhead from VS Code built-in tools — cannot be disabled">
+			<div style="font-size:20px; font-weight:700; color:var(--text-secondary);">${fmt(builtinBloat)}</div>
+			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Built-in overhead</div>
+			<div style="font-size:10px; color:var(--text-secondary); margin-top:2px;">not actionable</div>
+		</div>` : ''}
+	</div>`;
+}
+
+type McpServerEntry = ToolCurationAnalysis['underusedMcpServers'][number];
+
+function _mcpSourceLabel(s: McpServerEntry): string {
+	if (s.extensionId) { return 'Extension'; }
+	if (!s.configFiles || s.configFiles.length === 0) { return 'Settings'; }
+	const labels = new Set<string>();
+	for (const f of s.configFiles) {
+		const p = f.replace(/\\/g, '/');
+		if (p.includes('/.vscode/')) { labels.add('Workspace'); }
+		else if (p.includes('/.vs/')) { labels.add('Workspace (VS)'); }
+		else if (p.includes('/.cursor/')) { labels.add('Workspace (Cursor)'); }
+		else if (p.endsWith('/.mcp.json')) { labels.add(p.split('/').slice(-2).join('/')); }
+		else { labels.add('Config file'); }
+	}
+	return [...labels].join(', ');
+}
+
+function _buildMcpSourceOpenBtn(s: McpServerEntry, sourceTip: string): string {
+	if (s.configFiles && s.configFiles.length === 1) {
+		return ` <button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(s.configFiles[0])}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open ${escapeHtml(s.configFiles[0])}">open</button>`;
+	}
+	if (s.configFiles && s.configFiles.length > 1) {
+		return ` <button class="curation-file-btn" data-command="openFileFromList" data-paths="${escapeHtml(JSON.stringify(s.configFiles))}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="${escapeHtml(sourceTip)}">open</button>`;
+	}
+	if (s.extensionId) {
+		return ` <button class="curation-file-btn" data-command="manageExtension" data-extension-id="${escapeHtml(s.extensionId)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view for ${escapeHtml(s.extensionId)}">open</button>`;
+	}
+	return ` <button class="curation-file-btn" data-command="searchMcpExtensions" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Browse MCP extensions in the marketplace">open</button>`;
+}
+
+function _buildMcpActionCell(s: McpServerEntry): string {
+	if (s.extensionId) {
+		return `<button class="curation-file-btn" data-command="manageExtension" data-extension-id="${escapeHtml(s.extensionId)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open the Extensions view for ${escapeHtml(s.extensionId)} (disable or uninstall to reclaim prompt budget)">Manage Extension</button>`;
+	}
+	if (!s.configFiles || s.configFiles.length === 0) {
+		return `<button class="curation-file-btn" data-command="openToolPicker" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open VS Code tool selection menu">Change Tools</button>`;
+	}
+	if (s.configFiles.length === 1) {
+		return `<button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(s.configFiles[0])}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open ${escapeHtml(s.configFiles[0])}">Change Tools</button>`;
+	}
+	return `<button class="curation-file-btn" data-command="openFileFromList" data-paths="${escapeHtml(JSON.stringify(s.configFiles))}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Defined in ${s.configFiles.length} config files">Change Tools</button>`;
+}
+
+function _buildMcpServerRowHtml(s: McpServerEntry, bloat: ToolCurationAnalysis['estimatedPromptBloat']): string {
+	const b = bloat.byServer[s.server] ?? 0;
+	const sourceLabel = _mcpSourceLabel(s);
+	const sourceTip = s.configFiles?.join('\n') ?? s.extensionId ?? '';
+	const sourceOpenBtn = _buildMcpSourceOpenBtn(s, sourceTip);
+	const actionCell = _buildMcpActionCell(s);
+	const notConnected = s.availableToolCount === 0;
+	return `<tr class="${s.usedToolCount > 0 ? 'mcp-has-usage' : ''}">
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(s.server)}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;" title="${escapeHtml(sourceTip)}">${escapeHtml(sourceLabel)}${sourceOpenBtn}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${notConnected ? '<em style="color:var(--text-secondary)">not connected</em>' : s.availableToolCount}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${notConnected ? '—' : s.usedToolCount}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${b > 0 ? `~${b.toLocaleString()} tokens` : '—'}</td>
+		<td style="padding:5px 8px; font-size:12px;">${actionCell}</td>
+	</tr>`;
+}
+
+function _buildMcpJsonLink(allServers: McpServerEntry[]): string {
+	const allConfigFiles = [...new Set(
+		allServers.filter(s => !s.extensionId).flatMap(s => s.configFiles ?? [])
+	)];
+	const preferredFile = allConfigFiles.find(f => f.replace(/\\/g, '/').endsWith('.vscode/mcp.json')) ?? allConfigFiles[0];
+	if (!preferredFile) { return `<code>.vscode/mcp.json</code>`; }
+	const displayName = preferredFile.replace(/\\/g, '/').split('/').slice(-3).join('/');
+	return `<button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(preferredFile)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="${escapeHtml(preferredFile)}">${escapeHtml(displayName)}</button>`;
+}
+
+function buildUnusedMcpHtml(underusedMcpServers: ToolCurationAnalysis['underusedMcpServers'], bloat: ToolCurationAnalysis['estimatedPromptBloat'], windowDays: number): string {
+	// Show all servers, zero-usage first, then partially used, then fully used.
+	const allServers = [...underusedMcpServers].sort((a, b) => {
+		const aKey = a.usedToolCount === 0 ? 0 : a.usedToolCount < a.availableToolCount ? 1 : 2;
+		const bKey = b.usedToolCount === 0 ? 0 : b.usedToolCount < b.availableToolCount ? 1 : 2;
+		return aKey !== bKey ? aKey - bKey : a.usedToolCount - b.usedToolCount;
+	});
+	if (allServers.length === 0) { return ''; }
+	const rows = allServers.map(s => _buildMcpServerRowHtml(s, bloat)).join('');
+	const mcpJsonLink = _buildMcpJsonLink(allServers);
+	const usedCount = allServers.filter(s => s.usedToolCount > 0).length;
+	const unusedCount = allServers.length - usedCount;
+	// Pure CSS checkbox trick: input and .mcp-table-wrap are siblings inside <details>;
+	// the :checked ~ sibling combinator works without any JS (inline handlers are CSP-blocked).
+	return `<details style="margin-top:12px;" open>
+		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
+			🔌 MCP Servers in Last ${windowDays} Days (${allServers.length})
+		</summary>
+		<style>#mcp-hide-toggle:checked ~ .mcp-table-wrap .mcp-has-usage { display: none; }</style>
+		<div style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+			<input type="checkbox" id="mcp-hide-toggle" checked style="margin:0; cursor:pointer; flex-shrink:0;">
+			<label for="mcp-hide-toggle" style="font-size:12px; color:var(--text-primary); cursor:pointer; user-select:none;">Hide servers with usage</label>
+			<span style="font-size:11px; color:var(--text-secondary);">${unusedCount} with no usage · ${usedCount} with usage</span>
+		</div>
+		<div class="mcp-table-wrap" style="margin-top:8px; overflow-x:auto;">
+			<table style="width:100%; border-collapse:collapse; font-size:12px;">
+				<thead><tr style="border-bottom:1px solid var(--border-color);">
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Server</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Source</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Tools Available</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Tools Used</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Est. Overhead</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Action</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>
+			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 Open ${mcpJsonLink} to disable file-configured servers, or use <em>Manage Extension</em> to disable or uninstall an MCP-providing extension. (VS Code does not expose per-server picker state to extensions, so servers you disabled in the chat tool picker may still appear here.)</div>
+		</div>
+	</details>`;
+}
+
+function buildUnusedSkillsHtml(unusedSkills: AvailableToolEntry[]): string {
+	if (unusedSkills.length === 0) { return ''; }
+	const rows = unusedSkills.map(s => {
+		const skillFile = s.configFiles?.[0];
+		const viewLink = skillFile
+			? `<button class="curation-file-btn" data-command="openFile" data-path="${escapeHtml(skillFile)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:12px;text-decoration:underline;" title="Open ${escapeHtml(skillFile)}">View skill</button>`
+			: '—';
+		// Derive a human-readable source label. Plugin skills show the plugin name.
+		let sourceLabel = '—';
+		let manageBtn = '';
+		if (s.pluginName) {
+			sourceLabel = `Plugin: ${s.pluginName}`;
+			manageBtn = ` <button class="curation-file-btn" data-command="openAgentPlugins" data-plugin-name="${escapeHtml(s.pluginName)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view filtered to agent plugins">manage</button>`;
+		} else if (s.skillPath) {
+			if (s.skillPath.startsWith('.github/skills')) { sourceLabel = 'Workspace (.github)'; }
+			else if (s.skillPath.startsWith('.claude/skills')) { sourceLabel = 'Workspace (.claude)'; }
+			else if (s.skillPath.startsWith('.agents/skills')) { sourceLabel = 'Workspace (.agents)'; }
+			else { sourceLabel = 'User (~)'; }
+		}
+		const estTokens = Math.round((s.name.length + s.description.length + 10) / 4);
+		return `<tr>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(s.name)}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(sourceLabel)}${manageBtn}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(s.description)}">${escapeHtml(s.description)}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">~${estTokens.toLocaleString()} tokens</td>
+		<td style="padding:5px 8px; font-size:12px; white-space:nowrap;">${viewLink}</td>
+	</tr>`;
+	}).join('');
+	return `<details style="margin-top:8px;" open>
+		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
+			📚 Unused Skills (${unusedSkills.length})
+		</summary>
+		<div style="margin-top:8px; overflow-x:auto;">
+			<table style="width:100%; border-collapse:collapse; font-size:12px;">
+				<thead><tr style="border-bottom:1px solid var(--border-color);">
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Skill</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Source</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Description</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Est. Overhead</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">View</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>
+			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 Est. overhead is per agent interaction. For plugin skills, click <em>manage</em> to open the agent plugins view where you can uninstall the plugin. For workspace skills, update the description or remove the SKILL.md.</div>
+		</div>
+	</details>`;
+}
+
+function buildUnderusedAgentPluginsHtml(underusedAgentPlugins: ToolCurationAnalysis['underusedAgentPlugins'], windowDays: number): string {
+	if (underusedAgentPlugins.length === 0) { return ''; }
+	const rows = underusedAgentPlugins.map(p => {
+		const manageBtn = `<button class="curation-file-btn" data-command="openAgentPlugins" data-plugin-name="${escapeHtml(p.pluginName)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view filtered to @agentPlugins ${escapeHtml(p.pluginName)}">Manage Plugin</button>`;
+		const usageClass = p.usedSkillCount === 0 ? '' : 'plugin-has-usage';
+		return `<tr class="${usageClass}">
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(p.pluginName)}</td>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${p.availableSkillCount}</td>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${p.usedSkillCount}</td>
+			<td style="padding:5px 8px; font-size:12px;">${manageBtn}</td>
+		</tr>`;
+	}).join('');
+	const unusedCount = underusedAgentPlugins.filter(p => p.usedSkillCount === 0).length;
+	const usedCount = underusedAgentPlugins.length - unusedCount;
+	return `<details style="margin-top:8px;" open>
+		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
+			🧩 Agent Plugins in Last ${windowDays} Days (${underusedAgentPlugins.length})
+		</summary>
+		<style>#plugin-hide-toggle:checked ~ .plugin-table-wrap .plugin-has-usage { display: none; }</style>
+		<div style="display:flex; align-items:center; gap:6px; margin:6px 0;">
+			<input type="checkbox" id="plugin-hide-toggle" checked style="margin:0; cursor:pointer; flex-shrink:0;">
+			<label for="plugin-hide-toggle" style="font-size:12px; color:var(--text-primary); cursor:pointer; user-select:none;">Hide plugins with usage</label>
+			<span style="font-size:11px; color:var(--text-secondary);">${unusedCount} with no usage · ${usedCount} with usage</span>
+		</div>
+		<div class="plugin-table-wrap" style="margin-top:8px; overflow-x:auto;">
+			<table style="width:100%; border-collapse:collapse; font-size:12px;">
+				<thead><tr style="border-bottom:1px solid var(--border-color);">
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Plugin</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Skills Available</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Skills Used</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Action</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>
+			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 Click <em>Manage Plugin</em> to open the Extensions view filtered to <code>@agentPlugins</code> where you can uninstall unused plugins to reclaim prompt budget.</div>
+		</div>
+	</details>`;
+}
+
+function buildBuiltinToolsHtml(builtinTools: AvailableToolEntry[], bloat: ToolCurationAnalysis['estimatedPromptBloat']): string {
+	if (builtinTools.length === 0) { return ''; }
+	const builtinBloat = bloat.byServer['builtin'] ?? 0;
+	const rows = builtinTools.map(t => {
+		const overhead = Math.round((t.name.length + (t.description?.length ?? 0) + 10) / 4);
+		return `<tr>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${escapeHtml(t.name)}</td>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${escapeHtml(t.description ?? '')}">${escapeHtml(t.description ?? '—')}</td>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">~${overhead} tokens</td>
+		</tr>`;
+	}).join('');
+	const fmt = (n: number) => n >= 1000 ? `~${Math.round(n / 1000)}K` : `~${n}`;
+	return `<details style="margin-top:12px;">
+		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
+			🔧 Built-in VS Code Tools (${builtinTools.length}) — ${fmt(builtinBloat)} tokens overhead, not actionable
+		</summary>
+		<div style="margin-top:8px; overflow-x:auto;">
+			<table style="width:100%; border-collapse:collapse; font-size:12px;">
+				<thead><tr style="border-bottom:1px solid var(--border-color);">
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Tool</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Description</th>
+					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Est. Overhead</th>
+				</tr></thead>
+				<tbody>${rows}</tbody>
+			</table>
+			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">💡 These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above.</div>
+		</div>
+	</details>`;
+}
+
+function buildCurationSectionHtml(curation: ToolCurationAnalysis | null | undefined): string {
+	try {
+		if (!curation || curation.availableTools.length === 0) {
+			traceCurationOnce('render-hidden-empty', 'buildCurationSectionHtml.hidden', {
+				hasCurationObject: !!curation,
+				availableTools: curation?.availableTools?.length ?? 0,
+			});
+			return '';
+		}
+
+		const { availableTools, unusedTools, underusedMcpServers, underusedAgentPlugins, estimatedPromptBloat, windowDays } = curation;
+		const unusedSkills = unusedTools.filter(t => t.source === 'skill');
+		const builtinTools = availableTools.filter(t => t.source === 'builtin');
+
+		traceCuration('buildCurationSectionHtml.render', {
+			availableTools: availableTools.length,
+			unusedTools: unusedTools.length,
+			unusedSkills: unusedSkills.length,
+			mcpServers: underusedMcpServers.length,
+		});
+
+		return `
+			<!-- Tool Curation Section -->
+			<div id="section-tool-curation" class="section">
+				<div class="section-title"><span>✂️</span><span>Tool Curation</span></div>
+				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Compare available tools against actual usage to reduce prompt overhead (last ${windowDays} days)</div>
+				${buildCurationSummaryHtml(availableTools, unusedTools, estimatedPromptBloat)}
+				${buildUnusedMcpHtml(underusedMcpServers, estimatedPromptBloat, windowDays)}
+				${buildUnderusedAgentPluginsHtml(underusedAgentPlugins, windowDays)}
+				${buildBuiltinToolsHtml(builtinTools, estimatedPromptBloat)}
+				${buildUnusedSkillsHtml(unusedSkills)}
+			</div>`;
+	} catch (error) {
+		traceCuration('buildCurationSectionHtml.error', {
+			error: error instanceof Error ? error.message : String(error),
+		});
+		return `
+			<div id="section-tool-curation" class="section">
+				<div class="section-title"><span>✂️</span><span>Tool Curation</span></div>
+				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Tool curation is temporarily unavailable due to a rendering error. Try Refresh.</div>
+			</div>`;
+	}
+}
+
+function buildReposAndAgentTabPanelsHtml(): string {
+	return `
+		<div id="tab-panel-repos" class="tab-panel"${activeTab !== 'repos' ? ' style="display:none"' : ''}>
+			<div class="section" id="repos-pr-content">
+				<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
+				<div class="section-subtitle">PRs from the last 30 days across your known repositories — authored or reviewed by AI agents.</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+			</div>
+		</div>
+		<div id="tab-panel-agent" class="tab-panel"${activeTab !== 'agent' ? ' style="display:none"' : ''}>
+			<div class="section" id="agent-sessions-content">
+				<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
+				<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
+				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading… (sign in with GitHub to see data)</div>
+			</div>
+		</div>`;
+}
+
+function buildInsightCardHtml(insight: EvaluatedInsight): string {
+	const severityColors: Record<InsightSeverity, string> = {
+		tip: 'rgba(96,165,250,0.12)',
+		opportunity: 'rgba(251,191,36,0.12)',
+		celebration: 'rgba(74,222,128,0.12)',
+	};
+	const severityBorder: Record<InsightSeverity, string> = {
+		tip: 'rgba(96,165,250,0.5)',
+		opportunity: 'rgba(251,191,36,0.5)',
+		celebration: 'rgba(74,222,128,0.5)',
+	};
+	// Accent colour used for the primary action button per severity
+	const severityAccent: Record<InsightSeverity, string> = {
+		tip: 'rgba(96,165,250,0.85)',
+		opportunity: 'rgba(251,191,36,0.85)',
+		celebration: 'rgba(74,222,128,0.85)',
+	};
+	const bg = severityColors[insight.severity] ?? severityColors.tip;
+	const border = severityBorder[insight.severity] ?? severityBorder.tip;
+	const accent = severityAccent[insight.severity] ?? severityAccent.tip;
+	const isNew = insight.status === 'new';
+	const isDone = insight.status === 'done';
+
+	const actionBtn = insight.actionLabel
+		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="execute" data-command="${escapeHtml(insight.actionCommand ?? '')}"
+				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer;
+				border:1px solid ${border}; border-radius:5px;
+				background:${bg}; color:var(--text-primary);">${escapeHtml(insight.actionLabel)}</button>`
+		: '';
+
+	const doneBtn = !isDone
+		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="done"
+				title="Mark as done"
+				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer;
+				border:1px solid ${border}; border-radius:5px;
+				background:${accent}; color:#0d1117;">✓ Done</button>`
+		: `<span style="font-size:12px; color:var(--text-secondary); opacity:0.5; padding:5px 6px;">✓ Done</span>`;
+
+	const snoozeBtn = !isDone
+		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="snooze"
+				title="Snooze for 7 days"
+				style="padding:5px 14px; font-size:12px; font-weight:500; cursor:pointer;
+				border:1px solid ${border}; border-radius:5px;
+				background:transparent; color:var(--text-primary);">⏸ Snooze</button>`
+		: '';
+
+	const dismissBtn = !isDone
+		? `<button class="insight-action-btn" data-insight-id="${escapeHtml(insight.id)}" data-action="dismiss"
+				title="Dismiss permanently"
+				style="padding:4px 8px; font-size:14px; line-height:1; cursor:pointer; border:none; border-radius:4px;
+				background:transparent; color:var(--text-primary); opacity:0.5;">✕</button>`
+		: '';
+
+	return `
+		<div class="insight-card" data-insight-id="${escapeHtml(insight.id)}"
+			style="margin-bottom:12px; padding:16px 18px; border-radius:8px;
+			background:${bg}; border:1px solid ${border};
+			${isNew ? 'box-shadow:0 2px 8px ' + bg + ';' : ''}
+			${isDone ? 'opacity:0.45;' : ''}">
+			<div style="display:flex; align-items:flex-start; gap:10px;">
+				<div style="flex:1;">
+					<div style="font-size:13px; font-weight:700; color:var(--text-primary); margin-bottom:8px; display:flex; align-items:center; gap:8px;">
+						${isNew ? `<span style="font-size:10px; padding:2px 7px; border-radius:10px; background:${accent}; color:#0d1117; font-weight:700; letter-spacing:0.04em;">NEW</span>` : ''}
+						${escapeHtml(insight.title)}
+					</div>
+					<div style="font-size:12px; color:var(--text-primary); line-height:1.5; opacity:0.85; white-space:pre-wrap;">${escapeHtml(insight.body)}</div>
+					${actionBtn ? `<div style="margin-top:12px;">${actionBtn}</div>` : ''}
+				</div>
+				<div style="flex-shrink:0; margin-top:-4px;">
+					${dismissBtn}
+				</div>
+			</div>
+			<div style="display:flex; gap:8px; margin-top:14px; justify-content:flex-end; border-top:1px solid ${border}; padding-top:10px;">
+				${doneBtn}
+				${snoozeBtn}
+			</div>
+		</div>`;
+}
+
+function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
+	const applicable = insights.filter(i => i.status !== 'dismissed');
+	const newInsights = applicable.filter(i => i.status === 'new');
+	const otherInsights = applicable.filter(i => i.status !== 'new' && i.status !== 'done');
+
+	const forYouSection = newInsights.length > 0
+		? `<div style="margin-bottom:20px;">
+			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">✨ For You</div>
+			${newInsights.map(buildInsightCardHtml).join('')}
+		</div>`
+		: `<div style="margin-bottom:20px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+			🎉 No new insights right now — keep using Copilot and check back later!
+		</div>`;
+
+	const allSection = otherInsights.length > 0
+		? `<div>
+			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">All Tips</div>
+			${otherInsights.map(buildInsightCardHtml).join('')}
+		</div>`
+		: '';
+
+	return `
+		<div id="tab-panel-insights" class="tab-panel"${activeTab !== 'insights' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title"><span>💡</span><span>Insights</span></div>
+				<div class="section-subtitle">
+					Personalized tips based on your usage patterns. Tips are data-driven — they only appear when relevant to how you code with AI.
+				</div>
+				<div id="insights-container" style="margin-top:16px;">
+					${forYouSection}
+					${allSection}
+				</div>
+			</div>
+		</div>`;
+}
+
+function updateTabButtonCount(insights: EvaluatedInsight[]): void {
+	const tabButton = document.querySelector<HTMLButtonElement>('.tab-button[data-tab="insights"]');
+	if (!tabButton) { return; }
+	const newCount = insights.filter(i => i.status === 'new').length;
+	const badgeHtml = newCount > 0
+		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>`
+		: '';
+	const titleOnly = '<span class="codicon codicon-lightbulb"></span> Insights';
+	tabButton.innerHTML = titleOnly + badgeHtml;
+}
+
+function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
+	const container = document.getElementById('insights-container');
+	if (!container) { return; }
+	currentInsights = insights;
+	const forYou = insights.filter(i => i.status === 'new');
+	const other = insights.filter(i => i.status !== 'new' && i.status !== 'dismissed' && i.status !== 'done');
+
+	const forYouSection = forYou.length > 0
+		? `<div style="margin-bottom:20px;">
+			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">✨ For You</div>
+			${forYou.map(buildInsightCardHtml).join('')}
+		</div>`
+		: `<div style="margin-bottom:20px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+			🎉 No new insights right now — keep using Copilot and check back later!
+		</div>`;
+
+	const allSection = other.length > 0
+		? `<div>
+			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">All Tips</div>
+			${other.map(buildInsightCardHtml).join('')}
+		</div>`
+		: '';
+
+	container.innerHTML = forYouSection + allSection;
+	wireInsightCardButtons();
+	updateTabButtonCount(insights);
+}
+
+function _postOpenFileFromList(pathsJson: string | null): void {
+	if (!pathsJson) { return; }
+	try {
+		const paths = JSON.parse(pathsJson) as string[];
+		vscode.postMessage({ command: 'openFileFromList', paths });
+	} catch (error) {
+		traceCuration('wireCurationButtons.badPathsJson', { error: error instanceof Error ? error.message : String(error) });
+	}
+}
+
+function _handleCurationBtnClick(btn: HTMLButtonElement): void {
+	const command = btn.getAttribute('data-command');
+	if (!command) { return; }
+	if (command === 'openFile') {
+		const filePath = btn.getAttribute('data-path');
+		if (filePath) { vscode.postMessage({ command: 'openFile', path: filePath }); }
+	} else if (command === 'openFileFromList') {
+		_postOpenFileFromList(btn.getAttribute('data-paths'));
+	} else if (command === 'manageExtension') {
+		const extensionId = btn.getAttribute('data-extension-id');
+		if (extensionId) { vscode.postMessage({ command: 'manageExtension', extensionId }); }
+	} else if (command === 'openAgentPlugins') {
+		const pluginName = btn.getAttribute('data-plugin-name') ?? '';
+		vscode.postMessage({ command: 'openAgentPlugins', pluginName });
+	} else {
+		vscode.postMessage({ command });
+	}
+}
+
+function wireCurationButtons(): void {
+	try {
+		const section = document.getElementById('section-tool-curation');
+		if (!section) {
+			traceCurationOnce('wire-no-section', 'wireCurationButtons.noSection');
+			return;
+		}
+		const buttons = section.querySelectorAll<HTMLButtonElement>('.curation-file-btn');
+		traceCuration('wireCurationButtons.bind', { buttons: buttons.length });
+		buttons.forEach(btn => {
+			btn.addEventListener('click', () => {
+				try {
+					_handleCurationBtnClick(btn);
+				} catch (error) {
+					traceCuration('wireCurationButtons.clickError', { error: error instanceof Error ? error.message : String(error) });
+				}
+			});
+		});
+	} catch (error) {
+		traceCuration('wireCurationButtons.error', { error: error instanceof Error ? error.message : String(error) });
+	}
+}
+
+function wireInsightCardButtons(): void {
+	const container = document.getElementById('insights-container');
+	if (!container) { return; }
+	container.querySelectorAll<HTMLButtonElement>('.insight-action-btn').forEach(btn => {
+		btn.addEventListener('click', () => {
+			const id = btn.getAttribute('data-insight-id');
+			const action = btn.getAttribute('data-action');
+			if (!id || !action) { return; }
+			if (action === 'execute') {
+				const command = btn.getAttribute('data-command');
+				if (command) { vscode.postMessage({ command }); }
+			} else {
+				vscode.postMessage({ command: 'insightAction', id, action });
+			}
+		});
+	});
+}
+
+
+function buildUsageRootHtml(
+	stats: UsageAnalysisStats,
+	customizationHtml: string,
+	multiModelHtml: string,
+	thinkingEffortHtml: string,
+	sessionsSummaryHtml: string,
+	todayTotalRefs: number,
+	last30DaysTotalRefs: number,
+	allToolKeys: string[],
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+	allHighCostModels: string[],
+	allLowCostModels: string[],
+	allMediumCostModels: string[],
+	allUnknownModels: string[],
+): string {
+	return `
 		<style>${themeStyles}</style>
 		<style>${styles}</style>
 		<div class="container">
@@ -768,19 +2630,16 @@ function renderLayout(stats: UsageAnalysisStats): void {
 					<span class="header-title">Usage Analysis</span>
 				</div>
 				<div class="button-row">
-				${buttonHtml('btn-refresh')}
-				${buttonHtml('btn-details')}
-				${buttonHtml('btn-chart')}
-				${buttonHtml('btn-environmental')}
-				${buttonHtml('btn-diagnostics')}
-				${buttonHtml('btn-maturity')}
-				${stats.backendConfigured ? buttonHtml('btn-dashboard') : ''}
+				${navButtonsHtml('btn-usage', !!stats.backendConfigured)}
 				</div>
 			</div>
 
 			<div class="info-box">
-				<div class="info-box-title">📋 About This Dashboard</div>
-				<div>
+				<div class="info-box-title info-box-toggle" id="about-info-toggle" role="button" tabindex="0" aria-expanded="${!aboutCollapsed}" aria-controls="about-info-body">
+					<span>📋 About This Dashboard</span>
+					<span class="info-box-chevron" aria-hidden="true">${aboutCollapsed ? '▸' : '▾'}</span>
+				</div>
+				<div class="info-box-body" id="about-info-body"${aboutCollapsed ? ' style="display:none"' : ''}>
 					This dashboard analyzes your GitHub Copilot usage patterns by examining session log files.
 					It tracks modes (ask/edit/agent), tool usage, context references (#file, @workspace, etc.),
 					and MCP (Model Context Protocol) tools to help you understand how you interact with Copilot.
@@ -788,277 +2647,673 @@ function renderLayout(stats: UsageAnalysisStats): void {
 			</div>
 
 			<div class="tab-bar">
-				<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity">📊 My Activity</button>
-				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools">🔧 Tools &amp; Integrations</button>
-				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health">🏗️ Workspace Health</button>
+				<button class="tab-button ${activeTab === 'activity' ? 'active' : ''}" data-tab="activity"><span class="codicon codicon-pulse"></span> My Activity</button>
+				<button class="tab-button ${activeTab === 'sessions' ? 'active' : ''}" data-tab="sessions"><span class="codicon codicon-history"></span> Recent Sessions</button>
+				<button class="tab-button ${activeTab === 'tools' ? 'active' : ''}" data-tab="tools"><span class="codicon codicon-tools"></span> Tools &amp; Integrations</button>
+				<button class="tab-button ${activeTab === 'health' ? 'active' : ''}" data-tab="health"><span class="codicon codicon-server-environment"></span> Workspace Health</button>
+				<button class="tab-button ${activeTab === 'repos' ? 'active' : ''}" data-tab="repos"><span class="codicon codicon-git-pull-request"></span> Repository PRs</button>
+				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
+				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
 			</div>
 
-			<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
-				${sessionsSummaryHtml}
-				<!-- Mode Usage Section -->
-				<div class="section">
-					<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
-					<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
-					<div class="two-column">
-						<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-							<div class="bar-chart">
-								<div class="bar-item">
-									<div class="bar-label"><span>💬 Ask Mode</span><span><strong>${formatNumber(stats.today.modeUsage.ask)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.ask / todayTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.ask / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #3b82f6, #60a5fa);"></div></div>
-								</div>
-								<div class="bar-item">
-									<div class="bar-label"><span>✏️ Edit Mode</span><span><strong>${formatNumber(stats.today.modeUsage.edit)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.edit / todayTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.edit / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #10b981, #34d399);"></div></div>
-								</div>
-								<div class="bar-item">
-									<div class="bar-label"><span>🤖 Agent Mode</span><span><strong>${formatNumber(stats.today.modeUsage.agent)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.agent / todayTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.agent / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #7c3aed, #a855f7);"></div></div>
-								</div>						<div class="bar-item">
-								<div class="bar-label"><span>📋 Plan Mode</span><span><strong>${formatNumber(stats.today.modeUsage.plan)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.plan / todayTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.plan / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #f59e0b, #fbbf24);"></div></div>
-							</div>
-							<div class="bar-item">
-								<div class="bar-label"><span>⚡ Custom Agent</span><span><strong>${formatNumber(stats.today.modeUsage.customAgent)}</strong> (${formatPercent(todayTotalModes > 0 ? ((stats.today.modeUsage.customAgent / todayTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${todayTotalModes > 0 ? ((stats.today.modeUsage.customAgent / todayTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #ec4899, #f472b6);"></div></div>
-							</div>						</div>
-						</div>
-						<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📊 Last 30 Days</h4>
-							<div class="bar-chart">
-								<div class="bar-item">
-									<div class="bar-label"><span>💬 Ask Mode</span><span><strong>${formatNumber(stats.last30Days.modeUsage.ask)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.ask / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.ask / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #3b82f6, #60a5fa);"></div></div>
-								</div>
-								<div class="bar-item">
-									<div class="bar-label"><span>✏️ Edit Mode</span><span><strong>${formatNumber(stats.last30Days.modeUsage.edit)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.edit / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.edit / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #10b981, #34d399);"></div></div>
-								</div>
-								<div class="bar-item">
-									<div class="bar-label"><span>🤖 Agent Mode</span><span><strong>${formatNumber(stats.last30Days.modeUsage.agent)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.agent / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-									<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.agent / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #7c3aed, #a855f7);"></div></div>
-								</div>						<div class="bar-item">
-								<div class="bar-label"><span>📋 Plan Mode</span><span><strong>${formatNumber(stats.last30Days.modeUsage.plan)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.plan / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.plan / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #f59e0b, #fbbf24);"></div></div>
-							</div>
-							<div class="bar-item">
-								<div class="bar-label"><span>⚡ Custom Agent</span><span><strong>${formatNumber(stats.last30Days.modeUsage.customAgent)}</strong> (${formatPercent(last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.customAgent / last30DaysTotalModes) * 100) : 0, 0)})</span></div>
-								<div class="bar-track"><div class="bar-fill" style="width: ${last30DaysTotalModes > 0 ? ((stats.last30Days.modeUsage.customAgent / last30DaysTotalModes) * 100).toFixed(1) : 0}%; background: linear-gradient(90deg, #ec4899, #f472b6);"></div></div>
-							</div>						</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- Context References Section -->
-				<div class="section">
-					<div class="section-title"><span>🔗</span><span>Context References</span></div>
-					<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>
-					<div class="stats-grid">
-						<div class="stat-card"><div class="stat-label">📄 #file</div><div class="stat-value">${stats.last30Days.contextReferences.file}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.file}</div></div>
-						<div class="stat-card"><div class="stat-label">✂️ #selection</div><div class="stat-value">${stats.last30Days.contextReferences.selection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.selection}</div></div>
-						<div class="stat-card" title="Text selected in your editor providing passive context to Copilot"><div class="stat-label">✨ Implicit Selection</div><div class="stat-value">${stats.last30Days.contextReferences.implicitSelection}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.implicitSelection}</div></div>
-						<div class="stat-card"><div class="stat-label">🔤 #symbol</div><div class="stat-value">${stats.last30Days.contextReferences.symbol}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.symbol}</div></div>
-						<div class="stat-card"><div class="stat-label">🗂️ #codebase</div><div class="stat-value">${stats.last30Days.contextReferences.codebase}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.codebase}</div></div>
-						<div class="stat-card"><div class="stat-label">📁 @workspace</div><div class="stat-value">${stats.last30Days.contextReferences.workspace}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.workspace}</div></div>
-						<div class="stat-card"><div class="stat-label">💻 @terminal</div><div class="stat-value">${stats.last30Days.contextReferences.terminal}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminal}</div></div>
-						<div class="stat-card"><div class="stat-label">🔧 @vscode</div><div class="stat-value">${stats.last30Days.contextReferences.vscode}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.vscode}</div></div>
-						<div class="stat-card" title="Last command run in the terminal"><div class="stat-label">⌨️ #terminalLastCommand</div><div class="stat-value">${stats.last30Days.contextReferences.terminalLastCommand || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminalLastCommand || 0}</div></div>
-						<div class="stat-card" title="Selected terminal output"><div class="stat-label">🖱️ #terminalSelection</div><div class="stat-value">${stats.last30Days.contextReferences.terminalSelection || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.terminalSelection || 0}</div></div>
-						<div class="stat-card" title="Clipboard contents"><div class="stat-label">📋 #clipboard</div><div class="stat-value">${stats.last30Days.contextReferences.clipboard || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.clipboard || 0}</div></div>
-						<div class="stat-card" title="Uncommitted git changes"><div class="stat-label">📝 #changes</div><div class="stat-value">${stats.last30Days.contextReferences.changes || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.changes || 0}</div></div>
-						<div class="stat-card" title="Output panel contents"><div class="stat-label">📤 #outputPanel</div><div class="stat-value">${stats.last30Days.contextReferences.outputPanel || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.outputPanel || 0}</div></div>
-						<div class="stat-card" title="Problems panel contents"><div class="stat-label">⚠️ #problemsPanel</div><div class="stat-value">${stats.last30Days.contextReferences.problemsPanel || 0}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.problemsPanel || 0}</div></div>
-						<div class="stat-card" title="copilot-instructions.md file references detected in session logs"><div class="stat-label">📋 Copilot Instructions</div><div class="stat-value">${stats.last30Days.contextReferences.copilotInstructions}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.copilotInstructions}</div></div>
-						<div class="stat-card" title="agents.md file references detected in session logs"><div class="stat-label">🤖 Agents.md</div><div class="stat-value">${stats.last30Days.contextReferences.agentsMd}</div><div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Today: ${stats.today.contextReferences.agentsMd}</div></div>
-						<div class="stat-card" style="background: var(--list-active-bg); border: 2px solid var(--border-color); color: var(--list-active-fg);"><div class="stat-label" style="color: var(--list-active-fg); opacity: 0.85;">📊 Total References</div><div class="stat-value" style="color: var(--list-active-fg);">${last30DaysTotalRefs}</div><div style="font-size: 10px; color: var(--list-active-fg); opacity: 0.75; margin-top: 4px;">Today: ${todayTotalRefs}</div></div>
-					</div>
-					${Object.keys(stats.last30Days.contextReferences.byKind).length > 0 ? `
-						<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📎 Attached Files by Type (Last 30 Days)</div>
-							<div style="font-size: 12px; color: var(--text-primary);">
-								${Object.entries(stats.last30Days.contextReferences.byKind)
-									.sort(([, a], [, b]) => (b as number) - (a as number))
-									.slice(0, 5)
-									.map(([kind, count]) => `<div style="margin-bottom: 4px;"><span style="color: var(--link-color);">${escapeHtml(kind)}:</span> ${count}</div>`)
-									.join('')}
-							</div>
-						</div>
-					` : ''}
-					${Object.keys(stats.last30Days.contextReferences.byPath).length > 0 ? `
-						<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
-							<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📁 Most Referenced Files (Last 30 Days)</div>
-							<div style="font-size: 11px; color: var(--text-primary);">
-								${Object.entries(stats.last30Days.contextReferences.byPath)
-									.sort(([, a], [, b]) => (b as number) - (a as number))
-									.slice(0, 10)
-									.map(([path, count]) => `<div style="margin-bottom: 4px; font-family: 'Courier New', monospace;"><span style="color: var(--link-color);">${count}×</span> ${escapeHtml(path)}</div>`)
-									.join('')}
-							</div>
-						</div>
-					` : ''}
-				</div>
-
-				${multiModelHtml}
-			</div>
-
-			<div id="tab-panel-tools" class="tab-panel"${activeTab !== 'tools' ? ' style="display:none"' : ''}>
-				<!-- Tool Calls Section -->
-				<div class="section">
-					<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
-					<div class="section-subtitle">Functions and tools invoked by Copilot during interactions</div>
-					<div class="three-column">
-						<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</div>
-							${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10)}
-						</div>
-					</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.total)}</div>
-								${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10)}
-							</div>
-						</div>
-					<div>
-						<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-						<div class="list">
-							<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</div>
-								${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10)}
-							</div>
-						</div>
-					</div>
-				</div>
-
-				<!-- MCP Tools Section -->
-				<div class="section">
-					<div class="section-title"><span>🔌</span><span>MCP Tools</span></div>
-					<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
-					${(() => {
-						const unknownTools = getUnknownMcpTools(stats);
-						if (unknownTools.length > 0) {
-							const issueUrl = createMcpToolIssueUrl(unknownTools);
-							const toolListHtml = unknownTools.map(tool => {
-								const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
-								const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
-								const monthCount = (stats.month.toolCalls.byTool[tool] || 0) + (stats.month.mcpTools.byTool[tool] || 0);
-								const countParts: string[] = [];
-								if (todayCount > 0) { countParts.push(`${todayCount} today`); }
-								if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
-								if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
-								const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${countParts.join(' | ')})</span>` : '';
-								return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${escapeHtml(tool)}${countHtml}</span>`;
-							}).join(' ');
-							return `
-								<div id="unknown-mcp-tools-section" style="margin-bottom: 12px; padding: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
-									<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
-										${toolListHtml}
-									</div>
-									<a href="${issueUrl}" target="_blank" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500;">
-										<span>📝</span>
-										<span>Report Unknown Tools</span>
-									</a>
-								</div>
-							`;
-						}
-						return '';
-					})()}
-					<div class="three-column">
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.today.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.last30Days.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-						<div>
-							<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
-							<div class="list">
-								<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${formatNumber(stats.month.mcpTools.total)}</div>
-								${allMcpServerKeys.length > 0 ? `
-									<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byServer, allMcpServerKeys), 200)}</div></div>
-								` : '<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
-							</div>
-						</div>
-					</div>
-					<div class="three-column" style="margin-top: 12px;">
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.today.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.last30Days.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-						<div>
-							${allMcpToolKeys.length > 0 ? `
-								<div class="list">
-									<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${renderToolsTable(unionFill(stats.month.mcpTools.byTool, allMcpToolKeys), 10, lookupMcpToolName)}</div></div>
-								</div>
-							` : ''}
-						</div>
-					</div>
-				</div>
-			</div>
-
-			<div id="tab-panel-health" class="tab-panel"${activeTab !== 'health' ? ' style="display:none"' : ''}>
-				${customizationHtml}
-				${renderMissedPotential(stats)}
-
-				<!-- Repository Setup Section -->
-				<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
-					<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
-						🏗️ Repository Hygiene Analysis
-					</div>
-					<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
-						Analyze repository hygiene and structure to identify missing configuration files and best practices.
-					</div>
-					${matrix && matrix.workspaces && matrix.workspaces.length > 0 ? `
-						<div style="margin-bottom: 12px;">
-							<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${matrix.workspaces.length})</vscode-button>
-						</div>
-						<div id="repo-list-pane-container" class="repo-hygiene-pane">
-							<div class="repo-hygiene-pane-header">📁 Repository List</div>
-							<div id="repo-list-pane" class="repo-hygiene-pane-body"></div>
-						</div>
-						<div id="repo-details-pane-container" class="repo-hygiene-pane repo-hygiene-pane-collapsed">
-							<div class="repo-hygiene-pane-header">📊 Repository Details</div>
-							<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
-						</div>
-					` : `
-						<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
-						<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
-					`}
-				</div>
-			</div>
-
+			${buildSessionsTabPanelHtml(stats)}
+			${buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs)}
+			${buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels)}
+			${buildHealthTabPanelHtml(customizationHtml, stats)}
+			${buildReposAndAgentTabPanelsHtml()}
+			${buildInsightsTabPanelHtml(stats.insights ?? [])}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes
 			</div>
 		</div>
+`;
+}
+
+function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
+	latestTodaySessions = stats.todaySessions || [];
+	const cachedForLookback = sessionsLookback === 'today' ? latestTodaySessions : recentSessionsCache[sessionsLookback];
+	const bodyHtml = cachedForLookback
+		? renderTodaySessionsTable(cachedForLookback)
+		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
+	return `
+		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title" style="display:flex; align-items:center; gap:8px;">
+					<span>📋</span><span>Recent Sessions</span>
+					<select id="sessions-lookback" style="margin-left:auto; font-size:12px; padding:2px 6px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px;">
+						<option value="today"${sessionsLookback === 'today' ? ' selected' : ''}>Today</option>
+						<option value="7"${sessionsLookback === '7' ? ' selected' : ''}>Last 7 days</option>
+						<option value="30"${sessionsLookback === '30' ? ' selected' : ''}>Last 30 days</option>
+					</select>
+					${buildSessionColumnsMenuHtml()}
+				</div>
+				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
+				<div id="sessions-panel-body" style="margin-top: 12px;">
+					${bodyHtml}
+				</div>
+			</div>
+		</div>`;
+}
+
+function _billingApiBalanceHtml(api: CopilotApiBalance): string {
+	const pct = formatFixed(api.pctAvailable, 1);
+	const usedPct = formatFixed(100 - api.pctAvailable, 1);
+	const barFill = Math.min(100 - api.pctAvailable, 100);
+	const barColor = barFill > 90 ? 'var(--error-color, #f14c4c)' : barFill > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
+	return `
+		<div style="margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub Copilot API (all channels)</div>
+			<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:8px;">
+				<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:10px 16px; text-align:center; min-width:80px;">
+					<div style="font-size:18px; font-weight:700; color:var(--text-primary);">${formatNumber(api.usedAiCredits)}</div>
+					<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Credits used</div>
+				</div>
+				<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:10px 16px; text-align:center; min-width:80px;">
+					<div style="font-size:18px; font-weight:700; color:var(--text-primary);">${formatNumber(api.remainingAiCredits)}</div>
+					<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Credits remaining</div>
+				</div>
+				<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:10px 16px; text-align:center; min-width:80px;">
+					<div style="font-size:18px; font-weight:700; color:var(--text-primary);">${formatNumber(api.budgetAiCredits)}</div>
+					<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Monthly budget</div>
+				</div>
+			</div>
+			<div style="margin-bottom:4px; font-size:11px; color:var(--text-secondary); display:flex; justify-content:space-between;">
+				<span>${usedPct}% used</span><span>${pct}% available</span>
+			</div>
+			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
+				<div style="height:100%; width:100%; background:${barColor}; border-radius:4px; transform-origin:left; transform:scaleX(${formatFixed(barFill / 100, 4)});"></div>
+			</div>
+			<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
+				1 AI Credit = $0.01 · Budget = $${formatFixed(api.budgetUsd, 2)}/month
+			</div>
+		</div>`;
+}
+
+function _billingExtGroupCostsHtml(groupCosts: Record<string, number>): string {
+	const totalCostUsd = Object.values(groupCosts).reduce((s, v) => s + v, 0);
+	const rows = Object.entries(groupCosts)
+		.sort(([, a], [, b]) => b - a)
+		.map(([group, cost]) => `
+			<tr>
+				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(group)}</td>
+				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
+			</tr>`).join('');
+	return `
+		<div style="margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
+			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
+				<thead>
+					<tr style="background:var(--bg-tertiary);">
+						<th style="padding:6px 8px; text-align:left; font-size:11px; color:var(--text-secondary); font-weight:600;">Provider</th>
+						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
+					</tr>
+				</thead>
+				<tbody>${rows}</tbody>
+				<tfoot>
+					<tr style="border-top:1px solid var(--border-color);">
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${formatFixed(totalCostUsd, 2)}</td>
+					</tr>
+				</tfoot>
+			</table>
+		</div>`;
+}
+
+function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined, copilotCostUsd: number, nonCopilotCostUsd: number): string {
+	if (!api) {
+		return `
+			<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.5;">
+				ℹ️ No Copilot API quota data available yet. The API balance appears after the extension fetches your Copilot plan info.
+				The extension only tracks local IDE sessions — it cannot see web chat, cloud agent, or review agent usage.
+			</div>`;
+	}
+	if (copilotCostUsd <= 0) { return ''; }
+	const apiUsedUsd = api.usedAiCredits * 0.01;
+	const gapUsd = apiUsedUsd - copilotCostUsd;
+	const gapCredits = Math.round(gapUsd * 100);
+	const gapRow = gapCredits > 0
+		? `<div style="display:flex; justify-content:space-between; padding-top:6px; border-top:1px solid var(--border-subtle); color:var(--text-secondary);"><span>Gap (untracked Copilot usage)</span><span>$${formatFixed(gapUsd, 2)} (${formatNumber(gapCredits)} credits)</span></div>`
+		: '';
+	const otherRow = nonCopilotCostUsd > 0.001
+		? `<div style="display:flex; justify-content:space-between;"><span>Other providers (not in Copilot API)</span><span>$${formatFixed(nonCopilotCostUsd, 2)}</span></div>`
+		: '';
+	const note = gapCredits > 0
+		? `<div style="margin-top:8px; font-size:11px; color:var(--text-muted); line-height:1.5;">ℹ️ The gap represents Copilot usage the extension cannot track: <strong>github.com/copilot</strong> web chat, <strong>cloud agent</strong> sessions, and <strong>Copilot review agent</strong> — all counted against your AI Credit budget.</div>`
+		: `<div style="margin-top:8px; font-size:11px; color:var(--text-muted);">✅ Extension-tracked Copilot usage matches the API — no significant untracked usage from web chat, cloud agent, or review agent.</div>`;
+	return `
+		<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:12px 14px; margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">Coverage analysis</div>
+			<div style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--text-primary);">
+				<div style="display:flex; justify-content:space-between;"><span>API total Copilot usage</span><span style="font-weight:600;">$${formatFixed(apiUsedUsd, 2)} (${formatNumber(api.usedAiCredits)} credits)</span></div>
+				<div style="display:flex; justify-content:space-between;"><span>Extension tracked (Copilot IDE sessions)</span><span style="font-weight:600;">$${formatFixed(copilotCostUsd, 2)} (${formatNumber(Math.round(copilotCostUsd * 100))} credits)</span></div>
+				${gapRow}${otherRow}
+			</div>
+			${note}
+		</div>`;
+}
+
+function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
+	const api = stats.copilotApiBalance;
+	const groupCosts = stats.monthBillingGroupCosts;
+	if (!api && (!groupCosts || Object.keys(groupCosts).length === 0)) { return ''; }
+
+	const copilotCostUsd = groupCosts?.['GitHub Copilot'] ?? 0;
+	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
+	const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
+
+	const apiHtml = api ? _billingApiBalanceHtml(api) : '';
+	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts) : '';
+	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
+
+	return `
+		<div class="section">
+			<div class="section-title"><span>💳</span><span>Copilot Billing Coverage</span></div>
+			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs.</div>
+			${apiHtml}
+			${extHtml}
+			${deltaHtml}
+		</div>`;
+}
+
+function buildActivityTabPanelHtml(
+	stats: UsageAnalysisStats,
+	multiModelHtml: string,
+	thinkingEffortHtml: string,
+	sessionsSummaryHtml: string,
+	todayTotalRefs: number,
+	last30DaysTotalRefs: number,
+): string {
+	const modelCostHtml = buildModelCostSectionHtml(stats);
+	const billingComparisonHtml = buildBillingComparisonSectionHtml(stats);
+	return `
+		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
+			${sessionsSummaryHtml}
+			${billingComparisonHtml}
+			<!-- Mode Usage Section -->
+			<div class="section">
+				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
+				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
+				<div class="two-column">
+					${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
+					${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
+				</div>
+			</div>
+			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			${multiModelHtml}
+			${modelCostHtml}
+			${thinkingEffortHtml}
+			${buildContextWindowSectionHtml(stats)}
+		</div>`;
+}
+
+// ─── Context window / long-context pricing section ─────────────────────────────
+
+const _modelPricingData = getWindowData<{ pricing: Record<string, ModelPricing> }>('__MODEL_PRICING__');
+const MODEL_PRICING_MAP: Record<string, ModelPricing> = _modelPricingData?.pricing ?? {};
+
+/** Long-context tier info for a set of models — smallest threshold wins. */
+function _tierInfoForModels(models: string[]): { thresholdTokens: number; defaultInputCostPerMillion: number; longContextInputCostPerMillion: number; model: string } | null {
+	let best: { thresholdTokens: number; defaultInputCostPerMillion: number; longContextInputCostPerMillion: number; model: string } | null = null;
+	for (const model of models) {
+		const info = getLongContextInfo(model, MODEL_PRICING_MAP);
+		if (info && (!best || info.thresholdTokens < best.thresholdTokens)) {
+			best = { ...info, model };
+		}
+	}
+	return best;
+}
+
+/** "how much repo fits" estimate: ~4 characters per token, ~40 characters per source line. */
+function _defaultTierCapacityText(thresholdTokens: number): string {
+	const mb = (thresholdTokens * 4) / (1024 * 1024);
+	const lines = Math.round(thresholdTokens / 10 / 1000);
+	return `≈${formatFixed(mb, 1)} MB of code (~${formatNumber(lines)}K lines)`;
+}
+
+function _renderContextWindowBar(maxTokens: number, tier: { thresholdTokens: number; defaultInputCostPerMillion: number; longContextInputCostPerMillion: number; model: string }): string {
+	const pct = (maxTokens / tier.thresholdTokens) * 100;
+	const fillPct = Math.min(pct, 100);
+	const color = pct > 100 ? 'var(--error-color, #f14c4c)' : pct >= 70 ? 'var(--warning-color, #cca700)' : 'var(--success-color, #89d185)';
+	const modelName = escapeHtml(getModelDisplayName(tier.model));
+	const rateNote = `above it, input billing goes $${tier.defaultInputCostPerMillion.toFixed(2)} → $${tier.longContextInputCostPerMillion.toFixed(2)} per 1M tokens`;
+	return `
+		<div style="margin-top: 12px;">
+			<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-secondary); margin-bottom:4px;">
+				<span>${formatNumber(maxTokens)} tokens — ${formatFixed(pct, 0)}% of the ${formatNumber(tier.thresholdTokens)}-token default tier for ${modelName}</span>
+				<span>${formatNumber(tier.thresholdTokens)}</span>
+			</div>
+			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
+				<div style="height:100%; width:${formatFixed(fillPct, 0)}%; background:${color}; border-radius:4px;"></div>
+			</div>
+			<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Default tier fits ${_defaultTierCapacityText(tier.thresholdTokens)}; ${rateNote}.</div>
+		</div>`;
+}
+
+/** One labelled value line inside a context-window period column. */
+function _cwRow(label: string, value: string, subNote?: string, labelTitle?: string): string {
+	const titleAttr = labelTitle ? ` title="${labelTitle}"` : '';
+	return `
+		<div style="margin-bottom: 10px;">
+			<div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px;"${titleAttr}>${label}</div>
+			<div style="font-size: 13px; color: var(--text-primary);">${value}</div>
+			${subNote ? `<div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; line-height: 1.4;">${subNote}</div>` : ''}
+		</div>`;
+}
+
+/** Largest-request row for one period column (empty string when the period has none). */
+function _cwLargestRequestRow(cw: ContextWindowStats): string {
+	if (cw.maxRequestInputTokens <= 0) { return ''; }
+	const tier = _tierInfoForModels(cw.maxRequestModels);
+	const modelsLabel = escapeHtml(cw.maxRequestModels.map(m => getModelDisplayName(m)).join(', ') || '—');
+	const thresholdNote = tier
+		? `${formatFixed((cw.maxRequestInputTokens / tier.thresholdTokens) * 100, 0)}% of the ${formatNumber(tier.thresholdTokens)}-token price line · ${modelsLabel}`
+		: `${modelsLabel} — no long-context surcharge for ${cw.maxRequestModels.length > 1 ? 'these models' : 'this model'}`;
+	return _cwRow('📏 Largest request', `${formatNumber(cw.maxRequestInputTokens)} input tokens`, thresholdNote,
+		'The biggest single prompt (input incl. cached tokens) sent to a model in one request during this period');
+}
+
+/** Fullest-CLI-window row for one period column (empty string when unavailable). */
+function _cwFullestWindowRow(cw: ContextWindowStats): string {
+	if ((cw.maxReachedTokens ?? 0) <= 0) { return ''; }
+	const limit = cw.maxReachedWindowLimit;
+	const value = limit
+		? `${formatNumber(cw.maxReachedTokens!)} of ${formatNumber(limit)} (${formatFixed((cw.maxReachedTokens! / limit) * 100, 0)}%)`
+		: formatNumber(cw.maxReachedTokens!);
+	return _cwRow('🪟 Fullest CLI window', value, undefined,
+		'The highest context fill recorded for a Copilot CLI session in this period, versus its window limit');
+}
+
+/** Renders one period column of the context-window section. */
+function renderContextWindowPeriodHtml(cw: ContextWindowStats | undefined): string {
+	const hasData = !!cw && (cw.maxRequestInputTokens > 0 || (cw.maxReachedTokens ?? 0) > 0 || Object.keys(cw.tierCounts).length > 0);
+	if (!hasData) { return '<div style="color: var(--text-muted); font-size: 11px;">No data</div>'; }
+	const tierEntries = Object.entries(cw!.tierCounts);
+	const tierSessionCount = tierEntries.reduce((sum, [, c]) => sum + c, 0);
+	const tierRow = tierEntries.length > 0
+		? _cwRow('🪜 Context tiers', tierEntries.map(([t, c]) => `${escapeHtml(t)} ×${c}`).join(', '),
+			`${tierSessionCount} Copilot CLI session${tierSessionCount === 1 ? '' : 's'} grouped by chosen window size — "default" is the standard window at normal rates; larger tiers unlock more context at long-context prices`,
+			'Copilot CLI lets you pick a context-window tier per session; the count shows how many sessions used each tier')
+		: '';
+	return _cwLargestRequestRow(cw!) + _cwFullestWindowRow(cw!) + tierRow;
+}
+
+/**
+ * Bottom-of-tab section: largest request per period vs the long-context
+ * pricing threshold, fullest CLI window, and context tiers used.
+ */
+function buildContextWindowSectionHtml(stats: UsageAnalysisStats): string {
+	const cw30 = stats.last30Days.contextWindow;
+	const tier30 = cw30 && cw30.maxRequestInputTokens > 0 ? _tierInfoForModels(cw30.maxRequestModels) : null;
+	const bar = cw30 && tier30 ? _renderContextWindowBar(cw30.maxRequestInputTokens, tier30) : '';
+	return `
+		<div class="section">
+			<div class="section-title"><span>🪟</span><span>Context Window &amp; Long-Context Pricing</span></div>
+			<div class="section-subtitle">How close your largest requests come to the long-context price line. Models with tiered pricing bill higher input rates once a request exceeds their default-tier threshold.</div>
+			<div class="three-column">
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					${renderContextWindowPeriodHtml(stats.today.contextWindow)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					${renderContextWindowPeriodHtml(cw30)}
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					${renderContextWindowPeriodHtml(stats.lastMonth.contextWindow)}
+				</div>
+			</div>
+			${bar}
+		</div>`;
+}
+
+interface ContextRefDescriptor {
+	label: string;
+	title?: string;
+	get: (cr: ContextReferenceUsage) => number;
+}
+
+interface ContextRefRow {
+	label: string;
+	title?: string;
+	last30: number;
+	month: number;
+	lastMonth: number;
+	today: number;
+}
+
+function numCell(value: number, extraClass = ''): string {
+	const zeroClass = value > 0 ? '' : ' ctx-ref-zero';
+	const cls = `ctx-ref-num${extraClass ? ' ' + extraClass : ''}${zeroClass}`;
+	return `<td class="${cls}">${value}</td>`;
+}
+
+function sparklineCell(lastMonth: number, month: number, today: number): string {
+	const W = 60, H = 20, PAD = 2;
+	const values = [lastMonth, month, today];
+	const max = Math.max(...values);
+	// Flat line at the bottom when all zeros
+	const points = values.map((v, i) => {
+		const x = PAD + i * ((W - PAD * 2) / (values.length - 1));
+		const y = max === 0 ? H - PAD : PAD + (1 - v / max) * (H - PAD * 2);
+		return `${x.toFixed(1)},${y.toFixed(1)}`;
+	}).join(' ');
+	const isFlat = max === 0;
+	const color = isFlat ? 'var(--text-muted)' : today >= month && month >= lastMonth ? 'var(--link-color)' : today <= month && month <= lastMonth ? '#f87171' : 'var(--text-secondary)';
+	return `<td class="ctx-ref-spark"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" aria-hidden="true"><polyline points="${points}" fill="none" stroke="${color}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${values.map((v, i) => {
+		const x = PAD + i * ((W - PAD * 2) / (values.length - 1));
+		const y = max === 0 ? H - PAD : PAD + (1 - v / max) * (H - PAD * 2);
+		return `<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="2" fill="${color}"/>`;
+	}).join('')}</svg></td>`;
+}
+
+function renderContextRefTable(
+	rows: ContextRefRow[],
+	totals: { last30: number; month: number; lastMonth: number; today: number },
+): string {
+	const bodyRows = rows
+		.slice()
+		.sort((a, b) => b.last30 - a.last30)
+		.map((row) => {
+			const titleAttr = row.title ? ` title="${escapeHtml(row.title)}"` : '';
+			return `<tr${titleAttr}><td class="ctx-ref-name">${row.label}</td>${numCell(row.today, row.today > 0 ? 'ctx-ref-today-active' : '')}${numCell(row.month)}${numCell(row.lastMonth)}${numCell(row.last30)}${sparklineCell(row.lastMonth, row.month, row.today)}</tr>`;
+		})
+		.join('');
+	return `
+		<div class="ctx-ref-table-wrap">
+			<table class="ctx-ref-table">
+				<thead>
+					<tr>
+						<th class="ctx-ref-name">Reference</th>
+						<th class="ctx-ref-num">Today</th>
+						<th class="ctx-ref-num">This Month</th>
+						<th class="ctx-ref-num">Last Month</th>
+						<th class="ctx-ref-num">Last 30 Days</th>
+						<th class="ctx-ref-spark" title="Trend: Last Month → This Month → Today">Trend</th>
+					</tr>
+				</thead>
+				<tbody>
+					${bodyRows}
+				</tbody>
+				<tfoot>
+					<tr class="ctx-ref-total">
+						<td class="ctx-ref-name">📊 Total References</td>
+						<td class="ctx-ref-num">${totals.today}</td>
+						<td class="ctx-ref-num">${totals.month}</td>
+						<td class="ctx-ref-num">${totals.lastMonth}</td>
+						<td class="ctx-ref-num">${totals.last30}</td>
+						<td class="ctx-ref-spark">${sparklineCell(totals.lastMonth, totals.month, totals.today).replace(/^<td[^>]*>/, '').replace(/<\/td>$/, '')}</td>
+					</tr>
+				</tfoot>
+			</table>
+		</div>`;
+}
+
+function buildContextRefCardsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
+	const c = (v: number | undefined): number => v || 0;
+	const descriptors: ContextRefDescriptor[] = [
+		{ label: '📄 #file', get: (cr) => cr.file },
+		{ label: '✂️ #selection', get: (cr) => cr.selection },
+		{ label: '✨ Implicit Selection', title: 'Text selected in your editor providing passive context to Copilot', get: (cr) => cr.implicitSelection },
+		{ label: '🔤 #symbol', get: (cr) => cr.symbol },
+		{ label: '🗂️ #codebase', get: (cr) => cr.codebase },
+		{ label: '📁 @workspace', get: (cr) => cr.workspace },
+		{ label: '💻 @terminal', get: (cr) => cr.terminal },
+		{ label: '🔧 @vscode', get: (cr) => cr.vscode },
+		{ label: '⌨️ #terminalLastCommand', title: 'Last command run in the terminal', get: (cr) => c(cr.terminalLastCommand) },
+		{ label: '🖱️ #terminalSelection', title: 'Selected terminal output', get: (cr) => c(cr.terminalSelection) },
+		{ label: '📋 #clipboard', title: 'Clipboard contents', get: (cr) => c(cr.clipboard) },
+		{ label: '📝 #changes', title: 'Uncommitted git changes', get: (cr) => c(cr.changes) },
+		{ label: '📤 #outputPanel', title: 'Output panel contents', get: (cr) => c(cr.outputPanel) },
+		{ label: '⚠️ #problemsPanel', title: 'Problems panel contents', get: (cr) => c(cr.problemsPanel) },
+		{ label: '🔀 #pr', title: 'Pull request context references (#pr / #pullRequest) — Copilot PR chat understanding, review, and summary', get: (cr) => c(cr.pullRequest) },
+		{ label: '📷 Images', title: 'Pasted images and vision context detected in session logs', get: (cr) => c(cr.byKind['copilot.image']) },
+		{ label: '📋 Prompt Files', title: '.github/prompts/ prompt file uses detected in session logs', get: (cr) => c(cr.byKind['promptFile']) },
+		{ label: '📐 Code Lines', title: 'Total lines of code referenced via #file: range selections', get: (cr) => c(cr.codeContextLines) },
+		{ label: '🎯 Custom Prompts', title: 'Custom /command prompt uses detected in session logs', get: (cr) => c(cr.byKind['prompt']) },
+		{ label: '📋 Copilot Instructions', title: 'copilot-instructions.md file references detected in session logs', get: (cr) => cr.copilotInstructions },
+		{ label: '🤖 Agents.md', title: 'agents.md file references detected in session logs', get: (cr) => cr.agentsMd },
+	];
+	const r = stats.last30Days.contextReferences;
+	const m = stats.month.contextReferences;
+	const lm = stats.lastMonth.contextReferences;
+	const t = stats.today.contextReferences;
+	const rows: ContextRefRow[] = descriptors.map((d) => ({
+		label: d.label,
+		title: d.title,
+		last30: d.get(r),
+		month: d.get(m),
+		lastMonth: d.get(lm),
+		today: d.get(t),
+	}));
+	return renderContextRefTable(rows, {
+		last30: last30DaysTotalRefs,
+		month: getTotalContextRefs(m),
+		lastMonth: getTotalContextRefs(lm),
+		today: todayTotalRefs,
+	});
+}
+
+function buildContextRefsHtml(stats: UsageAnalysisStats, todayTotalRefs: number, last30DaysTotalRefs: number): string {
+	const byKindHtml = Object.keys(stats.last30Days.contextReferences.byKind).length > 0 ? `
+		<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📎 Attached Files by Type (Last 30 Days)</div>
+			<div style="font-size: 12px; color: var(--text-primary);">
+				${Object.entries(stats.last30Days.contextReferences.byKind)
+					.sort(([, a], [, b]) => (b as number) - (a as number))
+					.slice(0, 5)
+					.map(([kind, count]) => `<div style="margin-bottom: 4px;"><span style="color: var(--link-color);">${escapeHtml(kind)}:</span> ${count}</div>`)
+					.join('')}
+			</div>
+		</div>
+	` : '';
+	const byPathHtml = Object.keys(stats.last30Days.contextReferences.byPath).length > 0 ? `
+		<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
+			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">📁 Most Referenced Files (Last 30 Days)</div>
+			<div style="font-size: 11px; color: var(--text-primary);">
+				${Object.entries(stats.last30Days.contextReferences.byPath)
+					.sort(([, a], [, b]) => (b as number) - (a as number))
+					.slice(0, 10)
+					.map(([path, count]) => `<div style="margin-bottom: 4px; font-family: 'Courier New', monospace;"><span style="color: var(--link-color);">${count}×</span> ${escapeHtml(path)}</div>`)
+					.join('')}
+			</div>
+		</div>
+	` : '';
+	return `
+		<!-- Context References Section -->
+		<div class="section">
+			<div class="section-title"><span>🔗</span><span>Context References</span></div>
+			<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>
+			${buildContextRefCardsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			${byKindHtml}
+			${byPathHtml}
+		</div>`;
+}
+
+function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
+	const unknownTools = getUnknownMcpTools(stats);
+	if (unknownTools.length === 0) { return ''; }
+	const issueUrl = createMcpToolIssueUrl(unknownTools);
+	const toolListHtml = unknownTools.map(tool => {
+		const todayCount = (stats.today.toolCalls.byTool[tool] || 0) + (stats.today.mcpTools.byTool[tool] || 0);
+		const last30Count = (stats.last30Days.toolCalls.byTool[tool] || 0) + (stats.last30Days.mcpTools.byTool[tool] || 0);
+		const monthCount = (stats.month.toolCalls.byTool[tool] || 0) + (stats.month.mcpTools.byTool[tool] || 0);
+		const countParts: string[] = [];
+		if (todayCount > 0) { countParts.push(`${todayCount} today`); }
+		if (last30Count > todayCount) { countParts.push(`${last30Count} in the last 30d`); }
+		if (monthCount > last30Count) { countParts.push(`${monthCount} this month`); }
+		const countHtml = countParts.length > 0 ? `<span style="color:var(--text-muted);"> (${countParts.join(' | ')})</span>` : '';
+		const suppressBtn = `<button data-suppress-tool="${escapeHtml(tool)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${escapeHtml(tool)}">🔇</button>`;
+		return `<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${escapeHtml(tool)}${countHtml}${suppressBtn}</span>`;
+	}).join(' ');
+	return `
+		<div id="unknown-mcp-tools-section" style="margin-bottom: 12px; padding: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
+			<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
+				${toolListHtml}
+			</div>
+			<a href="${escapeHtml(issueUrl)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500;">
+				<span>📝</span>
+				<span>Report Unknown Tools</span>
+			</a>
+		</div>
 	`;
+}
 
+function buildToolsTabPanelHtml(
+	stats: UsageAnalysisStats,
+	allToolKeys: string[],
+	allMcpToolKeys: string[],
+	allMcpServerKeys: string[],
+	allHighCostModels: string[],
+	allLowCostModels: string[],
+	allMediumCostModels: string[],
+	allUnknownModels: string[],
+): string {
+	return `
+		<div id="tab-panel-tools" class="tab-panel"${activeTab !== 'tools' ? ' style="display:none"' : ''}>
+			<!-- Tool Calls Section -->
+			<div class="section">
+				<div class="section-title"><span>🔧</span><span>Tool Usage</span></div>
+				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions</div>
+				<div class="three-column">
+					<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Today</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</div>
+						${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10)}
+					</div>
+				</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📆 Last 30 Days</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.total)}</div>
+							${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10)}
+						</div>
+					</div>
+				<div>
+					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">📅 Previous Month</h4>
+					<div class="list">
+						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</div>
+							${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10)}
+						</div>
+					</div>
+				</div>
+			</div>
 
+			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
+			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
+			<!-- Multi-Model Usage Section -->
+			<div class="section">
+				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>
+				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
+				<div class="three-column">
+					${renderMultiModelPeriod('📅 Today', stats.today.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
+					${renderMultiModelPeriod('📆 Last 30 Days', stats.last30Days.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
+					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
+				</div>
+			</div>
+		</div>`;
+}
 
-	// Wire up navigation buttons
+function renderLayout(stats: UsageAnalysisStats): void {
+	const root = document.getElementById('root');
+	if (!root) {
+		return;
+	}
+
+	// customizationMatrix is passed as an extra field on the stats object alongside the typed fields
+	type StatsWithMatrix = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null };
+	const matrix =
+		(stats as StatsWithMatrix).customizationMatrix ??
+		(initialData as StatsWithMatrix | undefined)?.customizationMatrix ?? null;
+	hygieneMatrixState = matrix ?? null;
+	if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
+		selectedRepoPath = null;
+	}
+	if (Array.isArray(stats.currentWorkspacePaths)) {
+		currentWorkspacePaths = stats.currentWorkspacePaths;
+	}
+	// Persist curation analysis across refreshes — periodic updateStats may omit it
+	if (stats.curationAnalysis) {
+		currentCurationAnalysis = stats.curationAnalysis;
+		traceCuration('renderLayout.curation.cached', {
+			availableTools: currentCurationAnalysis.availableTools.length,
+			unusedTools: currentCurationAnalysis.unusedTools.length,
+		});
+	} else {
+		traceCurationOnce('render-no-curation-update', 'renderLayout.curation.notProvidedInUpdate');
+	}
+
+	const customizationHtml = buildCustomizationSectionHtml(matrix);
+	const allKeys = buildUsageAllKeysSets(stats);
+	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
+	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
+	const thinkingEffortHtml = buildThinkingEffortSectionHtml(stats);
+	const sessionsSummaryHtml = `
+		<!-- Summary Section -->
+		<div class="section">
+			<div class="section-title"><span>📈</span><span>Sessions Summary</span></div>
+			<div class="stats-grid">
+				<div class="stat-card"><div class="stat-label">📅 Today Sessions</div><div class="stat-value">${formatNumber(stats.today.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📆 Last 30 Days Sessions</div><div class="stat-value">${formatNumber(stats.last30Days.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📅 This Month Sessions</div><div class="stat-value">${formatNumber(stats.month.sessions)}</div></div>
+				<div class="stat-card"><div class="stat-label">📅 Last Month Sessions</div><div class="stat-value">${formatNumber(stats.lastMonth.sessions)}</div></div>
+			</div>
+		</div>`;
+
+	root.innerHTML = buildUsageRootHtml(
+		stats,
+		customizationHtml,
+		'',
+		thinkingEffortHtml,
+		sessionsSummaryHtml,
+		todayTotalRefs,
+		last30DaysTotalRefs,
+		allKeys.allToolKeys,
+		allKeys.allMcpToolKeys,
+		allKeys.allMcpServerKeys,
+		allKeys.allHighCostModels,
+		allKeys.allLowCostModels,
+		allKeys.allMediumCostModels,
+		allKeys.allUnknownModels,
+	);
+
+	wireNavigationButtons();
+	wireAboutInfoToggle();
+	wireRepositoryButtons();
+	wireCurationButtons();
+	renderRepositoryHygienePanels();
+	setupTabs();
+	wireCopyButtons();
+	// Initialize currentInsights from the stats and wire card buttons
+	currentInsights = stats.insights ?? [];
+	wireInsightCardButtons();
+}
+
+/** Wires up the collapsible "About This Dashboard" info box; the collapsed state is persisted via webview state. */
+function wireAboutInfoToggle(): void {
+	const toggle = document.getElementById('about-info-toggle');
+	const body = document.getElementById('about-info-body');
+	if (!toggle || !body) { return; }
+	const chevron = toggle.querySelector('.info-box-chevron');
+	const applyToggle = (): void => {
+		aboutCollapsed = !aboutCollapsed;
+		body.style.display = aboutCollapsed ? 'none' : '';
+		toggle.setAttribute('aria-expanded', String(!aboutCollapsed));
+		if (chevron) { chevron.textContent = aboutCollapsed ? '▸' : '▾'; }
+		vscode.setState({ ...(vscode.getState() ?? {}), aboutCollapsed });
+	};
+	toggle.addEventListener('click', applyToggle);
+	toggle.addEventListener('keydown', (event: KeyboardEvent) => {
+		if (event.key === 'Enter' || event.key === ' ') {
+			event.preventDefault();
+			applyToggle();
+		}
+	});
+}
+
+/** Wires up top-level navigation toolbar buttons (refresh, details, chart, etc.). */
+function wireNavigationButtons(): void {
 	document.getElementById('btn-refresh')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'refresh' });
 	});
@@ -1080,19 +3335,22 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	document.getElementById('btn-environmental')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'showEnvironmental' });
 	});
-	
-	// Repository analysis buttons
+	wireExtensionPointButtons(vscode);
+}
+
+/** Wires up repository hygiene analysis buttons and pane click handlers. */
+function wireRepositoryButtons(): void {
 	document.getElementById('btn-analyse-repo')?.addEventListener('click', () => {
-		const btn = document.getElementById('btn-analyse-repo') as any;
+		const btn = document.getElementById('btn-analyse-repo') as HTMLElement & { disabled: boolean };
 		if (btn) {
 			btn.disabled = true;
 			btn.textContent = 'Analyzing...';
 		}
 		vscode.postMessage({ command: 'analyseRepository' });
 	});
-	
+
 	document.getElementById('btn-analyse-all')?.addEventListener('click', () => {
-		const btn = document.getElementById('btn-analyse-all') as any;
+		const btn = document.getElementById('btn-analyse-all') as HTMLElement & { disabled: boolean };
 		if (btn) {
 			btn.disabled = true;
 			btn.textContent = 'Analyzing All...';
@@ -1104,44 +3362,38 @@ function renderLayout(stats: UsageAnalysisStats): void {
 		vscode.postMessage({ command: 'analyseAllRepositories' });
 	});
 
-	document.getElementById('repo-list-pane')?.addEventListener('click', (e) => {
+	document.getElementById('repo-list-pane')?.addEventListener('click', (e: MouseEvent) => {
 		const target = e.target as HTMLElement;
 		const actionButton = target.closest<HTMLElement>('.btn-repo-action');
-		if (!actionButton) {
-			return;
-		}
-
+		if (!actionButton) { return; }
 		const workspacePath = actionButton.getAttribute('data-workspace-path');
 		const action = actionButton.getAttribute('data-action');
-		if (!workspacePath || !action) {
-			return;
-		}
-
+		if (!workspacePath || !action) { return; }
 		if (action === 'details') {
 			selectedRepoPath = workspacePath;
 			isSwitchingRepository = false;
 			renderRepositoryHygienePanels();
 			return;
 		}
-
 		if (action === 'analyze') {
-			(actionButton as any).disabled = true;
-			(actionButton as any).textContent = 'Analyzing...';
+			(actionButton as HTMLElement & { disabled: boolean }).disabled = true;
+			actionButton.textContent = 'Analyzing...';
 			isBatchAnalysisInProgress = false;
 			vscode.postMessage({ command: 'analyseRepository', workspacePath });
 		}
 	});
 
-	document.getElementById('repo-details-pane')?.addEventListener('click', (e) => {
+	document.getElementById('repo-details-pane')?.addEventListener('click', (e: MouseEvent) => {
 		const target = e.target as HTMLElement;
 		if (target.closest('#btn-switch-repository')) {
 			isSwitchingRepository = true;
 			renderRepositoryHygienePanels();
 		}
 	});
+}
 
-	renderRepositoryHygienePanels();
-	setupTabs();
+/** Wires up copy-to-clipboard buttons (class `cf-copy`). */
+function wireCopyButtons(): void {
 	Array.from(document.getElementsByClassName('cf-copy')).forEach((el) => {
 		(el as HTMLElement).addEventListener('click', (ev) => {
 			const target = ev.currentTarget as HTMLElement;
@@ -1158,57 +3410,148 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	});
 }
 
-// Listen for messages from the extension
-window.addEventListener('message', (event) => {
-	const message = event.data;
+function handleUpdateStats(message: any): void {
+	clearLoadingTimeout();
+	if (message.data?.locale) {
+		setFormatLocale(message.data.locale);
+	}
+	if (typeof message.data?.use24HourTime === 'boolean') {
+		use24HourTime = message.data.use24HourTime;
+	}
+	const sanitized = sanitizeStats(message.data);
+	if (sanitized) {
+		_ulLoadingActive = false;
+		// New stats invalidate any lazily-loaded lookback data; it is re-requested on demand.
+		delete recentSessionsCache['7'];
+		delete recentSessionsCache['30'];
+		renderLayout(sanitized);
+		setupSessionsTableSort();
+		renderRepositoryHygienePanels();
+		if (repoPrStatsData) { updateReposPrPanel(repoPrStatsData); }
+		if (agentSessionsData) { updateAgentSessionsPanel(agentSessionsData); }
+	} else {
+		traceCurationOnce('update-invalid-sanitized', 'handleUpdateStats.sanitizeReturnedNull');
+		showLoadError('Received invalid data from the extension. Try refreshing.');
+	}
+}
+
+function handleToolSuppressed(toolName: string): void {
+	if (!toolName) { return; }
+	const section = document.getElementById('unknown-mcp-tools-section');
+	if (!section) { return; }
+	section.querySelectorAll<HTMLButtonElement>('button[data-suppress-tool]').forEach(btn => {
+		if (btn.getAttribute('data-suppress-tool') === toolName) {
+			btn.closest('span')?.remove();
+		}
+	});
+	if (section.querySelectorAll('button[data-suppress-tool]').length === 0) {
+		section.remove();
+	}
+}
+
+function handleHighlightUnknownTools(): void {
+	activeTab = 'tools';
+	document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
+		btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
+	});
+	document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
+		panel.style.display = 'none';
+	});
+	const toolsPanel = document.getElementById('tab-panel-tools');
+	if (toolsPanel) { toolsPanel.style.display = 'block'; }
+	const el = document.getElementById('unknown-mcp-tools-section');
+	if (el) {
+		el.scrollIntoView({ behavior: 'smooth', block: 'center' });
+		el.style.transition = 'box-shadow 0.3s ease';
+		el.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
+		setTimeout(() => { el.style.boxShadow = ''; }, 2000);
+	}
+}
+
+function handleRepoPrStatsLoaded(data: any): void {
+	repoPrStatsData = sanitizeRepoPrStatsData(data);
+	if (!repoPrStatsData.authenticated) { repoPrStatsLoaded = false; }
+	updateReposPrPanel(repoPrStatsData);
+}
+
+function handleAgentSessionsLoaded(data: any): void {
+	if (!data || typeof data !== 'object') { return; }
+	agentSessionsData = sanitizeAgentSessionsData(data);
+	if (!agentSessionsData.authenticated) { agentSessionsLoaded = false; }
+	updateAgentSessionsPanel(agentSessionsData);
+}
+
+function handleUpdateInsights(rawInsights: unknown): void {
+	if (!Array.isArray(rawInsights)) { return; }
+	const sanitized = sanitizeInsights(rawInsights);
+	refreshInsightsPanel(sanitized);
+}
+
+function handleLoadingStateMessage(message: any): boolean {
+	switch (message.command) {
+		case 'usageLoadingProgress':
+			updateUsageLoadingProgress(message); return true;
+		case 'usageRefreshing':
+			clearLoadingTimeout();
+			_ulLastStepIdx = 0;
+			renderUsageLoadingState('Refreshing Usage Analysis');
+			return true;
+		case 'updateStatsError':
+			clearLoadingTimeout();
+			showLoadError('Failed to calculate usage analysis. Check the Output panel for details.');
+			return true;
+	}
+	return false;
+}
+
+function handleExtensionMessage(message: any): void {
+	if (handleLoadingStateMessage(message)) { return; }
 	switch (message.command) {
 		case 'repoAnalysisResults':
-			displayRepoAnalysisResults(message.data, message.workspacePath);
-			break;
+			displayRepoAnalysisResults(message.data, message.workspacePath); break;
 		case 'repoAnalysisError':
-			displayRepoAnalysisError(message.error, message.workspacePath);
-			break;
+			displayRepoAnalysisError(message.error, message.workspacePath); break;
 		case 'repoAnalysisBatchComplete':
-			handleBatchAnalysisComplete();
-			break;
+			handleBatchAnalysisComplete(); break;
 		case 'updateStats':
-			// Re-render the layout with fresh stats, then restore repo analysis results
-			if (message.data?.locale) {
-				setFormatLocale(message.data.locale);
-			}
-			{
-				const sanitized = sanitizeStats(message.data);
-				if (sanitized) {
-					renderLayout(sanitized);
-					renderRepositoryHygienePanels();
-				}
-			}
+			handleUpdateStats(message); break;
+		case 'toolSuppressed':
+			handleToolSuppressed(message.toolName as string); break;
+		case 'highlightUnknownTools':
+			handleHighlightUnknownTools(); break;
+		case 'repoPrStatsLoaded':
+			handleRepoPrStatsLoaded(message.data); break;
+		case 'repoPrStatsProgress':
+			updateProgressPanel('#repos-pr-content', 'repos-pr-progress', 'Fetching PRs…', message.done as number, message.total as number);
 			break;
-		case 'highlightUnknownTools': {
-			// Switch to tools tab
-			activeTab = 'tools';
-			document.querySelectorAll<HTMLElement>('.tab-button').forEach(btn => {
-				btn.classList.toggle('active', btn.getAttribute('data-tab') === 'tools');
-			});
-			document.querySelectorAll<HTMLElement>('.tab-panel').forEach(panel => {
-				panel.style.display = 'none';
-			});
-			const toolsPanel = document.getElementById('tab-panel-tools');
-			if (toolsPanel) { toolsPanel.style.display = 'block'; }
-			// Then scroll to the element
-			const el = document.getElementById('unknown-mcp-tools-section');
-			if (el) {
-				el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-				el.style.transition = 'box-shadow 0.3s ease';
-				el.style.boxShadow = '0 0 0 3px var(--vscode-focusBorder)';
-				setTimeout(() => {
-					el.style.boxShadow = '';
-				}, 2000);
-			}
+		case 'agentSessionsLoaded':
+			handleAgentSessionsLoaded(message.data); break;
+		case 'recentSessionsLoaded':
+			handleRecentSessionsLoaded(message); break;
+		case 'agentSessionsProgress':
+			updateProgressPanel('#agent-sessions-content', 'agent-sessions-progress', 'Fetching agent sessions…', message.done as number, message.total as number);
 			break;
+		case 'updateInsights':
+			handleUpdateInsights(message.insights); break;
+		case 'switchTab':
+			handleSwitchTab(message); break;
+	}
+}
+
+function handleSwitchTab(message: any): void {
+	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${String(message.tab)}"]`);
+	btn?.click();
+	if (message.anchor) {
+		const anchor = document.getElementById(String(message.anchor));
+		if (anchor) {
+			// Use setTimeout to let the tab panel become visible before scrolling
+			setTimeout(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
 		}
 	}
-});
+}
+
+// Listen for messages from the extension
+registerMessageHandler<any>((message) => { handleExtensionMessage(message); });
 
 function getWorkspaceName(workspacePath: string): string {
 	const workspace = hygieneMatrixState?.workspaces.find((ws) => ws.workspacePath === workspacePath);
@@ -1232,33 +3575,34 @@ function toFiniteNumber(value: unknown): number {
 	return Number.isFinite(numeric) ? numeric : 0;
 }
 
-function buildRepoAnalysisBodyElement(data: any, workspacePath?: string): HTMLElement {
-	const summary = data?.summary || {};
-	const checks = Array.isArray(data?.checks) ? data.checks : [];
-	const recommendations = Array.isArray(data?.recommendations) ? [...data.recommendations] : [];
+const REPO_DOCS_LINKS: { [key: string]: string } = {
+	'git-repo': 'https://docs.github.com/en/get-started/using-git/about-git',
+	'gitignore': 'https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files',
+	'env-example': 'https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions',
+	'editorconfig': 'https://editorconfig.org/',
+	'linter': 'https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning',
+	'formatter': 'https://docs.github.com/en/contributing/style-guide-and-content-model/style-guide',
+	'type-safety': 'https://docs.github.com/en/code-security/code-scanning/reference/code-ql-built-in-queries/javascript-typescript-built-in-queries',
+	'commit-messages': 'https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits',
+	'conventional-commits': 'https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets',
+	'ci-config': 'https://docs.github.com/en/actions/about-github-actions/understanding-github-actions',
+	'scripts': 'https://docs.github.com/en/actions/tutorials/build-and-test-code/nodejs',
+	'task-runner': 'https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/add-scripts',
+	'devcontainer': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration',
+	'dockerfile': 'https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry',
+	'version-pinning': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/setting-up-your-nodejs-project-for-codespaces',
+	'license': 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository'
+};
 
-	// Documentation links for each check ID
-	const docsLinks: { [key: string]: string } = {
-		'git-repo': 'https://docs.github.com/en/get-started/using-git/about-git',
-		'gitignore': 'https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files',
-		'env-example': 'https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions',
-		'editorconfig': 'https://editorconfig.org/',
-		'linter': 'https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning',
-		'formatter': 'https://docs.github.com/en/contributing/style-guide-and-content-model/style-guide',
-		'type-safety': 'https://docs.github.com/en/code-security/code-scanning/reference/code-ql-built-in-queries/javascript-typescript-built-in-queries',
-		'commit-messages': 'https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits',
-		'conventional-commits': 'https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets',
-		'ci-config': 'https://docs.github.com/en/actions/about-github-actions/understanding-github-actions',
-		'scripts': 'https://docs.github.com/en/actions/tutorials/build-and-test-code/nodejs',
-		'task-runner': 'https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/add-scripts',
-		'devcontainer': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration',
-		'dockerfile': 'https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry',
-		'version-pinning': 'https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/setting-up-your-nodejs-project-for-codespaces',
-		'license': 'https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository'
-	};
+const REPO_CATEGORY_LABELS: { [key: string]: string } = {
+	versionControl: '🔄 Version Control',
+	codeQuality: '✨ Code Quality',
+	cicd: '🚀 CI/CD',
+	environment: '🔧 Environment',
+	documentation: '📚 Documentation'
+};
 
-	const container = el('div');
-
+function buildScoreHeaderElement(summary: any): HTMLElement {
 	const header = el('div');
 	header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;');
 	const title = el('div');
@@ -1268,32 +3612,17 @@ function buildRepoAnalysisBodyElement(data: any, workspacePath?: string): HTMLEl
 	score.setAttribute('style', 'font-size: 24px; font-weight: 700; color: var(--link-color);');
 	score.textContent = `${Math.round(toFiniteNumber(summary.percentage))}%`;
 	header.append(title, score);
-	container.appendChild(header);
+	return header;
+}
 
+function buildStatsGridElement(summary: any): HTMLElement {
 	const statsGrid = el('div');
 	statsGrid.setAttribute('style', 'display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;');
-
-	const statCards: Array<{ count: unknown; label: string; cardStyle: string; countStyle: string }> = [
-		{
-			count: summary.passedChecks,
-			label: 'Passed',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: var(--success-fg);'
-		},
-		{
-			count: summary.warningChecks,
-			label: 'Warnings',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: var(--warning-fg);'
-		},
-		{
-			count: summary.failedChecks,
-			label: 'Failed',
-			cardStyle: 'text-align: center; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;',
-			countStyle: 'font-size: 18px; font-weight: 600; color: #ef4444;'
-		}
+	const statCards = [
+		{ count: summary.passedChecks, label: 'Passed', cardStyle: 'text-align: center; padding: 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: var(--success-fg);' },
+		{ count: summary.warningChecks, label: 'Warnings', cardStyle: 'text-align: center; padding: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: var(--warning-fg);' },
+		{ count: summary.failedChecks, label: 'Failed', cardStyle: 'text-align: center; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;', countStyle: 'font-size: 18px; font-weight: 600; color: #ef4444;' }
 	];
-
 	for (const statCard of statCards) {
 		const card = el('div');
 		card.setAttribute('style', statCard.cardStyle);
@@ -1306,8 +3635,163 @@ function buildRepoAnalysisBodyElement(data: any, workspacePath?: string): HTMLEl
 		card.append(count, label);
 		statsGrid.appendChild(card);
 	}
+	return statsGrid;
+}
 
-	container.appendChild(statsGrid);
+function resolveCheckStatus(check: RepoHygieneCheck): { status: string; emoji: CustomizationTypeStatus; color: string } {
+	const status = check?.status === 'pass' || check?.status === 'warning' ? check.status : 'fail';
+	const emoji: CustomizationTypeStatus = status === 'pass' ? '✅' : status === 'warning' ? '⚠️' : '❌';
+	const color = status === 'pass' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#ef4444';
+	return { status, emoji, color };
+}
+
+function buildCheckContentElement(check: RepoHygieneCheck, statusColor: string): HTMLElement {
+	const content = el('div');
+	content.setAttribute('style', 'flex: 1;');
+	const checkLabel = el('div');
+	checkLabel.setAttribute('style', `font-size: 12px; font-weight: 600; color: ${statusColor};`);
+	checkLabel.textContent = typeof check?.label === 'string' ? check.label : '';
+	const checkDetail = el('div');
+	checkDetail.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); margin-top: 2px;');
+	checkDetail.textContent = typeof check?.detail === 'string' ? check.detail : '';
+	content.append(checkLabel, checkDetail);
+	if (typeof check?.hint === 'string' && check.hint.length > 0) {
+		const hint = el('div');
+		hint.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; font-style: italic;');
+		hint.textContent = `💡 ${check.hint}`;
+		content.appendChild(hint);
+	}
+	const docUrl = REPO_DOCS_LINKS[typeof check?.id === 'string' ? check.id : ''];
+	if (docUrl) {
+		const docLink = el('a');
+		docLink.setAttribute('href', docUrl);
+		docLink.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; display: inline-block;');
+		docLink.setAttribute('title', 'View official documentation');
+		docLink.textContent = '📖 View documentation';
+		content.appendChild(docLink);
+	}
+	return content;
+}
+
+function buildCheckRowElement(check: RepoHygieneCheck): HTMLElement {
+	const { emoji, color } = resolveCheckStatus(check);
+	const checkRow = el('div');
+	checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
+	const icon = el('span');
+	icon.setAttribute('style', 'flex-shrink: 0; padding-top: 1px;');
+	icon.innerHTML = statusBadgeHtml(emoji);
+	const weight = el('span');
+	weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
+	weight.textContent = `+${toFiniteNumber(check?.weight)}`;
+	checkRow.append(icon, buildCheckContentElement(check, color), weight);
+	return checkRow;
+}
+
+function buildCategorySectionElement(categoryId: string, categoryChecks: RepoHygieneCheck[], summary: any): HTMLElement {
+	const section = el('div');
+	section.setAttribute('style', 'margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
+	const sectionHeader = el('div');
+	sectionHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;');
+	const categoryName = el('span');
+	categoryName.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
+	categoryName.textContent = REPO_CATEGORY_LABELS[categoryId] || categoryId;
+	const categorySummary = summary?.categories?.[categoryId];
+	const categoryPct = el('span');
+	categoryPct.setAttribute('style', 'font-size: 11px; color: var(--link-color); font-weight: 600;');
+	categoryPct.textContent = `${Math.round(toFiniteNumber(categorySummary?.percentage))}%`;
+	sectionHeader.append(categoryName, categoryPct);
+	section.appendChild(sectionHeader);
+	for (const check of categoryChecks) {
+		section.appendChild(buildCheckRowElement(check));
+	}
+	return section;
+}
+
+function buildRecommendationsSectionElement(recommendations: RepoHygieneRecommendation[]): HTMLElement {
+	const section = el('div');
+	section.setAttribute('style', 'margin-top: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
+	const hdr = el('div');
+	hdr.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color);');
+	const hdrTitle = el('span');
+	hdrTitle.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
+	hdrTitle.textContent = '💡 Top Recommendations';
+	hdr.appendChild(hdrTitle);
+	section.appendChild(hdr);
+	for (const rec of recommendations.slice(0, 5)) {
+		const priority = rec?.priority === 'high' || rec?.priority === 'medium' ? rec.priority : 'low';
+		const priorityColor = priority === 'high' ? '#ef4444' : priority === 'medium' ? '#f59e0b' : '#60a5fa';
+		const row = el('div');
+		row.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px;');
+		const priorityLabel = el('span');
+		priorityLabel.setAttribute('style', `font-size: 10px; font-weight: 600; color: ${priorityColor}; min-width: 50px;`);
+		priorityLabel.textContent = String(priority).toUpperCase();
+		const content = el('div');
+		content.setAttribute('style', 'flex: 1;');
+		const action = el('div');
+		action.setAttribute('style', 'font-size: 11px; color: var(--text-primary);');
+		action.textContent = typeof rec?.action === 'string' ? rec.action : '';
+		const impact = el('div');
+		impact.setAttribute('style', 'font-size: 10px; color: var(--text-muted); margin-top: 2px;');
+		impact.textContent = typeof rec?.impact === 'string' ? rec.impact : '';
+		content.append(action, impact);
+		const weight = el('span');
+		weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
+		weight.textContent = `+${toFiniteNumber(rec?.weight)}`;
+		row.append(priorityLabel, content, weight);
+		section.appendChild(row);
+	}
+	return section;
+}
+
+function buildCopilotSectionElement(failedChecks: RepoHygieneCheck[], workspacePath?: string): HTMLElement {
+	const copilotSection = el('div');
+	copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;');
+	const copilotText = el('div');
+	copilotText.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); flex: 1;');
+	copilotText.textContent = 'Let Copilot help you fix the identified issues in this repository.';
+	const copilotBtn = document.createElement('vscode-button');
+	copilotBtn.setAttribute('style', 'min-width: 180px;');
+	copilotBtn.textContent = '🤖 Ask Copilot to Improve';
+	copilotBtn.addEventListener('click', () => {
+		const failedLines = failedChecks.map((c: RepoHygieneCheck) => `- ${c.label}: ${c.detail || ''}${c.hint ? ` (${c.hint})` : ''}`).join('\n');
+		const prompt = `Please help me improve this repository by addressing the following best practice issues:\n\n${failedLines}\n\nFor each issue, please provide specific steps or code changes to fix it.`;
+		const isRepoOpen = !workspacePath || currentWorkspacePaths.some(p => p.toLowerCase() === workspacePath.toLowerCase());
+		if (isRepoOpen) {
+			vscode.postMessage({ command: 'openCopilotChatWithPrompt', prompt });
+		} else {
+			const repoFolderName = workspacePath.split(/[/\\]/).filter(Boolean).pop() ?? workspacePath;
+			copilotSection.replaceChildren();
+			copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 4px; display: flex; flex-direction: column; gap: 8px;');
+			const instructions = el('div');
+			instructions.setAttribute('style', 'font-size: 11px; color: var(--warning-fg);');
+			instructions.textContent = `⚠️ Open "${repoFolderName}" in VS Code first, then paste this prompt into Copilot Chat:`;
+			const promptBox = el('pre');
+			promptBox.setAttribute('style', 'font-size: 10px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; font-family: monospace; margin: 0;');
+			promptBox.textContent = prompt;
+			const copyBtn = document.createElement('vscode-button');
+			copyBtn.setAttribute('appearance', 'secondary');
+			copyBtn.textContent = '📋 Copy prompt';
+			copyBtn.addEventListener('click', () => {
+				navigator.clipboard.writeText(prompt).then(() => {
+					copyBtn.textContent = '✅ Copied!';
+					setTimeout(() => { copyBtn.textContent = '📋 Copy prompt'; }, 2000);
+				});
+			});
+			copilotSection.append(instructions, promptBox, copyBtn);
+		}
+	});
+	copilotSection.append(copilotText, copilotBtn);
+	return copilotSection;
+}
+
+function buildRepoAnalysisBodyElement(data: RepoAnalysisData, workspacePath?: string): HTMLElement {
+	const summary = data?.summary || {};
+	const checks = Array.isArray(data?.checks) ? data.checks : [];
+	const recommendations = Array.isArray(data?.recommendations) ? [...data.recommendations] : [];
+
+	const container = el('div');
+	container.appendChild(buildScoreHeaderElement(summary));
+	container.appendChild(buildStatsGridElement(summary));
 
 	const scoreSummary = el('div');
 	scoreSummary.setAttribute('style', 'font-size: 11px; color: var(--text-muted); text-align: center; margin-bottom: 16px;');
@@ -1315,201 +3799,92 @@ function buildRepoAnalysisBodyElement(data: any, workspacePath?: string): HTMLEl
 	container.appendChild(scoreSummary);
 
 	const priorityOrder: { [key: string]: number } = { high: 1, medium: 2, low: 3 };
-	recommendations.sort((a: any, b: any) => (priorityOrder[a?.priority as string] || 99) - (priorityOrder[b?.priority as string] || 99));
+	recommendations.sort((a: RepoHygieneRecommendation, b: RepoHygieneRecommendation) => (priorityOrder[a?.priority as string] || 99) - (priorityOrder[b?.priority as string] || 99));
 
-	const categories: { [key: string]: any[] } = {};
+	const categories: Record<string, RepoHygieneCheck[]> = {};
 	for (const check of checks) {
 		const categoryId = typeof check?.category === 'string' && check.category.length > 0 ? check.category : 'other';
-		if (!categories[categoryId]) {
-			categories[categoryId] = [];
-		}
+		if (!categories[categoryId]) { categories[categoryId] = []; }
 		categories[categoryId].push(check);
 	}
-
-	const categoryLabels: { [key: string]: string } = {
-		versionControl: '🔄 Version Control',
-		codeQuality: '✨ Code Quality',
-		cicd: '🚀 CI/CD',
-		environment: '🔧 Environment',
-		documentation: '📚 Documentation'
-	};
-
 	for (const [categoryId, categoryChecks] of Object.entries(categories)) {
-		const section = el('div');
-		section.setAttribute('style', 'margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
-
-		const sectionHeader = el('div');
-		sectionHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;');
-
-		const categoryName = el('span');
-		categoryName.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
-		categoryName.textContent = categoryLabels[categoryId] || categoryId;
-
-		const categorySummary = summary?.categories?.[categoryId];
-		const categoryPct = el('span');
-		categoryPct.setAttribute('style', 'font-size: 11px; color: var(--link-color); font-weight: 600;');
-		categoryPct.textContent = `${Math.round(toFiniteNumber(categorySummary?.percentage))}%`;
-
-		sectionHeader.append(categoryName, categoryPct);
-		section.appendChild(sectionHeader);
-
-		for (const check of categoryChecks) {
-			const status = check?.status === 'pass' || check?.status === 'warning' ? check.status : 'fail';
-			const statusIcon = status === 'pass' ? '✅' : status === 'warning' ? '⚠️' : '❌';
-			const statusColor = status === 'pass' ? '#22c55e' : status === 'warning' ? '#f59e0b' : '#ef4444';
-
-			const checkRow = el('div');
-			checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
-
-			const icon = el('span');
-			icon.setAttribute('style', 'font-size: 16px;');
-			icon.textContent = statusIcon;
-
-			const content = el('div');
-			content.setAttribute('style', 'flex: 1;');
-
-			const checkLabel = el('div');
-			checkLabel.setAttribute('style', `font-size: 12px; font-weight: 600; color: ${statusColor};`);
-			checkLabel.textContent = typeof check?.label === 'string' ? check.label : '';
-
-			const checkDetail = el('div');
-			checkDetail.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); margin-top: 2px;');
-			checkDetail.textContent = typeof check?.detail === 'string' ? check.detail : '';
-
-			content.append(checkLabel, checkDetail);
-
-			if (typeof check?.hint === 'string' && check.hint.length > 0) {
-				const hint = el('div');
-				hint.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; font-style: italic;');
-				hint.textContent = `💡 ${check.hint}`;
-				content.appendChild(hint);
-			}
-
-			const checkId = typeof check?.id === 'string' ? check.id : '';
-			const docUrl = docsLinks[checkId];
-			if (docUrl) {
-				const docLink = el('a');
-				docLink.setAttribute('href', docUrl);
-				docLink.setAttribute('style', 'font-size: 10px; color: var(--link-color); margin-top: 4px; display: inline-block;');
-				docLink.setAttribute('title', 'View official documentation');
-				docLink.textContent = '📖 View documentation';
-				content.appendChild(docLink);
-			}
-
-			const weight = el('span');
-			weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
-			weight.textContent = `+${toFiniteNumber(check?.weight)}`;
-
-			checkRow.append(icon, content, weight);
-			section.appendChild(checkRow);
-		}
-
-		container.appendChild(section);
+		container.appendChild(buildCategorySectionElement(categoryId, categoryChecks, summary));
 	}
 
 	if (recommendations.length > 0) {
-		const recommendationsSection = el('div');
-		recommendationsSection.setAttribute('style', 'margin-top: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;');
-
-		const recommendationsHeader = el('div');
-		recommendationsHeader.setAttribute('style', 'padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color);');
-		const recommendationsTitle = el('span');
-		recommendationsTitle.setAttribute('style', 'font-size: 12px; font-weight: 600; color: var(--text-primary);');
-		recommendationsTitle.textContent = '💡 Top Recommendations';
-		recommendationsHeader.appendChild(recommendationsTitle);
-		recommendationsSection.appendChild(recommendationsHeader);
-
-		for (const recommendation of recommendations.slice(0, 5)) {
-			const priority = recommendation?.priority === 'high' || recommendation?.priority === 'medium' ? recommendation.priority : 'low';
-			const priorityColor = priority === 'high' ? '#ef4444' : priority === 'medium' ? '#f59e0b' : '#60a5fa';
-
-			const row = el('div');
-			row.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px;');
-
-			const priorityLabel = el('span');
-			priorityLabel.setAttribute('style', `font-size: 10px; font-weight: 600; color: ${priorityColor}; min-width: 50px;`);
-			priorityLabel.textContent = String(priority).toUpperCase();
-
-			const content = el('div');
-			content.setAttribute('style', 'flex: 1;');
-
-			const action = el('div');
-			action.setAttribute('style', 'font-size: 11px; color: var(--text-primary);');
-			action.textContent = typeof recommendation?.action === 'string' ? recommendation.action : '';
-
-			const impact = el('div');
-			impact.setAttribute('style', 'font-size: 10px; color: var(--text-muted); margin-top: 2px;');
-			impact.textContent = typeof recommendation?.impact === 'string' ? recommendation.impact : '';
-
-			content.append(action, impact);
-
-			const weight = el('span');
-			weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
-			weight.textContent = `+${toFiniteNumber(recommendation?.weight)}`;
-
-			row.append(priorityLabel, content, weight);
-			recommendationsSection.appendChild(row);
-		}
-
-		container.appendChild(recommendationsSection);
+		container.appendChild(buildRecommendationsSectionElement(recommendations));
 	}
 
-	// Build a prompt summarizing the failed/warning checks for Copilot
-	const failedChecks = checks.filter((c: any) => c?.status === 'fail' || c?.status === 'warning');
+	const failedChecks = checks.filter((c: RepoHygieneCheck) => c?.status === 'fail' || c?.status === 'warning');
 	if (failedChecks.length > 0) {
-		const copilotSection = el('div');
-		copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;');
-
-		const copilotText = el('div');
-		copilotText.setAttribute('style', 'font-size: 11px; color: var(--text-secondary); flex: 1;');
-		copilotText.textContent = 'Let Copilot help you fix the identified issues in this repository.';
-
-		const copilotBtn = document.createElement('vscode-button');
-		copilotBtn.setAttribute('style', 'min-width: 180px;');
-		copilotBtn.textContent = '🤖 Ask Copilot to Improve';
-		copilotBtn.addEventListener('click', () => {
-			const failedLines = failedChecks.map((c: any) => `- ${c.label}: ${c.detail || ''}${c.hint ? ` (${c.hint})` : ''}`).join('\n');
-			const prompt = `Please help me improve this repository by addressing the following best practice issues:\n\n${failedLines}\n\nFor each issue, please provide specific steps or code changes to fix it.`;
-
-			const isRepoOpen = !workspacePath || currentWorkspacePaths.some(
-				p => p.toLowerCase() === workspacePath.toLowerCase()
-			);
-
-			if (isRepoOpen) {
-				vscode.postMessage({ command: 'openCopilotChatWithPrompt', prompt });
-			} else {
-				// Repo is not currently open — show instructions + prompt + copy button
-				const repoFolderName = workspacePath.split(/[/\\]/).filter(Boolean).pop() ?? workspacePath;
-				copilotSection.replaceChildren();
-				copilotSection.setAttribute('style', 'margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 4px; display: flex; flex-direction: column; gap: 8px;');
-
-				const instructions = el('div');
-				instructions.setAttribute('style', 'font-size: 11px; color: var(--warning-fg);');
-				instructions.textContent = `⚠️ Open "${repoFolderName}" in VS Code first, then paste this prompt into Copilot Chat:`;
-
-				const promptBox = el('pre');
-				promptBox.setAttribute('style', 'font-size: 10px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; font-family: monospace; margin: 0;');
-				promptBox.textContent = prompt;
-
-				const copyBtn = document.createElement('vscode-button');
-				copyBtn.setAttribute('appearance', 'secondary');
-				copyBtn.textContent = '📋 Copy prompt';
-				copyBtn.addEventListener('click', () => {
-					navigator.clipboard.writeText(prompt).then(() => {
-						copyBtn.textContent = '✅ Copied!';
-						setTimeout(() => { copyBtn.textContent = '📋 Copy prompt'; }, 2000);
-					});
-				});
-
-				copilotSection.append(instructions, promptBox, copyBtn);
-			}
-		});
-
-		copilotSection.append(copilotText, copilotBtn);
-		container.appendChild(copilotSection);
+		container.appendChild(buildCopilotSectionElement(failedChecks, workspacePath));
 	}
 
 	return container;
+}
+
+function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], hasSelectedRepository: boolean): void {
+	const colStyles = {
+		sessions: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
+		interactions: 'width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
+		score: 'width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);',
+	};
+	const headerHtml = `
+		<div style="padding: 4px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary);">
+			<div style="flex: 1; min-width: 0; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Repository</div>
+			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
+			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
+			<div style="${colStyles.score} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
+			<div style="width: 80px; flex-shrink: 0;"></div>
+		</div>
+	`;
+	listPane.innerHTML = headerHtml + visibleWorkspaces.map((ws, idx) => {
+		const record = repoAnalysisState.get(ws.workspacePath);
+		const hasResult = !!record?.data?.summary;
+		const scoreLabel = getScoreLabel(ws.workspacePath);
+		const buttonLabel = hasResult ? 'Details' : 'Analyze';
+		const buttonAction = hasResult ? 'details' : 'analyze';
+		const isCurrentSelection = selectedRepoPath === ws.workspacePath && hasSelectedRepository;
+		const sessions = Number(ws.sessionCount) || 0;
+		const interactions = Number(ws.interactionCount) || 0;
+		return `
+			<div class="repo-item" style="padding: 6px 12px; border-bottom: ${idx < visibleWorkspaces.length - 1 ? '1px solid var(--border-subtle)' : 'none'}; display: flex; align-items: center; gap: 10px;">
+				<div style="flex: 1; min-width: 0;">
+					<div class="repo-name" style="font-size: 12px; font-weight: 600; color: var(--text-primary); font-family: 'Courier New', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(ws.workspacePath)}">
+						${escapeHtml(ws.workspaceName)}
+					</div>
+				</div>
+				<div style="${colStyles.sessions}">${sessions}</div>
+				<div style="${colStyles.interactions}">${interactions}</div>
+				<div style="${colStyles.score}">${escapeHtml(scoreLabel)}</div>
+				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${isCurrentSelection ? 'disabled="true"' : ''} style="min-width: 80px; flex-shrink: 0;">
+					${buttonLabel}
+				</vscode-button>
+			</div>
+		`;
+	}).join('');
+}
+
+function renderRepoDetailSuccess(detailsPane: HTMLElement, record: any, workspaceName: string): void {
+	detailsPane.replaceChildren();
+	const card = el('div', 'repo-details-card');
+	card.setAttribute('style', 'padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;');
+	const header = el('div', 'repo-details-card-header');
+	header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;');
+	const label = el('div');
+	label.setAttribute('style', 'font-size: 12px; color: var(--text-secondary);');
+	label.textContent = 'Repository: ';
+	const repoName = el('span');
+	repoName.setAttribute('style', "color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;");
+	repoName.textContent = workspaceName;
+	label.appendChild(repoName);
+	const switchButton = document.createElement('vscode-button');
+	switchButton.id = 'btn-switch-repository';
+	switchButton.setAttribute('style', 'min-width: 120px;');
+	switchButton.textContent = 'Switch Repository';
+	header.append(label, switchButton);
+	card.append(header, buildRepoAnalysisBodyElement(record.data, selectedRepoPath ?? undefined));
+	detailsPane.appendChild(card);
 }
 
 function renderRepositoryHygienePanels(): void {
@@ -1528,30 +3903,7 @@ function renderRepositoryHygienePanels(): void {
 
 	listContainer.classList.remove('repo-hygiene-pane-collapsed');
 	detailsContainer.classList.toggle('repo-hygiene-pane-collapsed', !hasSelectedRepository);
-
-	listPane.innerHTML = visibleWorkspaces.map((ws, idx) => {
-		const record = repoAnalysisState.get(ws.workspacePath);
-		const hasResult = !!record?.data?.summary;
-		const scoreLabel = getScoreLabel(ws.workspacePath);
-		const buttonLabel = hasResult ? 'Details' : 'Analyze';
-		const buttonAction = hasResult ? 'details' : 'analyze';
-		const isCurrentSelection = selectedRepoPath === ws.workspacePath && hasSelectedRepository;
-		return `
-			<div class="repo-item" style="padding: 8px 12px; border-bottom: ${idx < visibleWorkspaces.length - 1 ? '1px solid var(--border-subtle)' : 'none'}; display: flex; align-items: center; justify-content: space-between; gap: 10px;">
-				<div style="flex: 1; min-width: 0;">
-					<div class="repo-name" style="font-size: 12px; font-weight: 600; color: var(--text-primary); font-family: 'Courier New', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${escapeHtml(ws.workspacePath)}">
-						${escapeHtml(ws.workspaceName)}
-					</div>
-					<div style="font-size: 10px; color: var(--text-muted); margin-top: 2px;">
-						${Number(ws.sessionCount) || 0} ${ws.sessionCount === 1 ? 'session' : 'sessions'} · ${Number(ws.interactionCount) || 0} ${ws.interactionCount === 1 ? 'interaction' : 'interactions'} · Score: ${escapeHtml(scoreLabel)}
-					</div>
-				</div>
-				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${isCurrentSelection ? 'disabled="true"' : ''} style="min-width: 80px;">
-					${buttonLabel}
-				</vscode-button>
-			</div>
-		`;
-	}).join('');
+	renderRepoListPane(listPane, visibleWorkspaces, hasSelectedRepository);
 
 	if (!hasSelectedRepository || !selectedRepoPath) {
 		detailsPane.replaceChildren();
@@ -1561,30 +3913,7 @@ function renderRepositoryHygienePanels(): void {
 	const workspaceName = getWorkspaceName(selectedRepoPath);
 	const record = repoAnalysisState.get(selectedRepoPath);
 	if (record?.data) {
-		detailsPane.replaceChildren();
-		const card = el('div', 'repo-details-card');
-		card.setAttribute('style', 'padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;');
-
-		const header = el('div', 'repo-details-card-header');
-		header.setAttribute('style', 'display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;');
-
-		const label = el('div');
-		label.setAttribute('style', 'font-size: 12px; color: var(--text-secondary);');
-		label.textContent = 'Repository: ';
-
-		const repoName = el('span');
-		repoName.setAttribute('style', "color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;");
-		repoName.textContent = workspaceName;
-		label.appendChild(repoName);
-
-		const switchButton = document.createElement('vscode-button');
-		switchButton.id = 'btn-switch-repository';
-		switchButton.setAttribute('style', 'min-width: 120px;');
-		switchButton.textContent = 'Switch Repository';
-
-		header.append(label, switchButton);
-		card.append(header, buildRepoAnalysisBodyElement(record.data, selectedRepoPath ?? undefined));
-		detailsPane.appendChild(card);
+		renderRepoDetailSuccess(detailsPane, record, workspaceName);
 		return;
 	}
 
@@ -1613,7 +3942,7 @@ function renderRepositoryHygienePanels(): void {
 	`;
 }
 
-function displayRepoAnalysisResults(data: any, workspacePath?: string): void {
+function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: string): void {
 	if (workspacePath) {
 		repoAnalysisState.set(workspacePath, { data, error: undefined });
 		if (!isBatchAnalysisInProgress) {
@@ -1624,7 +3953,7 @@ function displayRepoAnalysisResults(data: any, workspacePath?: string): void {
 		return;
 	}
 
-	const btn = document.getElementById('btn-analyse-repo') as any;
+	const btn = document.getElementById('btn-analyse-repo') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
@@ -1651,7 +3980,7 @@ function displayRepoAnalysisError(error: string, workspacePath?: string): void {
 		return;
 	}
 
-	const btn = document.getElementById('btn-analyse-repo') as any;
+	const btn = document.getElementById('btn-analyse-repo') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
@@ -1675,34 +4004,73 @@ function handleBatchAnalysisComplete(): void {
 	renderRepositoryHygienePanels();
 
 	// Re-enable the "Analyze All" button
-	const btn = document.getElementById('btn-analyse-all') as any;
+	const btn = document.getElementById('btn-analyse-all') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
 		btn.disabled = false;
-		const matrix = (initialData as any)?.customizationMatrix as WorkspaceCustomizationMatrix | undefined;
+		const matrix = initialData?.customizationMatrix as WorkspaceCustomizationMatrix | undefined;
 		const count = matrix?.workspaces?.length || 0;
 		btn.textContent = `Analyze All Repositories (${count})`;
 	}
 }
 
 async function bootstrap(): Promise<void> {
-	const { provideVSCodeDesignSystem, vsCodeButton } = await import('@vscode/webview-ui-toolkit');
-	provideVSCodeDesignSystem().register(vsCodeButton());
+	await import('@vscode-elements/elements/dist/vscode-button/index.js');
 
 	// TOOL_NAME_MAP is imported at build-time from src/toolNames.json
 
 	if (!initialData) {
-		const root = document.getElementById('root');
-		if (root) {
-			root.textContent = 'No data available.';
-		}
+		renderUsageLoadingState('Loading usage analysis...');
+		// If data doesn't arrive within 30s, show a helpful hint (non-fatal)
+		loadingTimeoutId = setTimeout(() => {
+			const r = document.getElementById('root');
+			if (r && r.querySelector('#usage-loading-card')) {
+				const hint = document.createElement('div');
+				hint.style.cssText = 'padding: 32px; text-align: center; font-size: 14px;';
+				const msg = document.createElement('div');
+				msg.style.cssText = 'color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;';
+				msg.textContent = '⏳ Taking longer than expected… Session files may be large or the scan is still in progress.';
+				hint.append(msg, createRefreshButton());
+				r.textContent = '';
+				r.append(hint);
+			}
+		}, 30_000);
+		// Stats will arrive via the updateStats message; the module-level listener will call renderLayout then.
 		return;
 	}
-	console.log('[Usage Analysis] Browser default locale:', Intl.DateTimeFormat().resolvedOptions().locale);
-	console.log('[Usage Analysis] Received locale from extension:', initialData.locale);
-	console.log('[Usage Analysis] Test format 1234567.89 with received locale:', new Intl.NumberFormat(initialData.locale).format(1234567.89));
 	setFormatLocale(initialData.locale);
+	use24HourTime = initialData.use24HourTime !== false;
+	const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
+	if (Array.isArray(savedColumns)) {
+		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));
+		enabledSessionColumns = new Set(valid);
+	}
 	renderLayout(initialData);
+	setupSessionsTableSort();
+
+	// Event delegation for suppress-tool buttons (rendered dynamically in the tools section)
+	document.addEventListener('click', (event) => {
+		const target = event.target as HTMLElement;
+		const toolName = target.getAttribute('data-suppress-tool');
+		if (toolName) {
+			// Optimistic UI: remove the item immediately so the user sees instant feedback,
+			// rather than waiting for the async config.update round-trip in the extension host.
+			handleToolSuppressed(toolName);
+			vscode.postMessage({ command: 'suppressUnknownTool', toolName });
+		}
+	});
 }
 
-void bootstrap();
-
+void bootstrap().catch(err => {
+	console.error('[Usage Analysis] Bootstrap failed:', err);
+	const root = document.getElementById('root');
+	if (root) {
+		const container = document.createElement('div');
+		container.style.cssText = 'padding: 32px; text-align: center; font-size: 14px;';
+		const msg = document.createElement('div');
+		msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
+		msg.textContent = 'Failed to initialize usage analysis. Please try refreshing.';
+		container.append(msg, createRefreshButton());
+		root.textContent = '';
+		root.append(container);
+	}
+});
