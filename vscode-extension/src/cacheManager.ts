@@ -16,11 +16,15 @@ export interface CacheManagerDeps {
 }
 
 export class CacheManager {
+	private static readonly SNAPSHOT_SCHEMA_VERSION = 1;
+	private static readonly SNAPSHOT_MAX_ENTRIES = 20_000;
+
 	private sessionFileCache: Map<string, SessionFileCache> = new Map();
 	private readonly context: vscode.ExtensionContext;
 	private readonly deps: CacheManagerDeps;
 	private readonly cacheVersion: number;
 	private readonly policy: CachePolicy<SessionFileCache>;
+	private lastLoadedSnapshotMtime = 0;
 
 	constructor(
 		context: vscode.ExtensionContext,
@@ -294,6 +298,7 @@ export class CacheManager {
 	 * Also removes any legacy cache data from globalState as a one-time migration.
 	 */
 	async loadCacheFromStorage(): Promise<void> {
+		const loadStartedAt = Date.now();
 		try {
 			const cacheId = this.getCacheIdentifier();
 
@@ -332,7 +337,7 @@ export class CacheManager {
 				this.sessionFileCache = new Map(
 					Object.entries(envelope.entries as Record<string, SessionFileCache>),
 				);
-				this.deps.log(`Loaded ${this.sessionFileCache.size} cached session files from disk snapshot (${cacheId})`);
+				this.deps.log(`Loaded ${this.sessionFileCache.size} cached session files from disk snapshot (${cacheId}) in ${Date.now() - loadStartedAt}ms`);
 
 				// Record the snapshot mtime so loadSharedSnapshotIfChanged won't reload it redundantly.
 				try {
@@ -419,15 +424,6 @@ export class CacheManager {
 	// edition). Writes are atomic (temp file + rename) so readers never observe a
 	// partially written file.
 	// ---------------------------------------------------------------------------
-
-	/** Schema version for the snapshot envelope; bump on incompatible shape changes. */
-	private static readonly SNAPSHOT_SCHEMA_VERSION = 1;
-
-	/** Upper bound on entries kept in the shared snapshot (newest by mtime). */
-	private static readonly SNAPSHOT_MAX_ENTRIES = 5000;
-
-	/** mtime (ms) of the snapshot file the last time this window loaded it. */
-	private lastLoadedSnapshotMtime = 0;
 
 	getSharedSnapshotPath(): string {
 		const cacheId = this.getCacheIdentifier();
@@ -544,6 +540,7 @@ export class CacheManager {
 	 * Returns the number of entries merged.
 	 */
 	async loadSharedSnapshotIfChanged(): Promise<number> {
+		const loadStartedAt = Date.now();
 		const snapshotPath = this.getSharedSnapshotPath();
 		let mtimeMs: number;
 		try {
@@ -564,7 +561,7 @@ export class CacheManager {
 		const merged = this.mergeSnapshotEntries(entries);
 		this.lastLoadedSnapshotMtime = mtimeMs;
 		if (merged > 0) {
-			this.deps.log(`Warmed cache from shared snapshot: merged ${merged} entr${merged === 1 ? 'y' : 'ies'}`);
+			this.deps.log(`Warmed cache from shared snapshot: merged ${merged} entr${merged === 1 ? 'y' : 'ies'} in ${Date.now() - loadStartedAt}ms`);
 		}
 		return merged;
 	}

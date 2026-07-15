@@ -5,6 +5,10 @@
  * cache storage mechanics in CacheManager and cliCache.
  */
 
+export const VS_CODE_CACHE_MAX_ENTRIES = 20_000;
+export const VS_CODE_CACHE_EVICT_BATCH = 100;
+export const VS_CODE_CACHE_TRIGGER_THRESHOLD = VS_CODE_CACHE_MAX_ENTRIES + VS_CODE_CACHE_EVICT_BATCH - 1;
+
 /** Minimum metadata required by any cache entry for policy decisions. */
 export interface CacheEntryMeta {
 	mtime: number;
@@ -27,8 +31,10 @@ export interface CachePolicy<T extends CacheEntryMeta> {
  *
  * - Validates using mtime + size equality; treats a missing `size` field as
  *   invalid so old-format entries are upgraded automatically.
- * - Triggers eviction when the map grows past `triggerThreshold` and removes
- *   the `evictCount` oldest entries (Maps preserve insertion order).
+ * - Targets roughly `VS_CODE_CACHE_MAX_ENTRIES` live entries. To avoid pruning
+ *   on every insert near the limit, eviction waits until the map exceeds the
+ *   target by one batch and then removes the `evictCount` oldest entries
+ *   (Maps preserve insertion order).
  */
 export class VsCodeCachePolicy<T extends CacheEntryMeta> implements CachePolicy<T> {
 	private readonly triggerThreshold: number;
@@ -37,8 +43,8 @@ export class VsCodeCachePolicy<T extends CacheEntryMeta> implements CachePolicy<
 
 	constructor(
 		log: (msg: string) => void,
-		triggerThreshold = 3100,
-		evictCount = 100,
+		triggerThreshold = VS_CODE_CACHE_TRIGGER_THRESHOLD,
+		evictCount = VS_CODE_CACHE_EVICT_BATCH,
 	) {
 		this.log = log;
 		this.triggerThreshold = triggerThreshold;

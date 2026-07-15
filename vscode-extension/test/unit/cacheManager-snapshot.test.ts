@@ -130,6 +130,23 @@ test('writeSharedSnapshot merges with existing snapshot without regressing newer
 	assert.equal(entries!['/b.json'].mtime, 3000, 'follower\'s extra /b.json must be added');
 });
 
+test('writeSharedSnapshot caps the shared snapshot at 20000 newest entries', async () => {
+	const dir = tmpDir();
+	const writer = makeManager(dir);
+	for (let i = 0; i < 20_050; i++) {
+		writer.setCachedSessionData(`/file${i}.json`, entry(i), 10);
+	}
+	await writer.writeSharedSnapshot();
+
+	const entries = await writer.readSharedSnapshot();
+	assert.ok(entries);
+	assert.equal(Object.keys(entries!).length, 20_000, 'snapshot should keep only the newest 20000 entries');
+	assert.equal(entries!['/file0.json'], undefined, 'oldest snapshot entry should be pruned');
+	assert.equal(entries!['/file49.json'], undefined, 'entries outside the newest 20000 should be pruned');
+	assert.equal(entries!['/file50.json']?.mtime, 50, 'newest retained window should start at entry 50');
+	assert.equal(entries!['/file20049.json']?.mtime, 20049, 'newest entry should be retained');
+});
+
 test('refresh lock: acquire then release; renew only when owned', async () => {
 	const dir = tmpDir();
 	const m = makeManager(dir);
@@ -161,11 +178,19 @@ test('loadCacheFromStorage: loads entries from existing snapshot', async () => {
 	writer.setCachedSessionData('/b.json', entry(2000), 20);
 	await writer.writeSharedSnapshot();
 
-	const reader = makeManager(dir);
+	const logs: string[] = [];
+	const context: any = {
+		extensionMode: 1,
+		globalStorageUri: { fsPath: dir },
+		globalState: createMockMemento(),
+	};
+	const reader = new CacheManager(context, { log: (m: string) => logs.push(m), warn: () => {}, error: () => {} }, 1);
 	await reader.loadCacheFromStorage();
 	assert.equal(reader.cache.size, 2, 'should load both entries');
 	assert.equal(reader.cache.get('/a.json')?.mtime, 1000);
 	assert.equal(reader.cache.get('/b.json')?.mtime, 2000);
+	assert.ok(logs.some(l => /Loaded 2 cached session files from disk snapshot \(prod\) in \d+ms/.test(l)),
+		'should log load duration');
 });
 
 test('loadCacheFromStorage: starts with empty cache when no snapshot exists', async () => {
