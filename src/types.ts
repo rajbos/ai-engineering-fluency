@@ -598,6 +598,7 @@ export interface SessionFileDetails {
   editorName?: string; // friendly editor name (e.g., 'VS Code')
   title?: string; // session title (customTitle from session file)
   repository?: string; // Git remote origin URL for the session's workspace
+  workspacePath?: string; // absolute local cwd/workspace path the session ran in (from adapter getMeta)
   /** Parent session info (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */
   parentInfo?: SessionRelationRef | null;
   /** Direct child sessions (Copilot CLI and pi sessions; populated from data.db / JSONL parentSession field). */

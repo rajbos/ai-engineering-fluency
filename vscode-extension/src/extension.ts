@@ -172,6 +172,8 @@ import {
   normalizeMcpToolName as _normalizeMcpToolName,
   extractMcpServerName as _extractMcpServerName,
   normalizePath as _normalizePath,
+  normalizePathForDedup as _normalizePathForDedup,
+  normalizeToRepoRoot as _normalizeToRepoRoot,
 } from '../../src/workspaceHelpers';
 
 // --- Chart building ---
@@ -359,6 +361,23 @@ interface CopilotCliOtelComparison {
 	sessions: CopilotCliOtelComparisonSession[];
 }
 
+/**
+ * A discovered git worktree row for the diagnostics Worktrees tab. `files`/`folders`/`bytes`
+ * are -1 while their (expensive) size walk is still pending; `pushed` is "?" until the
+ * background push-status check completes.
+ */
+interface WorktreeScanResult {
+	path: string;
+	repoLabel: string;
+	branch: string;
+	lastCommit: string;
+	lastCommitDate: string | null;
+	pushed: "yes" | "no" | "?";
+	files: number;
+	folders: number;
+	bytes: number;
+}
+
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
 	private static readonly CACHE_VERSION = 59; // Detect Auto model and Foundry local models from request-level fields
@@ -376,6 +395,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastDiagnosticReport: string = '';
 	// Incremented on each worktree scan start/cancel; in-flight scans check this to stop early
 	private worktreeScanId: number = 0;
+	// Incremented on each cleanup start/cancel; an in-flight cleanup loop checks this to stop early
+	private worktreeCleanupId: number = 0;
 	private logViewerPanel?: vscode.WebviewPanel;
 	private logViewerSessionFilePath: string = '';
 	private logViewerCurrentData?: SessionLogData;
@@ -4942,6 +4963,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			editorSource: this.detectEditorSource(sessionFile),
 			title: cached.title,
 			repository: cached.repository,
+			workspacePath: cached.workspaceFolderPath,
 			...(cached.modelUsage && Object.keys(cached.modelUsage).length > 0 ? { modelUsage: cached.modelUsage } : {}),
 		};
 
@@ -4993,11 +5015,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			firstInteraction: details.firstInteraction,
 			lastInteraction: details.lastInteraction,
 			title: details.title,
-			repository: details.repository
+			repository: details.repository,
+			workspaceFolderPath: this.resolveCachedWorkspacePath(details, existingCache),
 		};
 
 		cacheEntry.usageAnalysis!.contextReferences = details.contextReferences;
 		this.setCachedSessionData(sessionFile, cacheEntry, stat.size);
+	}
+
+	/** Resolve the session's local workspace path for caching, preferring fresh details over the cached value. */
+	private resolveCachedWorkspacePath(details: SessionFileDetails, existingCache: SessionFileCache | undefined): string | undefined {
+		return details.workspacePath ?? existingCache?.workspaceFolderPath;
 	}
 
 	private resolveTokensForCacheUpdate(tokenResult: { tokens: number; thinkingTokens: number; actualTokens: number } | undefined, existingCache: SessionFileCache | undefined): { tokens: number; actualTokens: number | undefined; thinkingTokens: number | undefined; cacheReadTokens: number | undefined } {
@@ -5126,7 +5154,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.interactions = interactionCount;
 		details.editorRoot = eco.getEditorRoot(sessionFile);
 		details.editorName = getEcosystemDisplayName(eco, sessionFile);
-		if (meta.workspacePath) { details.repository = path.basename(meta.workspacePath); }
+		if (meta.workspacePath) { details.repository = path.basename(meta.workspacePath); details.workspacePath = meta.workspacePath; }
 		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult, modelUsage);
 		return details;
 	}
@@ -8238,6 +8266,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       pickWorktreeRoot: () => this.dispatch('pickWorktreeRoot:diagnostics', () => this.diagHandlePickWorktreeRoot()),
       scanWorktrees: () => this.dispatch('scanWorktrees:diagnostics', () => this.diagHandleScanWorktrees(message)),
       cancelWorktreeScan: () => this.dispatch('cancelWorktreeScan:diagnostics', () => this.diagHandleCancelWorktreeScan()),
+      deleteWorktree: () => this.dispatch('deleteWorktree:diagnostics', () => this.diagHandleDeleteWorktree(message)),
+      cleanupPushedWorktrees: () => this.dispatch('cleanupPushedWorktrees:diagnostics', () => this.diagHandleCleanupPushedWorktrees(message)),
+      cancelCleanupPushedWorktrees: () => this.dispatch('cancelCleanupPushedWorktrees:diagnostics', () => this.diagHandleCancelCleanupPushedWorktrees()),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
@@ -8599,12 +8630,14 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     const scanId = ++this.worktreeScanId;
     const excludeDirs = new Set(["node_modules", ".git", ".hg", ".svn", "packages", "vendor"]);
     const startTime = Date.now();
-    let totalFound = 0;
     const isActive = () => scanId === this.worktreeScanId;
     const send = (msg: Record<string, unknown>) => { if (this.isPanelOpen(panel)) { panel.webview.postMessage(msg); } };
 
     send({ command: "worktreeScanStarted", rootPaths });
 
+    // Phase 1 — fast discovery: locate worktrees and report each with cheap git metadata only
+    // (size and push status are left pending and filled in during phase 2).
+    const discovered: WorktreeScanResult[] = [];
     for (const root of rootPaths) {
       if (!isActive()) { return; }
       let isDirectory = false;
@@ -8616,51 +8649,112 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 
       send({ command: "worktreeScanRootStarted", root });
       const gitMarkers: string[] = [];
-      await this.findGitMarkerFiles(root, excludeDirs, gitMarkers, isActive);
+      // Report folder-walk progress (throttled) so the user sees activity on large roots
+      // long before the first worktree is found.
+      let dirsScanned = 0;
+      let lastWalkPost = 0;
+      const onDir = (): void => {
+        dirsScanned++;
+        const now = Date.now();
+        if (now - lastWalkPost >= 200) {
+          lastWalkPost = now;
+          send({ command: "worktreeScanWalkProgress", root, dirsScanned, markersFound: gitMarkers.length, elapsedMs: now - startTime });
+        }
+      };
+      await this.findGitMarkerFiles(root, excludeDirs, gitMarkers, isActive, onDir);
       if (!isActive()) { return; }
       send({ command: "worktreeScanRootMarkersFound", root, count: gitMarkers.length });
 
-      totalFound += await this.processWorktreeMarkers(gitMarkers, root, isActive, send, startTime);
+      discovered.push(...await this.discoverWorktreesFromMarkers(gitMarkers, root, isActive, send, startTime));
       if (!isActive()) { return; }
     }
 
-    send({ command: "worktreeScanComplete", totalWorktrees: totalFound, elapsedMs: Date.now() - startTime });
+    // Phase 2 — background enrichment: compute disk size and push status concurrently and
+    // patch each row as results arrive, so discovery is not blocked by these slow operations.
+    await this.enrichWorktrees(discovered, isActive, send, startTime);
+    if (!isActive()) { return; }
+
+    send({ command: "worktreeScanComplete", totalWorktrees: discovered.length, elapsedMs: Date.now() - startTime });
   }
 
-  private async processWorktreeMarkers(
+  /**
+   * Resolve .git markers to unique worktree roots (cheap, sequential) then fetch cheap git
+   * metadata concurrently, streaming each worktree to the webview as soon as it is known.
+   */
+  private async discoverWorktreesFromMarkers(
     gitMarkers: string[],
     root: string,
     isActive: () => boolean,
     send: (msg: Record<string, unknown>) => void,
     startTime: number,
-  ): Promise<number> {
+  ): Promise<WorktreeScanResult[]> {
     const foundRoots: string[] = [];
+    const worktreeRoots: string[] = [];
     let checked = 0;
     for (const markerFile of gitMarkers) {
-      if (!isActive()) { return foundRoots.length; }
+      if (!isActive()) { return []; }
       checked++;
       const worktreeRoot = await this.resolveWorktreeRootFromMarker(markerFile, foundRoots);
-      if (worktreeRoot) {
-        const result = await this.buildWorktreeResult(worktreeRoot);
-        if (!isActive()) { return foundRoots.length; }
-        send({ command: "worktreeFound", worktree: result });
-      }
-      if (checked % 5 === 0 || checked === gitMarkers.length) {
-        send({ command: "worktreeScanProgress", root, checked, total: gitMarkers.length, foundCount: foundRoots.length, elapsedMs: Date.now() - startTime });
+      if (worktreeRoot) { worktreeRoots.push(worktreeRoot); }
+      if (checked % 10 === 0 || checked === gitMarkers.length) {
+        send({ command: "worktreeScanProgress", root, checked, total: gitMarkers.length, foundCount: worktreeRoots.length, elapsedMs: Date.now() - startTime });
       }
     }
-    return foundRoots.length;
+
+    const discovered: WorktreeScanResult[] = [];
+    await this.runWithConcurrency(worktreeRoots, async (worktreeRoot) => {
+      if (!isActive()) { return; }
+      const result = await this.buildWorktreeDiscovery(worktreeRoot);
+      if (!isActive()) { return; }
+      discovered.push(result);
+      send({ command: "worktreeFound", worktree: result });
+    }, 8);
+    return discovered;
   }
+
+  /**
+   * Compute disk usage and push status for every discovered worktree, with bounded concurrency,
+   * streaming a `worktreeEnriched` patch per worktree plus throttled overall progress.
+   */
+  private async enrichWorktrees(
+    worktrees: WorktreeScanResult[],
+    isActive: () => boolean,
+    send: (msg: Record<string, unknown>) => void,
+    startTime: number,
+  ): Promise<void> {
+    const total = worktrees.length;
+    if (total === 0) { return; }
+    send({ command: "worktreeEnrichStarted", total, elapsedMs: Date.now() - startTime });
+    let enriched = 0;
+    let lastPost = 0;
+    await this.runWithConcurrency(worktrees.map((w) => w.path), async (worktreePath) => {
+      if (!isActive()) { return; }
+      const [stats, pushed] = await Promise.all([
+        this.computeFolderStats(worktreePath),
+        this.getWorktreePushedStatus(worktreePath),
+      ]);
+      if (!isActive()) { return; }
+      enriched++;
+      send({ command: "worktreeEnriched", path: worktreePath, files: stats.files, folders: stats.folders, bytes: stats.bytes, pushed });
+      const now = Date.now();
+      if (now - lastPost >= 200 || enriched === total) {
+        lastPost = now;
+        send({ command: "worktreeEnrichProgress", enriched, total, elapsedMs: now - startTime });
+      }
+    }, 4);
+  }
+
 
   /**
    * Recursively collects paths to ".git" marker FILES (worktree pointers) under `dir`,
    * skipping excluded directory names for speed. Does not descend into any ".git" entry
    * itself (file or directory), so nested worktrees inside a scanned repo are still found.
    */
-  private async findGitMarkerFiles(dir: string, excludeDirs: Set<string>, results: string[], isActive: () => boolean): Promise<void> {
+  private async findGitMarkerFiles(dir: string, excludeDirs: Set<string>, results: string[], isActive: () => boolean, onDir?: () => void): Promise<void> {
     if (!isActive()) { return; }
     let entries: fs.Dirent[];
     try { entries = await fs.promises.readdir(dir, { withFileTypes: true }); } catch { return; }
+    onDir?.();
     for (const entry of entries) {
       if (!isActive()) { return; }
       if (entry.name === ".git") {
@@ -8668,7 +8762,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         continue;
       }
       if (entry.isDirectory() && !excludeDirs.has(entry.name)) {
-        await this.findGitMarkerFiles(path.join(dir, entry.name), excludeDirs, results, isActive);
+        await this.findGitMarkerFiles(path.join(dir, entry.name), excludeDirs, results, isActive, onDir);
       }
     }
   }
@@ -8702,13 +8796,24 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     return worktreeRoot;
   }
 
-  private async buildWorktreeResult(worktreeRoot: string): Promise<{ path: string; repoLabel: string; branch: string; lastCommit: string; lastCommitDate: string | null; pushed: "yes" | "no" | "?"; files: number; folders: number; bytes: number }> {
-    const [stats, gitInfo] = await Promise.all([
-      this.computeFolderStats(worktreeRoot),
-      Promise.resolve(this.getWorktreeGitInfo(worktreeRoot)),
-    ]);
+  /**
+   * Fast per-worktree discovery: cheap git metadata only (branch, last commit, remote → repo
+   * label). Size and push status are left pending (-1 / "?") and filled in by enrichWorktrees.
+   */
+  private async buildWorktreeDiscovery(worktreeRoot: string): Promise<WorktreeScanResult> {
+    const gitInfo = await this.getWorktreeGitInfoFast(worktreeRoot);
     const repoLabel = gitInfo.remoteUrl ? this.getRepoLabelFromRemote(gitInfo.remoteUrl) : path.basename(path.dirname(worktreeRoot));
-    return { path: worktreeRoot, repoLabel, branch: gitInfo.branch, lastCommit: gitInfo.lastCommit, lastCommitDate: gitInfo.lastCommitDate, pushed: gitInfo.pushed, files: stats.files, folders: stats.folders, bytes: stats.bytes };
+    return {
+      path: worktreeRoot,
+      repoLabel,
+      branch: gitInfo.branch,
+      lastCommit: gitInfo.lastCommit,
+      lastCommitDate: gitInfo.lastCommitDate,
+      pushed: "?",
+      files: -1,
+      folders: -1,
+      bytes: -1,
+    };
   }
 
   /** Recursively computes file/folder counts and total byte size for a worktree (no exclusions — reflects true disk usage). */
@@ -8732,25 +8837,357 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     return { files, folders, bytes };
   }
 
-  private getWorktreeGitInfo(worktreeRoot: string): { branch: string; lastCommit: string; lastCommitDate: string | null; pushed: "yes" | "no" | "?"; remoteUrl: string } {
-    const opts: childProcess.ExecSyncOptionsWithStringEncoding = { cwd: worktreeRoot, encoding: "utf8", timeout: 5000, stdio: ["pipe", "pipe", "pipe"] };
-    let branch = "?", lastCommit = "?", lastCommitDate: string | null = null, pushed: "yes" | "no" | "?" = "?", remoteUrl = "";
-    try {
-      branch = childProcess.execSync("git branch --show-current", opts).trim() || "?";
-      try { lastCommit = childProcess.execSync("git log -1 --format=%cr", opts).trim() || "?"; } catch { /* no commits yet */ }
-      try { lastCommitDate = childProcess.execSync("git log -1 --format=%cI", opts).trim() || null; } catch { /* no commits yet */ }
-      try {
-        const unpushed = childProcess.execSync("git log --oneline --not --remotes --branches", opts).trim();
-        pushed = unpushed === "" ? "yes" : "no";
-      } catch { /* leave as unknown */ }
-      try { remoteUrl = childProcess.execSync("git remote get-url origin", opts).trim(); } catch { /* no remote configured */ }
-    } catch { /* not a readable git worktree */ }
-    return { branch, lastCommit, lastCommitDate, pushed, remoteUrl };
+  /** Runs a git subcommand without blocking the event loop; resolves { ok, stdout } (never rejects). */
+  private runGit(args: string[], cwd: string, timeoutMs = 8000): Promise<{ ok: boolean; stdout: string; stderr: string }> {
+    return new Promise((resolve) => {
+      childProcess.execFile(
+        "git",
+        args,
+        { cwd, encoding: "utf8", timeout: timeoutMs, windowsHide: true, maxBuffer: 8 * 1024 * 1024 },
+        (err, stdout, stderr) => resolve({ ok: !err, stdout: String(stdout ?? "").trim(), stderr: String(stderr ?? "").trim() }),
+      );
+    });
+  }
+
+  /** Cheap git metadata for discovery (branch, last commit, remote). Excludes the slow push check. */
+  private async getWorktreeGitInfoFast(worktreeRoot: string): Promise<{ branch: string; lastCommit: string; lastCommitDate: string | null; remoteUrl: string }> {
+    const [branch, lastCommit, lastCommitDate, remoteUrl] = await Promise.all([
+      this.runGit(["branch", "--show-current"], worktreeRoot),
+      this.runGit(["log", "-1", "--format=%cr"], worktreeRoot),
+      this.runGit(["log", "-1", "--format=%cI"], worktreeRoot),
+      this.runGit(["remote", "get-url", "origin"], worktreeRoot),
+    ]);
+    return {
+      branch: branch.stdout || "?",
+      lastCommit: lastCommit.stdout || "?",
+      lastCommitDate: lastCommitDate.stdout || null,
+      remoteUrl: remoteUrl.ok ? remoteUrl.stdout : "",
+    };
+  }
+
+  /** Whether every local commit is present on some remote. "?" when it cannot be determined. */
+  private async getWorktreePushedStatus(worktreeRoot: string): Promise<"yes" | "no" | "?"> {
+    const r = await this.runGit(["log", "--oneline", "--not", "--remotes", "--branches"], worktreeRoot);
+    if (!r.ok) { return "?"; }
+    return r.stdout === "" ? "yes" : "no";
   }
 
   private getRepoLabelFromRemote(remoteUrl: string): string {
     const match = remoteUrl.match(/[:/]([^/]+\/[^/]+?)(\.git)?$/);
     return match ? match[1] : remoteUrl;
+  }
+
+  /**
+   * Resolve the main (non-linked) repository root that owns a given worktree, so `git worktree
+   * remove` can be run from a location git recognizes as the repository. Returns null when the
+   * shared .git directory cannot be resolved or does not sit at the root of a normal (non-bare)
+   * working tree — callers should refuse to proceed rather than guess in that case.
+   */
+  private async resolveMainRepoRoot(worktreePath: string): Promise<string | null> {
+    let commonDir = (await this.runGit(["rev-parse", "--path-format=absolute", "--git-common-dir"], worktreePath)).stdout;
+    if (!commonDir) {
+      const legacy = await this.runGit(["rev-parse", "--git-common-dir"], worktreePath);
+      if (!legacy.ok || !legacy.stdout) { return null; }
+      commonDir = path.isAbsolute(legacy.stdout) ? legacy.stdout : path.resolve(worktreePath, legacy.stdout);
+    }
+    if (path.basename(commonDir).toLowerCase() !== ".git") { return null; }
+    return path.dirname(commonDir);
+  }
+
+  /**
+   * Removes a linked worktree via `git worktree remove` (never a raw folder delete): this keeps
+   * the main repository's worktree registry consistent and — without `force` — refuses when the
+   * worktree has uncommitted or untracked changes, protecting the user from silently losing work.
+   * Committed history is never at risk either way, since it lives in the shared object database.
+   */
+  private async removeGitWorktree(mainRepoRoot: string, worktreePath: string, force: boolean): Promise<{ ok: boolean; stderr: string }> {
+    const args = ["worktree", "remove", ...(force ? ["--force"] : []), worktreePath];
+    const result = await this.runGit(args, mainRepoRoot, 120000);
+    return { ok: result.ok, stderr: result.stderr };
+  }
+
+  /**
+   * True when git's own directory-removal step failed at the OS level (git's message is
+   * "failed to delete/remove '<path>': <errno text>") as opposed to refusing for a safety
+   * reason (uncommitted/untracked changes). On Windows this is a known git-for-windows gap:
+   * its internal directory walker can choke on reparse points/junctions (e.g. a pnpm
+   * node_modules layout) or paths exceeding MAX_PATH, well after git's dirty-tree check has
+   * already passed — so falling back to a direct filesystem delete here does not relax that
+   * safety check, it only swaps out a less capable directory-removal implementation for a
+   * more capable one (Node's fs.rm).
+   */
+  private isWorktreeDirectoryRemovalFailure(stderr: string): boolean {
+    return /failed to (delete|remove) '.*'/i.test(stderr);
+  }
+
+  /** Deletes a worktree's folder directly (Node's fs.rm handles junctions/long paths git's Windows walker sometimes cannot). */
+  private async forceRemoveWorktreeDirectory(worktreePath: string): Promise<{ ok: boolean; error?: string }> {
+    try {
+      await fs.promises.rm(worktreePath, { recursive: true, force: true, maxRetries: 3, retryDelay: 300 });
+      return { ok: true };
+    } catch (err) {
+      return { ok: false, error: err instanceof Error ? err.message : String(err) };
+    }
+  }
+
+  /**
+   * Falls back to a direct filesystem delete + git registration cleanup when git's own
+   * directory-removal step failed at the OS level (see isWorktreeDirectoryRemovalFailure).
+   * Returns the final remove/prune result.
+   */
+  private async removeWorktreeDirectoryFallback(mainRepoRoot: string, worktreePath: string): Promise<{ ok: boolean; stderr: string }> {
+    const manual = await this.forceRemoveWorktreeDirectory(worktreePath);
+    if (!manual.ok) {
+      return { ok: false, stderr: `Could not delete the worktree folder: ${manual.error}. Close any editor, terminal, or process using files in "${worktreePath}" and try again.` };
+    }
+    // The folder is gone; git only needs to clean up its now-trivial administrative record.
+    let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
+    if (!result.ok) {
+      const prune = await this.runGit(["worktree", "prune"], mainRepoRoot, 30000);
+      result = { ok: prune.ok, stderr: prune.stderr };
+    }
+    return result;
+  }
+
+  private async diagHandleDeleteWorktree(message: any): Promise<void> {
+    const worktreePath = typeof message?.path === "string" ? message.path.trim() : "";
+    if (!worktreePath) { return; }
+    const branch = typeof message?.branch === "string" && message.branch ? message.branch : "?";
+    const repoLabel = typeof message?.repoLabel === "string" && message.repoLabel ? message.repoLabel : path.basename(path.dirname(worktreePath));
+    const pushed = message?.pushed === "yes" || message?.pushed === "no" ? message.pushed : "?";
+
+    if (!(await this.confirmDeleteWorktree(worktreePath, branch, repoLabel, pushed))) { return; }
+
+    const mainRepoRoot = await this.resolveMainRepoRoot(worktreePath);
+    if (!mainRepoRoot || path.resolve(mainRepoRoot).toLowerCase() === path.resolve(worktreePath).toLowerCase()) {
+      vscode.window.showErrorMessage(`Could not safely locate the main repository for "${worktreePath}". Remove it manually with "git worktree remove".`);
+      return;
+    }
+
+    let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, false);
+    if (!result.ok && /modified or untracked/i.test(result.stderr)) {
+      const forceChoice = await vscode.window.showWarningMessage(
+        `"${worktreePath}" has uncommitted or untracked changes.`,
+        { modal: true, detail: "Force-deleting will permanently discard those changes — this cannot be undone. Committed history elsewhere in the repository is not affected." },
+        "Force Delete",
+      );
+      if (forceChoice !== "Force Delete") { return; }
+      result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
+    }
+
+    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
+      result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
+    }
+
+    if (!result.ok) {
+      vscode.window.showErrorMessage(`Could not delete worktree: ${result.stderr || "unknown error"}`);
+      return;
+    }
+
+    this.log(`🗑️ Deleted worktree: ${worktreePath}`);
+    vscode.window.showInformationMessage(`Deleted worktree "${branch}" (${repoLabel}).`);
+    if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
+      this.diagnosticsPanel.webview.postMessage({ command: "worktreeDeleted", path: worktreePath });
+    }
+  }
+
+  private diagHandleCancelCleanupPushedWorktrees(): void {
+    this.worktreeCleanupId++;
+    if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
+      this.diagnosticsPanel.webview.postMessage({ command: "cleanupCancelled" });
+    }
+  }
+
+  /**
+   * Bulk-deletes worktrees the caller believes are fully pushed, one at a time. Unlike the
+   * single-worktree delete flow, this NEVER force-deletes: if a worktree turns out to have
+   * uncommitted/untracked changes or unpushed commits (re-checked live, not trusted from the
+   * webview's possibly-stale list), it is skipped and the loop moves on to the next one. The
+   * OS-level directory-removal fallback (for git-for-windows junction/long-path failures) still
+   * applies, since that is not a safety bypass — the dirty-tree check already passed by then.
+   */
+  private async diagHandleCleanupPushedWorktrees(message: any): Promise<void> {
+    const candidates: Array<{ path: string; branch: string; repoLabel: string }> = Array.isArray(message?.worktrees)
+      ? message.worktrees
+        .filter((w: any) => w && typeof w.path === "string" && w.path.trim())
+        .map((w: any) => ({
+          path: String(w.path).trim(),
+          branch: typeof w.branch === "string" && w.branch ? w.branch : "?",
+          repoLabel: typeof w.repoLabel === "string" && w.repoLabel ? w.repoLabel : "",
+        }))
+      : [];
+
+    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
+    const panel = this.diagnosticsPanel;
+
+    if (candidates.length === 0) {
+      panel.webview.postMessage({ command: "cleanupDeclined" });
+      return;
+    }
+
+    const choice = await vscode.window.showWarningMessage(
+      `Clean up ${candidates.length} pushed worktree${candidates.length === 1 ? "" : "s"}?`,
+      {
+        modal: true,
+        detail: 'Removes worktrees whose commits are already pushed to a remote, using "git worktree remove". Any worktree found to have uncommitted, untracked, or unpushed changes is automatically skipped (never force-deleted) and the cleanup continues with the rest.',
+      },
+      "Clean Up",
+    );
+    if (choice !== "Clean Up") {
+      panel.webview.postMessage({ command: "cleanupDeclined" });
+      return;
+    }
+
+    const cleanupId = ++this.worktreeCleanupId;
+    const isActive = () => cleanupId === this.worktreeCleanupId;
+    const send = (msg: Record<string, unknown>) => { if (this.isPanelOpen(panel)) { panel.webview.postMessage(msg); } };
+
+    send({ command: "cleanupStarted", total: candidates.length });
+    let deleted = 0, skipped = 0, errors = 0;
+    for (let i = 0; i < candidates.length; i++) {
+      if (!isActive()) { break; }
+      const target = candidates[i];
+      const outcome = await this.cleanupSinglePushedWorktree(target.path);
+      if (outcome.status === "deleted") { deleted++; send({ command: "worktreeDeleted", path: target.path }); }
+      else if (outcome.status === "skipped") { skipped++; }
+      else { errors++; }
+      send({
+        command: "cleanupWorktreeResult",
+        path: target.path, branch: target.branch, repoLabel: target.repoLabel,
+        status: outcome.status, reason: outcome.reason,
+        processed: i + 1, total: candidates.length,
+      });
+    }
+
+    send({ command: "cleanupComplete", deleted, skipped, errors, cancelled: !isActive() });
+    this.log(`🧹 Worktree cleanup finished: ${deleted} deleted, ${skipped} skipped, ${errors} error(s)`);
+  }
+
+  /**
+   * Attempts to delete a single worktree as part of a bulk cleanup. Re-checks push status live
+   * (never trusts the webview's cached value) and never passes --force: a dirty or unpushed
+   * worktree is reported as "skipped", not force-removed.
+   */
+  private async cleanupSinglePushedWorktree(worktreePath: string): Promise<{ status: "deleted" | "skipped" | "error"; reason?: string }> {
+    const mainRepoRoot = await this.resolveMainRepoRoot(worktreePath);
+    if (!mainRepoRoot || path.resolve(mainRepoRoot).toLowerCase() === path.resolve(worktreePath).toLowerCase()) {
+      return { status: "error", reason: "Could not safely locate the main repository." };
+    }
+
+    const pushed = await this.getWorktreePushedStatus(worktreePath);
+    if (pushed !== "yes") {
+      return {
+        status: "skipped",
+        reason: pushed === "no" ? "Has commits not pushed to any remote." : "Push status could not be confirmed.",
+      };
+    }
+
+    let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, false);
+    if (!result.ok && /modified or untracked/i.test(result.stderr)) {
+      return { status: "skipped", reason: "Has uncommitted or untracked changes." };
+    }
+    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
+      result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
+    }
+    if (!result.ok) {
+      return { status: "error", reason: result.stderr || "unknown error" };
+    }
+    return { status: "deleted" };
+  }
+
+  private async confirmDeleteWorktree(worktreePath: string, branch: string, repoLabel: string, pushed: "yes" | "no" | "?"): Promise<boolean> {
+    const unpushedWarning = pushed === "no"
+      ? " ⚠️ This worktree has commits that have not been pushed to any remote — deleting it will permanently lose that work."
+      : pushed === "?"
+        ? " Push status could not be determined — make sure any important work has been pushed first."
+        : "";
+    const choice = await vscode.window.showWarningMessage(
+      `Delete worktree "${branch}" (${repoLabel})?`,
+      {
+        modal: true,
+        detail: `This removes the working copy at:\n${worktreePath}\n\nOnly the local working copy is removed via "git worktree remove" — committed history stays safe in the repository's shared object database. Only uncommitted or unpushed local changes in this worktree can be lost.${unpushedWarning}`,
+      },
+      "Delete Worktree",
+    );
+    return choice === "Delete Worktree";
+  }
+
+  /**
+   * Derive candidate worktree scan roots from discovered sessions and known session folders.
+   * Session workspace paths are normalized up to their repo root; known candidate folders are
+   * added as-is. Results are deduplicated (case/separator-insensitive) and filtered to paths
+   * that currently exist as directories.
+   */
+  private async computeDiscoveredWorktreeRoots(
+    detailedFiles: SessionFileDetails[],
+    candidatePaths: { path: string; exists: boolean; source: string }[],
+  ): Promise<string[]> {
+    const seen = new Set<string>();
+    const ordered: string[] = [];
+    const add = (raw: string | undefined): void => {
+      const value = (raw ?? "").trim();
+      if (!value) { return; }
+      const key = _normalizePathForDedup(value);
+      if (seen.has(key)) { return; }
+      seen.add(key);
+      ordered.push(value);
+    };
+    for (const f of detailedFiles) {
+      if (f.workspacePath) { add(_normalizeToRepoRoot(f.workspacePath)); }
+    }
+    for (const cp of candidatePaths) { add(cp.path); }
+    const result: string[] = [];
+    for (const p of ordered) {
+      try { if ((await fs.promises.stat(p)).isDirectory()) { result.push(p); } } catch { /* skip missing */ }
+    }
+    return result;
+  }
+
+  /** Deduplicate a path list case/separator-insensitively, preserving first-seen order. */
+  private dedupePathList(paths: (string | undefined)[]): string[] {
+    const seen = new Set<string>();
+    const merged: string[] = [];
+    for (const r of paths) {
+      const value = (typeof r === "string" ? r : "").trim();
+      if (!value) { continue; }
+      const key = _normalizePathForDedup(value);
+      if (seen.has(key)) { continue; }
+      seen.add(key);
+      merged.push(value);
+    }
+    return merged;
+  }
+
+  /**
+   * Merge freshly discovered roots into the persisted worktrees.scanRoots set (existing entries
+   * kept first), persist the union, and return it. This is what enables reboot hydration: the
+   * next diagnostics open reads worktrees.scanRoots directly.
+   */
+  private async mergeAndPersistWorktreeRoots(newRoots: string[]): Promise<string[]> {
+    const existing = this.context.globalState.get<string[]>("worktrees.scanRoots") ?? [];
+    const merged = this.dedupePathList([...existing, ...newRoots]);
+    await this.context.globalState.update("worktrees.scanRoots", merged);
+    return merged;
+  }
+
+  /**
+   * Synchronous known-folder roots for first render: the existing candidate-path directories
+   * reported by the discovery adapters (e.g. ~/.claude/projects, Copilot session dirs). File
+   * candidate paths (e.g. *.db) are excluded so the scanner is not handed a non-directory root.
+   */
+  private getKnownFolderWorktreeRoots(): string[] {
+    let candidatePaths: { path: string; exists: boolean; source: string }[] = [];
+    try { candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths(); } catch { candidatePaths = []; }
+    const dirs = candidatePaths.filter((cp) => {
+      try { return fs.statSync(cp.path).isDirectory(); } catch { return false; }
+    });
+    return this.dedupePathList(dirs.map((cp) => cp.path));
+  }
+
+  /** Union of persisted scan roots and known-folder roots, for the initial diagnostics render. */
+  private buildInitialWorktreeRoots(): string[] {
+    const persisted = this.context.globalState.get<string[]>("worktrees.scanRoots") ?? [];
+    return this.dedupePathList([...persisted, ...this.getKnownFolderWorktreeRoots()]);
   }
 
   /**
@@ -9191,7 +9628,26 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       const hitRate = totalAccesses > 0 ? ((cacheHits / totalAccesses) * 100).toFixed(1) : "0.0";
       this.log(`Loaded ${detailedSessionFiles.length} session files in background (Cache: ${cacheHits} hits, ${cacheMisses} misses, ${hitRate}% hit rate)`);
       if (panel === this.diagnosticsPanel) { this.diagnosticsHasLoadedFiles = true; }
+      await this.discoverAndSendWorktreeRoots(panel, detailedSessionFiles);
     } catch { this.log("Could not send session files to panel (may be closed)"); }
+  }
+
+  /**
+   * Derive worktree scan roots from the loaded sessions' workspace paths (plus known session
+   * folders), persist the union to worktrees.scanRoots (for reboot hydration), and push it to
+   * the diagnostics webview so the Worktrees tab roots list is pre-filled. Does not start a scan.
+   */
+  private async discoverAndSendWorktreeRoots(panel: vscode.WebviewPanel, detailedSessionFiles: SessionFileDetails[]): Promise<void> {
+    try {
+      const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
+      const discovered = await this.computeDiscoveredWorktreeRoots(detailedSessionFiles, candidatePaths);
+      const merged = await this.mergeAndPersistWorktreeRoots(discovered);
+      if (this.isPanelOpen(panel)) {
+        await panel.webview.postMessage({ command: "worktreeRootsDiscovered", roots: merged });
+      }
+    } catch (err) {
+      this.warn(`Could not derive worktree scan roots: ${err}`);
+    }
   }
 
   /**
@@ -9338,7 +9794,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       quotaEntitlements: this._copilotQuotaEntitlements,
       toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
       toolFamilies: getToolFamilies(),
-      worktreeScanRoots: this.context.globalState.get<string[]>('worktrees.scanRoots') ?? [],
+      worktreeScanRoots: this.buildInitialWorktreeRoots(),
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>

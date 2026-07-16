@@ -27,7 +27,8 @@ export {
 	normalizePath,
 	normalizePathForComparison,
 	normalizePathForDedup,
-	normalizePathSeparators
+	normalizePathSeparators,
+	normalizeToRepoRoot
 } from './utils/pathUtils';
 
 

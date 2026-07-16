@@ -11,6 +11,7 @@ import {
 	formatNumber,
 	formatCost,
 	formatDurationShort,
+	formatFileSize,
 	escapeHtml,
 	markdownToHtml,
 	STAGE_LABELS,
@@ -197,4 +198,36 @@ test('STAGE_DESCRIPTIONS: defines descriptions for all four stages', () => {
 	assert.ok(STAGE_DESCRIPTIONS[2].length > 0);
 	assert.ok(STAGE_DESCRIPTIONS[3].length > 0);
 	assert.ok(STAGE_DESCRIPTIONS[4].length > 0);
+});
+
+// ── formatFileSize ──────────────────────────────────────────────────────
+
+test('formatFileSize: bytes below 1 KB show as B', () => {
+	assert.equal(formatFileSize(512), '512 B');
+});
+
+test('formatFileSize: kilobytes use one decimal', () => {
+	assert.equal(formatFileSize(1536), '1.5 KB');
+});
+
+test('formatFileSize: megabytes use two decimals', () => {
+	assert.equal(formatFileSize(5 * 1024 * 1024), '5.00 MB');
+});
+
+test('formatFileSize: scales into GB', () => {
+	assert.equal(formatFileSize(3 * 1024 ** 3), '3.00 GB');
+});
+
+test('formatFileSize: scales into TB', () => {
+	assert.equal(formatFileSize(2 * 1024 ** 4), '2.00 TB');
+});
+
+test('formatFileSize: scales into PB and caps there', () => {
+	assert.equal(formatFileSize(4 * 1024 ** 5), '4.00 PB');
+	assert.equal(formatFileSize(2048 * 1024 ** 5), '2048.00 PB');
+});
+
+test('formatFileSize: rejects negative and non-finite values', () => {
+	assert.equal(formatFileSize(-1), 'N/A');
+	assert.equal(formatFileSize(NaN), 'N/A');
 });

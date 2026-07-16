@@ -50,6 +50,23 @@ export function normalizePathForDedup(
 }
 
 /**
+ * Normalize a session workspace path up to its parent repository root by stripping a trailing
+ * agent-worktree segment created by Copilot CLI or Claude Code:
+ *   "<repo>/copilot-worktrees/<name>[/...]"      -> "<repo>"
+ *   "<repo>/.claude/worktrees/<name>[/...]"       -> "<repo>"
+ * This lets the worktree scanner cover the whole repo (finding sibling worktrees) instead of a
+ * single worktree subfolder. The original path is returned unchanged when neither pattern is
+ * present, and the input's separator style is preserved.
+ */
+export function normalizeToRepoRoot(p: string): string {
+	const copilot = p.match(/^(.+?)[\\/]copilot-worktrees[\\/][^\\/]+(?:[\\/].*)?$/i);
+	if (copilot) { return copilot[1]; }
+	const claude = p.match(/^(.+?)[\\/]\.claude[\\/]worktrees[\\/][^\\/]+(?:[\\/].*)?$/i);
+	if (claude) { return claude[1]; }
+	return p;
+}
+
+/**
  * Strip the synthetic leading slash from Windows drive-letter URI paths.
  * Example: "/C:/repo/file.ts" -> "C:/repo/file.ts".
  */

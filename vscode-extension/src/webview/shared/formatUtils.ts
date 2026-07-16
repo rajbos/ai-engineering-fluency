@@ -123,10 +123,17 @@ export function formatFileSize(bytes: number): string {
 	if (numericBytes < 1024) {
 		return `${numericBytes} B`;
 	}
-	if (numericBytes < 1024 * 1024) {
-		return `${(numericBytes / 1024).toFixed(1)} KB`;
+	// Scale through binary units, picking the largest that keeps the value >= 1.
+	const units = ['KB', 'MB', 'GB', 'TB', 'PB'];
+	let value = numericBytes / 1024;
+	let unitIndex = 0;
+	while (value >= 1024 && unitIndex < units.length - 1) {
+		value /= 1024;
+		unitIndex++;
 	}
-	return `${(numericBytes / (1024 * 1024)).toFixed(2)} MB`;
+	// Keep KB at 1 decimal (small, noisy); MB and up at 2 decimals.
+	const decimals = unitIndex === 0 ? 1 : 2;
+	return `${value.toFixed(decimals)} ${units[unitIndex]}`;
 }
 
 /**

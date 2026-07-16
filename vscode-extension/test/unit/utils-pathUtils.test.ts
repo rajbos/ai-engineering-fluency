@@ -7,6 +7,7 @@ import {
 	hasWindowsDriveSegment,
 	normalizePath,
 	normalizePathForDedup,
+	normalizeToRepoRoot,
 	splitNormalizedPath,
 	stripWindowsDriveUriPrefix,
 	toPlatformPath
@@ -115,4 +116,58 @@ test('hasWindowsDriveSegment: on win32 returns false for non-drive segment', () 
 
 test('hasWindowsDriveSegment: on win32 returns false for undefined segment', () => {
 	assert.equal(hasWindowsDriveSegment(undefined, 'win32'), false);
+});
+
+// normalizeToRepoRoot - strips agent-worktree segments up to the repo root
+test('normalizeToRepoRoot: strips Windows .claude/worktrees segment', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\repos\\proj\\.claude\\worktrees\\feature-x'),
+		'C:\\Users\\me\\repos\\proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips POSIX .claude/worktrees segment', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/proj/.claude/worktrees/feature-x'),
+		'/home/me/repos/proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips copilot-worktrees segment', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\repos\\proj\\copilot-worktrees\\session-123'),
+		'C:\\Users\\me\\repos\\proj'
+	);
+});
+
+test('normalizeToRepoRoot: strips trailing sub-path below the worktree name', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/proj/.claude/worktrees/feature-x/src/app'),
+		'/home/me/repos/proj'
+	);
+});
+
+test('normalizeToRepoRoot: is case-insensitive for the marker segments', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/proj/Copilot-Worktrees/session-123'),
+		'/home/me/repos/proj'
+	);
+});
+
+test('normalizeToRepoRoot: returns a plain repo path unchanged', () => {
+	assert.equal(
+		normalizeToRepoRoot('C:\\Users\\me\\repos\\proj'),
+		'C:\\Users\\me\\repos\\proj'
+	);
+});
+
+test('normalizeToRepoRoot: does not strip when the marker has no leading repo prefix', () => {
+	assert.equal(normalizeToRepoRoot('copilot-worktrees/session-123'), 'copilot-worktrees/session-123');
+});
+
+test('normalizeToRepoRoot: ignores an unrelated "worktrees" folder without the .claude parent', () => {
+	assert.equal(
+		normalizeToRepoRoot('/home/me/repos/proj/worktrees/foo'),
+		'/home/me/repos/proj/worktrees/foo'
+	);
 });
