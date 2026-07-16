@@ -877,28 +877,131 @@ border: 1px solid #1f6feb;
 	transition: width 0.2s ease;
 }
 
-.worktree-group {
-	margin-bottom: 16px;
+/* While walking the folder tree we have no percentage yet, so pulse the bar to
+   signal ongoing activity instead of showing a misleading fixed progress. */
+.worktree-progress-fill.indeterminate {
+	animation: worktree-pulse 1.2s ease-in-out infinite;
 }
 
-.worktree-group-header {
-	display: flex;
-	align-items: baseline;
-	justify-content: space-between;
-	padding: 6px 4px;
-	border-bottom: 1px solid var(--border-color);
-	margin-bottom: 6px;
+@keyframes worktree-pulse {
+	0%,
+	100% {
+		opacity: 0.35;
+	}
+
+	50% {
+		opacity: 1;
+	}
 }
 
-.worktree-group-title {
-	font-weight: 700;
-	font-size: 13px;
-	color: var(--text-primary);
+.worktree-repo-row {
+	cursor: pointer;
+	font-weight: 600;
 }
 
-.worktree-group-stats {
-	font-size: 12px;
+.worktree-repo-row:hover {
+	background: var(--bg-tertiary);
+}
+
+.worktree-repo-row.expanded {
+	background: var(--bg-tertiary);
+}
+
+.worktree-delete-link {
+	margin-left: 8px;
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.worktree-delete-link:hover {
+	text-decoration: underline;
+}
+
+.worktree-caret {
+	display: inline-block;
+	width: 14px;
 	color: var(--text-muted);
+	font-size: 10px;
+}
+
+.worktree-roots-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin: 8px 0;
+	padding: 0;
+	background: none;
+	border: none;
+	color: var(--link-color);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.worktree-roots-toggle:hover {
+	text-decoration: underline;
+}
+
+.worktree-pending {
+	color: var(--text-muted);
+	font-style: italic;
+	opacity: 0.8;
+}
+
+/* The details row's cell wraps the per-worktree table; trim its padding so the
+   nested table aligns with the parent columns. */
+.worktree-repo-details > td {
+	padding: 0 0 12px 0;
+}
+
+.worktree-cleanup-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+.worktree-cleanup-card-actions {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.worktree-cleanup-card-actions .button {
+	font-size: 12px;
+	padding: 4px 10px;
+}
+
+.worktree-cleanup-log {
+	margin-top: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 12px;
+}
+
+.worktree-cleanup-log-row {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+	padding: 4px 6px;
+	border-radius: 4px;
+	background: var(--bg-tertiary);
+}
+
+.worktree-cleanup-log-branch {
+	font-weight: 600;
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.worktree-cleanup-log-repo {
+	color: var(--text-muted);
+}
+
+.worktree-cleanup-log-reason {
+	color: var(--text-muted);
+	flex: 1;
 }
 
 
