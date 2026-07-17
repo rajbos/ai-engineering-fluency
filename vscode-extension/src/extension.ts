@@ -180,7 +180,7 @@ import {
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -4665,14 +4665,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this._cacheHits++;
 			return null;
 		}
-		let supplementModelUsage = cached.modelUsage;
-		let supplementDailyRollups = cached.dailyRollups;
-		if (Object.keys(debugLogTokens.modelBreakdown).length > 0) {
-			supplementModelUsage = _scdlBuildFromBreakdown(debugLogTokens.modelBreakdown);
-			if (cached.dailyRollups) {
-				supplementDailyRollups = _scdlDistributeToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups;
-			}
-		}
+		const breakdownUsage = Object.keys(debugLogTokens.modelBreakdown).length > 0
+			? _scdlBuildFromBreakdown(debugLogTokens.modelBreakdown)
+			: cached.modelUsage;
+		// Reconcile to the debug log's totals even when the breakdown is missing or
+		// partial (e.g. some requests lack a `model` attribute), so Input+Output
+		// never drifts from Total — see reconcileModelUsageToTotal for why.
+		const supplementModelUsage = reconcileModelUsageToTotal(breakdownUsage, debugLogTokens.inputTokens, debugLogTokens.outputTokens);
+		const supplementDailyRollups = cached.dailyRollups
+			? (_scdlDistributeToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups)
+			: cached.dailyRollups;
 		const supplemented: SessionFileCache = {
 			...cached, modelUsage: supplementModelUsage, dailyRollups: supplementDailyRollups,
 			actualTokens: debugLogTokens.inputTokens + debugLogTokens.outputTokens,
@@ -4822,11 +4824,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private applyDebugLogModelBreakdown(modelUsage: ModelUsage, debugLogTokens: { inputTokens: number; outputTokens: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined, dailyRollups: { [utcDayKey: string]: DailyRollupEntry }, totalInteractions: number): ModelUsage {
-		if (!debugLogTokens || Object.keys(debugLogTokens.modelBreakdown).length === 0) { return modelUsage; }
-		const resolvedModelUsage: ModelUsage = {};
+		if (!debugLogTokens || debugLogTokens.inputTokens + debugLogTokens.outputTokens === 0) { return modelUsage; }
+		const breakdownUsage: ModelUsage = {};
 		for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-			resolvedModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+			breakdownUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
 		}
+		// Reconcile against the debug log's own totals even when the breakdown is
+		// missing or partial (e.g. some requests lack a `model` attribute), so
+		// Input+Output never drifts from Total — see reconcileModelUsageToTotal.
+		const resolvedModelUsage = reconcileModelUsageToTotal(
+			Object.keys(breakdownUsage).length > 0 ? breakdownUsage : modelUsage,
+			debugLogTokens.inputTokens,
+			debugLogTokens.outputTokens,
+		);
 		for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
 			const fraction = totalInteractions > 0 ? dayRollup.interactions / totalInteractions : 1;
 			dailyRollups[dayKey].modelUsage = this.scaledModelUsage(resolvedModelUsage, fraction);

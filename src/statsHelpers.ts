@@ -63,6 +63,54 @@ target[model].cacheCreationTokens = (target[model].cacheCreationTokens ?? 0) + u
 }
 
 /**
+ * Rescales a per-model usage breakdown so its input/output totals match an
+ * authoritative target (e.g. a debug log or OTel export), while preserving each
+ * model's relative share of the original breakdown.
+ *
+ * Needed because "Total tokens" and the per-model `modelUsage` map used for the
+ * "Input tokens" / "Output tokens" rows and cost estimates are sometimes derived
+ * from different sources that don't always agree — e.g. a debug log's per-request
+ * `model` attribute can be missing on some requests, so the per-model breakdown
+ * undercounts relative to the debug log's own total. Left unreconciled, Input +
+ * Output can end up higher or lower than Total in the UI, and cost estimates
+ * (computed from `modelUsage`) inherit the same drift.
+ *
+ * Any target total not covered by the known models — because `modelUsage` has no
+ * usable per-model split at all, or due to rounding — is attributed to a
+ * synthetic `unknown` bucket (consistent with how `calculateEstimatedCost`
+ * already treats unpriced/unrecognized models: it appears in totals but
+ * contributes $0 to cost) so Input + Output always equals the target total.
+ */
+export function reconcileModelUsageToTotal(modelUsage: ModelUsage, targetInputTokens: number, targetOutputTokens: number): ModelUsage {
+	if (targetInputTokens + targetOutputTokens <= 0) { return modelUsage; }
+	const currentInput = Object.values(modelUsage).reduce((s, u) => s + u.inputTokens, 0);
+	const currentOutput = Object.values(modelUsage).reduce((s, u) => s + u.outputTokens, 0);
+	const inputScale = currentInput > 0 ? targetInputTokens / currentInput : 0;
+	const outputScale = currentOutput > 0 ? targetOutputTokens / currentOutput : 0;
+	const result: ModelUsage = {};
+	let scaledInputTotal = 0;
+	let scaledOutputTotal = 0;
+	for (const [model, usage] of Object.entries(modelUsage)) {
+		const inputTokens = Math.round(usage.inputTokens * inputScale);
+		const outputTokens = Math.round(usage.outputTokens * outputScale);
+		scaledInputTotal += inputTokens;
+		scaledOutputTotal += outputTokens;
+		result[model] = {
+			inputTokens, outputTokens,
+			...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * inputScale) } : {}),
+			...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * inputScale) } : {}),
+		};
+	}
+	const residualInput = targetInputTokens - scaledInputTotal;
+	const residualOutput = targetOutputTokens - scaledOutputTotal;
+	if (residualInput !== 0 || residualOutput !== 0) {
+		const unknown = result.unknown ?? { inputTokens: 0, outputTokens: 0 };
+		result.unknown = { ...unknown, inputTokens: unknown.inputTokens + residualInput, outputTokens: unknown.outputTokens + residualOutput };
+	}
+	return result;
+}
+
+/**
  * Merges `source` language usage into `target` (in-place).
  */
 export function addLanguageUsage(target: LanguageUsage, source: LanguageUsage): void {
