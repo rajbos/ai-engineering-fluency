@@ -1010,29 +1010,23 @@ function getSessionSortIndicator(column: SessionSortColumn): string {
 	return sessionSortDirection === 'desc' ? ' ▼' : ' ▲';
 }
 
+const _todaySessionColumnComparators: Partial<Record<SessionSortColumn, (a: TodaySessionSummary, b: TodaySessionSummary) => number>> = {
+	title: (a, b) => (a.title || '').localeCompare(b.title || ''),
+	editor: (a, b) => (a.editor || '').localeCompare(b.editor || ''),
+	workspace: (a, b) => (a.workspace || '').localeCompare(b.workspace || ''),
+	durationMs: (a, b) => (a.durationMs ?? -1) - (b.durationMs ?? -1),
+	lastActivity: (a, b) => (a.lastActivity || '').localeCompare(b.lastActivity || ''),
+};
+
+function _compareTodaySessionsByColumn(a: TodaySessionSummary, b: TodaySessionSummary): number {
+	const comparator = _todaySessionColumnComparators[sessionSortColumn];
+	if (comparator) { return comparator(a, b); }
+	return (a[sessionSortColumn] as number) - (b[sessionSortColumn] as number);
+}
+
 function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary[] {
 	return [...sessions].sort((a, b) => {
-		let cmp = 0;
-		switch (sessionSortColumn) {
-			case 'title':
-				cmp = (a.title || '').localeCompare(b.title || '');
-				break;
-			case 'editor':
-				cmp = (a.editor || '').localeCompare(b.editor || '');
-				break;
-			case 'workspace':
-				cmp = (a.workspace || '').localeCompare(b.workspace || '');
-				break;
-			case 'durationMs':
-				cmp = (a.durationMs ?? -1) - (b.durationMs ?? -1);
-				break;
-			case 'lastActivity':
-				cmp = (a.lastActivity || '').localeCompare(b.lastActivity || '');
-				break;
-			default:
-				cmp = (a[sessionSortColumn] as number) - (b[sessionSortColumn] as number);
-				break;
-		}
+		const cmp = _compareTodaySessionsByColumn(a, b);
 		return sessionSortDirection === 'desc' ? -cmp : cmp;
 	});
 }

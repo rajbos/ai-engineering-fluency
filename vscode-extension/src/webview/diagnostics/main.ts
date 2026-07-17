@@ -1214,21 +1214,19 @@ function renderWorktreeRootsList(): string {
   return toggle + list;
 }
 
-function renderWorktreeProgress(): string {
-  if (!worktreeScanInProgress) { return ""; }
-  const s = worktreeScanStatus;
-  const seconds = (s.elapsedMs / 1000).toFixed(1);
-  if (s.phase === "enriching") {
-    const done = s.enriched ?? 0;
-    const total = s.enrichTotal ?? 0;
-    const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-    return `
+function _renderWorktreeEnrichingProgress(s: WorktreeScanStatus, seconds: string): string {
+  const done = s.enriched ?? 0;
+  const total = s.enrichTotal ?? 0;
+  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+  return `
     <div class="info-box" style="margin-top: 12px;">
       <div class="info-box-title">📦 Computing sizes &amp; push status…</div>
       <div>${done} / ${total} worktree${total === 1 ? "" : "s"} analyzed (${seconds}s)</div>
       <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${pct}%;"></div></div>
     </div>`;
-  }
+}
+
+function _renderWorktreeScanningProgress(s: WorktreeScanStatus, seconds: string): string {
   const walking = s.phase === "walking";
   const title = walking ? "🔍 Scanning folder…" : "⏳ Checking markers…";
   const dirs = s.dirsScanned ?? 0;
@@ -1244,6 +1242,14 @@ function renderWorktreeProgress(): string {
       <div>${detail}</div>
       <div class="worktree-progress-bar"><div class="${fillClass}" style="width: ${pct}%;"></div></div>
     </div>`;
+}
+
+function renderWorktreeProgress(): string {
+  if (!worktreeScanInProgress) { return ""; }
+  const s = worktreeScanStatus;
+  const seconds = (s.elapsedMs / 1000).toFixed(1);
+  if (s.phase === "enriching") { return _renderWorktreeEnrichingProgress(s, seconds); }
+  return _renderWorktreeScanningProgress(s, seconds);
 }
 
 function renderWorktreeControls(): string {
@@ -2911,48 +2917,32 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
 }
 
 /** Dispatches worktree-tab messages via static, literal command comparisons (no dynamic method lookup). */
+const _worktreeMessageHandlers: Record<string, (message: DiagMessage) => void> = {
+  worktreeRootPicked: handleWorktreeRootPicked,
+  worktreeRootsDiscovered: handleWorktreeRootsDiscovered,
+  worktreeScanStarted: () => handleWorktreeScanStarted(),
+  worktreeScanRootStarted: handleWorktreeScanRootStarted,
+  worktreeScanWalkProgress: handleWorktreeScanWalkProgress,
+  worktreeScanRootMarkersFound: handleWorktreeScanRootMarkersFound,
+  worktreeScanRootSkipped: handleWorktreeScanRootSkipped,
+  worktreeScanProgress: handleWorktreeScanProgress,
+  worktreeFound: handleWorktreeFound,
+  worktreeEnrichStarted: handleWorktreeEnrichStarted,
+  worktreeEnrichProgress: handleWorktreeEnrichProgress,
+  worktreeEnriched: handleWorktreeEnriched,
+  worktreeDeleted: handleWorktreeDeleted,
+  worktreeScanComplete: () => handleWorktreeScanComplete(),
+  worktreeScanCancelled: () => handleWorktreeScanCancelled(),
+  cleanupDeclined: () => handleCleanupDeclined(),
+  cleanupStarted: handleCleanupStarted,
+  cleanupWorktreeResult: handleCleanupWorktreeResult,
+  cleanupComplete: () => handleCleanupComplete(),
+  cleanupCancelled: () => handleCleanupCancelled(),
+};
+
 function handleWorktreeMessage(message: DiagMessage): void {
-  if (message.command === "worktreeRootPicked") {
-    handleWorktreeRootPicked(message);
-  } else if (message.command === "worktreeRootsDiscovered") {
-    handleWorktreeRootsDiscovered(message);
-  } else if (message.command === "worktreeScanStarted") {
-    handleWorktreeScanStarted();
-  } else if (message.command === "worktreeScanRootStarted") {
-    handleWorktreeScanRootStarted(message);
-  } else if (message.command === "worktreeScanWalkProgress") {
-    handleWorktreeScanWalkProgress(message);
-  } else if (message.command === "worktreeScanRootMarkersFound") {
-    handleWorktreeScanRootMarkersFound(message);
-  } else if (message.command === "worktreeScanRootSkipped") {
-    handleWorktreeScanRootSkipped(message);
-  } else if (message.command === "worktreeScanProgress") {
-    handleWorktreeScanProgress(message);
-  } else if (message.command === "worktreeFound") {
-    handleWorktreeFound(message);
-  } else if (message.command === "worktreeEnrichStarted") {
-    handleWorktreeEnrichStarted(message);
-  } else if (message.command === "worktreeEnrichProgress") {
-    handleWorktreeEnrichProgress(message);
-  } else if (message.command === "worktreeEnriched") {
-    handleWorktreeEnriched(message);
-  } else if (message.command === "worktreeDeleted") {
-    handleWorktreeDeleted(message);
-  } else if (message.command === "worktreeScanComplete") {
-    handleWorktreeScanComplete();
-  } else if (message.command === "worktreeScanCancelled") {
-    handleWorktreeScanCancelled();
-  } else if (message.command === "cleanupDeclined") {
-    handleCleanupDeclined();
-  } else if (message.command === "cleanupStarted") {
-    handleCleanupStarted(message);
-  } else if (message.command === "cleanupWorktreeResult") {
-    handleCleanupWorktreeResult(message);
-  } else if (message.command === "cleanupComplete") {
-    handleCleanupComplete();
-  } else if (message.command === "cleanupCancelled") {
-    handleCleanupCancelled();
-  }
+  const handler = _worktreeMessageHandlers[message.command];
+  if (handler) { handler(message); }
 }
 
 function setupMessageHandlers(): void {
