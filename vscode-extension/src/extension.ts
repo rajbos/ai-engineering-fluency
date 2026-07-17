@@ -6264,6 +6264,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 					this.context.globalState.update('usage.sessionColumnSettings', message.settings)
 				);
 				break;
+			case 'revealPath':
+				if (message.path) { await this.dispatch('revealPath:analysis', () => this.diagHandleRevealPath(message.path)); }
+				break;
+			case 'pickWorktreeRoot':
+				await this.dispatch('pickWorktreeRoot:analysis', () => this.diagHandlePickWorktreeRoot());
+				break;
+			case 'scanWorktrees':
+				await this.dispatch('scanWorktrees:analysis', () => this.diagHandleScanWorktrees(message));
+				break;
+			case 'cancelWorktreeScan':
+				await this.dispatch('cancelWorktreeScan:analysis', () => this.diagHandleCancelWorktreeScan());
+				break;
+			case 'deleteWorktree':
+				await this.dispatch('deleteWorktree:analysis', () => this.diagHandleDeleteWorktree(message));
+				break;
+			case 'cleanupPushedWorktrees':
+				await this.dispatch('cleanupPushedWorktrees:analysis', () => this.diagHandleCleanupPushedWorktrees(message));
+				break;
+			case 'cancelCleanupPushedWorktrees':
+				await this.dispatch('cancelCleanupPushedWorktrees:analysis', () => this.diagHandleCancelCleanupPushedWorktrees());
+				break;
 		}
 	}
 
@@ -8263,12 +8284,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       pickFolder: () => this.dispatch('pickFolder:diagnostics', () => this.diagHandlePickFolder()),
       analyzeFolder: () => this.dispatch('analyzeFolder:diagnostics', () => this.diagHandleAnalyzeFolder(message)),
       analyzeModelUsage: () => this.dispatch('analyzeModelUsage:diagnostics', () => this.diagHandleAnalyzeModelUsage(message)),
-      pickWorktreeRoot: () => this.dispatch('pickWorktreeRoot:diagnostics', () => this.diagHandlePickWorktreeRoot()),
-      scanWorktrees: () => this.dispatch('scanWorktrees:diagnostics', () => this.diagHandleScanWorktrees(message)),
-      cancelWorktreeScan: () => this.dispatch('cancelWorktreeScan:diagnostics', () => this.diagHandleCancelWorktreeScan()),
-      deleteWorktree: () => this.dispatch('deleteWorktree:diagnostics', () => this.diagHandleDeleteWorktree(message)),
-      cleanupPushedWorktrees: () => this.dispatch('cleanupPushedWorktrees:diagnostics', () => this.diagHandleCleanupPushedWorktrees(message)),
-      cancelCleanupPushedWorktrees: () => this.dispatch('cancelCleanupPushedWorktrees:diagnostics', () => this.diagHandleCancelCleanupPushedWorktrees()),
     };
     if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
     await this.handleDiagnosticConditionalCommand(message);
@@ -8596,8 +8611,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 
   private async diagHandlePickWorktreeRoot(): Promise<void> {
     const uris = await vscode.window.showOpenDialog({ canSelectFiles: false, canSelectFolders: true, canSelectMany: false, openLabel: "Select Root Folder to Scan" });
-    if (uris && uris.length > 0 && this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
-      this.diagnosticsPanel.webview.postMessage({ command: "worktreeRootPicked", folderPath: uris[0].fsPath });
+    if (uris && uris.length > 0 && this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
+      this.analysisPanel.webview.postMessage({ command: "worktreeRootPicked", folderPath: uris[0].fsPath });
     }
   }
 
@@ -8606,18 +8621,18 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       ? message.rootPaths.filter((p: unknown): p is string => typeof p === "string" && p.trim().length > 0).map((p: string) => p.trim())
       : [];
     await this.context.globalState.update("worktrees.scanRoots", rootPaths);
-    if (!this.diagnosticsPanel) { return; }
+    if (!this.analysisPanel) { return; }
     if (rootPaths.length === 0) {
-      this.diagnosticsPanel.webview.postMessage({ command: "worktreeScanComplete", totalWorktrees: 0, elapsedMs: 0 });
+      this.analysisPanel.webview.postMessage({ command: "worktreeScanComplete", totalWorktrees: 0, elapsedMs: 0 });
       return;
     }
-    await this.scanWorktreesIncremental(this.diagnosticsPanel, rootPaths);
+    await this.scanWorktreesIncremental(this.analysisPanel, rootPaths);
   }
 
   private diagHandleCancelWorktreeScan(): void {
     this.worktreeScanId++;
-    if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
-      this.diagnosticsPanel.webview.postMessage({ command: "worktreeScanCancelled" });
+    if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
+      this.analysisPanel.webview.postMessage({ command: "worktreeScanCancelled" });
     }
   }
 
@@ -8986,15 +9001,15 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 
     this.log(`🗑️ Deleted worktree: ${worktreePath}`);
     vscode.window.showInformationMessage(`Deleted worktree "${branch}" (${repoLabel}).`);
-    if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
-      this.diagnosticsPanel.webview.postMessage({ command: "worktreeDeleted", path: worktreePath });
+    if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
+      this.analysisPanel.webview.postMessage({ command: "worktreeDeleted", path: worktreePath });
     }
   }
 
   private diagHandleCancelCleanupPushedWorktrees(): void {
     this.worktreeCleanupId++;
-    if (this.diagnosticsPanel && this.isPanelOpen(this.diagnosticsPanel)) {
-      this.diagnosticsPanel.webview.postMessage({ command: "cleanupCancelled" });
+    if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
+      this.analysisPanel.webview.postMessage({ command: "cleanupCancelled" });
     }
   }
 
@@ -9017,8 +9032,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         }))
       : [];
 
-    if (!this.diagnosticsPanel || !this.isPanelOpen(this.diagnosticsPanel)) { return; }
-    const panel = this.diagnosticsPanel;
+    if (!this.analysisPanel || !this.isPanelOpen(this.analysisPanel)) { return; }
+    const panel = this.analysisPanel;
 
     if (candidates.length === 0) {
       panel.webview.postMessage({ command: "cleanupDeclined" });
@@ -9628,22 +9643,25 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       const hitRate = totalAccesses > 0 ? ((cacheHits / totalAccesses) * 100).toFixed(1) : "0.0";
       this.log(`Loaded ${detailedSessionFiles.length} session files in background (Cache: ${cacheHits} hits, ${cacheMisses} misses, ${hitRate}% hit rate)`);
       if (panel === this.diagnosticsPanel) { this.diagnosticsHasLoadedFiles = true; }
-      await this.discoverAndSendWorktreeRoots(panel, detailedSessionFiles);
+      await this.discoverAndSendWorktreeRoots(detailedSessionFiles);
     } catch { this.log("Could not send session files to panel (may be closed)"); }
   }
 
   /**
    * Derive worktree scan roots from the loaded sessions' workspace paths (plus known session
    * folders), persist the union to worktrees.scanRoots (for reboot hydration), and push it to
-   * the diagnostics webview so the Worktrees tab roots list is pre-filled. Does not start a scan.
+   * the Usage Analysis webview so the Worktrees tab roots list is pre-filled. Does not start a
+   * scan. Triggered by whichever panel's background session load ran (currently only the
+   * Diagnostics panel loads detailed session files), but always targets the Usage Analysis panel
+   * since that is where the Worktrees tab now lives.
    */
-  private async discoverAndSendWorktreeRoots(panel: vscode.WebviewPanel, detailedSessionFiles: SessionFileDetails[]): Promise<void> {
+  private async discoverAndSendWorktreeRoots(detailedSessionFiles: SessionFileDetails[]): Promise<void> {
     try {
       const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
       const discovered = await this.computeDiscoveredWorktreeRoots(detailedSessionFiles, candidatePaths);
       const merged = await this.mergeAndPersistWorktreeRoots(discovered);
-      if (this.isPanelOpen(panel)) {
-        await panel.webview.postMessage({ command: "worktreeRootsDiscovered", roots: merged });
+      if (this.analysisPanel && this.isPanelOpen(this.analysisPanel)) {
+        await this.analysisPanel.webview.postMessage({ command: "worktreeRootsDiscovered", roots: merged });
       }
     } catch (err) {
       this.warn(`Could not derive worktree scan roots: ${err}`);
@@ -9794,7 +9812,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       quotaEntitlements: this._copilotQuotaEntitlements,
       toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
       toolFamilies: getToolFamilies(),
-      worktreeScanRoots: this.buildInitialWorktreeRoots(),
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
@@ -9957,6 +9974,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       sessionColumnSettings,
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
+      worktreeScanRoots: this.buildInitialWorktreeRoots(),
     }).replace(/</g, "\\u003c") : 'null';
 
     return `<!DOCTYPE html>
