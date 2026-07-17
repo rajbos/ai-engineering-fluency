@@ -23,10 +23,11 @@ terraform {
 
 provider "azurerm" {
   features {}
-  # Authentication is via service principal client secret using ARM_* environment
-  # variables set by the workflow (ARM_CLIENT_ID, ARM_CLIENT_SECRET,
-  # ARM_TENANT_ID, ARM_SUBSCRIPTION_ID).
+  # Authentication is via GitHub Actions OIDC federated credentials using ARM_*
+  # environment variables set by the workflow (ARM_CLIENT_ID, ARM_TENANT_ID,
+  # ARM_SUBSCRIPTION_ID, ARM_USE_OIDC=true). No client secret is stored.
   # The SP has Contributor on the RG only, not subscription-level permissions,
   # so we disable automatic resource provider registration.
+  use_oidc                        = true
   resource_provider_registrations = "none"
 }
