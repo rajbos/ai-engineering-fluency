@@ -2664,7 +2664,11 @@ function buildUsageRootHtml(
 }
 
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
-	latestTodaySessions = stats.todaySessions || [];
+	// Guard against silent host updates that omit todaySessions (e.g. a stale payload
+	// shape): keep showing the last known sessions instead of clearing the table.
+	if (Array.isArray(stats.todaySessions)) {
+		latestTodaySessions = stats.todaySessions;
+	}
 	const cachedForLookback = sessionsLookback === 'today' ? latestTodaySessions : recentSessionsCache[sessionsLookback];
 	const bodyHtml = cachedForLookback
 		? renderTodaySessionsTable(cachedForLookback)
