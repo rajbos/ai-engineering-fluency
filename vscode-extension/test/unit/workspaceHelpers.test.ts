@@ -359,10 +359,10 @@ test('detectClaudeCodeEditorVariant: returns Claude Desktop for entrypoint claud
         }
 });
 
-test('detectClaudeCodeEditorVariant: returns Claude Code CLI for entrypoint claude-cli', () => {
+test('detectClaudeCodeEditorVariant: returns Claude Code CLI for entrypoint cli', () => {
         const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
         const file = nodePath.join(dir, 'session.jsonl');
-        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+        fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
         try {
                 assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code CLI');
         } finally {
@@ -370,7 +370,7 @@ test('detectClaudeCodeEditorVariant: returns Claude Code CLI for entrypoint clau
         }
 });
 
-test('detectClaudeCodeEditorVariant: returns Claude Code for entrypoint claude-vscode', () => {
+test('detectClaudeCodeEditorVariant: returns Claude Code for any other entrypoint (e.g. VS Code extension)', () => {
         const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
         const file = nodePath.join(dir, 'session.jsonl');
         fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-vscode', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
