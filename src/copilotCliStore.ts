@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
+import type { ModelUsage } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace
@@ -82,6 +83,7 @@ type CliStoreTurnCountsCacheEntry = { mtimeMs: number; size: number; byId: Map<s
 export class CopilotCliStoreAccess {
 	private _sqlJsModule: SqlJsStatic | null = null;
 	private _sqlJsInitPromise: Promise<SqlJsStatic> | null = null;
+	private _initSqlJsFn: typeof initSqlJs;
 	private _dbCache: Map<string, CliStoreDbCacheEntry> = new Map();
 	private _dbCacheInflight: Map<string, Promise<SqlDatabase | null>> = new Map();
 	// Bulk-loaded caches keyed by dbPath, invalidated on the same mtime/size basis
@@ -91,6 +93,10 @@ export class CopilotCliStoreAccess {
 	private _sessionsCacheInflight: Map<string, Promise<Map<string, CliStoreSession>>> = new Map();
 	private _turnCountsCache: Map<string, CliStoreTurnCountsCacheEntry> = new Map();
 	private _turnCountsCacheInflight: Map<string, Promise<Map<string, number>>> = new Map();
+
+	constructor(initSqlJsFn?: typeof initSqlJs) {
+		this._initSqlJsFn = initSqlJsFn ?? initSqlJs;
+	}
 
 	dispose(): void {
 		for (const entry of this._dbCache.values()) {
@@ -348,7 +354,7 @@ export class CopilotCliStoreAccess {
 				try {
 					wasmBinary = await fs.promises.readFile(wasmPath);
 				} catch { /* WASM file not present — proceed without pre-loaded binary */ }
-				const module = await initSqlJs(wasmBinary ? { wasmBinary: wasmBinary.buffer as ArrayBuffer } : undefined);
+				const module = await this._initSqlJsFn(wasmBinary ? { wasmBinary: wasmBinary.buffer as ArrayBuffer } : undefined);
 				this._sqlJsModule = module;
 				return module;
 			})().catch(err => {
@@ -442,6 +448,57 @@ export class CopilotCliStoreAccess {
 		if (!sessionId) { return 0; }
 		const byId = await this.getTurnCountsMap(dbPath);
 		return byId.get(sessionId) ?? 0;
+	}
+
+	/**
+	 * Returns exact per-model token/cost usage from the `assistant_usage_events`
+	 * billing table for a session UUID. Returns null when the table is missing,
+	 * the session has no rows, or the DB cannot be read.
+	 *
+	 * `input_tokens` already includes cache-write creation tokens, matching the
+	 * `inputTokens` meaning used elsewhere. `cache_read_tokens` is tracked
+	 * separately and exposed as `cachedReadTokens`; `cache_write_tokens` is
+	 * exposed as `cacheCreationTokens`. `total_nano_aiu` is summed to
+	 * `nanoAiu` so callers can compute exact dollar cost.
+	 */
+	async getSessionUsage(sessionId: string): Promise<{ modelUsage: ModelUsage; actualTokens: number; cacheReadTokens: number; nanoAiu: number } | null> {
+		const dbPath = this.getDbPath();
+		const db = await this.getDb(dbPath);
+		if (!db) { return null; }
+		try {
+			const result = db.exec(
+				'SELECT model, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens, total_nano_aiu FROM assistant_usage_events WHERE session_id = ?',
+				[sessionId],
+			);
+			if (!result.length) { return null; }
+			const cols = result[0].columns;
+			const modelUsage: ModelUsage = {};
+			let actualTokens = 0;
+			let cacheReadTokens = 0;
+			let nanoAiu = 0;
+			for (const row of result[0].values) {
+				const obj: Record<string, unknown> = {};
+				cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+				const model = typeof obj.model === 'string' ? obj.model : 'unknown';
+				const input = typeof obj.input_tokens === 'number' ? obj.input_tokens : 0;
+				const output = typeof obj.output_tokens === 'number' ? obj.output_tokens : 0;
+				const cacheRead = typeof obj.cache_read_tokens === 'number' ? obj.cache_read_tokens : 0;
+				const cacheWrite = typeof obj.cache_write_tokens === 'number' ? obj.cache_write_tokens : 0;
+				const nano = typeof obj.total_nano_aiu === 'number' ? obj.total_nano_aiu : 0;
+				if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+				modelUsage[model].inputTokens += input;
+				modelUsage[model].outputTokens += output;
+				if (cacheRead > 0) { modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + cacheRead; }
+				if (cacheWrite > 0) { modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + cacheWrite; }
+				actualTokens += input + output;
+				cacheReadTokens += cacheRead;
+				nanoAiu += nano;
+			}
+			if (actualTokens === 0 && cacheReadTokens === 0 && nanoAiu === 0) { return null; }
+			return { modelUsage, actualTokens, cacheReadTokens, nanoAiu };
+		} catch {
+			return null;
+		}
 	}
 
 	/**

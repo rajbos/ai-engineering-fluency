@@ -696,21 +696,22 @@ export function selectTokenEstimationStrategy(lines: string[]): TokenEstimationS
  * Estimate tokens from a JSONL session file (used by Copilot CLI/Agent mode and VS Code incremental format)
  * Each line is a separate JSON object representing an event in the session.
  *
- * `otelUsage`, when supplied by the caller (resolved via getCopilotCliOtelUsage against
+ * `exactUsage`, when supplied by the caller (resolved via getCopilotCliExactUsage against
  * the session's file path), overrides actualTokens/cacheReadTokens/copilotNanoAiu with
- * exact counts from the Copilot CLI OpenTelemetry file export instead of the ratio-based
- * estimate below — the same "exact data wins" precedent as a session.shutdown event.
+ * exact counts from the Copilot CLI `assistant_usage_events` billing table or the
+ * OpenTelemetry file export instead of the ratio-based estimate below — the same
+ * "exact data wins" precedent as a session.shutdown event.
  */
-export function estimateTokensFromJsonlSession(fileContent: string, otelUsage?: CopilotCliOtelSessionUsage | null): TokenEstimationResult {
+export function estimateTokensFromJsonlSession(fileContent: string, exactUsage?: CopilotCliOtelSessionUsage | null): TokenEstimationResult {
 	const lines = fileContent.trim().split('\n');
 	const strategy = selectTokenEstimationStrategy(lines);
 	const result = strategy.estimate(lines);
-	if (otelUsage) {
+	if (exactUsage) {
 		return {
 			...result,
-			actualTokens: otelUsage.actualTokens,
-			cacheReadTokens: otelUsage.cacheReadTokens,
-			copilotNanoAiu: otelUsage.nanoAiu || result.copilotNanoAiu,
+			actualTokens: exactUsage.actualTokens,
+			cacheReadTokens: exactUsage.cacheReadTokens,
+			copilotNanoAiu: exactUsage.nanoAiu || result.copilotNanoAiu,
 		};
 	}
 	return result;

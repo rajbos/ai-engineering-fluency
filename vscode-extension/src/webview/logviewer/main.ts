@@ -761,7 +761,7 @@ function buildActualTokensCard(data: SessionLogData, stats: SummaryStats): strin
 		return `<div class="summary-card">
 <div class="summary-label">✅ Actual Tokens</div>
 <div class="summary-value">${formatCompact(sessionActualTokens)}</div>
-<div class="summary-sub">${data.editorName === 'Mistral Vibe' ? 'From session data' : 'Total from session shutdown event'}</div>
+<div class="summary-sub">${data.editorName === 'Mistral Vibe' ? 'From session data' : 'Actual API tokens from Copilot CLI usage data'}</div>
 </div>`;
 	}
 	return '';
@@ -795,7 +795,7 @@ function buildDebugTokenCards(data: SessionLogData): string {
 
 function buildCachedTokensCard(data: SessionLogData): string {
 	if ((data.cachedTokens ?? 0) <= 0) { return ''; }
-	return `<div class="summary-card" title="Tokens served from the provider's prompt cache. Cached tokens are billed at a lower rate and reduce latency. Source: session.shutdown modelMetrics.">
+	return `<div class="summary-card" title="Tokens served from the provider's prompt cache. Cached tokens are billed at a lower rate and reduce latency. Source: Copilot CLI usage data (assistant_usage_events).">
 <div class="summary-label">💾 Cached Input</div>
 <div class="summary-value">${formatCompact(data.cachedTokens!)}</div>
 <div class="summary-sub">Prompt tokens served from cache</div>

@@ -4,13 +4,65 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+import type initSqlJs from 'sql.js';
+
+import { CopilotCliStoreAccess } from '../../../src/copilotCliStore';
 import {
 	extractCopilotCliSessionId,
 	getCopilotCliOtelUsage,
+	getCopilotCliStoreUsage,
+	getCopilotCliExactUsage,
 	loadCopilotCliOtelIndex,
 	clearCopilotCliOtelCache,
 	expireCopilotCliOtelCacheForTests,
 } from '../../../src/copilotCliOtel';
+
+type StoreRow = {
+	session_id: string;
+	model: string;
+	input_tokens: number;
+	output_tokens: number;
+	cache_read_tokens: number;
+	cache_write_tokens: number;
+	total_nano_aiu: number;
+};
+
+/**
+ * Builds a fake sql.js factory backed by the supplied rows. We avoid the real sql.js WASM
+ * in unit tests because loading it causes a Windows UV handle assertion on forced process
+ * exit (see copilotCliAdapter.test.ts for the same workaround).
+ */
+function createFakeSqlJs(rows: StoreRow[]): typeof initSqlJs {
+	return (() => Promise.resolve({
+		Database: class FakeDatabase {
+			constructor(_data?: Uint8Array | number[]) { /* rows come from closure, not serialized file */ }
+
+			run(_sql: string, _params?: unknown[]): void { /* no-op — tests only read */ }
+
+			exec(sql: string, params?: unknown[]): initSqlJs.QueryResult[] {
+				if (sql.includes('assistant_usage_events') && params && params.length > 0) {
+					const sessionId = params[0] as string;
+					const matches = rows.filter(r => r.session_id === sessionId);
+					return [{
+						columns: ['model', 'input_tokens', 'output_tokens', 'cache_read_tokens', 'cache_write_tokens', 'total_nano_aiu'],
+						values: matches.map(r => [
+							r.model,
+							r.input_tokens,
+							r.output_tokens,
+							r.cache_read_tokens,
+							r.cache_write_tokens,
+							r.total_nano_aiu,
+						]),
+					}];
+				}
+				return [];
+			}
+
+			export(): Uint8Array { return new Uint8Array(); }
+			close(): void { /* no-op */ }
+		},
+	})) as unknown as typeof initSqlJs;
+}
 
 const SESSION_ID = 'a19abe35-b44e-4713-bf70-27f015393772';
 const SESSION_ID_2 = 'b28cf946-c55b-5824-cf81-38f126404883';
@@ -33,6 +85,18 @@ function eventsJsonlPath(homeDir: string, sessionId: string): string {
 
 function dbVirtualPath(homeDir: string, sessionId: string): string {
 	return path.join(homeDir, '.copilot', 'session-store.db') + `#${sessionId}`;
+}
+
+/**
+ * Creates a CopilotCliStoreAccess instance seeded with the supplied assistant_usage_events
+ * rows. Uses a fake sql.js implementation so tests don't load the real WASM. Writes a dummy
+ * session-store.db file so getDb()/statDb() succeeds without touching the real sql.js WASM.
+ */
+function createStoreAccess(homeDir: string, rows: StoreRow[]): CopilotCliStoreAccess {
+	const dbPath = path.join(homeDir, '.copilot', 'session-store.db');
+	fs.mkdirSync(path.dirname(dbPath), { recursive: true });
+	fs.writeFileSync(dbPath, Buffer.alloc(0));
+	return new CopilotCliStoreAccess(createFakeSqlJs(rows));
 }
 
 function chatSpan(sessionId: string, overrides: Record<string, unknown> = {}): string {
@@ -206,5 +270,62 @@ test('loadCopilotCliOtelIndex: a shrunken (rotated/truncated) export triggers a 
 		const after = await loadCopilotCliOtelIndex();
 		assert.equal(after.get(SESSION_ID), undefined, 'the pre-rotation session should be gone after a rebuild');
 		assert.equal(after.get(SESSION_ID_2)?.actualTokens, 110, 'the post-rotation session should be parsed fresh');
+	});
+});
+
+test('getCopilotCliStoreUsage: reads exact usage from assistant_usage_events', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const storeAccess = createStoreAccess(homeDir, [
+			{ session_id: SESSION_ID, model: 'claude-sonnet-5', input_tokens: 100, output_tokens: 10, cache_read_tokens: 80, cache_write_tokens: 15, total_nano_aiu: 12345 },
+			{ session_id: SESSION_ID, model: 'claude-sonnet-5', input_tokens: 50, output_tokens: 5, cache_read_tokens: 40, cache_write_tokens: 5, total_nano_aiu: 6000 },
+		]);
+
+		const usage = await getCopilotCliStoreUsage(eventsJsonlPath(homeDir, SESSION_ID), storeAccess);
+		assert.ok(usage);
+		assert.equal(usage!.actualTokens, 165);
+		assert.equal(usage!.cacheReadTokens, 120);
+		assert.equal(usage!.nanoAiu, 18345);
+		assert.equal(usage!.modelUsage['claude-sonnet-5'].inputTokens, 150);
+		assert.equal(usage!.modelUsage['claude-sonnet-5'].outputTokens, 15);
+		assert.equal(usage!.modelUsage['claude-sonnet-5'].cachedReadTokens, 120);
+		assert.equal(usage!.modelUsage['claude-sonnet-5'].cacheCreationTokens, 20);
+	});
+});
+
+test('getCopilotCliStoreUsage: returns null when assistant_usage_events has no rows for the session', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const storeAccess = createStoreAccess(homeDir, [
+			{ session_id: SESSION_ID_2, model: 'claude-sonnet-5', input_tokens: 100, output_tokens: 10, cache_read_tokens: 0, cache_write_tokens: 0, total_nano_aiu: 12345 },
+		]);
+
+		const usage = await getCopilotCliStoreUsage(eventsJsonlPath(homeDir, SESSION_ID), storeAccess);
+		assert.equal(usage, null);
+	});
+});
+
+test('getCopilotCliExactUsage: prefers session-store.db over OTel file export', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const otelDir = path.join(homeDir, '.copilot', 'otel');
+		writeOtelSpans(otelDir, [chatSpan(SESSION_ID, { 'gen_ai.usage.input_tokens': 999, 'github.copilot.nano_aiu': 999999 })]);
+		const storeAccess = createStoreAccess(homeDir, [
+			{ session_id: SESSION_ID, model: 'claude-sonnet-5', input_tokens: 100, output_tokens: 10, cache_read_tokens: 0, cache_write_tokens: 0, total_nano_aiu: 12345 },
+		]);
+
+		const usage = await getCopilotCliExactUsage(eventsJsonlPath(homeDir, SESSION_ID), storeAccess);
+		assert.ok(usage);
+		assert.equal(usage!.actualTokens, 110, 'should use store data, not OTel');
+		assert.equal(usage!.nanoAiu, 12345);
+	});
+});
+
+test('getCopilotCliExactUsage: falls back to OTel file export when session-store.db has no billing rows', async (t) => {
+	await withHomedir(t, async (homeDir) => {
+		const otelDir = path.join(homeDir, '.copilot', 'otel');
+		writeOtelSpans(otelDir, [chatSpan(SESSION_ID)]);
+		const storeAccess = createStoreAccess(homeDir, []);
+
+		const usage = await getCopilotCliExactUsage(eventsJsonlPath(homeDir, SESSION_ID), storeAccess);
+		assert.ok(usage);
+		assert.equal(usage!.actualTokens, 110);
 	});
 });

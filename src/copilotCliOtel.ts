@@ -13,6 +13,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { Worker } from 'worker_threads';
 import type { ModelUsage } from './types';
+import { CopilotCliStoreAccess } from './copilotCliStore';
 
 /** Per-session usage aggregated from OTel `chat <model>` spans. */
 export interface CopilotCliOtelSessionUsage {
@@ -423,6 +424,47 @@ export async function getCopilotCliOtelUsage(sessionFile: string): Promise<Copil
 	if (!sessionId) { return null; }
 	const index = await loadCopilotCliOtelIndex();
 	return index.get(sessionId) ?? null;
+}
+
+// Shared store access for exact billing lookups. The instance caches the SQLite DB
+// by mtime/size, so repeated lookups across many sessions reuse the same in-memory DB.
+const cliStoreAccess = new CopilotCliStoreAccess();
+
+/**
+ * Looks up exact usage from `session-store.db`'s `assistant_usage_events` billing
+ * table for a Copilot CLI session file. Returns null when the DB/table is missing,
+ * the session has no rows, or the path is not a Copilot CLI session.
+ *
+ * This table is the authoritative source used by Copilot CLI's own usage display:
+ * it contains one row per LLM API call with exact input/output/cache tokens and
+ * nano-AIU cost. It is available for both worktree-backed sessions (events.jsonl)
+ * and DB-only chat sessions, and unlike `session.shutdown` events it is written
+ * even for sessions that do not shut down cleanly.
+ */
+export async function getCopilotCliStoreUsage(
+	sessionFile: string,
+	storeAccess: CopilotCliStoreAccess = cliStoreAccess,
+): Promise<CopilotCliOtelSessionUsage | null> {
+	const sessionId = extractCopilotCliSessionId(sessionFile);
+	if (!sessionId) { return null; }
+	const usage = await storeAccess.getSessionUsage(sessionId);
+	if (!usage) { return null; }
+	return usage;
+}
+
+/**
+ * Returns the most authoritative exact usage data available for a Copilot CLI session.
+ * Prefers the always-available `assistant_usage_events` table in session-store.db;
+ * falls back to the opt-in OpenTelemetry file export when the DB has no billing rows.
+ * Returns null for non-CLI paths or when no exact data is available.
+ */
+export async function getCopilotCliExactUsage(
+	sessionFile: string,
+	storeAccess: CopilotCliStoreAccess = cliStoreAccess,
+): Promise<CopilotCliOtelSessionUsage | null> {
+	const storeUsage = await getCopilotCliStoreUsage(sessionFile, storeAccess);
+	if (storeUsage) { return storeUsage; }
+	return getCopilotCliOtelUsage(sessionFile);
 }
 
 /** Whether the OTel export directory exists, how many export files it holds, and how many distinct sessions they cover. */
