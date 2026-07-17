@@ -1069,29 +1069,23 @@ function getSessionSortIndicator(column: SessionSortColumn): string {
 	return sessionSortDirection === 'desc' ? ' ▼' : ' ▲';
 }
 
+const _todaySessionColumnComparators: Partial<Record<SessionSortColumn, (a: TodaySessionSummary, b: TodaySessionSummary) => number>> = {
+	title: (a, b) => (a.title || '').localeCompare(b.title || ''),
+	editor: (a, b) => (a.editor || '').localeCompare(b.editor || ''),
+	workspace: (a, b) => (a.workspace || '').localeCompare(b.workspace || ''),
+	durationMs: (a, b) => (a.durationMs ?? -1) - (b.durationMs ?? -1),
+	lastActivity: (a, b) => (a.lastActivity || '').localeCompare(b.lastActivity || ''),
+};
+
+function _compareTodaySessionsByColumn(a: TodaySessionSummary, b: TodaySessionSummary): number {
+	const comparator = _todaySessionColumnComparators[sessionSortColumn];
+	if (comparator) { return comparator(a, b); }
+	return (a[sessionSortColumn] as number) - (b[sessionSortColumn] as number);
+}
+
 function sortTodaySessions(sessions: TodaySessionSummary[]): TodaySessionSummary[] {
 	return [...sessions].sort((a, b) => {
-		let cmp = 0;
-		switch (sessionSortColumn) {
-			case 'title':
-				cmp = (a.title || '').localeCompare(b.title || '');
-				break;
-			case 'editor':
-				cmp = (a.editor || '').localeCompare(b.editor || '');
-				break;
-			case 'workspace':
-				cmp = (a.workspace || '').localeCompare(b.workspace || '');
-				break;
-			case 'durationMs':
-				cmp = (a.durationMs ?? -1) - (b.durationMs ?? -1);
-				break;
-			case 'lastActivity':
-				cmp = (a.lastActivity || '').localeCompare(b.lastActivity || '');
-				break;
-			default:
-				cmp = (a[sessionSortColumn] as number) - (b[sessionSortColumn] as number);
-				break;
-		}
+		const cmp = _compareTodaySessionsByColumn(a, b);
 		return sessionSortDirection === 'desc' ? -cmp : cmp;
 	});
 }
@@ -1539,37 +1533,39 @@ function startWorktreeCleanup(): void {
 	});
 }
 
-function handleWorktreeTabClick(event: MouseEvent): void {
-	const target = event.target as HTMLElement | null;
-	if (!target) { return; }
+function _handleWorktreeActionButtonClick(target: HTMLElement): boolean {
 	if (target.id === "btn-browse-worktree-root") {
 		vscode.postMessage({ command: "pickWorktreeRoot" });
-		return;
+		return true;
 	}
 	if (target.id === "btn-add-worktree-root") {
 		addWorktreeRootFromInput();
-		return;
+		return true;
 	}
 	if (target.id === "btn-scan-worktrees") {
 		startWorktreeScan();
-		return;
+		return true;
 	}
 	if (target.id === "btn-cancel-worktree-scan") {
 		vscode.postMessage({ command: "cancelWorktreeScan" });
-		return;
+		return true;
 	}
 	if (target.id === "btn-cleanup-pushed-worktrees") {
 		startWorktreeCleanup();
-		return;
+		return true;
 	}
 	if (target.id === "btn-cancel-cleanup") {
 		vscode.postMessage({ command: "cancelCleanupPushedWorktrees" });
-		return;
+		return true;
 	}
+	return false;
+}
+
+function _handleWorktreeRootsListClick(target: HTMLElement): boolean {
 	if (target.closest("#btn-toggle-worktree-roots")) {
 		worktreeRootsExpanded = !worktreeRootsExpanded;
 		updateWorktreeControls();
-		return;
+		return true;
 	}
 	if (target.classList.contains("worktree-remove-root")) {
 		const idx = Number(target.getAttribute("data-index"));
@@ -1577,14 +1573,18 @@ function handleWorktreeTabClick(event: MouseEvent): void {
 			worktreeRoots.splice(idx, 1);
 			updateWorktreeControls();
 		}
-		return;
+		return true;
 	}
+	return false;
+}
+
+function _handleWorktreeRowLinkClick(event: MouseEvent, target: HTMLElement): boolean {
 	const revealLink = target.closest(".worktree-reveal-link") as HTMLElement | null;
 	if (revealLink) {
 		event.preventDefault();
 		const p = decodeURIComponent(revealLink.getAttribute("data-path") || "");
 		if (p) { vscode.postMessage({ command: "revealPath", path: p }); }
-		return;
+		return true;
 	}
 	const deleteLink = target.closest(".worktree-delete-link") as HTMLElement | null;
 	if (deleteLink) {
@@ -1596,29 +1596,48 @@ function handleWorktreeTabClick(event: MouseEvent): void {
 		// The actual confirmation is a native VS Code modal shown by the extension — it owns the
 		// "git worktree remove" call and any dirty-tree force-confirmation, not this webview.
 		if (p) { vscode.postMessage({ command: "deleteWorktree", path: p, branch, repoLabel, pushed }); }
-		return;
+		return true;
 	}
+	return false;
+}
+
+function _handleWorktreeSortHeaderClick(target: HTMLElement): boolean {
 	const sortHeader = target.closest("[data-wt-sort]") as HTMLElement | null;
-	if (sortHeader) {
-		const col = sortHeader.getAttribute("data-wt-sort") as WorktreeSortColumn | null;
-		if (col) {
-			if (worktreeSortColumn === col) {
-				worktreeSortDir = worktreeSortDir === "desc" ? "asc" : "desc";
-			} else {
-				worktreeSortColumn = col;
-				worktreeSortDir = col === "repo" ? "asc" : "desc";
-			}
-			updateWorktreeResults();
-		}
-		return;
+	if (!sortHeader) { return false; }
+	const col = sortHeader.getAttribute("data-wt-sort") as WorktreeSortColumn | null;
+	if (!col) { return true; }
+	if (worktreeSortColumn === col) {
+		worktreeSortDir = worktreeSortDir === "desc" ? "asc" : "desc";
+	} else {
+		worktreeSortColumn = col;
+		worktreeSortDir = col === "repo" ? "asc" : "desc";
 	}
+	updateWorktreeResults();
+	return true;
+}
+
+function _handleWorktreeRepoRowClick(target: HTMLElement): boolean {
 	const repoRow = target.closest(".worktree-repo-row") as HTMLElement | null;
-	if (repoRow) {
-		const repo = repoRow.getAttribute("data-repo") || "";
-		if (worktreeExpandedRepos.has(repo)) { worktreeExpandedRepos.delete(repo); }
-		else { worktreeExpandedRepos.add(repo); }
-		updateWorktreeResults();
-	}
+	if (!repoRow) { return false; }
+	const repo = repoRow.getAttribute("data-repo") ?? "";
+	if (worktreeExpandedRepos.has(repo)) { worktreeExpandedRepos.delete(repo); }
+	else { worktreeExpandedRepos.add(repo); }
+	updateWorktreeResults();
+	return true;
+}
+
+function _handleWorktreeTableInteractionClick(target: HTMLElement): boolean {
+	if (_handleWorktreeSortHeaderClick(target)) { return true; }
+	return _handleWorktreeRepoRowClick(target);
+}
+
+function handleWorktreeTabClick(event: MouseEvent): void {
+	const target = event.target as HTMLElement | null;
+	if (!target) { return; }
+	if (_handleWorktreeActionButtonClick(target)) { return; }
+	if (_handleWorktreeRootsListClick(target)) { return; }
+	if (_handleWorktreeRowLinkClick(event, target)) { return; }
+	_handleWorktreeTableInteractionClick(target);
 }
 
 function setupWorktreesHandlers(): void {
@@ -1818,48 +1837,32 @@ function handleWorktreeScanCancelled(): void {
 }
 
 /** Dispatches worktree-tab messages via static, literal command comparisons (no dynamic method lookup). */
+const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
+	worktreeRootPicked: handleWorktreeRootPicked,
+	worktreeRootsDiscovered: handleWorktreeRootsDiscovered,
+	worktreeScanStarted: () => handleWorktreeScanStarted(),
+	worktreeScanRootStarted: handleWorktreeScanRootStarted,
+	worktreeScanWalkProgress: handleWorktreeScanWalkProgress,
+	worktreeScanRootMarkersFound: handleWorktreeScanRootMarkersFound,
+	worktreeScanRootSkipped: handleWorktreeScanRootSkipped,
+	worktreeScanProgress: handleWorktreeScanProgress,
+	worktreeFound: handleWorktreeFound,
+	worktreeEnrichStarted: handleWorktreeEnrichStarted,
+	worktreeEnrichProgress: handleWorktreeEnrichProgress,
+	worktreeEnriched: handleWorktreeEnriched,
+	worktreeDeleted: handleWorktreeDeleted,
+	worktreeScanComplete: () => handleWorktreeScanComplete(),
+	worktreeScanCancelled: () => handleWorktreeScanCancelled(),
+	cleanupDeclined: () => handleCleanupDeclined(),
+	cleanupStarted: handleCleanupStarted,
+	cleanupWorktreeResult: handleCleanupWorktreeResult,
+	cleanupComplete: () => handleCleanupComplete(),
+	cleanupCancelled: () => handleCleanupCancelled(),
+};
+
 function handleWorktreeMessage(message: any): void {
-	if (message.command === "worktreeRootPicked") {
-		handleWorktreeRootPicked(message);
-	} else if (message.command === "worktreeRootsDiscovered") {
-		handleWorktreeRootsDiscovered(message);
-	} else if (message.command === "worktreeScanStarted") {
-		handleWorktreeScanStarted();
-	} else if (message.command === "worktreeScanRootStarted") {
-		handleWorktreeScanRootStarted(message);
-	} else if (message.command === "worktreeScanWalkProgress") {
-		handleWorktreeScanWalkProgress(message);
-	} else if (message.command === "worktreeScanRootMarkersFound") {
-		handleWorktreeScanRootMarkersFound(message);
-	} else if (message.command === "worktreeScanRootSkipped") {
-		handleWorktreeScanRootSkipped(message);
-	} else if (message.command === "worktreeScanProgress") {
-		handleWorktreeScanProgress(message);
-	} else if (message.command === "worktreeFound") {
-		handleWorktreeFound(message);
-	} else if (message.command === "worktreeEnrichStarted") {
-		handleWorktreeEnrichStarted(message);
-	} else if (message.command === "worktreeEnrichProgress") {
-		handleWorktreeEnrichProgress(message);
-	} else if (message.command === "worktreeEnriched") {
-		handleWorktreeEnriched(message);
-	} else if (message.command === "worktreeDeleted") {
-		handleWorktreeDeleted(message);
-	} else if (message.command === "worktreeScanComplete") {
-		handleWorktreeScanComplete();
-	} else if (message.command === "worktreeScanCancelled") {
-		handleWorktreeScanCancelled();
-	} else if (message.command === "cleanupDeclined") {
-		handleCleanupDeclined();
-	} else if (message.command === "cleanupStarted") {
-		handleCleanupStarted(message);
-	} else if (message.command === "cleanupWorktreeResult") {
-		handleCleanupWorktreeResult(message);
-	} else if (message.command === "cleanupComplete") {
-		handleCleanupComplete();
-	} else if (message.command === "cleanupCancelled") {
-		handleCleanupCancelled();
-	}
+	const handler = _worktreeMessageHandlers[message.command];
+	if (handler) { handler(message); }
 }
 
 function setupTabs(): void {
@@ -3138,21 +3141,19 @@ function renderWorktreeRootsList(): string {
 	return toggle + list;
 }
 
-function renderWorktreeProgress(): string {
-	if (!worktreeScanInProgress) { return ""; }
-	const s = worktreeScanStatus;
-	const seconds = (s.elapsedMs / 1000).toFixed(1);
-	if (s.phase === "enriching") {
-		const done = s.enriched ?? 0;
-		const total = s.enrichTotal ?? 0;
-		const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-		return `
+function _renderWorktreeEnrichingProgress(s: WorktreeScanStatus, seconds: string): string {
+	const done = s.enriched ?? 0;
+	const total = s.enrichTotal ?? 0;
+	const pct = total > 0 ? Math.round((done / total) * 100) : 0;
+	return `
     <div class="info-box" style="margin-top: 12px;">
       <div class="info-box-title">📦 Computing sizes &amp; push status…</div>
       <div>${done} / ${total} worktree${total === 1 ? "" : "s"} analyzed (${seconds}s)</div>
       <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${pct}%;"></div></div>
     </div>`;
-	}
+}
+
+function _renderWorktreeScanningProgress(s: WorktreeScanStatus, seconds: string): string {
 	const walking = s.phase === "walking";
 	const title = walking ? "🔍 Scanning folder…" : "⏳ Checking markers…";
 	const dirs = s.dirsScanned ?? 0;
@@ -3168,6 +3169,14 @@ function renderWorktreeProgress(): string {
       <div>${detail}</div>
       <div class="worktree-progress-bar"><div class="${fillClass}" style="width: ${pct}%;"></div></div>
     </div>`;
+}
+
+function renderWorktreeProgress(): string {
+	if (!worktreeScanInProgress) { return ""; }
+	const s = worktreeScanStatus;
+	const seconds = (s.elapsedMs / 1000).toFixed(1);
+	if (s.phase === "enriching") { return _renderWorktreeEnrichingProgress(s, seconds); }
+	return _renderWorktreeScanningProgress(s, seconds);
 }
 
 function renderWorktreeControls(): string {
@@ -3402,7 +3411,11 @@ function buildWorktreesTabPanelHtml(): string {
 }
 
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
-	latestTodaySessions = stats.todaySessions || [];
+	// Guard against silent host updates that omit todaySessions (e.g. a stale payload
+	// shape): keep showing the last known sessions instead of clearing the table.
+	if (Array.isArray(stats.todaySessions)) {
+		latestTodaySessions = stats.todaySessions;
+	}
 	const cachedForLookback = sessionsLookback === 'today' ? latestTodaySessions : recentSessionsCache[sessionsLookback];
 	const bodyHtml = cachedForLookback
 		? renderTodaySessionsTable(cachedForLookback)

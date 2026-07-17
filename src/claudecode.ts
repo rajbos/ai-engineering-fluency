@@ -10,6 +10,7 @@ import * as os from 'os';
 import type { ModelUsage } from './types';
 import { withErrorRecovery } from './utils/errors';
 import { normalizePathForComparison } from './workspaceHelpers';
+import { toLocalDayKey } from './utils/dayKeys';
 
 /**
  * Normalize a Claude Code API model ID to the dot-notation format used throughout this codebase.
@@ -68,7 +69,8 @@ export class ClaudeCodeDataAccess {
 	}
 
 	/**
-	 * Get all Claude Code session file paths (top-level session files, excluding subagent files).
+	 * Get all Claude Code session file paths, including subagent/workflow transcripts
+	 * written under <project>/<sessionId>/subagents/**\/*.jsonl (issue #1608).
 	 */
 	async getClaudeCodeSessionFiles(): Promise<string[]> {
 		const projectsDir = this.getClaudeCodeProjectsDir();
@@ -91,22 +93,30 @@ export class ClaudeCodeDataAccess {
 		}
 	}
 
-	private async collectJsonlFilesFromProject(projectPath: string): Promise<string[]> {
+	/**
+	 * Recursively collect .jsonl files under a project directory, up to maxDepth levels
+	 * deep, so subagent/workflow transcripts nested under <sessionId>/subagents/** are
+	 * discovered alongside the top-level session files.
+	 */
+	private async collectJsonlFilesFromProject(projectPath: string, depth = 0, maxDepth = 6): Promise<string[]> {
+		if (depth > maxDepth) { return []; }
 		try {
 			const entries = await fs.promises.readdir(projectPath, { withFileTypes: true });
 			const results = await Promise.all(
-				entries
-					.filter(e => !e.isDirectory() && e.name.endsWith('.jsonl'))
-					.map(async e => {
-						const fullPath = path.join(projectPath, e.name);
-						try {
-							const st = await fs.promises.stat(fullPath);
-							return st.size > 0 ? [fullPath] : [];
-						} catch (err) {
-							console.error(`[claudecode] Failed to stat ${fullPath}:`, err);
-							return [] as string[];
-						}
-					})
+				entries.map(async e => {
+					const fullPath = path.join(projectPath, e.name);
+					if (e.isDirectory()) {
+						return this.collectJsonlFilesFromProject(fullPath, depth + 1, maxDepth);
+					}
+					if (!e.name.endsWith('.jsonl')) { return []; }
+					try {
+						const st = await fs.promises.stat(fullPath);
+						return st.size > 0 ? [fullPath] : [];
+					} catch (err) {
+						console.error(`[claudecode] Failed to stat ${fullPath}:`, err);
+						return [] as string[];
+					}
+				})
 			);
 			return results.flat();
 		} catch (err) {
@@ -167,27 +177,152 @@ export class ClaudeCodeDataAccess {
 	}
 
 	/**
+	 * Resolve the project directory and session ID that `filePath` belongs to, whether it's
+	 * the top-level session file itself or a subagent transcript nested under
+	 * <sessionId>/subagents/**. Used to locate sibling files in the same session "family"
+	 * for cross-file dedup (see getPriorFamilyMessageIds).
+	 */
+	private resolveSessionFamilyRoot(filePath: string): { projectDir: string; sessionId: string } {
+		const parts = filePath.split(path.sep);
+		const subagentsIndex = parts.lastIndexOf('subagents');
+		if (subagentsIndex > 0) {
+			return { sessionId: parts[subagentsIndex - 1], projectDir: parts.slice(0, subagentsIndex - 1).join(path.sep) };
+		}
+		return { sessionId: path.basename(filePath, '.jsonl'), projectDir: path.dirname(filePath) };
+	}
+
+	/**
+	 * Get every .jsonl file in the same session "family" as `filePath` — the top-level
+	 * session file plus any subagent transcripts under <sessionId>/subagents/** — in a
+	 * stable canonical order (top-level file first, then subagent files sorted by path).
+	 */
+	private async getSessionFamilyFiles(filePath: string): Promise<string[]> {
+		const { projectDir, sessionId } = this.resolveSessionFamilyRoot(filePath);
+		const topLevelFile = path.join(projectDir, `${sessionId}.jsonl`);
+		const subagentsDir = path.join(projectDir, sessionId, 'subagents');
+		let subagentFiles: string[] = [];
+		try {
+			await fs.promises.access(subagentsDir);
+			subagentFiles = (await this.collectJsonlFilesFromProject(subagentsDir)).sort();
+		} catch { /* no subagents directory — common case, nothing to add */ }
+		return [topLevelFile, ...subagentFiles];
+	}
+
+	/**
+	 * Anthropic's message.id is meant to be unique per API response, but Claude Code's
+	 * sidechain (subagent) logging can replay a parent message under a new requestId
+	 * inside a subagent transcript. Since subagent files are discovered and token-counted
+	 * independently (issue #1608), that replay would otherwise be summed twice — once from
+	 * the file that first logged it, once from the file that replayed it.
+	 *
+	 * This returns the message.ids already "claimed" by family files that sort before
+	 * `filePath` in canonical order (top-level file, then subagent files by path), so the
+	 * caller can exclude them and each unique message is counted exactly once across the
+	 * whole family (issue #1570). Only subagent files can have anything to exclude — the
+	 * top-level file always sorts first — so this is a no-op fs-free fast path for the
+	 * common (non-subagent) case.
+	 */
+	private async getPriorFamilyMessageIds(filePath: string): Promise<Set<string>> {
+		const parts = filePath.split(path.sep);
+		if (parts.lastIndexOf('subagents') <= 0) { return new Set(); }
+
+		const family = await this.getSessionFamilyFiles(filePath);
+		const target = path.normalize(filePath);
+		const claimed = new Set<string>();
+		for (const familyFile of family) {
+			if (path.normalize(familyFile) === target) { break; }
+			const events = await this.readSessionEvents(familyFile);
+			for (const event of this.deduplicateAssistantEvents(events)) {
+				const msgId: string | undefined = event.message?.id;
+				if (msgId) { claimed.add(msgId); }
+			}
+		}
+		return claimed;
+	}
+
+	/**
+	 * Sum input + output tokens (including cache creation/read) from a single assistant
+	 * event's usage object. Shared by getTokensFromClaudeCodeSession and
+	 * getClaudeCodeDailyFractions so both use the identical token formula.
+	 */
+	private getEventTotalTokens(usage: any): number {
+		const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
+			+ (typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0)
+			+ (typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0);
+		const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
+		return inputTokens + outputTokens;
+	}
+
+	/**
 	 * Get token counts from a Claude Code session.
 	 * Uses ACTUAL Anthropic API token counts from assistant event message.usage.
-	 * De-duplicates by message.id (last-wins) — see deduplicateAssistantEvents.
+	 * De-duplicates by message.id (last-wins) — see deduplicateAssistantEvents — and, for
+	 * subagent transcripts, excludes messages already claimed by an earlier file in the
+	 * same session family (see getPriorFamilyMessageIds) so a replayed parent message
+	 * isn't summed twice across files (issue #1570).
 	 */
 	async getTokensFromClaudeCodeSession(sessionFilePath: string): Promise<{ tokens: number; thinkingTokens: number }> {
 		const events = await this.readSessionEvents(sessionFilePath);
-		let totalInputTokens = 0;
-		let totalOutputTokens = 0;
+		const priorIds = await this.getPriorFamilyMessageIds(sessionFilePath);
+		let totalTokens = 0;
 
 		for (const event of this.deduplicateAssistantEvents(events)) {
-			const usage = event.message.usage;
-			const inputTokens = (typeof usage.input_tokens === 'number' ? usage.input_tokens : 0)
-				+ (typeof usage.cache_creation_input_tokens === 'number' ? usage.cache_creation_input_tokens : 0)
-				+ (typeof usage.cache_read_input_tokens === 'number' ? usage.cache_read_input_tokens : 0);
-			const outputTokens = typeof usage.output_tokens === 'number' ? usage.output_tokens : 0;
-			totalInputTokens += inputTokens;
-			totalOutputTokens += outputTokens;
+			const msgId: string | undefined = event.message?.id;
+			if (msgId && priorIds.has(msgId)) { continue; }
+			totalTokens += this.getEventTotalTokens(event.message.usage);
 		}
 
 		// Claude Code does not separate thinking tokens — they are included in output_tokens
-		return { tokens: totalInputTokens + totalOutputTokens, thinkingTokens: 0 };
+		return { tokens: totalTokens, thinkingTokens: 0 };
+	}
+
+	/**
+	 * Bucket a single assistant event's tokens into its local calendar day, unless its
+	 * message.id was already claimed by an earlier family file (see getPriorFamilyMessageIds)
+	 * or it has no usable tokens/timestamp. Returns the token count actually bucketed, so the
+	 * caller can accumulate a running total without duplicating the skip conditions.
+	 */
+	private bucketEventIntoDay(event: any, priorIds: Set<string>, tokensPerDay: Map<string, number>): number {
+		const msgId: string | undefined = event.message?.id;
+		if (msgId && priorIds.has(msgId)) { return 0; }
+		const tokens = this.getEventTotalTokens(event.message.usage);
+		if (tokens <= 0) { return 0; }
+		const ts = event.timestamp ? new Date(event.timestamp).getTime() : NaN;
+		if (isNaN(ts)) { return 0; }
+		const dayKey = toLocalDayKey(new Date(ts));
+		tokensPerDay.set(dayKey, (tokensPerDay.get(dayKey) ?? 0) + tokens);
+		return tokens;
+	}
+
+	/**
+	 * Return the fraction of this session's tokens that occurred on each calendar day,
+	 * bucketed by each assistant event's own timestamp rather than the session's
+	 * firstInteraction. Claude Code logs exact per-event usage and an ISO timestamp per
+	 * assistant event, so multi-day sessions are attributed to the days the tokens were
+	 * actually spent on instead of collapsing everything onto the start day (issue #1608).
+	 */
+	async getClaudeCodeDailyFractions(sessionFilePath: string): Promise<Record<string, number>> {
+		const events = await this.readSessionEvents(sessionFilePath);
+		const priorIds = await this.getPriorFamilyMessageIds(sessionFilePath);
+		const tokensPerDay = new Map<string, number>();
+		let totalTokens = 0;
+
+		for (const event of this.deduplicateAssistantEvents(events)) {
+			totalTokens += this.bucketEventIntoDay(event, priorIds, tokensPerDay);
+		}
+
+		if (totalTokens === 0) {
+			const meta = await this.getClaudeCodeSessionMeta(sessionFilePath);
+			const fallbackMs = meta?.firstInteraction ? Date.parse(meta.firstInteraction) : NaN;
+			const fallback = isNaN(fallbackMs) ? toLocalDayKey(new Date()) : toLocalDayKey(new Date(fallbackMs));
+			return { [fallback]: 1.0 };
+		}
+
+		const fractions: Record<string, number> = {};
+		for (const [dayKey, tokens] of tokensPerDay.entries()) {
+			fractions[dayKey] = tokens / totalTokens;
+		}
+		return fractions;
 	}
 
 	/**
@@ -265,9 +400,12 @@ export class ClaudeCodeDataAccess {
 	 */
 	async getClaudeCodeModelUsage(sessionFilePath: string): Promise<ModelUsage> {
 		const events = await this.readSessionEvents(sessionFilePath);
+		const priorIds = await this.getPriorFamilyMessageIds(sessionFilePath);
 		const modelUsage: ModelUsage = {};
 
 		for (const event of this.deduplicateAssistantEvents(events)) {
+			const msgId: string | undefined = event.message?.id;
+			if (msgId && priorIds.has(msgId)) { continue; }
 			const usage = event.message.usage;
 			const model = normalizeClaudeModelId(event.message?.model || 'unknown');
 			this.addModelUsageEntry(modelUsage, model, usage);

@@ -881,3 +881,226 @@ assert.equal(result.toolCalls.total, 0);
 cleanup(filePath);
 }
 });
+
+// ----- getClaudeCodeDailyFractions (issue #1608, root cause A) -----
+
+test('getClaudeCodeDailyFractions: splits usage by each assistant event day, weighted by tokens', async () => {
+const events = [
+{
+type: 'assistant',
+message: {
+model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn',
+id: 'msg_day1', usage: { input_tokens: 100, output_tokens: 200 }
+},
+timestamp: '2026-07-11T12:00:00.000Z'
+},
+{
+type: 'assistant',
+message: {
+model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn',
+id: 'msg_day2', usage: { input_tokens: 100, output_tokens: 100 }
+},
+// 19h later — a different local day in every timezone from UTC-10 to UTC+14
+timestamp: '2026-07-12T07:00:00.000Z'
+}
+];
+const filePath = createTempSession(events);
+try {
+const fractions = await claudeCode.getClaudeCodeDailyFractions(filePath);
+const keys = Object.keys(fractions).sort();
+assert.equal(keys.length, 2, 'should have exactly 2 local day keys');
+// day1: 300 tokens, day2: 200 tokens, total 500
+const values = keys.map(k => fractions[k]).sort((a, b) => a - b);
+assert.ok(Math.abs(values[0] - 0.4) < 1e-9, `expected 0.4, got ${values[0]}`);
+assert.ok(Math.abs(values[1] - 0.6) < 1e-9, `expected 0.6, got ${values[1]}`);
+const total = Object.values(fractions).reduce((a, b) => a + b, 0);
+assert.ok(Math.abs(total - 1.0) < 1e-9, 'fractions should sum to 1.0');
+} finally {
+cleanup(filePath);
+}
+});
+
+test('getClaudeCodeDailyFractions: de-duplicates streaming fragments by message.id before bucketing', async () => {
+const events = [
+{
+type: 'assistant',
+message: { model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: null, id: 'msg_1', usage: { input_tokens: 10, output_tokens: 20 } },
+timestamp: '2026-07-11T12:00:00.000Z'
+},
+{
+type: 'assistant',
+message: { model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn', id: 'msg_1', usage: { input_tokens: 10, output_tokens: 50 } },
+timestamp: '2026-07-11T12:00:05.000Z'
+}
+];
+const filePath = createTempSession(events);
+try {
+const fractions = await claudeCode.getClaudeCodeDailyFractions(filePath);
+const keys = Object.keys(fractions);
+assert.equal(keys.length, 1);
+assert.ok(Math.abs(fractions[keys[0]] - 1.0) < 1e-9);
+} finally {
+cleanup(filePath);
+}
+});
+
+test('getClaudeCodeDailyFractions: falls back to firstInteraction day when there is no usage data', async () => {
+const events = [
+{
+type: 'user',
+isSidechain: false,
+message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+timestamp: '2026-07-11T12:00:00.000Z'
+}
+];
+const filePath = createTempSession(events);
+try {
+const fractions = await claudeCode.getClaudeCodeDailyFractions(filePath);
+const keys = Object.keys(fractions);
+assert.equal(keys.length, 1);
+assert.equal(fractions[keys[0]], 1.0);
+} finally {
+cleanup(filePath);
+}
+});
+
+test('ClaudeCodeAdapter.getDailyFractions: delegates to ClaudeCodeDataAccess', async () => {
+const events = [
+{
+type: 'assistant',
+message: { model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn', id: 'msg_1', usage: { input_tokens: 10, output_tokens: 20 } },
+timestamp: '2026-07-11T12:00:00.000Z'
+}
+];
+const filePath = createTempSession(events);
+try {
+const fractions = await claudeCodeAdapter.getDailyFractions(filePath);
+const keys = Object.keys(fractions);
+assert.equal(keys.length, 1);
+assert.equal(fractions[keys[0]], 1.0);
+} finally {
+cleanup(filePath);
+}
+});
+
+// ----- getClaudeCodeSessionFiles recursion into subagent transcripts (issue #1608, root cause B) -----
+
+class TestableClaudeCodeDataAccess extends ClaudeCodeDataAccess {
+constructor(private readonly testDataDir: string) { super(); }
+override getClaudeCodeDataDir(): string { return this.testDataDir; }
+}
+
+test('getClaudeCodeSessionFiles: discovers subagent transcripts nested under <sessionId>/subagents/**', async () => {
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-discovery-test-'));
+try {
+const dataDir = path.join(tmpDir, '.claude');
+const projectDir = path.join(dataDir, 'projects', 'test-project');
+const topLevelFile = path.join(projectDir, 'session-1.jsonl');
+const subagentDir = path.join(projectDir, 'session-1', 'subagents', 'workflows', 'wf-1');
+const subagentFile = path.join(subagentDir, 'agent-1.jsonl');
+
+fs.mkdirSync(projectDir, { recursive: true });
+fs.writeFileSync(topLevelFile, JSON.stringify({ type: 'user' }), 'utf8');
+fs.mkdirSync(subagentDir, { recursive: true });
+fs.writeFileSync(subagentFile, JSON.stringify({ type: 'assistant' }), 'utf8');
+
+const cc = new TestableClaudeCodeDataAccess(dataDir);
+const files = (await cc.getClaudeCodeSessionFiles()).map(f => path.normalize(f)).sort();
+assert.deepEqual(files, [path.normalize(subagentFile), path.normalize(topLevelFile)].sort());
+} finally {
+fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+});
+
+test('getClaudeCodeSessionFiles: ignores empty files at any depth', async () => {
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-discovery-test-'));
+try {
+const dataDir = path.join(tmpDir, '.claude');
+const projectDir = path.join(dataDir, 'projects', 'test-project');
+const subagentDir = path.join(projectDir, 'session-1', 'subagents');
+const emptyTopLevel = path.join(projectDir, 'empty.jsonl');
+const emptySubagent = path.join(subagentDir, 'empty-agent.jsonl');
+
+fs.mkdirSync(subagentDir, { recursive: true });
+fs.writeFileSync(emptyTopLevel, '', 'utf8');
+fs.writeFileSync(emptySubagent, '', 'utf8');
+
+const cc = new TestableClaudeCodeDataAccess(dataDir);
+const files = await cc.getClaudeCodeSessionFiles();
+assert.deepEqual(files, []);
+} finally {
+fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+});
+
+// ----- Cross-file dedup between a top-level session and its subagent transcripts -----
+//
+// Reproduces the scenario ccusage's dedup guards against ("sidechain logs can replay
+// parent messages with new request IDs"): the same message.id appears in both the
+// top-level session file and a nested <sessionId>/subagents/*.jsonl file. Since #1627
+// made subagent files independently discoverable, and getTokensFromClaudeCodeSession /
+// getClaudeCodeModelUsage only dedupe *within* a single file, the shared message's
+// tokens get summed once per file instead of once total (issue #1570 investigation).
+
+function createSessionFamily(topLevelEvents: any[], subagentEvents: any[]): { topLevelFile: string; subagentFile: string; tmpDir: string } {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-family-test-'));
+	const projectDir = path.join(tmpDir, '.claude', 'projects', 'test-project');
+	const sessionId = 'session-family-1';
+	const topLevelFile = path.join(projectDir, `${sessionId}.jsonl`);
+	const subagentDir = path.join(projectDir, sessionId, 'subagents');
+	const subagentFile = path.join(subagentDir, 'agent-1.jsonl');
+	fs.mkdirSync(subagentDir, { recursive: true });
+	fs.writeFileSync(topLevelFile, topLevelEvents.map(e => JSON.stringify(e)).join('\n'), 'utf8');
+	fs.writeFileSync(subagentFile, subagentEvents.map(e => JSON.stringify(e)).join('\n'), 'utf8');
+	return { topLevelFile, subagentFile, tmpDir };
+}
+
+const SHARED_MESSAGE_USAGE = { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }; // 150 tokens
+const SUBAGENT_OWN_USAGE = { input_tokens: 20, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }; // 30 tokens
+
+test('getTokensFromClaudeCodeSession: does not double-count a message.id replayed in a sibling subagent file', async () => {
+	const topLevelEvents = [
+		{ type: 'assistant', isSidechain: false, requestId: 'req_parent', message: { id: 'msg_shared', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SHARED_MESSAGE_USAGE } }
+	];
+	const subagentEvents = [
+		// The parent message replayed under a new requestId inside the subagent transcript.
+		{ type: 'assistant', isSidechain: true, requestId: 'req_sidechain_replay', message: { id: 'msg_shared', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SHARED_MESSAGE_USAGE } },
+		// A genuinely unique message produced by the subagent itself.
+		{ type: 'assistant', isSidechain: true, requestId: 'req_subagent_own', message: { id: 'msg_subagent_own', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SUBAGENT_OWN_USAGE } }
+	];
+	const { topLevelFile, subagentFile, tmpDir } = createSessionFamily(topLevelEvents, subagentEvents);
+	try {
+		const parentTokens = await claudeCode.getTokensFromClaudeCodeSession(topLevelFile);
+		const subagentTokens = await claudeCode.getTokensFromClaudeCodeSession(subagentFile);
+		// True family total: 150 (shared, counted once) + 30 (subagent-only) = 180.
+		// The generic per-file pipeline sums each file's independent result, so that sum
+		// must equal the true total — the subagent file must NOT re-contribute the shared message.
+		assert.equal(parentTokens.tokens, 150, 'parent file should count its own message once');
+		assert.equal(subagentTokens.tokens, 30, 'subagent file should exclude the message already counted in the parent');
+		assert.equal(parentTokens.tokens + subagentTokens.tokens, 180, 'summed family total must not double-count the shared message');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('getClaudeCodeModelUsage: does not double-count a message.id replayed in a sibling subagent file', async () => {
+	const topLevelEvents = [
+		{ type: 'assistant', isSidechain: false, requestId: 'req_parent', message: { id: 'msg_shared', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SHARED_MESSAGE_USAGE } }
+	];
+	const subagentEvents = [
+		{ type: 'assistant', isSidechain: true, requestId: 'req_sidechain_replay', message: { id: 'msg_shared', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SHARED_MESSAGE_USAGE } },
+		{ type: 'assistant', isSidechain: true, requestId: 'req_subagent_own', message: { id: 'msg_subagent_own', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SUBAGENT_OWN_USAGE } }
+	];
+	const { topLevelFile, subagentFile, tmpDir } = createSessionFamily(topLevelEvents, subagentEvents);
+	try {
+		const parentUsage = await claudeCode.getClaudeCodeModelUsage(topLevelFile);
+		const subagentUsage = await claudeCode.getClaudeCodeModelUsage(subagentFile);
+		const totalInput = (parentUsage['claude-sonnet-4.6']?.inputTokens ?? 0) + (subagentUsage['claude-sonnet-4.6']?.inputTokens ?? 0);
+		const totalOutput = (parentUsage['claude-sonnet-4.6']?.outputTokens ?? 0) + (subagentUsage['claude-sonnet-4.6']?.outputTokens ?? 0);
+		// Family total: input 100+20=120, output 50+10=60 — the shared message must only appear once.
+		assert.equal(totalInput, 120, 'summed input tokens must not double-count the shared message');
+		assert.equal(totalOutput, 60, 'summed output tokens must not double-count the shared message');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});

@@ -955,10 +955,12 @@ function detectCopilotFamilyFromPath(lowerPath: string): string | undefined {
 
 /**
  * Peek at the start of a Claude Code session file (~/.claude/projects/**) to find the
- * `entrypoint` field and distinguish the standalone Claude Desktop app from Claude Code
- * running in a terminal or the VS Code extension. All three write to the same directory
- * and are indistinguishable by path alone — only file content (the `entrypoint` field on
- * early JSONL events, e.g. "claude-desktop", "claude-cli", "claude-vscode") tells them apart.
+ * `entrypoint` field and distinguish the standalone Claude Desktop app, the terminal CLI,
+ * and the VS Code extension. All three write to the same directory and are indistinguishable
+ * by path alone — only file content (the `entrypoint` field on early JSONL events) tells them
+ * apart. Observed real-world values are "claude-desktop" and "cli" (not "claude-cli" — the
+ * field is the short form); any other/unknown value (e.g. a VS Code extension entrypoint)
+ * falls back to the generic "Claude Code" label.
  * Bounded to the first 64KB so classification stays cheap even for large session files.
  * @internal
  */
@@ -975,6 +977,7 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
 				let event: any;
 				try { event = JSON.parse(trimmed); } catch { continue; } // partial/truncated line
 				if (event?.entrypoint === 'claude-desktop') { return 'Claude Desktop'; }
+				if (event?.entrypoint === 'cli') { return 'Claude Code CLI'; }
 				if (event?.entrypoint) { return 'Claude Code'; }
 			}
 		} finally {
