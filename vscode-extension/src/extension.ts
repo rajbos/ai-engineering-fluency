@@ -6216,77 +6216,48 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.log(`🧭 [Tool Curation Trace] ${stage} ${details}`);
 	}
 
-	private async handleAnalysisMessage(message: any): Promise<void> {
-		switch (message.command) {
-			case 'refresh':
-				await this.dispatch('refresh:analysis', () => this.refreshAnalysisPanel());
-				break;
-			case 'analyseRepository':
-				await this.dispatch('analyseRepository', () => this.handleAnalyseRepository(message.workspacePath));
-				break;
-			case 'analyseAllRepositories':
-				await this.dispatch('analyseAllRepositories', () => this.handleAnalyseAllRepositories());
-				break;
-			case 'openCopilotChatWithPrompt':
-				await this.dispatch('openCopilotChatWithPrompt', () =>
-					vscode.commands.executeCommand('workbench.action.chat.open', { query: message.prompt, isNewChat: true })
-				);
-				break;
-			case 'suppressUnknownTool': {
+	private async _handleOpenSessionFile(message: any): Promise<void> {
+		if (!message.file) { return; }
+		await this.dispatch('openSessionFile:analysis', async () => {
+			try { await this.showLogViewer(message.file); }
+			catch { vscode.window.showErrorMessage('Could not open log viewer: ' + message.file); }
+		});
+	}
+
+	private _getAnalysisMessageHandlers(): Record<string, (message: any) => Promise<void> | void> {
+		return {
+			refresh: () => this.dispatch('refresh:analysis', () => this.refreshAnalysisPanel()),
+			analyseRepository: (message) => this.dispatch('analyseRepository', () => this.handleAnalyseRepository(message.workspacePath)),
+			analyseAllRepositories: () => this.dispatch('analyseAllRepositories', () => this.handleAnalyseAllRepositories()),
+			openCopilotChatWithPrompt: (message) => this.dispatch('openCopilotChatWithPrompt', () =>
+				vscode.commands.executeCommand('workbench.action.chat.open', { query: message.prompt, isNewChat: true })
+			),
+			suppressUnknownTool: (message) => {
 				const toolName = message.toolName as string;
-				if (toolName) { await this._handleSuppressUnknownTool(toolName); }
-				break;
-			}
-			case 'loadRepoPrStats':
-				await this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats());
-				break;
-			case 'loadAgentSessions':
-				await this.dispatch('loadAgentSessions', () => this.loadAgentSessions());
-				break;
-			case 'loadRecentSessions':
-				await this.dispatch('loadRecentSessions', () => this.loadRecentSessions(Number(message.days)));
-				break;
-			case 'openSessionFile':
-				if (message.file) {
-					await this.dispatch('openSessionFile:analysis', async () => {
-						try { await this.showLogViewer(message.file); }
-						catch { vscode.window.showErrorMessage('Could not open log viewer: ' + message.file); }
-					});
-				}
-				break;
-			case 'insightAction':
-					await this.dispatch(`insightAction:${message.id ?? ''}`, () => this.handleInsightAction(message));
-					break;
-			case 'traceUsageCuration':
-				this._logTraceCuration(message);
-				break;
-			case 'saveSessionColumnSettings':
-				await this.dispatch('saveSessionColumnSettings', () =>
-					this.context.globalState.update('usage.sessionColumnSettings', message.settings)
-				);
-				break;
-			case 'revealPath':
-				if (message.path) { await this.dispatch('revealPath:analysis', () => this.diagHandleRevealPath(message.path)); }
-				break;
-			case 'pickWorktreeRoot':
-				await this.dispatch('pickWorktreeRoot:analysis', () => this.diagHandlePickWorktreeRoot());
-				break;
-			case 'scanWorktrees':
-				await this.dispatch('scanWorktrees:analysis', () => this.diagHandleScanWorktrees(message));
-				break;
-			case 'cancelWorktreeScan':
-				await this.dispatch('cancelWorktreeScan:analysis', () => this.diagHandleCancelWorktreeScan());
-				break;
-			case 'deleteWorktree':
-				await this.dispatch('deleteWorktree:analysis', () => this.diagHandleDeleteWorktree(message));
-				break;
-			case 'cleanupPushedWorktrees':
-				await this.dispatch('cleanupPushedWorktrees:analysis', () => this.diagHandleCleanupPushedWorktrees(message));
-				break;
-			case 'cancelCleanupPushedWorktrees':
-				await this.dispatch('cancelCleanupPushedWorktrees:analysis', () => this.diagHandleCancelCleanupPushedWorktrees());
-				break;
-		}
+				return toolName ? this._handleSuppressUnknownTool(toolName) : undefined;
+			},
+			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
+			loadAgentSessions: () => this.dispatch('loadAgentSessions', () => this.loadAgentSessions()),
+			loadRecentSessions: (message) => this.dispatch('loadRecentSessions', () => this.loadRecentSessions(Number(message.days))),
+			openSessionFile: (message) => this._handleOpenSessionFile(message),
+			insightAction: (message) => this.dispatch(`insightAction:${message.id ?? ''}`, () => this.handleInsightAction(message)),
+			traceUsageCuration: (message) => this._logTraceCuration(message),
+			saveSessionColumnSettings: (message) => this.dispatch('saveSessionColumnSettings', () =>
+				this.context.globalState.update('usage.sessionColumnSettings', message.settings)
+			),
+			revealPath: (message) => message.path ? this.dispatch('revealPath:analysis', () => this.diagHandleRevealPath(message.path)) : undefined,
+			pickWorktreeRoot: () => this.dispatch('pickWorktreeRoot:analysis', () => this.diagHandlePickWorktreeRoot()),
+			scanWorktrees: (message) => this.dispatch('scanWorktrees:analysis', () => this.diagHandleScanWorktrees(message)),
+			cancelWorktreeScan: () => this.dispatch('cancelWorktreeScan:analysis', () => this.diagHandleCancelWorktreeScan()),
+			deleteWorktree: (message) => this.dispatch('deleteWorktree:analysis', () => this.diagHandleDeleteWorktree(message)),
+			cleanupPushedWorktrees: (message) => this.dispatch('cleanupPushedWorktrees:analysis', () => this.diagHandleCleanupPushedWorktrees(message)),
+			cancelCleanupPushedWorktrees: () => this.dispatch('cancelCleanupPushedWorktrees:analysis', () => this.diagHandleCancelCleanupPushedWorktrees()),
+		};
+	}
+
+	private async handleAnalysisMessage(message: any): Promise<void> {
+		const handler = this._getAnalysisMessageHandlers()[message.command];
+		if (handler) { await handler(message); }
 	}
 
 	private async handleInsightAction(message: any): Promise<void> {
@@ -8965,12 +8936,42 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     return result;
   }
 
-  private async diagHandleDeleteWorktree(message: any): Promise<void> {
+  /**
+   * Removes a worktree, escalating through a fallback chain: plain removal, then (with user
+   * confirmation) a force removal if uncommitted/untracked changes block it, then an OS-level
+   * directory-removal fallback for git-for-windows junction/long-path failures. Returns the
+   * final result, or `undefined` if the user declined the force-delete confirmation.
+   */
+  private async _removeWorktreeWithFallback(mainRepoRoot: string, worktreePath: string): Promise<{ ok: boolean; stderr: string } | undefined> {
+    let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, false);
+    if (!result.ok && /modified or untracked/i.test(result.stderr)) {
+      const forceChoice = await vscode.window.showWarningMessage(
+        `"${worktreePath}" has uncommitted or untracked changes.`,
+        { modal: true, detail: "Force-deleting will permanently discard those changes — this cannot be undone. Committed history elsewhere in the repository is not affected." },
+        "Force Delete",
+      );
+      if (forceChoice !== "Force Delete") { return undefined; }
+      result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
+    }
+
+    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
+      result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
+    }
+    return result;
+  }
+
+  /** Parse and normalize the delete-worktree webview message's fields, defaulting missing ones. */
+  private _parseDeleteWorktreeMessage(message: any): { worktreePath: string; branch: string; repoLabel: string; pushed: "yes" | "no" | "?" } {
     const worktreePath = typeof message?.path === "string" ? message.path.trim() : "";
-    if (!worktreePath) { return; }
     const branch = typeof message?.branch === "string" && message.branch ? message.branch : "?";
     const repoLabel = typeof message?.repoLabel === "string" && message.repoLabel ? message.repoLabel : path.basename(path.dirname(worktreePath));
     const pushed = message?.pushed === "yes" || message?.pushed === "no" ? message.pushed : "?";
+    return { worktreePath, branch, repoLabel, pushed };
+  }
+
+  private async diagHandleDeleteWorktree(message: any): Promise<void> {
+    const { worktreePath, branch, repoLabel, pushed } = this._parseDeleteWorktreeMessage(message);
+    if (!worktreePath) { return; }
 
     if (!(await this.confirmDeleteWorktree(worktreePath, branch, repoLabel, pushed))) { return; }
 
@@ -8980,20 +8981,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       return;
     }
 
-    let result = await this.removeGitWorktree(mainRepoRoot, worktreePath, false);
-    if (!result.ok && /modified or untracked/i.test(result.stderr)) {
-      const forceChoice = await vscode.window.showWarningMessage(
-        `"${worktreePath}" has uncommitted or untracked changes.`,
-        { modal: true, detail: "Force-deleting will permanently discard those changes — this cannot be undone. Committed history elsewhere in the repository is not affected." },
-        "Force Delete",
-      );
-      if (forceChoice !== "Force Delete") { return; }
-      result = await this.removeGitWorktree(mainRepoRoot, worktreePath, true);
-    }
-
-    if (!result.ok && this.isWorktreeDirectoryRemovalFailure(result.stderr)) {
-      result = await this.removeWorktreeDirectoryFallback(mainRepoRoot, worktreePath);
-    }
+    const result = await this._removeWorktreeWithFallback(mainRepoRoot, worktreePath);
+    if (!result) { return; }
 
     if (!result.ok) {
       vscode.window.showErrorMessage(`Could not delete worktree: ${result.stderr || "unknown error"}`);
@@ -9923,16 +9912,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 		</html>`;
   }
 
-  private getUsageAnalysisHtml(
-    webview: vscode.Webview,
-    stats: UsageAnalysisStats | null,
-  ): string {
-    const nonce = getNonce();
-    const scriptUri = webview.asWebviewUri(
-      vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "usage.js"),
-    );
-
-    // Detect user's locale for number formatting
+  /** Detect the user's locale for number formatting, logging each candidate source. */
+  private _detectUsageAnalysisLocale(stats: UsageAnalysisStats | null): string {
     const localeFromEnv =
       process.env.LC_ALL || process.env.LC_NUMERIC || process.env.LANG;
     const vscodeLanguage = vscode.env.language; // e.g., 'en', 'nl', 'de'
@@ -9944,19 +9925,23 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     );
     this.log(`[Locale Detection] Intl default: ${intlLocale}`);
 
-    const detectedLocale = (stats?.locale) || localeFromEnv || intlLocale;
+    const detectedLocale = stats?.locale || localeFromEnv || intlLocale;
     this.log(`[Usage Analysis] Extension detected locale: ${detectedLocale}`);
     this.log(
       `[Usage Analysis] Test format 1234567.89: ${new Intl.NumberFormat(detectedLocale).format(1234567.89)}`,
     );
+    return detectedLocale;
+  }
 
+  /** Build the JSON-serialized initial payload injected into the usage analysis webview. */
+  private _buildUsageAnalysisInitialData(stats: UsageAnalysisStats | null, detectedLocale: string): string {
+    if (!stats) { return 'null'; }
     const suppressedUnknownTools = vscode.workspace
       .getConfiguration('aiEngineeringFluency')
       .get<string[]>('suppressedUnknownTools', []);
-
     const sessionColumnSettings = this.context.globalState.get('usage.sessionColumnSettings', {});
 
-    const initialData = stats ? JSON.stringify({
+    return JSON.stringify({
       today: stats.today,
       last30Days: stats.last30Days,
       month: stats.month,
@@ -9976,7 +9961,20 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
-    }).replace(/</g, "\\u003c") : 'null';
+    }).replace(/</g, "\\u003c");
+  }
+
+  private getUsageAnalysisHtml(
+    webview: vscode.Webview,
+    stats: UsageAnalysisStats | null,
+  ): string {
+    const nonce = getNonce();
+    const scriptUri = webview.asWebviewUri(
+      vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "usage.js"),
+    );
+
+    const detectedLocale = this._detectUsageAnalysisLocale(stats);
+    const initialData = this._buildUsageAnalysisInitialData(stats, detectedLocale);
 
     return `<!DOCTYPE html>
 		<html lang="en">
