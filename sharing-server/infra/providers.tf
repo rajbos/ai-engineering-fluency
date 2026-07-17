@@ -26,8 +26,9 @@ provider "azurerm" {
   # Authentication is via GitHub Actions OIDC federated credentials using ARM_*
   # environment variables set by the workflow (ARM_CLIENT_ID, ARM_TENANT_ID,
   # ARM_SUBSCRIPTION_ID, ARM_USE_OIDC=true). No client secret is stored.
+  # use_oidc is intentionally not hardcoded here so a local run (without
+  # ARM_USE_OIDC set) falls back to the ambient `az login` session instead.
   # The SP has Contributor on the RG only, not subscription-level permissions,
   # so we disable automatic resource provider registration.
-  use_oidc                        = true
   resource_provider_registrations = "none"
 }
