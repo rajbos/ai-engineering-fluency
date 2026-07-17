@@ -35,7 +35,7 @@ import {
 	buildReasoningEffortTimeline,
 	extractResponseItemText,
 } from './tokenEstimation';
-import { extractCopilotCliSessionId, getCopilotCliOtelUsage } from './copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliExactUsage } from './copilotCliOtel';
 import { getModelBillingProvider } from './chartDataBuilder';
 import {
 	getModeType,
@@ -2508,13 +2508,14 @@ function _gmusProcessJsonRequests(sessionContent: ParsedSessionJson, modelUsage:
 	}
 }
 
-/** Resolve model usage for a JSONL-format session, preferring exact OTel usage when available. */
+/** Resolve model usage for a JSONL-format session, preferring exact billing usage when available. */
 async function _gmusResolveJsonl(sessionFile: string, fileContent: string, modelUsage: ModelUsage, deps: GmusDeps): Promise<ModelUsage> {
-	// Copilot CLI events.jsonl: prefer exact per-model usage from the OpenTelemetry
-	// file export (when enabled) over the ratio-based estimate below.
+	// Copilot CLI events.jsonl: prefer exact per-model usage from the
+	// session-store.db assistant_usage_events billing table, falling back to the
+	// opt-in OpenTelemetry file export and finally the ratio-based estimate below.
 	if (extractCopilotCliSessionId(sessionFile)) {
-		const otel = await getCopilotCliOtelUsage(sessionFile);
-		if (otel && Object.keys(otel.modelUsage).length > 0) { return otel.modelUsage; }
+		const exact = await getCopilotCliExactUsage(sessionFile);
+		if (exact && Object.keys(exact.modelUsage).length > 0) { return exact.modelUsage; }
 	}
 	const lines = fileContent.trim().split('\n');
 	const result = _gmusProcessJsonlContent(lines, modelUsage, deps);

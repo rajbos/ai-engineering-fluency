@@ -13,7 +13,7 @@ import { isMcpTool, extractMcpServerName } from '../../src/workspaceHelpers';
 import { resolveFileUri } from '../../src/workspacePathResolver';
 import { parseSessionFileContent } from '../../src/sessionParser';
 import { estimateTokensFromText, getModelFromRequest, isJsonlContent, estimateTokensFromJsonlSession, calculateEstimatedCost, extractAllTokensFromDebugLog } from '../../src/tokenEstimation';
-import { extractCopilotCliSessionId, getCopilotCliOtelUsage } from '../../src/copilotCliOtel';
+import { extractCopilotCliSessionId, getCopilotCliExactUsage } from '../../src/copilotCliOtel';
 import { extractDailyFractions } from '../../src/dailyAttribution';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
@@ -320,8 +320,8 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 		let fileModelUsage: ModelUsage = {};
 
 		if (isJsonl) {
-			const otelUsage = extractCopilotCliSessionId(filePath) ? await getCopilotCliOtelUsage(filePath) : null;
-			const result = estimateTokensFromJsonlSession(content, otelUsage);
+			const exactUsage = extractCopilotCliSessionId(filePath) ? await getCopilotCliExactUsage(filePath) : null;
+			const result = estimateTokensFromJsonlSession(content, exactUsage);
 			// Prefer actualTokens (from session.shutdown modelMetrics) over estimated tokens,
 			// matching VS Code's logic: actualTokens > 0 ? actualTokens : estimatedTokens
 			tokens = result.actualTokens > 0 ? result.actualTokens : result.tokens;
