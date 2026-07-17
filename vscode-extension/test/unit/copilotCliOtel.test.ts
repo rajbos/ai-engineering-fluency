@@ -39,7 +39,7 @@ function createFakeSqlJs(rows: StoreRow[]): typeof initSqlJs {
 
 			run(_sql: string, _params?: unknown[]): void { /* no-op — tests only read */ }
 
-			exec(sql: string, params?: unknown[]): initSqlJs.QueryResult[] {
+			exec(sql: string, params?: unknown[]): initSqlJs.QueryExecResult[] {
 				if (sql.includes('assistant_usage_events') && params && params.length > 0) {
 					const sessionId = params[0] as string;
 					const matches = rows.filter(r => r.session_id === sessionId);
