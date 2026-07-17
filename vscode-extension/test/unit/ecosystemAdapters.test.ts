@@ -180,14 +180,14 @@ test('ClaudeCodeAdapter.getDisplayName: returns Claude Desktop for entrypoint cl
     }
 });
 
-test('ClaudeCodeAdapter.getDisplayName: returns Claude Code for entrypoint claude-cli', () => {
+test('ClaudeCodeAdapter.getDisplayName: returns Claude Code CLI for entrypoint claude-cli', () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-adapter-'));
     const projectsDir = path.join(dir, '.claude', 'projects', 'hash');
     fs.mkdirSync(projectsDir, { recursive: true });
     const file = path.join(projectsDir, 'session.jsonl');
     fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
     try {
-        assert.equal(claudeCodeAdapter.getDisplayName(file), 'Claude Code');
+        assert.equal(claudeCodeAdapter.getDisplayName(file), 'Claude Code CLI');
     } finally {
         fs.rmSync(dir, { recursive: true, force: true });
     }
