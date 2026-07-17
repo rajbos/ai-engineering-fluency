@@ -1,908 +1,9 @@
-"use strict";
-(() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __esm = (fn, res, err) => function __init() {
-    if (err) throw err[0];
-    try {
-      return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-    } catch (e7) {
-      throw err = [e7], e7;
-    }
-  };
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-
-  // node_modules/@lit/reactive-element/css-tag.js
-  var t, e, s, o, n, r, i, S, c;
-  var init_css_tag = __esm({
-    "node_modules/@lit/reactive-element/css-tag.js"() {
-      t = globalThis;
-      e = t.ShadowRoot && (void 0 === t.ShadyCSS || t.ShadyCSS.nativeShadow) && "adoptedStyleSheets" in Document.prototype && "replace" in CSSStyleSheet.prototype;
-      s = /* @__PURE__ */ Symbol();
-      o = /* @__PURE__ */ new WeakMap();
-      n = class {
-        constructor(t4, e7, o7) {
-          if (this._$cssResult$ = true, o7 !== s) throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");
-          this.cssText = t4, this.t = e7;
-        }
-        get styleSheet() {
-          let t4 = this.o;
-          const s4 = this.t;
-          if (e && void 0 === t4) {
-            const e7 = void 0 !== s4 && 1 === s4.length;
-            e7 && (t4 = o.get(s4)), void 0 === t4 && ((this.o = t4 = new CSSStyleSheet()).replaceSync(this.cssText), e7 && o.set(s4, t4));
-          }
-          return t4;
-        }
-        toString() {
-          return this.cssText;
-        }
-      };
-      r = (t4) => new n("string" == typeof t4 ? t4 : t4 + "", void 0, s);
-      i = (t4, ...e7) => {
-        const o7 = 1 === t4.length ? t4[0] : e7.reduce((e8, s4, o8) => e8 + ((t5) => {
-          if (true === t5._$cssResult$) return t5.cssText;
-          if ("number" == typeof t5) return t5;
-          throw Error("Value passed to 'css' function must be a 'css' function result: " + t5 + ". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.");
-        })(s4) + t4[o8 + 1], t4[0]);
-        return new n(o7, t4, s);
-      };
-      S = (s4, o7) => {
-        if (e) s4.adoptedStyleSheets = o7.map((t4) => t4 instanceof CSSStyleSheet ? t4 : t4.styleSheet);
-        else for (const e7 of o7) {
-          const o8 = document.createElement("style"), n5 = t.litNonce;
-          void 0 !== n5 && o8.setAttribute("nonce", n5), o8.textContent = e7.cssText, s4.appendChild(o8);
-        }
-      };
-      c = e ? (t4) => t4 : (t4) => t4 instanceof CSSStyleSheet ? ((t5) => {
-        let e7 = "";
-        for (const s4 of t5.cssRules) e7 += s4.cssText;
-        return r(e7);
-      })(t4) : t4;
-    }
-  });
-
-  // node_modules/@lit/reactive-element/reactive-element.js
-  var i2, e2, h, r2, o2, n2, a, c2, l, p, d, u, f, b, y;
-  var init_reactive_element = __esm({
-    "node_modules/@lit/reactive-element/reactive-element.js"() {
-      init_css_tag();
-      init_css_tag();
-      ({ is: i2, defineProperty: e2, getOwnPropertyDescriptor: h, getOwnPropertyNames: r2, getOwnPropertySymbols: o2, getPrototypeOf: n2 } = Object);
-      a = globalThis;
-      c2 = a.trustedTypes;
-      l = c2 ? c2.emptyScript : "";
-      p = a.reactiveElementPolyfillSupport;
-      d = (t4, s4) => t4;
-      u = { toAttribute(t4, s4) {
-        switch (s4) {
-          case Boolean:
-            t4 = t4 ? l : null;
-            break;
-          case Object:
-          case Array:
-            t4 = null == t4 ? t4 : JSON.stringify(t4);
-        }
-        return t4;
-      }, fromAttribute(t4, s4) {
-        let i6 = t4;
-        switch (s4) {
-          case Boolean:
-            i6 = null !== t4;
-            break;
-          case Number:
-            i6 = null === t4 ? null : Number(t4);
-            break;
-          case Object:
-          case Array:
-            try {
-              i6 = JSON.parse(t4);
-            } catch (t5) {
-              i6 = null;
-            }
-        }
-        return i6;
-      } };
-      f = (t4, s4) => !i2(t4, s4);
-      b = { attribute: true, type: String, converter: u, reflect: false, useDefault: false, hasChanged: f };
-      Symbol.metadata ?? (Symbol.metadata = /* @__PURE__ */ Symbol("metadata")), a.litPropertyMetadata ?? (a.litPropertyMetadata = /* @__PURE__ */ new WeakMap());
-      y = class extends HTMLElement {
-        static addInitializer(t4) {
-          this._$Ei(), (this.l ?? (this.l = [])).push(t4);
-        }
-        static get observedAttributes() {
-          return this.finalize(), this._$Eh && [...this._$Eh.keys()];
-        }
-        static createProperty(t4, s4 = b) {
-          if (s4.state && (s4.attribute = false), this._$Ei(), this.prototype.hasOwnProperty(t4) && ((s4 = Object.create(s4)).wrapped = true), this.elementProperties.set(t4, s4), !s4.noAccessor) {
-            const i6 = /* @__PURE__ */ Symbol(), h3 = this.getPropertyDescriptor(t4, i6, s4);
-            void 0 !== h3 && e2(this.prototype, t4, h3);
-          }
-        }
-        static getPropertyDescriptor(t4, s4, i6) {
-          const { get: e7, set: r6 } = h(this.prototype, t4) ?? { get() {
-            return this[s4];
-          }, set(t5) {
-            this[s4] = t5;
-          } };
-          return { get: e7, set(s5) {
-            const h3 = e7?.call(this);
-            r6?.call(this, s5), this.requestUpdate(t4, h3, i6);
-          }, configurable: true, enumerable: true };
-        }
-        static getPropertyOptions(t4) {
-          return this.elementProperties.get(t4) ?? b;
-        }
-        static _$Ei() {
-          if (this.hasOwnProperty(d("elementProperties"))) return;
-          const t4 = n2(this);
-          t4.finalize(), void 0 !== t4.l && (this.l = [...t4.l]), this.elementProperties = new Map(t4.elementProperties);
-        }
-        static finalize() {
-          if (this.hasOwnProperty(d("finalized"))) return;
-          if (this.finalized = true, this._$Ei(), this.hasOwnProperty(d("properties"))) {
-            const t5 = this.properties, s4 = [...r2(t5), ...o2(t5)];
-            for (const i6 of s4) this.createProperty(i6, t5[i6]);
-          }
-          const t4 = this[Symbol.metadata];
-          if (null !== t4) {
-            const s4 = litPropertyMetadata.get(t4);
-            if (void 0 !== s4) for (const [t5, i6] of s4) this.elementProperties.set(t5, i6);
-          }
-          this._$Eh = /* @__PURE__ */ new Map();
-          for (const [t5, s4] of this.elementProperties) {
-            const i6 = this._$Eu(t5, s4);
-            void 0 !== i6 && this._$Eh.set(i6, t5);
-          }
-          this.elementStyles = this.finalizeStyles(this.styles);
-        }
-        static finalizeStyles(s4) {
-          const i6 = [];
-          if (Array.isArray(s4)) {
-            const e7 = new Set(s4.flat(1 / 0).reverse());
-            for (const s5 of e7) i6.unshift(c(s5));
-          } else void 0 !== s4 && i6.push(c(s4));
-          return i6;
-        }
-        static _$Eu(t4, s4) {
-          const i6 = s4.attribute;
-          return false === i6 ? void 0 : "string" == typeof i6 ? i6 : "string" == typeof t4 ? t4.toLowerCase() : void 0;
-        }
-        constructor() {
-          super(), this._$Ep = void 0, this.isUpdatePending = false, this.hasUpdated = false, this._$Em = null, this._$Ev();
-        }
-        _$Ev() {
-          this._$ES = new Promise((t4) => this.enableUpdating = t4), this._$AL = /* @__PURE__ */ new Map(), this._$E_(), this.requestUpdate(), this.constructor.l?.forEach((t4) => t4(this));
-        }
-        addController(t4) {
-          (this._$EO ?? (this._$EO = /* @__PURE__ */ new Set())).add(t4), void 0 !== this.renderRoot && this.isConnected && t4.hostConnected?.();
-        }
-        removeController(t4) {
-          this._$EO?.delete(t4);
-        }
-        _$E_() {
-          const t4 = /* @__PURE__ */ new Map(), s4 = this.constructor.elementProperties;
-          for (const i6 of s4.keys()) this.hasOwnProperty(i6) && (t4.set(i6, this[i6]), delete this[i6]);
-          t4.size > 0 && (this._$Ep = t4);
-        }
-        createRenderRoot() {
-          const t4 = this.shadowRoot ?? this.attachShadow(this.constructor.shadowRootOptions);
-          return S(t4, this.constructor.elementStyles), t4;
-        }
-        connectedCallback() {
-          this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this.enableUpdating(true), this._$EO?.forEach((t4) => t4.hostConnected?.());
-        }
-        enableUpdating(t4) {
-        }
-        disconnectedCallback() {
-          this._$EO?.forEach((t4) => t4.hostDisconnected?.());
-        }
-        attributeChangedCallback(t4, s4, i6) {
-          this._$AK(t4, i6);
-        }
-        _$ET(t4, s4) {
-          const i6 = this.constructor.elementProperties.get(t4), e7 = this.constructor._$Eu(t4, i6);
-          if (void 0 !== e7 && true === i6.reflect) {
-            const h3 = (void 0 !== i6.converter?.toAttribute ? i6.converter : u).toAttribute(s4, i6.type);
-            this._$Em = t4, null == h3 ? this.removeAttribute(e7) : this.setAttribute(e7, h3), this._$Em = null;
-          }
-        }
-        _$AK(t4, s4) {
-          const i6 = this.constructor, e7 = i6._$Eh.get(t4);
-          if (void 0 !== e7 && this._$Em !== e7) {
-            const t5 = i6.getPropertyOptions(e7), h3 = "function" == typeof t5.converter ? { fromAttribute: t5.converter } : void 0 !== t5.converter?.fromAttribute ? t5.converter : u;
-            this._$Em = e7;
-            const r6 = h3.fromAttribute(s4, t5.type);
-            this[e7] = r6 ?? this._$Ej?.get(e7) ?? r6, this._$Em = null;
-          }
-        }
-        requestUpdate(t4, s4, i6, e7 = false, h3) {
-          if (void 0 !== t4) {
-            const r6 = this.constructor;
-            if (false === e7 && (h3 = this[t4]), i6 ?? (i6 = r6.getPropertyOptions(t4)), !((i6.hasChanged ?? f)(h3, s4) || i6.useDefault && i6.reflect && h3 === this._$Ej?.get(t4) && !this.hasAttribute(r6._$Eu(t4, i6)))) return;
-            this.C(t4, s4, i6);
-          }
-          false === this.isUpdatePending && (this._$ES = this._$EP());
-        }
-        C(t4, s4, { useDefault: i6, reflect: e7, wrapped: h3 }, r6) {
-          i6 && !(this._$Ej ?? (this._$Ej = /* @__PURE__ */ new Map())).has(t4) && (this._$Ej.set(t4, r6 ?? s4 ?? this[t4]), true !== h3 || void 0 !== r6) || (this._$AL.has(t4) || (this.hasUpdated || i6 || (s4 = void 0), this._$AL.set(t4, s4)), true === e7 && this._$Em !== t4 && (this._$Eq ?? (this._$Eq = /* @__PURE__ */ new Set())).add(t4));
-        }
-        async _$EP() {
-          this.isUpdatePending = true;
-          try {
-            await this._$ES;
-          } catch (t5) {
-            Promise.reject(t5);
-          }
-          const t4 = this.scheduleUpdate();
-          return null != t4 && await t4, !this.isUpdatePending;
-        }
-        scheduleUpdate() {
-          return this.performUpdate();
-        }
-        performUpdate() {
-          if (!this.isUpdatePending) return;
-          if (!this.hasUpdated) {
-            if (this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this._$Ep) {
-              for (const [t6, s5] of this._$Ep) this[t6] = s5;
-              this._$Ep = void 0;
-            }
-            const t5 = this.constructor.elementProperties;
-            if (t5.size > 0) for (const [s5, i6] of t5) {
-              const { wrapped: t6 } = i6, e7 = this[s5];
-              true !== t6 || this._$AL.has(s5) || void 0 === e7 || this.C(s5, void 0, i6, e7);
-            }
-          }
-          let t4 = false;
-          const s4 = this._$AL;
-          try {
-            t4 = this.shouldUpdate(s4), t4 ? (this.willUpdate(s4), this._$EO?.forEach((t5) => t5.hostUpdate?.()), this.update(s4)) : this._$EM();
-          } catch (s5) {
-            throw t4 = false, this._$EM(), s5;
-          }
-          t4 && this._$AE(s4);
-        }
-        willUpdate(t4) {
-        }
-        _$AE(t4) {
-          this._$EO?.forEach((t5) => t5.hostUpdated?.()), this.hasUpdated || (this.hasUpdated = true, this.firstUpdated(t4)), this.updated(t4);
-        }
-        _$EM() {
-          this._$AL = /* @__PURE__ */ new Map(), this.isUpdatePending = false;
-        }
-        get updateComplete() {
-          return this.getUpdateComplete();
-        }
-        getUpdateComplete() {
-          return this._$ES;
-        }
-        shouldUpdate(t4) {
-          return true;
-        }
-        update(t4) {
-          this._$Eq && (this._$Eq = this._$Eq.forEach((t5) => this._$ET(t5, this[t5]))), this._$EM();
-        }
-        updated(t4) {
-        }
-        firstUpdated(t4) {
-        }
-      };
-      y.elementStyles = [], y.shadowRootOptions = { mode: "open" }, y[d("elementProperties")] = /* @__PURE__ */ new Map(), y[d("finalized")] = /* @__PURE__ */ new Map(), p?.({ ReactiveElement: y }), (a.reactiveElementVersions ?? (a.reactiveElementVersions = [])).push("2.1.2");
-    }
-  });
-
-  // node_modules/lit-html/lit-html.js
-  function V(t4, i6) {
-    if (!u2(t4) || !t4.hasOwnProperty("raw")) throw Error("invalid template strings array");
-    return void 0 !== e3 ? e3.createHTML(i6) : i6;
-  }
-  function M(t4, i6, s4 = t4, e7) {
-    if (i6 === E) return i6;
-    let h3 = void 0 !== e7 ? s4._$Co?.[e7] : s4._$Cl;
-    const o7 = a2(i6) ? void 0 : i6._$litDirective$;
-    return h3?.constructor !== o7 && (h3?._$AO?.(false), void 0 === o7 ? h3 = void 0 : (h3 = new o7(t4), h3._$AT(t4, s4, e7)), void 0 !== e7 ? (s4._$Co ?? (s4._$Co = []))[e7] = h3 : s4._$Cl = h3), void 0 !== h3 && (i6 = M(t4, h3._$AS(t4, i6.values), h3, e7)), i6;
-  }
-  var t2, i3, s2, e3, h2, o3, n3, r3, l2, c3, a2, u2, d2, f2, v, _, m, p2, g, $, y2, x, b2, w, T, E, A, C, P, N, S2, R, k, H, I, L, z, Z, B, D;
-  var init_lit_html = __esm({
-    "node_modules/lit-html/lit-html.js"() {
-      t2 = globalThis;
-      i3 = (t4) => t4;
-      s2 = t2.trustedTypes;
-      e3 = s2 ? s2.createPolicy("lit-html", { createHTML: (t4) => t4 }) : void 0;
-      h2 = "$lit$";
-      o3 = `lit$${Math.random().toFixed(9).slice(2)}$`;
-      n3 = "?" + o3;
-      r3 = `<${n3}>`;
-      l2 = document;
-      c3 = () => l2.createComment("");
-      a2 = (t4) => null === t4 || "object" != typeof t4 && "function" != typeof t4;
-      u2 = Array.isArray;
-      d2 = (t4) => u2(t4) || "function" == typeof t4?.[Symbol.iterator];
-      f2 = "[ 	\n\f\r]";
-      v = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g;
-      _ = /-->/g;
-      m = />/g;
-      p2 = RegExp(`>|${f2}(?:([^\\s"'>=/]+)(${f2}*=${f2}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g");
-      g = /'/g;
-      $ = /"/g;
-      y2 = /^(?:script|style|textarea|title)$/i;
-      x = (t4) => (i6, ...s4) => ({ _$litType$: t4, strings: i6, values: s4 });
-      b2 = x(1);
-      w = x(2);
-      T = x(3);
-      E = /* @__PURE__ */ Symbol.for("lit-noChange");
-      A = /* @__PURE__ */ Symbol.for("lit-nothing");
-      C = /* @__PURE__ */ new WeakMap();
-      P = l2.createTreeWalker(l2, 129);
-      N = (t4, i6) => {
-        const s4 = t4.length - 1, e7 = [];
-        let n5, l3 = 2 === i6 ? "<svg>" : 3 === i6 ? "<math>" : "", c4 = v;
-        for (let i7 = 0; i7 < s4; i7++) {
-          const s5 = t4[i7];
-          let a3, u3, d3 = -1, f3 = 0;
-          for (; f3 < s5.length && (c4.lastIndex = f3, u3 = c4.exec(s5), null !== u3); ) f3 = c4.lastIndex, c4 === v ? "!--" === u3[1] ? c4 = _ : void 0 !== u3[1] ? c4 = m : void 0 !== u3[2] ? (y2.test(u3[2]) && (n5 = RegExp("</" + u3[2], "g")), c4 = p2) : void 0 !== u3[3] && (c4 = p2) : c4 === p2 ? ">" === u3[0] ? (c4 = n5 ?? v, d3 = -1) : void 0 === u3[1] ? d3 = -2 : (d3 = c4.lastIndex - u3[2].length, a3 = u3[1], c4 = void 0 === u3[3] ? p2 : '"' === u3[3] ? $ : g) : c4 === $ || c4 === g ? c4 = p2 : c4 === _ || c4 === m ? c4 = v : (c4 = p2, n5 = void 0);
-          const x2 = c4 === p2 && t4[i7 + 1].startsWith("/>") ? " " : "";
-          l3 += c4 === v ? s5 + r3 : d3 >= 0 ? (e7.push(a3), s5.slice(0, d3) + h2 + s5.slice(d3) + o3 + x2) : s5 + o3 + (-2 === d3 ? i7 : x2);
-        }
-        return [V(t4, l3 + (t4[s4] || "<?>") + (2 === i6 ? "</svg>" : 3 === i6 ? "</math>" : "")), e7];
-      };
-      S2 = class _S {
-        constructor({ strings: t4, _$litType$: i6 }, e7) {
-          let r6;
-          this.parts = [];
-          let l3 = 0, a3 = 0;
-          const u3 = t4.length - 1, d3 = this.parts, [f3, v2] = N(t4, i6);
-          if (this.el = _S.createElement(f3, e7), P.currentNode = this.el.content, 2 === i6 || 3 === i6) {
-            const t5 = this.el.content.firstChild;
-            t5.replaceWith(...t5.childNodes);
-          }
-          for (; null !== (r6 = P.nextNode()) && d3.length < u3; ) {
-            if (1 === r6.nodeType) {
-              if (r6.hasAttributes()) for (const t5 of r6.getAttributeNames()) if (t5.endsWith(h2)) {
-                const i7 = v2[a3++], s4 = r6.getAttribute(t5).split(o3), e8 = /([.?@])?(.*)/.exec(i7);
-                d3.push({ type: 1, index: l3, name: e8[2], strings: s4, ctor: "." === e8[1] ? I : "?" === e8[1] ? L : "@" === e8[1] ? z : H }), r6.removeAttribute(t5);
-              } else t5.startsWith(o3) && (d3.push({ type: 6, index: l3 }), r6.removeAttribute(t5));
-              if (y2.test(r6.tagName)) {
-                const t5 = r6.textContent.split(o3), i7 = t5.length - 1;
-                if (i7 > 0) {
-                  r6.textContent = s2 ? s2.emptyScript : "";
-                  for (let s4 = 0; s4 < i7; s4++) r6.append(t5[s4], c3()), P.nextNode(), d3.push({ type: 2, index: ++l3 });
-                  r6.append(t5[i7], c3());
-                }
-              }
-            } else if (8 === r6.nodeType) if (r6.data === n3) d3.push({ type: 2, index: l3 });
-            else {
-              let t5 = -1;
-              for (; -1 !== (t5 = r6.data.indexOf(o3, t5 + 1)); ) d3.push({ type: 7, index: l3 }), t5 += o3.length - 1;
-            }
-            l3++;
-          }
-        }
-        static createElement(t4, i6) {
-          const s4 = l2.createElement("template");
-          return s4.innerHTML = t4, s4;
-        }
-      };
-      R = class {
-        constructor(t4, i6) {
-          this._$AV = [], this._$AN = void 0, this._$AD = t4, this._$AM = i6;
-        }
-        get parentNode() {
-          return this._$AM.parentNode;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        u(t4) {
-          const { el: { content: i6 }, parts: s4 } = this._$AD, e7 = (t4?.creationScope ?? l2).importNode(i6, true);
-          P.currentNode = e7;
-          let h3 = P.nextNode(), o7 = 0, n5 = 0, r6 = s4[0];
-          for (; void 0 !== r6; ) {
-            if (o7 === r6.index) {
-              let i7;
-              2 === r6.type ? i7 = new k(h3, h3.nextSibling, this, t4) : 1 === r6.type ? i7 = new r6.ctor(h3, r6.name, r6.strings, this, t4) : 6 === r6.type && (i7 = new Z(h3, this, t4)), this._$AV.push(i7), r6 = s4[++n5];
-            }
-            o7 !== r6?.index && (h3 = P.nextNode(), o7++);
-          }
-          return P.currentNode = l2, e7;
-        }
-        p(t4) {
-          let i6 = 0;
-          for (const s4 of this._$AV) void 0 !== s4 && (void 0 !== s4.strings ? (s4._$AI(t4, s4, i6), i6 += s4.strings.length - 2) : s4._$AI(t4[i6])), i6++;
-        }
-      };
-      k = class _k {
-        get _$AU() {
-          return this._$AM?._$AU ?? this._$Cv;
-        }
-        constructor(t4, i6, s4, e7) {
-          this.type = 2, this._$AH = A, this._$AN = void 0, this._$AA = t4, this._$AB = i6, this._$AM = s4, this.options = e7, this._$Cv = e7?.isConnected ?? true;
-        }
-        get parentNode() {
-          let t4 = this._$AA.parentNode;
-          const i6 = this._$AM;
-          return void 0 !== i6 && 11 === t4?.nodeType && (t4 = i6.parentNode), t4;
-        }
-        get startNode() {
-          return this._$AA;
-        }
-        get endNode() {
-          return this._$AB;
-        }
-        _$AI(t4, i6 = this) {
-          t4 = M(this, t4, i6), a2(t4) ? t4 === A || null == t4 || "" === t4 ? (this._$AH !== A && this._$AR(), this._$AH = A) : t4 !== this._$AH && t4 !== E && this._(t4) : void 0 !== t4._$litType$ ? this.$(t4) : void 0 !== t4.nodeType ? this.T(t4) : d2(t4) ? this.k(t4) : this._(t4);
-        }
-        O(t4) {
-          return this._$AA.parentNode.insertBefore(t4, this._$AB);
-        }
-        T(t4) {
-          this._$AH !== t4 && (this._$AR(), this._$AH = this.O(t4));
-        }
-        _(t4) {
-          this._$AH !== A && a2(this._$AH) ? this._$AA.nextSibling.data = t4 : this.T(l2.createTextNode(t4)), this._$AH = t4;
-        }
-        $(t4) {
-          const { values: i6, _$litType$: s4 } = t4, e7 = "number" == typeof s4 ? this._$AC(t4) : (void 0 === s4.el && (s4.el = S2.createElement(V(s4.h, s4.h[0]), this.options)), s4);
-          if (this._$AH?._$AD === e7) this._$AH.p(i6);
-          else {
-            const t5 = new R(e7, this), s5 = t5.u(this.options);
-            t5.p(i6), this.T(s5), this._$AH = t5;
-          }
-        }
-        _$AC(t4) {
-          let i6 = C.get(t4.strings);
-          return void 0 === i6 && C.set(t4.strings, i6 = new S2(t4)), i6;
-        }
-        k(t4) {
-          u2(this._$AH) || (this._$AH = [], this._$AR());
-          const i6 = this._$AH;
-          let s4, e7 = 0;
-          for (const h3 of t4) e7 === i6.length ? i6.push(s4 = new _k(this.O(c3()), this.O(c3()), this, this.options)) : s4 = i6[e7], s4._$AI(h3), e7++;
-          e7 < i6.length && (this._$AR(s4 && s4._$AB.nextSibling, e7), i6.length = e7);
-        }
-        _$AR(t4 = this._$AA.nextSibling, s4) {
-          for (this._$AP?.(false, true, s4); t4 !== this._$AB; ) {
-            const s5 = i3(t4).nextSibling;
-            i3(t4).remove(), t4 = s5;
-          }
-        }
-        setConnected(t4) {
-          void 0 === this._$AM && (this._$Cv = t4, this._$AP?.(t4));
-        }
-      };
-      H = class {
-        get tagName() {
-          return this.element.tagName;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        constructor(t4, i6, s4, e7, h3) {
-          this.type = 1, this._$AH = A, this._$AN = void 0, this.element = t4, this.name = i6, this._$AM = e7, this.options = h3, s4.length > 2 || "" !== s4[0] || "" !== s4[1] ? (this._$AH = Array(s4.length - 1).fill(new String()), this.strings = s4) : this._$AH = A;
-        }
-        _$AI(t4, i6 = this, s4, e7) {
-          const h3 = this.strings;
-          let o7 = false;
-          if (void 0 === h3) t4 = M(this, t4, i6, 0), o7 = !a2(t4) || t4 !== this._$AH && t4 !== E, o7 && (this._$AH = t4);
-          else {
-            const e8 = t4;
-            let n5, r6;
-            for (t4 = h3[0], n5 = 0; n5 < h3.length - 1; n5++) r6 = M(this, e8[s4 + n5], i6, n5), r6 === E && (r6 = this._$AH[n5]), o7 || (o7 = !a2(r6) || r6 !== this._$AH[n5]), r6 === A ? t4 = A : t4 !== A && (t4 += (r6 ?? "") + h3[n5 + 1]), this._$AH[n5] = r6;
-          }
-          o7 && !e7 && this.j(t4);
-        }
-        j(t4) {
-          t4 === A ? this.element.removeAttribute(this.name) : this.element.setAttribute(this.name, t4 ?? "");
-        }
-      };
-      I = class extends H {
-        constructor() {
-          super(...arguments), this.type = 3;
-        }
-        j(t4) {
-          this.element[this.name] = t4 === A ? void 0 : t4;
-        }
-      };
-      L = class extends H {
-        constructor() {
-          super(...arguments), this.type = 4;
-        }
-        j(t4) {
-          this.element.toggleAttribute(this.name, !!t4 && t4 !== A);
-        }
-      };
-      z = class extends H {
-        constructor(t4, i6, s4, e7, h3) {
-          super(t4, i6, s4, e7, h3), this.type = 5;
-        }
-        _$AI(t4, i6 = this) {
-          if ((t4 = M(this, t4, i6, 0) ?? A) === E) return;
-          const s4 = this._$AH, e7 = t4 === A && s4 !== A || t4.capture !== s4.capture || t4.once !== s4.once || t4.passive !== s4.passive, h3 = t4 !== A && (s4 === A || e7);
-          e7 && this.element.removeEventListener(this.name, this, s4), h3 && this.element.addEventListener(this.name, this, t4), this._$AH = t4;
-        }
-        handleEvent(t4) {
-          "function" == typeof this._$AH ? this._$AH.call(this.options?.host ?? this.element, t4) : this._$AH.handleEvent(t4);
-        }
-      };
-      Z = class {
-        constructor(t4, i6, s4) {
-          this.element = t4, this.type = 6, this._$AN = void 0, this._$AM = i6, this.options = s4;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        _$AI(t4) {
-          M(this, t4);
-        }
-      };
-      B = t2.litHtmlPolyfillSupport;
-      B?.(S2, k), (t2.litHtmlVersions ?? (t2.litHtmlVersions = [])).push("3.3.3");
-      D = (t4, i6, s4) => {
-        const e7 = s4?.renderBefore ?? i6;
-        let h3 = e7._$litPart$;
-        if (void 0 === h3) {
-          const t5 = s4?.renderBefore ?? null;
-          e7._$litPart$ = h3 = new k(i6.insertBefore(c3(), t5), t5, void 0, s4 ?? {});
-        }
-        return h3._$AI(t4), h3;
-      };
-    }
-  });
-
-  // node_modules/lit-element/lit-element.js
-  var s3, i4, o4;
-  var init_lit_element = __esm({
-    "node_modules/lit-element/lit-element.js"() {
-      init_reactive_element();
-      init_reactive_element();
-      init_lit_html();
-      init_lit_html();
-      s3 = globalThis;
-      i4 = class extends y {
-        constructor() {
-          super(...arguments), this.renderOptions = { host: this }, this._$Do = void 0;
-        }
-        createRenderRoot() {
-          var _a;
-          const t4 = super.createRenderRoot();
-          return (_a = this.renderOptions).renderBefore ?? (_a.renderBefore = t4.firstChild), t4;
-        }
-        update(t4) {
-          const r6 = this.render();
-          this.hasUpdated || (this.renderOptions.isConnected = this.isConnected), super.update(t4), this._$Do = D(r6, this.renderRoot, this.renderOptions);
-        }
-        connectedCallback() {
-          super.connectedCallback(), this._$Do?.setConnected(true);
-        }
-        disconnectedCallback() {
-          super.disconnectedCallback(), this._$Do?.setConnected(false);
-        }
-        render() {
-          return E;
-        }
-      };
-      i4._$litElement$ = true, i4["finalized"] = true, s3.litElementHydrateSupport?.({ LitElement: i4 });
-      o4 = s3.litElementPolyfillSupport;
-      o4?.({ LitElement: i4 });
-      (s3.litElementVersions ?? (s3.litElementVersions = [])).push("4.2.2");
-    }
-  });
-
-  // node_modules/lit-html/is-server.js
-  var init_is_server = __esm({
-    "node_modules/lit-html/is-server.js"() {
-    }
-  });
-
-  // node_modules/lit/index.js
-  var init_lit = __esm({
-    "node_modules/lit/index.js"() {
-      init_reactive_element();
-      init_lit_html();
-      init_lit_element();
-      init_is_server();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/custom-element.js
-  var init_custom_element = __esm({
-    "node_modules/@lit/reactive-element/decorators/custom-element.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/property.js
-  function n4(t4) {
-    return (e7, o7) => "object" == typeof o7 ? r4(t4, e7, o7) : ((t5, e8, o8) => {
-      const r6 = e8.hasOwnProperty(o8);
-      return e8.constructor.createProperty(o8, t5), r6 ? Object.getOwnPropertyDescriptor(e8, o8) : void 0;
-    })(t4, e7, o7);
-  }
-  var o5, r4;
-  var init_property = __esm({
-    "node_modules/@lit/reactive-element/decorators/property.js"() {
-      init_reactive_element();
-      o5 = { attribute: true, type: String, converter: u, reflect: false, hasChanged: f };
-      r4 = (t4 = o5, e7, r6) => {
-        const { kind: n5, metadata: i6 } = r6;
-        let s4 = globalThis.litPropertyMetadata.get(i6);
-        if (void 0 === s4 && globalThis.litPropertyMetadata.set(i6, s4 = /* @__PURE__ */ new Map()), "setter" === n5 && ((t4 = Object.create(t4)).wrapped = true), s4.set(r6.name, t4), "accessor" === n5) {
-          const { name: o7 } = r6;
-          return { set(r7) {
-            const n6 = e7.get.call(this);
-            e7.set.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
-          }, init(e8) {
-            return void 0 !== e8 && this.C(o7, void 0, t4, e8), e8;
-          } };
-        }
-        if ("setter" === n5) {
-          const { name: o7 } = r6;
-          return function(r7) {
-            const n6 = this[o7];
-            e7.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
-          };
-        }
-        throw Error("Unsupported decorator location: " + n5);
-      };
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/state.js
-  function r5(r6) {
-    return n4({ ...r6, state: true, attribute: false });
-  }
-  var init_state = __esm({
-    "node_modules/@lit/reactive-element/decorators/state.js"() {
-      init_property();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/event-options.js
-  var init_event_options = __esm({
-    "node_modules/@lit/reactive-element/decorators/event-options.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/base.js
-  var init_base = __esm({
-    "node_modules/@lit/reactive-element/decorators/base.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query.js
-  var init_query = __esm({
-    "node_modules/@lit/reactive-element/decorators/query.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-all.js
-  var init_query_all = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-all.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-async.js
-  var init_query_async = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-async.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-assigned-elements.js
-  var init_query_assigned_elements = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-assigned-elements.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js
-  var init_query_assigned_nodes = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/lit/decorators.js
-  var init_decorators = __esm({
-    "node_modules/lit/decorators.js"() {
-      init_custom_element();
-      init_property();
-      init_state();
-      init_event_options();
-      init_query();
-      init_query_all();
-      init_query_async();
-      init_query_assigned_elements();
-      init_query_assigned_nodes();
-    }
-  });
-
-  // node_modules/lit-html/directive.js
-  var t3, e5, i5;
-  var init_directive = __esm({
-    "node_modules/lit-html/directive.js"() {
-      t3 = { ATTRIBUTE: 1, CHILD: 2, PROPERTY: 3, BOOLEAN_ATTRIBUTE: 4, EVENT: 5, ELEMENT: 6 };
-      e5 = (t4) => (...e7) => ({ _$litDirective$: t4, values: e7 });
-      i5 = class {
-        constructor(t4) {
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        _$AT(t4, e7, i6) {
-          this._$Ct = t4, this._$AM = e7, this._$Ci = i6;
-        }
-        _$AS(t4, e7) {
-          return this.update(t4, e7);
-        }
-        update(t4, e7) {
-          return this.render(...e7);
-        }
-      };
-    }
-  });
-
-  // node_modules/lit-html/directives/class-map.js
-  var e6;
-  var init_class_map = __esm({
-    "node_modules/lit-html/directives/class-map.js"() {
-      init_lit_html();
-      init_directive();
-      e6 = e5(class extends i5 {
-        constructor(t4) {
-          if (super(t4), t4.type !== t3.ATTRIBUTE || "class" !== t4.name || t4.strings?.length > 2) throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.");
-        }
-        render(t4) {
-          return " " + Object.keys(t4).filter((s4) => t4[s4]).join(" ") + " ";
-        }
-        update(s4, [i6]) {
-          if (void 0 === this.st) {
-            this.st = /* @__PURE__ */ new Set(), void 0 !== s4.strings && (this.nt = new Set(s4.strings.join(" ").split(/\s/).filter((t4) => "" !== t4)));
-            for (const t4 in i6) i6[t4] && !this.nt?.has(t4) && this.st.add(t4);
-            return this.render(i6);
-          }
-          const r6 = s4.element.classList;
-          for (const t4 of this.st) t4 in i6 || (r6.remove(t4), this.st.delete(t4));
-          for (const t4 in i6) {
-            const s5 = !!i6[t4];
-            s5 === this.st.has(t4) || this.nt?.has(t4) || (s5 ? (r6.add(t4), this.st.add(t4)) : (r6.remove(t4), this.st.delete(t4)));
-          }
-          return E;
-        }
-      });
-    }
-  });
-
-  // node_modules/lit/directives/class-map.js
-  var init_class_map2 = __esm({
-    "node_modules/lit/directives/class-map.js"() {
-      init_class_map();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/VscElement.js
-  var VERSION, CONFIG_KEY, warn, VscElement, customElement;
-  var init_VscElement = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/VscElement.js"() {
-      init_lit();
-      VERSION = "2.5.1";
-      CONFIG_KEY = "__vscodeElements_disableRegistryWarning__";
-      warn = (message, componentInstance) => {
-        const prefix = "[VSCode Elements] ";
-        if (componentInstance) {
-          console.warn(`${prefix}${message}
-%o`, componentInstance);
-        } else {
-          console.warn(`${message}
-%o`, componentInstance);
-        }
-      };
-      VscElement = class extends i4 {
-        /** VSCode Elements version */
-        get version() {
-          return VERSION;
-        }
-        warn(message) {
-          warn(message, this);
-        }
-      };
-      customElement = (tagName) => {
-        return (classOrTarget) => {
-          const customElementClass = customElements.get(tagName);
-          if (!customElementClass) {
-            customElements.define(tagName, classOrTarget);
-            return;
-          }
-          if (CONFIG_KEY in window) {
-            return;
-          }
-          const el2 = document.createElement(tagName);
-          const anotherVersion = el2?.version;
-          let message = "";
-          if (!anotherVersion) {
-            message += "is already registered by an unknown custom element handler class.";
-          } else if (anotherVersion !== VERSION) {
-            message += "is already registered by a different version of VSCode Elements. ";
-            message += `This version is "${VERSION}", while the other one is "${anotherVersion}".`;
-          } else {
-            message += `is already registered by the same version of VSCode Elements (${VERSION}).`;
-          }
-          warn(`The custom element "${tagName}" ${message}
-To suppress this warning, set window.${CONFIG_KEY} to true`);
-        };
-      };
-    }
-  });
-
-  // node_modules/lit-html/directives/if-defined.js
-  var o6;
-  var init_if_defined = __esm({
-    "node_modules/lit-html/directives/if-defined.js"() {
-      init_lit_html();
-      o6 = (o7) => o7 ?? A;
-    }
-  });
-
-  // node_modules/lit/directives/if-defined.js
-  var init_if_defined2 = __esm({
-    "node_modules/lit/directives/if-defined.js"() {
-      init_if_defined();
-    }
-  });
-
-  // node_modules/lit/directive.js
-  var init_directive2 = __esm({
-    "node_modules/lit/directive.js"() {
-      init_directive();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/style-property-map.js
-  var StylePropertyMap, stylePropertyMap;
-  var init_style_property_map = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/style-property-map.js"() {
-      init_lit();
-      init_directive2();
-      StylePropertyMap = class extends i5 {
-        constructor(partInfo) {
-          super(partInfo);
-          this._prevProperties = {};
-          if (partInfo.type !== t3.PROPERTY || partInfo.name !== "style") {
-            throw new Error("The `stylePropertyMap` directive must be used in the `style` property");
-          }
-        }
-        update(part, [styleProps]) {
-          Object.entries(styleProps).forEach(([key, val]) => {
-            if (this._prevProperties[key] !== val) {
-              if (key.startsWith("--")) {
-                part.element.style.setProperty(key, val);
-              } else {
-                part.element.style[key] = val;
-              }
-              this._prevProperties[key] = val;
-            }
-          });
-          return E;
-        }
-        render(_styleProps) {
-          return E;
-        }
-      };
-      stylePropertyMap = e5(StylePropertyMap);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/default.styles.js
-  var default_styles_default;
-  var init_default_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/default.styles.js"() {
-      init_lit();
-      default_styles_default = i`
+"use strict";(()=>{var Po=Object.defineProperty;var u=(e,t,o)=>()=>{if(o)throw o[0];try{return e&&(t=e(e=0)),t}catch(n){throw o=[n],n}};var me=(e,t)=>{for(var o in t)Po(e,o,{get:t[o],enumerable:!0})};var $t,_t,Wt,_e,ct,W,P,Ae,Kt,Gt=u(()=>{$t=globalThis,_t=$t.ShadowRoot&&($t.ShadyCSS===void 0||$t.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,Wt=Symbol(),_e=new WeakMap,ct=class{constructor(t,o,n){if(this._$cssResult$=!0,n!==Wt)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=o}get styleSheet(){let t=this.o,o=this.t;if(_t&&t===void 0){let n=o!==void 0&&o.length===1;n&&(t=_e.get(o)),t===void 0&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),n&&_e.set(o,t))}return t}toString(){return this.cssText}},W=e=>new ct(typeof e=="string"?e:e+"",void 0,Wt),P=(e,...t)=>{let o=e.length===1?e[0]:t.reduce((n,r,s)=>n+(a=>{if(a._$cssResult$===!0)return a.cssText;if(typeof a=="number")return a;throw Error("Value passed to 'css' function must be a 'css' function result: "+a+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(r)+e[s+1],e[0]);return new ct(o,e,Wt)},Ae=(e,t)=>{if(_t)e.adoptedStyleSheets=t.map(o=>o instanceof CSSStyleSheet?o:o.styleSheet);else for(let o of t){let n=document.createElement("style"),r=$t.litNonce;r!==void 0&&n.setAttribute("nonce",r),n.textContent=o.cssText,e.appendChild(n)}},Kt=_t?e=>e:e=>e instanceof CSSStyleSheet?(t=>{let o="";for(let n of t.cssRules)o+=n.cssText;return W(o)})(e):e});var zo,qo,Wo,Ko,Go,Yo,O,Me,Jo,Xo,dt,lt,At,De,B,pt=u(()=>{Gt();Gt();({is:zo,defineProperty:qo,getOwnPropertyDescriptor:Wo,getOwnPropertyNames:Ko,getOwnPropertySymbols:Go,getPrototypeOf:Yo}=Object),O=globalThis,Me=O.trustedTypes,Jo=Me?Me.emptyScript:"",Xo=O.reactiveElementPolyfillSupport,dt=(e,t)=>e,lt={toAttribute(e,t){switch(t){case Boolean:e=e?Jo:null;break;case Object:case Array:e=e==null?e:JSON.stringify(e)}return e},fromAttribute(e,t){let o=e;switch(t){case Boolean:o=e!==null;break;case Number:o=e===null?null:Number(e);break;case Object:case Array:try{o=JSON.parse(e)}catch{o=null}}return o}},At=(e,t)=>!zo(e,t),De={attribute:!0,type:String,converter:lt,reflect:!1,useDefault:!1,hasChanged:At};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),O.litPropertyMetadata??(O.litPropertyMetadata=new WeakMap);B=class extends HTMLElement{static addInitializer(t){this._$Ei(),(this.l??(this.l=[])).push(t)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(t,o=De){if(o.state&&(o.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(t)&&((o=Object.create(o)).wrapped=!0),this.elementProperties.set(t,o),!o.noAccessor){let n=Symbol(),r=this.getPropertyDescriptor(t,n,o);r!==void 0&&qo(this.prototype,t,r)}}static getPropertyDescriptor(t,o,n){let{get:r,set:s}=Wo(this.prototype,t)??{get(){return this[o]},set(a){this[o]=a}};return{get:r,set(a){let i=r?.call(this);s?.call(this,a),this.requestUpdate(t,i,n)},configurable:!0,enumerable:!0}}static getPropertyOptions(t){return this.elementProperties.get(t)??De}static _$Ei(){if(this.hasOwnProperty(dt("elementProperties")))return;let t=Yo(this);t.finalize(),t.l!==void 0&&(this.l=[...t.l]),this.elementProperties=new Map(t.elementProperties)}static finalize(){if(this.hasOwnProperty(dt("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(dt("properties"))){let o=this.properties,n=[...Ko(o),...Go(o)];for(let r of n)this.createProperty(r,o[r])}let t=this[Symbol.metadata];if(t!==null){let o=litPropertyMetadata.get(t);if(o!==void 0)for(let[n,r]of o)this.elementProperties.set(n,r)}this._$Eh=new Map;for(let[o,n]of this.elementProperties){let r=this._$Eu(o,n);r!==void 0&&this._$Eh.set(r,o)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(t){let o=[];if(Array.isArray(t)){let n=new Set(t.flat(1/0).reverse());for(let r of n)o.unshift(Kt(r))}else t!==void 0&&o.push(Kt(t));return o}static _$Eu(t,o){let n=o.attribute;return n===!1?void 0:typeof n=="string"?n:typeof t=="string"?t.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(t=>this.enableUpdating=t),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(t=>t(this))}addController(t){(this._$EO??(this._$EO=new Set)).add(t),this.renderRoot!==void 0&&this.isConnected&&t.hostConnected?.()}removeController(t){this._$EO?.delete(t)}_$E_(){let t=new Map,o=this.constructor.elementProperties;for(let n of o.keys())this.hasOwnProperty(n)&&(t.set(n,this[n]),delete this[n]);t.size>0&&(this._$Ep=t)}createRenderRoot(){let t=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return Ae(t,this.constructor.elementStyles),t}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(t=>t.hostConnected?.())}enableUpdating(t){}disconnectedCallback(){this._$EO?.forEach(t=>t.hostDisconnected?.())}attributeChangedCallback(t,o,n){this._$AK(t,n)}_$ET(t,o){let n=this.constructor.elementProperties.get(t),r=this.constructor._$Eu(t,n);if(r!==void 0&&n.reflect===!0){let s=(n.converter?.toAttribute!==void 0?n.converter:lt).toAttribute(o,n.type);this._$Em=t,s==null?this.removeAttribute(r):this.setAttribute(r,s),this._$Em=null}}_$AK(t,o){let n=this.constructor,r=n._$Eh.get(t);if(r!==void 0&&this._$Em!==r){let s=n.getPropertyOptions(r),a=typeof s.converter=="function"?{fromAttribute:s.converter}:s.converter?.fromAttribute!==void 0?s.converter:lt;this._$Em=r;let i=a.fromAttribute(o,s.type);this[r]=i??this._$Ej?.get(r)??i,this._$Em=null}}requestUpdate(t,o,n,r=!1,s){if(t!==void 0){let a=this.constructor;if(r===!1&&(s=this[t]),n??(n=a.getPropertyOptions(t)),!((n.hasChanged??At)(s,o)||n.useDefault&&n.reflect&&s===this._$Ej?.get(t)&&!this.hasAttribute(a._$Eu(t,n))))return;this.C(t,o,n)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(t,o,{useDefault:n,reflect:r,wrapped:s},a){n&&!(this._$Ej??(this._$Ej=new Map)).has(t)&&(this._$Ej.set(t,a??o??this[t]),s!==!0||a!==void 0)||(this._$AL.has(t)||(this.hasUpdated||n||(o=void 0),this._$AL.set(t,o)),r===!0&&this._$Em!==t&&(this._$Eq??(this._$Eq=new Set)).add(t))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(o){Promise.reject(o)}let t=this.scheduleUpdate();return t!=null&&await t,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[r,s]of this._$Ep)this[r]=s;this._$Ep=void 0}let n=this.constructor.elementProperties;if(n.size>0)for(let[r,s]of n){let{wrapped:a}=s,i=this[r];a!==!0||this._$AL.has(r)||i===void 0||this.C(r,void 0,s,i)}}let t=!1,o=this._$AL;try{t=this.shouldUpdate(o),t?(this.willUpdate(o),this._$EO?.forEach(n=>n.hostUpdate?.()),this.update(o)):this._$EM()}catch(n){throw t=!1,this._$EM(),n}t&&this._$AE(o)}willUpdate(t){}_$AE(t){this._$EO?.forEach(o=>o.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(t)),this.updated(t)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(t){return!0}update(t){this._$Eq&&(this._$Eq=this._$Eq.forEach(o=>this._$ET(o,this[o]))),this._$EM()}updated(t){}firstUpdated(t){}};B.elementStyles=[],B.shadowRootOptions={mode:"open"},B[dt("elementProperties")]=new Map,B[dt("finalized")]=new Map,Xo?.({ReactiveElement:B}),(O.reactiveElementVersions??(O.reactiveElementVersions=[])).push("2.1.2")});function Fe(e,t){if(!ee(e)||!e.hasOwnProperty("raw"))throw Error("invalid template strings array");return Pe!==void 0?Pe.createHTML(t):t}function K(e,t,o=e,n){if(t===$)return t;let r=n!==void 0?o._$Co?.[n]:o._$Cl,s=gt(t)?void 0:t._$litDirective$;return r?.constructor!==s&&(r?._$AO?.(!1),s===void 0?r=void 0:(r=new s(e),r._$AT(e,o,n)),n!==void 0?(o._$Co??(o._$Co=[]))[n]=r:o._$Cl=r),r!==void 0&&(t=K(e,r._$AS(e,t.values),r,n)),t}var ht,Ie,Mt,Pe,Re,L,He,Zo,V,mt,gt,ee,Qo,Yt,ut,Be,Ue,j,Oe,Le,je,oe,A,qn,Wn,$,x,Ne,F,tn,bt,Jt,ft,G,Xt,Zt,Qt,te,en,Ve,Y=u(()=>{ht=globalThis,Ie=e=>e,Mt=ht.trustedTypes,Pe=Mt?Mt.createPolicy("lit-html",{createHTML:e=>e}):void 0,Re="$lit$",L=`lit$${Math.random().toFixed(9).slice(2)}$`,He="?"+L,Zo=`<${He}>`,V=document,mt=()=>V.createComment(""),gt=e=>e===null||typeof e!="object"&&typeof e!="function",ee=Array.isArray,Qo=e=>ee(e)||typeof e?.[Symbol.iterator]=="function",Yt=`[ 	
+\f\r]`,ut=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,Be=/-->/g,Ue=/>/g,j=RegExp(`>|${Yt}(?:([^\\s"'>=/]+)(${Yt}*=${Yt}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`,"g"),Oe=/'/g,Le=/"/g,je=/^(?:script|style|textarea|title)$/i,oe=e=>(t,...o)=>({_$litType$:e,strings:t,values:o}),A=oe(1),qn=oe(2),Wn=oe(3),$=Symbol.for("lit-noChange"),x=Symbol.for("lit-nothing"),Ne=new WeakMap,F=V.createTreeWalker(V,129);tn=(e,t)=>{let o=e.length-1,n=[],r,s=t===2?"<svg>":t===3?"<math>":"",a=ut;for(let i=0;i<o;i++){let c=e[i],d,p,l=-1,g=0;for(;g<c.length&&(a.lastIndex=g,p=a.exec(c),p!==null);)g=a.lastIndex,a===ut?p[1]==="!--"?a=Be:p[1]!==void 0?a=Ue:p[2]!==void 0?(je.test(p[2])&&(r=RegExp("</"+p[2],"g")),a=j):p[3]!==void 0&&(a=j):a===j?p[0]===">"?(a=r??ut,l=-1):p[1]===void 0?l=-2:(l=a.lastIndex-p[2].length,d=p[1],a=p[3]===void 0?j:p[3]==='"'?Le:Oe):a===Le||a===Oe?a=j:a===Be||a===Ue?a=ut:(a=j,r=void 0);let y=a===j&&e[i+1].startsWith("/>")?" ":"";s+=a===ut?c+Zo:l>=0?(n.push(d),c.slice(0,l)+Re+c.slice(l)+L+y):c+L+(l===-2?i:y)}return[Fe(e,s+(e[o]||"<?>")+(t===2?"</svg>":t===3?"</math>":"")),n]},bt=class e{constructor({strings:t,_$litType$:o},n){let r;this.parts=[];let s=0,a=0,i=t.length-1,c=this.parts,[d,p]=tn(t,o);if(this.el=e.createElement(d,n),F.currentNode=this.el.content,o===2||o===3){let l=this.el.content.firstChild;l.replaceWith(...l.childNodes)}for(;(r=F.nextNode())!==null&&c.length<i;){if(r.nodeType===1){if(r.hasAttributes())for(let l of r.getAttributeNames())if(l.endsWith(Re)){let g=p[a++],y=r.getAttribute(l).split(L),b=/([.?@])?(.*)/.exec(g);c.push({type:1,index:s,name:b[2],strings:y,ctor:b[1]==="."?Xt:b[1]==="?"?Zt:b[1]==="@"?Qt:G}),r.removeAttribute(l)}else l.startsWith(L)&&(c.push({type:6,index:s}),r.removeAttribute(l));if(je.test(r.tagName)){let l=r.textContent.split(L),g=l.length-1;if(g>0){r.textContent=Mt?Mt.emptyScript:"";for(let y=0;y<g;y++)r.append(l[y],mt()),F.nextNode(),c.push({type:2,index:++s});r.append(l[g],mt())}}}else if(r.nodeType===8)if(r.data===He)c.push({type:2,index:s});else{let l=-1;for(;(l=r.data.indexOf(L,l+1))!==-1;)c.push({type:7,index:s}),l+=L.length-1}s++}}static createElement(t,o){let n=V.createElement("template");return n.innerHTML=t,n}};Jt=class{constructor(t,o){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=o}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){let{el:{content:o},parts:n}=this._$AD,r=(t?.creationScope??V).importNode(o,!0);F.currentNode=r;let s=F.nextNode(),a=0,i=0,c=n[0];for(;c!==void 0;){if(a===c.index){let d;c.type===2?d=new ft(s,s.nextSibling,this,t):c.type===1?d=new c.ctor(s,c.name,c.strings,this,t):c.type===6&&(d=new te(s,this,t)),this._$AV.push(d),c=n[++i]}a!==c?.index&&(s=F.nextNode(),a++)}return F.currentNode=V,r}p(t){let o=0;for(let n of this._$AV)n!==void 0&&(n.strings!==void 0?(n._$AI(t,n,o),o+=n.strings.length-2):n._$AI(t[o])),o++}},ft=class e{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,o,n,r){this.type=2,this._$AH=x,this._$AN=void 0,this._$AA=t,this._$AB=o,this._$AM=n,this.options=r,this._$Cv=r?.isConnected??!0}get parentNode(){let t=this._$AA.parentNode,o=this._$AM;return o!==void 0&&t?.nodeType===11&&(t=o.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,o=this){t=K(this,t,o),gt(t)?t===x||t==null||t===""?(this._$AH!==x&&this._$AR(),this._$AH=x):t!==this._$AH&&t!==$&&this._(t):t._$litType$!==void 0?this.$(t):t.nodeType!==void 0?this.T(t):Qo(t)?this.k(t):this._(t)}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t))}_(t){this._$AH!==x&&gt(this._$AH)?this._$AA.nextSibling.data=t:this.T(V.createTextNode(t)),this._$AH=t}$(t){let{values:o,_$litType$:n}=t,r=typeof n=="number"?this._$AC(t):(n.el===void 0&&(n.el=bt.createElement(Fe(n.h,n.h[0]),this.options)),n);if(this._$AH?._$AD===r)this._$AH.p(o);else{let s=new Jt(r,this),a=s.u(this.options);s.p(o),this.T(a),this._$AH=s}}_$AC(t){let o=Ne.get(t.strings);return o===void 0&&Ne.set(t.strings,o=new bt(t)),o}k(t){ee(this._$AH)||(this._$AH=[],this._$AR());let o=this._$AH,n,r=0;for(let s of t)r===o.length?o.push(n=new e(this.O(mt()),this.O(mt()),this,this.options)):n=o[r],n._$AI(s),r++;r<o.length&&(this._$AR(n&&n._$AB.nextSibling,r),o.length=r)}_$AR(t=this._$AA.nextSibling,o){for(this._$AP?.(!1,!0,o);t!==this._$AB;){let n=Ie(t).nextSibling;Ie(t).remove(),t=n}}setConnected(t){this._$AM===void 0&&(this._$Cv=t,this._$AP?.(t))}},G=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,o,n,r,s){this.type=1,this._$AH=x,this._$AN=void 0,this.element=t,this.name=o,this._$AM=r,this.options=s,n.length>2||n[0]!==""||n[1]!==""?(this._$AH=Array(n.length-1).fill(new String),this.strings=n):this._$AH=x}_$AI(t,o=this,n,r){let s=this.strings,a=!1;if(s===void 0)t=K(this,t,o,0),a=!gt(t)||t!==this._$AH&&t!==$,a&&(this._$AH=t);else{let i=t,c,d;for(t=s[0],c=0;c<s.length-1;c++)d=K(this,i[n+c],o,c),d===$&&(d=this._$AH[c]),a||(a=!gt(d)||d!==this._$AH[c]),d===x?t=x:t!==x&&(t+=(d??"")+s[c+1]),this._$AH[c]=d}a&&!r&&this.j(t)}j(t){t===x?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"")}},Xt=class extends G{constructor(){super(...arguments),this.type=3}j(t){this.element[this.name]=t===x?void 0:t}},Zt=class extends G{constructor(){super(...arguments),this.type=4}j(t){this.element.toggleAttribute(this.name,!!t&&t!==x)}},Qt=class extends G{constructor(t,o,n,r,s){super(t,o,n,r,s),this.type=5}_$AI(t,o=this){if((t=K(this,t,o,0)??x)===$)return;let n=this._$AH,r=t===x&&n!==x||t.capture!==n.capture||t.once!==n.once||t.passive!==n.passive,s=t!==x&&(n===x||r);r&&this.element.removeEventListener(this.name,this,n),s&&this.element.addEventListener(this.name,this,t),this._$AH=t}handleEvent(t){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t)}},te=class{constructor(t,o,n){this.element=t,this.type=6,this._$AN=void 0,this._$AM=o,this.options=n}get _$AU(){return this._$AM._$AU}_$AI(t){K(this,t)}},en=ht.litHtmlPolyfillSupport;en?.(bt,ft),(ht.litHtmlVersions??(ht.litHtmlVersions=[])).push("3.3.3");Ve=(e,t,o)=>{let n=o?.renderBefore??t,r=n._$litPart$;if(r===void 0){let s=o?.renderBefore??null;n._$litPart$=r=new ft(t.insertBefore(mt(),s),s,void 0,o??{})}return r._$AI(e),r}});var vt,N,on,ze=u(()=>{pt();pt();Y();Y();vt=globalThis,N=class extends B{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var o;let t=super.createRenderRoot();return(o=this.renderOptions).renderBefore??(o.renderBefore=t.firstChild),t}update(t){let o=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(t),this._$Do=Ve(o,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return $}};N._$litElement$=!0,N.finalized=!0,vt.litElementHydrateSupport?.({LitElement:N});on=vt.litElementPolyfillSupport;on?.({LitElement:N});(vt.litElementVersions??(vt.litElementVersions=[])).push("4.2.2")});var qe=u(()=>{});var D=u(()=>{pt();Y();ze();qe()});var We=u(()=>{});function m(e){return(t,o)=>typeof o=="object"?rn(e,t,o):((n,r,s)=>{let a=r.hasOwnProperty(s);return r.constructor.createProperty(s,n),a?Object.getOwnPropertyDescriptor(r,s):void 0})(e,t,o)}var nn,rn,ne=u(()=>{pt();nn={attribute:!0,type:String,converter:lt,reflect:!1,hasChanged:At},rn=(e=nn,t,o)=>{let{kind:n,metadata:r}=o,s=globalThis.litPropertyMetadata.get(r);if(s===void 0&&globalThis.litPropertyMetadata.set(r,s=new Map),n==="setter"&&((e=Object.create(e)).wrapped=!0),s.set(o.name,e),n==="accessor"){let{name:a}=o;return{set(i){let c=t.get.call(this);t.set.call(this,i),this.requestUpdate(a,c,e,!0,i)},init(i){return i!==void 0&&this.C(a,void 0,e,i),i}}}if(n==="setter"){let{name:a}=o;return function(i){let c=this[a];t.call(this,i),this.requestUpdate(a,c,e,!0,i)}}throw Error("Unsupported decorator location: "+n)}});function re(e){return m({...e,state:!0,attribute:!1})}var Ke=u(()=>{ne();});var Ge=u(()=>{});var J=u(()=>{});var Ye=u(()=>{J();});var Je=u(()=>{J();});var Xe=u(()=>{J();});var Ze=u(()=>{J();});var Qe=u(()=>{J();});var It=u(()=>{We();ne();Ke();Ge();Ye();Je();Xe();Ze();Qe()});var Pt,Bt,X,se=u(()=>{Pt={ATTRIBUTE:1,CHILD:2,PROPERTY:3,BOOLEAN_ATTRIBUTE:4,EVENT:5,ELEMENT:6},Bt=e=>(...t)=>({_$litDirective$:e,values:t}),X=class{constructor(t){}get _$AU(){return this._$AM._$AU}_$AT(t,o,n){this._$Ct=t,this._$AM=o,this._$Ci=n}_$AS(t,o){return this.update(t,o)}update(t,o){return this.render(...o)}}});var Ut,to=u(()=>{Y();se();Ut=Bt(class extends X{constructor(e){if(super(e),e.type!==Pt.ATTRIBUTE||e.name!=="class"||e.strings?.length>2)throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.")}render(e){return" "+Object.keys(e).filter(t=>e[t]).join(" ")+" "}update(e,[t]){if(this.st===void 0){this.st=new Set,e.strings!==void 0&&(this.nt=new Set(e.strings.join(" ").split(/\s/).filter(n=>n!=="")));for(let n in t)t[n]&&!this.nt?.has(n)&&this.st.add(n);return this.render(t)}let o=e.element.classList;for(let n of this.st)n in t||(o.remove(n),this.st.delete(n));for(let n in t){let r=!!t[n];r===this.st.has(n)||this.nt?.has(n)||(r?(o.add(n),this.st.add(n)):(o.remove(n),this.st.delete(n)))}return $}})});var ae=u(()=>{to()});var Ot,eo,oo,R,Z,Lt=u(()=>{D();Ot="2.5.1",eo="__vscodeElements_disableRegistryWarning__",oo=(e,t)=>{console.warn(t?`[VSCode Elements] ${e}
+%o`:`${e}
+%o`,t)},R=class extends N{get version(){return Ot}warn(t){oo(t,this)}},Z=e=>t=>{if(!customElements.get(e)){customElements.define(e,t);return}if(eo in window)return;let r=document.createElement(e)?.version,s="";r?r!==Ot?(s+="is already registered by a different version of VSCode Elements. ",s+=`This version is "${Ot}", while the other one is "${r}".`):s+=`is already registered by the same version of VSCode Elements (${Ot}).`:s+="is already registered by an unknown custom element handler class.",oo(`The custom element "${e}" ${s}
+To suppress this warning, set window.${eo} to true`)}});var Q,no=u(()=>{Y();Q=e=>e??x});var ie=u(()=>{no()});var ro=u(()=>{se()});var ce,so,ao=u(()=>{D();ro();ce=class extends X{constructor(t){if(super(t),this._prevProperties={},t.type!==Pt.PROPERTY||t.name!=="style")throw new Error("The `stylePropertyMap` directive must be used in the `style` property")}update(t,[o]){return Object.entries(o).forEach(([n,r])=>{this._prevProperties[n]!==r&&(n.startsWith("--")?t.element.style.setProperty(n,r):t.element.style[n]=r,this._prevProperties[n]=r)}),$}render(t){return $}},so=Bt(ce)});var tt,Nt=u(()=>{D();tt=P`
   :host([hidden]) {
     display: none;
   }
@@ -913,19 +14,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     opacity: 0.4;
     pointer-events: none;
   }
-`;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js
-  var styles, vscode_icon_styles_default;
-  var init_vscode_icon_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js"() {
-      init_lit();
-      init_default_styles();
-      styles = [
-        default_styles_default,
-        i`
+`});var sn,io,co=u(()=>{D();Nt();sn=[tt,P`
     :host {
       color: var(--vscode-icon-foreground, #cccccc);
       display: inline-block;
@@ -985,168 +74,25 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       animation-timing-function: linear;
       animation-iteration-count: infinite;
     }
-  `
-      ];
-      vscode_icon_styles_default = styles;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js
-  var __decorate, VscodeIcon_1, VscodeIcon;
-  var init_vscode_icon = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js"() {
-      init_lit();
-      init_decorators();
-      init_class_map2();
-      init_if_defined2();
-      init_VscElement();
-      init_style_property_map();
-      init_vscode_icon_styles();
-      __decorate = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeIcon = VscodeIcon_1 = class VscodeIcon2 extends VscElement {
-        constructor() {
-          super(...arguments);
-          this.label = "";
-          this.name = "";
-          this.size = 16;
-          this.spin = false;
-          this.spinDuration = 1.5;
-          this.actionIcon = false;
-          this._onButtonClick = (ev) => {
-            this.dispatchEvent(new CustomEvent("vsc-click", { detail: { originalEvent: ev } }));
-          };
-        }
-        connectedCallback() {
-          super.connectedCallback();
-          const { href, nonce } = this._getStylesheetConfig();
-          VscodeIcon_1.stylesheetHref = href;
-          VscodeIcon_1.nonce = nonce;
-        }
-        /**
-         * For using web fonts in web components, the font stylesheet must be included
-         * twice: on the page and in the web component. This function looks for the
-         * font stylesheet on the page and returns the stylesheet URL and the nonce
-         * id.
-         */
-        _getStylesheetConfig() {
-          if (typeof document === "undefined") {
-            return { nonce: void 0, href: void 0 };
-          }
-          const linkElement = document.getElementById("vscode-codicon-stylesheet");
-          const href = linkElement?.getAttribute("href") || void 0;
-          const nonce = linkElement?.nonce || void 0;
-          if (!linkElement) {
-            let msg = 'To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';
-            msg += "See https://vscode-elements.github.io/components/icon/ for more details.";
-            this.warn(msg);
-          }
-          return { nonce, href };
-        }
-        render() {
-          const { stylesheetHref, nonce } = VscodeIcon_1;
-          const content = b2`<span
-      class=${e6({
-            codicon: true,
-            ["codicon-" + this.name]: true,
-            spin: this.spin
-          })}
-      .style=${stylePropertyMap({
-            animationDuration: String(this.spinDuration) + "s",
-            fontSize: this.size + "px",
-            height: this.size + "px",
-            width: this.size + "px"
-          })}
-    ></span>`;
-          const wrapped = this.actionIcon ? b2` <button
+  `],io=sn});var z,yt,_,lo=u(()=>{D();It();ae();ie();Lt();ao();co();z=function(e,t,o,n){var r=arguments.length,s=r<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,a;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(e,t,o,n);else for(var i=e.length-1;i>=0;i--)(a=e[i])&&(s=(r<3?a(s):r>3?a(t,o,s):a(t,o))||s);return r>3&&s&&Object.defineProperty(t,o,s),s},_=yt=class extends R{constructor(){super(...arguments),this.label="",this.name="",this.size=16,this.spin=!1,this.spinDuration=1.5,this.actionIcon=!1,this._onButtonClick=t=>{this.dispatchEvent(new CustomEvent("vsc-click",{detail:{originalEvent:t}}))}}connectedCallback(){super.connectedCallback();let{href:t,nonce:o}=this._getStylesheetConfig();yt.stylesheetHref=t,yt.nonce=o}_getStylesheetConfig(){if(typeof document>"u")return{nonce:void 0,href:void 0};let t=document.getElementById("vscode-codicon-stylesheet"),o=t?.getAttribute("href")||void 0,n=t?.nonce||void 0;if(!t){let r='To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';r+="See https://vscode-elements.github.io/components/icon/ for more details.",this.warn(r)}return{nonce:n,href:o}}render(){let{stylesheetHref:t,nonce:o}=yt,n=A`<span
+      class=${Ut({codicon:!0,["codicon-"+this.name]:!0,spin:this.spin})}
+      .style=${so({animationDuration:String(this.spinDuration)+"s",fontSize:this.size+"px",height:this.size+"px",width:this.size+"px"})}
+    ></span>`,r=this.actionIcon?A` <button
           class="button"
           @click=${this._onButtonClick}
           aria-label=${this.label}
         >
-          ${content}
-        </button>` : b2` <span class="icon" aria-hidden="true" role="presentation"
-          >${content}</span
-        >`;
-          return b2`
+          ${n}
+        </button>`:A` <span class="icon" aria-hidden="true" role="presentation"
+          >${n}</span
+        >`;return A`
       <link
         rel="stylesheet"
-        href=${o6(stylesheetHref)}
-        nonce=${o6(nonce)}
+        href=${Q(t)}
+        nonce=${Q(o)}
       />
-      ${wrapped}
-    `;
-        }
-      };
-      VscodeIcon.styles = vscode_icon_styles_default;
-      VscodeIcon.stylesheetHref = "";
-      VscodeIcon.nonce = "";
-      __decorate([
-        n4()
-      ], VscodeIcon.prototype, "label", void 0);
-      __decorate([
-        n4({ type: String })
-      ], VscodeIcon.prototype, "name", void 0);
-      __decorate([
-        n4({ type: Number })
-      ], VscodeIcon.prototype, "size", void 0);
-      __decorate([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeIcon.prototype, "spin", void 0);
-      __decorate([
-        n4({ type: Number, attribute: "spin-duration" })
-      ], VscodeIcon.prototype, "spinDuration", void 0);
-      __decorate([
-        n4({ type: Boolean, reflect: true, attribute: "action-icon" })
-      ], VscodeIcon.prototype, "actionIcon", void 0);
-      VscodeIcon = VscodeIcon_1 = __decorate([
-        customElement("vscode-icon")
-      ], VscodeIcon);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/index.js
-  var init_vscode_icon2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/index.js"() {
-      init_vscode_icon();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/helpers.js
-  function getDefaultFontStack() {
-    if (navigator.userAgent.indexOf("Linux") > -1) {
-      return 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
-    } else if (navigator.userAgent.indexOf("Mac") > -1) {
-      return "-apple-system, BlinkMacSystemFont, sans-serif";
-    } else if (navigator.userAgent.indexOf("Windows") > -1) {
-      return '"Segoe WPC", "Segoe UI", sans-serif';
-    } else {
-      return "sans-serif";
-    }
-  }
-  var DEFAULT_LINE_HEIGHT, DEFAULT_FONT_SIZE, INPUT_LINE_HEIGHT_RATIO;
-  var init_helpers = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/helpers.js"() {
-      DEFAULT_LINE_HEIGHT = 16;
-      DEFAULT_FONT_SIZE = 13;
-      INPUT_LINE_HEIGHT_RATIO = DEFAULT_LINE_HEIGHT / DEFAULT_FONT_SIZE;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js
-  var defaultFontStack, styles2, vscode_button_styles_default;
-  var init_vscode_button_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js"() {
-      init_lit();
-      init_default_styles();
-      init_helpers();
-      defaultFontStack = r(getDefaultFontStack());
-      styles2 = [
-        default_styles_default,
-        i`
+      ${r}
+    `}};_.styles=io;_.stylesheetHref="";_.nonce="";z([m()],_.prototype,"label",void 0);z([m({type:String})],_.prototype,"name",void 0);z([m({type:Number})],_.prototype,"size",void 0);z([m({type:Boolean,reflect:!0})],_.prototype,"spin",void 0);z([m({type:Number,attribute:"spin-duration"})],_.prototype,"spinDuration",void 0);z([m({type:Boolean,reflect:!0,attribute:"action-icon"})],_.prototype,"actionIcon",void 0);_=yt=z([Z("vscode-icon")],_)});var po=u(()=>{lo()});function Rt(){return navigator.userAgent.indexOf("Linux")>-1?'system-ui, "Ubuntu", "Droid Sans", sans-serif':navigator.userAgent.indexOf("Mac")>-1?"-apple-system, BlinkMacSystemFont, sans-serif":navigator.userAgent.indexOf("Windows")>-1?'"Segoe WPC", "Segoe UI", sans-serif':"sans-serif"}var de=u(()=>{});var an,cn,uo,ho=u(()=>{D();Nt();de();an=W(Rt()),cn=[tt,P`
     :host {
       cursor: pointer;
       display: inline-block;
@@ -1174,7 +120,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       box-sizing: border-box;
       color: var(--vscode-button-foreground, #ffffff);
       display: flex;
-      font-family: var(--vscode-font-family, ${defaultFontStack});
+      font-family: var(--vscode-font-family, ${an});
       font-size: var(--vscode-font-size, 13px);
       font-weight: var(--vscode-font-weight, normal);
       height: 100%;
@@ -1330,259 +276,29 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     :host([icon]) .icon-after {
       margin-left: 3px;
     }
-  `
-      ];
-      vscode_button_styles_default = styles2;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js
-  var __decorate2, VscodeButton;
-  var init_vscode_button = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js"() {
-      init_lit();
-      init_decorators();
-      init_class_map2();
-      init_VscElement();
-      init_vscode_icon2();
-      init_vscode_button_styles();
-      init_if_defined2();
-      __decorate2 = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeButton = class VscodeButton2 extends VscElement {
-        get form() {
-          return this._internals.form;
-        }
-        constructor() {
-          super();
-          this.autofocus = false;
-          this.tabIndex = 0;
-          this.secondary = false;
-          this.block = false;
-          this.role = "button";
-          this.disabled = false;
-          this.icon = "";
-          this.iconSpin = false;
-          this.iconAfter = "";
-          this.iconAfterSpin = false;
-          this.focused = false;
-          this.name = void 0;
-          this.iconOnly = false;
-          this.type = "button";
-          this.value = "";
-          this._prevTabindex = 0;
-          this._hasContentBefore = false;
-          this._hasContentAfter = false;
-          this._handleFocus = () => {
-            this.focused = true;
-          };
-          this._handleBlur = () => {
-            this.focused = false;
-          };
-          this.addEventListener("keydown", this._handleKeyDown.bind(this));
-          this.addEventListener("click", this._handleClick.bind(this));
-          this._internals = this.attachInternals();
-        }
-        connectedCallback() {
-          super.connectedCallback();
-          if (this.autofocus) {
-            if (this.tabIndex < 0) {
-              this.tabIndex = 0;
-            }
-            this.updateComplete.then(() => {
-              this.focus();
-              this.requestUpdate();
-            });
-          }
-          this.addEventListener("focus", this._handleFocus);
-          this.addEventListener("blur", this._handleBlur);
-        }
-        disconnectedCallback() {
-          super.disconnectedCallback();
-          this.removeEventListener("focus", this._handleFocus);
-          this.removeEventListener("blur", this._handleBlur);
-        }
-        update(changedProperties) {
-          super.update(changedProperties);
-          if (changedProperties.has("value")) {
-            this._internals.setFormValue(this.value);
-          }
-          if (changedProperties.has("disabled")) {
-            if (this.disabled) {
-              this._prevTabindex = this.tabIndex;
-              this.tabIndex = -1;
-            } else {
-              this.tabIndex = this._prevTabindex;
-            }
-          }
-        }
-        _executeAction() {
-          if (this.type === "submit" && this._internals.form) {
-            this._internals.form.requestSubmit();
-          }
-          if (this.type === "reset" && this._internals.form) {
-            this._internals.form.reset();
-          }
-        }
-        _handleKeyDown(event) {
-          if ((event.key === "Enter" || event.key === " ") && !this.hasAttribute("disabled")) {
-            const syntheticClick = new MouseEvent("click", {
-              bubbles: true,
-              cancelable: true
-            });
-            syntheticClick.synthetic = true;
-            this.dispatchEvent(syntheticClick);
-            this._executeAction();
-          }
-        }
-        _handleClick(event) {
-          if (event.synthetic) {
-            return;
-          }
-          if (!this.hasAttribute("disabled")) {
-            this._executeAction();
-          }
-        }
-        _handleSlotChange(ev) {
-          const slot = ev.target;
-          if (slot.name === "content-before") {
-            this._hasContentBefore = slot.assignedElements().length > 0;
-          }
-          if (slot.name === "content-after") {
-            this._hasContentAfter = slot.assignedElements().length > 0;
-          }
-        }
-        render() {
-          const hasIcon = this.icon !== "";
-          const hasIconAfter = this.iconAfter !== "";
-          const baseClasses = {
-            base: true,
-            "icon-only": this.iconOnly,
-            "has-content-before": this._hasContentBefore,
-            "has-content-after": this._hasContentAfter
-          };
-          const iconElem = hasIcon ? b2`<vscode-icon
+  `],uo=cn});var k,v,mo=u(()=>{D();It();ae();Lt();po();ho();ie();k=function(e,t,o,n){var r=arguments.length,s=r<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,a;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(e,t,o,n);else for(var i=e.length-1;i>=0;i--)(a=e[i])&&(s=(r<3?a(s):r>3?a(t,o,s):a(t,o))||s);return r>3&&s&&Object.defineProperty(t,o,s),s},v=class extends R{get form(){return this._internals.form}constructor(){super(),this.autofocus=!1,this.tabIndex=0,this.secondary=!1,this.block=!1,this.role="button",this.disabled=!1,this.icon="",this.iconSpin=!1,this.iconAfter="",this.iconAfterSpin=!1,this.focused=!1,this.name=void 0,this.iconOnly=!1,this.type="button",this.value="",this._prevTabindex=0,this._hasContentBefore=!1,this._hasContentAfter=!1,this._handleFocus=()=>{this.focused=!0},this._handleBlur=()=>{this.focused=!1},this.addEventListener("keydown",this._handleKeyDown.bind(this)),this.addEventListener("click",this._handleClick.bind(this)),this._internals=this.attachInternals()}connectedCallback(){super.connectedCallback(),this.autofocus&&(this.tabIndex<0&&(this.tabIndex=0),this.updateComplete.then(()=>{this.focus(),this.requestUpdate()})),this.addEventListener("focus",this._handleFocus),this.addEventListener("blur",this._handleBlur)}disconnectedCallback(){super.disconnectedCallback(),this.removeEventListener("focus",this._handleFocus),this.removeEventListener("blur",this._handleBlur)}update(t){super.update(t),t.has("value")&&this._internals.setFormValue(this.value),t.has("disabled")&&(this.disabled?(this._prevTabindex=this.tabIndex,this.tabIndex=-1):this.tabIndex=this._prevTabindex)}_executeAction(){this.type==="submit"&&this._internals.form&&this._internals.form.requestSubmit(),this.type==="reset"&&this._internals.form&&this._internals.form.reset()}_handleKeyDown(t){if((t.key==="Enter"||t.key===" ")&&!this.hasAttribute("disabled")){let o=new MouseEvent("click",{bubbles:!0,cancelable:!0});o.synthetic=!0,this.dispatchEvent(o),this._executeAction()}}_handleClick(t){t.synthetic||this.hasAttribute("disabled")||this._executeAction()}_handleSlotChange(t){let o=t.target;o.name==="content-before"&&(this._hasContentBefore=o.assignedElements().length>0),o.name==="content-after"&&(this._hasContentAfter=o.assignedElements().length>0)}render(){let t=this.icon!=="",o=this.iconAfter!=="",n={base:!0,"icon-only":this.iconOnly,"has-content-before":this._hasContentBefore,"has-content-after":this._hasContentAfter},r=t?A`<vscode-icon
           name=${this.icon}
           ?spin=${this.iconSpin}
-          spin-duration=${o6(this.iconSpinDuration)}
+          spin-duration=${Q(this.iconSpinDuration)}
           class="icon"
-        ></vscode-icon>` : A;
-          const iconAfterElem = hasIconAfter ? b2`<vscode-icon
+        ></vscode-icon>`:x,s=o?A`<vscode-icon
           name=${this.iconAfter}
           ?spin=${this.iconAfterSpin}
-          spin-duration=${o6(this.iconAfterSpinDuration)}
+          spin-duration=${Q(this.iconAfterSpinDuration)}
           class="icon-after"
-        ></vscode-icon>` : A;
-          return b2`
+        ></vscode-icon>`:x;return A`
       <div
-        class=${e6(baseClasses)}
+        class=${Ut(n)}
         part="base"
         @slotchange=${this._handleSlotChange}
       >
         <slot name="content-before"></slot>
-        ${iconElem}
+        ${r}
         <slot></slot>
-        ${iconAfterElem}
+        ${s}
         <slot name="content-after"></slot>
       </div>
-    `;
-        }
-      };
-      VscodeButton.styles = vscode_button_styles_default;
-      VscodeButton.formAssociated = true;
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "autofocus", void 0);
-      __decorate2([
-        n4({ type: Number, reflect: true })
-      ], VscodeButton.prototype, "tabIndex", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "secondary", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "block", void 0);
-      __decorate2([
-        n4({ reflect: true })
-      ], VscodeButton.prototype, "role", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "disabled", void 0);
-      __decorate2([
-        n4()
-      ], VscodeButton.prototype, "icon", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-spin" })
-      ], VscodeButton.prototype, "iconSpin", void 0);
-      __decorate2([
-        n4({ type: Number, reflect: true, attribute: "icon-spin-duration" })
-      ], VscodeButton.prototype, "iconSpinDuration", void 0);
-      __decorate2([
-        n4({ attribute: "icon-after" })
-      ], VscodeButton.prototype, "iconAfter", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-after-spin" })
-      ], VscodeButton.prototype, "iconAfterSpin", void 0);
-      __decorate2([
-        n4({
-          type: Number,
-          reflect: true,
-          attribute: "icon-after-spin-duration"
-        })
-      ], VscodeButton.prototype, "iconAfterSpinDuration", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "focused", void 0);
-      __decorate2([
-        n4({ type: String, reflect: true })
-      ], VscodeButton.prototype, "name", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-only" })
-      ], VscodeButton.prototype, "iconOnly", void 0);
-      __decorate2([
-        n4({ reflect: true })
-      ], VscodeButton.prototype, "type", void 0);
-      __decorate2([
-        n4()
-      ], VscodeButton.prototype, "value", void 0);
-      __decorate2([
-        r5()
-      ], VscodeButton.prototype, "_hasContentBefore", void 0);
-      __decorate2([
-        r5()
-      ], VscodeButton.prototype, "_hasContentAfter", void 0);
-      VscodeButton = __decorate2([
-        customElement("vscode-button")
-      ], VscodeButton);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/index.js
-  var vscode_button_exports = {};
-  __export(vscode_button_exports, {
-    VscodeButton: () => VscodeButton
-  });
-  var init_vscode_button2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/index.js"() {
-      init_vscode_button();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-badge/vscode-badge.styles.js
-  var defaultFontStack2, styles3, vscode_badge_styles_default;
-  var init_vscode_badge_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-badge/vscode-badge.styles.js"() {
-      init_lit();
-      init_default_styles();
-      init_helpers();
-      defaultFontStack2 = r(getDefaultFontStack());
-      styles3 = [
-        default_styles_default,
-        i`
+    `}};v.styles=uo;v.formAssociated=!0;k([m({type:Boolean,reflect:!0})],v.prototype,"autofocus",void 0);k([m({type:Number,reflect:!0})],v.prototype,"tabIndex",void 0);k([m({type:Boolean,reflect:!0})],v.prototype,"secondary",void 0);k([m({type:Boolean,reflect:!0})],v.prototype,"block",void 0);k([m({reflect:!0})],v.prototype,"role",void 0);k([m({type:Boolean,reflect:!0})],v.prototype,"disabled",void 0);k([m()],v.prototype,"icon",void 0);k([m({type:Boolean,reflect:!0,attribute:"icon-spin"})],v.prototype,"iconSpin",void 0);k([m({type:Number,reflect:!0,attribute:"icon-spin-duration"})],v.prototype,"iconSpinDuration",void 0);k([m({attribute:"icon-after"})],v.prototype,"iconAfter",void 0);k([m({type:Boolean,reflect:!0,attribute:"icon-after-spin"})],v.prototype,"iconAfterSpin",void 0);k([m({type:Number,reflect:!0,attribute:"icon-after-spin-duration"})],v.prototype,"iconAfterSpinDuration",void 0);k([m({type:Boolean,reflect:!0})],v.prototype,"focused",void 0);k([m({type:String,reflect:!0})],v.prototype,"name",void 0);k([m({type:Boolean,reflect:!0,attribute:"icon-only"})],v.prototype,"iconOnly",void 0);k([m({reflect:!0})],v.prototype,"type",void 0);k([m()],v.prototype,"value",void 0);k([re()],v.prototype,"_hasContentBefore",void 0);k([re()],v.prototype,"_hasContentAfter",void 0);v=k([Z("vscode-button")],v)});var go={};me(go,{VscodeButton:()=>v});var bo=u(()=>{mo()});var dn,ln,fo,vo=u(()=>{D();Nt();de();dn=W(Rt()),ln=[tt,P`
     :host {
       display: inline-block;
     }
@@ -1594,7 +310,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       box-sizing: border-box;
       color: var(--vscode-badge-foreground, #f8f8f8);
       display: block;
-      font-family: var(--vscode-font-family, ${defaultFontStack2});
+      font-family: var(--vscode-font-family, ${dn});
       font-size: 11px;
       font-weight: 400;
       line-height: 14px;
@@ -1631,941 +347,586 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       min-width: 16px;
       padding: 3px 5px;
     }
-  `
-      ];
-      vscode_badge_styles_default = styles3;
-    }
-  });
+  `],fo=ln});var yo,et,xo=u(()=>{D();It();Lt();vo();yo=function(e,t,o,n){var r=arguments.length,s=r<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,a;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(e,t,o,n);else for(var i=e.length-1;i>=0;i--)(a=e[i])&&(s=(r<3?a(s):r>3?a(t,o,s):a(t,o))||s);return r>3&&s&&Object.defineProperty(t,o,s),s},et=class extends R{constructor(){super(...arguments),this.variant="default"}render(){return A`<div class="root"><slot></slot></div>`}};et.styles=fo;yo([m({reflect:!0})],et.prototype,"variant",void 0);et=yo([Z("vscode-badge")],et)});var ko={};me(ko,{VscodeBadge:()=>et});var To=u(()=>{xo()});function q(e){let t=globalThis.window;return t?t[e]:void 0}var Bo=q("__MODEL_PRICING__"),qt={};for(let[e,t]of Object.entries(Bo?.pricing??{}))t.displayNames&&t.displayNames.length>0&&(qt[e]=t.displayNames[0]);function ge(e){if(qt[e])return qt[e];try{return decodeURIComponent(e)}catch{return e}}var be={Antigravity:"\u{1F680}","Claude Code":"\u{1F7E0}","Claude Code CLI":"\u{1F7E0}","Claude Desktop":"\u{1F7E0}","Claude Desktop Cowork":"\u{1F7E0}",Continue:"\u25B6\uFE0F","Copilot CLI":"\u{1F916}",Crush:"\u{1F9BE}",Cursor:"\u{1F5B1}\uFE0F",Devin:"\u{1F9E0}","Devin CLI":"\u{1F9E0}",Eclipse:"\u{1F311}","Gemini CLI":"\u{1F48E}",JetBrains:"\u{1F9E9}",Kiro:"\u{1F47B}","Kiro CLI":"\u{1F47B}","Mistral Vibe":"\u{1F525}","MS Scout (Copilot CLI)":"\u{1F52D}",OpenCode:"\u{1F7E2}",Pi:"\u03C0",Unknown:"\u2753","Visual Studio":"\u{1FA9F}","VS Code":"\u{1F499}","VS Code Exploration":"\u{1F9EA}","VS Code Insiders":"\u{1F49A}","VS Code Server":"\u2601\uFE0F","VS Code Server (Insiders)":"\u2601\uFE0F",VSCodium:"\u{1F537}",Windsurf:"\u{1F3C4}"};function fe(e){return be[e]??"\u{1F4DD}"}var Uo=q("__TOKEN_ESTIMATORS__"),Oo=Uo?.estimators??{},wt,ve=!0;function ye(e){ve=e}function xe(e){return fe(e)}function ke(e){return 1/(Oo[e]??.25)}function Lo(e,t){return new Intl.NumberFormat(wt,{minimumFractionDigits:t,maximumFractionDigits:t}).format(e)}function E(e,t=1){return`${Lo(e,t)}%`}function C(e){return e.toLocaleString(wt)}function h(e){return ve?new Intl.NumberFormat(wt,{notation:"compact",maximumFractionDigits:1}).format(e):C(e)}function H(e){return new Intl.NumberFormat(wt,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(e)}function f(e,t,o){let n=document.createElement(e);return t&&(n.className=t),o!==void 0&&(n.textContent=o),n}function Ct(e,t,o,n){let r=document.createElement(e);n&&(r.className=n);let s=document.createElement("span");return s.className=`codicon codicon-${t}`,r.append(s,document.createTextNode(` ${o}`)),r}function No(e,t){let o=document.createElement("span");return o.className=`codicon codicon-${e} nav-icon`,t&&o.style.setProperty("--icon-accent",t),o}function Ro(e,t){t.appearance&&e.setAttribute("appearance",t.appearance),t.hidden&&(e.hidden=!0),t.active&&(e.classList.add("nav-active"),e.setAttribute("disabled",""),e.setAttribute("aria-current","page"))}function Te(e,t,o){let n=document.createElement("vscode-button");if(typeof e=="string")return n.id=e,n.textContent=t||"",o&&n.setAttribute("appearance",o),n;let r=e;return n.id=r.id,r.icon?n.append(No(r.icon,r.iconColor),document.createTextNode(r.label)):n.textContent=r.label,Ro(n,r),n}var Ho={"btn-refresh":{id:"btn-refresh",label:"Refresh",icon:"refresh",appearance:"primary"},"btn-details":{id:"btn-details",label:"Details",icon:"robot",iconColor:"#c37bff",appearance:"secondary"},"btn-chart":{id:"btn-chart",label:"Chart",icon:"graph-line",iconColor:"#60a5fa",appearance:"secondary"},"btn-usage":{id:"btn-usage",label:"Usage Analysis",icon:"graph",iconColor:"#22d3ee",appearance:"secondary"},"btn-diagnostics":{id:"btn-diagnostics",label:"Diagnostics",icon:"search",iconColor:"#fb7185",appearance:"secondary"},"btn-maturity":{id:"btn-maturity",label:"Fluency Score",icon:"target",iconColor:"#fbbf24",appearance:"secondary"},"btn-dashboard":{id:"btn-dashboard",label:"Team Dashboard",icon:"organization",iconColor:"#818cf8",appearance:"secondary"},"btn-level-viewer":{id:"btn-level-viewer",label:"Level Viewer",icon:"list-tree",iconColor:"#94a3b8",appearance:"secondary"},"btn-environmental":{id:"btn-environmental",label:"Environmental Impact",icon:"globe",iconColor:"#4ade80",appearance:"secondary"}};var jo=["btn-refresh","btn-details","btn-chart","btn-usage","btn-maturity","btn-environmental","btn-diagnostics","btn-dashboard"];function Ee(e,t){return jo.filter(o=>o!=="btn-dashboard"||t).map(o=>({...Ho[o],active:o===e}))}function Se(e){let t=window.__EXTENSION_POINT_BUTTONS__??[];if(t.length===0)return;let o=document.querySelector(".button-row");if(o)for(let n of t){let r=document.createElement("vscode-button");r.id=`ext-point-${n.id}`,r.textContent=n.label,r.addEventListener("click",()=>{e.postMessage({command:"extensionPointAction",buttonId:n.id})}),o.append(r)}}var we=`/**
+ * Shared theme variables for all webview panels
+ * Uses VS Code theme tokens for automatic light/dark theme support.
+ *
+ * The "INDUSTRIAL REDUX" high-contrast styling (stark outlines, uppercase
+ * navigation, neon stage colors, monospace body) is intentionally scoped to
+ * the high-contrast themes only. Normal light/dark themes keep the native
+ * VS Code look so the navigation bar and typography stay unobtrusive.
+ */
 
-  // node_modules/@vscode-elements/elements/dist/vscode-badge/vscode-badge.js
-  var __decorate3, VscodeBadge;
-  var init_vscode_badge = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-badge/vscode-badge.js"() {
-      init_lit();
-      init_decorators();
-      init_VscElement();
-      init_vscode_badge_styles();
-      __decorate3 = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeBadge = class VscodeBadge2 extends VscElement {
-        constructor() {
-          super(...arguments);
-          this.variant = "default";
-        }
-        render() {
-          return b2`<div class="root"><slot></slot></div>`;
-        }
-      };
-      VscodeBadge.styles = vscode_badge_styles_default;
-      __decorate3([
-        n4({ reflect: true })
-      ], VscodeBadge.prototype, "variant", void 0);
-      VscodeBadge = __decorate3([
-        customElement("vscode-badge")
-      ], VscodeBadge);
-    }
-  });
+:root {
+	/* VS Code base colors */
+	--bg-primary: var(--vscode-editor-background);
+	--bg-secondary: var(--vscode-sideBar-background);
+	--bg-tertiary: var(--vscode-editorWidget-background);
+	--text-primary: var(--vscode-editor-foreground);
+	--text-secondary: var(--vscode-descriptionForeground);
+	--text-muted: var(--vscode-disabledForeground);
+	--border-color: var(--vscode-panel-border);
+	--border-subtle: var(--vscode-widget-border);
 
-  // node_modules/@vscode-elements/elements/dist/vscode-badge/index.js
-  var vscode_badge_exports = {};
-  __export(vscode_badge_exports, {
-    VscodeBadge: () => VscodeBadge
-  });
-  var init_vscode_badge2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-badge/index.js"() {
-      init_vscode_badge();
-    }
-  });
+	/* Button colors */
+	--button-bg: var(--vscode-button-background);
+	--button-fg: var(--vscode-button-foreground);
+	--button-hover-bg: var(--vscode-button-hoverBackground);
+	--button-secondary-bg: var(--vscode-button-secondaryBackground);
+	--button-secondary-fg: var(--vscode-button-secondaryForeground);
+	--button-secondary-hover-bg: var(--vscode-button-secondaryHoverBackground);
 
-  // src/webview/shared/dataLoader.ts
-  function getWindowData(key) {
-    if (typeof window === "undefined") {
-      return void 0;
-    }
-    return window[key];
-  }
+	/* Input colors */
+	--input-bg: var(--vscode-input-background);
+	--input-fg: var(--vscode-input-foreground);
+	--input-border: var(--vscode-input-border);
 
-  // src/webview/shared/modelUtils.ts
-  var _pricingData = getWindowData("__MODEL_PRICING__");
-  var _modelNames = {};
-  for (const [modelId, pricing] of Object.entries(_pricingData?.pricing ?? {})) {
-    if (pricing.displayNames && pricing.displayNames.length > 0) {
-      _modelNames[modelId] = pricing.displayNames[0];
-    }
-  }
-  function getModelDisplayName(model) {
-    if (_modelNames[model]) {
-      return _modelNames[model];
-    }
-    try {
-      return decodeURIComponent(model);
-    } catch {
-      return model;
-    }
-  }
+	/* List/card colors */
+	--list-hover-bg: var(--vscode-list-hoverBackground);
+	--list-active-bg: var(--vscode-list-activeSelectionBackground);
+	--list-active-fg: var(--vscode-list-activeSelectionForeground);
+	--list-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
 
-  // src/editorIcons.ts
-  var EDITOR_ICON_MAP = {
-    "Antigravity": "\u{1F680}",
-    "Claude Code": "\u{1F7E0}",
-    "Claude Desktop Cowork": "\u{1F7E0}",
-    "Continue": "\u25B6\uFE0F",
-    "Copilot CLI": "\u{1F916}",
-    "Crush": "\u{1F9BE}",
-    "Cursor": "\u{1F5B1}\uFE0F",
-    "Eclipse": "\u{1F311}",
-    "Gemini CLI": "\u{1F48E}",
-    "JetBrains": "\u{1F9E9}",
-    "Mistral Vibe": "\u{1F525}",
-    "MS Scout (Copilot CLI)": "\u{1F52D}",
-    "OpenCode": "\u{1F7E2}",
-    "Pi": "\u03C0",
-    "Unknown": "\u2753",
-    "Visual Studio": "\u{1FA9F}",
-    "VS Code": "\u{1F499}",
-    "VS Code Exploration": "\u{1F9EA}",
-    "VS Code Insiders": "\u{1F49A}",
-    "VS Code Server": "\u2601\uFE0F",
-    "VS Code Server (Insiders)": "\u2601\uFE0F",
-    "VSCodium": "\u{1F537}",
-    "Windsurf": "\u{1F3C4}"
-  };
-  function getEditorIconByName(editor) {
-    return EDITOR_ICON_MAP[editor] ?? "\u{1F4DD}";
-  }
+	/* Alternating row colors for better readability */
+	--row-alternate-bg: var(--vscode-list-inactiveSelectionBackground);
 
-  // src/webview/shared/formatUtils.ts
-  var _estimatorsData = getWindowData("__TOKEN_ESTIMATORS__");
-  var tokenEstimators = _estimatorsData?.estimators ?? {};
-  var currentLocale;
-  var compactNumbersEnabled = true;
-  function setCompactNumbers(enabled) {
-    compactNumbersEnabled = enabled;
-  }
-  function getEditorIcon(editor) {
-    return getEditorIconByName(editor);
-  }
-  function getCharsPerToken(model) {
-    const ratio = tokenEstimators[model] ?? 0.25;
-    return 1 / ratio;
-  }
-  function formatFixed(value, digits) {
-    return new Intl.NumberFormat(currentLocale, {
-      minimumFractionDigits: digits,
-      maximumFractionDigits: digits
-    }).format(value);
-  }
-  function formatPercent(value, digits = 1) {
-    return `${formatFixed(value, digits)}%`;
-  }
-  function formatNumber(value) {
-    return value.toLocaleString(currentLocale);
-  }
-  function formatCompact(value) {
-    if (!compactNumbersEnabled) {
-      return formatNumber(value);
-    }
-    return new Intl.NumberFormat(currentLocale, {
-      notation: "compact",
-      maximumFractionDigits: 1
-    }).format(value);
-  }
-  function formatCost(value) {
-    return new Intl.NumberFormat(currentLocale, {
-      style: "currency",
-      currency: "USD",
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2
-    }).format(value);
-  }
+	/* Badge colors */
+	--badge-bg: var(--vscode-badge-background);
+	--badge-fg: var(--vscode-badge-foreground);
 
-  // src/webview/shared/domUtils.ts
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== void 0) {
-      node.textContent = text;
-    }
-    return node;
-  }
-  function createButton(configOrId, label, appearance) {
-    const button = document.createElement("vscode-button");
-    if (typeof configOrId === "string") {
-      button.id = configOrId;
-      button.textContent = label || "";
-      if (appearance) {
-        button.setAttribute("appearance", appearance);
-      }
-    } else {
-      const config = configOrId;
-      button.id = config.id;
-      button.textContent = config.label;
-      if (config.appearance) {
-        button.setAttribute("appearance", config.appearance);
-      }
-      if (config.hidden) {
-        button.hidden = true;
-      }
-    }
-    return button;
-  }
+	/* Focus colors */
+	--focus-border: var(--vscode-focusBorder);
 
-  // src/webview/shared/buttonConfig.ts
-  var BUTTONS = {
-    "btn-refresh": {
-      id: "btn-refresh",
-      label: "\u{1F504} Refresh",
-      appearance: "primary"
-    },
-    "btn-details": {
-      id: "btn-details",
-      label: "\u{1F916} Details"
-    },
-    "btn-chart": {
-      id: "btn-chart",
-      label: "\u{1F4C8} Chart"
-    },
-    "btn-usage": {
-      id: "btn-usage",
-      label: "\u{1F4CA} Usage Analysis"
-    },
-    "btn-diagnostics": {
-      id: "btn-diagnostics",
-      label: "\u{1F50D} Diagnostics"
-    },
-    "btn-maturity": {
-      id: "btn-maturity",
-      label: "\u{1F3AF} Fluency Score"
-    },
-    "btn-dashboard": {
-      id: "btn-dashboard",
-      label: "\u{1F4CA} Team Dashboard"
-    },
-    "btn-level-viewer": {
-      id: "btn-level-viewer",
-      label: "\u{1F50D} Level Viewer"
-    },
-    "btn-environmental": {
-      id: "btn-environmental",
-      label: "\u{1F33F} Environmental Impact"
-    }
-  };
+	/* Link colors */
+	--link-color: var(--vscode-textLink-foreground);
+	--link-hover-color: var(--vscode-textLink-activeForeground);
 
-  // src/webview/shared/extensionPoints.ts
-  function wireExtensionPointButtons(vscodeApi) {
-    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
-    if (buttons.length === 0) {
-      return;
-    }
-    const buttonRow = document.querySelector(".button-row");
-    if (!buttonRow) {
-      return;
-    }
-    for (const btn of buttons) {
-      const el2 = document.createElement("vscode-button");
-      el2.id = `ext-point-${btn.id}`;
-      el2.textContent = btn.label;
-      el2.addEventListener("click", () => {
-        vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
-      });
-      buttonRow.append(el2);
-    }
-  }
+	/* Status colors */
+	--error-fg: var(--vscode-errorForeground);
+	--warning-fg: var(--vscode-editorWarning-foreground);
+	--success-fg: var(--vscode-terminal-ansiGreen);
 
-  // src/webview/shared/theme.css
-  var theme_default = '/**\n * Shared theme variables for all webview panels\n * Uses VS Code theme tokens for automatic light/dark theme support.\n *\n * The "INDUSTRIAL REDUX" high-contrast styling (stark outlines, uppercase\n * navigation, neon stage colors, monospace body) is intentionally scoped to\n * the high-contrast themes only. Normal light/dark themes keep the native\n * VS Code look so the navigation bar and typography stay unobtrusive.\n */\n\n:root {\n	/* VS Code base colors */\n	--bg-primary: var(--vscode-editor-background);\n	--bg-secondary: var(--vscode-sideBar-background);\n	--bg-tertiary: var(--vscode-editorWidget-background);\n	--text-primary: var(--vscode-editor-foreground);\n	--text-secondary: var(--vscode-descriptionForeground);\n	--text-muted: var(--vscode-disabledForeground);\n	--border-color: var(--vscode-panel-border);\n	--border-subtle: var(--vscode-widget-border);\n\n	/* Button colors */\n	--button-bg: var(--vscode-button-background);\n	--button-fg: var(--vscode-button-foreground);\n	--button-hover-bg: var(--vscode-button-hoverBackground);\n	--button-secondary-bg: var(--vscode-button-secondaryBackground);\n	--button-secondary-fg: var(--vscode-button-secondaryForeground);\n	--button-secondary-hover-bg: var(--vscode-button-secondaryHoverBackground);\n\n	/* Input colors */\n	--input-bg: var(--vscode-input-background);\n	--input-fg: var(--vscode-input-foreground);\n	--input-border: var(--vscode-input-border);\n\n	/* List/card colors */\n	--list-hover-bg: var(--vscode-list-hoverBackground);\n	--list-active-bg: var(--vscode-list-activeSelectionBackground);\n	--list-active-fg: var(--vscode-list-activeSelectionForeground);\n	--list-inactive-bg: var(--vscode-list-inactiveSelectionBackground);\n\n	/* Alternating row colors for better readability */\n	--row-alternate-bg: var(--vscode-list-inactiveSelectionBackground);\n\n	/* Badge colors */\n	--badge-bg: var(--vscode-badge-background);\n	--badge-fg: var(--vscode-badge-foreground);\n\n	/* Focus colors */\n	--focus-border: var(--vscode-focusBorder);\n\n	/* Link colors */\n	--link-color: var(--vscode-textLink-foreground);\n	--link-hover-color: var(--vscode-textLink-activeForeground);\n\n	/* Status colors */\n	--error-fg: var(--vscode-errorForeground);\n	--warning-fg: var(--vscode-editorWarning-foreground);\n	--success-fg: var(--vscode-terminal-ansiGreen);\n\n	/* Stage accent colors \u2014 dark theme defaults */\n	--stage-1-color: #93c5fd;\n	--stage-2-color: #a78bfa;\n	--stage-3-color: #3b82f6;\n	--stage-4-color: #22d3ee;\n\n	/* Stage progress pip empty fill */\n	--stage-pip-empty-bg: rgba(128, 128, 128, 0.2);\n\n	/* Semantic muted foreground */\n	--fg-muted: var(--vscode-disabledForeground);\n\n	/* Shadow for cards */\n	--shadow-color: rgb(0, 0, 0, 0.16);\n	--shadow-hover-color: rgb(0, 0, 0, 0.24);\n}\n\n/* Light theme adjustments */\nbody[data-vscode-theme-kind="vscode-light"],\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] {\n	--shadow-color: rgb(0, 0, 0, 0.08);\n	--shadow-hover-color: rgb(0, 0, 0, 0.12);\n	/* Stage colors darkened for readable contrast on light backgrounds */\n	--stage-1-color: #1d6fa4;\n	--stage-2-color: #7c3aed;\n	--stage-3-color: #2563eb;\n	--stage-4-color: #0891b2;\n	--stage-pip-empty-bg: rgba(0, 0, 0, 0.12);\n}\n\n/* Default navigation button row \u2014 native look for normal themes */\n.button-row {\n	display: flex;\n	gap: 10px;\n	flex-wrap: wrap;\n}\n\n/* ------------------------------------------------------------------ *\n * High contrast themes \u2014 INDUSTRIAL REDUX\n * Stark outlines, uppercase navigation, neon stage colors, monospace.\n * Everything below is deliberately gated to the high-contrast theme\n * kinds so normal light/dark themes are unaffected.\n * ------------------------------------------------------------------ */\n\nbody[data-vscode-theme-kind="vscode-high-contrast"],\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] {\n	/* Base colors \u2014 forced to stark contrasts */\n	--bg-secondary: transparent;\n	--bg-tertiary: transparent;\n	--text-secondary: var(--vscode-foreground);\n	--text-muted: var(--vscode-descriptionForeground);\n	--border-color: var(--vscode-contrastBorder);\n	--border-subtle: var(--vscode-contrastBorder);\n\n	/* Button colors \u2014 high contrast, no subtle grays */\n	--button-bg: var(--vscode-foreground);\n	--button-fg: var(--vscode-editor-background);\n	--button-hover-bg: var(--vscode-editor-background);\n	--button-secondary-bg: transparent;\n	--button-secondary-fg: var(--vscode-foreground);\n	--button-secondary-hover-bg: var(--vscode-foreground);\n\n	/* Input colors */\n	--input-bg: transparent;\n	--input-fg: var(--vscode-foreground);\n	--input-border: var(--vscode-foreground);\n\n	/* List/card colors */\n	--list-hover-bg: var(--vscode-editor-background);\n	--list-active-bg: var(--vscode-foreground);\n	--list-active-fg: var(--vscode-editor-background);\n	--list-inactive-bg: transparent;\n\n	/* Alternating row colors dropped for harsh outlines */\n	--row-alternate-bg: transparent;\n\n	/* Badge colors */\n	--badge-bg: var(--vscode-foreground);\n	--badge-fg: var(--vscode-editor-background);\n\n	/* Focus colors */\n	--focus-border: var(--vscode-foreground);\n\n	/* Link colors */\n	--link-color: var(--vscode-foreground);\n	--link-hover-color: var(--vscode-textLink-activeForeground);\n\n	/* Stage progress pip empty fill */\n	--stage-pip-empty-bg: transparent;\n\n	/* Semantic muted foreground */\n	--fg-muted: var(--vscode-descriptionForeground);\n\n	/* Shadow for cards \u2014 HARD shadows */\n	--shadow-color: var(--vscode-foreground);\n	--shadow-hover-color: var(--vscode-foreground);\n\n	/* Monospace body for the industrial identity */\n	font-family: var(--vscode-editor-font-family), "JetBrains Mono", "Fira Code", monospace;\n}\n\n/* High contrast dark \u2014 stark neon stage colors */\nbody[data-vscode-theme-kind="vscode-high-contrast"] {\n	--stage-1-color: #ff00ff; /* Magenta */\n	--stage-2-color: #00ffff; /* Cyan */\n	--stage-3-color: #ffff00; /* Yellow */\n	--stage-4-color: #00ff00; /* Green */\n}\n\n/* High contrast light \u2014 darkened neon for readable contrast */\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] {\n	--stage-1-color: #d100d1;\n	--stage-2-color: #008787;\n	--stage-3-color: #b5b500;\n	--stage-4-color: #00a300;\n}\n\n/* Industrial navigation tab bar (high contrast only) */\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row {\n	display: flex;\n	gap: 0; /* Force flush blocks */\n	flex-wrap: wrap; /* Let it wrap so no scrollbars appear */\n	border: 3px solid var(--vscode-foreground);\n	background-color: var(--vscode-editor-background);\n	margin-bottom: 2rem;\n	box-shadow: 4px 4px 0 var(--vscode-panel-border);\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > * {\n	flex-grow: 1; /* Stretch to fill */\n	flex-shrink: 1;\n	flex-basis: auto;\n	text-align: center;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button {\n	border-radius: 0 !important;\n	border: none !important;\n	border-right: 2px solid var(--vscode-foreground) !important;\n	font-family: inherit;\n	font-weight: 900;\n	text-transform: uppercase;\n	background-color: var(--vscode-editor-background) !important;\n	color: var(--vscode-foreground) !important;\n	padding: 12px 16px !important;\n	cursor: pointer;\n	box-shadow: none !important;\n	letter-spacing: 1px;\n	transition: transform 0.1s, background-color 0.1s;\n	height: auto !important; /* Override vscode-button strict heights */\n	border-bottom: 3px solid transparent !important;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button::part(control) {\n	background-color: var(--vscode-editor-background) !important;\n	color: var(--vscode-foreground) !important;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover::part(control) {\n	background-color: var(--vscode-foreground) !important;\n	color: var(--vscode-editor-background) !important;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > *:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:last-child {\n	border-right: none !important;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button:hover {\n	background-color: var(--vscode-foreground) !important;\n	color: var(--vscode-editor-background) !important;\n	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important; /* Cyber/Industrial accent indicator */\n}\n\n/* Industrial header + title (high contrast only) */\nbody[data-vscode-theme-kind="vscode-high-contrast"] .header,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .header {\n	display: flex;\n	justify-content: space-between;\n	align-items: flex-end;\n	margin-bottom: 2rem;\n	flex-wrap: nowrap;\n	white-space: nowrap;\n	gap: 15px;\n	border-bottom: 4px solid var(--vscode-foreground);\n	padding-bottom: 1rem;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .title,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .title {\n	font-size: 28px;\n	font-weight: 900;\n	text-transform: uppercase;\n	letter-spacing: 2px;\n	color: var(--vscode-foreground);\n	text-shadow: 2px 2px 0 var(--vscode-panel-border);\n	white-space: nowrap;\n}\n';
+	/* Stage accent colors \u2014 dark theme defaults */
+	--stage-1-color: #93c5fd;
+	--stage-2-color: #a78bfa;
+	--stage-3-color: #3b82f6;
+	--stage-4-color: #22d3ee;
 
-  // src/webview/details/styles.css
-  var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 14px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.title {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n\n\n.sections {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n}\n\n.stats-table {\n	width: 100%;\n	border-collapse: collapse;\n	table-layout: fixed;\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	overflow: hidden;\n}\n\n.stats-table thead {\n	background: var(--list-hover-bg);\n}\n\n.stats-table th,\n.stats-table td {\n	padding: 10px 12px;\n	border-bottom: 1px solid var(--border-subtle);\n	vertical-align: middle;\n}\n\n.stats-table th {\n	text-align: left;\n	color: var(--text-secondary);\n	font-weight: 700;\n	font-size: 12px;\n	letter-spacing: 0.1px;\n}\n\n.stats-table td {\n	color: var(--text-primary);\n	font-size: 12px;\n}\n\n.stats-table th.align-right,\n.stats-table td.align-right {\n	text-align: right;\n}\n\n.metric-label {\n	display: inline-flex;\n	align-items: center;\n	gap: 6px;\n	font-weight: 600;\n}\n\n.period-header {\n	display: flex;\n	align-items: center;\n	gap: 4px;\n	color: var(--text-secondary);\n}\n\n.align-right .period-header {\n	justify-content: flex-end;\n}\n\n.value-right {\n	text-align: right;\n}\n\n.muted {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 4px;\n}\n\n.notes {\n	margin: 4px 0 0;\n	padding-left: 16px;\n	color: var(--text-secondary);\n}\n\n.notes li {\n	margin: 4px 0;\n	line-height: 1.4;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n}\n\n.empty-state {\n	display: flex;\n	flex-direction: column;\n	gap: 12px;\n	padding: 20px;\n}\n\n.empty-state-title {\n	font-size: 15px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n.empty-state-description {\n	color: var(--text-secondary);\n	font-size: 13px;\n	line-height: 1.5;\n	margin: 0;\n}\n\n.empty-state-steps {\n	margin: 0;\n	padding-left: 20px;\n	color: var(--text-secondary);\n	font-size: 13px;\n	line-height: 1.6;\n}\n\n.empty-state-steps li {\n	margin: 4px 0;\n}\n\n.empty-state-note {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 6px;\n	padding: 10px 14px;\n	color: var(--text-secondary);\n	font-size: 12px;\n	line-height: 1.5;\n}\n";
+	/* Stage progress pip empty fill */
+	--stage-pip-empty-bg: rgba(128, 128, 128, 0.2);
 
-  // src/webview/shared/messageHandler.ts
-  function registerMessageHandler(handler) {
-    window.addEventListener("message", (event) => {
-      handler(event.data);
-    });
-  }
+	/* Semantic muted foreground */
+	--fg-muted: var(--vscode-disabledForeground);
 
-  // src/webview/details/main.ts
-  var vscode = acquireVsCodeApi();
-  var initialData = getWindowData("__INITIAL_DETAILS__");
-  console.log("[CopilotTokenTracker] details webview loaded");
-  console.log("[CopilotTokenTracker] initialData:", initialData);
-  console.log("[CopilotTokenTracker] initialData:", initialData);
-  var _initSort = initialData?.sortSettings;
-  var editorSortKey = _initSort?.editor?.key ?? "name";
-  var editorSortDir = _initSort?.editor?.dir ?? "asc";
-  var modelSortKey = _initSort?.model?.key ?? "name";
-  var modelSortDir = _initSort?.model?.dir ?? "asc";
-  var modelOtherExpanded = _initSort?.modelOtherExpanded ?? false;
-  function calculateProjection(last30DaysValue) {
-    const daysInYear = 365.25;
-    return last30DaysValue / 30 * daysInYear;
-  }
-  function buildValueCell(mainValue, subText) {
-    const td = document.createElement("td");
-    td.className = "value-right align-right";
-    td.textContent = mainValue;
-    if (subText !== void 0) {
-      td.append(el("div", "muted", subText));
-    }
-    return td;
-  }
-  function buildMetricLabelCell(icon, label, color, tooltip) {
-    const td = document.createElement("td");
-    const labelWrapper = document.createElement("span");
-    labelWrapper.className = "metric-label";
-    const iconSpan = document.createElement("span");
-    iconSpan.textContent = icon;
-    if (color) {
-      iconSpan.style.color = color;
-    }
-    const textSpan = document.createElement("span");
-    textSpan.textContent = label;
-    if (tooltip) {
-      labelWrapper.title = tooltip;
-      labelWrapper.style.cursor = "help";
-      const hintSpan = document.createElement("span");
-      hintSpan.textContent = " \u2139\uFE0F";
-      hintSpan.style.cssText = "font-size:0.75em; opacity:0.6;";
-      textSpan.append(hintSpan);
-    }
-    labelWrapper.append(iconSpan, textSpan);
-    td.append(labelWrapper);
-    return td;
-  }
-  function buildSortableTableHeader(columns, getSortKey, getSortDir, onSort) {
-    const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
-    const wraps = [];
-    function updateHeaders() {
-      wraps.forEach((w2, i6) => {
-        w2.textContent = `${columns[i6].icon} ${columns[i6].text}${getSortIndicator(columns[i6].key, getSortKey(), getSortDir())}`;
-      });
-    }
-    columns.forEach((h3, idx) => {
-      const th = document.createElement("th");
-      th.className = idx === 0 ? "" : "align-right";
-      th.style.cursor = "pointer";
-      th.style.userSelect = "none";
-      th.title = `Sort by ${h3.text}`;
-      const wrap = el("div", "period-header");
-      wrap.textContent = `${h3.icon} ${h3.text}${getSortIndicator(h3.key, getSortKey(), getSortDir())}`;
-      th.append(wrap);
-      wraps.push(wrap);
-      th.addEventListener("click", () => {
-        onSort(h3.key);
-        updateHeaders();
-      });
-      headerRow.append(th);
-    });
-    thead.append(headerRow);
-    return { thead, updateHeaders };
-  }
-  function render(stats) {
-    setCompactNumbers(stats.compactNumbers !== false);
-    const root = document.getElementById("root");
-    if (!root) {
-      return;
-    }
-    const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens + stats.last30Days.thinkingTokens));
-    const projectedSessions = Math.round(calculateProjection(stats.last30Days.sessions));
-    const projectedCo2 = calculateProjection(stats.last30Days.co2);
-    const projectedWater = calculateProjection(stats.last30Days.waterUsage);
-    const projectedCost = calculateProjection(stats.last30Days.estimatedCost);
-    const projectedCostCopilot = calculateProjection(stats.last30Days.estimatedCostCopilot ?? 0);
-    const projectedTrees = calculateProjection(stats.last30Days.treesEquivalent);
-    renderShell(root, stats, {
-      projectedTokens,
-      projectedSessions,
-      projectedCo2,
-      projectedWater,
-      projectedCost,
-      projectedCostCopilot,
-      projectedTrees
-    });
-    wireButtons();
-  }
-  function renderShell(root, stats, projections) {
-    const lastUpdated = new Date(stats.lastUpdated);
-    root.replaceChildren();
-    const themeStyle = document.createElement("style");
-    themeStyle.textContent = theme_default;
-    const style = document.createElement("style");
-    style.textContent = styles_default;
-    const container = el("div", "container");
-    const header = el("div", "header");
-    const title = el("div", "title", "AI Engineering Fluency");
-    const buttonRow = el("div", "button-row");
-    buttonRow.append(
-      createButton(BUTTONS["btn-refresh"]),
-      createButton(BUTTONS["btn-chart"]),
-      createButton(BUTTONS["btn-usage"]),
-      createButton(BUTTONS["btn-environmental"]),
-      createButton(BUTTONS["btn-diagnostics"]),
-      createButton(BUTTONS["btn-maturity"])
-    );
-    if (stats.backendConfigured) {
-      buttonRow.append(createButton(BUTTONS["btn-dashboard"]));
-    }
-    header.append(title, buttonRow);
-    const footer = el("div", "footer", `Last updated: ${lastUpdated.toLocaleString()} \xB7 Updates every 5 minutes`);
-    const sections = el("div", "sections");
-    const isEmptyState = (stats.today.tokens ?? 0) === 0 && (stats.last30Days.tokens ?? 0) === 0 && (stats.lastMonth.tokens ?? 0) === 0;
-    if (isEmptyState) {
-      sections.append(buildEmptyStateSection());
-    }
-    sections.append(buildMetricsSection(stats, projections));
-    const editorSection = buildEditorUsageSection(stats);
-    if (editorSection) {
-      sections.append(editorSection);
-    }
-    const modelSection = buildModelUsageSection(stats);
-    if (modelSection) {
-      sections.append(modelSection);
-    }
-    container.append(header, sections, footer);
-    root.append(themeStyle, style, container);
-  }
-  function sumInputTokens(p3) {
-    return Object.values(p3.modelUsage).reduce((s4, m2) => s4 + m2.inputTokens, 0);
-  }
-  function sumOutputTokens(p3) {
-    return Object.values(p3.modelUsage).reduce((s4, m2) => s4 + m2.outputTokens, 0);
-  }
-  function hasActualTokens(p3) {
-    return (p3.actualTokens || 0) > 0;
-  }
-  function serviceOverheadPct(p3) {
-    return hasActualTokens(p3) ? formatPercent((p3.actualTokens - p3.estimatedTokens) / p3.actualTokens * 100) : "\u2014";
-  }
-  function inputTokenCell(p3) {
-    return hasActualTokens(p3) ? formatCompact(sumInputTokens(p3)) : "\u2014";
-  }
-  function outputTokenCell(p3) {
-    return hasActualTokens(p3) ? formatCompact(sumOutputTokens(p3)) : "\u2014";
-  }
-  function totalTokenCell(p3) {
-    const modelTotal = sumInputTokens(p3) + sumOutputTokens(p3);
-    if ((p3.actualTokens ?? 0) > 0) {
-      return formatCompact(p3.tokens + p3.thinkingTokens);
-    }
-    return formatCompact(modelTotal > 0 ? modelTotal : p3.tokens);
-  }
-  function buildCachedTokenRow(stats) {
-    if (!(stats.today.cachedTokens || stats.last30Days.cachedTokens || stats.month.cachedTokens || stats.lastMonth.cachedTokens)) {
-      return [];
-    }
-    return [{ label: "Cached tokens", labelTooltip: 'Cache-read tokens \u2014 already included in "Input tokens" above, shown separately because they are billed at a lower rate.', icon: "\u26A1", color: "#34d399", today: formatCompact(stats.today.cachedTokens || 0), last30Days: formatCompact(stats.last30Days.cachedTokens || 0), month: formatCompact(stats.month.cachedTokens || 0), lastMonth: formatCompact(stats.lastMonth.cachedTokens || 0), projected: "\u2014" }];
-  }
-  function buildCopilotPlanRow(stats) {
-    if (!stats.copilotPlan) {
-      return [];
-    }
-    const plan = stats.copilotPlan;
-    const credits = plan.monthlyAiCreditsUsd > 0 ? `$${plan.monthlyAiCreditsUsd} credits/month` : "no credits";
-    return [{ label: `${plan.planName} (${credits})`, labelTooltip: `Your active GitHub Copilot subscription plan (ID: ${plan.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`, icon: "\u{1F3F7}\uFE0F", color: "#60a5fa", today: "\u2014", last30Days: "\u2014", month: "\u2014", lastMonth: "\u2014", projected: "\u2014" }];
-  }
-  function buildMetricsRows(stats, projections) {
-    const rows = [
-      { label: "Total tokens", labelTooltip: "All LLM API tokens counted across every call in this period \u2014 matches the status bar. When debug logs are available this is the definitive total; otherwise it falls back to per-model attribution or the text-based estimate.", icon: "\u{1F7E3}", color: "#c37bff", today: totalTokenCell(stats.today), last30Days: totalTokenCell(stats.last30Days), month: totalTokenCell(stats.month), lastMonth: totalTokenCell(stats.lastMonth), projected: formatCompact(projections.projectedTokens) },
-      { label: "Input tokens", labelTooltip: "Total prompt tokens sent to the model, including any cache-read tokens (shown separately below).", icon: "\u2B06\uFE0F", color: "#c37bff", today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: "\u2014" },
-      { label: "Output tokens", icon: "\u2B07\uFE0F", color: "#c37bff", today: outputTokenCell(stats.today), last30Days: outputTokenCell(stats.last30Days), month: outputTokenCell(stats.month), lastMonth: outputTokenCell(stats.lastMonth), projected: "\u2014" },
-      ...buildCachedTokenRow(stats),
-      { label: "Tokens (user estimated)", icon: "\u{1F4DD}", color: "#b39ddb", today: formatCompact(stats.today.estimatedTokens), last30Days: formatCompact(stats.last30Days.estimatedTokens), month: formatCompact(stats.month.estimatedTokens), lastMonth: formatCompact(stats.lastMonth.estimatedTokens), projected: "\u2014" },
-      { label: "Service overhead %", icon: "\u2601\uFE0F", color: "#90a4ae", today: serviceOverheadPct(stats.today), last30Days: serviceOverheadPct(stats.last30Days), month: serviceOverheadPct(stats.month), lastMonth: serviceOverheadPct(stats.lastMonth), projected: "\u2014" },
-      { label: "Thinking tokens", icon: "\u{1F9E0}", color: "#a78bfa", today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: "\u2014" },
-      { label: "Estimated cost (UBB)", labelTooltip: "Based on GitHub Copilot AI Credit rates (1 credit = $0.01) \u2014 this is what Copilot will bill you. UBB = Usage Based Billing.", icon: "\u{1F7E2}", color: "#7ce38b", today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
-      ...buildCopilotPlanRow(stats),
-      { label: "Sessions", icon: "\u{1F4C2}", color: "#66aaff", today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
-      { label: "Average interactions/session", icon: "\u{1F4AC}", color: "#8ce0ff", today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: "\u2014" },
-      { label: "Average tokens/session", icon: "\u{1F522}", color: "#7ce38b", today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: "\u2014" }
-    ];
-    return rows;
-  }
-  function buildMetricsSection(stats, projections) {
-    const section = el("div", "section");
-    section.append(el("h3", "", "AI Engineering Fluency"));
-    const table = document.createElement("table");
-    table.className = "stats-table";
-    const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
-    const HEADERS = [{ icon: "\u{1F4CA}", text: "Metric" }, { icon: "\u{1F4C5}", text: "Today" }, { icon: "\u{1F4C8}", text: "Last 30 Days" }, { icon: "\u{1F5D3}\uFE0F", text: "Current Month" }, { icon: "\u{1F4C6}", text: "Previous Month" }, { icon: "\u{1F30D}", text: "Projected Year" }];
-    HEADERS.forEach((h3, idx) => {
-      const th = document.createElement("th");
-      th.className = idx === 0 ? "" : "align-right";
-      const wrap = el("div", "period-header");
-      wrap.textContent = `${h3.icon} ${h3.text}`;
-      th.append(wrap);
-      headerRow.append(th);
-    });
-    thead.append(headerRow);
-    table.append(thead);
-    const tbody = document.createElement("tbody");
-    buildMetricsRows(stats, projections).forEach((row) => {
-      const tr = document.createElement("tr");
-      tr.append(buildMetricLabelCell(row.icon, row.label, row.color, row.labelTooltip), buildValueCell(row.today), buildValueCell(row.last30Days), buildValueCell(row.month), buildValueCell(row.lastMonth), buildValueCell(row.projected));
-      tbody.append(tr);
-    });
-    table.append(tbody);
-    section.append(table);
-    return section;
-  }
-  function getSortIndicator(colKey, activeKey, dir) {
-    if (colKey !== activeKey) {
-      return " \u2195";
-    }
-    return dir === "asc" ? " \u2191" : " \u2193";
-  }
-  function saveSortSettings() {
-    vscode.postMessage({
-      command: "saveSortSettings",
-      settings: {
-        editor: { key: editorSortKey, dir: editorSortDir },
-        model: { key: modelSortKey, dir: modelSortDir },
-        modelOtherExpanded
-      }
-    });
-  }
-  function buildEditorRow(item, totals) {
-    const { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens, projectedSessions } = item;
-    const todayPct = totals.today > 0 ? todayUsage.tokens / totals.today * 100 : 0;
-    const last30Pct = totals.last30Days > 0 ? last30DaysUsage.tokens / totals.last30Days * 100 : 0;
-    const monthPct = totals.month > 0 ? monthUsage.tokens / totals.month * 100 : 0;
-    const lastMonthPct = totals.lastMonth > 0 ? lastMonthUsage.tokens / totals.lastMonth * 100 : 0;
-    const tr = document.createElement("tr");
-    if (editor === "JetBrains") {
-      tr.title = "JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.";
-    }
-    if (editor === "Antigravity") {
-      tr.title = "Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.";
-    }
-    if (editor === "Cursor") {
-      tr.title = "Cursor: token counts reflect the context window size at the last request (contextTokensUsed). Output tokens are not stored locally.";
-    }
-    const labelTd = document.createElement("td");
-    const labelWrapper = document.createElement("span");
-    labelWrapper.className = "metric-label";
-    labelWrapper.textContent = `${getEditorIcon(editor)} ${editor}`;
-    if (editor === "JetBrains" || editor === "Antigravity" || editor === "Cursor") {
-      labelWrapper.textContent = `${labelWrapper.textContent} \u24D8`;
-    }
-    labelTd.append(labelWrapper);
-    tr.append(
-      labelTd,
-      buildValueCell(formatCompact(todayUsage.tokens), `${formatPercent(todayPct)} \xB7 ${todayUsage.sessions} sessions`),
-      buildValueCell(formatCompact(last30DaysUsage.tokens), `${formatPercent(last30Pct)} \xB7 ${last30DaysUsage.sessions} sessions`),
-      buildValueCell(formatCompact(monthUsage.tokens), `${formatPercent(monthPct)} \xB7 ${monthUsage.sessions} sessions`),
-      buildValueCell(formatCompact(lastMonthUsage.tokens), `${formatPercent(lastMonthPct)} \xB7 ${lastMonthUsage.sessions} sessions`),
-      buildValueCell(formatCompact(projectedTokens), `${projectedSessions} sessions`)
-    );
-    return tr;
-  }
-  function buildEditorTbody(stats, allEditors) {
-    const totals = {
-      today: Object.values(stats.today.editorUsage).reduce((s4, e7) => s4 + e7.tokens, 0),
-      last30Days: Object.values(stats.last30Days.editorUsage).reduce((s4, e7) => s4 + e7.tokens, 0),
-      month: Object.values(stats.month.editorUsage).reduce((s4, e7) => s4 + e7.tokens, 0),
-      lastMonth: Object.values(stats.lastMonth.editorUsage).reduce((s4, e7) => s4 + e7.tokens, 0)
-    };
-    const items = allEditors.map((editor) => {
-      const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
-      const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
-      const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
-      const lastMonthUsage = stats.lastMonth.editorUsage[editor] || { tokens: 0, sessions: 0 };
-      return { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens: Math.round(calculateProjection(last30DaysUsage.tokens)), projectedSessions: Math.round(calculateProjection(last30DaysUsage.sessions)) };
-    });
-    items.sort((a3, b3) => {
-      let cmp;
-      switch (editorSortKey) {
-        case "name":
-          cmp = a3.editor.localeCompare(b3.editor);
-          break;
-        case "today":
-          cmp = a3.todayUsage.tokens - b3.todayUsage.tokens;
-          break;
-        case "last30Days":
-          cmp = a3.last30DaysUsage.tokens - b3.last30DaysUsage.tokens;
-          break;
-        case "month":
-          cmp = a3.monthUsage.tokens - b3.monthUsage.tokens;
-          break;
-        case "lastMonth":
-          cmp = a3.lastMonthUsage.tokens - b3.lastMonthUsage.tokens;
-          break;
-        case "projected":
-          cmp = a3.projectedTokens - b3.projectedTokens;
-          break;
-        default:
-          cmp = 0;
-      }
-      return editorSortDir === "asc" ? cmp : -cmp;
-    });
-    const tbody = document.createElement("tbody");
-    items.forEach((item) => tbody.append(buildEditorRow(item, totals)));
-    return tbody;
-  }
-  function buildEditorUsageSection(stats) {
-    const allEditors = /* @__PURE__ */ new Set([
-      ...Object.keys(stats.today.editorUsage),
-      ...Object.keys(stats.last30Days.editorUsage),
-      ...Object.keys(stats.month.editorUsage),
-      ...Object.keys(stats.lastMonth.editorUsage)
-    ]);
-    if (allEditors.size === 0) {
-      return null;
-    }
-    const section = el("div", "section");
-    const heading = el("h3");
-    heading.textContent = "\u{1F4BB} Usage by Editor";
-    section.append(heading);
-    const table = document.createElement("table");
-    table.className = "stats-table";
-    const editorColHeaders = [
-      { icon: "\u{1F4DD}", text: "Editor", key: "name" },
-      { icon: "\u{1F4C5}", text: "Today", key: "today" },
-      { icon: "\u{1F4C8}", text: "Last 30 Days", key: "last30Days" },
-      { icon: "\u{1F5D3}\uFE0F", text: "Current Month", key: "month" },
-      { icon: "\u{1F4C6}", text: "Previous Month", key: "lastMonth" },
-      { icon: "\u{1F30D}", text: "Projected Year", key: "projected" }
-    ];
-    const { thead } = buildSortableTableHeader(
-      editorColHeaders,
-      () => editorSortKey,
-      () => editorSortDir,
-      (key) => {
-        if (editorSortKey === key) {
-          editorSortDir = editorSortDir === "asc" ? "desc" : "asc";
-        } else {
-          editorSortKey = key;
-          editorSortDir = key === "name" ? "asc" : "desc";
-        }
-        const newTbody = buildEditorTbody(stats, Array.from(allEditors));
-        const oldTbody = table.querySelector("tbody");
-        if (oldTbody) {
-          table.replaceChild(newTbody, oldTbody);
-        } else {
-          table.append(newTbody);
-        }
-        saveSortSettings();
-      }
-    );
-    table.append(thead);
-    table.append(buildEditorTbody(stats, Array.from(allEditors)));
-    section.append(table);
-    return section;
-  }
-  var TOP_N_MODELS = 5;
-  function toModelItem(stats, model) {
-    const todayUsage = stats.today.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-    const last30DaysUsage = stats.last30Days.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-    const monthUsage = stats.month.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-    const lastMonthUsage = stats.lastMonth.modelUsage[model] || { inputTokens: 0, outputTokens: 0 };
-    const todayTotal = todayUsage.inputTokens + todayUsage.outputTokens;
-    const last30DaysTotal = last30DaysUsage.inputTokens + last30DaysUsage.outputTokens;
-    const monthTotal = monthUsage.inputTokens + monthUsage.outputTokens;
-    const lastMonthTotal = lastMonthUsage.inputTokens + lastMonthUsage.outputTokens;
-    return {
-      model,
-      todayTotal,
-      todayInputPct: todayTotal > 0 ? todayUsage.inputTokens / todayTotal * 100 : 0,
-      todayOutputPct: todayTotal > 0 ? todayUsage.outputTokens / todayTotal * 100 : 0,
-      last30DaysTotal,
-      last30DaysInputPct: last30DaysTotal > 0 ? last30DaysUsage.inputTokens / last30DaysTotal * 100 : 0,
-      last30DaysOutputPct: last30DaysTotal > 0 ? last30DaysUsage.outputTokens / last30DaysTotal * 100 : 0,
-      monthTotal,
-      monthInputPct: monthTotal > 0 ? monthUsage.inputTokens / monthTotal * 100 : 0,
-      monthOutputPct: monthTotal > 0 ? monthUsage.outputTokens / monthTotal * 100 : 0,
-      lastMonthTotal,
-      lastMonthInputPct: lastMonthTotal > 0 ? lastMonthUsage.inputTokens / lastMonthTotal * 100 : 0,
-      lastMonthOutputPct: lastMonthTotal > 0 ? lastMonthUsage.outputTokens / lastMonthTotal * 100 : 0,
-      projected: Math.round(calculateProjection(last30DaysTotal)),
-      charsPerToken: getCharsPerToken(model)
-    };
-  }
-  function sortModelItems(items) {
-    items.sort((a3, b3) => {
-      let cmp;
-      switch (modelSortKey) {
-        case "name":
-          cmp = a3.model.localeCompare(b3.model);
-          break;
-        case "today":
-          cmp = a3.todayTotal - b3.todayTotal;
-          break;
-        case "last30Days":
-          cmp = a3.last30DaysTotal - b3.last30DaysTotal;
-          break;
-        case "month":
-          cmp = a3.monthTotal - b3.monthTotal;
-          break;
-        case "lastMonth":
-          cmp = a3.lastMonthTotal - b3.lastMonthTotal;
-          break;
-        case "projected":
-          cmp = a3.projected - b3.projected;
-          break;
-        default:
-          cmp = 0;
-      }
-      return modelSortDir === "asc" ? cmp : -cmp;
-    });
-  }
-  function buildModelRowEl(item, isOtherChild) {
-    const tr = document.createElement("tr");
-    if (isOtherChild) {
-      tr.style.opacity = "0.85";
-    }
-    const labelTd = document.createElement("td");
-    const labelWrapper = document.createElement("span");
-    labelWrapper.className = "metric-label";
-    if (isOtherChild) {
-      const indentSpan = document.createElement("span");
-      indentSpan.style.cssText = "display:inline-block;width:12px";
-      labelWrapper.append(indentSpan);
-    }
-    const charsSpan = document.createElement("span");
-    charsSpan.style.cssText = "color:#9aa0a6;font-size:11px;font-weight:500;";
-    charsSpan.textContent = `(~${item.charsPerToken.toFixed(1)} chars/tk)`;
-    labelWrapper.append(document.createTextNode(`${getModelDisplayName(item.model)} `), charsSpan);
-    labelTd.append(labelWrapper);
-    tr.append(
-      labelTd,
-      buildValueCell(formatCompact(item.todayTotal), `\u2191${formatPercent(item.todayInputPct)} \u2193${formatPercent(item.todayOutputPct)}`),
-      buildValueCell(formatCompact(item.last30DaysTotal), `\u2191${formatPercent(item.last30DaysInputPct)} \u2193${formatPercent(item.last30DaysOutputPct)}`),
-      buildValueCell(formatCompact(item.monthTotal), `\u2191${formatPercent(item.monthInputPct)} \u2193${formatPercent(item.monthOutputPct)}`),
-      buildValueCell(formatCompact(item.lastMonthTotal), `\u2191${formatPercent(item.lastMonthInputPct)} \u2193${formatPercent(item.lastMonthOutputPct)}`),
-      buildValueCell(formatCompact(item.projected))
-    );
-    return tr;
-  }
-  function appendOtherModels(stats, otherModels, onToggleOther, tbody) {
-    const sumUsage = (period) => otherModels.reduce((acc, m2) => {
-      const u3 = stats[period].modelUsage[m2] || { inputTokens: 0, outputTokens: 0 };
-      return { inputTokens: acc.inputTokens + u3.inputTokens, outputTokens: acc.outputTokens + u3.outputTokens };
-    }, { inputTokens: 0, outputTokens: 0 });
-    const pct = (part, total) => total > 0 ? part / total * 100 : 0;
-    const otherToday = sumUsage("today");
-    const otherLast30 = sumUsage("last30Days");
-    const otherMonth = sumUsage("month");
-    const otherLastMonth = sumUsage("lastMonth");
-    const tTotal = otherToday.inputTokens + otherToday.outputTokens;
-    const l30Total = otherLast30.inputTokens + otherLast30.outputTokens;
-    const mTotal = otherMonth.inputTokens + otherMonth.outputTokens;
-    const lmTotal = otherLastMonth.inputTokens + otherLastMonth.outputTokens;
-    const otherTr = document.createElement("tr");
-    otherTr.style.cursor = "pointer";
-    otherTr.style.background = "var(--list-hover-bg)";
-    otherTr.title = modelOtherExpanded ? "Collapse other models" : "Expand other models";
-    const otherLabelWrapper = document.createElement("span");
-    otherLabelWrapper.className = "metric-label";
-    const otherNameSpan = document.createElement("span");
-    otherNameSpan.style.cssText = "color:var(--text-secondary);font-weight:600;";
-    otherNameSpan.textContent = `\u{1F4E6} Other (${otherModels.length} model${otherModels.length !== 1 ? "s" : ""})`;
-    const otherToggleSpan = document.createElement("span");
-    otherToggleSpan.style.cssText = "font-size:10px;color:var(--text-muted)";
-    otherToggleSpan.textContent = ` ${modelOtherExpanded ? "\u25B2" : "\u25BC"}`;
-    otherLabelWrapper.append(otherNameSpan, otherToggleSpan);
-    const otherLabelTd = document.createElement("td");
-    otherLabelTd.append(otherLabelWrapper);
-    const mkOtherTd = (io, total) => {
-      const td = buildValueCell(formatCompact(total));
-      if (total > 0) {
-        td.append(el("div", "muted", `\u2191${formatPercent(pct(io.inputTokens, total))} \u2193${formatPercent(pct(io.outputTokens, total))}`));
-      }
-      return td;
-    };
-    otherTr.append(otherLabelTd, mkOtherTd(otherToday, tTotal), mkOtherTd(otherLast30, l30Total), mkOtherTd(otherMonth, mTotal), mkOtherTd(otherLastMonth, lmTotal), buildValueCell(formatCompact(Math.round(calculateProjection(l30Total)))));
-    otherTr.addEventListener("click", () => {
-      modelOtherExpanded = !modelOtherExpanded;
-      saveSortSettings();
-      onToggleOther();
-    });
-    tbody.append(otherTr);
-    if (modelOtherExpanded) {
-      const otherItems = otherModels.map((m2) => toModelItem(stats, m2));
-      sortModelItems(otherItems);
-      otherItems.forEach((item) => tbody.append(buildModelRowEl(item, true)));
-    }
-  }
-  function buildModelTbody(stats, topModels, otherModels, onToggleOther) {
-    const topItems = topModels.map((m2) => toModelItem(stats, m2));
-    sortModelItems(topItems);
-    const tbody = document.createElement("tbody");
-    topItems.forEach((item) => tbody.append(buildModelRowEl(item, false)));
-    if (otherModels.length > 0) {
-      appendOtherModels(stats, otherModels, onToggleOther, tbody);
-    }
-    return tbody;
-  }
-  function buildModelUsageSection(stats) {
-    const allModels = /* @__PURE__ */ new Set([
-      ...Object.keys(stats.today.modelUsage),
-      ...Object.keys(stats.last30Days.modelUsage),
-      ...Object.keys(stats.month.modelUsage),
-      ...Object.keys(stats.lastMonth.modelUsage)
-    ]);
-    if (allModels.size === 0) {
-      return null;
-    }
-    const sortedByLast30Days = Array.from(allModels).sort((a3, b3) => {
-      const aUsage = stats.last30Days.modelUsage[a3] || { inputTokens: 0, outputTokens: 0 };
-      const bUsage = stats.last30Days.modelUsage[b3] || { inputTokens: 0, outputTokens: 0 };
-      return bUsage.inputTokens + bUsage.outputTokens - (aUsage.inputTokens + aUsage.outputTokens);
-    });
-    const topModels = sortedByLast30Days.slice(0, TOP_N_MODELS);
-    const otherModels = sortedByLast30Days.slice(TOP_N_MODELS);
-    const section = el("div", "section");
-    const heading = el("h3");
-    heading.textContent = "\u{1F3AF} Model Usage (Tokens)";
-    section.append(heading);
-    const table = document.createElement("table");
-    table.className = "stats-table";
-    const modelColHeaders = [
-      { icon: "\u{1F9E0}", text: "Model", key: "name" },
-      { icon: "\u{1F4C5}", text: "Today", key: "today" },
-      { icon: "\u{1F4C8}", text: "Last 30 Days", key: "last30Days" },
-      { icon: "\u{1F5D3}\uFE0F", text: "Current Month", key: "month" },
-      { icon: "\u{1F4C6}", text: "Previous Month", key: "lastMonth" },
-      { icon: "\u{1F30D}", text: "Projected Year", key: "projected" }
-    ];
-    function rebuildTbody() {
-      const newTbody = buildModelTbody(stats, topModels, otherModels, rebuildTbody);
-      const oldTbody = table.querySelector("tbody");
-      if (oldTbody) {
-        table.replaceChild(newTbody, oldTbody);
-      } else {
-        table.append(newTbody);
-      }
-    }
-    const { thead } = buildSortableTableHeader(
-      modelColHeaders,
-      () => modelSortKey,
-      () => modelSortDir,
-      (key) => {
-        if (modelSortKey === key) {
-          modelSortDir = modelSortDir === "asc" ? "desc" : "asc";
-        } else {
-          modelSortKey = key;
-          modelSortDir = key === "name" ? "asc" : "desc";
-        }
-        rebuildTbody();
-        saveSortSettings();
-      }
-    );
-    table.append(thead);
-    rebuildTbody();
-    section.append(table);
-    return section;
-  }
-  function buildEmptyStateSection() {
-    const section = el("div", "section");
-    const inner = el("div", "empty-state");
-    const title = el("div", "empty-state-title", "\u{1F44B} Welcome to AI Engineering Fluency");
-    const desc = el(
-      "p",
-      "empty-state-description",
-      "This extension tracks AI token usage by reading session log files stored locally by supported tools. No token data has been found yet."
-    );
-    const toolsLabel = document.createElement("p");
-    toolsLabel.className = "empty-state-description";
-    const toolsLabelStrong = document.createElement("strong");
-    toolsLabelStrong.textContent = "Supported tools & editors:";
-    toolsLabel.append(toolsLabelStrong);
-    const toolsList = document.createElement("ul");
-    toolsList.className = "empty-state-steps";
-    const toolsTexts = [
-      "\u{1F680} Antigravity \u2014 Google's Gemini-powered desktop IDE",
-      "\u{1F916} Claude Code \u2014 Anthropic's CLI coding agent",
-      "\u{1F4BB} Copilot CLI \u2014 GitHub Copilot in the terminal",
-      "\u{1F5B1}\uFE0F Cursor, \u{1F30A} Windsurf \u2014 built-in AI chat",
-      "\u{1F48E} Gemini CLI \u2014 Google's open-source CLI coding agent",
-      "\u{1F7E2} OpenCode, \u{1F980} Crush \u2014 terminal-based coding agents",
-      "\u03C0 Pi \u2014 Mistral-powered terminal coding agent",
-      "\u{1F5A5}\uFE0F Visual Studio 2022+ \u2014 GitHub Copilot Chat extension",
-      "\u{1F499} VS Code / VS Code Insiders / VSCodium \u2014 GitHub Copilot Chat extension"
-    ];
-    toolsTexts.forEach((text) => {
-      const li = document.createElement("li");
-      li.textContent = text;
-      toolsList.append(li);
-    });
-    const stepsLabel = document.createElement("p");
-    stepsLabel.className = "empty-state-description";
-    const stepsLabelStrong = document.createElement("strong");
-    stepsLabelStrong.textContent = "To get started:";
-    stepsLabel.append(stepsLabelStrong);
-    const steps = document.createElement("ol");
-    steps.className = "empty-state-steps";
-    const stepTexts = [
-      "Use any of the supported tools or editors listed above to interact with an AI model.",
-      "For GitHub Copilot in VS Code: open the Copilot Chat panel (Ctrl+Alt+I / Cmd+Alt+I) and start a conversation.",
-      "For terminal agents (Claude Code, Gemini CLI, Antigravity, Pi, OpenCode, Copilot CLI): run a coding session in your terminal.",
-      "Click the \u{1F504} Refresh button above to reload the stats after your first session."
-    ];
-    stepTexts.forEach((text) => {
-      const li = document.createElement("li");
-      li.textContent = text;
-      steps.append(li);
-    });
-    const note = el(
-      "div",
-      "empty-state-note",
-      "\u{1F4A1} If you have been using one of the supported tools but still see no data, open the Diagnostics panel (\u{1F50D} Diagnostics button above) to verify that session files are being discovered correctly."
-    );
-    inner.append(title, desc, toolsLabel, toolsList, stepsLabel, steps, note);
-    section.append(inner);
-    return section;
-  }
-  function wireButtons() {
-    const refresh = document.getElementById("btn-refresh");
-    const chart = document.getElementById("btn-chart");
-    const usage = document.getElementById("btn-usage");
-    const diagnostics = document.getElementById("btn-diagnostics");
-    refresh?.addEventListener("click", () => vscode.postMessage({ command: "refresh" }));
-    chart?.addEventListener("click", () => vscode.postMessage({ command: "showChart" }));
-    usage?.addEventListener("click", () => vscode.postMessage({ command: "showUsageAnalysis" }));
-    diagnostics?.addEventListener("click", () => vscode.postMessage({ command: "showDiagnostics" }));
-    const maturity = document.getElementById("btn-maturity");
-    maturity?.addEventListener("click", () => vscode.postMessage({ command: "showMaturity" }));
-    const dashboard = document.getElementById("btn-dashboard");
-    dashboard?.addEventListener("click", () => vscode.postMessage({ command: "showDashboard" }));
-    const environmental = document.getElementById("btn-environmental");
-    environmental?.addEventListener("click", () => vscode.postMessage({ command: "showEnvironmental" }));
-    wireExtensionPointButtons(vscode);
-  }
-  async function bootstrap() {
-    console.log("[CopilotTokenTracker] bootstrap called");
-    await Promise.resolve().then(() => (init_vscode_button2(), vscode_button_exports));
-    await Promise.resolve().then(() => (init_vscode_badge2(), vscode_badge_exports));
-    if (initialData) {
-      console.log("[CopilotTokenTracker] Rendering details with initialData:", initialData);
-      render(initialData);
-    } else {
-      console.warn("[CopilotTokenTracker] No initialData found, rendering fallback.");
-      const root = document.getElementById("root");
-      if (root) {
-        root.textContent = "";
-        const fallback = document.createElement("div");
-        fallback.style.padding = "16px";
-        fallback.style.color = "#e7e7e7";
-        fallback.textContent = "No data available.";
-        root.append(fallback);
-      }
-    }
-  }
-  registerMessageHandler((message) => {
-    if (message.command === "updateStats") {
-      render(message.data);
-    }
-  });
-  void bootstrap();
-})();
+	/* Shadow for cards */
+	--shadow-color: rgb(0, 0, 0, 0.16);
+	--shadow-hover-color: rgb(0, 0, 0, 0.24);
+}
+
+/* Light theme adjustments */
+body[data-vscode-theme-kind="vscode-light"],
+body[data-vscode-theme-kind="vscode-high-contrast-light"] {
+	--shadow-color: rgb(0, 0, 0, 0.08);
+	--shadow-hover-color: rgb(0, 0, 0, 0.12);
+	/* Stage colors darkened for readable contrast on light backgrounds */
+	--stage-1-color: #1d6fa4;
+	--stage-2-color: #7c3aed;
+	--stage-3-color: #2563eb;
+	--stage-4-color: #0891b2;
+	--stage-pip-empty-bg: rgba(0, 0, 0, 0.12);
+}
+
+/* Default navigation button row \u2014 native look for normal themes */
+.button-row {
+	display: flex;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+/* Per-button icon accent color (set via the --icon-accent custom property on the icon
+   span itself), so the label text keeps the theme's normal button foreground while the
+   glyph picks up a distinct color \u2014 breaks up an otherwise uniform row of solid pills.
+   The explicit margin-right overrides vscode-button's own ::slotted(*) 4px default \u2014
+   some codicon glyphs (graph, target, globe) fill their 16px box edge-to-edge with
+   little built-in whitespace, so 4px reads as touching the label; a fixed 6px keeps the
+   gap visually consistent across glyphs instead of varying with each icon's artwork. */
+.button-row .nav-icon {
+	color: var(--icon-accent, inherit);
+	margin-right: 6px !important;
+}
+
+/* Active view indicator \u2014 the nav button for the currently open view.
+   Rendered non-clickable (disabled) but kept fully opaque and marked with a
+   secondary background plus an accent underline so the row reads as a tab strip. */
+.button-row vscode-button.nav-active {
+	opacity: 1;
+	pointer-events: none;
+}
+
+.button-row vscode-button.nav-active::part(control) {
+	background: var(--button-secondary-bg);
+	color: var(--button-secondary-fg);
+	border-bottom: 2px solid var(--focus-border);
+	cursor: default;
+}
+
+/* ------------------------------------------------------------------ *
+ * High contrast themes \u2014 INDUSTRIAL REDUX
+ * Stark outlines, uppercase navigation, neon stage colors, monospace.
+ * Everything below is deliberately gated to the high-contrast theme
+ * kinds so normal light/dark themes are unaffected.
+ * ------------------------------------------------------------------ */
+
+body[data-vscode-theme-kind="vscode-high-contrast"],
+body[data-vscode-theme-kind="vscode-high-contrast-light"] {
+	/* Base colors \u2014 forced to stark contrasts */
+	--bg-secondary: transparent;
+	--bg-tertiary: transparent;
+	--text-secondary: var(--vscode-foreground);
+	--text-muted: var(--vscode-descriptionForeground);
+	--border-color: var(--vscode-contrastBorder);
+	--border-subtle: var(--vscode-contrastBorder);
+
+	/* Button colors \u2014 high contrast, no subtle grays */
+	--button-bg: var(--vscode-foreground);
+	--button-fg: var(--vscode-editor-background);
+	--button-hover-bg: var(--vscode-editor-background);
+	--button-secondary-bg: transparent;
+	--button-secondary-fg: var(--vscode-foreground);
+	--button-secondary-hover-bg: var(--vscode-foreground);
+
+	/* Input colors */
+	--input-bg: transparent;
+	--input-fg: var(--vscode-foreground);
+	--input-border: var(--vscode-foreground);
+
+	/* List/card colors */
+	--list-hover-bg: var(--vscode-editor-background);
+	--list-active-bg: var(--vscode-foreground);
+	--list-active-fg: var(--vscode-editor-background);
+	--list-inactive-bg: transparent;
+
+	/* Alternating row colors dropped for harsh outlines */
+	--row-alternate-bg: transparent;
+
+	/* Badge colors */
+	--badge-bg: var(--vscode-foreground);
+	--badge-fg: var(--vscode-editor-background);
+
+	/* Focus colors */
+	--focus-border: var(--vscode-foreground);
+
+	/* Link colors */
+	--link-color: var(--vscode-foreground);
+	--link-hover-color: var(--vscode-textLink-activeForeground);
+
+	/* Stage progress pip empty fill */
+	--stage-pip-empty-bg: transparent;
+
+	/* Semantic muted foreground */
+	--fg-muted: var(--vscode-descriptionForeground);
+
+	/* Shadow for cards \u2014 HARD shadows */
+	--shadow-color: var(--vscode-foreground);
+	--shadow-hover-color: var(--vscode-foreground);
+
+	/* Monospace body for the industrial identity */
+	font-family: var(--vscode-editor-font-family), "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* High contrast dark \u2014 stark neon stage colors */
+body[data-vscode-theme-kind="vscode-high-contrast"] {
+	--stage-1-color: #ff00ff; /* Magenta */
+	--stage-2-color: #00ffff; /* Cyan */
+	--stage-3-color: #ffff00; /* Yellow */
+	--stage-4-color: #00ff00; /* Green */
+}
+
+/* High contrast light \u2014 darkened neon for readable contrast */
+body[data-vscode-theme-kind="vscode-high-contrast-light"] {
+	--stage-1-color: #d100d1;
+	--stage-2-color: #008787;
+	--stage-3-color: #b5b500;
+	--stage-4-color: #00a300;
+}
+
+/* High contrast stays stark and monochrome by design \u2014 the per-button icon accent
+   colors are a normal-theme-only affordance and must not dilute that contrast. */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-icon,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-icon {
+	color: currentColor;
+}
+
+/* Industrial navigation tab bar (high contrast only) */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row {
+	display: flex;
+	gap: 0; /* Force flush blocks */
+	flex-wrap: wrap; /* Let it wrap so no scrollbars appear */
+	border: 3px solid var(--vscode-foreground);
+	background-color: var(--vscode-editor-background);
+	margin-bottom: 2rem;
+	box-shadow: 4px 4px 0 var(--vscode-panel-border);
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > * {
+	flex-grow: 1; /* Stretch to fill */
+	flex-shrink: 1;
+	flex-basis: auto;
+	text-align: center;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button {
+	border-radius: 0 !important;
+	border: none !important;
+	border-right: 2px solid var(--vscode-foreground) !important;
+	font-family: inherit;
+	font-weight: 900;
+	text-transform: uppercase;
+	background-color: var(--vscode-editor-background) !important;
+	color: var(--vscode-foreground) !important;
+	padding: 12px 16px !important;
+	cursor: pointer;
+	box-shadow: none !important;
+	letter-spacing: 1px;
+	transition: transform 0.1s, background-color 0.1s;
+	height: auto !important; /* Override vscode-button strict heights */
+	border-bottom: 3px solid transparent !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button::part(control) {
+	background-color: var(--vscode-editor-background) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover::part(control) {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > *:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:last-child {
+	border-right: none !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button:hover {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important; /* Cyber/Industrial accent indicator */
+}
+
+/* Active view indicator (high contrast) \u2014 inverted like hover, with the accent underline */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button.nav-active,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button.nav-active {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important;
+	opacity: 1;
+	pointer-events: none;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button.nav-active::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button.nav-active::part(control) {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	cursor: default;
+}
+
+/* Industrial header + title (high contrast only) */
+body[data-vscode-theme-kind="vscode-high-contrast"] .header,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-end;
+	margin-bottom: 2rem;
+	flex-wrap: nowrap;
+	white-space: nowrap;
+	gap: 15px;
+	border-bottom: 4px solid var(--vscode-foreground);
+	padding-bottom: 1rem;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .title,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
+	font-size: 28px;
+	font-weight: 900;
+	text-transform: uppercase;
+	letter-spacing: 2px;
+	color: var(--vscode-foreground);
+	text-shadow: 2px 2px 0 var(--vscode-panel-border);
+	white-space: nowrap;
+}
+`;var Ce=`body {
+	margin: 0;
+	background: var(--bg-primary);
+	color: var(--text-primary);
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+}
+
+.container {
+	padding: 16px;
+	display: flex;
+	flex-direction: column;
+	gap: 14px;
+	max-width: 1200px;
+	margin: 0 auto;
+}
+
+.header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	padding-bottom: 4px;
+}
+
+.header-left {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+}
+
+.title {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.plan-badge {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	align-self: flex-start;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 999px;
+	padding: 2px 10px;
+	font-size: 11px;
+	color: var(--text-secondary);
+	cursor: help;
+}
+
+.cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	gap: 10px;
+	text-align: center;
+}
+
+.card {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	padding: 12px;
+	box-shadow: 0 4px 10px var(--shadow-color);
+	text-align: center;
+}
+
+.card-label {
+	color: var(--text-secondary);
+	font-size: 11px;
+	margin-bottom: 6px;
+}
+
+.card-value {
+	color: var(--text-primary);
+	font-size: 18px;
+	font-weight: 700;
+}
+
+
+
+.sections {
+	display: flex;
+	flex-direction: column;
+	gap: 16px;
+}
+
+.section {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	padding: 12px;
+	box-shadow: 0 4px 10px var(--shadow-color);
+}
+
+.section h3 {
+	margin: 0 0 10px;
+	font-size: 14px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-primary);
+	letter-spacing: 0.2px;
+}
+
+.stats-table {
+	width: 100%;
+	border-collapse: collapse;
+	table-layout: fixed;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 8px;
+	overflow: hidden;
+}
+
+.stats-table thead {
+	background: var(--list-hover-bg);
+}
+
+.stats-table th,
+.stats-table td {
+	padding: 10px 12px;
+	border-bottom: 1px solid var(--border-subtle);
+	vertical-align: middle;
+}
+
+.stats-table th {
+	text-align: left;
+	color: var(--text-secondary);
+	font-weight: 700;
+	font-size: 12px;
+	letter-spacing: 0.1px;
+}
+
+.stats-table td {
+	color: var(--text-primary);
+	font-size: 12px;
+}
+
+.stats-table th.align-right,
+.stats-table td.align-right {
+	text-align: right;
+}
+
+.stats-table tr.group-row td {
+	background: var(--list-hover-bg);
+	color: var(--text-secondary);
+	font-size: 12px;
+	font-weight: 700;
+	text-transform: uppercase;
+	letter-spacing: 1px;
+	padding: 8px 12px;
+	border-top: 1px solid var(--border-color);
+	border-bottom: 1px solid var(--border-color);
+}
+
+/* First group sits right under the table header, no extra top rule needed */
+.stats-table tbody tr.group-row:first-child td {
+	border-top: none;
+}
+
+.metric-label {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	font-weight: 600;
+}
+
+.period-header {
+	display: flex;
+	align-items: center;
+	gap: 4px;
+	color: var(--text-secondary);
+}
+
+.align-right .period-header {
+	justify-content: flex-end;
+}
+
+.value-right {
+	text-align: right;
+}
+
+.muted {
+	color: var(--text-muted);
+	font-size: 11px;
+	margin-top: 4px;
+}
+
+.notes {
+	margin: 4px 0 0;
+	padding-left: 16px;
+	color: var(--text-secondary);
+}
+
+.notes li {
+	margin: 4px 0;
+	line-height: 1.4;
+}
+
+.footer {
+	color: var(--text-muted);
+	font-size: 11px;
+	margin-top: 6px;
+}
+
+.empty-state {
+	display: flex;
+	flex-direction: column;
+	gap: 12px;
+	padding: 20px;
+}
+
+.empty-state-title {
+	font-size: 15px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.empty-state-description {
+	color: var(--text-secondary);
+	font-size: 13px;
+	line-height: 1.5;
+	margin: 0;
+}
+
+.empty-state-steps {
+	margin: 0;
+	padding-left: 20px;
+	color: var(--text-secondary);
+	font-size: 13px;
+	line-height: 1.6;
+}
+
+.empty-state-steps li {
+	margin: 4px 0;
+}
+
+.empty-state-note {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-subtle);
+	border-radius: 6px;
+	padding: 10px 14px;
+	color: var(--text-secondary);
+	font-size: 12px;
+	line-height: 1.5;
+}
+`;function $e(e){window.addEventListener("message",t=>{e(t.data)})}var U=acquireVsCodeApi(),at=q("__INITIAL_DETAILS__");console.log("[CopilotTokenTracker] details webview loaded");console.log("[CopilotTokenTracker] initialData:",at);console.log("[CopilotTokenTracker] initialData:",at);var Tt=at?.sortSettings,xt=Tt?.editor?.key??"name",nt=Tt?.editor?.dir??"asc",kt=Tt?.model?.key??"name",rt=Tt?.model?.dir??"asc",ot=Tt?.modelOtherExpanded??!1;function M(e){return e/30*365.25}function T(e,t){let o=document.createElement("td");return o.className="value-right align-right",o.textContent=e,t!==void 0&&o.append(f("div","muted",t)),o}function pn(e,t,o,n){let r=document.createElement("td"),s=document.createElement("span");s.className="metric-label";let a=document.createElement("span");a.textContent=e,o&&(a.style.color=o);let i=document.createElement("span");if(i.textContent=t,n){s.title=n,s.style.cursor="help";let c=document.createElement("span");c.textContent=" \u2139\uFE0F",c.style.cssText="font-size:0.75em; opacity:0.6;",i.append(c)}return s.append(a,i),r.append(s),r}function Co(e,t,o,n){let r=document.createElement("thead"),s=document.createElement("tr"),a=[];function i(){a.forEach((c,d)=>{c.textContent=`${e[d].icon} ${e[d].text}${Eo(e[d].key,t(),o())}`})}return e.forEach((c,d)=>{let p=document.createElement("th");p.className=d===0?"":"align-right",p.style.cursor="pointer",p.style.userSelect="none",p.title=`Sort by ${c.text}`;let l=f("div","period-header");l.textContent=`${c.icon} ${c.text}${Eo(c.key,t(),o())}`,p.append(l),a.push(l),p.addEventListener("click",()=>{n(c.key),i()}),s.append(p)}),r.append(s),{thead:r,updateHeaders:i}}function $o(e){ye(e.compactNumbers!==!1);let t=document.getElementById("root");if(!t)return;let o=Math.round(M(e.last30Days.tokens+e.last30Days.thinkingTokens)),n=Math.round(M(e.last30Days.sessions)),r=M(e.last30Days.co2),s=M(e.last30Days.waterUsage),a=M(e.last30Days.estimatedCost),i=M(e.last30Days.estimatedCostCopilot??0),c=M(e.last30Days.treesEquivalent);un(t,e,{projectedTokens:o,projectedSessions:n,projectedCo2:r,projectedWater:s,projectedCost:a,projectedCostCopilot:i,projectedTrees:c}),wn()}function un(e,t,o){let n=new Date(t.lastUpdated);e.replaceChildren();let r=document.createElement("style");r.textContent=we;let s=document.createElement("style");s.textContent=Ce;let a=f("div","container"),i=f("div","header"),c=f("div","header-left");c.append(f("div","title","AI Engineering Fluency"));let d=mn(t);d&&c.append(d);let p=f("div","button-row");p.append(...Ee("btn-details",!!t.backendConfigured).map(it=>Te(it))),i.append(c,p);let l=f("div","footer",`Last updated: ${n.toLocaleString()} \xB7 Updates every 5 minutes`),g=f("div","sections");(t.today.tokens??0)===0&&(t.last30Days.tokens??0)===0&&(t.lastMonth.tokens??0)===0?g.append(Sn()):g.append(gn(t)),g.append(vn(t,o));let b=xn(t);b&&g.append(b);let w=En(t);w&&g.append(w),a.append(i,g,l),e.append(r,s,a)}function _o(e){return Object.values(e.modelUsage).reduce((t,o)=>t+o.inputTokens,0)}function Ao(e){return Object.values(e.modelUsage).reduce((t,o)=>t+o.outputTokens,0)}function le(e){return(e.actualTokens||0)>0}function Ht(e){return le(e)?E((e.actualTokens-e.estimatedTokens)/e.actualTokens*100):"\u2014"}function jt(e){return le(e)?h(_o(e)):"\u2014"}function Ft(e){return le(e)?h(Ao(e)):"\u2014"}function st(e){let t=_o(e)+Ao(e);return(e.actualTokens??0)>0?h(e.tokens+e.thinkingTokens):h(t>0?t:e.tokens)}function hn(e){return e.today.cachedTokens||e.last30Days.cachedTokens||e.month.cachedTokens||e.lastMonth.cachedTokens?[{label:"Cached tokens",labelTooltip:'Cache-read tokens \u2014 already included in "Input tokens" above, shown separately because they are billed at a lower rate.',icon:"\u26A1",color:"#34d399",today:h(e.today.cachedTokens||0),last30Days:h(e.last30Days.cachedTokens||0),month:h(e.month.cachedTokens||0),lastMonth:h(e.lastMonth.cachedTokens||0),projected:"\u2014"}]:[]}function mn(e){if(!e.copilotPlan)return null;let t=e.copilotPlan,o=t.monthlyAiCreditsUsd>0?`$${t.monthlyAiCreditsUsd} credits/month`:"no credits",n=f("div","plan-badge",`\u{1F3F7}\uFE0F ${t.planName} \xB7 ${o}`);return n.title=`Your active GitHub Copilot subscription plan (ID: ${t.planId}). Included AI credits cover usage-based billing (1 AI credit = $0.01).`,n}function Vt(e,t,o){let n=f("div","card");return n.id=e,n.append(f("div","card-label",t),f("div","card-value",o)),n}function gn(e){let t=f("div","cards");return t.id="summary-cards",t.append(Vt("card-today-tokens","\u{1F4C5} Tokens Today",st(e.today)),Vt("card-30d-tokens","\u{1F4C8} Tokens Last 30 Days",st(e.last30Days)),Vt("card-month-cost","\u{1F4B0} Est. Cost This Month (UBB)",H(e.month.estimatedCostCopilot??0)),Vt("card-today-sessions","\u{1F4C2} Sessions Today",C(e.today.sessions))),t}function bn(e,t){let o=[{label:"Total tokens",labelTooltip:"All LLM API tokens counted across every call in this period \u2014 matches the status bar. When debug logs are available this is the definitive total; otherwise it falls back to per-model attribution or the text-based estimate.",icon:"\u{1F7E3}",color:"#c37bff",today:st(e.today),last30Days:st(e.last30Days),month:st(e.month),lastMonth:st(e.lastMonth),projected:h(t.projectedTokens)},{label:"Input tokens",labelTooltip:"Total prompt tokens sent to the model, including any cache-read tokens (shown separately below).",icon:"\u2B06\uFE0F",color:"#c37bff",today:jt(e.today),last30Days:jt(e.last30Days),month:jt(e.month),lastMonth:jt(e.lastMonth),projected:"\u2014"},{label:"Output tokens",icon:"\u2B07\uFE0F",color:"#c37bff",today:Ft(e.today),last30Days:Ft(e.last30Days),month:Ft(e.month),lastMonth:Ft(e.lastMonth),projected:"\u2014"},...hn(e),{label:"Tokens (user estimated)",icon:"\u{1F4DD}",color:"#b39ddb",today:h(e.today.estimatedTokens),last30Days:h(e.last30Days.estimatedTokens),month:h(e.month.estimatedTokens),lastMonth:h(e.lastMonth.estimatedTokens),projected:"\u2014"},{label:"Service overhead %",icon:"\u2601\uFE0F",color:"#90a4ae",today:Ht(e.today),last30Days:Ht(e.last30Days),month:Ht(e.month),lastMonth:Ht(e.lastMonth),projected:"\u2014"},{label:"Thinking tokens",icon:"\u{1F9E0}",color:"#a78bfa",today:h(e.today.thinkingTokens||0),last30Days:h(e.last30Days.thinkingTokens||0),month:h(e.month.thinkingTokens||0),lastMonth:h(e.lastMonth.thinkingTokens||0),projected:"\u2014"}],n=[{label:"Estimated cost (UBB)",labelTooltip:"Based on GitHub Copilot AI Credit rates (1 credit = $0.01) \u2014 this is what Copilot will bill you. UBB = Usage Based Billing.",icon:"\u{1F7E2}",color:"#7ce38b",today:H(e.today.estimatedCostCopilot??0),last30Days:H(e.last30Days.estimatedCostCopilot??0),month:H(e.month.estimatedCostCopilot??0),lastMonth:H(e.lastMonth.estimatedCostCopilot??0),projected:H(t.projectedCostCopilot??0)}],r=[{label:"Sessions",icon:"\u{1F4C2}",color:"#66aaff",today:C(e.today.sessions),last30Days:C(e.last30Days.sessions),month:C(e.month.sessions),lastMonth:C(e.lastMonth.sessions),projected:C(t.projectedSessions)},{label:"Average interactions/session",icon:"\u{1F4AC}",color:"#8ce0ff",today:C(e.today.avgInteractionsPerSession),last30Days:C(e.last30Days.avgInteractionsPerSession),month:C(e.month.avgInteractionsPerSession),lastMonth:C(e.lastMonth.avgInteractionsPerSession),projected:"\u2014"},{label:"Average tokens/session",icon:"\u{1F522}",color:"#7ce38b",today:h(e.today.avgTokensPerSession),last30Days:h(e.last30Days.avgTokensPerSession),month:h(e.month.avgTokensPerSession),lastMonth:h(e.lastMonth.avgTokensPerSession),projected:"\u2014"}];return[{heading:"\u{1F522} Tokens",rows:o},{heading:"\u{1F4B0} Cost",rows:n},{heading:"\u{1F4AC} Activity",rows:r}]}function fn(e){let t=document.createElement("tr");t.className="group-row";let o=document.createElement("td");return o.colSpan=6,o.textContent=e,t.append(o),t}function vn(e,t){let o=f("div","section");o.append(Ct("h3","graph","Key Metrics"));let n=document.createElement("table");n.className="stats-table";let r=document.createElement("thead"),s=document.createElement("tr");[{icon:"\u{1F4CA}",text:"Metric"},{icon:"\u{1F4C5}",text:"Today"},{icon:"\u{1F4C8}",text:"Last 30 Days"},{icon:"\u{1F5D3}\uFE0F",text:"Current Month"},{icon:"\u{1F4C6}",text:"Previous Month"},{icon:"\u{1F30D}",text:"Projected Year"}].forEach((c,d)=>{let p=document.createElement("th");p.className=d===0?"":"align-right";let l=f("div","period-header");l.textContent=`${c.icon} ${c.text}`,p.append(l),s.append(p)}),r.append(s),n.append(r);let i=document.createElement("tbody");return bn(e,t).forEach(c=>{i.append(fn(c.heading)),c.rows.forEach(d=>{let p=document.createElement("tr");p.append(pn(d.icon,d.label,d.color,d.labelTooltip),T(d.today),T(d.last30Days),T(d.month),T(d.lastMonth),T(d.projected)),i.append(p)})}),n.append(i),o.append(n),o}function Eo(e,t,o){return e!==t?" \u2195":o==="asc"?" \u2191":" \u2193"}function pe(){U.postMessage({command:"saveSortSettings",settings:{editor:{key:xt,dir:nt},model:{key:kt,dir:rt},modelOtherExpanded:ot}})}function yn(e,t){let{editor:o,todayUsage:n,last30DaysUsage:r,monthUsage:s,lastMonthUsage:a,projectedTokens:i,projectedSessions:c}=e,d=t.today>0?n.tokens/t.today*100:0,p=t.last30Days>0?r.tokens/t.last30Days*100:0,l=t.month>0?s.tokens/t.month*100:0,g=t.lastMonth>0?a.tokens/t.lastMonth*100:0,y=document.createElement("tr");o==="JetBrains"&&(y.title="JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available."),o==="Antigravity"&&(y.title="Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally."),o==="Cursor"&&(y.title="Cursor: token counts reflect the context window size at the last request (contextTokensUsed). Output tokens are not stored locally.");let b=document.createElement("td"),w=document.createElement("span");return w.className="metric-label",w.textContent=`${xe(o)} ${o}`,(o==="JetBrains"||o==="Antigravity"||o==="Cursor")&&(w.textContent=`${w.textContent} \u24D8`),b.append(w),y.append(b,T(h(n.tokens),`${E(d)} \xB7 ${n.sessions} sessions`),T(h(r.tokens),`${E(p)} \xB7 ${r.sessions} sessions`),T(h(s.tokens),`${E(l)} \xB7 ${s.sessions} sessions`),T(h(a.tokens),`${E(g)} \xB7 ${a.sessions} sessions`),T(h(i),`${c} sessions`)),y}function So(e,t){let o={today:Object.values(e.today.editorUsage).reduce((s,a)=>s+a.tokens,0),last30Days:Object.values(e.last30Days.editorUsage).reduce((s,a)=>s+a.tokens,0),month:Object.values(e.month.editorUsage).reduce((s,a)=>s+a.tokens,0),lastMonth:Object.values(e.lastMonth.editorUsage).reduce((s,a)=>s+a.tokens,0)},n=t.map(s=>{let a=e.today.editorUsage[s]||{tokens:0,sessions:0},i=e.last30Days.editorUsage[s]||{tokens:0,sessions:0},c=e.month.editorUsage[s]||{tokens:0,sessions:0},d=e.lastMonth.editorUsage[s]||{tokens:0,sessions:0};return{editor:s,todayUsage:a,last30DaysUsage:i,monthUsage:c,lastMonthUsage:d,projectedTokens:Math.round(M(i.tokens)),projectedSessions:Math.round(M(i.sessions))}});n.sort((s,a)=>{let i;switch(xt){case"name":i=s.editor.localeCompare(a.editor);break;case"today":i=s.todayUsage.tokens-a.todayUsage.tokens;break;case"last30Days":i=s.last30DaysUsage.tokens-a.last30DaysUsage.tokens;break;case"month":i=s.monthUsage.tokens-a.monthUsage.tokens;break;case"lastMonth":i=s.lastMonthUsage.tokens-a.lastMonthUsage.tokens;break;case"projected":i=s.projectedTokens-a.projectedTokens;break;default:i=0}return nt==="asc"?i:-i});let r=document.createElement("tbody");return n.forEach(s=>r.append(yn(s,o))),r}function xn(e){let t=new Set([...Object.keys(e.today.editorUsage),...Object.keys(e.last30Days.editorUsage),...Object.keys(e.month.editorUsage),...Object.keys(e.lastMonth.editorUsage)]);if(t.size===0)return null;let o=f("div","section"),n=Ct("h3","device-desktop","Usage by Editor");o.append(n);let r=document.createElement("table");r.className="stats-table";let s=[{icon:"\u{1F4DD}",text:"Editor",key:"name"},{icon:"\u{1F4C5}",text:"Today",key:"today"},{icon:"\u{1F4C8}",text:"Last 30 Days",key:"last30Days"},{icon:"\u{1F5D3}\uFE0F",text:"Current Month",key:"month"},{icon:"\u{1F4C6}",text:"Previous Month",key:"lastMonth"},{icon:"\u{1F30D}",text:"Projected Year",key:"projected"}],{thead:a}=Co(s,()=>xt,()=>nt,i=>{xt===i?nt=nt==="asc"?"desc":"asc":(xt=i,nt=i==="name"?"asc":"desc");let c=So(e,Array.from(t)),d=r.querySelector("tbody");d?r.replaceChild(c,d):r.append(c),pe()});return r.append(a),r.append(So(e,Array.from(t))),o.append(r),o}var wo=5;function Mo(e,t){let o=e.today.modelUsage[t]||{inputTokens:0,outputTokens:0},n=e.last30Days.modelUsage[t]||{inputTokens:0,outputTokens:0},r=e.month.modelUsage[t]||{inputTokens:0,outputTokens:0},s=e.lastMonth.modelUsage[t]||{inputTokens:0,outputTokens:0},a=o.inputTokens+o.outputTokens,i=n.inputTokens+n.outputTokens,c=r.inputTokens+r.outputTokens,d=s.inputTokens+s.outputTokens;return{model:t,todayTotal:a,todayInputPct:a>0?o.inputTokens/a*100:0,todayOutputPct:a>0?o.outputTokens/a*100:0,last30DaysTotal:i,last30DaysInputPct:i>0?n.inputTokens/i*100:0,last30DaysOutputPct:i>0?n.outputTokens/i*100:0,monthTotal:c,monthInputPct:c>0?r.inputTokens/c*100:0,monthOutputPct:c>0?r.outputTokens/c*100:0,lastMonthTotal:d,lastMonthInputPct:d>0?s.inputTokens/d*100:0,lastMonthOutputPct:d>0?s.outputTokens/d*100:0,projected:Math.round(M(i)),charsPerToken:ke(t)}}function Do(e){e.sort((t,o)=>{let n;switch(kt){case"name":n=t.model.localeCompare(o.model);break;case"today":n=t.todayTotal-o.todayTotal;break;case"last30Days":n=t.last30DaysTotal-o.last30DaysTotal;break;case"month":n=t.monthTotal-o.monthTotal;break;case"lastMonth":n=t.lastMonthTotal-o.lastMonthTotal;break;case"projected":n=t.projected-o.projected;break;default:n=0}return rt==="asc"?n:-n})}function Io(e,t){let o=document.createElement("tr");t&&(o.style.opacity="0.85");let n=document.createElement("td"),r=document.createElement("span");if(r.className="metric-label",t){let a=document.createElement("span");a.style.cssText="display:inline-block;width:12px",r.append(a)}let s=document.createElement("span");return s.style.cssText="color:#9aa0a6;font-size:11px;font-weight:500;",s.textContent=`(~${e.charsPerToken.toFixed(1)} chars/tk)`,r.append(document.createTextNode(`${ge(e.model)} `),s),n.append(r),o.append(n,T(h(e.todayTotal),`\u2191${E(e.todayInputPct)} \u2193${E(e.todayOutputPct)}`),T(h(e.last30DaysTotal),`\u2191${E(e.last30DaysInputPct)} \u2193${E(e.last30DaysOutputPct)}`),T(h(e.monthTotal),`\u2191${E(e.monthInputPct)} \u2193${E(e.monthOutputPct)}`),T(h(e.lastMonthTotal),`\u2191${E(e.lastMonthInputPct)} \u2193${E(e.lastMonthOutputPct)}`),T(h(e.projected))),o}function kn(e,t,o,n){let r=I=>t.reduce((S,St)=>{let he=e[I].modelUsage[St]||{inputTokens:0,outputTokens:0};return{inputTokens:S.inputTokens+he.inputTokens,outputTokens:S.outputTokens+he.outputTokens}},{inputTokens:0,outputTokens:0}),s=(I,S)=>S>0?I/S*100:0,a=r("today"),i=r("last30Days"),c=r("month"),d=r("lastMonth"),p=a.inputTokens+a.outputTokens,l=i.inputTokens+i.outputTokens,g=c.inputTokens+c.outputTokens,y=d.inputTokens+d.outputTokens,b=document.createElement("tr");b.style.cursor="pointer",b.style.background="var(--list-hover-bg)",b.title=ot?"Collapse other models":"Expand other models";let w=document.createElement("span");w.className="metric-label";let it=document.createElement("span");it.style.cssText="color:var(--text-secondary);font-weight:600;",it.textContent=`\u{1F4E6} Other (${t.length} model${t.length!==1?"s":""})`;let zt=document.createElement("span");zt.style.cssText="font-size:10px;color:var(--text-muted)",zt.textContent=` ${ot?"\u25B2":"\u25BC"}`,w.append(it,zt);let ue=document.createElement("td");ue.append(w);let Et=(I,S)=>{let St=T(h(S));return S>0&&St.append(f("div","muted",`\u2191${E(s(I.inputTokens,S))} \u2193${E(s(I.outputTokens,S))}`)),St};if(b.append(ue,Et(a,p),Et(i,l),Et(c,g),Et(d,y),T(h(Math.round(M(l))))),b.addEventListener("click",()=>{ot=!ot,pe(),o()}),n.append(b),ot){let I=t.map(S=>Mo(e,S));Do(I),I.forEach(S=>n.append(Io(S,!0)))}}function Tn(e,t,o,n){let r=t.map(a=>Mo(e,a));Do(r);let s=document.createElement("tbody");return r.forEach(a=>s.append(Io(a,!1))),o.length>0&&kn(e,o,n,s),s}function En(e){let t=new Set([...Object.keys(e.today.modelUsage),...Object.keys(e.last30Days.modelUsage),...Object.keys(e.month.modelUsage),...Object.keys(e.lastMonth.modelUsage)]);if(t.size===0)return null;let o=Array.from(t).sort((l,g)=>{let y=e.last30Days.modelUsage[l]||{inputTokens:0,outputTokens:0},b=e.last30Days.modelUsage[g]||{inputTokens:0,outputTokens:0};return b.inputTokens+b.outputTokens-(y.inputTokens+y.outputTokens)}),n=o.slice(0,wo),r=o.slice(wo),s=f("div","section"),a=Ct("h3","symbol-numeric","Model Usage (Tokens)");s.append(a);let i=document.createElement("table");i.className="stats-table";let c=[{icon:"\u{1F9E0}",text:"Model",key:"name"},{icon:"\u{1F4C5}",text:"Today",key:"today"},{icon:"\u{1F4C8}",text:"Last 30 Days",key:"last30Days"},{icon:"\u{1F5D3}\uFE0F",text:"Current Month",key:"month"},{icon:"\u{1F4C6}",text:"Previous Month",key:"lastMonth"},{icon:"\u{1F30D}",text:"Projected Year",key:"projected"}];function d(){let l=Tn(e,n,r,d),g=i.querySelector("tbody");g?i.replaceChild(l,g):i.append(l)}let{thead:p}=Co(c,()=>kt,()=>rt,l=>{kt===l?rt=rt==="asc"?"desc":"asc":(kt=l,rt=l==="name"?"asc":"desc"),d(),pe()});return i.append(p),d(),s.append(i),s}function Sn(){let e=f("div","section"),t=f("div","empty-state"),o=f("div","empty-state-title","\u{1F44B} Welcome to AI Engineering Fluency"),n=f("p","empty-state-description","This extension tracks AI token usage by reading session log files stored locally by supported tools. No token data has been found yet."),r=document.createElement("p");r.className="empty-state-description";let s=document.createElement("strong");s.textContent="Supported tools & editors:",r.append(s);let a=document.createElement("ul");a.className="empty-state-steps",["\u{1F680} Antigravity \u2014 Google's Gemini-powered desktop IDE","\u{1F916} Claude Code \u2014 Anthropic's CLI coding agent","\u{1F4BB} Copilot CLI \u2014 GitHub Copilot in the terminal","\u{1F5B1}\uFE0F Cursor, \u{1F30A} Windsurf \u2014 built-in AI chat","\u{1F48E} Gemini CLI \u2014 Google's open-source CLI coding agent","\u{1F7E2} OpenCode, \u{1F980} Crush \u2014 terminal-based coding agents","\u03C0 Pi \u2014 Mistral-powered terminal coding agent","\u{1F5A5}\uFE0F Visual Studio 2022+ \u2014 GitHub Copilot Chat extension","\u{1F499} VS Code / VS Code Insiders / VSCodium \u2014 GitHub Copilot Chat extension"].forEach(y=>{let b=document.createElement("li");b.textContent=y,a.append(b)});let c=document.createElement("p");c.className="empty-state-description";let d=document.createElement("strong");d.textContent="To get started:",c.append(d);let p=document.createElement("ol");p.className="empty-state-steps",["Use any of the supported tools or editors listed above to interact with an AI model.","For GitHub Copilot in VS Code: open the Copilot Chat panel (Ctrl+Alt+I / Cmd+Alt+I) and start a conversation.","For terminal agents (Claude Code, Gemini CLI, Antigravity, Pi, OpenCode, Copilot CLI): run a coding session in your terminal.","Click the \u{1F504} Refresh button above to reload the stats after your first session."].forEach(y=>{let b=document.createElement("li");b.textContent=y,p.append(b)});let g=f("div","empty-state-note","\u{1F4A1} If you have been using one of the supported tools but still see no data, open the Diagnostics panel (\u{1F50D} Diagnostics button above) to verify that session files are being discovered correctly.");return t.append(o,n,r,a,c,p,g),e.append(t),e}function wn(){let e=document.getElementById("btn-refresh"),t=document.getElementById("btn-chart"),o=document.getElementById("btn-usage"),n=document.getElementById("btn-diagnostics");e?.addEventListener("click",()=>U.postMessage({command:"refresh"})),t?.addEventListener("click",()=>U.postMessage({command:"showChart"})),o?.addEventListener("click",()=>U.postMessage({command:"showUsageAnalysis"})),n?.addEventListener("click",()=>U.postMessage({command:"showDiagnostics"})),document.getElementById("btn-maturity")?.addEventListener("click",()=>U.postMessage({command:"showMaturity"})),document.getElementById("btn-dashboard")?.addEventListener("click",()=>U.postMessage({command:"showDashboard"})),document.getElementById("btn-environmental")?.addEventListener("click",()=>U.postMessage({command:"showEnvironmental"})),Se(U)}async function Cn(){if(console.log("[CopilotTokenTracker] bootstrap called"),await Promise.resolve().then(()=>(bo(),go)),await Promise.resolve().then(()=>(To(),ko)),at)console.log("[CopilotTokenTracker] Rendering details with initialData:",at),$o(at);else{console.warn("[CopilotTokenTracker] No initialData found, rendering fallback.");let e=document.getElementById("root");if(e){e.textContent="";let t=document.createElement("div");t.style.padding="16px",t.style.color="#e7e7e7",t.textContent="No data available.",e.append(t)}}}$e(e=>{e.command==="updateStats"&&$o(e.data)});Cn();})();
 /*! Bundled license information:
 
 @lit/reactive-element/css-tag.js:
@@ -2616,4 +977,3 @@ lit-html/directives/if-defined.js:
    * SPDX-License-Identifier: BSD-3-Clause
    *)
 */
-//# sourceMappingURL=details.js.map
