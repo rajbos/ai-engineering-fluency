@@ -93,6 +93,10 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		};
 	}
 
+	async getDailyFractions(sessionFile: string): Promise<Record<string, number>> {
+		return await this.claudeCode.getClaudeCodeDailyFractions(sessionFile);
+	}
+
 	getEditorRoot(_sessionFile: string): string {
 		return this.claudeCode.getClaudeCodeProjectsDir();
 	}

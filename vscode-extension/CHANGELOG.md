@@ -4,6 +4,9 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Bug Fixes
+- Claude Code: attribute multi-day session tokens to the day each turn actually occurred instead of collapsing everything onto the session's start day, and discover subagent/workflow transcripts under `<sessionId>/subagents/**` that were previously silently excluded (#1608)
+
 ## [0.13.0] - 2026-07-11
 
 ### Features
