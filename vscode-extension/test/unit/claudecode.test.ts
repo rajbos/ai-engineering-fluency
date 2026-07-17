@@ -1032,3 +1032,75 @@ assert.deepEqual(files, []);
 fs.rmSync(tmpDir, { recursive: true, force: true });
 }
 });
+
+// ----- Cross-file dedup between a top-level session and its subagent transcripts -----
+//
+// Reproduces the scenario ccusage's dedup guards against ("sidechain logs can replay
+// parent messages with new request IDs"): the same message.id appears in both the
+// top-level session file and a nested <sessionId>/subagents/*.jsonl file. Since #1627
+// made subagent files independently discoverable, and getTokensFromClaudeCodeSession /
+// getClaudeCodeModelUsage only dedupe *within* a single file, the shared message's
+// tokens get summed once per file instead of once total (issue #1570 investigation).
+
+function createSessionFamily(topLevelEvents: any[], subagentEvents: any[]): { topLevelFile: string; subagentFile: string; tmpDir: string } {
+	const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-family-test-'));
+	const projectDir = path.join(tmpDir, '.claude', 'projects', 'test-project');
+	const sessionId = 'session-family-1';
+	const topLevelFile = path.join(projectDir, `${sessionId}.jsonl`);
+	const subagentDir = path.join(projectDir, sessionId, 'subagents');
+	const subagentFile = path.join(subagentDir, 'agent-1.jsonl');
+	fs.mkdirSync(subagentDir, { recursive: true });
+	fs.writeFileSync(topLevelFile, topLevelEvents.map(e => JSON.stringify(e)).join('\n'), 'utf8');
+	fs.writeFileSync(subagentFile, subagentEvents.map(e => JSON.stringify(e)).join('\n'), 'utf8');
+	return { topLevelFile, subagentFile, tmpDir };
+}
+
+const SHARED_MESSAGE_USAGE = { input_tokens: 100, output_tokens: 50, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }; // 150 tokens
+const SUBAGENT_OWN_USAGE = { input_tokens: 20, output_tokens: 10, cache_creation_input_tokens: 0, cache_read_input_tokens: 0 }; // 30 tokens
+
+test('getTokensFromClaudeCodeSession: does not double-count a message.id replayed in a sibling subagent file', async () => {
+	const topLevelEvents = [
+		{ type: 'assistant', isSidechain: false, requestId: 'req_parent', message: { id: 'msg_shared', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SHARED_MESSAGE_USAGE } }
+	];
+	const subagentEvents = [
+		// The parent message replayed under a new requestId inside the subagent transcript.
+		{ type: 'assistant', isSidechain: true, requestId: 'req_sidechain_replay', message: { id: 'msg_shared', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SHARED_MESSAGE_USAGE } },
+		// A genuinely unique message produced by the subagent itself.
+		{ type: 'assistant', isSidechain: true, requestId: 'req_subagent_own', message: { id: 'msg_subagent_own', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SUBAGENT_OWN_USAGE } }
+	];
+	const { topLevelFile, subagentFile, tmpDir } = createSessionFamily(topLevelEvents, subagentEvents);
+	try {
+		const parentTokens = await claudeCode.getTokensFromClaudeCodeSession(topLevelFile);
+		const subagentTokens = await claudeCode.getTokensFromClaudeCodeSession(subagentFile);
+		// True family total: 150 (shared, counted once) + 30 (subagent-only) = 180.
+		// The generic per-file pipeline sums each file's independent result, so that sum
+		// must equal the true total — the subagent file must NOT re-contribute the shared message.
+		assert.equal(parentTokens.tokens, 150, 'parent file should count its own message once');
+		assert.equal(subagentTokens.tokens, 30, 'subagent file should exclude the message already counted in the parent');
+		assert.equal(parentTokens.tokens + subagentTokens.tokens, 180, 'summed family total must not double-count the shared message');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
+
+test('getClaudeCodeModelUsage: does not double-count a message.id replayed in a sibling subagent file', async () => {
+	const topLevelEvents = [
+		{ type: 'assistant', isSidechain: false, requestId: 'req_parent', message: { id: 'msg_shared', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SHARED_MESSAGE_USAGE } }
+	];
+	const subagentEvents = [
+		{ type: 'assistant', isSidechain: true, requestId: 'req_sidechain_replay', message: { id: 'msg_shared', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SHARED_MESSAGE_USAGE } },
+		{ type: 'assistant', isSidechain: true, requestId: 'req_subagent_own', message: { id: 'msg_subagent_own', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: SUBAGENT_OWN_USAGE } }
+	];
+	const { topLevelFile, subagentFile, tmpDir } = createSessionFamily(topLevelEvents, subagentEvents);
+	try {
+		const parentUsage = await claudeCode.getClaudeCodeModelUsage(topLevelFile);
+		const subagentUsage = await claudeCode.getClaudeCodeModelUsage(subagentFile);
+		const totalInput = (parentUsage['claude-sonnet-4.6']?.inputTokens ?? 0) + (subagentUsage['claude-sonnet-4.6']?.inputTokens ?? 0);
+		const totalOutput = (parentUsage['claude-sonnet-4.6']?.outputTokens ?? 0) + (subagentUsage['claude-sonnet-4.6']?.outputTokens ?? 0);
+		// Family total: input 100+20=120, output 50+10=60 — the shared message must only appear once.
+		assert.equal(totalInput, 120, 'summed input tokens must not double-count the shared message');
+		assert.equal(totalOutput, 60, 'summed output tokens must not double-count the shared message');
+	} finally {
+		fs.rmSync(tmpDir, { recursive: true, force: true });
+	}
+});
