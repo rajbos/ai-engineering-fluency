@@ -8,6 +8,7 @@ computeUtcDateRanges,
 aggregatePeriodStats,
 computeSessionTotalTokens,
 computeSessionDurationMs,
+reconcileModelUsageToTotal,
 type SessionAggregateInput,
 type UtcDateRanges,
 } from '../../../src/statsHelpers';
@@ -164,6 +165,68 @@ test('addModelUsage: source with empty object is a no-op', () => {
 const target: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
 addModelUsage(target, {});
 assert.deepEqual(target, { 'gpt-4': { inputTokens: 100, outputTokens: 50 } });
+});
+
+// ── reconcileModelUsageToTotal ──────────────────────────────────────────────
+
+test('reconcileModelUsageToTotal: returns modelUsage unchanged when target totals are zero', () => {
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const result = reconcileModelUsageToTotal(modelUsage, 0, 0);
+assert.deepEqual(result, modelUsage);
+});
+
+test('reconcileModelUsageToTotal: no-op when the breakdown already matches the target (regression for the Input > Total bug)', () => {
+// The bug this guards: Input/Output tokens (from modelUsage) must never exceed
+// Total tokens (the debug-log/actualTokens total) in the details webview table.
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const result = reconcileModelUsageToTotal(modelUsage, 100, 50);
+assert.deepEqual(result, { 'gpt-4': { inputTokens: 100, outputTokens: 50 } });
+});
+
+test('reconcileModelUsageToTotal: scales a single model proportionally down to the target total', () => {
+// Stale pre-debug-log estimate overcounted input tokens (111 vs the debug log's
+// authoritative 90) — this is the exact shape of the reported "Input > Total" bug.
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 111, outputTokens: 40 } };
+const result = reconcileModelUsageToTotal(modelUsage, 90, 30);
+assert.deepEqual(result, { 'gpt-4': { inputTokens: 90, outputTokens: 30 } });
+});
+
+test('reconcileModelUsageToTotal: preserves relative shares across multiple models', () => {
+const modelUsage: ModelUsage = {
+'gpt-4': { inputTokens: 300, outputTokens: 100 },
+'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 100 },
+};
+// Target is double the current total (400 input / 200 output).
+const result = reconcileModelUsageToTotal(modelUsage, 800, 400);
+assert.deepEqual(result['gpt-4'], { inputTokens: 600, outputTokens: 200 });
+assert.deepEqual(result['claude-3-5-sonnet'], { inputTokens: 200, outputTokens: 200 });
+});
+
+test('reconcileModelUsageToTotal: scales cachedReadTokens and cacheCreationTokens using the input scale factor', () => {
+const modelUsage: ModelUsage = {
+'claude-3-5-sonnet': { inputTokens: 200, outputTokens: 50, cachedReadTokens: 80, cacheCreationTokens: 20 },
+};
+const result = reconcileModelUsageToTotal(modelUsage, 100, 50);
+assert.deepEqual(result['claude-3-5-sonnet'], {
+inputTokens: 100, outputTokens: 50, cachedReadTokens: 40, cacheCreationTokens: 10,
+});
+});
+
+test('reconcileModelUsageToTotal: attributes the whole target to an "unknown" bucket when modelUsage has no usable breakdown', () => {
+const result = reconcileModelUsageToTotal({}, 100, 50);
+assert.deepEqual(result, { unknown: { inputTokens: 100, outputTokens: 50 } });
+});
+
+test('reconcileModelUsageToTotal: sum of reconciled models always equals the target totals (no silent drift)', () => {
+const modelUsage: ModelUsage = {
+'gpt-4': { inputTokens: 37, outputTokens: 11 },
+'claude-3-5-sonnet': { inputTokens: 53, outputTokens: 29 },
+};
+const result = reconcileModelUsageToTotal(modelUsage, 1000, 333);
+const totalInput = Object.values(result).reduce((s, u) => s + u.inputTokens, 0);
+const totalOutput = Object.values(result).reduce((s, u) => s + u.outputTokens, 0);
+assert.strictEqual(totalInput, 1000);
+assert.strictEqual(totalOutput, 333);
 });
 
 // ── addEditorUsage ────────────────────────────────────────────────────────────
