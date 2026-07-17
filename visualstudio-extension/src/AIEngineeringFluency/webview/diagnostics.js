@@ -1,908 +1,9 @@
-"use strict";
-(() => {
-  var __defProp = Object.defineProperty;
-  var __getOwnPropNames = Object.getOwnPropertyNames;
-  var __esm = (fn, res, err) => function __init() {
-    if (err) throw err[0];
-    try {
-      return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
-    } catch (e7) {
-      throw err = [e7], e7;
-    }
-  };
-  var __export = (target, all) => {
-    for (var name in all)
-      __defProp(target, name, { get: all[name], enumerable: true });
-  };
-
-  // node_modules/@lit/reactive-element/css-tag.js
-  var t, e, s, o, n, r, i, S, c;
-  var init_css_tag = __esm({
-    "node_modules/@lit/reactive-element/css-tag.js"() {
-      t = globalThis;
-      e = t.ShadowRoot && (void 0 === t.ShadyCSS || t.ShadyCSS.nativeShadow) && "adoptedStyleSheets" in Document.prototype && "replace" in CSSStyleSheet.prototype;
-      s = /* @__PURE__ */ Symbol();
-      o = /* @__PURE__ */ new WeakMap();
-      n = class {
-        constructor(t4, e7, o7) {
-          if (this._$cssResult$ = true, o7 !== s) throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");
-          this.cssText = t4, this.t = e7;
-        }
-        get styleSheet() {
-          let t4 = this.o;
-          const s4 = this.t;
-          if (e && void 0 === t4) {
-            const e7 = void 0 !== s4 && 1 === s4.length;
-            e7 && (t4 = o.get(s4)), void 0 === t4 && ((this.o = t4 = new CSSStyleSheet()).replaceSync(this.cssText), e7 && o.set(s4, t4));
-          }
-          return t4;
-        }
-        toString() {
-          return this.cssText;
-        }
-      };
-      r = (t4) => new n("string" == typeof t4 ? t4 : t4 + "", void 0, s);
-      i = (t4, ...e7) => {
-        const o7 = 1 === t4.length ? t4[0] : e7.reduce((e8, s4, o8) => e8 + ((t5) => {
-          if (true === t5._$cssResult$) return t5.cssText;
-          if ("number" == typeof t5) return t5;
-          throw Error("Value passed to 'css' function must be a 'css' function result: " + t5 + ". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.");
-        })(s4) + t4[o8 + 1], t4[0]);
-        return new n(o7, t4, s);
-      };
-      S = (s4, o7) => {
-        if (e) s4.adoptedStyleSheets = o7.map((t4) => t4 instanceof CSSStyleSheet ? t4 : t4.styleSheet);
-        else for (const e7 of o7) {
-          const o8 = document.createElement("style"), n5 = t.litNonce;
-          void 0 !== n5 && o8.setAttribute("nonce", n5), o8.textContent = e7.cssText, s4.appendChild(o8);
-        }
-      };
-      c = e ? (t4) => t4 : (t4) => t4 instanceof CSSStyleSheet ? ((t5) => {
-        let e7 = "";
-        for (const s4 of t5.cssRules) e7 += s4.cssText;
-        return r(e7);
-      })(t4) : t4;
-    }
-  });
-
-  // node_modules/@lit/reactive-element/reactive-element.js
-  var i2, e2, h, r2, o2, n2, a, c2, l, p, d, u, f, b, y;
-  var init_reactive_element = __esm({
-    "node_modules/@lit/reactive-element/reactive-element.js"() {
-      init_css_tag();
-      init_css_tag();
-      ({ is: i2, defineProperty: e2, getOwnPropertyDescriptor: h, getOwnPropertyNames: r2, getOwnPropertySymbols: o2, getPrototypeOf: n2 } = Object);
-      a = globalThis;
-      c2 = a.trustedTypes;
-      l = c2 ? c2.emptyScript : "";
-      p = a.reactiveElementPolyfillSupport;
-      d = (t4, s4) => t4;
-      u = { toAttribute(t4, s4) {
-        switch (s4) {
-          case Boolean:
-            t4 = t4 ? l : null;
-            break;
-          case Object:
-          case Array:
-            t4 = null == t4 ? t4 : JSON.stringify(t4);
-        }
-        return t4;
-      }, fromAttribute(t4, s4) {
-        let i6 = t4;
-        switch (s4) {
-          case Boolean:
-            i6 = null !== t4;
-            break;
-          case Number:
-            i6 = null === t4 ? null : Number(t4);
-            break;
-          case Object:
-          case Array:
-            try {
-              i6 = JSON.parse(t4);
-            } catch (t5) {
-              i6 = null;
-            }
-        }
-        return i6;
-      } };
-      f = (t4, s4) => !i2(t4, s4);
-      b = { attribute: true, type: String, converter: u, reflect: false, useDefault: false, hasChanged: f };
-      Symbol.metadata ?? (Symbol.metadata = /* @__PURE__ */ Symbol("metadata")), a.litPropertyMetadata ?? (a.litPropertyMetadata = /* @__PURE__ */ new WeakMap());
-      y = class extends HTMLElement {
-        static addInitializer(t4) {
-          this._$Ei(), (this.l ?? (this.l = [])).push(t4);
-        }
-        static get observedAttributes() {
-          return this.finalize(), this._$Eh && [...this._$Eh.keys()];
-        }
-        static createProperty(t4, s4 = b) {
-          if (s4.state && (s4.attribute = false), this._$Ei(), this.prototype.hasOwnProperty(t4) && ((s4 = Object.create(s4)).wrapped = true), this.elementProperties.set(t4, s4), !s4.noAccessor) {
-            const i6 = /* @__PURE__ */ Symbol(), h3 = this.getPropertyDescriptor(t4, i6, s4);
-            void 0 !== h3 && e2(this.prototype, t4, h3);
-          }
-        }
-        static getPropertyDescriptor(t4, s4, i6) {
-          const { get: e7, set: r6 } = h(this.prototype, t4) ?? { get() {
-            return this[s4];
-          }, set(t5) {
-            this[s4] = t5;
-          } };
-          return { get: e7, set(s5) {
-            const h3 = e7?.call(this);
-            r6?.call(this, s5), this.requestUpdate(t4, h3, i6);
-          }, configurable: true, enumerable: true };
-        }
-        static getPropertyOptions(t4) {
-          return this.elementProperties.get(t4) ?? b;
-        }
-        static _$Ei() {
-          if (this.hasOwnProperty(d("elementProperties"))) return;
-          const t4 = n2(this);
-          t4.finalize(), void 0 !== t4.l && (this.l = [...t4.l]), this.elementProperties = new Map(t4.elementProperties);
-        }
-        static finalize() {
-          if (this.hasOwnProperty(d("finalized"))) return;
-          if (this.finalized = true, this._$Ei(), this.hasOwnProperty(d("properties"))) {
-            const t5 = this.properties, s4 = [...r2(t5), ...o2(t5)];
-            for (const i6 of s4) this.createProperty(i6, t5[i6]);
-          }
-          const t4 = this[Symbol.metadata];
-          if (null !== t4) {
-            const s4 = litPropertyMetadata.get(t4);
-            if (void 0 !== s4) for (const [t5, i6] of s4) this.elementProperties.set(t5, i6);
-          }
-          this._$Eh = /* @__PURE__ */ new Map();
-          for (const [t5, s4] of this.elementProperties) {
-            const i6 = this._$Eu(t5, s4);
-            void 0 !== i6 && this._$Eh.set(i6, t5);
-          }
-          this.elementStyles = this.finalizeStyles(this.styles);
-        }
-        static finalizeStyles(s4) {
-          const i6 = [];
-          if (Array.isArray(s4)) {
-            const e7 = new Set(s4.flat(1 / 0).reverse());
-            for (const s5 of e7) i6.unshift(c(s5));
-          } else void 0 !== s4 && i6.push(c(s4));
-          return i6;
-        }
-        static _$Eu(t4, s4) {
-          const i6 = s4.attribute;
-          return false === i6 ? void 0 : "string" == typeof i6 ? i6 : "string" == typeof t4 ? t4.toLowerCase() : void 0;
-        }
-        constructor() {
-          super(), this._$Ep = void 0, this.isUpdatePending = false, this.hasUpdated = false, this._$Em = null, this._$Ev();
-        }
-        _$Ev() {
-          this._$ES = new Promise((t4) => this.enableUpdating = t4), this._$AL = /* @__PURE__ */ new Map(), this._$E_(), this.requestUpdate(), this.constructor.l?.forEach((t4) => t4(this));
-        }
-        addController(t4) {
-          (this._$EO ?? (this._$EO = /* @__PURE__ */ new Set())).add(t4), void 0 !== this.renderRoot && this.isConnected && t4.hostConnected?.();
-        }
-        removeController(t4) {
-          this._$EO?.delete(t4);
-        }
-        _$E_() {
-          const t4 = /* @__PURE__ */ new Map(), s4 = this.constructor.elementProperties;
-          for (const i6 of s4.keys()) this.hasOwnProperty(i6) && (t4.set(i6, this[i6]), delete this[i6]);
-          t4.size > 0 && (this._$Ep = t4);
-        }
-        createRenderRoot() {
-          const t4 = this.shadowRoot ?? this.attachShadow(this.constructor.shadowRootOptions);
-          return S(t4, this.constructor.elementStyles), t4;
-        }
-        connectedCallback() {
-          this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this.enableUpdating(true), this._$EO?.forEach((t4) => t4.hostConnected?.());
-        }
-        enableUpdating(t4) {
-        }
-        disconnectedCallback() {
-          this._$EO?.forEach((t4) => t4.hostDisconnected?.());
-        }
-        attributeChangedCallback(t4, s4, i6) {
-          this._$AK(t4, i6);
-        }
-        _$ET(t4, s4) {
-          const i6 = this.constructor.elementProperties.get(t4), e7 = this.constructor._$Eu(t4, i6);
-          if (void 0 !== e7 && true === i6.reflect) {
-            const h3 = (void 0 !== i6.converter?.toAttribute ? i6.converter : u).toAttribute(s4, i6.type);
-            this._$Em = t4, null == h3 ? this.removeAttribute(e7) : this.setAttribute(e7, h3), this._$Em = null;
-          }
-        }
-        _$AK(t4, s4) {
-          const i6 = this.constructor, e7 = i6._$Eh.get(t4);
-          if (void 0 !== e7 && this._$Em !== e7) {
-            const t5 = i6.getPropertyOptions(e7), h3 = "function" == typeof t5.converter ? { fromAttribute: t5.converter } : void 0 !== t5.converter?.fromAttribute ? t5.converter : u;
-            this._$Em = e7;
-            const r6 = h3.fromAttribute(s4, t5.type);
-            this[e7] = r6 ?? this._$Ej?.get(e7) ?? r6, this._$Em = null;
-          }
-        }
-        requestUpdate(t4, s4, i6, e7 = false, h3) {
-          if (void 0 !== t4) {
-            const r6 = this.constructor;
-            if (false === e7 && (h3 = this[t4]), i6 ?? (i6 = r6.getPropertyOptions(t4)), !((i6.hasChanged ?? f)(h3, s4) || i6.useDefault && i6.reflect && h3 === this._$Ej?.get(t4) && !this.hasAttribute(r6._$Eu(t4, i6)))) return;
-            this.C(t4, s4, i6);
-          }
-          false === this.isUpdatePending && (this._$ES = this._$EP());
-        }
-        C(t4, s4, { useDefault: i6, reflect: e7, wrapped: h3 }, r6) {
-          i6 && !(this._$Ej ?? (this._$Ej = /* @__PURE__ */ new Map())).has(t4) && (this._$Ej.set(t4, r6 ?? s4 ?? this[t4]), true !== h3 || void 0 !== r6) || (this._$AL.has(t4) || (this.hasUpdated || i6 || (s4 = void 0), this._$AL.set(t4, s4)), true === e7 && this._$Em !== t4 && (this._$Eq ?? (this._$Eq = /* @__PURE__ */ new Set())).add(t4));
-        }
-        async _$EP() {
-          this.isUpdatePending = true;
-          try {
-            await this._$ES;
-          } catch (t5) {
-            Promise.reject(t5);
-          }
-          const t4 = this.scheduleUpdate();
-          return null != t4 && await t4, !this.isUpdatePending;
-        }
-        scheduleUpdate() {
-          return this.performUpdate();
-        }
-        performUpdate() {
-          if (!this.isUpdatePending) return;
-          if (!this.hasUpdated) {
-            if (this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this._$Ep) {
-              for (const [t6, s5] of this._$Ep) this[t6] = s5;
-              this._$Ep = void 0;
-            }
-            const t5 = this.constructor.elementProperties;
-            if (t5.size > 0) for (const [s5, i6] of t5) {
-              const { wrapped: t6 } = i6, e7 = this[s5];
-              true !== t6 || this._$AL.has(s5) || void 0 === e7 || this.C(s5, void 0, i6, e7);
-            }
-          }
-          let t4 = false;
-          const s4 = this._$AL;
-          try {
-            t4 = this.shouldUpdate(s4), t4 ? (this.willUpdate(s4), this._$EO?.forEach((t5) => t5.hostUpdate?.()), this.update(s4)) : this._$EM();
-          } catch (s5) {
-            throw t4 = false, this._$EM(), s5;
-          }
-          t4 && this._$AE(s4);
-        }
-        willUpdate(t4) {
-        }
-        _$AE(t4) {
-          this._$EO?.forEach((t5) => t5.hostUpdated?.()), this.hasUpdated || (this.hasUpdated = true, this.firstUpdated(t4)), this.updated(t4);
-        }
-        _$EM() {
-          this._$AL = /* @__PURE__ */ new Map(), this.isUpdatePending = false;
-        }
-        get updateComplete() {
-          return this.getUpdateComplete();
-        }
-        getUpdateComplete() {
-          return this._$ES;
-        }
-        shouldUpdate(t4) {
-          return true;
-        }
-        update(t4) {
-          this._$Eq && (this._$Eq = this._$Eq.forEach((t5) => this._$ET(t5, this[t5]))), this._$EM();
-        }
-        updated(t4) {
-        }
-        firstUpdated(t4) {
-        }
-      };
-      y.elementStyles = [], y.shadowRootOptions = { mode: "open" }, y[d("elementProperties")] = /* @__PURE__ */ new Map(), y[d("finalized")] = /* @__PURE__ */ new Map(), p?.({ ReactiveElement: y }), (a.reactiveElementVersions ?? (a.reactiveElementVersions = [])).push("2.1.2");
-    }
-  });
-
-  // node_modules/lit-html/lit-html.js
-  function V(t4, i6) {
-    if (!u2(t4) || !t4.hasOwnProperty("raw")) throw Error("invalid template strings array");
-    return void 0 !== e3 ? e3.createHTML(i6) : i6;
-  }
-  function M(t4, i6, s4 = t4, e7) {
-    if (i6 === E) return i6;
-    let h3 = void 0 !== e7 ? s4._$Co?.[e7] : s4._$Cl;
-    const o7 = a2(i6) ? void 0 : i6._$litDirective$;
-    return h3?.constructor !== o7 && (h3?._$AO?.(false), void 0 === o7 ? h3 = void 0 : (h3 = new o7(t4), h3._$AT(t4, s4, e7)), void 0 !== e7 ? (s4._$Co ?? (s4._$Co = []))[e7] = h3 : s4._$Cl = h3), void 0 !== h3 && (i6 = M(t4, h3._$AS(t4, i6.values), h3, e7)), i6;
-  }
-  var t2, i3, s2, e3, h2, o3, n3, r3, l2, c3, a2, u2, d2, f2, v, _, m, p2, g, $, y2, x, b2, w, T, E, A, C, P, N, S2, R, k, H, I, L, z, Z, B, D;
-  var init_lit_html = __esm({
-    "node_modules/lit-html/lit-html.js"() {
-      t2 = globalThis;
-      i3 = (t4) => t4;
-      s2 = t2.trustedTypes;
-      e3 = s2 ? s2.createPolicy("lit-html", { createHTML: (t4) => t4 }) : void 0;
-      h2 = "$lit$";
-      o3 = `lit$${Math.random().toFixed(9).slice(2)}$`;
-      n3 = "?" + o3;
-      r3 = `<${n3}>`;
-      l2 = document;
-      c3 = () => l2.createComment("");
-      a2 = (t4) => null === t4 || "object" != typeof t4 && "function" != typeof t4;
-      u2 = Array.isArray;
-      d2 = (t4) => u2(t4) || "function" == typeof t4?.[Symbol.iterator];
-      f2 = "[ 	\n\f\r]";
-      v = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g;
-      _ = /-->/g;
-      m = />/g;
-      p2 = RegExp(`>|${f2}(?:([^\\s"'>=/]+)(${f2}*=${f2}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`, "g");
-      g = /'/g;
-      $ = /"/g;
-      y2 = /^(?:script|style|textarea|title)$/i;
-      x = (t4) => (i6, ...s4) => ({ _$litType$: t4, strings: i6, values: s4 });
-      b2 = x(1);
-      w = x(2);
-      T = x(3);
-      E = /* @__PURE__ */ Symbol.for("lit-noChange");
-      A = /* @__PURE__ */ Symbol.for("lit-nothing");
-      C = /* @__PURE__ */ new WeakMap();
-      P = l2.createTreeWalker(l2, 129);
-      N = (t4, i6) => {
-        const s4 = t4.length - 1, e7 = [];
-        let n5, l3 = 2 === i6 ? "<svg>" : 3 === i6 ? "<math>" : "", c4 = v;
-        for (let i7 = 0; i7 < s4; i7++) {
-          const s5 = t4[i7];
-          let a3, u3, d3 = -1, f3 = 0;
-          for (; f3 < s5.length && (c4.lastIndex = f3, u3 = c4.exec(s5), null !== u3); ) f3 = c4.lastIndex, c4 === v ? "!--" === u3[1] ? c4 = _ : void 0 !== u3[1] ? c4 = m : void 0 !== u3[2] ? (y2.test(u3[2]) && (n5 = RegExp("</" + u3[2], "g")), c4 = p2) : void 0 !== u3[3] && (c4 = p2) : c4 === p2 ? ">" === u3[0] ? (c4 = n5 ?? v, d3 = -1) : void 0 === u3[1] ? d3 = -2 : (d3 = c4.lastIndex - u3[2].length, a3 = u3[1], c4 = void 0 === u3[3] ? p2 : '"' === u3[3] ? $ : g) : c4 === $ || c4 === g ? c4 = p2 : c4 === _ || c4 === m ? c4 = v : (c4 = p2, n5 = void 0);
-          const x2 = c4 === p2 && t4[i7 + 1].startsWith("/>") ? " " : "";
-          l3 += c4 === v ? s5 + r3 : d3 >= 0 ? (e7.push(a3), s5.slice(0, d3) + h2 + s5.slice(d3) + o3 + x2) : s5 + o3 + (-2 === d3 ? i7 : x2);
-        }
-        return [V(t4, l3 + (t4[s4] || "<?>") + (2 === i6 ? "</svg>" : 3 === i6 ? "</math>" : "")), e7];
-      };
-      S2 = class _S {
-        constructor({ strings: t4, _$litType$: i6 }, e7) {
-          let r6;
-          this.parts = [];
-          let l3 = 0, a3 = 0;
-          const u3 = t4.length - 1, d3 = this.parts, [f3, v2] = N(t4, i6);
-          if (this.el = _S.createElement(f3, e7), P.currentNode = this.el.content, 2 === i6 || 3 === i6) {
-            const t5 = this.el.content.firstChild;
-            t5.replaceWith(...t5.childNodes);
-          }
-          for (; null !== (r6 = P.nextNode()) && d3.length < u3; ) {
-            if (1 === r6.nodeType) {
-              if (r6.hasAttributes()) for (const t5 of r6.getAttributeNames()) if (t5.endsWith(h2)) {
-                const i7 = v2[a3++], s4 = r6.getAttribute(t5).split(o3), e8 = /([.?@])?(.*)/.exec(i7);
-                d3.push({ type: 1, index: l3, name: e8[2], strings: s4, ctor: "." === e8[1] ? I : "?" === e8[1] ? L : "@" === e8[1] ? z : H }), r6.removeAttribute(t5);
-              } else t5.startsWith(o3) && (d3.push({ type: 6, index: l3 }), r6.removeAttribute(t5));
-              if (y2.test(r6.tagName)) {
-                const t5 = r6.textContent.split(o3), i7 = t5.length - 1;
-                if (i7 > 0) {
-                  r6.textContent = s2 ? s2.emptyScript : "";
-                  for (let s4 = 0; s4 < i7; s4++) r6.append(t5[s4], c3()), P.nextNode(), d3.push({ type: 2, index: ++l3 });
-                  r6.append(t5[i7], c3());
-                }
-              }
-            } else if (8 === r6.nodeType) if (r6.data === n3) d3.push({ type: 2, index: l3 });
-            else {
-              let t5 = -1;
-              for (; -1 !== (t5 = r6.data.indexOf(o3, t5 + 1)); ) d3.push({ type: 7, index: l3 }), t5 += o3.length - 1;
-            }
-            l3++;
-          }
-        }
-        static createElement(t4, i6) {
-          const s4 = l2.createElement("template");
-          return s4.innerHTML = t4, s4;
-        }
-      };
-      R = class {
-        constructor(t4, i6) {
-          this._$AV = [], this._$AN = void 0, this._$AD = t4, this._$AM = i6;
-        }
-        get parentNode() {
-          return this._$AM.parentNode;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        u(t4) {
-          const { el: { content: i6 }, parts: s4 } = this._$AD, e7 = (t4?.creationScope ?? l2).importNode(i6, true);
-          P.currentNode = e7;
-          let h3 = P.nextNode(), o7 = 0, n5 = 0, r6 = s4[0];
-          for (; void 0 !== r6; ) {
-            if (o7 === r6.index) {
-              let i7;
-              2 === r6.type ? i7 = new k(h3, h3.nextSibling, this, t4) : 1 === r6.type ? i7 = new r6.ctor(h3, r6.name, r6.strings, this, t4) : 6 === r6.type && (i7 = new Z(h3, this, t4)), this._$AV.push(i7), r6 = s4[++n5];
-            }
-            o7 !== r6?.index && (h3 = P.nextNode(), o7++);
-          }
-          return P.currentNode = l2, e7;
-        }
-        p(t4) {
-          let i6 = 0;
-          for (const s4 of this._$AV) void 0 !== s4 && (void 0 !== s4.strings ? (s4._$AI(t4, s4, i6), i6 += s4.strings.length - 2) : s4._$AI(t4[i6])), i6++;
-        }
-      };
-      k = class _k {
-        get _$AU() {
-          return this._$AM?._$AU ?? this._$Cv;
-        }
-        constructor(t4, i6, s4, e7) {
-          this.type = 2, this._$AH = A, this._$AN = void 0, this._$AA = t4, this._$AB = i6, this._$AM = s4, this.options = e7, this._$Cv = e7?.isConnected ?? true;
-        }
-        get parentNode() {
-          let t4 = this._$AA.parentNode;
-          const i6 = this._$AM;
-          return void 0 !== i6 && 11 === t4?.nodeType && (t4 = i6.parentNode), t4;
-        }
-        get startNode() {
-          return this._$AA;
-        }
-        get endNode() {
-          return this._$AB;
-        }
-        _$AI(t4, i6 = this) {
-          t4 = M(this, t4, i6), a2(t4) ? t4 === A || null == t4 || "" === t4 ? (this._$AH !== A && this._$AR(), this._$AH = A) : t4 !== this._$AH && t4 !== E && this._(t4) : void 0 !== t4._$litType$ ? this.$(t4) : void 0 !== t4.nodeType ? this.T(t4) : d2(t4) ? this.k(t4) : this._(t4);
-        }
-        O(t4) {
-          return this._$AA.parentNode.insertBefore(t4, this._$AB);
-        }
-        T(t4) {
-          this._$AH !== t4 && (this._$AR(), this._$AH = this.O(t4));
-        }
-        _(t4) {
-          this._$AH !== A && a2(this._$AH) ? this._$AA.nextSibling.data = t4 : this.T(l2.createTextNode(t4)), this._$AH = t4;
-        }
-        $(t4) {
-          const { values: i6, _$litType$: s4 } = t4, e7 = "number" == typeof s4 ? this._$AC(t4) : (void 0 === s4.el && (s4.el = S2.createElement(V(s4.h, s4.h[0]), this.options)), s4);
-          if (this._$AH?._$AD === e7) this._$AH.p(i6);
-          else {
-            const t5 = new R(e7, this), s5 = t5.u(this.options);
-            t5.p(i6), this.T(s5), this._$AH = t5;
-          }
-        }
-        _$AC(t4) {
-          let i6 = C.get(t4.strings);
-          return void 0 === i6 && C.set(t4.strings, i6 = new S2(t4)), i6;
-        }
-        k(t4) {
-          u2(this._$AH) || (this._$AH = [], this._$AR());
-          const i6 = this._$AH;
-          let s4, e7 = 0;
-          for (const h3 of t4) e7 === i6.length ? i6.push(s4 = new _k(this.O(c3()), this.O(c3()), this, this.options)) : s4 = i6[e7], s4._$AI(h3), e7++;
-          e7 < i6.length && (this._$AR(s4 && s4._$AB.nextSibling, e7), i6.length = e7);
-        }
-        _$AR(t4 = this._$AA.nextSibling, s4) {
-          for (this._$AP?.(false, true, s4); t4 !== this._$AB; ) {
-            const s5 = i3(t4).nextSibling;
-            i3(t4).remove(), t4 = s5;
-          }
-        }
-        setConnected(t4) {
-          void 0 === this._$AM && (this._$Cv = t4, this._$AP?.(t4));
-        }
-      };
-      H = class {
-        get tagName() {
-          return this.element.tagName;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        constructor(t4, i6, s4, e7, h3) {
-          this.type = 1, this._$AH = A, this._$AN = void 0, this.element = t4, this.name = i6, this._$AM = e7, this.options = h3, s4.length > 2 || "" !== s4[0] || "" !== s4[1] ? (this._$AH = Array(s4.length - 1).fill(new String()), this.strings = s4) : this._$AH = A;
-        }
-        _$AI(t4, i6 = this, s4, e7) {
-          const h3 = this.strings;
-          let o7 = false;
-          if (void 0 === h3) t4 = M(this, t4, i6, 0), o7 = !a2(t4) || t4 !== this._$AH && t4 !== E, o7 && (this._$AH = t4);
-          else {
-            const e8 = t4;
-            let n5, r6;
-            for (t4 = h3[0], n5 = 0; n5 < h3.length - 1; n5++) r6 = M(this, e8[s4 + n5], i6, n5), r6 === E && (r6 = this._$AH[n5]), o7 || (o7 = !a2(r6) || r6 !== this._$AH[n5]), r6 === A ? t4 = A : t4 !== A && (t4 += (r6 ?? "") + h3[n5 + 1]), this._$AH[n5] = r6;
-          }
-          o7 && !e7 && this.j(t4);
-        }
-        j(t4) {
-          t4 === A ? this.element.removeAttribute(this.name) : this.element.setAttribute(this.name, t4 ?? "");
-        }
-      };
-      I = class extends H {
-        constructor() {
-          super(...arguments), this.type = 3;
-        }
-        j(t4) {
-          this.element[this.name] = t4 === A ? void 0 : t4;
-        }
-      };
-      L = class extends H {
-        constructor() {
-          super(...arguments), this.type = 4;
-        }
-        j(t4) {
-          this.element.toggleAttribute(this.name, !!t4 && t4 !== A);
-        }
-      };
-      z = class extends H {
-        constructor(t4, i6, s4, e7, h3) {
-          super(t4, i6, s4, e7, h3), this.type = 5;
-        }
-        _$AI(t4, i6 = this) {
-          if ((t4 = M(this, t4, i6, 0) ?? A) === E) return;
-          const s4 = this._$AH, e7 = t4 === A && s4 !== A || t4.capture !== s4.capture || t4.once !== s4.once || t4.passive !== s4.passive, h3 = t4 !== A && (s4 === A || e7);
-          e7 && this.element.removeEventListener(this.name, this, s4), h3 && this.element.addEventListener(this.name, this, t4), this._$AH = t4;
-        }
-        handleEvent(t4) {
-          "function" == typeof this._$AH ? this._$AH.call(this.options?.host ?? this.element, t4) : this._$AH.handleEvent(t4);
-        }
-      };
-      Z = class {
-        constructor(t4, i6, s4) {
-          this.element = t4, this.type = 6, this._$AN = void 0, this._$AM = i6, this.options = s4;
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        _$AI(t4) {
-          M(this, t4);
-        }
-      };
-      B = t2.litHtmlPolyfillSupport;
-      B?.(S2, k), (t2.litHtmlVersions ?? (t2.litHtmlVersions = [])).push("3.3.3");
-      D = (t4, i6, s4) => {
-        const e7 = s4?.renderBefore ?? i6;
-        let h3 = e7._$litPart$;
-        if (void 0 === h3) {
-          const t5 = s4?.renderBefore ?? null;
-          e7._$litPart$ = h3 = new k(i6.insertBefore(c3(), t5), t5, void 0, s4 ?? {});
-        }
-        return h3._$AI(t4), h3;
-      };
-    }
-  });
-
-  // node_modules/lit-element/lit-element.js
-  var s3, i4, o4;
-  var init_lit_element = __esm({
-    "node_modules/lit-element/lit-element.js"() {
-      init_reactive_element();
-      init_reactive_element();
-      init_lit_html();
-      init_lit_html();
-      s3 = globalThis;
-      i4 = class extends y {
-        constructor() {
-          super(...arguments), this.renderOptions = { host: this }, this._$Do = void 0;
-        }
-        createRenderRoot() {
-          var _a;
-          const t4 = super.createRenderRoot();
-          return (_a = this.renderOptions).renderBefore ?? (_a.renderBefore = t4.firstChild), t4;
-        }
-        update(t4) {
-          const r6 = this.render();
-          this.hasUpdated || (this.renderOptions.isConnected = this.isConnected), super.update(t4), this._$Do = D(r6, this.renderRoot, this.renderOptions);
-        }
-        connectedCallback() {
-          super.connectedCallback(), this._$Do?.setConnected(true);
-        }
-        disconnectedCallback() {
-          super.disconnectedCallback(), this._$Do?.setConnected(false);
-        }
-        render() {
-          return E;
-        }
-      };
-      i4._$litElement$ = true, i4["finalized"] = true, s3.litElementHydrateSupport?.({ LitElement: i4 });
-      o4 = s3.litElementPolyfillSupport;
-      o4?.({ LitElement: i4 });
-      (s3.litElementVersions ?? (s3.litElementVersions = [])).push("4.2.2");
-    }
-  });
-
-  // node_modules/lit-html/is-server.js
-  var init_is_server = __esm({
-    "node_modules/lit-html/is-server.js"() {
-    }
-  });
-
-  // node_modules/lit/index.js
-  var init_lit = __esm({
-    "node_modules/lit/index.js"() {
-      init_reactive_element();
-      init_lit_html();
-      init_lit_element();
-      init_is_server();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/custom-element.js
-  var init_custom_element = __esm({
-    "node_modules/@lit/reactive-element/decorators/custom-element.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/property.js
-  function n4(t4) {
-    return (e7, o7) => "object" == typeof o7 ? r4(t4, e7, o7) : ((t5, e8, o8) => {
-      const r6 = e8.hasOwnProperty(o8);
-      return e8.constructor.createProperty(o8, t5), r6 ? Object.getOwnPropertyDescriptor(e8, o8) : void 0;
-    })(t4, e7, o7);
-  }
-  var o5, r4;
-  var init_property = __esm({
-    "node_modules/@lit/reactive-element/decorators/property.js"() {
-      init_reactive_element();
-      o5 = { attribute: true, type: String, converter: u, reflect: false, hasChanged: f };
-      r4 = (t4 = o5, e7, r6) => {
-        const { kind: n5, metadata: i6 } = r6;
-        let s4 = globalThis.litPropertyMetadata.get(i6);
-        if (void 0 === s4 && globalThis.litPropertyMetadata.set(i6, s4 = /* @__PURE__ */ new Map()), "setter" === n5 && ((t4 = Object.create(t4)).wrapped = true), s4.set(r6.name, t4), "accessor" === n5) {
-          const { name: o7 } = r6;
-          return { set(r7) {
-            const n6 = e7.get.call(this);
-            e7.set.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
-          }, init(e8) {
-            return void 0 !== e8 && this.C(o7, void 0, t4, e8), e8;
-          } };
-        }
-        if ("setter" === n5) {
-          const { name: o7 } = r6;
-          return function(r7) {
-            const n6 = this[o7];
-            e7.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
-          };
-        }
-        throw Error("Unsupported decorator location: " + n5);
-      };
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/state.js
-  function r5(r6) {
-    return n4({ ...r6, state: true, attribute: false });
-  }
-  var init_state = __esm({
-    "node_modules/@lit/reactive-element/decorators/state.js"() {
-      init_property();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/event-options.js
-  var init_event_options = __esm({
-    "node_modules/@lit/reactive-element/decorators/event-options.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/base.js
-  var init_base = __esm({
-    "node_modules/@lit/reactive-element/decorators/base.js"() {
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query.js
-  var init_query = __esm({
-    "node_modules/@lit/reactive-element/decorators/query.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-all.js
-  var init_query_all = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-all.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-async.js
-  var init_query_async = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-async.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-assigned-elements.js
-  var init_query_assigned_elements = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-assigned-elements.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js
-  var init_query_assigned_nodes = __esm({
-    "node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js"() {
-      init_base();
-    }
-  });
-
-  // node_modules/lit/decorators.js
-  var init_decorators = __esm({
-    "node_modules/lit/decorators.js"() {
-      init_custom_element();
-      init_property();
-      init_state();
-      init_event_options();
-      init_query();
-      init_query_all();
-      init_query_async();
-      init_query_assigned_elements();
-      init_query_assigned_nodes();
-    }
-  });
-
-  // node_modules/lit-html/directive.js
-  var t3, e5, i5;
-  var init_directive = __esm({
-    "node_modules/lit-html/directive.js"() {
-      t3 = { ATTRIBUTE: 1, CHILD: 2, PROPERTY: 3, BOOLEAN_ATTRIBUTE: 4, EVENT: 5, ELEMENT: 6 };
-      e5 = (t4) => (...e7) => ({ _$litDirective$: t4, values: e7 });
-      i5 = class {
-        constructor(t4) {
-        }
-        get _$AU() {
-          return this._$AM._$AU;
-        }
-        _$AT(t4, e7, i6) {
-          this._$Ct = t4, this._$AM = e7, this._$Ci = i6;
-        }
-        _$AS(t4, e7) {
-          return this.update(t4, e7);
-        }
-        update(t4, e7) {
-          return this.render(...e7);
-        }
-      };
-    }
-  });
-
-  // node_modules/lit-html/directives/class-map.js
-  var e6;
-  var init_class_map = __esm({
-    "node_modules/lit-html/directives/class-map.js"() {
-      init_lit_html();
-      init_directive();
-      e6 = e5(class extends i5 {
-        constructor(t4) {
-          if (super(t4), t4.type !== t3.ATTRIBUTE || "class" !== t4.name || t4.strings?.length > 2) throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.");
-        }
-        render(t4) {
-          return " " + Object.keys(t4).filter((s4) => t4[s4]).join(" ") + " ";
-        }
-        update(s4, [i6]) {
-          if (void 0 === this.st) {
-            this.st = /* @__PURE__ */ new Set(), void 0 !== s4.strings && (this.nt = new Set(s4.strings.join(" ").split(/\s/).filter((t4) => "" !== t4)));
-            for (const t4 in i6) i6[t4] && !this.nt?.has(t4) && this.st.add(t4);
-            return this.render(i6);
-          }
-          const r6 = s4.element.classList;
-          for (const t4 of this.st) t4 in i6 || (r6.remove(t4), this.st.delete(t4));
-          for (const t4 in i6) {
-            const s5 = !!i6[t4];
-            s5 === this.st.has(t4) || this.nt?.has(t4) || (s5 ? (r6.add(t4), this.st.add(t4)) : (r6.remove(t4), this.st.delete(t4)));
-          }
-          return E;
-        }
-      });
-    }
-  });
-
-  // node_modules/lit/directives/class-map.js
-  var init_class_map2 = __esm({
-    "node_modules/lit/directives/class-map.js"() {
-      init_class_map();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/VscElement.js
-  var VERSION, CONFIG_KEY, warn, VscElement, customElement;
-  var init_VscElement = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/VscElement.js"() {
-      init_lit();
-      VERSION = "2.5.1";
-      CONFIG_KEY = "__vscodeElements_disableRegistryWarning__";
-      warn = (message, componentInstance) => {
-        const prefix = "[VSCode Elements] ";
-        if (componentInstance) {
-          console.warn(`${prefix}${message}
-%o`, componentInstance);
-        } else {
-          console.warn(`${message}
-%o`, componentInstance);
-        }
-      };
-      VscElement = class extends i4 {
-        /** VSCode Elements version */
-        get version() {
-          return VERSION;
-        }
-        warn(message) {
-          warn(message, this);
-        }
-      };
-      customElement = (tagName) => {
-        return (classOrTarget) => {
-          const customElementClass = customElements.get(tagName);
-          if (!customElementClass) {
-            customElements.define(tagName, classOrTarget);
-            return;
-          }
-          if (CONFIG_KEY in window) {
-            return;
-          }
-          const el = document.createElement(tagName);
-          const anotherVersion = el?.version;
-          let message = "";
-          if (!anotherVersion) {
-            message += "is already registered by an unknown custom element handler class.";
-          } else if (anotherVersion !== VERSION) {
-            message += "is already registered by a different version of VSCode Elements. ";
-            message += `This version is "${VERSION}", while the other one is "${anotherVersion}".`;
-          } else {
-            message += `is already registered by the same version of VSCode Elements (${VERSION}).`;
-          }
-          warn(`The custom element "${tagName}" ${message}
-To suppress this warning, set window.${CONFIG_KEY} to true`);
-        };
-      };
-    }
-  });
-
-  // node_modules/lit-html/directives/if-defined.js
-  var o6;
-  var init_if_defined = __esm({
-    "node_modules/lit-html/directives/if-defined.js"() {
-      init_lit_html();
-      o6 = (o7) => o7 ?? A;
-    }
-  });
-
-  // node_modules/lit/directives/if-defined.js
-  var init_if_defined2 = __esm({
-    "node_modules/lit/directives/if-defined.js"() {
-      init_if_defined();
-    }
-  });
-
-  // node_modules/lit/directive.js
-  var init_directive2 = __esm({
-    "node_modules/lit/directive.js"() {
-      init_directive();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/style-property-map.js
-  var StylePropertyMap, stylePropertyMap;
-  var init_style_property_map = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/style-property-map.js"() {
-      init_lit();
-      init_directive2();
-      StylePropertyMap = class extends i5 {
-        constructor(partInfo) {
-          super(partInfo);
-          this._prevProperties = {};
-          if (partInfo.type !== t3.PROPERTY || partInfo.name !== "style") {
-            throw new Error("The `stylePropertyMap` directive must be used in the `style` property");
-          }
-        }
-        update(part, [styleProps]) {
-          Object.entries(styleProps).forEach(([key, val]) => {
-            if (this._prevProperties[key] !== val) {
-              if (key.startsWith("--")) {
-                part.element.style.setProperty(key, val);
-              } else {
-                part.element.style[key] = val;
-              }
-              this._prevProperties[key] = val;
-            }
-          });
-          return E;
-        }
-        render(_styleProps) {
-          return E;
-        }
-      };
-      stylePropertyMap = e5(StylePropertyMap);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/default.styles.js
-  var default_styles_default;
-  var init_default_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/default.styles.js"() {
-      init_lit();
-      default_styles_default = i`
+"use strict";(()=>{var wn=Object.defineProperty;var g=(e,t,o)=>()=>{if(o)throw o[0];try{return e&&(t=e(e=0)),t}catch(n){throw o=[n],n}};var Cn=(e,t)=>{for(var o in t)wn(e,o,{get:t[o],enumerable:!0})};var Ne,Fe,st,Xt,pe,ze,W,Qt,rt,it=g(()=>{Ne=globalThis,Fe=Ne.ShadowRoot&&(Ne.ShadyCSS===void 0||Ne.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,st=Symbol(),Xt=new WeakMap,pe=class{constructor(t,o,n){if(this._$cssResult$=!0,n!==st)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=o}get styleSheet(){let t=this.o,o=this.t;if(Fe&&t===void 0){let n=o!==void 0&&o.length===1;n&&(t=Xt.get(o)),t===void 0&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),n&&Xt.set(o,t))}return t}toString(){return this.cssText}},ze=e=>new pe(typeof e=="string"?e:e+"",void 0,st),W=(e,...t)=>{let o=e.length===1?e[0]:t.reduce((n,s,r)=>n+(i=>{if(i._$cssResult$===!0)return i.cssText;if(typeof i=="number")return i;throw Error("Value passed to 'css' function must be a 'css' function result: "+i+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(s)+e[r+1],e[0]);return new pe(o,e,st)},Qt=(e,t)=>{if(Fe)e.adoptedStyleSheets=t.map(o=>o instanceof CSSStyleSheet?o:o.styleSheet);else for(let o of t){let n=document.createElement("style"),s=Ne.litNonce;s!==void 0&&n.setAttribute("nonce",s),n.textContent=o.cssText,e.appendChild(n)}},rt=Fe?e=>e:e=>e instanceof CSSStyleSheet?(t=>{let o="";for(let n of t.cssRules)o+=n.cssText;return ze(o)})(e):e});var Dn,_n,Rn,Bn,Pn,Hn,H,eo,Nn,Fn,be,me,Oe,to,_,he=g(()=>{it();it();({is:Dn,defineProperty:_n,getOwnPropertyDescriptor:Rn,getOwnPropertyNames:Bn,getOwnPropertySymbols:Pn,getPrototypeOf:Hn}=Object),H=globalThis,eo=H.trustedTypes,Nn=eo?eo.emptyScript:"",Fn=H.reactiveElementPolyfillSupport,be=(e,t)=>e,me={toAttribute(e,t){switch(t){case Boolean:e=e?Nn:null;break;case Object:case Array:e=e==null?e:JSON.stringify(e)}return e},fromAttribute(e,t){let o=e;switch(t){case Boolean:o=e!==null;break;case Number:o=e===null?null:Number(e);break;case Object:case Array:try{o=JSON.parse(e)}catch{o=null}}return o}},Oe=(e,t)=>!Dn(e,t),to={attribute:!0,type:String,converter:me,reflect:!1,useDefault:!1,hasChanged:Oe};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),H.litPropertyMetadata??(H.litPropertyMetadata=new WeakMap);_=class extends HTMLElement{static addInitializer(t){this._$Ei(),(this.l??(this.l=[])).push(t)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(t,o=to){if(o.state&&(o.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(t)&&((o=Object.create(o)).wrapped=!0),this.elementProperties.set(t,o),!o.noAccessor){let n=Symbol(),s=this.getPropertyDescriptor(t,n,o);s!==void 0&&_n(this.prototype,t,s)}}static getPropertyDescriptor(t,o,n){let{get:s,set:r}=Rn(this.prototype,t)??{get(){return this[o]},set(i){this[o]=i}};return{get:s,set(i){let a=s?.call(this);r?.call(this,i),this.requestUpdate(t,a,n)},configurable:!0,enumerable:!0}}static getPropertyOptions(t){return this.elementProperties.get(t)??to}static _$Ei(){if(this.hasOwnProperty(be("elementProperties")))return;let t=Hn(this);t.finalize(),t.l!==void 0&&(this.l=[...t.l]),this.elementProperties=new Map(t.elementProperties)}static finalize(){if(this.hasOwnProperty(be("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(be("properties"))){let o=this.properties,n=[...Bn(o),...Pn(o)];for(let s of n)this.createProperty(s,o[s])}let t=this[Symbol.metadata];if(t!==null){let o=litPropertyMetadata.get(t);if(o!==void 0)for(let[n,s]of o)this.elementProperties.set(n,s)}this._$Eh=new Map;for(let[o,n]of this.elementProperties){let s=this._$Eu(o,n);s!==void 0&&this._$Eh.set(s,o)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(t){let o=[];if(Array.isArray(t)){let n=new Set(t.flat(1/0).reverse());for(let s of n)o.unshift(rt(s))}else t!==void 0&&o.push(rt(t));return o}static _$Eu(t,o){let n=o.attribute;return n===!1?void 0:typeof n=="string"?n:typeof t=="string"?t.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(t=>this.enableUpdating=t),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(t=>t(this))}addController(t){(this._$EO??(this._$EO=new Set)).add(t),this.renderRoot!==void 0&&this.isConnected&&t.hostConnected?.()}removeController(t){this._$EO?.delete(t)}_$E_(){let t=new Map,o=this.constructor.elementProperties;for(let n of o.keys())this.hasOwnProperty(n)&&(t.set(n,this[n]),delete this[n]);t.size>0&&(this._$Ep=t)}createRenderRoot(){let t=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return Qt(t,this.constructor.elementStyles),t}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(t=>t.hostConnected?.())}enableUpdating(t){}disconnectedCallback(){this._$EO?.forEach(t=>t.hostDisconnected?.())}attributeChangedCallback(t,o,n){this._$AK(t,n)}_$ET(t,o){let n=this.constructor.elementProperties.get(t),s=this.constructor._$Eu(t,n);if(s!==void 0&&n.reflect===!0){let r=(n.converter?.toAttribute!==void 0?n.converter:me).toAttribute(o,n.type);this._$Em=t,r==null?this.removeAttribute(s):this.setAttribute(s,r),this._$Em=null}}_$AK(t,o){let n=this.constructor,s=n._$Eh.get(t);if(s!==void 0&&this._$Em!==s){let r=n.getPropertyOptions(s),i=typeof r.converter=="function"?{fromAttribute:r.converter}:r.converter?.fromAttribute!==void 0?r.converter:me;this._$Em=s;let a=i.fromAttribute(o,r.type);this[s]=a??this._$Ej?.get(s)??a,this._$Em=null}}requestUpdate(t,o,n,s=!1,r){if(t!==void 0){let i=this.constructor;if(s===!1&&(r=this[t]),n??(n=i.getPropertyOptions(t)),!((n.hasChanged??Oe)(r,o)||n.useDefault&&n.reflect&&r===this._$Ej?.get(t)&&!this.hasAttribute(i._$Eu(t,n))))return;this.C(t,o,n)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(t,o,{useDefault:n,reflect:s,wrapped:r},i){n&&!(this._$Ej??(this._$Ej=new Map)).has(t)&&(this._$Ej.set(t,i??o??this[t]),r!==!0||i!==void 0)||(this._$AL.has(t)||(this.hasUpdated||n||(o=void 0),this._$AL.set(t,o)),s===!0&&this._$Em!==t&&(this._$Eq??(this._$Eq=new Set)).add(t))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(o){Promise.reject(o)}let t=this.scheduleUpdate();return t!=null&&await t,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[s,r]of this._$Ep)this[s]=r;this._$Ep=void 0}let n=this.constructor.elementProperties;if(n.size>0)for(let[s,r]of n){let{wrapped:i}=r,a=this[s];i!==!0||this._$AL.has(s)||a===void 0||this.C(s,void 0,r,a)}}let t=!1,o=this._$AL;try{t=this.shouldUpdate(o),t?(this.willUpdate(o),this._$EO?.forEach(n=>n.hostUpdate?.()),this.update(o)):this._$EM()}catch(n){throw t=!1,this._$EM(),n}t&&this._$AE(o)}willUpdate(t){}_$AE(t){this._$EO?.forEach(o=>o.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(t)),this.updated(t)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(t){return!0}update(t){this._$Eq&&(this._$Eq=this._$Eq.forEach(o=>this._$ET(o,this[o]))),this._$EM()}updated(t){}firstUpdated(t){}};_.elementStyles=[],_.shadowRootOptions={mode:"open"},_[be("elementProperties")]=new Map,_[be("finalized")]=new Map,Fn?.({ReactiveElement:_}),(H.reactiveElementVersions??(H.reactiveElementVersions=[])).push("2.1.2")});function bo(e,t){if(!bt(e)||!e.hasOwnProperty("raw"))throw Error("invalid template strings array");return no!==void 0?no.createHTML(t):t}function K(e,t,o=e,n){if(t===A)return t;let s=n!==void 0?o._$Co?.[n]:o._$Cl,r=ye(t)?void 0:t._$litDirective$;return s?.constructor!==r&&(s?._$AO?.(!1),r===void 0?s=void 0:(s=new r(e),s._$AT(e,o,n)),n!==void 0?(o._$Co??(o._$Co=[]))[n]=s:o._$Cl=s),s!==void 0&&(t=K(e,s._$AS(e,t.values),s,n)),t}var ve,oo,Ue,no,co,N,uo,zn,G,fe,ye,bt,On,at,ge,so,ro,j,io,ao,po,mt,R,Oi,Ui,A,x,lo,q,Un,xe,lt,ke,Y,dt,ct,ut,pt,Wn,mo,X=g(()=>{ve=globalThis,oo=e=>e,Ue=ve.trustedTypes,no=Ue?Ue.createPolicy("lit-html",{createHTML:e=>e}):void 0,co="$lit$",N=`lit$${Math.random().toFixed(9).slice(2)}$`,uo="?"+N,zn=`<${uo}>`,G=document,fe=()=>G.createComment(""),ye=e=>e===null||typeof e!="object"&&typeof e!="function",bt=Array.isArray,On=e=>bt(e)||typeof e?.[Symbol.iterator]=="function",at=`[ 	
+\f\r]`,ge=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,so=/-->/g,ro=/>/g,j=RegExp(`>|${at}(?:([^\\s"'>=/]+)(${at}*=${at}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`,"g"),io=/'/g,ao=/"/g,po=/^(?:script|style|textarea|title)$/i,mt=e=>(t,...o)=>({_$litType$:e,strings:t,values:o}),R=mt(1),Oi=mt(2),Ui=mt(3),A=Symbol.for("lit-noChange"),x=Symbol.for("lit-nothing"),lo=new WeakMap,q=G.createTreeWalker(G,129);Un=(e,t)=>{let o=e.length-1,n=[],s,r=t===2?"<svg>":t===3?"<math>":"",i=ge;for(let a=0;a<o;a++){let d=e[a],u,p,c=-1,m=0;for(;m<d.length&&(i.lastIndex=m,p=i.exec(d),p!==null);)m=i.lastIndex,i===ge?p[1]==="!--"?i=so:p[1]!==void 0?i=ro:p[2]!==void 0?(po.test(p[2])&&(s=RegExp("</"+p[2],"g")),i=j):p[3]!==void 0&&(i=j):i===j?p[0]===">"?(i=s??ge,c=-1):p[1]===void 0?c=-2:(c=i.lastIndex-p[2].length,u=p[1],i=p[3]===void 0?j:p[3]==='"'?ao:io):i===ao||i===io?i=j:i===so||i===ro?i=ge:(i=j,s=void 0);let v=i===j&&e[a+1].startsWith("/>")?" ":"";r+=i===ge?d+zn:c>=0?(n.push(u),d.slice(0,c)+co+d.slice(c)+N+v):d+N+(c===-2?a:v)}return[bo(e,r+(e[o]||"<?>")+(t===2?"</svg>":t===3?"</math>":"")),n]},xe=class e{constructor({strings:t,_$litType$:o},n){let s;this.parts=[];let r=0,i=0,a=t.length-1,d=this.parts,[u,p]=Un(t,o);if(this.el=e.createElement(u,n),q.currentNode=this.el.content,o===2||o===3){let c=this.el.content.firstChild;c.replaceWith(...c.childNodes)}for(;(s=q.nextNode())!==null&&d.length<a;){if(s.nodeType===1){if(s.hasAttributes())for(let c of s.getAttributeNames())if(c.endsWith(co)){let m=p[i++],v=s.getAttribute(c).split(N),k=/([.?@])?(.*)/.exec(m);d.push({type:1,index:r,name:k[2],strings:v,ctor:k[1]==="."?dt:k[1]==="?"?ct:k[1]==="@"?ut:Y}),s.removeAttribute(c)}else c.startsWith(N)&&(d.push({type:6,index:r}),s.removeAttribute(c));if(po.test(s.tagName)){let c=s.textContent.split(N),m=c.length-1;if(m>0){s.textContent=Ue?Ue.emptyScript:"";for(let v=0;v<m;v++)s.append(c[v],fe()),q.nextNode(),d.push({type:2,index:++r});s.append(c[m],fe())}}}else if(s.nodeType===8)if(s.data===uo)d.push({type:2,index:r});else{let c=-1;for(;(c=s.data.indexOf(N,c+1))!==-1;)d.push({type:7,index:r}),c+=N.length-1}r++}}static createElement(t,o){let n=G.createElement("template");return n.innerHTML=t,n}};lt=class{constructor(t,o){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=o}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){let{el:{content:o},parts:n}=this._$AD,s=(t?.creationScope??G).importNode(o,!0);q.currentNode=s;let r=q.nextNode(),i=0,a=0,d=n[0];for(;d!==void 0;){if(i===d.index){let u;d.type===2?u=new ke(r,r.nextSibling,this,t):d.type===1?u=new d.ctor(r,d.name,d.strings,this,t):d.type===6&&(u=new pt(r,this,t)),this._$AV.push(u),d=n[++a]}i!==d?.index&&(r=q.nextNode(),i++)}return q.currentNode=G,s}p(t){let o=0;for(let n of this._$AV)n!==void 0&&(n.strings!==void 0?(n._$AI(t,n,o),o+=n.strings.length-2):n._$AI(t[o])),o++}},ke=class e{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,o,n,s){this.type=2,this._$AH=x,this._$AN=void 0,this._$AA=t,this._$AB=o,this._$AM=n,this.options=s,this._$Cv=s?.isConnected??!0}get parentNode(){let t=this._$AA.parentNode,o=this._$AM;return o!==void 0&&t?.nodeType===11&&(t=o.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,o=this){t=K(this,t,o),ye(t)?t===x||t==null||t===""?(this._$AH!==x&&this._$AR(),this._$AH=x):t!==this._$AH&&t!==A&&this._(t):t._$litType$!==void 0?this.$(t):t.nodeType!==void 0?this.T(t):On(t)?this.k(t):this._(t)}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t))}_(t){this._$AH!==x&&ye(this._$AH)?this._$AA.nextSibling.data=t:this.T(G.createTextNode(t)),this._$AH=t}$(t){let{values:o,_$litType$:n}=t,s=typeof n=="number"?this._$AC(t):(n.el===void 0&&(n.el=xe.createElement(bo(n.h,n.h[0]),this.options)),n);if(this._$AH?._$AD===s)this._$AH.p(o);else{let r=new lt(s,this),i=r.u(this.options);r.p(o),this.T(i),this._$AH=r}}_$AC(t){let o=lo.get(t.strings);return o===void 0&&lo.set(t.strings,o=new xe(t)),o}k(t){bt(this._$AH)||(this._$AH=[],this._$AR());let o=this._$AH,n,s=0;for(let r of t)s===o.length?o.push(n=new e(this.O(fe()),this.O(fe()),this,this.options)):n=o[s],n._$AI(r),s++;s<o.length&&(this._$AR(n&&n._$AB.nextSibling,s),o.length=s)}_$AR(t=this._$AA.nextSibling,o){for(this._$AP?.(!1,!0,o);t!==this._$AB;){let n=oo(t).nextSibling;oo(t).remove(),t=n}}setConnected(t){this._$AM===void 0&&(this._$Cv=t,this._$AP?.(t))}},Y=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,o,n,s,r){this.type=1,this._$AH=x,this._$AN=void 0,this.element=t,this.name=o,this._$AM=s,this.options=r,n.length>2||n[0]!==""||n[1]!==""?(this._$AH=Array(n.length-1).fill(new String),this.strings=n):this._$AH=x}_$AI(t,o=this,n,s){let r=this.strings,i=!1;if(r===void 0)t=K(this,t,o,0),i=!ye(t)||t!==this._$AH&&t!==A,i&&(this._$AH=t);else{let a=t,d,u;for(t=r[0],d=0;d<r.length-1;d++)u=K(this,a[n+d],o,d),u===A&&(u=this._$AH[d]),i||(i=!ye(u)||u!==this._$AH[d]),u===x?t=x:t!==x&&(t+=(u??"")+r[d+1]),this._$AH[d]=u}i&&!s&&this.j(t)}j(t){t===x?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"")}},dt=class extends Y{constructor(){super(...arguments),this.type=3}j(t){this.element[this.name]=t===x?void 0:t}},ct=class extends Y{constructor(){super(...arguments),this.type=4}j(t){this.element.toggleAttribute(this.name,!!t&&t!==x)}},ut=class extends Y{constructor(t,o,n,s,r){super(t,o,n,s,r),this.type=5}_$AI(t,o=this){if((t=K(this,t,o,0)??x)===A)return;let n=this._$AH,s=t===x&&n!==x||t.capture!==n.capture||t.once!==n.once||t.passive!==n.passive,r=t!==x&&(n===x||s);s&&this.element.removeEventListener(this.name,this,n),r&&this.element.addEventListener(this.name,this,t),this._$AH=t}handleEvent(t){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t)}},pt=class{constructor(t,o,n){this.element=t,this.type=6,this._$AN=void 0,this._$AM=o,this.options=n}get _$AU(){return this._$AM._$AU}_$AI(t){K(this,t)}},Wn=ve.litHtmlPolyfillSupport;Wn?.(xe,ke),(ve.litHtmlVersions??(ve.litHtmlVersions=[])).push("3.3.3");mo=(e,t,o)=>{let n=o?.renderBefore??t,s=n._$litPart$;if(s===void 0){let r=o?.renderBefore??null;n._$litPart$=s=new ke(t.insertBefore(fe(),r),r,void 0,o??{})}return s._$AI(e),s}});var Se,F,jn,ho=g(()=>{he();he();X();X();Se=globalThis,F=class extends _{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var o;let t=super.createRenderRoot();return(o=this.renderOptions).renderBefore??(o.renderBefore=t.firstChild),t}update(t){let o=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(t),this._$Do=mo(o,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return A}};F._$litElement$=!0,F.finalized=!0,Se.litElementHydrateSupport?.({LitElement:F});jn=Se.litElementPolyfillSupport;jn?.({LitElement:F});(Se.litElementVersions??(Se.litElementVersions=[])).push("4.2.2")});var go=g(()=>{});var z=g(()=>{he();X();ho();go()});var vo=g(()=>{});function f(e){return(t,o)=>typeof o=="object"?Gn(e,t,o):((n,s,r)=>{let i=s.hasOwnProperty(r);return s.constructor.createProperty(r,n),i?Object.getOwnPropertyDescriptor(s,r):void 0})(e,t,o)}var qn,Gn,ht=g(()=>{he();qn={attribute:!0,type:String,converter:me,reflect:!1,hasChanged:Oe},Gn=(e=qn,t,o)=>{let{kind:n,metadata:s}=o,r=globalThis.litPropertyMetadata.get(s);if(r===void 0&&globalThis.litPropertyMetadata.set(s,r=new Map),n==="setter"&&((e=Object.create(e)).wrapped=!0),r.set(o.name,e),n==="accessor"){let{name:i}=o;return{set(a){let d=t.get.call(this);t.set.call(this,a),this.requestUpdate(i,d,e,!0,a)},init(a){return a!==void 0&&this.C(i,void 0,e,a),a}}}if(n==="setter"){let{name:i}=o;return function(a){let d=this[i];t.call(this,a),this.requestUpdate(i,d,e,!0,a)}}throw Error("Unsupported decorator location: "+n)}});function gt(e){return f({...e,state:!0,attribute:!1})}var fo=g(()=>{ht();});var yo=g(()=>{});var Q=g(()=>{});var xo=g(()=>{Q();});var ko=g(()=>{Q();});var So=g(()=>{Q();});var wo=g(()=>{Q();});var Co=g(()=>{Q();});var vt=g(()=>{vo();ht();fo();yo();xo();ko();So();wo();Co()});var je,qe,ee,ft=g(()=>{je={ATTRIBUTE:1,CHILD:2,PROPERTY:3,BOOLEAN_ATTRIBUTE:4,EVENT:5,ELEMENT:6},qe=e=>(...t)=>({_$litDirective$:e,values:t}),ee=class{constructor(t){}get _$AU(){return this._$AM._$AU}_$AT(t,o,n){this._$Ct=t,this._$AM=o,this._$Ci=n}_$AS(t,o){return this.update(t,o)}update(t,o){return this.render(...o)}}});var Ge,$o=g(()=>{X();ft();Ge=qe(class extends ee{constructor(e){if(super(e),e.type!==je.ATTRIBUTE||e.name!=="class"||e.strings?.length>2)throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.")}render(e){return" "+Object.keys(e).filter(t=>e[t]).join(" ")+" "}update(e,[t]){if(this.st===void 0){this.st=new Set,e.strings!==void 0&&(this.nt=new Set(e.strings.join(" ").split(/\s/).filter(n=>n!=="")));for(let n in t)t[n]&&!this.nt?.has(n)&&this.st.add(n);return this.render(t)}let o=e.element.classList;for(let n of this.st)n in t||(o.remove(n),this.st.delete(n));for(let n in t){let s=!!t[n];s===this.st.has(n)||this.nt?.has(n)||(s?(o.add(n),this.st.add(n)):(o.remove(n),this.st.delete(n)))}return A}})});var yt=g(()=>{$o()});var Ve,Eo,To,te,Ze,xt=g(()=>{z();Ve="2.5.1",Eo="__vscodeElements_disableRegistryWarning__",To=(e,t)=>{console.warn(t?`[VSCode Elements] ${e}
+%o`:`${e}
+%o`,t)},te=class extends F{get version(){return Ve}warn(t){To(t,this)}},Ze=e=>t=>{if(!customElements.get(e)){customElements.define(e,t);return}if(Eo in window)return;let s=document.createElement(e)?.version,r="";s?s!==Ve?(r+="is already registered by a different version of VSCode Elements. ",r+=`This version is "${Ve}", while the other one is "${s}".`):r+=`is already registered by the same version of VSCode Elements (${Ve}).`:r+="is already registered by an unknown custom element handler class.",To(`The custom element "${e}" ${r}
+To suppress this warning, set window.${Eo} to true`)}});var oe,Ao=g(()=>{X();oe=e=>e??x});var kt=g(()=>{Ao()});var Io=g(()=>{ft()});var St,Mo,Lo=g(()=>{z();Io();St=class extends ee{constructor(t){if(super(t),this._prevProperties={},t.type!==je.PROPERTY||t.name!=="style")throw new Error("The `stylePropertyMap` directive must be used in the `style` property")}update(t,[o]){return Object.entries(o).forEach(([n,s])=>{this._prevProperties[n]!==s&&(n.startsWith("--")?t.element.style.setProperty(n,s):t.element.style[n]=s,this._prevProperties[n]=s)}),A}render(t){return A}},Mo=qe(St)});var Je,wt=g(()=>{z();Je=W`
   :host([hidden]) {
     display: none;
   }
@@ -913,19 +14,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     opacity: 0.4;
     pointer-events: none;
   }
-`;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js
-  var styles, vscode_icon_styles_default;
-  var init_vscode_icon_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js"() {
-      init_lit();
-      init_default_styles();
-      styles = [
-        default_styles_default,
-        i`
+`});var Vn,Do,_o=g(()=>{z();wt();Vn=[Je,W`
     :host {
       color: var(--vscode-icon-foreground, #cccccc);
       display: inline-block;
@@ -985,168 +74,25 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       animation-timing-function: linear;
       animation-iteration-count: infinite;
     }
-  `
-      ];
-      vscode_icon_styles_default = styles;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js
-  var __decorate, VscodeIcon_1, VscodeIcon;
-  var init_vscode_icon = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js"() {
-      init_lit();
-      init_decorators();
-      init_class_map2();
-      init_if_defined2();
-      init_VscElement();
-      init_style_property_map();
-      init_vscode_icon_styles();
-      __decorate = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeIcon = VscodeIcon_1 = class VscodeIcon2 extends VscElement {
-        constructor() {
-          super(...arguments);
-          this.label = "";
-          this.name = "";
-          this.size = 16;
-          this.spin = false;
-          this.spinDuration = 1.5;
-          this.actionIcon = false;
-          this._onButtonClick = (ev) => {
-            this.dispatchEvent(new CustomEvent("vsc-click", { detail: { originalEvent: ev } }));
-          };
-        }
-        connectedCallback() {
-          super.connectedCallback();
-          const { href, nonce } = this._getStylesheetConfig();
-          VscodeIcon_1.stylesheetHref = href;
-          VscodeIcon_1.nonce = nonce;
-        }
-        /**
-         * For using web fonts in web components, the font stylesheet must be included
-         * twice: on the page and in the web component. This function looks for the
-         * font stylesheet on the page and returns the stylesheet URL and the nonce
-         * id.
-         */
-        _getStylesheetConfig() {
-          if (typeof document === "undefined") {
-            return { nonce: void 0, href: void 0 };
-          }
-          const linkElement = document.getElementById("vscode-codicon-stylesheet");
-          const href = linkElement?.getAttribute("href") || void 0;
-          const nonce = linkElement?.nonce || void 0;
-          if (!linkElement) {
-            let msg = 'To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';
-            msg += "See https://vscode-elements.github.io/components/icon/ for more details.";
-            this.warn(msg);
-          }
-          return { nonce, href };
-        }
-        render() {
-          const { stylesheetHref, nonce } = VscodeIcon_1;
-          const content = b2`<span
-      class=${e6({
-            codicon: true,
-            ["codicon-" + this.name]: true,
-            spin: this.spin
-          })}
-      .style=${stylePropertyMap({
-            animationDuration: String(this.spinDuration) + "s",
-            fontSize: this.size + "px",
-            height: this.size + "px",
-            width: this.size + "px"
-          })}
-    ></span>`;
-          const wrapped = this.actionIcon ? b2` <button
+  `],Do=Vn});var V,we,I,Ro=g(()=>{z();vt();yt();kt();xt();Lo();_o();V=function(e,t,o,n){var s=arguments.length,r=s<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,i;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")r=Reflect.decorate(e,t,o,n);else for(var a=e.length-1;a>=0;a--)(i=e[a])&&(r=(s<3?i(r):s>3?i(t,o,r):i(t,o))||r);return s>3&&r&&Object.defineProperty(t,o,r),r},I=we=class extends te{constructor(){super(...arguments),this.label="",this.name="",this.size=16,this.spin=!1,this.spinDuration=1.5,this.actionIcon=!1,this._onButtonClick=t=>{this.dispatchEvent(new CustomEvent("vsc-click",{detail:{originalEvent:t}}))}}connectedCallback(){super.connectedCallback();let{href:t,nonce:o}=this._getStylesheetConfig();we.stylesheetHref=t,we.nonce=o}_getStylesheetConfig(){if(typeof document>"u")return{nonce:void 0,href:void 0};let t=document.getElementById("vscode-codicon-stylesheet"),o=t?.getAttribute("href")||void 0,n=t?.nonce||void 0;if(!t){let s='To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';s+="See https://vscode-elements.github.io/components/icon/ for more details.",this.warn(s)}return{nonce:n,href:o}}render(){let{stylesheetHref:t,nonce:o}=we,n=R`<span
+      class=${Ge({codicon:!0,["codicon-"+this.name]:!0,spin:this.spin})}
+      .style=${Mo({animationDuration:String(this.spinDuration)+"s",fontSize:this.size+"px",height:this.size+"px",width:this.size+"px"})}
+    ></span>`,s=this.actionIcon?R` <button
           class="button"
           @click=${this._onButtonClick}
           aria-label=${this.label}
         >
-          ${content}
-        </button>` : b2` <span class="icon" aria-hidden="true" role="presentation"
-          >${content}</span
-        >`;
-          return b2`
+          ${n}
+        </button>`:R` <span class="icon" aria-hidden="true" role="presentation"
+          >${n}</span
+        >`;return R`
       <link
         rel="stylesheet"
-        href=${o6(stylesheetHref)}
-        nonce=${o6(nonce)}
+        href=${oe(t)}
+        nonce=${oe(o)}
       />
-      ${wrapped}
-    `;
-        }
-      };
-      VscodeIcon.styles = vscode_icon_styles_default;
-      VscodeIcon.stylesheetHref = "";
-      VscodeIcon.nonce = "";
-      __decorate([
-        n4()
-      ], VscodeIcon.prototype, "label", void 0);
-      __decorate([
-        n4({ type: String })
-      ], VscodeIcon.prototype, "name", void 0);
-      __decorate([
-        n4({ type: Number })
-      ], VscodeIcon.prototype, "size", void 0);
-      __decorate([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeIcon.prototype, "spin", void 0);
-      __decorate([
-        n4({ type: Number, attribute: "spin-duration" })
-      ], VscodeIcon.prototype, "spinDuration", void 0);
-      __decorate([
-        n4({ type: Boolean, reflect: true, attribute: "action-icon" })
-      ], VscodeIcon.prototype, "actionIcon", void 0);
-      VscodeIcon = VscodeIcon_1 = __decorate([
-        customElement("vscode-icon")
-      ], VscodeIcon);
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-icon/index.js
-  var init_vscode_icon2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-icon/index.js"() {
-      init_vscode_icon();
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/includes/helpers.js
-  function getDefaultFontStack() {
-    if (navigator.userAgent.indexOf("Linux") > -1) {
-      return 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
-    } else if (navigator.userAgent.indexOf("Mac") > -1) {
-      return "-apple-system, BlinkMacSystemFont, sans-serif";
-    } else if (navigator.userAgent.indexOf("Windows") > -1) {
-      return '"Segoe WPC", "Segoe UI", sans-serif';
-    } else {
-      return "sans-serif";
-    }
-  }
-  var DEFAULT_LINE_HEIGHT, DEFAULT_FONT_SIZE, INPUT_LINE_HEIGHT_RATIO;
-  var init_helpers = __esm({
-    "node_modules/@vscode-elements/elements/dist/includes/helpers.js"() {
-      DEFAULT_LINE_HEIGHT = 16;
-      DEFAULT_FONT_SIZE = 13;
-      INPUT_LINE_HEIGHT_RATIO = DEFAULT_LINE_HEIGHT / DEFAULT_FONT_SIZE;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js
-  var defaultFontStack, styles2, vscode_button_styles_default;
-  var init_vscode_button_styles = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js"() {
-      init_lit();
-      init_default_styles();
-      init_helpers();
-      defaultFontStack = r(getDefaultFontStack());
-      styles2 = [
-        default_styles_default,
-        i`
+      ${s}
+    `}};I.styles=Do;I.stylesheetHref="";I.nonce="";V([f()],I.prototype,"label",void 0);V([f({type:String})],I.prototype,"name",void 0);V([f({type:Number})],I.prototype,"size",void 0);V([f({type:Boolean,reflect:!0})],I.prototype,"spin",void 0);V([f({type:Number,attribute:"spin-duration"})],I.prototype,"spinDuration",void 0);V([f({type:Boolean,reflect:!0,attribute:"action-icon"})],I.prototype,"actionIcon",void 0);I=we=V([Ze("vscode-icon")],I)});var Bo=g(()=>{Ro()});function Po(){return navigator.userAgent.indexOf("Linux")>-1?'system-ui, "Ubuntu", "Droid Sans", sans-serif':navigator.userAgent.indexOf("Mac")>-1?"-apple-system, BlinkMacSystemFont, sans-serif":navigator.userAgent.indexOf("Windows")>-1?'"Segoe WPC", "Segoe UI", sans-serif':"sans-serif"}var Ho=g(()=>{});var Zn,Jn,No,Fo=g(()=>{z();wt();Ho();Zn=ze(Po()),Jn=[Je,W`
     :host {
       cursor: pointer;
       display: inline-block;
@@ -1174,7 +120,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       box-sizing: border-box;
       color: var(--vscode-button-foreground, #ffffff);
       display: flex;
-      font-family: var(--vscode-font-family, ${defaultFontStack});
+      font-family: var(--vscode-font-family, ${Zn});
       font-size: var(--vscode-font-size, 13px);
       font-weight: var(--vscode-font-weight, normal);
       height: 100%;
@@ -1330,429 +276,360 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     :host([icon]) .icon-after {
       margin-left: 3px;
     }
-  `
-      ];
-      vscode_button_styles_default = styles2;
-    }
-  });
-
-  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js
-  var __decorate2, VscodeButton;
-  var init_vscode_button = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js"() {
-      init_lit();
-      init_decorators();
-      init_class_map2();
-      init_VscElement();
-      init_vscode_icon2();
-      init_vscode_button_styles();
-      init_if_defined2();
-      __decorate2 = function(decorators, target, key, desc) {
-        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
-        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
-        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
-        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
-      };
-      VscodeButton = class VscodeButton2 extends VscElement {
-        get form() {
-          return this._internals.form;
-        }
-        constructor() {
-          super();
-          this.autofocus = false;
-          this.tabIndex = 0;
-          this.secondary = false;
-          this.block = false;
-          this.role = "button";
-          this.disabled = false;
-          this.icon = "";
-          this.iconSpin = false;
-          this.iconAfter = "";
-          this.iconAfterSpin = false;
-          this.focused = false;
-          this.name = void 0;
-          this.iconOnly = false;
-          this.type = "button";
-          this.value = "";
-          this._prevTabindex = 0;
-          this._hasContentBefore = false;
-          this._hasContentAfter = false;
-          this._handleFocus = () => {
-            this.focused = true;
-          };
-          this._handleBlur = () => {
-            this.focused = false;
-          };
-          this.addEventListener("keydown", this._handleKeyDown.bind(this));
-          this.addEventListener("click", this._handleClick.bind(this));
-          this._internals = this.attachInternals();
-        }
-        connectedCallback() {
-          super.connectedCallback();
-          if (this.autofocus) {
-            if (this.tabIndex < 0) {
-              this.tabIndex = 0;
-            }
-            this.updateComplete.then(() => {
-              this.focus();
-              this.requestUpdate();
-            });
-          }
-          this.addEventListener("focus", this._handleFocus);
-          this.addEventListener("blur", this._handleBlur);
-        }
-        disconnectedCallback() {
-          super.disconnectedCallback();
-          this.removeEventListener("focus", this._handleFocus);
-          this.removeEventListener("blur", this._handleBlur);
-        }
-        update(changedProperties) {
-          super.update(changedProperties);
-          if (changedProperties.has("value")) {
-            this._internals.setFormValue(this.value);
-          }
-          if (changedProperties.has("disabled")) {
-            if (this.disabled) {
-              this._prevTabindex = this.tabIndex;
-              this.tabIndex = -1;
-            } else {
-              this.tabIndex = this._prevTabindex;
-            }
-          }
-        }
-        _executeAction() {
-          if (this.type === "submit" && this._internals.form) {
-            this._internals.form.requestSubmit();
-          }
-          if (this.type === "reset" && this._internals.form) {
-            this._internals.form.reset();
-          }
-        }
-        _handleKeyDown(event) {
-          if ((event.key === "Enter" || event.key === " ") && !this.hasAttribute("disabled")) {
-            const syntheticClick = new MouseEvent("click", {
-              bubbles: true,
-              cancelable: true
-            });
-            syntheticClick.synthetic = true;
-            this.dispatchEvent(syntheticClick);
-            this._executeAction();
-          }
-        }
-        _handleClick(event) {
-          if (event.synthetic) {
-            return;
-          }
-          if (!this.hasAttribute("disabled")) {
-            this._executeAction();
-          }
-        }
-        _handleSlotChange(ev) {
-          const slot = ev.target;
-          if (slot.name === "content-before") {
-            this._hasContentBefore = slot.assignedElements().length > 0;
-          }
-          if (slot.name === "content-after") {
-            this._hasContentAfter = slot.assignedElements().length > 0;
-          }
-        }
-        render() {
-          const hasIcon = this.icon !== "";
-          const hasIconAfter = this.iconAfter !== "";
-          const baseClasses = {
-            base: true,
-            "icon-only": this.iconOnly,
-            "has-content-before": this._hasContentBefore,
-            "has-content-after": this._hasContentAfter
-          };
-          const iconElem = hasIcon ? b2`<vscode-icon
+  `],No=Jn});var S,y,zo=g(()=>{z();vt();yt();xt();Bo();Fo();kt();S=function(e,t,o,n){var s=arguments.length,r=s<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,i;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")r=Reflect.decorate(e,t,o,n);else for(var a=e.length-1;a>=0;a--)(i=e[a])&&(r=(s<3?i(r):s>3?i(t,o,r):i(t,o))||r);return s>3&&r&&Object.defineProperty(t,o,r),r},y=class extends te{get form(){return this._internals.form}constructor(){super(),this.autofocus=!1,this.tabIndex=0,this.secondary=!1,this.block=!1,this.role="button",this.disabled=!1,this.icon="",this.iconSpin=!1,this.iconAfter="",this.iconAfterSpin=!1,this.focused=!1,this.name=void 0,this.iconOnly=!1,this.type="button",this.value="",this._prevTabindex=0,this._hasContentBefore=!1,this._hasContentAfter=!1,this._handleFocus=()=>{this.focused=!0},this._handleBlur=()=>{this.focused=!1},this.addEventListener("keydown",this._handleKeyDown.bind(this)),this.addEventListener("click",this._handleClick.bind(this)),this._internals=this.attachInternals()}connectedCallback(){super.connectedCallback(),this.autofocus&&(this.tabIndex<0&&(this.tabIndex=0),this.updateComplete.then(()=>{this.focus(),this.requestUpdate()})),this.addEventListener("focus",this._handleFocus),this.addEventListener("blur",this._handleBlur)}disconnectedCallback(){super.disconnectedCallback(),this.removeEventListener("focus",this._handleFocus),this.removeEventListener("blur",this._handleBlur)}update(t){super.update(t),t.has("value")&&this._internals.setFormValue(this.value),t.has("disabled")&&(this.disabled?(this._prevTabindex=this.tabIndex,this.tabIndex=-1):this.tabIndex=this._prevTabindex)}_executeAction(){this.type==="submit"&&this._internals.form&&this._internals.form.requestSubmit(),this.type==="reset"&&this._internals.form&&this._internals.form.reset()}_handleKeyDown(t){if((t.key==="Enter"||t.key===" ")&&!this.hasAttribute("disabled")){let o=new MouseEvent("click",{bubbles:!0,cancelable:!0});o.synthetic=!0,this.dispatchEvent(o),this._executeAction()}}_handleClick(t){t.synthetic||this.hasAttribute("disabled")||this._executeAction()}_handleSlotChange(t){let o=t.target;o.name==="content-before"&&(this._hasContentBefore=o.assignedElements().length>0),o.name==="content-after"&&(this._hasContentAfter=o.assignedElements().length>0)}render(){let t=this.icon!=="",o=this.iconAfter!=="",n={base:!0,"icon-only":this.iconOnly,"has-content-before":this._hasContentBefore,"has-content-after":this._hasContentAfter},s=t?R`<vscode-icon
           name=${this.icon}
           ?spin=${this.iconSpin}
-          spin-duration=${o6(this.iconSpinDuration)}
+          spin-duration=${oe(this.iconSpinDuration)}
           class="icon"
-        ></vscode-icon>` : A;
-          const iconAfterElem = hasIconAfter ? b2`<vscode-icon
+        ></vscode-icon>`:x,r=o?R`<vscode-icon
           name=${this.iconAfter}
           ?spin=${this.iconAfterSpin}
-          spin-duration=${o6(this.iconAfterSpinDuration)}
+          spin-duration=${oe(this.iconAfterSpinDuration)}
           class="icon-after"
-        ></vscode-icon>` : A;
-          return b2`
+        ></vscode-icon>`:x;return R`
       <div
-        class=${e6(baseClasses)}
+        class=${Ge(n)}
         part="base"
         @slotchange=${this._handleSlotChange}
       >
         <slot name="content-before"></slot>
-        ${iconElem}
+        ${s}
         <slot></slot>
-        ${iconAfterElem}
+        ${r}
         <slot name="content-after"></slot>
       </div>
-    `;
-        }
-      };
-      VscodeButton.styles = vscode_button_styles_default;
-      VscodeButton.formAssociated = true;
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "autofocus", void 0);
-      __decorate2([
-        n4({ type: Number, reflect: true })
-      ], VscodeButton.prototype, "tabIndex", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "secondary", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "block", void 0);
-      __decorate2([
-        n4({ reflect: true })
-      ], VscodeButton.prototype, "role", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "disabled", void 0);
-      __decorate2([
-        n4()
-      ], VscodeButton.prototype, "icon", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-spin" })
-      ], VscodeButton.prototype, "iconSpin", void 0);
-      __decorate2([
-        n4({ type: Number, reflect: true, attribute: "icon-spin-duration" })
-      ], VscodeButton.prototype, "iconSpinDuration", void 0);
-      __decorate2([
-        n4({ attribute: "icon-after" })
-      ], VscodeButton.prototype, "iconAfter", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-after-spin" })
-      ], VscodeButton.prototype, "iconAfterSpin", void 0);
-      __decorate2([
-        n4({
-          type: Number,
-          reflect: true,
-          attribute: "icon-after-spin-duration"
-        })
-      ], VscodeButton.prototype, "iconAfterSpinDuration", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true })
-      ], VscodeButton.prototype, "focused", void 0);
-      __decorate2([
-        n4({ type: String, reflect: true })
-      ], VscodeButton.prototype, "name", void 0);
-      __decorate2([
-        n4({ type: Boolean, reflect: true, attribute: "icon-only" })
-      ], VscodeButton.prototype, "iconOnly", void 0);
-      __decorate2([
-        n4({ reflect: true })
-      ], VscodeButton.prototype, "type", void 0);
-      __decorate2([
-        n4()
-      ], VscodeButton.prototype, "value", void 0);
-      __decorate2([
-        r5()
-      ], VscodeButton.prototype, "_hasContentBefore", void 0);
-      __decorate2([
-        r5()
-      ], VscodeButton.prototype, "_hasContentAfter", void 0);
-      VscodeButton = __decorate2([
-        customElement("vscode-button")
-      ], VscodeButton);
-    }
-  });
+    `}};y.styles=No;y.formAssociated=!0;S([f({type:Boolean,reflect:!0})],y.prototype,"autofocus",void 0);S([f({type:Number,reflect:!0})],y.prototype,"tabIndex",void 0);S([f({type:Boolean,reflect:!0})],y.prototype,"secondary",void 0);S([f({type:Boolean,reflect:!0})],y.prototype,"block",void 0);S([f({reflect:!0})],y.prototype,"role",void 0);S([f({type:Boolean,reflect:!0})],y.prototype,"disabled",void 0);S([f()],y.prototype,"icon",void 0);S([f({type:Boolean,reflect:!0,attribute:"icon-spin"})],y.prototype,"iconSpin",void 0);S([f({type:Number,reflect:!0,attribute:"icon-spin-duration"})],y.prototype,"iconSpinDuration",void 0);S([f({attribute:"icon-after"})],y.prototype,"iconAfter",void 0);S([f({type:Boolean,reflect:!0,attribute:"icon-after-spin"})],y.prototype,"iconAfterSpin",void 0);S([f({type:Number,reflect:!0,attribute:"icon-after-spin-duration"})],y.prototype,"iconAfterSpinDuration",void 0);S([f({type:Boolean,reflect:!0})],y.prototype,"focused",void 0);S([f({type:String,reflect:!0})],y.prototype,"name",void 0);S([f({type:Boolean,reflect:!0,attribute:"icon-only"})],y.prototype,"iconOnly",void 0);S([f({reflect:!0})],y.prototype,"type",void 0);S([f()],y.prototype,"value",void 0);S([gt()],y.prototype,"_hasContentBefore",void 0);S([gt()],y.prototype,"_hasContentAfter",void 0);y=S([Ze("vscode-button")],y)});var Oo={};Cn(Oo,{VscodeButton:()=>y});var Uo=g(()=>{zo()});var Wt={"btn-refresh":{id:"btn-refresh",label:"Refresh",icon:"refresh",appearance:"primary"},"btn-details":{id:"btn-details",label:"Details",icon:"robot",iconColor:"#c37bff",appearance:"secondary"},"btn-chart":{id:"btn-chart",label:"Chart",icon:"graph-line",iconColor:"#60a5fa",appearance:"secondary"},"btn-usage":{id:"btn-usage",label:"Usage Analysis",icon:"graph",iconColor:"#22d3ee",appearance:"secondary"},"btn-diagnostics":{id:"btn-diagnostics",label:"Diagnostics",icon:"search",iconColor:"#fb7185",appearance:"secondary"},"btn-maturity":{id:"btn-maturity",label:"Fluency Score",icon:"target",iconColor:"#fbbf24",appearance:"secondary"},"btn-dashboard":{id:"btn-dashboard",label:"Team Dashboard",icon:"organization",iconColor:"#818cf8",appearance:"secondary"},"btn-level-viewer":{id:"btn-level-viewer",label:"Level Viewer",icon:"list-tree",iconColor:"#94a3b8",appearance:"secondary"},"btn-environmental":{id:"btn-environmental",label:"Environmental Impact",icon:"globe",iconColor:"#4ade80",appearance:"secondary"}};var $n=["btn-refresh","btn-details","btn-chart","btn-usage","btn-maturity","btn-environmental","btn-diagnostics","btn-dashboard"];function En(e,t){return $n.filter(o=>o!=="btn-dashboard"||t).map(o=>({...Wt[o],active:o===e}))}function Tn(e){let t=typeof e=="string"?Wt[e]:e;if(t.hidden)return"";let o=t.appearance?` appearance="${t.appearance}"`:"",n=t.active?' class="nav-active" disabled aria-current="page"':"",s=t.iconColor?` style="--icon-accent:${t.iconColor}"`:"",r=t.icon?`<span class="codicon codicon-${t.icon} nav-icon"${s}></span>`:"";return`<vscode-button id="${t.id}"${o}${n}>${r}${t.label}</vscode-button>`}function jt(e,t){return En(e,t).map(o=>Tn(o)).join(`
+`)}function qt(e){let t=window.__EXTENSION_POINT_BUTTONS__??[];if(t.length===0)return;let o=document.querySelector(".button-row");if(o)for(let n of t){let s=document.createElement("vscode-button");s.id=`ext-point-${n.id}`,s.textContent=n.label,s.addEventListener("click",()=>{e.postMessage({command:"extensionPointAction",buttonId:n.id})}),o.append(s)}}var Gt={Antigravity:"\u{1F680}","Claude Code":"\u{1F7E0}","Claude Code CLI":"\u{1F7E0}","Claude Desktop":"\u{1F7E0}","Claude Desktop Cowork":"\u{1F7E0}",Continue:"\u25B6\uFE0F","Copilot CLI":"\u{1F916}",Crush:"\u{1F9BE}",Cursor:"\u{1F5B1}\uFE0F",Devin:"\u{1F9E0}","Devin CLI":"\u{1F9E0}",Eclipse:"\u{1F311}","Gemini CLI":"\u{1F48E}",JetBrains:"\u{1F9E9}",Kiro:"\u{1F47B}","Kiro CLI":"\u{1F47B}","Mistral Vibe":"\u{1F525}","MS Scout (Copilot CLI)":"\u{1F52D}",OpenCode:"\u{1F7E2}",Pi:"\u03C0",Unknown:"\u2753","Visual Studio":"\u{1FA9F}","VS Code":"\u{1F499}","VS Code Exploration":"\u{1F9EA}","VS Code Insiders":"\u{1F49A}","VS Code Server":"\u2601\uFE0F","VS Code Server (Insiders)":"\u2601\uFE0F",VSCodium:"\u{1F537}",Windsurf:"\u{1F3C4}"};function Vt(e){return Gt[e]??"\u{1F4DD}"}function Be(e){let t=globalThis.window;return t?t[e]:void 0}var An=Be("__TOKEN_ESTIMATORS__"),Li=An?.estimators??{};function P(e){return Vt(e)}function l(e){return e.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}function J(e){let t=Number(e);if(!Number.isFinite(t)||t<0)return"N/A";if(t<1024)return`${t} B`;let o=["KB","MB","GB","TB","PB"],n=t/1024,s=0;for(;n>=1024&&s<o.length-1;)n/=1024,s++;let r=s===0?1:2;return`${n.toFixed(r)} ${o[s]}`}function Pe(e){try{let t=Date.now(),o=new Date(e).getTime(),n=t-o;if(n<0)return"Just now";let s=Math.floor(n/1e3),r=Math.floor(s/60),i=Math.floor(r/60),a=Math.floor(i/24);return a>0?`${a} day${a!==1?"s":""} ago`:i>0?`${i} hour${i!==1?"s":""} ago`:r>0?`${r} minute${r!==1?"s":""} ago`:`${s} second${s!==1?"s":""} ago`}catch{return"Unknown"}}function Zt(e,t){return{restore(){let o=e.getState();return{...t,...o??{}}},save(o){e.setState(o)},patch(o){let n=e.getState()??{...t},s={...t,...n,...o};return e.setState(s),s}}}var Jt=`/**
+ * Shared theme variables for all webview panels
+ * Uses VS Code theme tokens for automatic light/dark theme support.
+ *
+ * The "INDUSTRIAL REDUX" high-contrast styling (stark outlines, uppercase
+ * navigation, neon stage colors, monospace body) is intentionally scoped to
+ * the high-contrast themes only. Normal light/dark themes keep the native
+ * VS Code look so the navigation bar and typography stay unobtrusive.
+ */
 
-  // node_modules/@vscode-elements/elements/dist/vscode-button/index.js
-  var vscode_button_exports = {};
-  __export(vscode_button_exports, {
-    VscodeButton: () => VscodeButton
-  });
-  var init_vscode_button2 = __esm({
-    "node_modules/@vscode-elements/elements/dist/vscode-button/index.js"() {
-      init_vscode_button();
-    }
-  });
+:root {
+	/* VS Code base colors */
+	--bg-primary: var(--vscode-editor-background);
+	--bg-secondary: var(--vscode-sideBar-background);
+	--bg-tertiary: var(--vscode-editorWidget-background);
+	--text-primary: var(--vscode-editor-foreground);
+	--text-secondary: var(--vscode-descriptionForeground);
+	--text-muted: var(--vscode-disabledForeground);
+	--border-color: var(--vscode-panel-border);
+	--border-subtle: var(--vscode-widget-border);
 
-  // src/webview/shared/buttonConfig.ts
-  var BUTTONS = {
-    "btn-refresh": {
-      id: "btn-refresh",
-      label: "\u{1F504} Refresh",
-      appearance: "primary"
-    },
-    "btn-details": {
-      id: "btn-details",
-      label: "\u{1F916} Details"
-    },
-    "btn-chart": {
-      id: "btn-chart",
-      label: "\u{1F4C8} Chart"
-    },
-    "btn-usage": {
-      id: "btn-usage",
-      label: "\u{1F4CA} Usage Analysis"
-    },
-    "btn-diagnostics": {
-      id: "btn-diagnostics",
-      label: "\u{1F50D} Diagnostics"
-    },
-    "btn-maturity": {
-      id: "btn-maturity",
-      label: "\u{1F3AF} Fluency Score"
-    },
-    "btn-dashboard": {
-      id: "btn-dashboard",
-      label: "\u{1F4CA} Team Dashboard"
-    },
-    "btn-level-viewer": {
-      id: "btn-level-viewer",
-      label: "\u{1F50D} Level Viewer"
-    },
-    "btn-environmental": {
-      id: "btn-environmental",
-      label: "\u{1F33F} Environmental Impact"
-    }
-  };
-  function buttonHtml(id) {
-    const config = BUTTONS[id];
-    if (config.hidden) {
-      return "";
-    }
-    const appearance = config.appearance ? ` appearance="${config.appearance}"` : "";
-    return `<vscode-button id="${config.id}"${appearance}>${config.label}</vscode-button>`;
-  }
+	/* Button colors */
+	--button-bg: var(--vscode-button-background);
+	--button-fg: var(--vscode-button-foreground);
+	--button-hover-bg: var(--vscode-button-hoverBackground);
+	--button-secondary-bg: var(--vscode-button-secondaryBackground);
+	--button-secondary-fg: var(--vscode-button-secondaryForeground);
+	--button-secondary-hover-bg: var(--vscode-button-secondaryHoverBackground);
 
-  // src/webview/shared/extensionPoints.ts
-  function wireExtensionPointButtons(vscodeApi) {
-    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
-    if (buttons.length === 0) {
-      return;
-    }
-    const buttonRow = document.querySelector(".button-row");
-    if (!buttonRow) {
-      return;
-    }
-    for (const btn of buttons) {
-      const el = document.createElement("vscode-button");
-      el.id = `ext-point-${btn.id}`;
-      el.textContent = btn.label;
-      el.addEventListener("click", () => {
-        vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
-      });
-      buttonRow.append(el);
-    }
-  }
+	/* Input colors */
+	--input-bg: var(--vscode-input-background);
+	--input-fg: var(--vscode-input-foreground);
+	--input-border: var(--vscode-input-border);
 
-  // src/editorIcons.ts
-  var EDITOR_ICON_MAP = {
-    "Antigravity": "\u{1F680}",
-    "Claude Code": "\u{1F7E0}",
-    "Claude Desktop Cowork": "\u{1F7E0}",
-    "Continue": "\u25B6\uFE0F",
-    "Copilot CLI": "\u{1F916}",
-    "Crush": "\u{1F9BE}",
-    "Cursor": "\u{1F5B1}\uFE0F",
-    "Eclipse": "\u{1F311}",
-    "Gemini CLI": "\u{1F48E}",
-    "JetBrains": "\u{1F9E9}",
-    "Mistral Vibe": "\u{1F525}",
-    "MS Scout (Copilot CLI)": "\u{1F52D}",
-    "OpenCode": "\u{1F7E2}",
-    "Pi": "\u03C0",
-    "Unknown": "\u2753",
-    "Visual Studio": "\u{1FA9F}",
-    "VS Code": "\u{1F499}",
-    "VS Code Exploration": "\u{1F9EA}",
-    "VS Code Insiders": "\u{1F49A}",
-    "VS Code Server": "\u2601\uFE0F",
-    "VS Code Server (Insiders)": "\u2601\uFE0F",
-    "VSCodium": "\u{1F537}",
-    "Windsurf": "\u{1F3C4}"
-  };
-  function getEditorIconByName(editor) {
-    return EDITOR_ICON_MAP[editor] ?? "\u{1F4DD}";
-  }
+	/* List/card colors */
+	--list-hover-bg: var(--vscode-list-hoverBackground);
+	--list-active-bg: var(--vscode-list-activeSelectionBackground);
+	--list-active-fg: var(--vscode-list-activeSelectionForeground);
+	--list-inactive-bg: var(--vscode-list-inactiveSelectionBackground);
 
-  // src/webview/shared/dataLoader.ts
-  function getWindowData(key) {
-    if (typeof window === "undefined") {
-      return void 0;
-    }
-    return window[key];
-  }
+	/* Alternating row colors for better readability */
+	--row-alternate-bg: var(--vscode-list-inactiveSelectionBackground);
 
-  // src/webview/shared/formatUtils.ts
-  var _estimatorsData = getWindowData("__TOKEN_ESTIMATORS__");
-  var tokenEstimators = _estimatorsData?.estimators ?? {};
-  function getEditorIcon(editor) {
-    return getEditorIconByName(editor);
-  }
-  function escapeHtml(text) {
-    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
-  }
-  function formatFileSize(bytes) {
-    const numericBytes = Number(bytes);
-    if (!Number.isFinite(numericBytes) || numericBytes < 0) {
-      return "N/A";
-    }
-    if (numericBytes < 1024) {
-      return `${numericBytes} B`;
-    }
-    if (numericBytes < 1024 * 1024) {
-      return `${(numericBytes / 1024).toFixed(1)} KB`;
-    }
-    return `${(numericBytes / (1024 * 1024)).toFixed(2)} MB`;
-  }
-  function getTimeSince(isoString) {
-    try {
-      const now = Date.now();
-      const then = new Date(isoString).getTime();
-      const diffMs = now - then;
-      if (diffMs < 0) {
-        return "Just now";
-      }
-      const seconds = Math.floor(diffMs / 1e3);
-      const minutes = Math.floor(seconds / 60);
-      const hours = Math.floor(minutes / 60);
-      const days = Math.floor(hours / 24);
-      if (days > 0) {
-        return `${days} day${days !== 1 ? "s" : ""} ago`;
-      }
-      if (hours > 0) {
-        return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
-      }
-      if (minutes > 0) {
-        return `${minutes} minute${minutes !== 1 ? "s" : ""} ago`;
-      }
-      return `${seconds} second${seconds !== 1 ? "s" : ""} ago`;
-    } catch {
-      return "Unknown";
-    }
-  }
+	/* Badge colors */
+	--badge-bg: var(--vscode-badge-background);
+	--badge-fg: var(--vscode-badge-foreground);
 
-  // src/webview/shared/viewState.ts
-  function createViewStateManager(vscode2, defaults) {
-    return {
-      restore() {
-        const saved = vscode2.getState();
-        return { ...defaults, ...saved ?? {} };
-      },
-      save(state) {
-        vscode2.setState(state);
-      },
-      patch(partial) {
-        const current = vscode2.getState() ?? { ...defaults };
-        const next = { ...defaults, ...current, ...partial };
-        vscode2.setState(next);
-        return next;
-      }
-    };
-  }
+	/* Focus colors */
+	--focus-border: var(--vscode-focusBorder);
 
-  // src/webview/shared/theme.css
-  var theme_default = '/**\n * Shared theme variables for all webview panels\n * Uses VS Code theme tokens for automatic light/dark theme support.\n *\n * The "INDUSTRIAL REDUX" high-contrast styling (stark outlines, uppercase\n * navigation, neon stage colors, monospace body) is intentionally scoped to\n * the high-contrast themes only. Normal light/dark themes keep the native\n * VS Code look so the navigation bar and typography stay unobtrusive.\n */\n\n:root {\n	/* VS Code base colors */\n	--bg-primary: var(--vscode-editor-background);\n	--bg-secondary: var(--vscode-sideBar-background);\n	--bg-tertiary: var(--vscode-editorWidget-background);\n	--text-primary: var(--vscode-editor-foreground);\n	--text-secondary: var(--vscode-descriptionForeground);\n	--text-muted: var(--vscode-disabledForeground);\n	--border-color: var(--vscode-panel-border);\n	--border-subtle: var(--vscode-widget-border);\n\n	/* Button colors */\n	--button-bg: var(--vscode-button-background);\n	--button-fg: var(--vscode-button-foreground);\n	--button-hover-bg: var(--vscode-button-hoverBackground);\n	--button-secondary-bg: var(--vscode-button-secondaryBackground);\n	--button-secondary-fg: var(--vscode-button-secondaryForeground);\n	--button-secondary-hover-bg: var(--vscode-button-secondaryHoverBackground);\n\n	/* Input colors */\n	--input-bg: var(--vscode-input-background);\n	--input-fg: var(--vscode-input-foreground);\n	--input-border: var(--vscode-input-border);\n\n	/* List/card colors */\n	--list-hover-bg: var(--vscode-list-hoverBackground);\n	--list-active-bg: var(--vscode-list-activeSelectionBackground);\n	--list-active-fg: var(--vscode-list-activeSelectionForeground);\n	--list-inactive-bg: var(--vscode-list-inactiveSelectionBackground);\n\n	/* Alternating row colors for better readability */\n	--row-alternate-bg: var(--vscode-list-inactiveSelectionBackground);\n\n	/* Badge colors */\n	--badge-bg: var(--vscode-badge-background);\n	--badge-fg: var(--vscode-badge-foreground);\n\n	/* Focus colors */\n	--focus-border: var(--vscode-focusBorder);\n\n	/* Link colors */\n	--link-color: var(--vscode-textLink-foreground);\n	--link-hover-color: var(--vscode-textLink-activeForeground);\n\n	/* Status colors */\n	--error-fg: var(--vscode-errorForeground);\n	--warning-fg: var(--vscode-editorWarning-foreground);\n	--success-fg: var(--vscode-terminal-ansiGreen);\n\n	/* Stage accent colors \u2014 dark theme defaults */\n	--stage-1-color: #93c5fd;\n	--stage-2-color: #a78bfa;\n	--stage-3-color: #3b82f6;\n	--stage-4-color: #22d3ee;\n\n	/* Stage progress pip empty fill */\n	--stage-pip-empty-bg: rgba(128, 128, 128, 0.2);\n\n	/* Semantic muted foreground */\n	--fg-muted: var(--vscode-disabledForeground);\n\n	/* Shadow for cards */\n	--shadow-color: rgb(0, 0, 0, 0.16);\n	--shadow-hover-color: rgb(0, 0, 0, 0.24);\n}\n\n/* Light theme adjustments */\nbody[data-vscode-theme-kind="vscode-light"],\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] {\n	--shadow-color: rgb(0, 0, 0, 0.08);\n	--shadow-hover-color: rgb(0, 0, 0, 0.12);\n	/* Stage colors darkened for readable contrast on light backgrounds */\n	--stage-1-color: #1d6fa4;\n	--stage-2-color: #7c3aed;\n	--stage-3-color: #2563eb;\n	--stage-4-color: #0891b2;\n	--stage-pip-empty-bg: rgba(0, 0, 0, 0.12);\n}\n\n/* Default navigation button row \u2014 native look for normal themes */\n.button-row {\n	display: flex;\n	gap: 10px;\n	flex-wrap: wrap;\n}\n\n/* ------------------------------------------------------------------ *\n * High contrast themes \u2014 INDUSTRIAL REDUX\n * Stark outlines, uppercase navigation, neon stage colors, monospace.\n * Everything below is deliberately gated to the high-contrast theme\n * kinds so normal light/dark themes are unaffected.\n * ------------------------------------------------------------------ */\n\nbody[data-vscode-theme-kind="vscode-high-contrast"],\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] {\n	/* Base colors \u2014 forced to stark contrasts */\n	--bg-secondary: transparent;\n	--bg-tertiary: transparent;\n	--text-secondary: var(--vscode-foreground);\n	--text-muted: var(--vscode-descriptionForeground);\n	--border-color: var(--vscode-contrastBorder);\n	--border-subtle: var(--vscode-contrastBorder);\n\n	/* Button colors \u2014 high contrast, no subtle grays */\n	--button-bg: var(--vscode-foreground);\n	--button-fg: var(--vscode-editor-background);\n	--button-hover-bg: var(--vscode-editor-background);\n	--button-secondary-bg: transparent;\n	--button-secondary-fg: var(--vscode-foreground);\n	--button-secondary-hover-bg: var(--vscode-foreground);\n\n	/* Input colors */\n	--input-bg: transparent;\n	--input-fg: var(--vscode-foreground);\n	--input-border: var(--vscode-foreground);\n\n	/* List/card colors */\n	--list-hover-bg: var(--vscode-editor-background);\n	--list-active-bg: var(--vscode-foreground);\n	--list-active-fg: var(--vscode-editor-background);\n	--list-inactive-bg: transparent;\n\n	/* Alternating row colors dropped for harsh outlines */\n	--row-alternate-bg: transparent;\n\n	/* Badge colors */\n	--badge-bg: var(--vscode-foreground);\n	--badge-fg: var(--vscode-editor-background);\n\n	/* Focus colors */\n	--focus-border: var(--vscode-foreground);\n\n	/* Link colors */\n	--link-color: var(--vscode-foreground);\n	--link-hover-color: var(--vscode-textLink-activeForeground);\n\n	/* Stage progress pip empty fill */\n	--stage-pip-empty-bg: transparent;\n\n	/* Semantic muted foreground */\n	--fg-muted: var(--vscode-descriptionForeground);\n\n	/* Shadow for cards \u2014 HARD shadows */\n	--shadow-color: var(--vscode-foreground);\n	--shadow-hover-color: var(--vscode-foreground);\n\n	/* Monospace body for the industrial identity */\n	font-family: var(--vscode-editor-font-family), "JetBrains Mono", "Fira Code", monospace;\n}\n\n/* High contrast dark \u2014 stark neon stage colors */\nbody[data-vscode-theme-kind="vscode-high-contrast"] {\n	--stage-1-color: #ff00ff; /* Magenta */\n	--stage-2-color: #00ffff; /* Cyan */\n	--stage-3-color: #ffff00; /* Yellow */\n	--stage-4-color: #00ff00; /* Green */\n}\n\n/* High contrast light \u2014 darkened neon for readable contrast */\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] {\n	--stage-1-color: #d100d1;\n	--stage-2-color: #008787;\n	--stage-3-color: #b5b500;\n	--stage-4-color: #00a300;\n}\n\n/* Industrial navigation tab bar (high contrast only) */\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row {\n	display: flex;\n	gap: 0; /* Force flush blocks */\n	flex-wrap: wrap; /* Let it wrap so no scrollbars appear */\n	border: 3px solid var(--vscode-foreground);\n	background-color: var(--vscode-editor-background);\n	margin-bottom: 2rem;\n	box-shadow: 4px 4px 0 var(--vscode-panel-border);\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > * {\n	flex-grow: 1; /* Stretch to fill */\n	flex-shrink: 1;\n	flex-basis: auto;\n	text-align: center;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button {\n	border-radius: 0 !important;\n	border: none !important;\n	border-right: 2px solid var(--vscode-foreground) !important;\n	font-family: inherit;\n	font-weight: 900;\n	text-transform: uppercase;\n	background-color: var(--vscode-editor-background) !important;\n	color: var(--vscode-foreground) !important;\n	padding: 12px 16px !important;\n	cursor: pointer;\n	box-shadow: none !important;\n	letter-spacing: 1px;\n	transition: transform 0.1s, background-color 0.1s;\n	height: auto !important; /* Override vscode-button strict heights */\n	border-bottom: 3px solid transparent !important;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button::part(control) {\n	background-color: var(--vscode-editor-background) !important;\n	color: var(--vscode-foreground) !important;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover::part(control),\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover::part(control) {\n	background-color: var(--vscode-foreground) !important;\n	color: var(--vscode-editor-background) !important;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > *:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:last-child,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:last-child {\n	border-right: none !important;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button:hover {\n	background-color: var(--vscode-foreground) !important;\n	color: var(--vscode-editor-background) !important;\n	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important; /* Cyber/Industrial accent indicator */\n}\n\n/* Industrial header + title (high contrast only) */\nbody[data-vscode-theme-kind="vscode-high-contrast"] .header,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .header {\n	display: flex;\n	justify-content: space-between;\n	align-items: flex-end;\n	margin-bottom: 2rem;\n	flex-wrap: nowrap;\n	white-space: nowrap;\n	gap: 15px;\n	border-bottom: 4px solid var(--vscode-foreground);\n	padding-bottom: 1rem;\n}\n\nbody[data-vscode-theme-kind="vscode-high-contrast"] .title,\nbody[data-vscode-theme-kind="vscode-high-contrast-light"] .title {\n	font-size: 28px;\n	font-weight: 900;\n	text-transform: uppercase;\n	letter-spacing: 2px;\n	color: var(--vscode-foreground);\n	text-shadow: 2px 2px 0 var(--vscode-panel-border);\n	white-space: nowrap;\n}\n';
+	/* Link colors */
+	--link-color: var(--vscode-textLink-foreground);
+	--link-hover-color: var(--vscode-textLink-activeForeground);
 
-  // src/webview/diagnostics/styles.css
-  var styles_default = `* {
+	/* Status colors */
+	--error-fg: var(--vscode-errorForeground);
+	--warning-fg: var(--vscode-editorWarning-foreground);
+	--success-fg: var(--vscode-terminal-ansiGreen);
+
+	/* Stage accent colors \u2014 dark theme defaults */
+	--stage-1-color: #93c5fd;
+	--stage-2-color: #a78bfa;
+	--stage-3-color: #3b82f6;
+	--stage-4-color: #22d3ee;
+
+	/* Stage progress pip empty fill */
+	--stage-pip-empty-bg: rgba(128, 128, 128, 0.2);
+
+	/* Semantic muted foreground */
+	--fg-muted: var(--vscode-disabledForeground);
+
+	/* Shadow for cards */
+	--shadow-color: rgb(0, 0, 0, 0.16);
+	--shadow-hover-color: rgb(0, 0, 0, 0.24);
+}
+
+/* Light theme adjustments */
+body[data-vscode-theme-kind="vscode-light"],
+body[data-vscode-theme-kind="vscode-high-contrast-light"] {
+	--shadow-color: rgb(0, 0, 0, 0.08);
+	--shadow-hover-color: rgb(0, 0, 0, 0.12);
+	/* Stage colors darkened for readable contrast on light backgrounds */
+	--stage-1-color: #1d6fa4;
+	--stage-2-color: #7c3aed;
+	--stage-3-color: #2563eb;
+	--stage-4-color: #0891b2;
+	--stage-pip-empty-bg: rgba(0, 0, 0, 0.12);
+}
+
+/* Default navigation button row \u2014 native look for normal themes */
+.button-row {
+	display: flex;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+/* Per-button icon accent color (set via the --icon-accent custom property on the icon
+   span itself), so the label text keeps the theme's normal button foreground while the
+   glyph picks up a distinct color \u2014 breaks up an otherwise uniform row of solid pills.
+   The explicit margin-right overrides vscode-button's own ::slotted(*) 4px default \u2014
+   some codicon glyphs (graph, target, globe) fill their 16px box edge-to-edge with
+   little built-in whitespace, so 4px reads as touching the label; a fixed 6px keeps the
+   gap visually consistent across glyphs instead of varying with each icon's artwork. */
+.button-row .nav-icon {
+	color: var(--icon-accent, inherit);
+	margin-right: 6px !important;
+}
+
+/* Active view indicator \u2014 the nav button for the currently open view.
+   Rendered non-clickable (disabled) but kept fully opaque and marked with a
+   secondary background plus an accent underline so the row reads as a tab strip. */
+.button-row vscode-button.nav-active {
+	opacity: 1;
+	pointer-events: none;
+}
+
+.button-row vscode-button.nav-active::part(control) {
+	background: var(--button-secondary-bg);
+	color: var(--button-secondary-fg);
+	border-bottom: 2px solid var(--focus-border);
+	cursor: default;
+}
+
+/* ------------------------------------------------------------------ *
+ * High contrast themes \u2014 INDUSTRIAL REDUX
+ * Stark outlines, uppercase navigation, neon stage colors, monospace.
+ * Everything below is deliberately gated to the high-contrast theme
+ * kinds so normal light/dark themes are unaffected.
+ * ------------------------------------------------------------------ */
+
+body[data-vscode-theme-kind="vscode-high-contrast"],
+body[data-vscode-theme-kind="vscode-high-contrast-light"] {
+	/* Base colors \u2014 forced to stark contrasts */
+	--bg-secondary: transparent;
+	--bg-tertiary: transparent;
+	--text-secondary: var(--vscode-foreground);
+	--text-muted: var(--vscode-descriptionForeground);
+	--border-color: var(--vscode-contrastBorder);
+	--border-subtle: var(--vscode-contrastBorder);
+
+	/* Button colors \u2014 high contrast, no subtle grays */
+	--button-bg: var(--vscode-foreground);
+	--button-fg: var(--vscode-editor-background);
+	--button-hover-bg: var(--vscode-editor-background);
+	--button-secondary-bg: transparent;
+	--button-secondary-fg: var(--vscode-foreground);
+	--button-secondary-hover-bg: var(--vscode-foreground);
+
+	/* Input colors */
+	--input-bg: transparent;
+	--input-fg: var(--vscode-foreground);
+	--input-border: var(--vscode-foreground);
+
+	/* List/card colors */
+	--list-hover-bg: var(--vscode-editor-background);
+	--list-active-bg: var(--vscode-foreground);
+	--list-active-fg: var(--vscode-editor-background);
+	--list-inactive-bg: transparent;
+
+	/* Alternating row colors dropped for harsh outlines */
+	--row-alternate-bg: transparent;
+
+	/* Badge colors */
+	--badge-bg: var(--vscode-foreground);
+	--badge-fg: var(--vscode-editor-background);
+
+	/* Focus colors */
+	--focus-border: var(--vscode-foreground);
+
+	/* Link colors */
+	--link-color: var(--vscode-foreground);
+	--link-hover-color: var(--vscode-textLink-activeForeground);
+
+	/* Stage progress pip empty fill */
+	--stage-pip-empty-bg: transparent;
+
+	/* Semantic muted foreground */
+	--fg-muted: var(--vscode-descriptionForeground);
+
+	/* Shadow for cards \u2014 HARD shadows */
+	--shadow-color: var(--vscode-foreground);
+	--shadow-hover-color: var(--vscode-foreground);
+
+	/* Monospace body for the industrial identity */
+	font-family: var(--vscode-editor-font-family), "JetBrains Mono", "Fira Code", monospace;
+}
+
+/* High contrast dark \u2014 stark neon stage colors */
+body[data-vscode-theme-kind="vscode-high-contrast"] {
+	--stage-1-color: #ff00ff; /* Magenta */
+	--stage-2-color: #00ffff; /* Cyan */
+	--stage-3-color: #ffff00; /* Yellow */
+	--stage-4-color: #00ff00; /* Green */
+}
+
+/* High contrast light \u2014 darkened neon for readable contrast */
+body[data-vscode-theme-kind="vscode-high-contrast-light"] {
+	--stage-1-color: #d100d1;
+	--stage-2-color: #008787;
+	--stage-3-color: #b5b500;
+	--stage-4-color: #00a300;
+}
+
+/* High contrast stays stark and monochrome by design \u2014 the per-button icon accent
+   colors are a normal-theme-only affordance and must not dilute that contrast. */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-icon,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-icon {
+	color: currentColor;
+}
+
+/* Industrial navigation tab bar (high contrast only) */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row {
+	display: flex;
+	gap: 0; /* Force flush blocks */
+	flex-wrap: wrap; /* Let it wrap so no scrollbars appear */
+	border: 3px solid var(--vscode-foreground);
+	background-color: var(--vscode-editor-background);
+	margin-bottom: 2rem;
+	box-shadow: 4px 4px 0 var(--vscode-panel-border);
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > * {
+	flex-grow: 1; /* Stretch to fill */
+	flex-shrink: 1;
+	flex-basis: auto;
+	text-align: center;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button {
+	border-radius: 0 !important;
+	border: none !important;
+	border-right: 2px solid var(--vscode-foreground) !important;
+	font-family: inherit;
+	font-weight: 900;
+	text-transform: uppercase;
+	background-color: var(--vscode-editor-background) !important;
+	color: var(--vscode-foreground) !important;
+	padding: 12px 16px !important;
+	cursor: pointer;
+	box-shadow: none !important;
+	letter-spacing: 1px;
+	transition: transform 0.1s, background-color 0.1s;
+	height: auto !important; /* Override vscode-button strict heights */
+	border-bottom: 3px solid transparent !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button::part(control) {
+	background-color: var(--vscode-editor-background) !important;
+	color: var(--vscode-foreground) !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover::part(control) {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row > *:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row > *:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:last-child,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:last-child {
+	border-right: none !important;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row .nav-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row button:hover,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row .nav-button:hover {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important; /* Cyber/Industrial accent indicator */
+}
+
+/* Active view indicator (high contrast) \u2014 inverted like hover, with the accent underline */
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button.nav-active,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button.nav-active {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	border-bottom: 3px solid var(--vscode-terminal-ansiCyan) !important;
+	opacity: 1;
+	pointer-events: none;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .button-row vscode-button.nav-active::part(control),
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .button-row vscode-button.nav-active::part(control) {
+	background-color: var(--vscode-foreground) !important;
+	color: var(--vscode-editor-background) !important;
+	cursor: default;
+}
+
+/* Industrial header + title (high contrast only) */
+body[data-vscode-theme-kind="vscode-high-contrast"] .header,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .header {
+	display: flex;
+	justify-content: space-between;
+	align-items: flex-end;
+	margin-bottom: 2rem;
+	flex-wrap: nowrap;
+	white-space: nowrap;
+	gap: 15px;
+	border-bottom: 4px solid var(--vscode-foreground);
+	padding-bottom: 1rem;
+}
+
+body[data-vscode-theme-kind="vscode-high-contrast"] .title,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
+	font-size: 28px;
+	font-weight: 900;
+	text-transform: uppercase;
+	letter-spacing: 2px;
+	color: var(--vscode-foreground);
+	text-shadow: 2px 2px 0 var(--vscode-panel-border);
+	white-space: nowrap;
+}
+`;var Kt=`* {
 	margin: 0;
 	padding: 0;
 	box-sizing: border-box;
@@ -2027,6 +904,23 @@ body {
 	color: var(--text-secondary);
 	text-align: left;
 	margin-top: 6px;
+}
+
+.otel-delta-positive {
+	color: var(--success-fg);
+}
+
+.otel-delta-negative {
+	color: var(--error-fg);
+}
+
+.info-box pre {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 8px 10px;
+	font-size: 12px;
+	overflow-x: auto;
 }
 
 .context-ref-filter {
@@ -2539,6 +1433,28 @@ border: 1px solid #1f6feb;
 	min-width: 280px;
 }
 
+.otel-delta-period-row {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	margin-bottom: 20px;
+}
+
+.otel-delta-period-row label {
+	color: var(--text-secondary);
+	font-size: 13px;
+}
+
+.otel-delta-period-select {
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, var(--border-color));
+	border-radius: 4px;
+	padding: 4px 8px;
+	font-size: 13px;
+	cursor: pointer;
+}
+
 .analyzer-loading {
 	display: flex;
 	align-items: center;
@@ -2552,505 +1468,214 @@ border: 1px solid #1f6feb;
 	to { transform: rotate(360deg); }
 }
 
+/* Worktrees tab */
+.worktree-roots-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
 
-`;
+.worktree-root-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 6px 10px;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+}
 
-  // src/webview/shared/contextRefUtils.ts
-  function getTotalContextRefs(refs) {
-    return refs.file + refs.selection + refs.implicitSelection + refs.symbol + refs.codebase + refs.workspace + refs.terminal + refs.vscode + refs.copilotInstructions + refs.agentsMd + (refs.terminalLastCommand || 0) + (refs.terminalSelection || 0) + (refs.clipboard || 0) + (refs.changes || 0) + (refs.outputPanel || 0) + (refs.problemsPanel || 0) + (refs.pullRequest || 0);
-  }
-  var REF_LABELS = [
-    { key: "file", full: "#file", abbr: "#file" },
-    { key: "selection", full: "#selection", abbr: "#sel" },
-    { key: "implicitSelection", full: "implicit", abbr: "impl" },
-    { key: "symbol", full: "#symbol", abbr: "#sym" },
-    { key: "codebase", full: "#codebase", abbr: "#cb" },
-    { key: "workspace", full: "@workspace", abbr: "@ws" },
-    { key: "terminal", full: "@terminal", abbr: "@term" },
-    { key: "vscode", full: "@vscode", abbr: "@vsc" },
-    { key: "terminalLastCommand", full: "#terminalLastCommand", abbr: "#termLC" },
-    { key: "terminalSelection", full: "#terminalSelection", abbr: "#termSel" },
-    { key: "clipboard", full: "#clipboard", abbr: "#clip" },
-    { key: "changes", full: "#changes", abbr: "#chg" },
-    { key: "outputPanel", full: "#outputPanel", abbr: "#out" },
-    { key: "problemsPanel", full: "#problemsPanel", abbr: "#prob" },
-    { key: "pullRequest", full: "#pr", abbr: "#pr" },
-    { key: "copilotInstructions", full: "\u{1F4CB} instructions", abbr: "\u{1F4CB} inst" },
-    { key: "agentsMd", full: "\u{1F916} agents", abbr: "\u{1F916} ag" }
-  ];
-  function getContextRefsSummary(refs, abbreviated = false) {
-    const parts = [];
-    for (const entry of REF_LABELS) {
-      const count = refs[entry.key] || 0;
-      if (count > 0) {
-        const label = abbreviated ? entry.abbr : entry.full;
-        parts.push(`${label}: ${count}`);
-      }
-    }
-    return parts.length > 0 ? parts.join(", ") : "None";
-  }
+.worktree-root-item span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
 
-  // src/webview/diagnostics/main.ts
-  var LOADING_PLACEHOLDER = "Loading...";
-  var SESSION_FILES_SECTION_REGEX = /Session File Locations \(first 20\):[\s\S]*?(?=\n\s*\n|={70})/;
-  var LOADING_MESSAGE = `\u23F3 Loading diagnostic data...
+.worktree-progress-bar {
+	height: 6px;
+	border-radius: 3px;
+	background: var(--bg-tertiary);
+	overflow: hidden;
+	margin-top: 8px;
+}
+
+.worktree-progress-fill {
+	height: 100%;
+	background: var(--link-color);
+	transition: width 0.2s ease;
+}
+
+/* While walking the folder tree we have no percentage yet, so pulse the bar to
+   signal ongoing activity instead of showing a misleading fixed progress. */
+.worktree-progress-fill.indeterminate {
+	animation: worktree-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes worktree-pulse {
+	0%,
+	100% {
+		opacity: 0.35;
+	}
+
+	50% {
+		opacity: 1;
+	}
+}
+
+.worktree-repo-row {
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.worktree-repo-row:hover {
+	background: var(--bg-tertiary);
+}
+
+.worktree-repo-row.expanded {
+	background: var(--bg-tertiary);
+}
+
+.worktree-delete-link {
+	margin-left: 8px;
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.worktree-delete-link:hover {
+	text-decoration: underline;
+}
+
+.worktree-caret {
+	display: inline-block;
+	width: 14px;
+	color: var(--text-muted);
+	font-size: 10px;
+}
+
+.worktree-roots-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin: 8px 0;
+	padding: 0;
+	background: none;
+	border: none;
+	color: var(--link-color);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.worktree-roots-toggle:hover {
+	text-decoration: underline;
+}
+
+.worktree-pending {
+	color: var(--text-muted);
+	font-style: italic;
+	opacity: 0.8;
+}
+
+/* The details row's cell wraps the per-worktree table; trim its padding so the
+   nested table aligns with the parent columns. */
+.worktree-repo-details > td {
+	padding: 0 0 12px 0;
+}
+
+.worktree-cleanup-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+.worktree-cleanup-card-actions {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.worktree-cleanup-card-actions .button {
+	font-size: 12px;
+	padding: 4px 10px;
+}
+
+.worktree-cleanup-log {
+	margin-top: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 12px;
+}
+
+.worktree-cleanup-log-row {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+	padding: 4px 6px;
+	border-radius: 4px;
+	background: var(--bg-tertiary);
+}
+
+.worktree-cleanup-log-branch {
+	font-weight: 600;
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.worktree-cleanup-log-repo {
+	color: var(--text-muted);
+}
+
+.worktree-cleanup-log-reason {
+	color: var(--text-muted);
+	flex: 1;
+}
+
+
+`;function He(e){return e.file+e.selection+e.implicitSelection+e.symbol+e.codebase+e.workspace+e.terminal+e.vscode+e.copilotInstructions+e.agentsMd+(e.terminalLastCommand||0)+(e.terminalSelection||0)+(e.clipboard||0)+(e.changes||0)+(e.outputPanel||0)+(e.problemsPanel||0)+(e.pullRequest||0)}var Ln=[{key:"file",full:"#file",abbr:"#file"},{key:"selection",full:"#selection",abbr:"#sel"},{key:"implicitSelection",full:"implicit",abbr:"impl"},{key:"symbol",full:"#symbol",abbr:"#sym"},{key:"codebase",full:"#codebase",abbr:"#cb"},{key:"workspace",full:"@workspace",abbr:"@ws"},{key:"terminal",full:"@terminal",abbr:"@term"},{key:"vscode",full:"@vscode",abbr:"@vsc"},{key:"terminalLastCommand",full:"#terminalLastCommand",abbr:"#termLC"},{key:"terminalSelection",full:"#terminalSelection",abbr:"#termSel"},{key:"clipboard",full:"#clipboard",abbr:"#clip"},{key:"changes",full:"#changes",abbr:"#chg"},{key:"outputPanel",full:"#outputPanel",abbr:"#out"},{key:"problemsPanel",full:"#problemsPanel",abbr:"#prob"},{key:"pullRequest",full:"#pr",abbr:"#pr"},{key:"copilotInstructions",full:"\u{1F4CB} instructions",abbr:"\u{1F4CB} inst"},{key:"agentsMd",full:"\u{1F916} agents",abbr:"\u{1F916} ag"}];function Yt(e,t=!1){let o=[];for(let n of Ln){let s=e[n.key]||0;if(s>0){let r=t?n.abbr:n.full;o.push(`${r}: ${s}`)}}return o.length>0?o.join(", "):"None"}var Kn="Loading...",Yn=/Session File Locations \(first 20\):[\s\S]*?(?=\n\s*\n|={70})/,Xn=`\u23F3 Loading diagnostic data...
 
 This may take a few moments depending on the number of session files.
-The view will automatically update when data is ready.`;
-  var vscode = acquireVsCodeApi();
-  var initialData = getWindowData("__INITIAL_DIAGNOSTICS__");
-  var diagState = createViewStateManager(vscode, {
-    activeTab: void 0,
-    activeSubtab: void 0
-  });
-  var currentSortColumn = "lastInteraction";
-  var currentSortDirection = "desc";
-  var currentEditorFilter = null;
-  var currentContextRefFilter = null;
-  var hideEmptySessions = true;
-  var showOnlyUnattributed = false;
-  var toolSortColumn = "avg";
-  var toolSortDir = "desc";
-  var storedToolFamilies;
-  var storedDetailedFiles = [];
-  var isLoading = true;
-  var currentBackendInfo;
-  var currentGithubAuth;
-  function removeSessionFilesSection(reportText) {
-    return reportText.replace(SESSION_FILES_SECTION_REGEX, "");
-  }
-  function formatDate(isoString) {
-    if (!isoString) {
-      return "N/A";
-    }
-    try {
-      return escapeHtml(new Date(isoString).toLocaleString());
-    } catch {
-      return escapeHtml(isoString);
-    }
-  }
-  function sanitizeNumber(value) {
-    if (value === void 0 || value === null) {
-      return "0";
-    }
-    const n5 = Number(value);
-    if (!Number.isFinite(n5)) {
-      return "0";
-    }
-    return Math.floor(n5).toString();
-  }
-  function formatTokenCount(value) {
-    const n5 = Number(value ?? 0);
-    if (!Number.isFinite(n5) || n5 === 0) {
-      return "0";
-    }
-    if (n5 >= 1e9) {
-      return `${(n5 / 1e9).toFixed(1)}B`;
-    }
-    if (n5 >= 1e6) {
-      return `${(n5 / 1e6).toFixed(1)}M`;
-    }
-    if (n5 >= 1e3) {
-      return `${(n5 / 1e3).toFixed(1)}K`;
-    }
-    return Math.floor(n5).toString();
-  }
-  function buildCandidatePathRow(cp, tbody) {
-    const row = document.createElement("tr");
-    if (!cp.exists) {
-      row.style.opacity = "0.5";
-    }
-    const statusCell = document.createElement("td");
-    statusCell.textContent = cp.exists ? "\u2705" : "\u274C";
-    statusCell.style.textAlign = "center";
-    const sourceCell = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = getEditorBadgeClass(cp.source);
-    badge.textContent = `${getEditorIcon(cp.source)} ${cp.source}`;
-    sourceCell.appendChild(badge);
-    const pathCell = document.createElement("td");
-    pathCell.setAttribute("title", cp.path);
-    pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
-    pathCell.style.fontSize = "12px";
-    pathCell.textContent = cp.path;
-    row.append(statusCell, sourceCell, pathCell);
-    tbody.appendChild(row);
-  }
-  function buildCrushGroupRow(crushEntries, tbody) {
-    const anyExist = crushEntries.some((cp) => cp.exists);
-    const row = document.createElement("tr");
-    if (!anyExist) {
-      row.style.opacity = "0.5";
-    }
-    const statusCell = document.createElement("td");
-    statusCell.textContent = anyExist ? "\u2705" : "\u274C";
-    statusCell.style.textAlign = "center";
-    const sourceCell = document.createElement("td");
-    const badge = document.createElement("span");
-    badge.className = getEditorBadgeClass("Crush");
-    badge.textContent = `${getEditorIcon("Crush")} Crush`;
-    sourceCell.appendChild(badge);
-    const pathCell = document.createElement("td");
-    pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
-    pathCell.style.fontSize = "12px";
-    pathCell.style.lineHeight = "1.6";
-    for (const cp of crushEntries) {
-      const line = document.createElement("div");
-      line.style.opacity = cp.exists ? "1" : "0.5";
-      line.title = cp.path;
-      line.textContent = `${cp.exists ? "\u2705" : "\u274C"} ${cp.path}`;
-      pathCell.appendChild(line);
-    }
-    row.append(statusCell, sourceCell, pathCell);
-    tbody.appendChild(row);
-  }
-  function buildCandidatePathsElement(candidatePaths) {
-    const container = document.createElement("div");
-    container.className = "candidate-paths-table";
-    const heading = document.createElement("h4");
-    heading.textContent = "Scanned Paths (all candidate locations):";
-    container.appendChild(heading);
-    const description = document.createElement("p");
-    description.style.cssText = "color: #999; font-size: 12px; margin: 4px 0 8px 0;";
-    description.textContent = "These are all the paths the extension checks for session files. Paths marked with \u2705 exist on this system.";
-    container.appendChild(description);
-    const table = document.createElement("table");
-    table.className = "session-table";
-    container.appendChild(table);
-    const thead = document.createElement("thead");
-    const headerRow = document.createElement("tr");
-    for (const text of ["Status", "Source", "Path"]) {
-      const th = document.createElement("th");
-      th.textContent = text;
-      headerRow.appendChild(th);
-    }
-    thead.appendChild(headerRow);
-    table.appendChild(thead);
-    const tbody = document.createElement("tbody");
-    table.appendChild(tbody);
-    const sorted = [...candidatePaths].sort((a3, b3) => a3.exists !== b3.exists ? a3.exists ? -1 : 1 : a3.source.localeCompare(b3.source));
-    const crushEntries = sorted.filter((cp) => cp.source.toLowerCase().includes("crush"));
-    const otherEntries = sorted.filter((cp) => !cp.source.toLowerCase().includes("crush"));
-    for (const cp of otherEntries) {
-      buildCandidatePathRow(cp, tbody);
-    }
-    if (crushEntries.length > 0) {
-      buildCrushGroupRow(crushEntries, tbody);
-    }
-    return container;
-  }
-  function getFileName(filePath) {
-    const parts = filePath.split(/[/\\]/);
-    return parts[parts.length - 1];
-  }
-  function getRepoDisplayName(repoUrl) {
-    if (!repoUrl) {
-      return "";
-    }
-    let url = repoUrl.replace(/\.git$/, "");
-    if (url.includes("@") && url.includes(":")) {
-      const colonIndex = url.lastIndexOf(":");
-      const atIndex = url.lastIndexOf("@");
-      if (colonIndex > atIndex) {
-        return url.substring(colonIndex + 1);
-      }
-    }
-    try {
-      if (url.includes("://")) {
-        const urlObj = new URL(url);
-        const pathParts = urlObj.pathname.split("/").filter((p3) => p3);
-        if (pathParts.length >= 2) {
-          return `${pathParts[pathParts.length - 2]}/${pathParts[pathParts.length - 1]}`;
-        }
-        return urlObj.pathname.replace(/^\//, "");
-      }
-    } catch {
-    }
-    const parts = url.split("/").filter((p3) => p3);
-    if (parts.length >= 2) {
-      return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
-    }
-    return url;
-  }
-  function getEditorBadgeClass(editor) {
-    const lower = editor.toLowerCase();
-    if (lower.includes("ms scout") || lower.includes("microsoft scout")) {
-      return "editor-badge editor-badge-ms-scout";
-    }
-    if (lower.includes("visual studio")) {
-      return "editor-badge editor-badge-vs";
-    }
-    if (lower.includes("jetbrains")) {
-      return "editor-badge editor-badge-jetbrains";
-    }
-    if (lower.includes("mistral")) {
-      return "editor-badge editor-badge-mistral-vibe";
-    }
-    if (lower.includes("antigravity")) {
-      return "editor-badge editor-badge-antigravity";
-    }
-    if (lower.includes("gemini")) {
-      return "editor-badge editor-badge-gemini-cli";
-    }
-    if (lower.includes("crush")) {
-      return "editor-badge editor-badge-crush";
-    }
-    if (lower.includes("cursor")) {
-      return "editor-badge editor-badge-cursor";
-    }
-    if (lower === "pi") {
-      return "editor-badge editor-badge-pi";
-    }
-    return "editor-badge";
-  }
-  function getSortValue(file, column) {
-    switch (column) {
-      case "size":
-        return file.size || 0;
-      case "tokens":
-        return file.tokens || 0;
-      case "interactions":
-        return file.interactions || 0;
-      case "contextRefs":
-        return getTotalContextRefs(file.contextReferences);
-      default:
-        return 0;
-    }
-  }
-  function compareSessionFiles(a3, b3) {
-    if (currentSortColumn === "lastInteraction") {
-      const aVal = a3.lastInteraction;
-      const bVal = b3.lastInteraction;
-      if (!aVal && !bVal) {
-        return 0;
-      }
-      if (!aVal) {
-        return 1;
-      }
-      if (!bVal) {
-        return -1;
-      }
-      const aNum2 = new Date(aVal).getTime();
-      const bNum2 = new Date(bVal).getTime();
-      return currentSortDirection === "desc" ? bNum2 - aNum2 : aNum2 - bNum2;
-    }
-    const aNum = getSortValue(a3, currentSortColumn);
-    const bNum = getSortValue(b3, currentSortColumn);
-    if (aNum === 0 && bNum === 0) {
-      return 0;
-    }
-    return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
-  }
-  function groupChildrenAfterParents(sorted, byFile) {
-    const placed = /* @__PURE__ */ new Set();
-    const result = [];
-    for (const f3 of sorted) {
-      if (placed.has(f3.file)) {
-        continue;
-      }
-      result.push(f3);
-      placed.add(f3.file);
-      for (const childRef of f3.childInfo ?? []) {
-        if (!childRef.sessionFile) {
-          continue;
-        }
-        const childDetails = byFile.get(childRef.sessionFile);
-        if (childDetails && !placed.has(childDetails.file)) {
-          result.push(childDetails);
-          placed.add(childDetails.file);
-        }
-      }
-    }
-    return result;
-  }
-  function sortSessionFiles(files) {
-    const sorted = [...files].sort(compareSessionFiles);
-    const byFile = /* @__PURE__ */ new Map();
-    for (const f3 of sorted) {
-      byFile.set(f3.file, f3);
-    }
-    return groupChildrenAfterParents(sorted, byFile);
-  }
-  function getSortIndicator(column) {
-    if (currentSortColumn !== column) {
-      return "";
-    }
-    return currentSortDirection === "desc" ? " \u25BC" : " \u25B2";
-  }
-  function getEditorStats(files) {
-    const stats = {};
-    for (const sf of files) {
-      const editor = sf.editorSource || "Unknown";
-      if (!stats[editor]) {
-        stats[editor] = { count: 0, interactions: 0 };
-      }
-      stats[editor].count++;
-      stats[editor].interactions += sf.interactions;
-    }
-    return stats;
-  }
-  function safeText(value) {
-    if (value === null || value === void 0) {
-      return "";
-    }
-    return escapeHtml(String(value));
-  }
-  function getUnattributedTokens(sf) {
-    const tokens = sf.tokens || 0;
-    if (tokens === 0 || !sf.modelUsage) {
-      return 0;
-    }
-    const attributed = Object.values(sf.modelUsage).reduce((s4, m2) => s4 + m2.inputTokens + m2.outputTokens, 0);
-    return attributed > 0 ? Math.max(0, tokens - attributed) : 0;
-  }
-  function applySessionFilters(detailedFiles) {
-    let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => sf.editorSource === currentEditorFilter) : detailedFiles;
-    if (currentContextRefFilter) {
-      filteredFiles = filteredFiles.filter((sf) => {
-        const value = sf.contextReferences[currentContextRefFilter];
-        return typeof value === "number" && value > 0;
-      });
-    }
-    if (showOnlyUnattributed) {
-      filteredFiles = filteredFiles.filter((sf) => getUnattributedTokens(sf) > 1e3);
-    }
-    const zeroInteractionCount = filteredFiles.filter((sf) => sf.interactions === 0).length;
-    if (hideEmptySessions && zeroInteractionCount === filteredFiles.length && filteredFiles.length > 0) {
-      hideEmptySessions = false;
-    }
-    if (hideEmptySessions) {
-      filteredFiles = filteredFiles.filter((sf) => sf.interactions > 0);
-    }
-    return { filteredFiles, zeroInteractionCount };
-  }
-  function aggregateContextRefs(filteredFiles) {
-    return filteredFiles.reduce((agg, sf) => {
-      const r6 = sf.contextReferences;
-      agg.file += r6.file;
-      agg.symbol += r6.symbol;
-      agg.selection += r6.selection;
-      agg.implicitSelection += r6.implicitSelection;
-      agg.codebase += r6.codebase;
-      agg.workspace += r6.workspace;
-      agg.terminal += r6.terminal;
-      agg.vscode += r6.vscode;
-      agg.copilotInstructions += r6.copilotInstructions;
-      agg.agentsMd += r6.agentsMd;
-      return agg;
-    }, { file: 0, symbol: 0, selection: 0, implicitSelection: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, copilotInstructions: 0, agentsMd: 0 });
-  }
-  function buildEditorPanelsHtml(detailedFiles, editorStats, editors) {
-    return `<div class="editor-filter-panels">
-    <div class="editor-panel ${currentEditorFilter === null ? "active" : ""}" data-editor=""><div class="editor-panel-icon">\u{1F310}</div><div class="editor-panel-name">All Editors</div><div class="editor-panel-stats">${detailedFiles.length} sessions</div></div>
-    ${editors.map((editor) => `<div class="editor-panel ${currentEditorFilter === editor ? "active" : ""}" data-editor="${escapeHtml(editor)}"><div class="editor-panel-icon">${getEditorIcon(editor)}</div><div class="editor-panel-name">${escapeHtml(editor)}</div><div class="editor-panel-stats">${editorStats[editor].count} sessions \xB7 ${editorStats[editor].interactions} interactions</div></div>`).join("")}
-  </div>`;
-  }
-  function buildSessionSummaryCardsHtml(filteredFiles, allFiles, totalInteractions, totalTokens, totalContextRefs, agg, zeroInteractionCount) {
-    const mkRef = (key, icon, label) => agg[key] > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === key ? "active" : ""}" data-ref-type="${key}">${icon} ${label} ${agg[key]}</div>` : "";
-    const unattributedCount = allFiles.filter((sf) => getUnattributedTokens(sf) > 1e3).length;
-    const unattributedCheckbox = unattributedCount > 0 ? `<label class="empty-sessions-toggle" title="Sessions where some debug-log tokens cannot be assigned to a specific model \u2014 may indicate incomplete model attribution in the debug log"><input type="checkbox" id="show-only-unattributed" ${showOnlyUnattributed ? "checked" : ""}>\u26A0\uFE0F Show only sessions with unattributed tokens<span class="hidden-count">(${unattributedCount} session${unattributedCount === 1 ? "" : "s"})</span></label>` : "";
-    return `<div class="summary-cards">
-    <div class="summary-card"><div class="summary-label">\u{1F4C1} ${currentEditorFilter ? "Filtered" : "Total"} Sessions</div><div class="summary-value">${filteredFiles.length}</div></div>
-    <div class="summary-card"><div class="summary-label">\u{1F4AC} Interactions</div><div class="summary-value">${totalInteractions}</div></div>
-    <div class="summary-card"><div class="summary-label">\u{1FA99} Tokens</div><div class="summary-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div></div>
-    <div class="summary-card"><div class="summary-label">\u{1F517} Context References</div><div class="summary-value">${safeText(totalContextRefs)}</div><div class="summary-sub">${totalContextRefs === 0 ? "None" : ""}${mkRef("file", "", "#file")}${mkRef("symbol", "", "#sym")}${mkRef("implicitSelection", "", "implicit")}${mkRef("copilotInstructions", "\u{1F4CB}", "instructions")}${mkRef("agentsMd", "\u{1F916}", "agents")}${mkRef("workspace", "", "@workspace")}${mkRef("vscode", "", "@vscode")}</div></div>
+The view will automatically update when data is ready.`,b=acquireVsCodeApi(),Xe=Be("__INITIAL_DIAGNOSTICS__"),U=Zt(b,{activeTab:void 0,activeSubtab:void 0,otelDeltaPeriod:"all"}),It,Qe=U.restore().otelDeltaPeriod??"all",se="lastInteraction",re="desc",de=null,ie=null,$e=!0,Mt=!1,et="avg",ae="desc",Et,Ee=[],Ie=!0,Me,le,E=Xe?.worktreeScanRoots?[...Xe.worktreeScanRoots]:[],L=[],w=!1,C={root:"",checked:0,total:0,foundCount:0,elapsedMs:0},Le=null,Ct=!1,Ye=new Set,Te=!1,De="count",Ae="desc",B=!1,Z=!1,Lt={processed:0,total:0},O=[];function Xo(e){return e.replace(Yn,"")}function Re(e){if(!e)return"N/A";try{return l(new Date(e).toLocaleString())}catch{return l(e)}}function Wo(e){if(e==null)return"0";let t=Number(e);return Number.isFinite(t)?Math.floor(t).toString():"0"}function $(e){let t=Number(e??0);return!Number.isFinite(t)||t===0?"0":t>=1e9?`${(t/1e9).toFixed(1)}B`:t>=1e6?`${(t/1e6).toFixed(1)}M`:t>=1e3?`${(t/1e3).toFixed(1)}K`:Math.floor(t).toString()}function Qn(e,t){let o=document.createElement("tr");e.exists||(o.style.opacity="0.5");let n=document.createElement("td");n.textContent=e.exists?"\u2705":"\u274C",n.style.textAlign="center";let s=document.createElement("td"),r=document.createElement("span");r.className=ot(e.source),r.textContent=`${P(e.source)} ${e.source}`,s.appendChild(r);let i=document.createElement("td");i.setAttribute("title",e.path),i.style.fontFamily="var(--vscode-editor-font-family, monospace)",i.style.fontSize="12px",i.textContent=e.path,o.append(n,s,i),t.appendChild(o)}function es(e,t){let o=e.some(d=>d.exists),n=document.createElement("tr");o||(n.style.opacity="0.5");let s=document.createElement("td");s.textContent=o?"\u2705":"\u274C",s.style.textAlign="center";let r=document.createElement("td"),i=document.createElement("span");i.className=ot("Crush"),i.textContent=`${P("Crush")} Crush`,r.appendChild(i);let a=document.createElement("td");a.style.fontFamily="var(--vscode-editor-font-family, monospace)",a.style.fontSize="12px",a.style.lineHeight="1.6";for(let d of e){let u=document.createElement("div");u.style.opacity=d.exists?"1":"0.5",u.title=d.path,u.textContent=`${d.exists?"\u2705":"\u274C"} ${d.path}`,a.appendChild(u)}n.append(s,r,a),t.appendChild(n)}function ts(e){let t=document.createElement("div");t.className="candidate-paths-table";let o=document.createElement("h4");o.textContent="Scanned Paths (all candidate locations):",t.appendChild(o);let n=document.createElement("p");n.style.cssText="color: #999; font-size: 12px; margin: 4px 0 8px 0;",n.textContent="These are all the paths the extension checks for session files. Paths marked with \u2705 exist on this system.",t.appendChild(n);let s=document.createElement("table");s.className="session-table",t.appendChild(s);let r=document.createElement("thead"),i=document.createElement("tr");for(let c of["Status","Source","Path"]){let m=document.createElement("th");m.textContent=c,i.appendChild(m)}r.appendChild(i),s.appendChild(r);let a=document.createElement("tbody");s.appendChild(a);let d=[...e].sort((c,m)=>c.exists!==m.exists?c.exists?-1:1:c.source.localeCompare(m.source)),u=d.filter(c=>c.source.toLowerCase().includes("crush")),p=d.filter(c=>!c.source.toLowerCase().includes("crush"));for(let c of p)Qn(c,a);return u.length>0&&es(u,a),t}function os(e){let t=e.split(/[/\\]/);return t[t.length-1]}function ns(e){if(!e)return"";let t=e.replace(/\.git$/,"");if(t.includes("@")&&t.includes(":")){let n=t.lastIndexOf(":"),s=t.lastIndexOf("@");if(n>s)return t.substring(n+1)}try{if(t.includes("://")){let n=new URL(t),s=n.pathname.split("/").filter(r=>r);return s.length>=2?`${s[s.length-2]}/${s[s.length-1]}`:n.pathname.replace(/^\//,"")}}catch{}let o=t.split("/").filter(n=>n);return o.length>=2?`${o[o.length-2]}/${o[o.length-1]}`:t}function ot(e){let t=e.toLowerCase();return t.includes("ms scout")||t.includes("microsoft scout")?"editor-badge editor-badge-ms-scout":t.includes("visual studio")?"editor-badge editor-badge-vs":t.includes("jetbrains")?"editor-badge editor-badge-jetbrains":t.includes("mistral")?"editor-badge editor-badge-mistral-vibe":t.includes("antigravity")?"editor-badge editor-badge-antigravity":t.includes("gemini")?"editor-badge editor-badge-gemini-cli":t.includes("crush")?"editor-badge editor-badge-crush":t.includes("cursor")?"editor-badge editor-badge-cursor":t==="pi"?"editor-badge editor-badge-pi":"editor-badge"}function jo(e,t){switch(t){case"size":return e.size||0;case"tokens":return e.tokens||0;case"interactions":return e.interactions||0;case"contextRefs":return He(e.contextReferences);default:return 0}}function ss(e,t){if(se==="lastInteraction"){let s=e.lastInteraction,r=t.lastInteraction;if(!s&&!r)return 0;if(!s)return 1;if(!r)return-1;let i=new Date(s).getTime(),a=new Date(r).getTime();return re==="desc"?a-i:i-a}let o=jo(e,se),n=jo(t,se);return o===0&&n===0?0:re==="desc"?n-o:o-n}function rs(e,t){let o=new Set,n=[];for(let s of e)if(!o.has(s.file)){n.push(s),o.add(s.file);for(let r of s.childInfo??[]){if(!r.sessionFile)continue;let i=t.get(r.sessionFile);i&&!o.has(i.file)&&(n.push(i),o.add(i.file))}}return n}function is(e){let t=[...e].sort(ss),o=new Map;for(let n of t)o.set(n.file,n);return rs(t,o)}function Ce(e){return se!==e?"":re==="desc"?" \u25BC":" \u25B2"}function Dt(e){let t={};for(let o of e){let n=o.editorSource||"Unknown";t[n]||(t[n]={count:0,interactions:0}),t[n].count++,t[n].interactions+=o.interactions}return t}function as(e){return e==null?"":l(String(e))}function _t(e){let t=e.tokens||0;if(t===0||!e.modelUsage)return 0;let o=Object.values(e.modelUsage).reduce((n,s)=>n+s.inputTokens+s.outputTokens,0);return o>0?Math.max(0,t-o):0}function ls(e){let t=de?e.filter(n=>n.editorSource===de):e;ie&&(t=t.filter(n=>{let s=n.contextReferences[ie];return typeof s=="number"&&s>0})),Mt&&(t=t.filter(n=>_t(n)>1e3));let o=t.filter(n=>n.interactions===0).length;return $e&&o===t.length&&t.length>0&&($e=!1),$e&&(t=t.filter(n=>n.interactions>0)),{filteredFiles:t,zeroInteractionCount:o}}function ds(e){return e.reduce((t,o)=>{let n=o.contextReferences;return t.file+=n.file,t.symbol+=n.symbol,t.selection+=n.selection,t.implicitSelection+=n.implicitSelection,t.codebase+=n.codebase,t.workspace+=n.workspace,t.terminal+=n.terminal,t.vscode+=n.vscode,t.copilotInstructions+=n.copilotInstructions,t.agentsMd+=n.agentsMd,t},{file:0,symbol:0,selection:0,implicitSelection:0,codebase:0,workspace:0,terminal:0,vscode:0,copilotInstructions:0,agentsMd:0})}function cs(e,t,o){return`<div class="editor-filter-panels">
+    <div class="editor-panel ${de===null?"active":""}" data-editor=""><div class="editor-panel-icon">\u{1F310}</div><div class="editor-panel-name">All Editors</div><div class="editor-panel-stats">${e.length} sessions</div></div>
+    ${o.map(n=>`<div class="editor-panel ${de===n?"active":""}" data-editor="${l(n)}"><div class="editor-panel-icon">${P(n)}</div><div class="editor-panel-name">${l(n)}</div><div class="editor-panel-stats">${t[n].count} sessions \xB7 ${t[n].interactions} interactions</div></div>`).join("")}
+  </div>`}function us(e,t,o,n,s,r,i){let a=(p,c,m)=>r[p]>0?`<div class="context-ref-filter ${ie===p?"active":""}" data-ref-type="${p}">${c} ${m} ${r[p]}</div>`:"",d=t.filter(p=>_t(p)>1e3).length,u=d>0?`<label class="empty-sessions-toggle" title="Sessions where some debug-log tokens cannot be assigned to a specific model \u2014 may indicate incomplete model attribution in the debug log"><input type="checkbox" id="show-only-unattributed" ${Mt?"checked":""}>\u26A0\uFE0F Show only sessions with unattributed tokens<span class="hidden-count">(${d} session${d===1?"":"s"})</span></label>`:"";return`<div class="summary-cards">
+    <div class="summary-card"><div class="summary-label">\u{1F4C1} ${de?"Filtered":"Total"} Sessions</div><div class="summary-value">${e.length}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1F4AC} Interactions</div><div class="summary-value">${o}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1FA99} Tokens</div><div class="summary-value" title="${n.toLocaleString()} tokens">${$(n)}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1F517} Context References</div><div class="summary-value">${as(s)}</div><div class="summary-sub">${s===0?"None":""}${a("file","","#file")}${a("symbol","","#sym")}${a("implicitSelection","","implicit")}${a("copilotInstructions","\u{1F4CB}","instructions")}${a("agentsMd","\u{1F916}","agents")}${a("workspace","","@workspace")}${a("vscode","","@vscode")}</div></div>
     <div class="summary-card"><div class="summary-label">\u{1F4C5} Time Range</div><div class="summary-value">Last 14 days</div></div>
   </div>
-  <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? "checked" : ""}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ""}</label>${unattributedCheckbox}</div>`;
-  }
-  function buildHierarchyBadgesHtml(sf) {
-    let html = "";
-    if (sf.parentInfo) {
-      const parentTitle = escapeHtml(sf.parentInfo.name.length > 30 ? sf.parentInfo.name.substring(0, 30) + "\u2026" : sf.parentInfo.name);
-      const linkAttr = sf.parentInfo.sessionFile ? ` href="#" class="session-hierarchy-badge hierarchy-parent session-file-link" data-file="${encodeURIComponent(sf.parentInfo.sessionFile)}"` : ` class="session-hierarchy-badge hierarchy-parent"`;
-      html += `<a${linkAttr} title="Parent session: ${escapeHtml(sf.parentInfo.name)}">\u2191 Parent: ${parentTitle}</a>`;
-    }
-    if (sf.totalChildCount && sf.totalChildCount > 0) {
-      const count = sf.totalChildCount;
-      const label = count === 1 ? "1 child session" : `${count} child sessions`;
-      html += `<span class="session-hierarchy-badge hierarchy-children" title="${label}">\u2193 ${count} ${count === 1 ? "Child" : "Children"}</span>`;
-    }
-    return html ? `<div class="session-hierarchy-badges">${html}</div>` : "";
-  }
-  function buildUnattributedBadge(sf) {
-    const unattributed = getUnattributedTokens(sf);
-    if (unattributed <= 1e3) {
-      return "";
-    }
-    const pct = Math.round(unattributed / (sf.tokens || 1) * 100);
-    return ` <span title="\u26A0\uFE0F ${unattributed.toLocaleString()} tokens (~${pct}%) not attributed to any model \u2014 debug log events without a model field" style="color:#f59e0b; cursor:help; font-size:0.9em;">\u26A0\uFE0F</span>`;
-  }
-  function buildSessionTableHtml(sortedFiles) {
-    const rows = sortedFiles.map((sf, idx) => {
-      const editorLabel = sf.editorName || sf.editorSource;
-      const isChild = !!sf.parentInfo;
-      const rawTitleHtml = sf.title ? `<a href="#" class="session-file-link" data-file="${encodeURIComponent(sf.file)}" title="${escapeHtml(sf.title)}">${escapeHtml(sf.title.length > 40 ? sf.title.substring(0, 40) + "..." : sf.title)}</a>` : `<a href="#" class="session-file-link empty-session-link" data-file="${encodeURIComponent(sf.file)}" title="Empty session">(Empty session)</a>`;
-      const titleHtml = isChild ? `<span class="child-title-indent">${rawTitleHtml}</span>` : rawTitleHtml;
-      const hierarchyBadges = buildHierarchyBadgesHtml(sf);
-      const repoLabel = sf.repository ? escapeHtml(getRepoDisplayName(sf.repository)) : sf.file.includes("session-store.db") ? '<span style="color: #888; font-style: italic;">No workspace</span>' : '<span style="color: #666;">\u2014</span>';
-      const repoTitle = sf.repository ? escapeHtml(sf.repository) : sf.file.includes("session-store.db") ? "Chat session \u2014 no workspace connected" : "No repository detected";
-      const isUnknownEditor = (sf.editorName || sf.editorSource || "Unknown") === "Unknown";
-      const rowClass = isChild ? ' class="child-session-row"' : "";
-      return `<tr${rowClass}><td>${idx + 1}</td><td><span class="${getEditorBadgeClass(editorLabel)}" title="${escapeHtml(sf.editorSource)}">${getEditorIcon(editorLabel)} ${escapeHtml(editorLabel)}</span></td><td class="session-title" title="${sf.title ? escapeHtml(sf.title) : "Empty session"}">${hierarchyBadges}${titleHtml}</td><td class="repository-cell" title="${repoTitle}">${repoLabel}</td><td>${formatFileSize(sf.size)}</td><td title="${Number(sf.tokens || 0).toLocaleString()} tokens">${formatTokenCount(sf.tokens)}${buildUnattributedBadge(sf)}</td><td>${sanitizeNumber(sf.interactions)}</td><td title="${escapeHtml(getContextRefsSummary(sf.contextReferences))}">${sanitizeNumber(getTotalContextRefs(sf.contextReferences))}</td><td>${formatDate(sf.lastInteraction)}</td><td><a href="#" class="view-formatted-link" data-file="${encodeURIComponent(sf.file)}" title="View formatted JSONL file">\u{1F4C4} View</a>${isUnknownEditor ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.file)}" title="Report this unknown path so we can add editor support">\u{1F4E2} Report</a>` : ""}</td></tr>`;
-    }).join("");
-    return `<div class="table-container"><table class="session-table"><thead><tr><th>#</th><th>Editor</th><th>Title</th><th>Repository</th><th class="sortable" data-sort="size">Size${getSortIndicator("size")}</th><th class="sortable" data-sort="tokens">Tokens${getSortIndicator("tokens")}</th><th class="sortable" data-sort="interactions">Interactions${getSortIndicator("interactions")}</th><th class="sortable" data-sort="contextRefs">Context Refs${getSortIndicator("contextRefs")}</th><th class="sortable" data-sort="lastInteraction">Last Interaction${getSortIndicator("lastInteraction")}</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
-  }
-  function renderSessionTable(detailedFiles, isLoading2 = false) {
-    if (isLoading2) {
-      return `<div class="loading-state"><div class="loading-spinner">\u23F3</div><div class="loading-text">Loading session files...</div><div class="loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`;
-    }
-    if (detailedFiles.length === 0) {
-      return '<p style="color: #999;">No session files with activity in the last 14 days.</p>';
-    }
-    const editorStats = getEditorStats(detailedFiles);
-    const editors = Object.keys(editorStats).sort();
-    const { filteredFiles, zeroInteractionCount } = applySessionFilters(detailedFiles);
-    const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
-    const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
-    const totalContextRefs = filteredFiles.reduce((sum, sf) => sum + getTotalContextRefs(sf.contextReferences), 0);
-    const agg = aggregateContextRefs(filteredFiles);
-    const sortedFiles = sortSessionFiles(filteredFiles);
-    return `${buildEditorPanelsHtml(detailedFiles, editorStats, editors)}${buildSessionSummaryCardsHtml(filteredFiles, detailedFiles, totalInteractions, totalTokens, totalContextRefs, agg, zeroInteractionCount)}${buildSessionTableHtml(sortedFiles)}`;
-  }
-  function counterRow(key, label, value) {
-    return `
+  <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${$e?"checked":""}>Hide sessions with 0 interactions${i>0?`<span class="hidden-count">(${i} hidden)</span>`:""}</label>${u}</div>`}function ps(e){let t="";if(e.parentInfo){let o=l(e.parentInfo.name.length>30?e.parentInfo.name.substring(0,30)+"\u2026":e.parentInfo.name),n=e.parentInfo.sessionFile?` href="#" class="session-hierarchy-badge hierarchy-parent session-file-link" data-file="${encodeURIComponent(e.parentInfo.sessionFile)}"`:' class="session-hierarchy-badge hierarchy-parent"';t+=`<a${n} title="Parent session: ${l(e.parentInfo.name)}">\u2191 Parent: ${o}</a>`}if(e.totalChildCount&&e.totalChildCount>0){let o=e.totalChildCount,n=o===1?"1 child session":`${o} child sessions`;t+=`<span class="session-hierarchy-badge hierarchy-children" title="${n}">\u2193 ${o} ${o===1?"Child":"Children"}</span>`}return t?`<div class="session-hierarchy-badges">${t}</div>`:""}function bs(e){let t=_t(e);if(t<=1e3)return"";let o=Math.round(t/(e.tokens||1)*100);return` <span title="\u26A0\uFE0F ${t.toLocaleString()} tokens (~${o}%) not attributed to any model \u2014 debug log events without a model field" style="color:#f59e0b; cursor:help; font-size:0.9em;">\u26A0\uFE0F</span>`}function ms(e){let t=e.map((o,n)=>{let s=o.editorName||o.editorSource,r=!!o.parentInfo,i=o.title?`<a href="#" class="session-file-link" data-file="${encodeURIComponent(o.file)}" title="${l(o.title)}">${l(o.title.length>40?o.title.substring(0,40)+"...":o.title)}</a>`:`<a href="#" class="session-file-link empty-session-link" data-file="${encodeURIComponent(o.file)}" title="Empty session">(Empty session)</a>`,a=r?`<span class="child-title-indent">${i}</span>`:i,d=ps(o),u=o.repository?l(ns(o.repository)):o.file.includes("session-store.db")?'<span style="color: #888; font-style: italic;">No workspace</span>':'<span style="color: #666;">\u2014</span>',p=o.repository?l(o.repository):o.file.includes("session-store.db")?"Chat session \u2014 no workspace connected":"No repository detected",c=(o.editorName||o.editorSource||"Unknown")==="Unknown";return`<tr${r?' class="child-session-row"':""}><td>${n+1}</td><td><span class="${ot(s)}" title="${l(o.editorSource)}">${P(s)} ${l(s)}</span></td><td class="session-title" title="${o.title?l(o.title):"Empty session"}">${d}${a}</td><td class="repository-cell" title="${p}">${u}</td><td>${J(o.size)}</td><td title="${Number(o.tokens||0).toLocaleString()} tokens">${$(o.tokens)}${bs(o)}</td><td>${Wo(o.interactions)}</td><td title="${l(Yt(o.contextReferences))}">${Wo(He(o.contextReferences))}</td><td>${Re(o.lastInteraction)}</td><td><a href="#" class="view-formatted-link" data-file="${encodeURIComponent(o.file)}" title="View formatted JSONL file">\u{1F4C4} View</a>${c?` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(o.file)}" title="Report this unknown path so we can add editor support">\u{1F4E2} Report</a>`:""}</td></tr>`}).join("");return`<div class="table-container"><table class="session-table"><thead><tr><th>#</th><th>Editor</th><th>Title</th><th>Repository</th><th class="sortable" data-sort="size">Size${Ce("size")}</th><th class="sortable" data-sort="tokens">Tokens${Ce("tokens")}</th><th class="sortable" data-sort="interactions">Interactions${Ce("interactions")}</th><th class="sortable" data-sort="contextRefs">Context Refs${Ce("contextRefs")}</th><th class="sortable" data-sort="lastInteraction">Last Interaction${Ce("lastInteraction")}</th><th>Actions</th></tr></thead><tbody>${t}</tbody></table></div>`}function Qo(e,t=!1){if(t)return'<div class="loading-state"><div class="loading-spinner">\u23F3</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="session-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>';if(e.length===0)return'<p style="color: #999;">No session files with activity in the last 14 days.</p>';let o=Dt(e),n=Object.keys(o).sort(),{filteredFiles:s,zeroInteractionCount:r}=ls(e),i=s.reduce((c,m)=>c+Number(m.interactions||0),0),a=s.reduce((c,m)=>c+Number(m.tokens||0),0),d=s.reduce((c,m)=>c+He(m.contextReferences),0),u=ds(s),p=is(s);return`${cs(e,o,n)}${us(s,e,i,a,d,u,r)}${ms(p)}`}function qo(e,t,o){return`
     <tr>
-      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${escapeHtml(label)}</td>
+      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${l(t)}</td>
       <td style="padding: 6px 8px 6px 0;">
-        <input type="number" class="debug-counter-input" data-key="${escapeHtml(key)}" value="${value}" min="0" step="1"
+        <input type="number" class="debug-counter-input" data-key="${l(e)}" value="${o}" min="0" step="1"
           style="width:70px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 2px 6px; font-family: var(--vscode-editor-font-family, monospace);" />
       </td>
       <td style="padding: 6px 0;">
-        <button class="button secondary debug-counter-set" data-key="${escapeHtml(key)}" style="padding: 2px 10px; font-size: 12px;">Set</button>
+        <button class="button secondary debug-counter-set" data-key="${l(e)}" style="padding: 2px 10px; font-size: 12px;">Set</button>
       </td>
-    </tr>`;
-  }
-  function stringRow(key, label, value) {
-    const display = value ? `\u2705 ${escapeHtml(value)}` : "\u274C (not set)";
-    return `
+    </tr>`}function hs(e,t,o){let n=o?`\u2705 ${l(o)}`:"\u274C (not set)";return`
     <tr>
-      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${escapeHtml(label)}</td>
+      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${l(t)}</td>
       <td style="padding: 6px 8px 6px 0;" colspan="2">
-        <span style="font-family: var(--vscode-editor-font-family, monospace);">${display}</span>
+        <span style="font-family: var(--vscode-editor-font-family, monospace);">${n}</span>
       </td>
-    </tr>`;
-  }
-  function flagRow(key, label, value) {
-    return `
+    </tr>`}function gs(e,t,o){return`
     <tr>
-      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${escapeHtml(label)}</td>
+      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${l(t)}</td>
       <td style="padding: 6px 8px 6px 0;">
-        <input type="checkbox" class="debug-flag-input" data-key="${escapeHtml(key)}" ${value ? "checked" : ""} />
-        <span style="margin-left:6px; font-family: var(--vscode-editor-font-family, monospace);">${value ? "\u2705 true" : "\u274C false"}</span>
+        <input type="checkbox" class="debug-flag-input" data-key="${l(e)}" ${o?"checked":""} />
+        <span style="margin-left:6px; font-family: var(--vscode-editor-font-family, monospace);">${o?"\u2705 true":"\u274C false"}</span>
       </td>
       <td style="padding: 6px 0;">
-        <button class="button secondary debug-flag-set" data-key="${escapeHtml(key)}" style="padding: 2px 10px; font-size: 12px;">Set</button>
+        <button class="button secondary debug-flag-set" data-key="${l(e)}" style="padding: 2px 10px; font-size: 12px;">Set</button>
       </td>
-    </tr>`;
-  }
-  function renderDebugTab(counters) {
-    const c4 = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: "" };
-    return `
+    </tr>`}function vs(e){let t=e??{openCount:0,unknownMcpOpenCount:0,fluencyBannerDismissed:!1,unknownMcpDismissedVersion:""};return`
     <div id="tab-debug" class="tab-content">
       <div class="info-box">
         <div class="info-box-title">\u{1F41B} Debug \u2014 Global State Counters</div>
@@ -3059,27 +1684,19 @@ The view will automatically update when data is ready.`;
       <div class="cache-details">
         <h4>Notification Counters</h4>
         <table><tbody>
-          ${counterRow("extension.openCount", "extension.openCount (fluency banner threshold: 5)", c4.openCount)}
-          ${counterRow("extension.unknownMcpOpenCount", "extension.unknownMcpOpenCount (unknown MCP threshold: 8)", c4.unknownMcpOpenCount)}
+          ${qo("extension.openCount","extension.openCount (fluency banner threshold: 5)",t.openCount)}
+          ${qo("extension.unknownMcpOpenCount","extension.unknownMcpOpenCount (unknown MCP threshold: 8)",t.unknownMcpOpenCount)}
         </tbody></table>
         <h4 style="margin-top:16px;">Dismissed Flags</h4>
         <table><tbody>
-          ${flagRow("news.fluencyScoreBanner.v1.dismissed", "news.fluencyScoreBanner.v1.dismissed", c4.fluencyBannerDismissed)}
-          ${stringRow("news.unknownMcpTools.dismissedVersion", "news.unknownMcpTools.dismissedVersion", c4.unknownMcpDismissedVersion)}
+          ${gs("news.fluencyScoreBanner.v1.dismissed","news.fluencyScoreBanner.v1.dismissed",t.fluencyBannerDismissed)}
+          ${hs("news.unknownMcpTools.dismissedVersion","news.unknownMcpTools.dismissedVersion",t.unknownMcpDismissedVersion)}
         </tbody></table>
         <div style="margin-top: 16px;">
           <button class="button secondary" id="btn-reset-debug-counters"><span>\u{1F504}</span><span>Reset All Counters &amp; Dismissed Flags</span></button>
         </div>
       </div>
-    </div>`;
-  }
-  function renderGitHubAuthPanel(githubAuth) {
-    const authenticated = githubAuth?.authenticated || false;
-    const username = githubAuth?.username || "";
-    const statusColor = authenticated ? "#2d6a4f" : "#666";
-    const statusIcon = authenticated ? "\u2705" : "\u26AA";
-    const statusText = authenticated ? "Authenticated" : "Not Authenticated";
-    return `
+    </div>`}function Rt(e){let t=e?.authenticated||!1,o=e?.username||"",n=t?"#2d6a4f":"#666";return`
 <div class="info-box">
   <div class="info-box-title">\u{1F511} GitHub Authentication</div>
   <div>
@@ -3088,19 +1705,19 @@ The view will automatically update when data is ready.`;
 </div>
 
 <div class="summary-cards">
-  <div class="summary-card" style="border-left: 4px solid ${statusColor};">
-    <div class="summary-label">${statusIcon} Status</div>
-    <div class="summary-value" style="font-size: 16px; color: ${statusColor};">${statusText}</div>
+  <div class="summary-card" style="border-left: 4px solid ${n};">
+    <div class="summary-label">${t?"\u2705":"\u26AA"} Status</div>
+    <div class="summary-value" style="font-size: 16px; color: ${n};">${t?"Authenticated":"Not Authenticated"}</div>
   </div>
-  ${authenticated ? `
+  ${t?`
   <div class="summary-card">
     <div class="summary-label">\u{1F464} Logged in as</div>
-    <div class="summary-value" style="font-size: 16px;">${escapeHtml(username)}</div>
+    <div class="summary-value" style="font-size: 16px;">${l(o)}</div>
   </div>
-  ` : ""}
+  `:""}
 </div>
 
-${authenticated ? `
+${t?`
   <div style="margin-top: 24px;">
     <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
       You are currently authenticated with GitHub. This enables future features such as:
@@ -3111,7 +1728,7 @@ ${authenticated ? `
       <li>Advanced analytics and insights</li>
     </ul>
   </div>
-` : `
+`:`
   <div style="margin-top: 24px;">
     <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
       Sign in with your GitHub account to unlock future features. This uses VS Code's built-in authentication.
@@ -3120,61 +1737,37 @@ ${authenticated ? `
 `}
 
 <div class="button-group">
-  ${authenticated ? `
+  ${t?`
     <button class="button secondary" id="btn-sign-out-github">
       <span>\u{1F50C}</span>
       <span>Disconnect GitHub</span>
     </button>
-  ` : `
+  `:`
     <button class="button" id="btn-authenticate-github">
       <span>\u{1F511}</span>
       <span>Authenticate with GitHub</span>
     </button>
   `}
 </div>
-  `;
-  }
-  function getBackendStatus(isConfigured, enabled) {
-    return isConfigured ? { color: "#2d6a4f", icon: "\u2705", text: "Configured & Enabled" } : enabled ? { color: "#d97706", icon: "\u26A0\uFE0F", text: "Enabled but Not Configured" } : { color: "#666", icon: "\u26AA", text: "Disabled" };
-  }
-  function renderAzureDetailsSection(azureInfo) {
-    if (!azureInfo.isConfigured) {
-      return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F680} Get Started with Azure Storage</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">To enable cloud synchronization, configure an Azure Storage account via the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Azure subscription with Storage Account access</li><li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li><li>VS Code signed in with your Azure account (for Entra ID auth)</li></ul></div>`;
-    }
-    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4CA} Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Storage Account</td><td>${escapeHtml(azureInfo.storageAccount)}</td></tr><tr><td style="font-weight: 600;">Subscription ID</td><td>${escapeHtml(azureInfo.subscriptionId)}</td></tr><tr><td style="font-weight: 600;">Resource Group</td><td>${escapeHtml(azureInfo.resourceGroup)}</td></tr><tr><td style="font-weight: 600;">Aggregation Table</td><td>${escapeHtml(azureInfo.aggTable)}</td></tr><tr><td style="font-weight: 600;">Events Table</td><td>${escapeHtml(azureInfo.eventsTable)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4C8} Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">\u{1F4BB} Unique Devices</div><div class="summary-value">${escapeHtml(String(azureInfo.deviceCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Based on workspace IDs</div></div><div class="summary-card"><div class="summary-label">\u{1F4C1} Total Sessions</div><div class="summary-value">${escapeHtml(String(azureInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">\u2601\uFE0F Cloud Records</div><div class="summary-value">${azureInfo.recordCount !== null ? escapeHtml(String(azureInfo.recordCount)) : "\u2014"}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Azure Storage records</div></div><div class="summary-card"><div class="summary-label">\u{1F504} Sync Status</div><div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? formatDate(azureInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
-  }
-  function renderAzureStoragePanel(azureInfo) {
-    const { color, icon, text } = getBackendStatus(azureInfo.isConfigured, azureInfo.enabled);
-    return `<div class="info-box"><div class="info-box-title">\u2601\uFE0F Azure Storage Backend</div><div>Sync your token usage data to Azure Storage Tables for team-wide reporting and multi-device access.</div></div>
-    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div><div class="summary-card"><div class="summary-label">\u{1F510} Auth Mode</div><div class="summary-value" style="font-size: 16px;">${azureInfo.authMode === "entraId" ? "Entra ID" : "Shared Key"}</div></div><div class="summary-card"><div class="summary-label">\u{1F465} Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(azureInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">\u{1F552} Last Sync</div><div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? getTimeSince(azureInfo.lastSyncTime) : "Never"}</div></div></div>
-    ${renderAzureDetailsSection(azureInfo)}
-    <div class="button-group"><button class="button" id="btn-configure-backend"><span>${azureInfo.isConfigured ? "\u2699\uFE0F" : "\u{1F527}"}</span><span>${azureInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
-  }
-  function renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated) {
-    const authColor = githubNotAuthenticated ? "#d97706" : githubAuth?.authenticated ? "#2d6a4f" : "#666";
-    const authIcon = githubNotAuthenticated ? "\u26A0\uFE0F" : githubAuth?.authenticated ? "\u2705" : "\u26AA";
-    const authValue = githubNotAuthenticated ? "Not Authenticated" : githubAuth?.authenticated ? escapeHtml(githubAuth.username || "Authenticated") : "Not Authenticated";
-    return `<div class="summary-card" style="border-left: 4px solid ${authColor};"><div class="summary-label">${authIcon} GitHub Auth</div><div class="summary-value" style="font-size: 14px; color: ${authColor};">${authValue}</div></div>`;
-  }
-  function renderTeamServerDetailsSection(teamInfo) {
-    if (!teamInfo.isConfigured) {
-      return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F680} Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`;
-    }
-    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4CA} Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Server URL</td><td>${escapeHtml(teamInfo.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4C8} Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">\u{1F4C1} Total Sessions</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">\u{1F504} Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
-  }
-  function renderTeamServerPanel(teamInfo, githubAuth) {
-    const { color, icon, text } = getBackendStatus(teamInfo.isConfigured, teamInfo.enabled);
-    const githubNotAuthenticated = teamInfo.isConfigured && !githubAuth?.authenticated;
-    const authWarning = githubNotAuthenticated ? `<button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub"><span style="font-size: 18px; flex-shrink: 0;">\u26A0\uFE0F</span><div style="flex: 1;"><div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div><div style="color: #d4a017; font-size: 12px;">Team server sync will not run until you sign in to GitHub. <strong style="color: #fbbf24;">Click here to sign in.</strong></div></div><span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">\u2192</span></button>` : "";
-    return `<div class="info-box"><div class="info-box-title">\u{1F5A5}\uFE0F Team Server Backend</div><div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div></div>
-    ${authWarning}
-    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">\u{1F465} Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">\u{1F552} Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div></div></div>
-    ${renderTeamServerDetailsSection(teamInfo)}
-    <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "\u2699\uFE0F" : "\u{1F527}"}</span><span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
-  }
-  function renderBackendStoragePanel(backendInfo, githubAuth) {
-    if (!backendInfo) {
-      return `
+  `}function en(e,t){return e?{color:"#2d6a4f",icon:"\u2705",text:"Configured & Enabled"}:t?{color:"#d97706",icon:"\u26A0\uFE0F",text:"Enabled but Not Configured"}:{color:"#666",icon:"\u26AA",text:"Disabled"}}function fs(e){return e.isConfigured?`<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4CA} Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Storage Account</td><td>${l(e.storageAccount)}</td></tr><tr><td style="font-weight: 600;">Subscription ID</td><td>${l(e.subscriptionId)}</td></tr><tr><td style="font-weight: 600;">Resource Group</td><td>${l(e.resourceGroup)}</td></tr><tr><td style="font-weight: 600;">Aggregation Table</td><td>${l(e.aggTable)}</td></tr><tr><td style="font-weight: 600;">Events Table</td><td>${l(e.eventsTable)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4C8} Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">\u{1F4BB} Unique Devices</div><div class="summary-value">${l(String(e.deviceCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Based on workspace IDs</div></div><div class="summary-card"><div class="summary-label">\u{1F4C1} Total Sessions</div><div class="summary-value">${l(String(e.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">\u2601\uFE0F Cloud Records</div><div class="summary-value">${e.recordCount!==null?l(String(e.recordCount)):"\u2014"}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Azure Storage records</div></div><div class="summary-card"><div class="summary-label">\u{1F504} Sync Status</div><div class="summary-value" style="font-size: 14px;">${e.lastSyncTime?Re(e.lastSyncTime):"Never"}</div></div></div></div>`:'<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F680} Get Started with Azure Storage</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">To enable cloud synchronization, configure an Azure Storage account via the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Azure subscription with Storage Account access</li><li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li><li>VS Code signed in with your Azure account (for Entra ID auth)</li></ul></div>'}function ys(e){let{color:t,icon:o,text:n}=en(e.isConfigured,e.enabled);return`<div class="info-box"><div class="info-box-title">\u2601\uFE0F Azure Storage Backend</div><div>Sync your token usage data to Azure Storage Tables for team-wide reporting and multi-device access.</div></div>
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${t};"><div class="summary-label">${o} Status</div><div class="summary-value" style="font-size: 16px; color: ${t};">${n}</div></div><div class="summary-card"><div class="summary-label">\u{1F510} Auth Mode</div><div class="summary-value" style="font-size: 16px;">${e.authMode==="entraId"?"Entra ID":"Shared Key"}</div></div><div class="summary-card"><div class="summary-label">\u{1F465} Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${l(e.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">\u{1F552} Last Sync</div><div class="summary-value" style="font-size: 14px;">${e.lastSyncTime?Pe(e.lastSyncTime):"Never"}</div></div></div>
+    ${fs(e)}
+    <div class="button-group"><button class="button" id="btn-configure-backend"><span>${e.isConfigured?"\u2699\uFE0F":"\u{1F527}"}</span><span>${e.isConfigured?"Manage Backend":"Configure Backend"}</span></button></div>`}function xs(e,t){let o=t?"#d97706":e?.authenticated?"#2d6a4f":"#666",n=t?"\u26A0\uFE0F":e?.authenticated?"\u2705":"\u26AA",s=t?"Not Authenticated":e?.authenticated?l(e.username||"Authenticated"):"Not Authenticated";return`<div class="summary-card" style="border-left: 4px solid ${o};"><div class="summary-label">${n} GitHub Auth</div><div class="summary-value" style="font-size: 14px; color: ${o};">${s}</div></div>`}function ks(e){return e.isConfigured?`<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4CA} Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Server URL</td><td>${l(e.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4C8} Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">\u{1F4C1} Total Sessions</div><div class="summary-value">${l(String(e.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">\u{1F504} Last Sync</div><div class="summary-value" style="font-size: 14px;">${e.lastSyncTime?Re(e.lastSyncTime):"Never"}</div></div></div></div>`:`<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F680} Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`}function Ss(e,t){let{color:o,icon:n,text:s}=en(e.isConfigured,e.enabled),r=e.isConfigured&&!t?.authenticated;return`<div class="info-box"><div class="info-box-title">\u{1F5A5}\uFE0F Team Server Backend</div><div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div></div>
+    ${r?'<button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub"><span style="font-size: 18px; flex-shrink: 0;">\u26A0\uFE0F</span><div style="flex: 1;"><div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div><div style="color: #d4a017; font-size: 12px;">Team server sync will not run until you sign in to GitHub. <strong style="color: #fbbf24;">Click here to sign in.</strong></div></div><span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">\u2192</span></button>':""}
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${o};"><div class="summary-label">${n} Status</div><div class="summary-value" style="font-size: 16px; color: ${o};">${s}</div></div>${xs(t,r)}<div class="summary-card"><div class="summary-label">\u{1F465} Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${l(e.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">\u{1F552} Last Sync</div><div class="summary-value" style="font-size: 14px;">${e.lastSyncTime?Pe(e.lastSyncTime):"Never"}</div></div></div>
+    ${ks(e)}
+    <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${e.isConfigured?"\u2699\uFE0F":"\u{1F527}"}</span><span>${e.isConfigured?"Manage Backend":"Configure Backend"}</span></button></div>`}function Bt(e,t){return e?`
+    <div class="subtab-bar">
+      <button class="subtab active" data-subtab="backend-azure">\u2601\uFE0F Azure Storage</button>
+      <button class="subtab" data-subtab="backend-teamserver">\u{1F5A5}\uFE0F Team Server</button>
+    </div>
+    <div id="subtab-backend-azure" class="subtab-content active">
+      ${ys(e.azure)}
+    </div>
+    <div id="subtab-backend-teamserver" class="subtab-content">
+      ${Ss(e.teamServer,t)}
+    </div>
+  `:`
       <div class="info-box">
         <div class="info-box-title">\u2601\uFE0F Backend Storage</div>
         <div>Backend storage information is not available. This may be a temporary issue.</div>
@@ -3185,23 +1778,7 @@ ${authenticated ? `
           </button>
         </div>
       </div>
-    `;
-    }
-    return `
-    <div class="subtab-bar">
-      <button class="subtab active" data-subtab="backend-azure">\u2601\uFE0F Azure Storage</button>
-      <button class="subtab" data-subtab="backend-teamserver">\u{1F5A5}\uFE0F Team Server</button>
-    </div>
-    <div id="subtab-backend-azure" class="subtab-content active">
-      ${renderAzureStoragePanel(backendInfo.azure)}
-    </div>
-    <div id="subtab-backend-teamserver" class="subtab-content">
-      ${renderTeamServerPanel(backendInfo.teamServer, githubAuth)}
-    </div>
-  `;
-  }
-  function renderFolderAnalyzerTab() {
-    return `
+    `}function ws(){return`
     <div class="info-box">
       <div class="info-box-title">\u{1F52C} Path Analyzer</div>
       <div>
@@ -3211,7 +1788,7 @@ ${authenticated ? `
       </div>
     </div>
     <div class="section">
-      <div class="section-title">\u{1F4C1} Folder Selection</div>
+      <div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Folder Selection</span></div>
       <div class="folder-input-row">
         <input
           type="text"
@@ -3243,73 +1820,50 @@ ${authenticated ? `
       </div>
     </div>
     <div id="folder-analysis-results"></div>
-  `;
-  }
-  function buildFolderFileTableRow(f3, idx, folderPath) {
-    const hasData = f3.interactions > 0 || f3.tokens > 0;
-    const rel = f3.file.startsWith(folderPath) ? f3.file.slice(folderPath.length).replace(/^[/\\]/, "") : getFileName(f3.file);
-    const safeInteractions = Number(f3.interactions);
-    const interactionsCell = safeInteractions > 0 ? `<strong>${escapeHtml(String(safeInteractions))}</strong>` : `<span style="color: var(--text-muted);">0</span>`;
-    const safeTokens = Number(f3.tokens);
-    const tokensCell = safeTokens > 0 ? `<strong title="${escapeHtml(String(safeTokens.toLocaleString()))} tokens">${escapeHtml(String(formatTokenCount(safeTokens)))}</strong>` : `<span style="color: var(--text-muted);">0</span>`;
-    return `
-    <tr style="${hasData ? "" : "opacity: 0.45;"}">
-      <td>${idx + 1}</td>
-      <td title="${escapeHtml(f3.file)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(rel)}</td>
-      <td>${escapeHtml(String(formatFileSize(f3.size)))}</td>
-      <td>${interactionsCell}</td>
-      <td>${tokensCell}</td>
-      <td>${formatDate(f3.modified)}</td>
-    </tr>`;
-  }
-  function renderFolderAnalysisResults(files, totalScanned, parseErrors, truncated, folderPath) {
-    const sessionFiles = files.filter((f3) => f3.interactions > 0 || f3.tokens > 0);
-    const totalInteractions = files.reduce((sum, f3) => sum + Number(f3.interactions), 0);
-    const totalTokens = files.reduce((sum, f3) => sum + Number(f3.tokens), 0);
-    const sorted = [...files].sort((a3, b3) => {
-      const aScore = a3.interactions * 1e3 + a3.tokens;
-      const bScore = b3.interactions * 1e3 + b3.tokens;
-      return bScore - aScore;
-    });
-    const truncatedWarning = truncated ? `<div class="info-box" style="margin-bottom: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);">
+  `}function Cs(e,t,o){let n=e.interactions>0||e.tokens>0,s=e.file.startsWith(o)?e.file.slice(o.length).replace(/^[/\\]/,""):os(e.file),r=Number(e.interactions),i=r>0?`<strong>${l(String(r))}</strong>`:'<span style="color: var(--text-muted);">0</span>',a=Number(e.tokens),d=a>0?`<strong title="${l(String(a.toLocaleString()))} tokens">${l(String($(a)))}</strong>`:'<span style="color: var(--text-muted);">0</span>';return`
+    <tr style="${n?"":"opacity: 0.45;"}">
+      <td>${t+1}</td>
+      <td title="${l(e.file)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${l(s)}</td>
+      <td>${l(String(J(e.size)))}</td>
+      <td>${i}</td>
+      <td>${d}</td>
+      <td>${Re(e.modified)}</td>
+    </tr>`}function $s(e,t,o,n,s){let r=e.filter(m=>m.interactions>0||m.tokens>0),i=e.reduce((m,v)=>m+Number(v.interactions),0),a=e.reduce((m,v)=>m+Number(v.tokens),0),d=[...e].sort((m,v)=>{let k=m.interactions*1e3+m.tokens;return v.interactions*1e3+v.tokens-k}),u=n?`<div class="info-box" style="margin-bottom: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);">
         <div>\u26A0\uFE0F Scan limit reached (500 files). Results may be incomplete. Try a more specific subfolder.</div>
-      </div>` : "";
-    const emptyState = `
+      </div>`:"",p=`
     <div style="padding: 32px; text-align: center; color: var(--text-muted);">
       <div style="font-size: 36px; margin-bottom: 12px;">\u{1F4ED}</div>
       <div style="font-size: 14px;">No matching files found in this folder.</div>
       <div style="font-size: 12px; margin-top: 8px;">Try a different folder path or tool type.</div>
-    </div>`;
-    const tableRows = sorted.map((f3, idx) => buildFolderFileTableRow(f3, idx, folderPath)).join("");
-    return `
+    </div>`,c=d.map((m,v)=>Cs(m,v,s)).join("");return`
     <div class="section" style="margin-top: 0;">
-      <div class="section-title">\u{1F4CA} Analysis Results</div>
-      ${truncatedWarning}
+      <div class="section-title"><span class="codicon codicon-graph"></span><span>Analysis Results</span></div>
+      ${u}
       <div class="summary-cards">
         <div class="summary-card">
           <div class="summary-label">\u{1F4C4} Files Scanned</div>
-          <div class="summary-value">${escapeHtml(String(totalScanned))}${truncated ? "+" : ""}</div>
+          <div class="summary-value">${l(String(t))}${n?"+":""}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">\u2705 With Sessions</div>
-          <div class="summary-value">${sessionFiles.length}</div>
-          <div style="font-size: 11px; color: var(--text-muted);">${files.length - sessionFiles.length} empty / unknown</div>
+          <div class="summary-value">${r.length}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${e.length-r.length} empty / unknown</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">\u{1F4AC} Interactions</div>
-          <div class="summary-value">${escapeHtml(String(totalInteractions))}</div>
+          <div class="summary-value">${l(String(i))}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">\u{1FA99} Tokens</div>
-          <div class="summary-value" title="${escapeHtml(String(totalTokens.toLocaleString()))} tokens">${escapeHtml(String(formatTokenCount(totalTokens)))}</div>
+          <div class="summary-value" title="${l(String(a.toLocaleString()))} tokens">${l(String($(a)))}</div>
         </div>
-        ${parseErrors > 0 ? `
+        ${o>0?`
         <div class="summary-card" style="border-left: 3px solid #d97706;">
           <div class="summary-label">\u26A0\uFE0F Unreadable</div>
-          <div class="summary-value" style="color: #d97706;">${escapeHtml(String(parseErrors))}</div>
-        </div>` : ""}
+          <div class="summary-value" style="color: #d97706;">${l(String(o))}</div>
+        </div>`:""}
       </div>
-      ${files.length === 0 ? emptyState : `
+      ${e.length===0?p:`
         <div class="table-container" style="margin-top: 12px; max-height: 420px;">
           <table class="session-table">
             <thead>
@@ -3322,926 +1876,214 @@ ${authenticated ? `
                 <th>Last Modified</th>
               </tr>
             </thead>
-            <tbody>${tableRows}</tbody>
+            <tbody>${c}</tbody>
           </table>
         </div>`}
-    </div>`;
-  }
-  function groupSessionFolders(raw) {
-    const result = [];
-    const jbBuckets = /* @__PURE__ */ new Map();
-    for (const sf of raw || []) {
-      const norm = String(sf.dir || "").replace(/\\/g, "/");
-      const m2 = norm.match(/^(.*\/\.copilot\/jb)\/[^/]+\/?$/);
-      if (m2) {
-        const parent = m2[1];
-        const existing = jbBuckets.get(parent);
-        if (existing) {
-          existing.count += sf.count;
-        } else {
-          const tail = norm.length - parent.length;
-          const parentNative = sf.dir.slice(0, sf.dir.length - tail);
-          jbBuckets.set(parent, { dir: parentNative, count: sf.count, editorName: sf.editorName || "JetBrains" });
-        }
-      } else {
-        result.push(sf);
-      }
-    }
-    for (const bucket of jbBuckets.values()) {
-      result.push(bucket);
-    }
-    return result;
-  }
-  function getHomeDirectory() {
-    const win = window;
-    return win.process?.env?.HOME || win.process?.env?.USERPROFILE || "";
-  }
-  function buildSessionFolderRow(sf, home) {
-    let display = sf.dir;
-    if (home && display.startsWith(home)) {
-      display = display.replace(home, "~");
-    }
-    const editorName = sf.editorName || "Unknown";
-    const row = document.createElement("tr");
-    const folderCell = document.createElement("td");
-    folderCell.setAttribute("title", sf.dir);
-    folderCell.textContent = display;
-    row.appendChild(folderCell);
-    const editorCell = document.createElement("td");
-    const editorBadge = document.createElement("span");
-    editorBadge.className = getEditorBadgeClass(editorName);
-    editorBadge.textContent = `${getEditorIcon(editorName)} ${editorName}`;
-    editorCell.appendChild(editorBadge);
-    row.appendChild(editorCell);
-    const countCell = document.createElement("td");
-    countCell.textContent = String(sf.count);
-    row.appendChild(countCell);
-    const openCell = document.createElement("td");
-    const openLink = document.createElement("a");
-    openLink.href = "#";
-    openLink.className = "reveal-link";
-    openLink.setAttribute("data-path", encodeURIComponent(sf.dir));
-    openLink.textContent = "Open directory";
-    openCell.appendChild(openLink);
-    if (editorName === "Unknown") {
-      const reportLink = document.createElement("a");
-      reportLink.href = "#";
-      reportLink.className = "report-editor-link";
-      reportLink.setAttribute("data-path", encodeURIComponent(sf.dir));
-      reportLink.setAttribute("title", "Report this unknown path so we can add editor support");
-      reportLink.textContent = "\u{1F4E2} Report";
-      openCell.appendChild(document.createTextNode(" "));
-      openCell.appendChild(reportLink);
-    }
-    row.appendChild(openCell);
-    return row;
-  }
-  function buildSessionFoldersElement(folders) {
-    const sorted = [...folders].sort((a3, b3) => b3.count - a3.count);
-    const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
-    const home = getHomeDirectory();
-    const container = document.createElement("div");
-    container.className = "session-folders-table";
-    const heading = document.createElement("h4");
-    heading.textContent = "Main Session Folders (by editor root):";
-    container.appendChild(heading);
-    const table = document.createElement("table");
-    table.className = "session-table";
-    container.appendChild(table);
-    const thead = document.createElement("thead");
-    table.appendChild(thead);
-    const headerRow = document.createElement("tr");
-    thead.appendChild(headerRow);
-    for (const text of ["Folder", "Editor", "# of Sessions", "Open"]) {
-      const th = document.createElement("th");
-      th.textContent = text;
-      headerRow.appendChild(th);
-    }
-    const tbody = document.createElement("tbody");
-    table.appendChild(tbody);
-    for (const sf of sorted) {
-      tbody.appendChild(buildSessionFolderRow(sf, home));
-    }
-    const totalRow = document.createElement("tr");
-    totalRow.style.borderTop = "2px solid #5a5a5a";
-    totalRow.style.fontWeight = "600";
-    totalRow.style.background = "rgba(255, 255, 255, 0.05)";
-    const totalLabelCell = document.createElement("td");
-    totalLabelCell.setAttribute("colspan", "2");
-    totalLabelCell.style.textAlign = "right";
-    totalLabelCell.style.paddingRight = "16px";
-    totalLabelCell.textContent = "Total:";
-    totalRow.appendChild(totalLabelCell);
-    const totalCountCell = document.createElement("td");
-    totalCountCell.textContent = String(totalSessions);
-    totalRow.appendChild(totalCountCell);
-    totalRow.appendChild(document.createElement("td"));
-    tbody.appendChild(totalRow);
-    return container;
-  }
-  function setupStorageLinkHandlers() {
-    document.querySelectorAll(".open-storage-link").forEach((link) => {
-      link.addEventListener("click", (e7) => {
-        e7.preventDefault();
-        const path = decodeURIComponent(
-          link.getAttribute("data-path") || ""
-        );
-        if (path) {
-          vscode.postMessage({ command: "revealPath", path });
-        }
-      });
-    });
-  }
-  function setupGitHubAuthHandlers() {
-    document.getElementById("btn-authenticate-github")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "authenticateGitHub" });
-    });
-    document.getElementById("btn-sign-out-github")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "signOutGitHub" });
-    });
-  }
-  function activateSubtab(subtabId) {
-    const subtabEl = document.querySelector(`.subtab[data-subtab="${subtabId}"]`);
-    const contentEl = document.getElementById(`subtab-${subtabId}`);
-    if (subtabEl && contentEl) {
-      const subtabBar = subtabEl.closest(".subtab-bar");
-      if (subtabBar) {
-        subtabBar.querySelectorAll(".subtab").forEach((s4) => s4.classList.remove("active"));
-      }
-      document.querySelectorAll(".subtab-content").forEach((c4) => c4.classList.remove("active"));
-      subtabEl.classList.add("active");
-      contentEl.classList.add("active");
-      return true;
-    }
-    return false;
-  }
-  function activateTab(tabId) {
-    const tabButton = document.querySelector(`.tab[data-tab="${tabId}"]`);
-    const tabContent = document.getElementById(`tab-${tabId}`);
-    if (tabButton && tabContent) {
-      document.querySelectorAll(".tab").forEach((t4) => t4.classList.remove("active"));
-      document.querySelectorAll(".tab-content").forEach((c4) => c4.classList.remove("active"));
-      tabButton.classList.add("active");
-      tabContent.classList.add("active");
-      return true;
-    }
-    return false;
-  }
-  function setupSortHandlers() {
-    document.querySelectorAll(".sortable").forEach((header) => {
-      header.addEventListener("click", () => {
-        const sortColumn = header.getAttribute(
-          "data-sort"
-        );
-        if (sortColumn) {
-          if (currentSortColumn === sortColumn) {
-            currentSortDirection = currentSortDirection === "desc" ? "asc" : "desc";
-          } else {
-            currentSortColumn = sortColumn;
-            currentSortDirection = "desc";
-          }
-          reRenderTable();
-        }
-      });
-    });
-  }
-  function setupEditorFilterHandlers() {
-    document.querySelectorAll(".editor-panel").forEach((panel) => {
-      panel.addEventListener("click", () => {
-        const editor = panel.getAttribute("data-editor");
-        currentEditorFilter = editor === "" ? null : editor;
-        reRenderTable();
-      });
-    });
-  }
-  function setupContextRefFilterHandlers() {
-    document.querySelectorAll(".context-ref-filter").forEach((filter) => {
-      filter.addEventListener("click", () => {
-        const refType = filter.getAttribute(
-          "data-ref-type"
-        );
-        if (currentContextRefFilter === refType) {
-          currentContextRefFilter = null;
-        } else {
-          currentContextRefFilter = refType;
-        }
-        reRenderTable();
-      });
-    });
-  }
-  function setupUnattributedFilterHandler() {
-    const checkbox = document.getElementById("show-only-unattributed");
-    if (checkbox) {
-      checkbox.addEventListener("change", () => {
-        showOnlyUnattributed = checkbox.checked;
-        reRenderTable();
-      });
-    }
-  }
-  function setupZeroInteractionFilterHandler() {
-    const checkbox = document.getElementById("hide-empty-sessions");
-    if (checkbox) {
-      checkbox.addEventListener("change", () => {
-        hideEmptySessions = checkbox.checked;
-        reRenderTable();
-      });
-    }
-  }
-  function setupBackendButtonHandlers() {
-    document.getElementById("btn-configure-backend")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "configureBackend" });
-    });
-    document.getElementById("btn-configure-backend-team")?.addEventListener("click", () => {
-      diagState.patch({ activeTab: "backend", activeSubtab: "backend-teamserver" });
-      vscode.postMessage({ command: "configureTeamServer" });
-    });
-    document.getElementById("btn-team-server-auth-warning")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "authenticateGitHub" });
-    });
-    document.getElementById("btn-open-settings")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "openSettings" });
-    });
-    document.getElementById("btn-open-display-settings")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "openDisplaySettings" });
-    });
-  }
-  function setupDisplaySettingHandlers() {
-    document.getElementById("select-show-tokens")?.addEventListener("change", (e7) => {
-      const value = e7.target.value;
-      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showTokens", value });
-    });
-    document.getElementById("select-show-cost")?.addEventListener("change", (e7) => {
-      const value = e7.target.value;
-      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showCost", value });
-    });
-    document.getElementById("input-monthly-budget")?.addEventListener("change", (e7) => {
-      const input = e7.target;
-      const raw = parseFloat(input.value);
-      const value = isNaN(raw) ? 0 : Math.min(99999, Math.max(0, Math.round(raw * 100) / 100));
-      input.value = value.toString();
-      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.monthlyBudget", value });
-    });
-  }
-  function setupSubtabHandlers() {
-    document.querySelectorAll(".subtab").forEach((subtab) => {
-      subtab.addEventListener("click", () => {
-        const subtabId = subtab.getAttribute("data-subtab");
-        if (!subtabId) {
-          return;
-        }
-        const subtabBar = subtab.closest(".subtab-bar");
-        if (subtabBar) {
-          subtabBar.querySelectorAll(".subtab").forEach((s4) => s4.classList.remove("active"));
-        }
-        document.querySelectorAll(".subtab-content").forEach((c4) => c4.classList.remove("active"));
-        subtab.classList.add("active");
-        document.getElementById(`subtab-${subtabId}`)?.classList.add("active");
-        diagState.patch({ activeSubtab: subtabId });
-      });
-    });
-  }
-  function reRenderTable() {
-    const container = document.getElementById("session-table-container");
-    if (container) {
-      container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
-      if (!isLoading) {
-        setupSortHandlers();
-        setupEditorFilterHandlers();
-        setupContextRefFilterHandlers();
-        setupZeroInteractionFilterHandler();
-        setupUnattributedFilterHandler();
-        setupFileLinks();
-      }
-    }
-  }
-  function reRenderToolAnalysisTable() {
-    document.querySelectorAll(".tool-analysis-table").forEach((table) => {
-      const encoded = table.getAttribute("data-rows");
-      if (!encoded) {
-        return;
-      }
-      const rows = JSON.parse(decodeURIComponent(encoded));
-      const baselineRaw = table.getAttribute("data-baseline");
-      const baseline = baselineRaw ? parseFloat(baselineRaw) : NaN;
-      const tbody = table.querySelector("tbody");
-      if (tbody) {
-        tbody.innerHTML = renderToolAnalysisRows(rows, baseline);
-      }
-      const thead = table.querySelector("thead");
-      if (thead) {
-        thead.innerHTML = toolAnalysisTheadHtml();
-      }
-    });
-    setupToolAnalysisSortHandlers();
-  }
-  function setupToolAnalysisSortHandlers() {
-    document.querySelectorAll(".tool-sortable").forEach((header) => {
-      header.addEventListener("click", () => {
-        const col = header.getAttribute("data-sort");
-        if (!col) {
-          return;
-        }
-        if (toolSortColumn === col) {
-          toolSortDir = toolSortDir === "desc" ? "asc" : "desc";
-        } else {
-          toolSortColumn = col;
-          toolSortDir = col === "tool" ? "asc" : "desc";
-        }
-        reRenderToolAnalysisTable();
-      });
-    });
-    document.getElementById("btn-open-tool-families-settings")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "openToolFamiliesSettings" });
-    });
-  }
-  function setupFileLinks() {
-    document.querySelectorAll(".session-file-link").forEach((link) => {
-      link.addEventListener("click", (e7) => {
-        e7.preventDefault();
-        const file = decodeURIComponent(
-          link.getAttribute("data-file") || ""
-        );
-        vscode.postMessage({ command: "openSessionFile", file });
-      });
-    });
-    document.querySelectorAll(".view-formatted-link").forEach((link) => {
-      link.addEventListener("click", (e7) => {
-        e7.preventDefault();
-        const file = decodeURIComponent(
-          link.getAttribute("data-file") || ""
-        );
-        vscode.postMessage({ command: "openFormattedJsonlFile", file });
-      });
-    });
-    document.querySelectorAll(".reveal-link").forEach((link) => {
-      link.addEventListener("click", (e7) => {
-        e7.preventDefault();
-        const path = decodeURIComponent(
-          link.getAttribute("data-path") || ""
-        );
-        vscode.postMessage({ command: "revealPath", path });
-      });
-    });
-    document.querySelectorAll(".report-editor-link").forEach((link) => {
-      link.addEventListener("click", (e7) => {
-        e7.preventDefault();
-        const path = decodeURIComponent(
-          link.getAttribute("data-path") || ""
-        );
-        vscode.postMessage({ command: "reportNewEditorPath", path });
-      });
-    });
-  }
-  function updateCacheNumbers() {
-    const cacheTabContent = document.getElementById("tab-cache");
-    if (cacheTabContent) {
-      const summaryCards = cacheTabContent.querySelectorAll(".summary-card");
-      if (summaryCards.length >= 4) {
-        const entriesValue = summaryCards[0]?.querySelector(".summary-value");
-        if (entriesValue) {
-          entriesValue.textContent = "0";
-        }
-        const sizeValue = summaryCards[1]?.querySelector(".summary-value");
-        if (sizeValue) {
-          sizeValue.textContent = "0 MB";
-        }
-        const lastUpdatedValue = summaryCards[2]?.querySelector(".summary-value");
-        if (lastUpdatedValue) {
-          lastUpdatedValue.textContent = "Never";
-        }
-        const ageValue = summaryCards[3]?.querySelector(".summary-value");
-        if (ageValue) {
-          ageValue.textContent = "N/A";
-        }
-      }
-    }
-  }
-  function setupFolderAnalyzerHandlers() {
-    document.getElementById("btn-browse-folder")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "pickFolder" });
-    });
-    document.getElementById("btn-analyze-folder")?.addEventListener("click", () => {
-      const input = document.getElementById("folder-path-input");
-      const select = document.getElementById("tool-type-select");
-      const folderPath = input?.value.trim() ?? "";
-      if (!folderPath) {
-        if (input) {
-          input.style.borderColor = "#d97706";
-          input.focus();
-        }
-        return;
-      }
-      if (input) {
-        input.style.borderColor = "";
-      }
-      const btn = document.getElementById("btn-analyze-folder");
-      if (btn) {
-        btn.disabled = true;
-        btn.innerHTML = "<span>\u23F3</span><span>Analyzing\u2026</span>";
-      }
-      const resultsDiv = document.getElementById("folder-analysis-results");
-      if (resultsDiv) {
-        resultsDiv.innerHTML = `
+    </div>`}function Es(e,t=!1){let o=Dt(e),n=Object.keys(o).sort().map(i=>`<option value="${l(i)}">${l(P(i))} ${l(i)} (${o[i].count})</option>`).join(""),s=t?"\u23F3 Loading sessions\u2026":"",r=[{value:"all",label:"\u{1F550} All Time"},{value:"lastMonth",label:"\u{1F4C5} Last Month"},{value:"month",label:"\u{1F4C6} Current Month"},{value:"week",label:"\u{1F5D3}\uFE0F This Week"},{value:"today",label:"\u2600\uFE0F Today"},{value:"yesterday",label:"\u{1F319} Yesterday"}].map(i=>`<option value="${i.value}">${i.label}</option>`).join("");return`
+    <div class="info-box">
+      <div class="info-box-title">\u{1F9EE} Model Usage Breakdown</div>
+      <div>
+        Aggregates the exact per-model token usage and estimated cost the dashboard uses,
+        for a single editor or across all of them. Handy for spotting model/pricing
+        mismatches behind an unexpected cost total (e.g. tokens attributed to the wrong model tier).
+        Updates automatically when you change the editor or time range below.
+      </div>
+    </div>
+    <div class="section">
+      <div class="section-title">\u{1F3AF} Select Editor &amp; Time Range</div>
+      <div class="folder-input-row">
+        <select id="model-usage-editor-select" class="tool-type-select" ${t?"disabled":""}>
+          <option value="all">\u{1F310} All Editors</option>
+          ${n}
+        </select>
+        <select id="model-usage-time-select" class="tool-type-select" ${t?"disabled":""}>
+          ${r}
+        </select>
+        <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${l(s)}</span>
+      </div>
+    </div>
+    <div id="model-usage-results"></div>
+  `}function Ts(e,t){return`
+    <tr>
+      <td>${l(e.model)}</td>
+      <td title="${e.sessionCount} session(s)">${e.sessionCount.toLocaleString()}</td>
+      <td title="${e.inputTokens.toLocaleString()} tokens">${$(e.inputTokens)}</td>
+      <td title="${e.outputTokens.toLocaleString()} tokens">${$(e.outputTokens)}</td>
+      <td title="${e.cacheCreationTokens.toLocaleString()} tokens">${$(e.cacheCreationTokens)}</td>
+      ${t?`<td title="${e.cacheCreation1hTokens.toLocaleString()} tokens">${$(e.cacheCreation1hTokens)}</td>`:""}
+      <td title="${e.cachedReadTokens.toLocaleString()} tokens">${$(e.cachedReadTokens)}</td>
+      <td>$${e.estimatedCost.toFixed(2)}</td>
+    </tr>`}function Go(e,t){let o=e-t;return o<=0?"":`
+    <div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">\u2139\uFE0F ${o} session(s) have no per-model data</div>
+      <div>
+        This is often expected, not a bug. Common causes: chat-only sessions stored in a
+        database with no model/token columns (e.g. Copilot CLI's session-store.db), older
+        or truncated session logs written before an editor started recording per-model
+        attribution, or sessions that never made a model-backed request (e.g. empty/aborted
+        chats).
+      </div>
+    </div>`}var As={all:"All Time",lastMonth:"Last Month",month:"Current Month",week:"This Week",today:"Today",yesterday:"Yesterday"};function Is(e,t,o,n,s,r=!0,i="all"){let a=e==="all"?"All Editors":e,d=As[i]||"All Time",u=i==="all"?a:`${a} \u2014 ${d}`;if(n.length===0)return`
+      <div class="section" style="margin-top: 0;">
+        <div style="padding: 32px; text-align: center; color: var(--text-muted);">
+          <div style="font-size: 36px; margin-bottom: 12px;">\u{1F4ED}</div>
+          <div style="font-size: 14px;">No per-model usage data found for ${l(u)}.</div>
+          <div style="font-size: 12px; margin-top: 8px;">${t} session file(s) matched, ${o} had model attribution data.</div>
+        </div>
+      </div>
+      ${Go(t,o)}`;let p=n.map(c=>Ts(c,r)).join("");return`
+    <div class="section" style="margin-top: 0;">
+      <div class="section-title">\u{1F4CA} Results \u2014 ${l(u)}</div>
+      <div class="summary-cards">
+        <div class="summary-card">
+          <div class="summary-label">\u{1F4C4} Session Files</div>
+          <div class="summary-value">${t}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${o} with model data</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">\u{1F9E9} Models</div>
+          <div class="summary-value">${n.length}</div>
+        </div>
+        <div class="summary-card">
+          <div class="summary-label">\u{1F4B0} Est. Total Cost</div>
+          <div class="summary-value">$${s.toFixed(2)}</div>
+        </div>
+      </div>
+      <div class="table-container" style="margin-top: 12px; max-height: 420px;">
+        <table class="session-table">
+          <thead>
+            <tr>
+              <th>Model</th>
+              <th>Sessions</th>
+              <th>Input</th>
+              <th>Output</th>
+              <th>Cache Create</th>
+              ${r?"<th>Cache Create (1h)</th>":""}
+              <th>Cache Read</th>
+              <th>Est. Cost</th>
+            </tr>
+          </thead>
+          <tbody>${p}</tbody>
+        </table>
+      </div>
+      ${Go(t,o)}
+    </div>`}function Ms(){if(E.length===0)return'<div style="color: var(--text-muted); font-size: 12px; margin: 8px 0;">No root folders added yet. Add a folder to scan for worktrees.</div>';let e=E.length>2,t=!e||Te,o=e?`<button class="worktree-roots-toggle" id="btn-toggle-worktree-roots" aria-expanded="${Te}"><span class="worktree-caret">${Te?"\u25BC":"\u25B6"}</span>${E.length} root folders found</button>`:"",n=t?`<div class="worktree-roots-list">${E.map((s,r)=>`<div class="worktree-root-item"><span title="${l(s)}">${l(s)}</span><button class="button secondary worktree-remove-root" data-index="${r}" ${w?"disabled":""}>\u2715</button></div>`).join("")}</div>`:"";return o+n}function Ls(e,t){let o=e.enriched??0,n=e.enrichTotal??0,s=n>0?Math.round(o/n*100):0;return`
+    <div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">\u{1F4E6} Computing sizes &amp; push status\u2026</div>
+      <div>${o} / ${n} worktree${n===1?"":"s"} analyzed (${t}s)</div>
+      <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${s}%;"></div></div>
+    </div>`}function Ds(e,t){let o=e.phase==="walking",n=o?"\u{1F50D} Scanning folder\u2026":"\u23F3 Checking markers\u2026",s=e.dirsScanned??0,r=o?`Exploring for git worktrees \u2014 ${s} folder${s===1?"":"s"} scanned (${t}s)`:`${e.checked} / ${e.total||"?"} .git markers checked \u2014 ${e.foundCount} worktree${e.foundCount===1?"":"s"} found so far (${t}s)`,i=o?100:e.total>0?Math.round(e.checked/e.total*100):0,a=o?"worktree-progress-fill indeterminate":"worktree-progress-fill";return`
+    <div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">${n}</div>
+      <div>Folder: <span style="font-family: var(--vscode-editor-font-family, monospace);">${l(e.root||"\u2026")}</span></div>
+      <div>${r}</div>
+      <div class="worktree-progress-bar"><div class="${a}" style="width: ${i}%;"></div></div>
+    </div>`}function tn(){if(!w)return"";let e=C,t=(e.elapsedMs/1e3).toFixed(1);return e.phase==="enriching"?Ls(e,t):Ds(e,t)}function on(){return`
+    <div class="section">
+      <div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Root Folders</span></div>
+      <div id="worktree-roots-list">${Ms()}</div>
+      <div class="folder-input-row" style="margin-top: 8px;">
+        <input
+          type="text"
+          id="worktree-root-input"
+          class="folder-input"
+          placeholder="Paste a root folder path here, e.g. C:\\code\\repos"
+          ${w?"disabled":""}
+        />
+        <button class="button secondary" id="btn-browse-worktree-root" ${w?"disabled":""}>\u{1F4C2} Browse\u2026</button>
+        <button class="button secondary" id="btn-add-worktree-root" ${w?"disabled":""}>\u2795 Add</button>
+      </div>
+      <div style="margin-top: 16px;">
+        <button class="button" id="btn-scan-worktrees" ${w||B||E.length===0?"disabled":""}>\u{1F50D} Scan for Worktrees</button>
+        ${w?'<button class="button secondary" id="btn-cancel-worktree-scan">\u2715 Cancel</button>':""}
+      </div>
+      ${Le?`<div class="info-box" style="margin-top: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);"><div>\u26A0\uFE0F ${l(Le)}</div></div>`:""}
+      <div id="worktree-progress-area">${tn()}</div>
+    </div>`}function _s(e){let t=new Map;for(let o of e){let n=o.repoLabel||"Unknown";t.has(n)||t.set(n,[]),t.get(n).push(o)}return t}function nt(e){return e.bytes<0}function _e(e){return e.bytes>0?e.bytes:0}function Rs(e){let t=nt(e),o=a=>`<span class="worktree-pending">${w?a:"\u2014"}</span>`,n=e.pushed==="yes"?"\u2705":e.pushed==="no"?"\u{1F534}":"\u2753",s=t?o("checking\u2026"):`${n} ${l(e.pushed)}`,r=t?o("\u2026"):l(String(e.files)),i=t?o("computing\u2026"):`<span title="${e.bytes.toLocaleString()} bytes">${J(e.bytes)}</span>`;return`<tr>
+    <td title="${l(e.path)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${l(e.path)}</td>
+    <td>${l(e.branch)}</td>
+    <td>${l(e.lastCommit)}</td>
+    <td>${s}</td>
+    <td>${r}</td>
+    <td>${i}</td>
+    <td>
+      <a href="#" class="worktree-reveal-link" data-path="${encodeURIComponent(e.path)}">Open</a>
+      <a href="#" class="worktree-delete-link" data-path="${encodeURIComponent(e.path)}" data-branch="${encodeURIComponent(e.branch)}" data-repo="${encodeURIComponent(e.repoLabel)}" data-pushed="${l(e.pushed)}" title="Remove via git worktree remove (asks for confirmation)">\u{1F5D1}\uFE0F Delete</a>
+    </td>
+  </tr>`}function Bs(e){return`<div class="table-container">
+    <table class="session-table">
+      <thead><tr><th>Path</th><th>Branch</th><th>Last Commit</th><th>Pushed</th><th>Files</th><th>Size</th><th>Actions</th></tr></thead>
+      <tbody>${[...e].sort((n,s)=>_e(s)-_e(n)).map(Rs).join("")}</tbody>
+    </table>
+  </div>`}function Ps(e){let t=e.reduce((s,r)=>s+_e(r),0),o=e.some(nt),n=`<span title="${t.toLocaleString()} bytes">${J(t)}</span>`;return o?`${n} <span class="worktree-pending">\u2026</span>`:n}function Hs(e,t){let o=Ye.has(e),n=o?"\u25BC":"\u25B6",s=l(e),r=`<tr class="worktree-repo-row${o?" expanded":""}" data-repo="${s}" aria-expanded="${o}">
+    <td><span class="worktree-caret">${n}</span> ${l(e)}</td>
+    <td>${t.length}</td>
+    <td>${Ps(t)}</td>
+  </tr>`,i=`<tr class="worktree-repo-details" data-repo="${s}"${o?"":' style="display: none;"'}>
+    <td colspan="3">${Bs(t)}</td>
+  </tr>`;return r+i}function $t(e){return De!==e?"":Ae==="desc"?" \u25BC":" \u25B2"}function Ns(e){return e.reduce((t,o)=>t+_e(o),0)}function Fs(e,t){let o=Ae==="desc"?-1:1;if(De==="repo")return o*e[0].localeCompare(t[0]);let n=r=>De==="count"?r.length:Ns(r),s=n(e[1])-n(t[1]);return s!==0?o*s:e[0].localeCompare(t[0])}function nn(){return L.filter(e=>e.pushed==="yes"&&!nt(e))}function zs(){let e=nn().length,t=B||Z||w||e===0,o=Z?"\u23F3 Waiting\u2026":`\u{1F9F9} Clean Up (${e})`;return`<div class="summary-card worktree-cleanup-card">
+    <div class="summary-label">Pushed Worktrees</div>
+    <div class="worktree-cleanup-card-actions">
+      <button class="button secondary" id="btn-cleanup-pushed-worktrees" ${t?"disabled":""}>${o}</button>
+      ${B?'<button class="button secondary" id="btn-cancel-cleanup">\u2715</button>':""}
+    </div>
+  </div>`}function Vo(){let e=O.filter(o=>o.status!=="deleted");return e.length===0?"":`<div class="worktree-cleanup-log">${e.map(o=>`<div class="worktree-cleanup-log-row">
+      <span>${o.status==="skipped"?"\u23ED\uFE0F":"\u274C"}</span>
+      <span class="worktree-cleanup-log-branch">${l(o.branch)}</span>
+      <span class="worktree-cleanup-log-repo">${l(o.repoLabel)}</span>
+      <span class="worktree-cleanup-log-reason">${l(o.reason||"")}</span>
+    </div>`).join("")}</div>`}function Os(){if(B){let{processed:n,total:s}=Lt,r=s>0?Math.round(n/s*100):0;return`<div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">\u{1F9F9} Cleaning up pushed worktrees\u2026</div>
+      <div>${n} / ${s} processed</div>
+      <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${r}%;"></div></div>
+    </div>${Vo()}`}if(O.length===0)return"";let e=O.filter(n=>n.status==="deleted").length,t=O.filter(n=>n.status==="skipped").length,o=O.filter(n=>n.status==="error").length;return`<div class="info-box" style="margin-top: 12px;">
+    <div class="info-box-title">\u{1F9F9} Cleanup finished</div>
+    <div>\u2705 ${e} deleted \xB7 \u23ED\uFE0F ${t} skipped (uncommitted/unpushed) \xB7 ${o>0?`\u274C ${o} error${o===1?"":"s"}`:"0 errors"}</div>
+  </div>${Vo()}`}function sn(){if(L.length===0)return w?'<div style="padding: 16px; color: var(--text-muted);">Discovering worktrees\u2026</div>':'<div style="padding: 16px; color: var(--text-muted);">No worktrees found yet. Add root folders above and click Scan.</div>';let e=_s(L),t=L.reduce((d,u)=>d+_e(u),0),o=L.some(nt),n=`${J(t)}${o?' <span class="worktree-pending">\u2026</span>':""}`,s=`<div class="summary-cards">
+    <div class="summary-card"><div class="summary-label">\u{1F333} Worktrees</div><div class="summary-value">${L.length}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1F4E6} Repositories</div><div class="summary-value">${e.size}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1F4BE} Total Size</div><div class="summary-value" title="${t.toLocaleString()} bytes">${n}</div></div>
+    ${zs()}
+  </div>`,i=[...e.entries()].sort(Fs).map(([d,u])=>Hs(d,u)).join(""),a=`<div class="table-container">
+    <table class="session-table worktree-repo-table">
+      <thead><tr>
+        <th class="sortable" data-wt-sort="repo">Repository${$t("repo")}</th>
+        <th class="sortable" data-wt-sort="count">Worktrees${$t("count")}</th>
+        <th class="sortable" data-wt-sort="size">Size${$t("size")}</th>
+      </tr></thead>
+      <tbody>${i}</tbody>
+    </table>
+  </div>`;return s+Os()+a}function Us(){return`
+    <div id="tab-worktrees" class="tab-content">
+      <div class="info-box">
+        <div class="info-box-title">\u{1F333} Worktree Discovery</div>
+        <div>
+          Scans folders for uncleaned git worktrees and reports disk usage grouped by repository (based on each
+          worktree's git remote). Add one or more root folders below, then click Scan. Results stream in as they're found.
+        </div>
+      </div>
+      <div id="worktree-controls">${on()}</div>
+      <div id="worktree-results">${sn()}</div>
+    </div>`}function rn(e){let t=[],o=new Map;for(let n of e||[]){let s=String(n.dir||"").replace(/\\/g,"/"),r=s.match(/^(.*\/\.copilot\/jb)\/[^/]+\/?$/);if(r){let i=r[1],a=o.get(i);if(a)a.count+=n.count;else{let d=s.length-i.length,u=n.dir.slice(0,n.dir.length-d);o.set(i,{dir:u,count:n.count,editorName:n.editorName||"JetBrains"})}}else t.push(n)}for(let n of o.values())t.push(n);return t}function Ws(){let e=window;return e.process?.env?.HOME||e.process?.env?.USERPROFILE||""}function js(e,t){let o=e.dir;t&&o.startsWith(t)&&(o=o.replace(t,"~"));let n=e.editorName||"Unknown",s=document.createElement("tr"),r=document.createElement("td");r.setAttribute("title",e.dir),r.textContent=o,s.appendChild(r);let i=document.createElement("td"),a=document.createElement("span");a.className=ot(n),a.textContent=`${P(n)} ${n}`,i.appendChild(a),s.appendChild(i);let d=document.createElement("td");d.textContent=String(e.count),s.appendChild(d);let u=document.createElement("td"),p=document.createElement("a");if(p.href="#",p.className="reveal-link",p.setAttribute("data-path",encodeURIComponent(e.dir)),p.textContent="Open directory",u.appendChild(p),n==="Unknown"){let c=document.createElement("a");c.href="#",c.className="report-editor-link",c.setAttribute("data-path",encodeURIComponent(e.dir)),c.setAttribute("title","Report this unknown path so we can add editor support"),c.textContent="\u{1F4E2} Report",u.appendChild(document.createTextNode(" ")),u.appendChild(c)}return s.appendChild(u),s}function an(e){let t=[...e].sort((v,k)=>k.count-v.count),o=t.reduce((v,k)=>v+k.count,0),n=Ws(),s=document.createElement("div");s.className="session-folders-table";let r=document.createElement("h4");r.textContent="Main Session Folders (by editor root):",s.appendChild(r);let i=document.createElement("table");i.className="session-table",s.appendChild(i);let a=document.createElement("thead");i.appendChild(a);let d=document.createElement("tr");a.appendChild(d);for(let v of["Folder","Editor","# of Sessions","Open"]){let k=document.createElement("th");k.textContent=v,d.appendChild(k)}let u=document.createElement("tbody");i.appendChild(u);for(let v of t)u.appendChild(js(v,n));let p=document.createElement("tr");p.style.borderTop="2px solid #5a5a5a",p.style.fontWeight="600",p.style.background="rgba(255, 255, 255, 0.05)";let c=document.createElement("td");c.setAttribute("colspan","2"),c.style.textAlign="right",c.style.paddingRight="16px",c.textContent="Total:",p.appendChild(c);let m=document.createElement("td");return m.textContent=String(o),p.appendChild(m),p.appendChild(document.createElement("td")),u.appendChild(p),s}function ln(){document.querySelectorAll(".open-storage-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-path")||"");o&&b.postMessage({command:"revealPath",path:o})})})}function Pt(){document.getElementById("btn-authenticate-github")?.addEventListener("click",()=>{b.postMessage({command:"authenticateGitHub"})}),document.getElementById("btn-sign-out-github")?.addEventListener("click",()=>{b.postMessage({command:"signOutGitHub"})})}function Ht(e){let t=document.querySelector(`.subtab[data-subtab="${e}"]`),o=document.getElementById(`subtab-${e}`);if(t&&o){let n=t.closest(".subtab-bar");return n&&n.querySelectorAll(".subtab").forEach(s=>s.classList.remove("active")),document.querySelectorAll(".subtab-content").forEach(s=>s.classList.remove("active")),t.classList.add("active"),o.classList.add("active"),!0}return!1}function Tt(e){let t=document.querySelector(`.tab[data-tab="${e}"]`),o=document.getElementById(`tab-${e}`);return t&&o?(document.querySelectorAll(".tab").forEach(n=>n.classList.remove("active")),document.querySelectorAll(".tab-content").forEach(n=>n.classList.remove("active")),t.classList.add("active"),o.classList.add("active"),!0):!1}function dn(){document.querySelectorAll(".sortable").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-sort");t&&(se===t?re=re==="desc"?"asc":"desc":(se=t,re="desc"),ce())})})}function cn(){document.querySelectorAll(".editor-panel").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-editor");de=t===""?null:t,ce()})})}function un(){document.querySelectorAll(".context-ref-filter").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-ref-type");ie===t?ie=null:ie=t,ce()})})}function pn(){let e=document.getElementById("show-only-unattributed");e&&e.addEventListener("change",()=>{Mt=e.checked,ce()})}function bn(){let e=document.getElementById("hide-empty-sessions");e&&e.addEventListener("change",()=>{$e=e.checked,ce()})}function Nt(){document.getElementById("btn-configure-backend")?.addEventListener("click",()=>{b.postMessage({command:"configureBackend"})}),document.getElementById("btn-configure-backend-team")?.addEventListener("click",()=>{U.patch({activeTab:"backend",activeSubtab:"backend-teamserver"}),b.postMessage({command:"configureTeamServer"})}),document.getElementById("btn-team-server-auth-warning")?.addEventListener("click",()=>{b.postMessage({command:"authenticateGitHub"})}),document.getElementById("btn-open-settings")?.addEventListener("click",()=>{b.postMessage({command:"openSettings"})}),document.getElementById("btn-open-display-settings")?.addEventListener("click",()=>{b.postMessage({command:"openDisplaySettings"})})}function qs(){document.getElementById("select-show-tokens")?.addEventListener("change",e=>{let t=e.target.value;b.postMessage({command:"updateDisplaySetting",key:"display.statusBar.showTokens",value:t})}),document.getElementById("select-show-cost")?.addEventListener("change",e=>{let t=e.target.value;b.postMessage({command:"updateDisplaySetting",key:"display.statusBar.showCost",value:t})}),document.getElementById("input-monthly-budget")?.addEventListener("change",e=>{let t=e.target,o=parseFloat(t.value),n=isNaN(o)?0:Math.min(99999,Math.max(0,Math.round(o*100)/100));t.value=n.toString(),b.postMessage({command:"updateDisplaySetting",key:"display.statusBar.monthlyBudget",value:n})})}function Ft(){document.querySelectorAll(".subtab").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-subtab");if(!t)return;let o=e.closest(".subtab-bar");o&&o.querySelectorAll(".subtab").forEach(n=>n.classList.remove("active")),document.querySelectorAll(".subtab-content").forEach(n=>n.classList.remove("active")),e.classList.add("active"),document.getElementById(`subtab-${t}`)?.classList.add("active"),U.patch({activeSubtab:t})})})}function ce(){let e=document.getElementById("session-table-container");e&&(e.innerHTML=Qo(Ee,Ie),Ie||(dn(),cn(),un(),bn(),pn(),mn()))}function Gs(){document.querySelectorAll(".tool-analysis-table").forEach(e=>{let t=e.getAttribute("data-rows");if(!t)return;let o=JSON.parse(decodeURIComponent(t)),n=e.getAttribute("data-baseline"),s=n?parseFloat(n):NaN,r=e.querySelector("tbody");r&&(r.innerHTML=Ot(o,s));let i=e.querySelector("thead");i&&(i.innerHTML=Ut())}),zt()}function zt(){document.querySelectorAll(".tool-sortable").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-sort");t&&(et===t?ae=ae==="desc"?"asc":"desc":(et=t,ae=t==="tool"?"asc":"desc"),Gs())})}),document.getElementById("btn-open-tool-families-settings")?.addEventListener("click",()=>{b.postMessage({command:"openToolFamiliesSettings"})})}function mn(){document.querySelectorAll(".session-file-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-file")||"");b.postMessage({command:"openSessionFile",file:o})})}),document.querySelectorAll(".view-formatted-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-file")||"");b.postMessage({command:"openFormattedJsonlFile",file:o})})}),document.querySelectorAll(".reveal-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-path")||"");b.postMessage({command:"revealPath",path:o})})}),document.querySelectorAll(".report-editor-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-path")||"");b.postMessage({command:"reportNewEditorPath",path:o})})})}function At(){let e=document.getElementById("tab-cache");if(e){let t=e.querySelectorAll(".summary-card");if(t.length>=4){let o=t[0]?.querySelector(".summary-value");o&&(o.textContent="0");let n=t[1]?.querySelector(".summary-value");n&&(n.textContent="0 MB");let s=t[2]?.querySelector(".summary-value");s&&(s.textContent="Never");let r=t[3]?.querySelector(".summary-value");r&&(r.textContent="N/A")}}}function Vs(){document.getElementById("btn-browse-folder")?.addEventListener("click",()=>{b.postMessage({command:"pickFolder"})}),document.getElementById("btn-analyze-folder")?.addEventListener("click",()=>{let e=document.getElementById("folder-path-input"),t=document.getElementById("tool-type-select"),o=e?.value.trim()??"";if(!o){e&&(e.style.borderColor="#d97706",e.focus());return}e&&(e.style.borderColor="");let n=document.getElementById("btn-analyze-folder");n&&(n.disabled=!0,n.innerHTML="<span>\u23F3</span><span>Analyzing\u2026</span>");let s=document.getElementById("folder-analysis-results");s&&(s.innerHTML=`
           <div class="analyzer-loading">
             <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
             <span>Scanning files\u2026</span>
-          </div>`;
-      }
-      vscode.postMessage({
-        command: "analyzeFolder",
-        folderPath,
-        toolType: select?.value ?? "auto"
-      });
-    });
-  }
-  function setupTabHandlers() {
-    document.querySelectorAll(".tab").forEach((tab) => {
-      tab.addEventListener("click", () => {
-        const tabId = tab.getAttribute("data-tab");
-        if (tabId && activateTab(tabId)) {
-          diagState.patch({ activeTab: tabId });
-        }
-      });
-    });
-  }
-  function handleClearCacheClick(target) {
-    target.style.background = "#d97706";
-    target.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
-    if (target instanceof HTMLButtonElement) {
-      target.disabled = true;
-    }
-    updateCacheNumbers();
-    vscode.postMessage({ command: "clearCache" });
-  }
-  function handleDebugCounterSetClick(target) {
-    const key = target.getAttribute("data-key");
-    const row = target.closest("tr");
-    const input = row?.querySelector(".debug-counter-input");
-    if (key && input) {
-      const value = parseInt(input.value, 10);
-      if (!isNaN(value)) {
-        vscode.postMessage({ command: "setDebugCounter", key, value });
-      }
-    }
-  }
-  function handleDebugFlagSetClick(target) {
-    const key = target.getAttribute("data-key");
-    const row = target.closest("tr");
-    const input = row?.querySelector(".debug-flag-input");
-    if (key && input) {
-      vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
-    }
-  }
-  function handleGlobalClickEvent(event) {
-    const target = event.target;
-    if (!target) {
-      return;
-    }
-    if (target.id === "btn-clear-cache" || target.id === "btn-clear-cache-tab") {
-      handleClearCacheClick(target);
-    }
-    if (target.id === "btn-reset-insights" || target.id === "btn-reset-insights-tab") {
-      vscode.postMessage({ command: "resetInsightsState" });
-    }
-    if (target.id === "btn-reset-debug-counters") {
-      vscode.postMessage({ command: "resetDebugCounters" });
-    }
-    if (target.classList.contains("debug-counter-set")) {
-      handleDebugCounterSetClick(target);
-    }
-    if (target.classList.contains("debug-flag-set")) {
-      handleDebugFlagSetClick(target);
-    }
-  }
-  function wireNavButtons() {
-    document.getElementById("btn-refresh")?.addEventListener(
-      "click",
-      () => vscode.postMessage({ command: "refresh" })
-    );
-    document.getElementById("btn-chart")?.addEventListener(
-      "click",
-      () => vscode.postMessage({ command: "showChart" })
-    );
-    document.getElementById("btn-usage")?.addEventListener(
-      "click",
-      () => vscode.postMessage({ command: "showUsageAnalysis" })
-    );
-    document.getElementById("btn-details")?.addEventListener(
-      "click",
-      () => vscode.postMessage({ command: "showDetails" })
-    );
-    document.getElementById("btn-diagnostics")?.addEventListener(
-      "click",
-      () => vscode.postMessage({ command: "showDiagnostics" })
-    );
-    document.getElementById("btn-maturity")?.addEventListener(
-      "click",
-      () => vscode.postMessage({ command: "showMaturity" })
-    );
-    document.getElementById("btn-dashboard")?.addEventListener(
-      "click",
-      () => vscode.postMessage({ command: "showDashboard" })
-    );
-    document.getElementById("btn-environmental")?.addEventListener(
-      "click",
-      () => vscode.postMessage({ command: "showEnvironmental" })
-    );
-    wireExtensionPointButtons(vscode);
-  }
-  function setupButtonHandlers() {
-    document.getElementById("btn-copy")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "copyReport" });
-    });
-    document.getElementById("btn-issue")?.addEventListener("click", () => {
-      vscode.postMessage({ command: "openIssue" });
-    });
-    document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
-      const btn = document.getElementById(
-        "btn-clear-cache"
-      );
-      if (btn) {
-        btn.style.background = "#d97706";
-        btn.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
-        btn.disabled = true;
-      }
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    });
-    document.getElementById("btn-clear-cache-tab")?.addEventListener("click", () => {
-      const btn = document.getElementById(
-        "btn-clear-cache-tab"
-      );
-      if (btn) {
-        btn.style.background = "#d97706";
-        btn.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
-        btn.disabled = true;
-      }
-      updateCacheNumbers();
-      vscode.postMessage({ command: "clearCache" });
-    });
-    document.addEventListener("click", handleGlobalClickEvent);
-    wireNavButtons();
-  }
-  function handleDiagnosticReport(message) {
-    if (!message.report) {
-      return;
-    }
-    const reportTabContent = document.getElementById("tab-report");
-    if (!reportTabContent) {
-      return;
-    }
-    const processedReport = removeSessionFilesSection(message.report);
-    const reportPre = reportTabContent.querySelector(".report-content");
-    if (reportPre) {
-      reportPre.textContent = processedReport;
-    }
-  }
-  function handleBackendStorageSection(message) {
-    if (!message.backendStorageInfo) {
-      console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");
-      return;
-    }
-    currentBackendInfo = message.backendStorageInfo;
-    if (message.githubAuth !== void 0) {
-      currentGithubAuth = message.githubAuth;
-    }
-    const backendTabContent = document.getElementById("tab-backend");
-    if (!backendTabContent) {
-      return;
-    }
-    const activeSubtabEl = backendTabContent.querySelector(".subtab.active");
-    const previousSubtab = activeSubtabEl?.getAttribute("data-subtab") ?? diagState.restore().activeSubtab;
-    backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
-    setupBackendButtonHandlers();
-    setupSubtabHandlers();
-    if (previousSubtab) {
-      activateSubtab(previousSubtab);
-      diagState.patch({ activeSubtab: previousSubtab });
-    }
-  }
-  function handleSessionFoldersSection(message) {
-    if (!message.sessionFolders || message.sessionFolders.length === 0) {
-      return;
-    }
-    const reportTabContent = document.getElementById("tab-report");
-    if (!reportTabContent) {
-      return;
-    }
-    const grouped = groupSessionFolders(message.sessionFolders);
-    const foldersEl = buildSessionFoldersElement(grouped);
-    const existing = reportTabContent.querySelector(".session-folders-table");
-    if (existing) {
-      existing.replaceWith(foldersEl);
-    } else {
-      const reportContent = reportTabContent.querySelector(".report-content");
-      if (reportContent) {
-        reportContent.insertAdjacentElement("afterend", foldersEl);
-      } else {
-        reportTabContent.appendChild(foldersEl);
-      }
-    }
-    setupStorageLinkHandlers();
-  }
-  function handleCandidatePathsSection(message) {
-    if (!message.candidatePaths || message.candidatePaths.length === 0) {
-      return;
-    }
-    const reportTabContent = document.getElementById("tab-report");
-    if (!reportTabContent) {
-      return;
-    }
-    reportTabContent.querySelector(".candidate-paths-table")?.remove();
-    const candidateEl = buildCandidatePathsElement(message.candidatePaths);
-    const foldersTable = reportTabContent.querySelector(".session-folders-table");
-    if (foldersTable) {
-      foldersTable.insertAdjacentElement("afterend", candidateEl);
-    } else {
-      const reportContent = reportTabContent.querySelector(".report-content");
-      if (reportContent) {
-        reportContent.insertAdjacentElement("afterend", candidateEl);
-      } else {
-        reportTabContent.appendChild(candidateEl);
-      }
-    }
-  }
-  function handleDiagnosticDataLoaded(message) {
-    handleDiagnosticReport(message);
-    handleBackendStorageSection(message);
-    handleSessionFoldersSection(message);
-    handleCandidatePathsSection(message);
-    if (message.githubAuth !== void 0) {
-      const githubTabContent = document.getElementById("tab-github");
-      if (githubTabContent) {
-        githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
-        setupGitHubAuthHandlers();
-      }
-    }
-    if (message.toolFamilies) {
-      storedToolFamilies = message.toolFamilies;
-    }
-    if (message.toolCallStats !== void 0) {
-      const toolAnalysisTab = document.getElementById("tab-tool-analysis");
-      if (toolAnalysisTab) {
-        const wasActive = toolAnalysisTab.classList.contains("active");
-        const newContent = renderToolAnalysisTab(message.toolCallStats, storedToolFamilies);
-        const temp = document.createElement("div");
-        temp.innerHTML = newContent;
-        const newTab = temp.firstElementChild;
-        if (newTab) {
-          if (wasActive) {
-            newTab.classList.add("active");
-          }
-          toolAnalysisTab.replaceWith(newTab);
-          setupToolAnalysisSortHandlers();
-        }
-      }
-    }
-  }
-  function handleGithubAuthUpdated(message) {
-    currentGithubAuth = message.githubAuth;
-    const githubTabContent = document.getElementById("tab-github");
-    if (githubTabContent) {
-      githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
-      setupGitHubAuthHandlers();
-    }
-    const backendTabContent = document.getElementById("tab-backend");
-    if (backendTabContent && currentBackendInfo) {
-      const activeSubtabEl = backendTabContent.querySelector(".subtab.active");
-      const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
-      backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
-      setupBackendButtonHandlers();
-      setupSubtabHandlers();
-      if (previousSubtab) {
-        activateSubtab(previousSubtab);
-      }
-    }
-  }
-  function handleDiagnosticDataError(message) {
-    console.error("Error loading diagnostic data:", message.error);
-    const rootEl = document.getElementById("root");
-    if (rootEl) {
-      const errorDiv = document.createElement("div");
-      errorDiv.style.cssText = "color: #ff6b6b; padding: 20px; text-align: center;";
-      errorDiv.innerHTML = `
-<h3>\u26A0\uFE0F Error Loading Diagnostic Data</h3>
-<p>${escapeHtml(message.error || "Unknown error")}</p>
-`;
-      rootEl.insertBefore(errorDiv, rootEl.firstChild);
-    }
-  }
-  function sanitizeNumericRecord(input) {
-    if (!input || typeof input !== "object") {
-      return {};
-    }
-    return Object.fromEntries(
-      Object.entries(input).map(([key, value]) => [key, Number(value ?? 0) || 0])
-    );
-  }
-  function numField(v2) {
-    return Number(v2 ?? 0) || 0;
-  }
-  function optStr(v2) {
-    return v2 === null || v2 === void 0 ? void 0 : String(v2);
-  }
-  function nullStr(v2) {
-    return v2 === null || v2 === void 0 ? null : String(v2);
-  }
-  function sanitizeContextReferences(contextRefs) {
-    return {
-      file: numField(contextRefs.file),
-      symbol: numField(contextRefs.symbol),
-      selection: numField(contextRefs.selection),
-      implicitSelection: numField(contextRefs.implicitSelection),
-      codebase: numField(contextRefs.codebase),
-      workspace: numField(contextRefs.workspace),
-      terminal: numField(contextRefs.terminal),
-      vscode: numField(contextRefs.vscode),
-      terminalLastCommand: numField(contextRefs.terminalLastCommand),
-      terminalSelection: numField(contextRefs.terminalSelection),
-      clipboard: numField(contextRefs.clipboard),
-      changes: numField(contextRefs.changes),
-      outputPanel: numField(contextRefs.outputPanel),
-      problemsPanel: numField(contextRefs.problemsPanel),
-      pullRequest: numField(contextRefs.pullRequest),
-      byKind: sanitizeNumericRecord(contextRefs.byKind),
-      copilotInstructions: numField(contextRefs.copilotInstructions),
-      agentsMd: numField(contextRefs.agentsMd),
-      byPath: sanitizeNumericRecord(contextRefs.byPath)
-    };
-  }
-  function sanitizeChildInfo(sf) {
-    if (!Array.isArray(sf.childInfo)) {
-      return void 0;
-    }
-    return sf.childInfo.filter((child) => !!child && typeof child === "object").map((child) => ({
-      uuid: String(child.uuid ?? ""),
-      name: String(child.name ?? ""),
-      sessionFile: optStr(child.sessionFile)
-    }));
-  }
-  function sanitizeParentInfo(sf) {
-    if (!sf.parentInfo || typeof sf.parentInfo !== "object") {
-      return void 0;
-    }
-    const p3 = sf.parentInfo;
-    return {
-      uuid: String(p3.uuid ?? ""),
-      name: String(p3.name ?? ""),
-      sessionFile: optStr(p3.sessionFile)
-    };
-  }
-  function sanitizeSessionFileItem(item) {
-    const sf = item ?? {};
-    const contextRefs = sf.contextReferences ?? {};
-    return {
-      file: String(sf.file ?? sf.sessionFile ?? ""),
-      editorSource: String(sf.editorSource ?? ""),
-      editorRoot: optStr(sf.editorRoot),
-      editorName: optStr(sf.editorName),
-      title: optStr(sf.title),
-      repository: optStr(sf.repository),
-      size: numField(sf.size),
-      modified: String(sf.modified ?? ""),
-      tokens: numField(sf.tokens),
-      interactions: numField(sf.interactions),
-      firstInteraction: nullStr(sf.firstInteraction),
-      lastInteraction: nullStr(sf.lastInteraction),
-      contextReferences: sanitizeContextReferences(contextRefs),
-      parentInfo: sanitizeParentInfo(sf),
-      childInfo: sanitizeChildInfo(sf),
-      totalChildCount: sf.totalChildCount === null || sf.totalChildCount === void 0 ? void 0 : Number(sf.totalChildCount)
-    };
-  }
-  function sanitizeDetailedSessionFiles(input) {
-    if (!Array.isArray(input)) {
-      return [];
-    }
-    return input.map(sanitizeSessionFileItem);
-  }
-  function handleSessionFilesLoaded(message) {
-    storedDetailedFiles = sanitizeDetailedSessionFiles(message.detailedSessionFiles);
-    isLoading = false;
-    const sessionsTab = document.querySelector('.tab[data-tab="sessions"]');
-    if (sessionsTab) {
-      sessionsTab.textContent = `\u{1F4C1} Session Files (${storedDetailedFiles.length})`;
-    }
-    reRenderTable();
-  }
-  function handleCacheCleared() {
-    const btnReport = document.getElementById(
-      "btn-clear-cache"
-    );
-    const btnTab = document.getElementById(
-      "btn-clear-cache-tab"
-    );
-    if (btnReport) {
-      btnReport.style.background = "#2d6a4f";
-      btnReport.innerHTML = "<span>\u2705</span><span>Cache Cleared</span>";
-      btnReport.disabled = false;
-    }
-    if (btnTab) {
-      btnTab.style.background = "#2d6a4f";
-      btnTab.innerHTML = "<span>\u2705</span><span>Cache Cleared</span>";
-      btnTab.disabled = false;
-    }
-    setTimeout(() => {
-      if (btnReport) {
-        btnReport.style.background = "";
-        btnReport.innerHTML = "<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>";
-      }
-      if (btnTab) {
-        btnTab.style.background = "";
-        btnTab.innerHTML = "<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>";
-      }
-    }, 2e3);
-  }
-  function updateCacheSummaryCards(cacheInfo, summaryCards) {
-    if (summaryCards.length < 4) {
-      return;
-    }
-    const entriesValue = summaryCards[0]?.querySelector(".summary-value");
-    if (entriesValue) {
-      entriesValue.textContent = String(cacheInfo.size);
-    }
-    const sizeValue = summaryCards[1]?.querySelector(".summary-value");
-    if (sizeValue) {
-      sizeValue.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`;
-    }
-    const lastUpdatedValue = summaryCards[2]?.querySelector(".summary-value");
-    if (lastUpdatedValue) {
-      lastUpdatedValue.textContent = new Date(cacheInfo.lastUpdated).toLocaleString();
-    }
-    const ageValue = summaryCards[3]?.querySelector(".summary-value");
-    if (ageValue) {
-      ageValue.textContent = "0 seconds ago";
-    }
-  }
-  function handleCacheRefreshed(message) {
-    if (!message.cacheInfo) {
-      return;
-    }
-    const cacheTabContent = document.getElementById("tab-cache");
-    if (!cacheTabContent) {
-      return;
-    }
-    updateCacheSummaryCards(message.cacheInfo, cacheTabContent.querySelectorAll(".summary-card"));
-  }
-  function handleFolderPicked(message) {
-    const input = document.getElementById("folder-path-input");
-    if (input && message.folderPath) {
-      input.value = message.folderPath;
-      input.style.borderColor = "";
-    }
-  }
-  function handleFolderAnalysisResult(message) {
-    const btn = document.getElementById("btn-analyze-folder");
-    if (btn) {
-      btn.disabled = false;
-      btn.innerHTML = "<span>\u{1F50D}</span><span>Analyze</span>";
-    }
-    const resultsDiv = document.getElementById("folder-analysis-results");
-    if (resultsDiv) {
-      if (message.error) {
-        resultsDiv.innerHTML = `
+          </div>`),b.postMessage({command:"analyzeFolder",folderPath:o,toolType:t?.value??"auto"})})}function tt(){let e=document.getElementById("model-usage-editor-select"),t=document.getElementById("model-usage-time-select");if(!e||e.disabled)return;let o=e.value||"all",n=t?.value||"all",s=document.getElementById("model-usage-results");s&&(s.innerHTML=`
+        <div class="analyzer-loading">
+          <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
+          <span>Aggregating model usage\u2026</span>
+        </div>`),b.postMessage({command:"analyzeModelUsage",editor:o,timeRange:n})}function Zs(){document.getElementById("model-usage-editor-select")?.addEventListener("change",()=>{tt()}),document.getElementById("model-usage-time-select")?.addEventListener("change",()=>{tt()})}function Js(e){let t=document.getElementById("model-usage-results");if(t){if(e.stillLoading){t.innerHTML=`
+      <div class="info-box" style="margin-top: 12px;">
+        <div class="info-box-title">\u23F3 Still loading session files</div>
+        <div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>
+      </div>`;return}t.innerHTML=Is(String(e.editor||"all"),Number(e.fileCount||0),Number(e.filesWithUsage||0),e.rows||[],Number(e.totalCost||0),e.supportsCache1h!==!1,String(e.timeRange||"all"))}}function D(){let e=document.getElementById("worktree-controls");e&&(e.innerHTML=on())}function T(){let e=document.getElementById("worktree-results");e&&(e.innerHTML=sn())}function ue(){let e=document.getElementById("worktree-progress-area");e&&(e.innerHTML=tn())}function hn(){Ct||(Ct=!0,requestAnimationFrame(()=>{Ct=!1,T()}))}function gn(){let e=document.getElementById("worktree-root-input"),t=e?.value.trim();t&&(E.some(o=>o.toLowerCase()===t.toLowerCase())||E.push(t),e&&(e.value=""),D())}function Ks(){E.length===0||w||B||(w=!0,L=[],Le=null,C={root:"",checked:0,total:0,foundCount:0,elapsedMs:0},O=[],D(),T(),b.postMessage({command:"scanWorktrees",rootPaths:E}))}function Ys(){if(B||Z||w)return;let e=nn();e.length!==0&&(Z=!0,T(),b.postMessage({command:"cleanupPushedWorktrees",worktrees:e.map(t=>({path:t.path,branch:t.branch,repoLabel:t.repoLabel}))}))}function Xs(e){return e.id==="btn-browse-worktree-root"?(b.postMessage({command:"pickWorktreeRoot"}),!0):e.id==="btn-add-worktree-root"?(gn(),!0):e.id==="btn-scan-worktrees"?(Ks(),!0):e.id==="btn-cancel-worktree-scan"?(b.postMessage({command:"cancelWorktreeScan"}),!0):e.id==="btn-cleanup-pushed-worktrees"?(Ys(),!0):e.id==="btn-cancel-cleanup"?(b.postMessage({command:"cancelCleanupPushedWorktrees"}),!0):!1}function Qs(e){if(e.closest("#btn-toggle-worktree-roots"))return Te=!Te,D(),!0;if(e.classList.contains("worktree-remove-root")){let t=Number(e.getAttribute("data-index"));return isNaN(t)||(E.splice(t,1),D()),!0}return!1}function er(e,t){let o=t.closest(".worktree-reveal-link");if(o){e.preventDefault();let s=decodeURIComponent(o.getAttribute("data-path")||"");return s&&b.postMessage({command:"revealPath",path:s}),!0}let n=t.closest(".worktree-delete-link");if(n){e.preventDefault();let s=decodeURIComponent(n.getAttribute("data-path")||""),r=decodeURIComponent(n.getAttribute("data-branch")||""),i=decodeURIComponent(n.getAttribute("data-repo")||""),a=n.getAttribute("data-pushed")||"?";return s&&b.postMessage({command:"deleteWorktree",path:s,branch:r,repoLabel:i,pushed:a}),!0}return!1}function tr(e){let t=e.closest("[data-wt-sort]");if(!t)return!1;let o=t.getAttribute("data-wt-sort");return o&&(De===o?Ae=Ae==="desc"?"asc":"desc":(De=o,Ae=o==="repo"?"asc":"desc"),T()),!0}function or(e){let t=e.closest(".worktree-repo-row");if(!t)return!1;let o=t.getAttribute("data-repo")??"";return Ye.has(o)?Ye.delete(o):Ye.add(o),T(),!0}function nr(e){return tr(e)?!0:or(e)}function sr(e){let t=e.target;t&&(Xs(t)||Qs(t)||er(e,t)||nr(t))}function rr(){let e=document.getElementById("tab-worktrees");e&&(e.addEventListener("click",sr),e.addEventListener("keydown",t=>{t.target?.id==="worktree-root-input"&&t.key==="Enter"&&(t.preventDefault(),gn())}))}function ir(e){let t=e??{},o=String(t.pushed??"?"),n=o==="yes"||o==="no"?o:"?";return{path:String(t.path??""),repoLabel:String(t.repoLabel??"Unknown"),branch:String(t.branch??"?"),lastCommit:String(t.lastCommit??"?"),lastCommitDate:t.lastCommitDate?String(t.lastCommitDate):null,pushed:n,files:h(t.files),folders:h(t.folders),bytes:h(t.bytes)}}function ar(e){if(!e.folderPath)return;let t=String(e.folderPath);E.some(o=>o.toLowerCase()===t.toLowerCase())||E.push(t),D()}function lr(e){if(w||!Array.isArray(e.roots))return;let t=!1;for(let o of e.roots){if(typeof o!="string")continue;let n=o.trim();n&&(E.some(s=>s.toLowerCase()===n.toLowerCase())||(E.push(n),t=!0))}t&&D()}function dr(){w=!0,L=[],Le=null,C={root:"",checked:0,total:0,foundCount:0,elapsedMs:0},D(),T()}function cr(e){C={...C,root:String(e.root||""),checked:0,total:0,phase:"walking",dirsScanned:0},ue()}function ur(e){C={...C,root:String(e.root??C.root),phase:"walking",dirsScanned:h(e.dirsScanned),elapsedMs:h(e.elapsedMs)},ue()}function pr(e){C={...C,total:h(e.count),phase:"checking"},ue()}function br(e){Le=`Skipped "${e.root}": ${e.reason||"not accessible"}`,D()}function mr(e){C={root:String(e.root??C.root),checked:h(e.checked),total:e.total!==void 0?h(e.total):C.total,foundCount:h(e.foundCount),elapsedMs:h(e.elapsedMs)},ue()}function hr(e){e.worktree&&(L.push(ir(e.worktree)),hn())}function gr(e){let t=String(e.path??"");if(!t)return;let o=L.findIndex(n=>n.path===t);o!==-1&&(L.splice(o,1),T())}function vr(){Z=!1,T()}function fr(e){Z=!1,B=!0,Lt={processed:0,total:h(e.total)},O=[],T()}function yr(e){Lt={processed:h(e.processed),total:h(e.total)};let t=e.status,o=t==="deleted"||t==="skipped"?t:"error";O.push({path:String(e.path??""),branch:String(e.branch??"?"),repoLabel:String(e.repoLabel??""),status:o,reason:typeof e.reason=="string"?e.reason:void 0}),T()}function xr(){B=!1,T()}function kr(){B=!1,Z=!1,T()}function Sr(e){C={...C,phase:"enriching",enriched:0,enrichTotal:h(e.total),elapsedMs:h(e.elapsedMs)},ue()}function wr(e){C={...C,phase:"enriching",enriched:h(e.enriched),enrichTotal:h(e.total),elapsedMs:h(e.elapsedMs)},ue()}function Cr(e){let t=String(e.path??"");if(!t)return;let o=L.find(s=>s.path===t);if(!o)return;o.files=h(e.files),o.folders=h(e.folders),o.bytes=h(e.bytes);let n=String(e.pushed??"?");o.pushed=n==="yes"||n==="no"?n:"?",hn()}function $r(){w=!1,D(),T()}function Er(){w=!1,D()}function Tr(){document.querySelectorAll(".tab").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-tab");if(t&&Tt(t)&&(U.patch({activeTab:t}),t==="model-usage")){let o=document.getElementById("model-usage-results");o&&!o.innerHTML.trim()&&tt()}})})}function Ar(e){e.style.background="#d97706",e.innerHTML="<span>\u23F3</span><span>Clearing...</span>",e instanceof HTMLButtonElement&&(e.disabled=!0),At(),b.postMessage({command:"clearCache"})}function Ir(e){let t=e.getAttribute("data-key"),n=e.closest("tr")?.querySelector(".debug-counter-input");if(t&&n){let s=parseInt(n.value,10);isNaN(s)||b.postMessage({command:"setDebugCounter",key:t,value:s})}}function Mr(e){let t=e.getAttribute("data-key"),n=e.closest("tr")?.querySelector(".debug-flag-input");t&&n&&b.postMessage({command:"setDebugFlag",key:t,value:n.checked})}function Lr(e){let t=e.target;t&&((t.id==="btn-clear-cache"||t.id==="btn-clear-cache-tab")&&Ar(t),(t.id==="btn-reset-insights"||t.id==="btn-reset-insights-tab")&&b.postMessage({command:"resetInsightsState"}),t.id==="btn-reset-debug-counters"&&b.postMessage({command:"resetDebugCounters"}),t.id==="btn-reset-discovered-editors"&&b.postMessage({command:"resetDiscoveredEditors"}),t.classList.contains("debug-counter-set")&&Ir(t),t.classList.contains("debug-flag-set")&&Mr(t))}function Dr(){document.getElementById("btn-refresh")?.addEventListener("click",()=>b.postMessage({command:"refresh"})),document.getElementById("btn-chart")?.addEventListener("click",()=>b.postMessage({command:"showChart"})),document.getElementById("btn-usage")?.addEventListener("click",()=>b.postMessage({command:"showUsageAnalysis"})),document.getElementById("btn-details")?.addEventListener("click",()=>b.postMessage({command:"showDetails"})),document.getElementById("btn-diagnostics")?.addEventListener("click",()=>b.postMessage({command:"showDiagnostics"})),document.getElementById("btn-maturity")?.addEventListener("click",()=>b.postMessage({command:"showMaturity"})),document.getElementById("btn-dashboard")?.addEventListener("click",()=>b.postMessage({command:"showDashboard"})),document.getElementById("btn-environmental")?.addEventListener("click",()=>b.postMessage({command:"showEnvironmental"})),qt(b)}function _r(){document.getElementById("btn-copy")?.addEventListener("click",()=>{b.postMessage({command:"copyReport"})}),document.getElementById("btn-issue")?.addEventListener("click",()=>{b.postMessage({command:"openIssue"})}),document.getElementById("btn-clear-cache")?.addEventListener("click",()=>{let e=document.getElementById("btn-clear-cache");e&&(e.style.background="#d97706",e.innerHTML="<span>\u23F3</span><span>Clearing...</span>",e.disabled=!0),At(),b.postMessage({command:"clearCache"})}),document.getElementById("btn-clear-cache-tab")?.addEventListener("click",()=>{let e=document.getElementById("btn-clear-cache-tab");e&&(e.style.background="#d97706",e.innerHTML="<span>\u23F3</span><span>Clearing...</span>",e.disabled=!0),At(),b.postMessage({command:"clearCache"})}),document.addEventListener("click",Lr),Dr()}function Rr(e){if(!e.report)return;let t=document.getElementById("tab-report");if(!t)return;let o=Xo(e.report),n=t.querySelector(".report-content");n&&(n.textContent=o)}function Br(e){if(!e.backendStorageInfo){console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");return}Me=e.backendStorageInfo,e.githubAuth!==void 0&&(le=e.githubAuth);let t=document.getElementById("tab-backend");if(!t)return;let n=t.querySelector(".subtab.active")?.getAttribute("data-subtab")??U.restore().activeSubtab;t.innerHTML=Bt(Me,le),Nt(),Ft(),n&&(Ht(n),U.patch({activeSubtab:n}))}function Pr(e){if(!e.sessionFolders||e.sessionFolders.length===0)return;let t=document.getElementById("tab-report");if(!t)return;let o=rn(e.sessionFolders),n=an(o),s=t.querySelector(".session-folders-table");if(s)s.replaceWith(n);else{let r=t.querySelector(".report-content");r?r.insertAdjacentElement("afterend",n):t.appendChild(n)}ln()}function Hr(e){if(!e.candidatePaths||e.candidatePaths.length===0)return;let t=document.getElementById("tab-report");if(!t)return;t.querySelector(".candidate-paths-table")?.remove();let o=ts(e.candidatePaths),n=t.querySelector(".session-folders-table");if(n)n.insertAdjacentElement("afterend",o);else{let s=t.querySelector(".report-content");s?s.insertAdjacentElement("afterend",o):t.appendChild(o)}}function vn(e,t,o){let n=document.getElementById(`tab-${e}`);if(!n)return;let s=n.classList.contains("active"),r=document.createElement("div");r.innerHTML=t;let i=r.firstElementChild;i&&(s&&i.classList.add("active"),n.replaceWith(i),o?.())}function Nr(e){if(e.githubAuth===void 0)return;let t=document.getElementById("tab-github");t&&(t.innerHTML=Rt(e.githubAuth),Pt())}function Fr(e){if(e.toolFamilies&&(Et=e.toolFamilies),e.toolCallStats===void 0)return;let t=xn(e.toolCallStats,Et);vn("tool-analysis",t,zt)}function fn(){vn("otel-delta",Sn(It,Qe),yn)}function yn(){let e=document.getElementById("otel-delta-period");e&&e.addEventListener("change",()=>{Qe=e.value,U.patch({otelDeltaPeriod:Qe}),fn()})}function zr(e){e.otelComparison!==void 0&&(It=e.otelComparison,fn())}function Or(e){Rr(e),Br(e),Pr(e),Hr(e),Nr(e),Fr(e),zr(e)}function Ur(e){le=e.githubAuth;let t=document.getElementById("tab-github");t&&(t.innerHTML=Rt(le),Pt());let o=document.getElementById("tab-backend");if(o&&Me){let s=o.querySelector(".subtab.active")?.getAttribute("data-subtab");o.innerHTML=Bt(Me,le),Nt(),Ft(),s&&Ht(s)}}function Wr(e){console.error("Error loading diagnostic data:",e.error);let t=document.getElementById("root");if(t){let o=document.createElement("div");o.style.cssText="color: #ff6b6b; padding: 20px; text-align: center;",o.innerHTML=`
+<h3><span class="codicon codicon-warning"></span> Error Loading Diagnostic Data</h3>
+<p>${l(e.error||"Unknown error")}</p>
+`,t.insertBefore(o,t.firstChild)}}function Zo(e){return!e||typeof e!="object"?{}:Object.fromEntries(Object.entries(e).map(([t,o])=>[t,Number(o??0)||0]))}function h(e){return Number(e??0)||0}function ne(e){return e==null?void 0:String(e)}function Jo(e){return e==null?null:String(e)}function jr(e){return{file:h(e.file),symbol:h(e.symbol),selection:h(e.selection),implicitSelection:h(e.implicitSelection),codebase:h(e.codebase),workspace:h(e.workspace),terminal:h(e.terminal),vscode:h(e.vscode),terminalLastCommand:h(e.terminalLastCommand),terminalSelection:h(e.terminalSelection),clipboard:h(e.clipboard),changes:h(e.changes),outputPanel:h(e.outputPanel),problemsPanel:h(e.problemsPanel),pullRequest:h(e.pullRequest),byKind:Zo(e.byKind),copilotInstructions:h(e.copilotInstructions),agentsMd:h(e.agentsMd),byPath:Zo(e.byPath)}}function qr(e){if(Array.isArray(e.childInfo))return e.childInfo.filter(t=>!!t&&typeof t=="object").map(t=>({uuid:String(t.uuid??""),name:String(t.name??""),sessionFile:ne(t.sessionFile)}))}function Gr(e){if(!e.parentInfo||typeof e.parentInfo!="object")return;let t=e.parentInfo;return{uuid:String(t.uuid??""),name:String(t.name??""),sessionFile:ne(t.sessionFile)}}function Vr(e){let t=e??{},o=t.contextReferences??{};return{file:String(t.file??t.sessionFile??""),editorSource:String(t.editorSource??""),editorRoot:ne(t.editorRoot),editorName:ne(t.editorName),title:ne(t.title),repository:ne(t.repository),size:h(t.size),modified:String(t.modified??""),tokens:h(t.tokens),interactions:h(t.interactions),firstInteraction:Jo(t.firstInteraction),lastInteraction:Jo(t.lastInteraction),contextReferences:jr(o),parentInfo:Gr(t),childInfo:qr(t),totalChildCount:t.totalChildCount===null||t.totalChildCount===void 0?void 0:Number(t.totalChildCount)}}function Zr(e){return Array.isArray(e)?e.map(Vr):[]}function Jr(e){let t=Number(e.processed||0),o=Number(e.total||0),n=o>0?`Analyzing files\u2026 (${t} / ${o})`:"Analyzing files\u2026",s=document.getElementById("session-loading-subtext");s&&(s.textContent=n);let r=document.getElementById("model-usage-status");r&&(r.textContent=o>0?`\u23F3 Loading sessions\u2026 (${t}/${o})`:"\u23F3 Loading sessions\u2026")}function Kr(e){Ee=Zr(e.detailedSessionFiles),Ie=!1;let t=document.querySelector('.tab[data-tab="sessions"]');t&&(t.textContent=`\u{1F4C1} Session Files (${Ee.length})`);let o=document.getElementById("model-usage-editor-select");if(o){let r=Dt(Ee),i=Object.keys(r).sort().map(a=>`<option value="${l(a)}">${l(P(a))} ${l(a)} (${r[a].count})</option>`).join("");o.innerHTML=`<option value="all">\u{1F310} All Editors</option>${i}`,o.disabled=!1}let n=document.getElementById("model-usage-time-select");n&&(n.disabled=!1);let s=document.getElementById("model-usage-status");s&&(s.textContent=""),tt(),ce()}function Yr(){let e=document.getElementById("btn-clear-cache"),t=document.getElementById("btn-clear-cache-tab");e&&(e.style.background="#2d6a4f",e.innerHTML="<span>\u2705</span><span>Cache Cleared</span>",e.disabled=!1),t&&(t.style.background="#2d6a4f",t.innerHTML="<span>\u2705</span><span>Cache Cleared</span>",t.disabled=!1),setTimeout(()=>{e&&(e.style.background="",e.innerHTML="<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>"),t&&(t.style.background="",t.innerHTML="<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>")},2e3)}function Xr(e,t){if(t.length<4)return;let o=t[0]?.querySelector(".summary-value");o&&(o.textContent=String(e.size));let n=t[1]?.querySelector(".summary-value");n&&(n.textContent=`${e.sizeInMB.toFixed(2)} MB`);let s=t[2]?.querySelector(".summary-value");s&&(s.textContent=new Date(e.lastUpdated).toLocaleString());let r=t[3]?.querySelector(".summary-value");r&&(r.textContent="0 seconds ago")}function Qr(e){if(!e.cacheInfo)return;let t=document.getElementById("tab-cache");t&&Xr(e.cacheInfo,t.querySelectorAll(".summary-card"))}function ei(e){let t=document.getElementById("folder-path-input");t&&e.folderPath&&(t.value=e.folderPath,t.style.borderColor="")}function ti(e){let t=document.getElementById("btn-analyze-folder");t&&(t.disabled=!1,t.innerHTML="<span>\u{1F50D}</span><span>Analyze</span>");let o=document.getElementById("folder-analysis-results");o&&(e.error?o.innerHTML=`
         <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
           <div class="info-box-title">\u26A0\uFE0F Analysis Error</div>
-          <div>${escapeHtml(message.error)}</div>
-        </div>`;
-      } else {
-        resultsDiv.innerHTML = renderFolderAnalysisResults(
-          message.files || [],
-          message.totalScanned || 0,
-          message.parseErrors || 0,
-          message.truncated || false,
-          escapeHtml(String(message.folderPath || ""))
-        );
-      }
-    }
-  }
-  function setupMessageHandlers() {
-    window.addEventListener("message", (event) => {
-      const message = event.data;
-      if (message.command === "diagnosticDataLoaded") {
-        handleDiagnosticDataLoaded(message);
-      } else if (message.command === "githubAuthUpdated") {
-        handleGithubAuthUpdated(message);
-      } else if (message.command === "diagnosticDataError") {
-        handleDiagnosticDataError(message);
-      } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
-        handleSessionFilesLoaded(message);
-      } else if (message.command === "cacheCleared") {
-        handleCacheCleared();
-      } else if (message.command === "cacheRefreshed") {
-        handleCacheRefreshed(message);
-      } else if (message.command === "folderPicked") {
-        handleFolderPicked(message);
-      } else if (message.command === "folderAnalysisResult") {
-        handleFolderAnalysisResult(message);
-      }
-    });
-  }
-  function renderDiagCacheTabHtml(data) {
-    return `
+          <div>${l(e.error)}</div>
+        </div>`:o.innerHTML=$s(e.files||[],e.totalScanned||0,e.parseErrors||0,e.truncated||!1,l(String(e.folderPath||""))))}var oi={worktreeRootPicked:ar,worktreeRootsDiscovered:lr,worktreeScanStarted:()=>dr(),worktreeScanRootStarted:cr,worktreeScanWalkProgress:ur,worktreeScanRootMarkersFound:pr,worktreeScanRootSkipped:br,worktreeScanProgress:mr,worktreeFound:hr,worktreeEnrichStarted:Sr,worktreeEnrichProgress:wr,worktreeEnriched:Cr,worktreeDeleted:gr,worktreeScanComplete:()=>$r(),worktreeScanCancelled:()=>Er(),cleanupDeclined:()=>vr(),cleanupStarted:fr,cleanupWorktreeResult:yr,cleanupComplete:()=>xr(),cleanupCancelled:()=>kr()};function ni(e){let t=oi[e.command];t&&t(e)}function si(){window.addEventListener("message",e=>{let t=e.data;t.command==="diagnosticDataLoaded"?Or(t):t.command==="githubAuthUpdated"?Ur(t):t.command==="diagnosticDataError"?Wr(t):t.command==="sessionFilesLoaded"&&t.detailedSessionFiles?Kr(t):t.command==="sessionFilesLoadProgress"?Jr(t):t.command==="cacheCleared"?Yr():t.command==="cacheRefreshed"?Qr(t):t.command==="folderPicked"?ei(t):t.command==="folderAnalysisResult"?ti(t):t.command==="modelUsageResult"?Js(t):ni(t)})}function ri(e){return`
 <div id="tab-cache" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u{1F4BE} Cache Information</div>
@@ -4254,26 +2096,26 @@ Cache is stored in VS Code's global state and persists across sessions.
 <div class="summary-cards">
 <div class="summary-card">
 <div class="summary-label">\u{1F4E6} Cache Entries</div>
-<div class="summary-value">${data.cacheInfo?.size || 0}</div>
+<div class="summary-value">${e.cacheInfo?.size||0}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u{1F4BE} Cache Size</div>
-<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>
+<div class="summary-value">${e.cacheInfo?.sizeInMB?e.cacheInfo.sizeInMB.toFixed(2)+" MB":"N/A"}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u{1F552} Last Updated</div>
-<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>
+<div class="summary-value" style="font-size: 14px;">${e.cacheInfo?.lastUpdated?Re(e.cacheInfo.lastUpdated):"Never"}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u23F1\uFE0F Cache Age</div>
-<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? getTimeSince(data.cacheInfo.lastUpdated) : "N/A"}</div>
+<div class="summary-value" style="font-size: 14px;">${e.cacheInfo?.lastUpdated?Pe(e.cacheInfo.lastUpdated):"N/A"}</div>
 </div>
 </div>
 <div class="cache-location">
 <h4>Storage Location</h4>
 <div class="location-box">
-<code>${escapeHtml(data.cacheInfo?.location || "VS Code Global State")}</code>
-${data.cacheInfo?.storagePath ? ` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(data.cacheInfo.storagePath)}">Open storage location</a>` : ""}
+<code>${l(e.cacheInfo?.location||"VS Code Global State")}</code>
+${e.cacheInfo?.storagePath?` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(e.cacheInfo.storagePath)}">Open storage location</a>`:""}
 </div>
 <p style="color: #999; font-size: 12px; margin-top: 8px;">
 Cache is stored in VS Code's global state (extension storage) and includes:
@@ -4298,25 +2140,24 @@ This can help resolve issues with stale or incorrect data.
 </div>
 </div>
 </div>
-</div>`;
-  }
-  function sel(current, value) {
-    return current === value ? "selected" : "";
-  }
-  function renderQuotaCardHtml(data) {
-    const quotaContent = data.quotaEntitlements ? `<p>
-${data.quotaEntitlements.premium_interactions ? `<strong>Premium Interactions:</strong> $${data.quotaEntitlements.premium_interactions.toFixed(2)}/month<br/>` : ""}${data.quotaEntitlements.completions ? `<strong>Completions:</strong> $${data.quotaEntitlements.completions.toFixed(2)}/month<br/>` : ""}
-    </p>` : `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>`;
-    return `<div class="backend-card">
+</div>`}function M(e,t){return e===t?"selected":""}function ii(e){return`<div class="backend-card">
 <h4>\u{1F4CA} API Quota Information</h4>
-${quotaContent}
-</div>`;
-  }
-  function renderDiagDisplayTabHtml(data) {
-    const showTokens = data.displaySettings?.showTokens ?? "both";
-    const showCost = data.displaySettings?.showCost ?? "none";
-    const monthlyBudget = Math.round((data.displaySettings?.monthlyBudget ?? 0) * 100) / 100;
-    return `
+${e.quotaEntitlements?`<p>
+${e.quotaEntitlements.premium_interactions?`<strong>Premium Interactions:</strong> $${e.quotaEntitlements.premium_interactions.toFixed(2)}/month<br/>`:""}${e.quotaEntitlements.completions?`<strong>Completions:</strong> $${e.quotaEntitlements.completions.toFixed(2)}/month<br/>`:""}
+    </p>`:'<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>'}
+</div>`}function ai(){return`<div class="backend-card">
+<h4>\u{1F195} Editor Discovery Notifications</h4>
+<p>
+The extension remembers which editors it has already seen so each editor triggers a discovery notification only once.
+Use this reset to clear that memory and start tracking from scratch.
+</p>
+<div class="button-group">
+<button class="button secondary" id="btn-reset-discovered-editors">
+<span>\u267B\uFE0F</span>
+<span>Reset Discovered Editors</span>
+</button>
+</div>
+</div>`}function li(e){let t=e.displaySettings?.showTokens??"both",o=e.displaySettings?.showCost??"none",n=Math.round((e.displaySettings?.monthlyBudget??0)*100)/100;return`
 <div id="tab-display" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u2699\uFE0F Display Settings</div>
@@ -4331,23 +2172,23 @@ Choose what to show in the VS Code status bar toolbar. You can show token counts
 <div style="display: flex; align-items: center; gap: 12px;">
   <label style="min-width: 175px; font-size: 13px;">\u{1F522} Token counts:</label>
   <select id="select-show-tokens" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
-    <option value="none" ${sel(showTokens, "none")}>None</option>
-    <option value="today" ${sel(showTokens, "today")}>Today only</option>
-    <option value="last30days" ${sel(showTokens, "last30days")}>Last 30 days only</option>
-    <option value="currentMonth" ${sel(showTokens, "currentMonth")}>Current calendar month only</option>
-    <option value="both" ${sel(showTokens, "both")}>Today + last 30 days (default)</option>
-    <option value="todayAndCurrentMonth" ${sel(showTokens, "todayAndCurrentMonth")}>Today + current calendar month</option>
+    <option value="none" ${M(t,"none")}>None</option>
+    <option value="today" ${M(t,"today")}>Today only</option>
+    <option value="last30days" ${M(t,"last30days")}>Last 30 days only</option>
+    <option value="currentMonth" ${M(t,"currentMonth")}>Current calendar month only</option>
+    <option value="both" ${M(t,"both")}>Today + last 30 days (default)</option>
+    <option value="todayAndCurrentMonth" ${M(t,"todayAndCurrentMonth")}>Today + current calendar month</option>
   </select>
 </div>
 <div style="display: flex; align-items: center; gap: 12px;">
   <label style="min-width: 175px; font-size: 13px;">\u{1F4B0} Estimated cost (USD):</label>
   <select id="select-show-cost" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
-    <option value="none" ${sel(showCost, "none")}>None (hidden)</option>
-    <option value="today" ${sel(showCost, "today")}>Today only</option>
-    <option value="last30days" ${sel(showCost, "last30days")}>Last 30 days only</option>
-    <option value="currentMonth" ${sel(showCost, "currentMonth")}>Current calendar month only</option>
-    <option value="both" ${sel(showCost, "both")}>Today + last 30 days</option>
-    <option value="todayAndCurrentMonth" ${sel(showCost, "todayAndCurrentMonth")}>Today + current calendar month</option>
+    <option value="none" ${M(o,"none")}>None (hidden)</option>
+    <option value="today" ${M(o,"today")}>Today only</option>
+    <option value="last30days" ${M(o,"last30days")}>Last 30 days only</option>
+    <option value="currentMonth" ${M(o,"currentMonth")}>Current calendar month only</option>
+    <option value="both" ${M(o,"both")}>Today + last 30 days</option>
+    <option value="todayAndCurrentMonth" ${M(o,"todayAndCurrentMonth")}>Today + current calendar month</option>
   </select>
 </div>
 </div>
@@ -4360,12 +2201,13 @@ Set a monthly AI spend budget in USD to get visual alerts on the status bar. The
 </p>
 <div style="display: flex; align-items: center; gap: 12px;">
   <label style="min-width: 175px; font-size: 13px;">\u{1F4B5} Monthly budget (USD):</label>
-  <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
+  <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${n}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
 </div>
 <p class="hint">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
-${data.quotaEntitlements && data.quotaEntitlements.premium_interactions ? `<p class="hint" style="color: #90ee90;"><strong>\u2139\uFE0F API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${data.quotaEntitlements.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>` : ""}
+${e.quotaEntitlements&&e.quotaEntitlements.premium_interactions?`<p class="hint" style="color: #90ee90;"><strong>\u2139\uFE0F API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${e.quotaEntitlements.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>`:""}
 </div>
-${renderQuotaCardHtml(data)}
+${ii(e)}
+${ai()}
 <div class="backend-card">
 <h4>\u{1F522} Number Formatting</h4>
 <p>
@@ -4379,141 +2221,95 @@ for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,2
 </button>
 </div>
 </div>
-</div>`;
-  }
-  function getToolSortIndicator(col) {
-    if (toolSortColumn !== col) {
-      return ' <span class="sort-hint">\u2195</span>';
-    }
-    return toolSortDir === "desc" ? " \u25BC" : " \u25B2";
-  }
-  function pooledAvg(rows) {
-    const totalCalls = rows.reduce((s4, r6) => s4 + r6.calls, 0);
-    const totalTokens = rows.reduce((s4, r6) => s4 + r6.totalTokens, 0);
-    return totalCalls > 0 ? totalTokens / totalCalls : NaN;
-  }
-  function sortToolRows(rows) {
-    return [...rows].sort((a3, b3) => {
-      let aVal, bVal;
-      switch (toolSortColumn) {
-        case "tool":
-          aVal = a3.tool.toLowerCase();
-          bVal = b3.tool.toLowerCase();
-          break;
-        case "calls":
-          aVal = a3.calls;
-          bVal = b3.calls;
-          break;
-        case "total":
-          aVal = a3.totalTokens;
-          bVal = b3.totalTokens;
-          break;
-        case "avg":
-        default:
-          aVal = a3.calls > 0 ? a3.totalTokens / a3.calls : 0;
-          bVal = b3.calls > 0 ? b3.totalTokens / b3.calls : 0;
-          break;
-      }
-      if (aVal < bVal) {
-        return toolSortDir === "desc" ? 1 : -1;
-      }
-      if (aVal > bVal) {
-        return toolSortDir === "desc" ? -1 : 1;
-      }
-      return 0;
-    });
-  }
-  function renderToolRow(r6, builtInBaseline) {
-    const avg = r6.calls > 0 ? Math.round(r6.totalTokens / r6.calls) : 0;
-    let ratioHtml = '<td class="tool-ratio">\u2014</td>';
-    if (!r6.isBuiltIn && !isNaN(builtInBaseline) && builtInBaseline > 0 && r6.calls > 0) {
-      const ratio = r6.totalTokens / r6.calls / builtInBaseline;
-      const pct = Math.round(ratio * 100);
-      const cls = ratio < 0.85 ? "ratio-better" : ratio > 1.15 ? "ratio-worse" : "ratio-neutral";
-      ratioHtml = `<td class="tool-ratio ${cls}" title="${pct}% of built-in average">${pct}%</td>`;
-    } else if (r6.isBuiltIn) {
-      ratioHtml = '<td class="tool-ratio tool-builtin-label">baseline</td>';
-    }
-    const badge = r6.isBuiltIn ? ' <span class="tool-type-badge built-in">built-in</span>' : ' <span class="tool-type-badge alternative">alt</span>';
-    return `<tr><td>${escapeHtml(r6.tool)}${badge}</td><td>${escapeHtml(String(r6.calls))}</td><td>${formatTokenCount(r6.totalTokens)}</td><td>${formatTokenCount(avg)}</td>${ratioHtml}</tr>`;
-  }
-  function renderToolAnalysisRows(rows, builtInBaseline = NaN) {
-    return sortToolRows(rows).map((r6) => renderToolRow(r6, builtInBaseline)).join("");
-  }
-  function toolAnalysisTheadHtml() {
-    return `<tr>
-<th class="tool-sortable" data-sort="tool">Tool${getToolSortIndicator("tool")}</th>
-<th class="tool-sortable" data-sort="calls">Calls${getToolSortIndicator("calls")}</th>
-<th class="tool-sortable" data-sort="total">Total Output Tokens${getToolSortIndicator("total")}</th>
-<th class="tool-sortable" data-sort="avg">Avg Tokens / Call${getToolSortIndicator("avg")}</th>
+</div>`}function Ke(e){return et!==e?' <span class="sort-hint">\u2195</span>':ae==="desc"?" \u25BC":" \u25B2"}function di(e){let t=e.reduce((n,s)=>n+s.calls,0),o=e.reduce((n,s)=>n+s.totalTokens,0);return t>0?o/t:NaN}function ci(e){return[...e].sort((t,o)=>{let n,s;switch(et){case"tool":n=t.tool.toLowerCase(),s=o.tool.toLowerCase();break;case"calls":n=t.calls,s=o.calls;break;case"total":n=t.totalTokens,s=o.totalTokens;break;default:n=t.calls>0?t.totalTokens/t.calls:0,s=o.calls>0?o.totalTokens/o.calls:0;break}return n<s?ae==="desc"?1:-1:n>s?ae==="desc"?-1:1:0})}function ui(e,t){let o=e.calls>0?Math.round(e.totalTokens/e.calls):0,n='<td class="tool-ratio">\u2014</td>';if(!e.isBuiltIn&&!isNaN(t)&&t>0&&e.calls>0){let r=e.totalTokens/e.calls/t,i=Number(Math.round(r*100))||0;n=`<td class="tool-ratio ${r<.85?"ratio-better":r>1.15?"ratio-worse":"ratio-neutral"}" title="${i}% of built-in average">${i}%</td>`}else e.isBuiltIn&&(n='<td class="tool-ratio tool-builtin-label">baseline</td>');let s=e.isBuiltIn?' <span class="tool-type-badge built-in">built-in</span>':' <span class="tool-type-badge alternative">alt</span>';return`<tr><td>${l(e.tool)}${s}</td><td>${l(String(e.calls))}</td><td>${$(e.totalTokens)}</td><td>${$(o)}</td>${n}</tr>`}function Ot(e,t=NaN){return ci(e).map(o=>ui(o,t)).join("")}function Ut(){return`<tr>
+<th class="tool-sortable" data-sort="tool">Tool${Ke("tool")}</th>
+<th class="tool-sortable" data-sort="calls">Calls${Ke("calls")}</th>
+<th class="tool-sortable" data-sort="total">Total Output Tokens${Ke("total")}</th>
+<th class="tool-sortable" data-sort="avg">Avg Tokens / Call${Ke("avg")}</th>
 <th>vs Built-in</th>
-</tr>`;
-  }
-  function renderToolFamilySection(family, outputTokensByTool, byTool, assignedTools) {
-    const buildRows = (names, isBuiltIn) => names.filter((t4) => outputTokensByTool[t4] !== void 0 && (byTool[t4] || 0) > 0 && !assignedTools.has(t4)).map((t4) => {
-      assignedTools.add(t4);
-      return { tool: t4, totalTokens: outputTokensByTool[t4], calls: byTool[t4] || 0, isBuiltIn };
-    });
-    const builtInRows = buildRows(family.builtIn, true);
-    const altRows = buildRows(family.alternatives, false);
-    const allRows = [...builtInRows, ...altRows];
-    if (allRows.length === 0) {
-      return { html: "", rows: [] };
-    }
-    const baseline = pooledAvg(builtInRows);
-    const encodedRows = encodeURIComponent(JSON.stringify(allRows));
-    const desc = family.description ? ` <span class="hint">${escapeHtml(family.description)}</span>` : "";
-    const html = `
+</tr>`}function pi(e,t,o,n){let s=(m,v)=>m.filter(k=>t[k]!==void 0&&(o[k]||0)>0&&!n.has(k)).map(k=>(n.add(k),{tool:k,totalTokens:t[k],calls:o[k]||0,isBuiltIn:v})),r=s(e.builtIn,!0),i=s(e.alternatives,!1),a=[...r,...i];if(a.length===0)return{html:"",rows:[]};let d=di(r),u=encodeURIComponent(JSON.stringify(a)),p=e.description?` <span class="hint">${l(e.description)}</span>`:"";return{html:`
 <div class="tool-family-section">
-<h4 class="tool-family-heading">${escapeHtml(family.name)}${desc}</h4>
-<table class="session-table tool-analysis-table" data-rows="${encodedRows}" data-baseline="${isNaN(baseline) ? "" : String(baseline)}">
-<thead>${toolAnalysisTheadHtml()}</thead>
-<tbody>${renderToolAnalysisRows(allRows, baseline)}</tbody>
+<h4 class="tool-family-heading">${l(e.name)}${p}</h4>
+<table class="session-table tool-analysis-table" data-rows="${u}" data-baseline="${isNaN(d)?"":String(d)}">
+<thead>${Ut()}</thead>
+<tbody>${Ot(a,d)}</tbody>
 </table>
-</div>`;
-    return { html, rows: allRows };
-  }
-  function renderToolAnalysisTab(toolCallStats, families) {
-    if (!toolCallStats || !toolCallStats.outputTokensByTool || Object.keys(toolCallStats.outputTokensByTool).length === 0) {
-      return `<div id="tab-tool-analysis" class="tab-content">
+</div>`,rows:a}}function xn(e,t){if(!e||!e.outputTokensByTool||Object.keys(e.outputTokensByTool).length===0)return`<div id="tab-tool-analysis" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u{1F527} Tool Output Token Analysis</div>
 <div>Track how many tokens each tool produces as output over the last 30 days. Data is collected as you use the extension \u2014 no output token data has been recorded yet.</div>
 </div>
-</div>`;
-    }
-    const outputTokensByTool = toolCallStats.outputTokensByTool;
-    const byTool = toolCallStats.byTool;
-    const assignedTools = /* @__PURE__ */ new Set();
-    let sectionsHtml = "";
-    if (families && families.length > 0) {
-      for (const family of families) {
-        const { html } = renderToolFamilySection(family, outputTokensByTool, byTool, assignedTools);
-        sectionsHtml += html;
-      }
-    }
-    const otherRows = Object.entries(outputTokensByTool).filter(([t4]) => !assignedTools.has(t4) && (byTool[t4] || 0) > 0).map(([t4, tokens]) => ({ tool: t4, totalTokens: tokens, calls: byTool[t4] || 0, isBuiltIn: false }));
-    if (otherRows.length > 0) {
-      const encodedOther = encodeURIComponent(JSON.stringify(otherRows));
-      sectionsHtml += `
+</div>`;let o=e.outputTokensByTool,n=e.byTool,s=new Set,r="";if(t&&t.length>0)for(let a of t){let{html:d}=pi(a,o,n,s);r+=d}let i=Object.entries(o).filter(([a])=>!s.has(a)&&(n[a]||0)>0).map(([a,d])=>({tool:a,totalTokens:d,calls:n[a]||0,isBuiltIn:!1}));if(i.length>0){let a=encodeURIComponent(JSON.stringify(i));r+=`
 <div class="tool-family-section">
 <h4 class="tool-family-heading">Other Tools</h4>
-<table class="session-table tool-analysis-table" data-rows="${encodedOther}" data-baseline="">
-<thead>${toolAnalysisTheadHtml()}</thead>
-<tbody>${renderToolAnalysisRows(otherRows, NaN)}</tbody>
+<table class="session-table tool-analysis-table" data-rows="${a}" data-baseline="">
+<thead>${Ut()}</thead>
+<tbody>${Ot(i,NaN)}</tbody>
 </table>
-</div>`;
-    }
-    return `<div id="tab-tool-analysis" class="tab-content">
+</div>`}return`<div id="tab-tool-analysis" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u{1F527} Tool Output Token Analysis</div>
 <div>Tokens produced by each tool's output over the last 30 days. Tools are grouped by family. <strong>vs Built-in</strong> shows how an alternative compares to the pooled baseline \u2014 green is more token-efficient. Click column headers to sort within each group. <button class="inline-link" id="btn-open-tool-families-settings">Configure tool families \u2197</button></div>
 </div>
-${sectionsHtml}
-</div>`;
-  }
-  function buildDiagReportTabHtml(escapedReport) {
-    return `<div id="tab-report" class="tab-content active">
+${r}
+</div>`}function bi(e){return e&&e.otelSessionsIndexed>0?"":`<div class="info-box">
+<div class="info-box-title">\u{1F4E1} Copilot CLI OpenTelemetry Export Not Detected</div>
+<div>
+${e?.otelDirExists?`The export directory exists but no session data has been indexed from it yet (${Number(e.otelFileCount)} file(s) found).`:"No <code>~/.copilot/otel</code> directory was found \u2014 the export isn't enabled yet."} Enabling it lets this extension read <strong>exact</strong> token counts (input, output, cache) straight from Copilot CLI instead of estimating them from ratios.<br/><br/>
+Set these three environment variables before starting a Copilot CLI session, then run a session and reopen this tab:
+<pre style="margin-top:8px;">COPILOT_OTEL_ENABLED=true
+COPILOT_OTEL_EXPORTER_TYPE=file
+COPILOT_OTEL_FILE_EXPORTER_PATH=~/.copilot/otel/copilot-otel.jsonl</pre>
+See <code>docs/COPILOT-CLI-OTEL-EXPORT.md</code> in the repo for full setup steps (Windows/PowerShell and Unix shells) and how to verify it's working.
+</div>
+</div>`}function kn(e){let t=Number(e)||0;if(t===0)return{text:"0",cssClass:""};let o=t>0?"+":"-",n=t>0?"otel-delta-positive":"otel-delta-negative";return{text:`${o}${$(Math.abs(t))}`,cssClass:n}}function Ko(e){return new Date(e.getFullYear(),e.getMonth(),e.getDate())}function mi(e,t,o){if(t==="all")return!0;if(!e)return!1;let n=new Date(e);if(Number.isNaN(n.getTime()))return!1;let s=Ko(o),r=Ko(n);if(t==="today")return r.getTime()===s.getTime();if(t==="yesterday"){let i=new Date(s);return i.setDate(i.getDate()-1),r.getTime()===i.getTime()}if(t==="week"){let i=new Date(s);return i.setDate(i.getDate()-6),n>=i&&n<=o}return n.getFullYear()===o.getFullYear()&&n.getMonth()===o.getMonth()&&n<=o}function hi(e,t){if(t==="all")return e;let o=new Date,n=e.sessions.filter(i=>mi(i.lastActivity,t,o)),s=n.reduce((i,a)=>i+a.baselineTokens,0),r=n.reduce((i,a)=>i+a.otelTokens,0);return{...e,sessions:n,sessionsMatched:n.length,totalBaselineTokens:s,totalOtelTokens:r,deltaTokens:r-s}}var Yo={all:"All Time",today:"Today",yesterday:"Yesterday",week:"This Week",month:"This Month"};function gi(e){return`<div class="otel-delta-period-row">
+<label for="otel-delta-period">Show:</label>
+<select id="otel-delta-period" class="otel-delta-period-select">${Object.keys(Yo).map(o=>`<option value="${o}"${o===e?" selected":""}>${Yo[o]}</option>`).join("")}</select>
+</div>`}function vi(e){let t=kn(e.deltaTokens),o=Number(e.sessionsMatched)||0,n=Number(e.totalBaselineTokens)||0,s=Number(e.totalOtelTokens)||0,r=Number(e.deltaTokens)||0;return`<div class="summary-cards">
+<div class="summary-card">
+<div class="summary-label">\u{1F4E1} Sessions With OTel Data</div>
+<div class="summary-value">${o.toLocaleString()}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">\u{1F4CA} Previous Estimate (Total)</div>
+<div class="summary-value" title="${n.toLocaleString()} tokens">${$(n)}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">\u{1F3AF} OTel Exact (Total)</div>
+<div class="summary-value" title="${s.toLocaleString()} tokens">${$(s)}</div>
+</div>
+<div class="summary-card">
+<div class="summary-label">\u0394 Delta</div>
+<div class="summary-value ${t.cssClass}" title="${r.toLocaleString()} tokens">${t.text}</div>
+</div>
+</div>`}function fi(e){return e.map(t=>{let o=kn(t.delta),n=l(String(t.sessionId??"").slice(0,8)),s=l((Array.isArray(t.models)?t.models:[]).map(a=>String(a)).join(", ")||"\u2014"),r=Number(t.baselineTokens)||0,i=Number(t.otelTokens)||0;return`<tr>
+<td title="${l(String(t.sessionId??""))}"><code>${n}</code></td>
+<td>${s}</td>
+<td title="${r.toLocaleString()} tokens">${$(r)}</td>
+<td title="${i.toLocaleString()} tokens">${$(i)}</td>
+<td class="${o.cssClass}" title="${(Number(t.delta)||0).toLocaleString()} tokens">${o.text}</td>
+</tr>`}).join("")}function Sn(e,t=Qe){let o=bi(e);if(!e||e.sessionsMatched===0)return`<div id="tab-otel-delta" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">\u{1F4E1} OTel vs. Estimated Token Counts</div>
+<div>Compares the token counts this extension estimates for Copilot CLI sessions against exact counts read from Copilot CLI's OpenTelemetry export, when available.</div>
+</div>
+${o}
+</div>`;let n=hi(e,t),s=n.sessions.length>0?`<table class="session-table">
+<thead><tr><th>Session</th><th>Model(s)</th><th>Previous Estimate</th><th>OTel Exact</th><th>Delta</th></tr></thead>
+<tbody>${fi(n.sessions)}</tbody>
+</table>`:'<div class="info-box">No Copilot CLI sessions with OTel data in this period. Try a wider range.</div>';return`<div id="tab-otel-delta" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">\u{1F4E1} OTel vs. Estimated Token Counts</div>
+<div>
+Compares the token counts this extension would normally estimate for each Copilot CLI session against the exact counts read from Copilot CLI's OpenTelemetry file export. A positive delta means OTel revealed usage the estimate missed entirely (e.g. chat-only sessions, which previously reported 0 tokens); near-zero deltas mean the estimate already had exact numbers from a session.shutdown event.<br/>
+Checked ${(Number(e.sessionsChecked)||0).toLocaleString()} Copilot CLI session(s) found locally; ${(Number(e.otelSessionsIndexed)||0).toLocaleString()} session(s) are present in the OTel export.
+</div>
+</div>
+${o}
+${gi(t)}
+${vi(n)}
+${s}
+</div>`}function yi(e){return`<div id="tab-report" class="tab-content active">
 <div class="info-box">
 <div class="info-box-title">\u{1F4CB} About This Report</div>
 <div>
@@ -4528,13 +2324,10 @@ code or conversation content. You can safely share this report when reporting is
 <button class="button secondary" id="btn-clear-cache"><span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span></button>
 <button class="button secondary" id="btn-reset-insights"><span>\u{1F4A1}</span><span>Reset Insights Dismissals</span></button>
 </div>
-<div class="report-content">${escapedReport}</div>
-</div>`;
-  }
-  function buildDiagRootHtml(data, detailedFiles, escapedReport) {
-    return `
-<style>${theme_default}</style>
-<style>${styles_default}</style>
+<div class="report-content">${e}</div>
+</div>`}function xi(e,t,o){return`
+<style>${Jt}</style>
+<style>${Kt}</style>
 <div class="container">
 <div class="header">
 <div class="header-left">
@@ -4542,29 +2335,26 @@ code or conversation content. You can safely share this report when reporting is
 <span class="header-title">Diagnostic Report</span>
 </div>
 <div class="button-row">
-${buttonHtml("btn-refresh")}
-${buttonHtml("btn-details")}
-${buttonHtml("btn-chart")}
-${buttonHtml("btn-usage")}
-${buttonHtml("btn-environmental")}
-${buttonHtml("btn-maturity")}
-${data?.backendConfigured ? buttonHtml("btn-dashboard") : ""}
+${jt("btn-diagnostics",!!e?.backendConfigured)}
 </div>
 </div>
 
 <div class="tabs">
 <button class="tab active" data-tab="report">\u{1F4CB} Report</button>
-<button class="tab" data-tab="sessions">\u{1F4C1} Session Files (${detailedFiles.length})</button>
+<button class="tab" data-tab="sessions">\u{1F4C1} Session Files (${t.length})</button>
 <button class="tab" data-tab="cache">\u{1F4BE} Cache</button>
 <button class="tab" data-tab="backend">\u2601\uFE0F Backend Storage</button>
 <button class="tab" data-tab="github">\u{1F511} GitHub Auth</button>
 <button class="tab" data-tab="display">\u2699\uFE0F Settings</button>
 <button class="tab" data-tab="path-analyzer">\u{1F52C} Path Analyzer</button>
+<button class="tab" data-tab="model-usage">\u{1F9EE} Model Usage</button>
 <button class="tab" data-tab="tool-analysis">\u{1F527} Tool Analysis</button>
-${data.isDebugMode ? '<button class="tab" data-tab="debug">\u{1F41B} Debug</button>' : ""}
+<button class="tab" data-tab="worktrees">\u{1F333} Worktrees</button>
+<button class="tab" data-tab="otel-delta">\u{1F4E1} OTel Delta</button>
+${e.isDebugMode?'<button class="tab" data-tab="debug">\u{1F41B} Debug</button>':""}
 </div>
 
-${buildDiagReportTabHtml(escapedReport)}
+${yi(o)}
 
 <div id="tab-sessions" class="tab-content">
 <div class="info-box">
@@ -4574,87 +2364,30 @@ This tab shows session files with activity in the last 14 days from all detected
 Click on an editor panel to filter, click column headers to sort, and click a file name to open it.
 </div>
 </div>
-<div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
+<div id="session-table-container">${Qo(t,t.length===0)}</div>
 </div>
 
-${renderDiagCacheTabHtml(data)}
+${ri(e)}
 <div id="tab-backend" class="tab-content">
-${renderBackendStoragePanel(data.backendStorageInfo, data.githubAuth)}
+${Bt(e.backendStorageInfo,e.githubAuth)}
 </div>
 
 <div id="tab-github" class="tab-content">
-${renderGitHubAuthPanel(data.githubAuth)}
+${Rt(e.githubAuth)}
 </div>
-${renderDiagDisplayTabHtml(data)}
-${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ""}
+${li(e)}
+${e.isDebugMode?vs(e.globalStateCounters):""}
 <div id="tab-path-analyzer" class="tab-content">
-${renderFolderAnalyzerTab()}
+${ws()}
 </div>
-${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+<div id="tab-model-usage" class="tab-content">
+${Es(t,Ie)}
 </div>
-`;
-  }
-  function renderLayout(data) {
-    const root = document.getElementById("root");
-    if (!root) {
-      return;
-    }
-    const detailedFiles = data.detailedSessionFiles || [];
-    storedDetailedFiles = detailedFiles;
-    isLoading = detailedFiles.length === 0;
-    currentBackendInfo = data.backendStorageInfo;
-    currentGithubAuth = data.githubAuth;
-    if (data.toolFamilies) {
-      storedToolFamilies = data.toolFamilies;
-    }
-    const reportIsLoading = data.report === LOADING_PLACEHOLDER;
-    const escapedReport = reportIsLoading ? LOADING_MESSAGE.trim() : removeSessionFilesSection(escapeHtml(data.report));
-    root.innerHTML = buildDiagRootHtml(data, detailedFiles, escapedReport);
-    const sessionFolders = groupSessionFolders(data.sessionFolders || []);
-    if (sessionFolders.length > 0) {
-      const reportTab = document.getElementById("tab-report");
-      const reportContent = reportTab?.querySelector(".report-content");
-      if (reportContent) {
-        reportContent.insertAdjacentElement("afterend", buildSessionFoldersElement(sessionFolders));
-      }
-    }
-    setupMessageHandlers();
-    setupTabHandlers();
-    setupSortHandlers();
-    setupEditorFilterHandlers();
-    setupContextRefFilterHandlers();
-    setupZeroInteractionFilterHandler();
-    setupUnattributedFilterHandler();
-    setupBackendButtonHandlers();
-    setupSubtabHandlers();
-    setupFileLinks();
-    setupStorageLinkHandlers();
-    setupGitHubAuthHandlers();
-    setupFolderAnalyzerHandlers();
-    setupButtonHandlers();
-    setupDisplaySettingHandlers();
-    setupToolAnalysisSortHandlers();
-    const savedState = diagState.restore();
-    if (savedState?.activeTab && !activateTab(savedState.activeTab)) {
-      activateTab("report");
-    }
-    if (savedState?.activeSubtab) {
-      activateSubtab(savedState.activeSubtab);
-    }
-  }
-  async function bootstrap() {
-    await Promise.resolve().then(() => (init_vscode_button2(), vscode_button_exports));
-    if (!initialData) {
-      const root = document.getElementById("root");
-      if (root) {
-        root.textContent = "No data available.";
-      }
-      return;
-    }
-    renderLayout(initialData);
-  }
-  void bootstrap();
-})();
+${xn(e.toolCallStats,e.toolFamilies)}
+${Us()}
+${Sn(e.otelComparison)}
+</div>
+`}function ki(e){let t=document.getElementById("root");if(!t)return;let o=e.detailedSessionFiles||[];Ee=o,Ie=o.length===0,Me=e.backendStorageInfo,le=e.githubAuth,It=e.otelComparison,e.toolFamilies&&(Et=e.toolFamilies);let s=e.report===Kn?Xn.trim():Xo(l(e.report));t.innerHTML=xi(e,o,s);let r=rn(e.sessionFolders||[]);if(r.length>0){let d=document.getElementById("tab-report")?.querySelector(".report-content");d&&d.insertAdjacentElement("afterend",an(r))}si(),Tr(),dn(),cn(),un(),bn(),pn(),Nt(),Ft(),mn(),ln(),Pt(),Vs(),Zs(),rr(),_r(),qs(),zt(),yn();let i=U.restore();i?.activeTab&&!Tt(i.activeTab)&&Tt("report"),i?.activeSubtab&&Ht(i.activeSubtab)}async function Si(){if(await Promise.resolve().then(()=>(Uo(),Oo)),!Xe){let e=document.getElementById("root");e&&(e.textContent="No data available.");return}ki(Xe)}Si();})();
 /*! Bundled license information:
 
 @lit/reactive-element/css-tag.js:
@@ -4705,4 +2438,3 @@ lit-html/directives/if-defined.js:
    * SPDX-License-Identifier: BSD-3-Clause
    *)
 */
-//# sourceMappingURL=diagnostics.js.map

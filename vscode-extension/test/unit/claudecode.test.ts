@@ -881,3 +881,154 @@ assert.equal(result.toolCalls.total, 0);
 cleanup(filePath);
 }
 });
+
+// ----- getClaudeCodeDailyFractions (issue #1608, root cause A) -----
+
+test('getClaudeCodeDailyFractions: splits usage by each assistant event day, weighted by tokens', async () => {
+const events = [
+{
+type: 'assistant',
+message: {
+model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn',
+id: 'msg_day1', usage: { input_tokens: 100, output_tokens: 200 }
+},
+timestamp: '2026-07-11T12:00:00.000Z'
+},
+{
+type: 'assistant',
+message: {
+model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn',
+id: 'msg_day2', usage: { input_tokens: 100, output_tokens: 100 }
+},
+// 19h later — a different local day in every timezone from UTC-10 to UTC+14
+timestamp: '2026-07-12T07:00:00.000Z'
+}
+];
+const filePath = createTempSession(events);
+try {
+const fractions = await claudeCode.getClaudeCodeDailyFractions(filePath);
+const keys = Object.keys(fractions).sort();
+assert.equal(keys.length, 2, 'should have exactly 2 local day keys');
+// day1: 300 tokens, day2: 200 tokens, total 500
+const values = keys.map(k => fractions[k]).sort((a, b) => a - b);
+assert.ok(Math.abs(values[0] - 0.4) < 1e-9, `expected 0.4, got ${values[0]}`);
+assert.ok(Math.abs(values[1] - 0.6) < 1e-9, `expected 0.6, got ${values[1]}`);
+const total = Object.values(fractions).reduce((a, b) => a + b, 0);
+assert.ok(Math.abs(total - 1.0) < 1e-9, 'fractions should sum to 1.0');
+} finally {
+cleanup(filePath);
+}
+});
+
+test('getClaudeCodeDailyFractions: de-duplicates streaming fragments by message.id before bucketing', async () => {
+const events = [
+{
+type: 'assistant',
+message: { model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: null, id: 'msg_1', usage: { input_tokens: 10, output_tokens: 20 } },
+timestamp: '2026-07-11T12:00:00.000Z'
+},
+{
+type: 'assistant',
+message: { model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn', id: 'msg_1', usage: { input_tokens: 10, output_tokens: 50 } },
+timestamp: '2026-07-11T12:00:05.000Z'
+}
+];
+const filePath = createTempSession(events);
+try {
+const fractions = await claudeCode.getClaudeCodeDailyFractions(filePath);
+const keys = Object.keys(fractions);
+assert.equal(keys.length, 1);
+assert.ok(Math.abs(fractions[keys[0]] - 1.0) < 1e-9);
+} finally {
+cleanup(filePath);
+}
+});
+
+test('getClaudeCodeDailyFractions: falls back to firstInteraction day when there is no usage data', async () => {
+const events = [
+{
+type: 'user',
+isSidechain: false,
+message: { role: 'user', content: [{ type: 'text', text: 'hello' }] },
+timestamp: '2026-07-11T12:00:00.000Z'
+}
+];
+const filePath = createTempSession(events);
+try {
+const fractions = await claudeCode.getClaudeCodeDailyFractions(filePath);
+const keys = Object.keys(fractions);
+assert.equal(keys.length, 1);
+assert.equal(fractions[keys[0]], 1.0);
+} finally {
+cleanup(filePath);
+}
+});
+
+test('ClaudeCodeAdapter.getDailyFractions: delegates to ClaudeCodeDataAccess', async () => {
+const events = [
+{
+type: 'assistant',
+message: { model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'end_turn', id: 'msg_1', usage: { input_tokens: 10, output_tokens: 20 } },
+timestamp: '2026-07-11T12:00:00.000Z'
+}
+];
+const filePath = createTempSession(events);
+try {
+const fractions = await claudeCodeAdapter.getDailyFractions(filePath);
+const keys = Object.keys(fractions);
+assert.equal(keys.length, 1);
+assert.equal(fractions[keys[0]], 1.0);
+} finally {
+cleanup(filePath);
+}
+});
+
+// ----- getClaudeCodeSessionFiles recursion into subagent transcripts (issue #1608, root cause B) -----
+
+class TestableClaudeCodeDataAccess extends ClaudeCodeDataAccess {
+constructor(private readonly testDataDir: string) { super(); }
+override getClaudeCodeDataDir(): string { return this.testDataDir; }
+}
+
+test('getClaudeCodeSessionFiles: discovers subagent transcripts nested under <sessionId>/subagents/**', async () => {
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-discovery-test-'));
+try {
+const dataDir = path.join(tmpDir, '.claude');
+const projectDir = path.join(dataDir, 'projects', 'test-project');
+const topLevelFile = path.join(projectDir, 'session-1.jsonl');
+const subagentDir = path.join(projectDir, 'session-1', 'subagents', 'workflows', 'wf-1');
+const subagentFile = path.join(subagentDir, 'agent-1.jsonl');
+
+fs.mkdirSync(projectDir, { recursive: true });
+fs.writeFileSync(topLevelFile, JSON.stringify({ type: 'user' }), 'utf8');
+fs.mkdirSync(subagentDir, { recursive: true });
+fs.writeFileSync(subagentFile, JSON.stringify({ type: 'assistant' }), 'utf8');
+
+const cc = new TestableClaudeCodeDataAccess(dataDir);
+const files = (await cc.getClaudeCodeSessionFiles()).map(f => path.normalize(f)).sort();
+assert.deepEqual(files, [path.normalize(subagentFile), path.normalize(topLevelFile)].sort());
+} finally {
+fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+});
+
+test('getClaudeCodeSessionFiles: ignores empty files at any depth', async () => {
+const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'claude-discovery-test-'));
+try {
+const dataDir = path.join(tmpDir, '.claude');
+const projectDir = path.join(dataDir, 'projects', 'test-project');
+const subagentDir = path.join(projectDir, 'session-1', 'subagents');
+const emptyTopLevel = path.join(projectDir, 'empty.jsonl');
+const emptySubagent = path.join(subagentDir, 'empty-agent.jsonl');
+
+fs.mkdirSync(subagentDir, { recursive: true });
+fs.writeFileSync(emptyTopLevel, '', 'utf8');
+fs.writeFileSync(emptySubagent, '', 'utf8');
+
+const cc = new TestableClaudeCodeDataAccess(dataDir);
+const files = await cc.getClaudeCodeSessionFiles();
+assert.deepEqual(files, []);
+} finally {
+fs.rmSync(tmpDir, { recursive: true, force: true });
+}
+});
