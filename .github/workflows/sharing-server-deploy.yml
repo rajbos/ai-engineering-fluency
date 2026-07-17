@@ -167,12 +167,14 @@ jobs:
       url:  ${{ steps.app-url.outputs.url }}
     permissions:
       contents: read
+      id-token: write # required to request the OIDC token for Azure federated login
     # ARM_* env vars are read by both the AzureRM Terraform backend and provider.
+    # Auth is via OIDC federated credentials (no client secret).
     env:
       ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
-      ARM_CLIENT_SECRET:   ${{ secrets.AZURE_CLIENT_SECRET }}
       ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC:        "true"
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -206,6 +208,17 @@ jobs:
             -backend-config="container_name=${{ vars.TF_STATE_CONTAINER }}" \
             -backend-config="key=${{ needs.setup.outputs.state_key }}"
 
+      # Azure CLI login (OIDC federated credential) — needed by the `az containerapp`
+      # calls below for custom domain/cert reconciliation. Terraform itself
+      # authenticates separately via ARM_USE_OIDC and does not need this login.
+      - name: Azure Login
+        if: steps.prereqs.outputs.configured == 'true'
+        uses: azure/login@532459ea530d8321f2fb9bb10d1e0bcf23869a43 # v3.0.0
+        with:
+          client-id:       ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id:       ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
       - name: Reconcile custom domain Terraform state
         # Custom domains (and their managed certs) are only meaningful on stable, long-lived
         # environments (production). Per-branch testing environments each get a unique ACA FQDN
@@ -227,9 +240,6 @@ jobs:
           TF_VAR_min_replicas:           ${{ needs.setup.outputs.min_replicas }}
           TF_VAR_custom_domain:          ${{ vars.SHARING_CUSTOM_DOMAIN }}
         run: |
-          az login --service-principal -u "$ARM_CLIENT_ID" -p "$ARM_CLIENT_SECRET" --tenant "$ARM_TENANT_ID" --output none
-          az account set --subscription "$ARM_SUBSCRIPTION_ID"
-
           ENV_NAME="${TF_VAR_app_name}-env"
           EXPECTED_CERT_NAME="sharing-cert"
 

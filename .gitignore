@@ -44,3 +44,13 @@ jetbrains-plugin/.gradle/
 **/idea-sandbox/
 .claude/scheduled_tasks.lock
 .claude/settings.local.json
+
+# Terraform (local runs only — CI uses ephemeral runners and a remote backend,
+# but local bootstrap runs like sharing-server/infra/bootstrap leave these
+# behind; state files can contain plaintext secrets, never commit them)
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfplan
+crash.log
+crash.*.log
