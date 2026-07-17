@@ -345,7 +345,15 @@ test('getEditorTypeFromPath: detects Claude Code', () => {
         assert.equal(getEditorTypeFromPath('/home/user/.claude/projects/hash/session.jsonl'), 'Claude Code');
 });
 
-test('detectClaudeCodeEditorVariant: returns Claude Desktop for entrypoint claude-desktop', () => {
+test('detectClaudeCodeEditorVariant: returns Claude Code CLI for entrypoint claude-cli', () => {
+    const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
+    const file = nodePath.join(dir, 'session.jsonl');
+    fs.writeFileSync(file, JSON.stringify({ type: 'user', entrypoint: 'claude-cli', timestamp: '2026-01-01T00:00:00.000Z' }) + '\n');
+    try {
+        assert.equal(detectClaudeCodeEditorVariant(file), 'Claude Code CLI');
+    } finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }e-desktop', () => {
         const dir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'claude-variant-'));
         const projectsDir = nodePath.join(dir, '.claude', 'projects', 'hash');
         fs.mkdirSync(projectsDir, { recursive: true });
