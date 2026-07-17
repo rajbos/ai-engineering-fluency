@@ -2508,6 +2508,32 @@ function _gmusProcessJsonRequests(sessionContent: ParsedSessionJson, modelUsage:
 	}
 }
 
+/** Resolve model usage for a JSONL-format session, preferring exact OTel usage when available. */
+async function _gmusResolveJsonl(sessionFile: string, fileContent: string, modelUsage: ModelUsage, deps: GmusDeps): Promise<ModelUsage> {
+	// Copilot CLI events.jsonl: prefer exact per-model usage from the OpenTelemetry
+	// file export (when enabled) over the ratio-based estimate below.
+	if (extractCopilotCliSessionId(sessionFile)) {
+		const otel = await getCopilotCliOtelUsage(sessionFile);
+		if (otel && Object.keys(otel.modelUsage).length > 0) { return otel.modelUsage; }
+	}
+	const lines = fileContent.trim().split('\n');
+	const result = _gmusProcessJsonlContent(lines, modelUsage, deps);
+	return result ?? modelUsage;
+}
+
+/** Resolve model usage from a session file's content, dispatching by format. */
+async function _gmusResolveFromContent(sessionFile: string, fileContent: string, modelUsage: ModelUsage, deps: GmusDeps, preloadedParsedJson?: unknown): Promise<ModelUsage> {
+	if (isUuidPointerFile(fileContent)) { return modelUsage; }
+	const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
+	if (isJsonl) {
+		return _gmusResolveJsonl(sessionFile, fileContent, modelUsage, deps);
+	}
+	const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+	if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return modelUsage; }
+	_gmusProcessJsonRequests(parsed, modelUsage, deps);
+	return modelUsage;
+}
+
 export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'warn' | 'tokenEstimators' | 'modelPricing' | 'ecosystems'>, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<ModelUsage> {
 	const modelUsage: ModelUsage = {};
 	if (deps.ecosystems) {
@@ -2519,22 +2545,7 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 	}
 	try {
 		const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
-		if (isUuidPointerFile(fileContent)) { return modelUsage; }
-		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
-		if (isJsonl) {
-			// Copilot CLI events.jsonl: prefer exact per-model usage from the OpenTelemetry
-			// file export (when enabled) over the ratio-based estimate below.
-			if (extractCopilotCliSessionId(sessionFile)) {
-				const otel = await getCopilotCliOtelUsage(sessionFile);
-				if (otel && Object.keys(otel.modelUsage).length > 0) { return otel.modelUsage; }
-			}
-			const lines = fileContent.trim().split('\n');
-			const result = _gmusProcessJsonlContent(lines, modelUsage, deps);
-			return result ?? modelUsage;
-		}
-		const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-		if (!isParsedSessionJson(parsed)) { deps.warn(`Unexpected session format in ${sessionFile}`); return modelUsage; }
-		_gmusProcessJsonRequests(parsed, modelUsage, deps);
+		return await _gmusResolveFromContent(sessionFile, fileContent, modelUsage, deps, preloadedParsedJson);
 	} catch (error) {
 		deps.warn(`Error getting model usage from ${sessionFile}: ${error}`);
 	}
