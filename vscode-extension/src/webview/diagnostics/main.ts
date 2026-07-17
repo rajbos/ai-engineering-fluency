@@ -2096,37 +2096,39 @@ function startWorktreeCleanup(): void {
   });
 }
 
-function handleWorktreeTabClick(event: MouseEvent): void {
-  const target = event.target as HTMLElement | null;
-  if (!target) { return; }
+function _handleWorktreeActionButtonClick(target: HTMLElement): boolean {
   if (target.id === "btn-browse-worktree-root") {
     vscode.postMessage({ command: "pickWorktreeRoot" });
-    return;
+    return true;
   }
   if (target.id === "btn-add-worktree-root") {
     addWorktreeRootFromInput();
-    return;
+    return true;
   }
   if (target.id === "btn-scan-worktrees") {
     startWorktreeScan();
-    return;
+    return true;
   }
   if (target.id === "btn-cancel-worktree-scan") {
     vscode.postMessage({ command: "cancelWorktreeScan" });
-    return;
+    return true;
   }
   if (target.id === "btn-cleanup-pushed-worktrees") {
     startWorktreeCleanup();
-    return;
+    return true;
   }
   if (target.id === "btn-cancel-cleanup") {
     vscode.postMessage({ command: "cancelCleanupPushedWorktrees" });
-    return;
+    return true;
   }
+  return false;
+}
+
+function _handleWorktreeRootsListClick(target: HTMLElement): boolean {
   if (target.closest("#btn-toggle-worktree-roots")) {
     worktreeRootsExpanded = !worktreeRootsExpanded;
     updateWorktreeControls();
-    return;
+    return true;
   }
   if (target.classList.contains("worktree-remove-root")) {
     const idx = Number(target.getAttribute("data-index"));
@@ -2134,14 +2136,18 @@ function handleWorktreeTabClick(event: MouseEvent): void {
       worktreeRoots.splice(idx, 1);
       updateWorktreeControls();
     }
-    return;
+    return true;
   }
+  return false;
+}
+
+function _handleWorktreeRowLinkClick(event: MouseEvent, target: HTMLElement): boolean {
   const revealLink = target.closest(".worktree-reveal-link") as HTMLElement | null;
   if (revealLink) {
     event.preventDefault();
     const p = decodeURIComponent(revealLink.getAttribute("data-path") || "");
     if (p) { vscode.postMessage({ command: "revealPath", path: p }); }
-    return;
+    return true;
   }
   const deleteLink = target.closest(".worktree-delete-link") as HTMLElement | null;
   if (deleteLink) {
@@ -2153,29 +2159,48 @@ function handleWorktreeTabClick(event: MouseEvent): void {
     // The actual confirmation is a native VS Code modal shown by the extension — it owns the
     // "git worktree remove" call and any dirty-tree force-confirmation, not this webview.
     if (p) { vscode.postMessage({ command: "deleteWorktree", path: p, branch, repoLabel, pushed }); }
-    return;
+    return true;
   }
+  return false;
+}
+
+function _handleWorktreeSortHeaderClick(target: HTMLElement): boolean {
   const sortHeader = target.closest("[data-wt-sort]") as HTMLElement | null;
-  if (sortHeader) {
-    const col = sortHeader.getAttribute("data-wt-sort") as WorktreeSortColumn | null;
-    if (col) {
-      if (worktreeSortColumn === col) {
-        worktreeSortDir = worktreeSortDir === "desc" ? "asc" : "desc";
-      } else {
-        worktreeSortColumn = col;
-        worktreeSortDir = col === "repo" ? "asc" : "desc";
-      }
-      updateWorktreeResults();
-    }
-    return;
+  if (!sortHeader) { return false; }
+  const col = sortHeader.getAttribute("data-wt-sort") as WorktreeSortColumn | null;
+  if (!col) { return true; }
+  if (worktreeSortColumn === col) {
+    worktreeSortDir = worktreeSortDir === "desc" ? "asc" : "desc";
+  } else {
+    worktreeSortColumn = col;
+    worktreeSortDir = col === "repo" ? "asc" : "desc";
   }
+  updateWorktreeResults();
+  return true;
+}
+
+function _handleWorktreeRepoRowClick(target: HTMLElement): boolean {
   const repoRow = target.closest(".worktree-repo-row") as HTMLElement | null;
-  if (repoRow) {
-    const repo = repoRow.getAttribute("data-repo") ?? "";
-    if (worktreeExpandedRepos.has(repo)) { worktreeExpandedRepos.delete(repo); }
-    else { worktreeExpandedRepos.add(repo); }
-    updateWorktreeResults();
-  }
+  if (!repoRow) { return false; }
+  const repo = repoRow.getAttribute("data-repo") ?? "";
+  if (worktreeExpandedRepos.has(repo)) { worktreeExpandedRepos.delete(repo); }
+  else { worktreeExpandedRepos.add(repo); }
+  updateWorktreeResults();
+  return true;
+}
+
+function _handleWorktreeTableInteractionClick(target: HTMLElement): boolean {
+  if (_handleWorktreeSortHeaderClick(target)) { return true; }
+  return _handleWorktreeRepoRowClick(target);
+}
+
+function handleWorktreeTabClick(event: MouseEvent): void {
+  const target = event.target as HTMLElement | null;
+  if (!target) { return; }
+  if (_handleWorktreeActionButtonClick(target)) { return; }
+  if (_handleWorktreeRootsListClick(target)) { return; }
+  if (_handleWorktreeRowLinkClick(event, target)) { return; }
+  _handleWorktreeTableInteractionClick(target);
 }
 
 function setupWorktreesHandlers(): void {
