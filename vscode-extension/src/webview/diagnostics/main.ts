@@ -161,39 +161,7 @@ type DiagnosticsData = {
   quotaEntitlements?: QuotaEntitlements;
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
   toolFamilies?: ToolFamilyConfig[];
-  worktreeScanRoots?: string[];
   otelComparison?: CopilotCliOtelComparison | null;
-};
-
-type WorktreeResult = {
-  path: string;
-  repoLabel: string;
-  branch: string;
-  lastCommit: string;
-  lastCommitDate: string | null;
-  pushed: "yes" | "no" | "?";
-  files: number;
-  folders: number;
-  bytes: number;
-};
-
-type WorktreeScanStatus = {
-  root: string;
-  checked: number;
-  total: number;
-  foundCount: number;
-  elapsedMs: number;
-  /**
-   * "walking" while discovering .git markers under the root; "checking" while resolving them;
-   * "enriching" during the background size + push-status pass.
-   */
-  phase?: "walking" | "checking" | "enriching";
-  /** Folders explored during the "walking" phase (live activity indicator). */
-  dirsScanned?: number;
-  /** Worktrees whose size + push status have been computed during the "enriching" phase. */
-  enriched?: number;
-  /** Total worktrees to enrich during the "enriching" phase. */
-  enrichTotal?: number;
 };
 
 type ToolFamilyConfig = {
@@ -257,32 +225,6 @@ let storedDetailedFiles: SessionFileDetails[] = [];
 let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
-
-// Worktree discovery tab state
-let worktreeRoots: string[] = initialData?.worktreeScanRoots ? [...initialData.worktreeScanRoots] : [];
-let worktreeResults: WorktreeResult[] = [];
-let worktreeScanInProgress = false;
-let worktreeScanStatus: WorktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
-let worktreeScanError: string | null = null;
-let worktreeRenderPending = false;
-// Repo labels whose per-worktree details table is expanded in the results view.
-const worktreeExpandedRepos = new Set<string>();
-// Whether the root-folders list is expanded. Collapsed by default when there are more than 2.
-let worktreeRootsExpanded = false;
-// Sort state for the top-level repository table.
-type WorktreeSortColumn = "repo" | "count" | "size";
-let worktreeSortColumn: WorktreeSortColumn = "count";
-let worktreeSortDir: "asc" | "desc" = "desc";
-
-// Bulk "clean up pushed worktrees" state.
-let worktreeCleanupInProgress = false;
-// True from the moment the cleanup button is clicked until the extension's native confirm
-// modal is answered, so a second click can't fire a duplicate confirmation while it's open.
-let worktreeCleanupConfirmPending = false;
-let worktreeCleanupStatus: { processed: number; total: number } = { processed: 0, total: 0 };
-type WorktreeCleanupOutcome = "deleted" | "skipped" | "error";
-type WorktreeCleanupLogEntry = { path: string; branch: string; repoLabel: string; status: WorktreeCleanupOutcome; reason?: string };
-let worktreeCleanupLog: WorktreeCleanupLogEntry[] = [];
 
 function removeSessionFilesSection(reportText: string): string {
   return reportText.replace(SESSION_FILES_SECTION_REGEX, "");
@@ -1193,296 +1135,6 @@ function renderModelUsageResults(
     </div>`;
 }
 
-function renderWorktreeRootsList(): string {
-  if (worktreeRoots.length === 0) {
-    return `<div style="color: var(--text-muted); font-size: 12px; margin: 8px 0;">No root folders added yet. Add a folder to scan for worktrees.</div>`;
-  }
-  // With more than 2 locations the list gets long, so collapse it by default and show a count.
-  const collapsible = worktreeRoots.length > 2;
-  const showList = !collapsible || worktreeRootsExpanded;
-  const toggle = collapsible
-    ? `<button class="worktree-roots-toggle" id="btn-toggle-worktree-roots" aria-expanded="${worktreeRootsExpanded}"><span class="worktree-caret">${worktreeRootsExpanded ? "▼" : "▶"}</span>${worktreeRoots.length} root folders found</button>`
-    : "";
-  const list = showList
-    ? `<div class="worktree-roots-list">${worktreeRoots
-        .map(
-          (r, i) =>
-            `<div class="worktree-root-item"><span title="${escapeHtml(r)}">${escapeHtml(r)}</span><button class="button secondary worktree-remove-root" data-index="${i}" ${worktreeScanInProgress ? "disabled" : ""}>✕</button></div>`,
-        )
-        .join("")}</div>`
-    : "";
-  return toggle + list;
-}
-
-function _renderWorktreeEnrichingProgress(s: WorktreeScanStatus, seconds: string): string {
-  const done = s.enriched ?? 0;
-  const total = s.enrichTotal ?? 0;
-  const pct = total > 0 ? Math.round((done / total) * 100) : 0;
-  return `
-    <div class="info-box" style="margin-top: 12px;">
-      <div class="info-box-title">📦 Computing sizes &amp; push status…</div>
-      <div>${done} / ${total} worktree${total === 1 ? "" : "s"} analyzed (${seconds}s)</div>
-      <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${pct}%;"></div></div>
-    </div>`;
-}
-
-function _renderWorktreeScanningProgress(s: WorktreeScanStatus, seconds: string): string {
-  const walking = s.phase === "walking";
-  const title = walking ? "🔍 Scanning folder…" : "⏳ Checking markers…";
-  const dirs = s.dirsScanned ?? 0;
-  const detail = walking
-    ? `Exploring for git worktrees — ${dirs} folder${dirs === 1 ? "" : "s"} scanned (${seconds}s)`
-    : `${s.checked} / ${s.total || "?"} .git markers checked — ${s.foundCount} worktree${s.foundCount === 1 ? "" : "s"} found so far (${seconds}s)`;
-  const pct = walking ? 100 : (s.total > 0 ? Math.round((s.checked / s.total) * 100) : 0);
-  const fillClass = walking ? "worktree-progress-fill indeterminate" : "worktree-progress-fill";
-  return `
-    <div class="info-box" style="margin-top: 12px;">
-      <div class="info-box-title">${title}</div>
-      <div>Folder: <span style="font-family: var(--vscode-editor-font-family, monospace);">${escapeHtml(s.root || "…")}</span></div>
-      <div>${detail}</div>
-      <div class="worktree-progress-bar"><div class="${fillClass}" style="width: ${pct}%;"></div></div>
-    </div>`;
-}
-
-function renderWorktreeProgress(): string {
-  if (!worktreeScanInProgress) { return ""; }
-  const s = worktreeScanStatus;
-  const seconds = (s.elapsedMs / 1000).toFixed(1);
-  if (s.phase === "enriching") { return _renderWorktreeEnrichingProgress(s, seconds); }
-  return _renderWorktreeScanningProgress(s, seconds);
-}
-
-function renderWorktreeControls(): string {
-  return `
-    <div class="section">
-      <div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Root Folders</span></div>
-      <div id="worktree-roots-list">${renderWorktreeRootsList()}</div>
-      <div class="folder-input-row" style="margin-top: 8px;">
-        <input
-          type="text"
-          id="worktree-root-input"
-          class="folder-input"
-          placeholder="Paste a root folder path here, e.g. C:\\code\\repos"
-          ${worktreeScanInProgress ? "disabled" : ""}
-        />
-        <button class="button secondary" id="btn-browse-worktree-root" ${worktreeScanInProgress ? "disabled" : ""}>📂 Browse…</button>
-        <button class="button secondary" id="btn-add-worktree-root" ${worktreeScanInProgress ? "disabled" : ""}>➕ Add</button>
-      </div>
-      <div style="margin-top: 16px;">
-        <button class="button" id="btn-scan-worktrees" ${worktreeScanInProgress || worktreeCleanupInProgress || worktreeRoots.length === 0 ? "disabled" : ""}>🔍 Scan for Worktrees</button>
-        ${worktreeScanInProgress ? '<button class="button secondary" id="btn-cancel-worktree-scan">✕ Cancel</button>' : ""}
-      </div>
-      ${worktreeScanError ? `<div class="info-box" style="margin-top: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);"><div>⚠️ ${escapeHtml(worktreeScanError)}</div></div>` : ""}
-      <div id="worktree-progress-area">${renderWorktreeProgress()}</div>
-    </div>`;
-}
-
-function groupWorktreesByRepo(results: WorktreeResult[]): Map<string, WorktreeResult[]> {
-  const groups = new Map<string, WorktreeResult[]>();
-  for (const wt of results) {
-    const key = wt.repoLabel || "Unknown";
-    if (!groups.has(key)) { groups.set(key, []); }
-    groups.get(key)!.push(wt);
-  }
-  return groups;
-}
-
-/** A worktree whose size/push status has not been computed yet (bytes are the -1 sentinel). */
-function isWorktreePending(w: WorktreeResult): boolean {
-  return w.bytes < 0;
-}
-
-/** Bytes counted toward totals: pending (-1) worktrees contribute 0 until enriched. */
-function knownBytes(w: WorktreeResult): number {
-  return w.bytes > 0 ? w.bytes : 0;
-}
-
-function buildWorktreeRowHtml(w: WorktreeResult): string {
-  const pending = isWorktreePending(w);
-  // While a scan is running the values are still being computed; if it stopped (e.g. cancelled)
-  // before this row was enriched, show a neutral dash instead of a misleading "computing…".
-  const pendingLabel = (active: string) => `<span class="worktree-pending">${worktreeScanInProgress ? active : "—"}</span>`;
-  const pushedIcon = w.pushed === "yes" ? "✅" : w.pushed === "no" ? "🔴" : "❓";
-  const pushedCell = pending ? pendingLabel("checking…") : `${pushedIcon} ${escapeHtml(w.pushed)}`;
-  const filesCell = pending ? pendingLabel("…") : escapeHtml(String(w.files));
-  const sizeCell = pending
-    ? pendingLabel("computing…")
-    : `<span title="${w.bytes.toLocaleString()} bytes">${formatFileSize(w.bytes)}</span>`;
-  return `<tr>
-    <td title="${escapeHtml(w.path)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(w.path)}</td>
-    <td>${escapeHtml(w.branch)}</td>
-    <td>${escapeHtml(w.lastCommit)}</td>
-    <td>${pushedCell}</td>
-    <td>${filesCell}</td>
-    <td>${sizeCell}</td>
-    <td>
-      <a href="#" class="worktree-reveal-link" data-path="${encodeURIComponent(w.path)}">Open</a>
-      <a href="#" class="worktree-delete-link" data-path="${encodeURIComponent(w.path)}" data-branch="${encodeURIComponent(w.branch)}" data-repo="${encodeURIComponent(w.repoLabel)}" data-pushed="${escapeHtml(w.pushed)}" title="Remove via git worktree remove (asks for confirmation)">🗑️ Delete</a>
-    </td>
-  </tr>`;
-}
-
-/** The per-worktree details table shown when a repository row is expanded. */
-function buildWorktreeDetailsTableHtml(worktrees: WorktreeResult[]): string {
-  const sorted = [...worktrees].sort((a, b) => knownBytes(b) - knownBytes(a));
-  const rows = sorted.map(buildWorktreeRowHtml).join("");
-  return `<div class="table-container">
-    <table class="session-table">
-      <thead><tr><th>Path</th><th>Branch</th><th>Last Commit</th><th>Pushed</th><th>Files</th><th>Size</th><th>Actions</th></tr></thead>
-      <tbody>${rows}</tbody>
-    </table>
-  </div>`;
-}
-
-/** Size cell text with a trailing "…" hint while any worktree in the set is still being sized. */
-function worktreeSizeText(worktrees: WorktreeResult[]): string {
-  const totalBytes = worktrees.reduce((s, w) => s + knownBytes(w), 0);
-  const pending = worktrees.some(isWorktreePending);
-  const size = `<span title="${totalBytes.toLocaleString()} bytes">${formatFileSize(totalBytes)}</span>`;
-  return pending ? `${size} <span class="worktree-pending">…</span>` : size;
-}
-
-/**
- * A repository's summary row (Repository | Worktrees | Size) plus a details row that holds the
- * per-worktree table. The details row is hidden unless the repo is in worktreeExpandedRepos.
- */
-function buildWorktreeRepoRowsHtml(repoLabel: string, worktrees: WorktreeResult[]): string {
-  const expanded = worktreeExpandedRepos.has(repoLabel);
-  const caret = expanded ? "▼" : "▶";
-  const repoAttr = escapeHtml(repoLabel);
-  const summaryRow = `<tr class="worktree-repo-row${expanded ? " expanded" : ""}" data-repo="${repoAttr}" aria-expanded="${expanded}">
-    <td><span class="worktree-caret">${caret}</span> ${escapeHtml(repoLabel)}</td>
-    <td>${worktrees.length}</td>
-    <td>${worktreeSizeText(worktrees)}</td>
-  </tr>`;
-  const detailsRow = `<tr class="worktree-repo-details" data-repo="${repoAttr}"${expanded ? "" : ' style="display: none;"'}>
-    <td colspan="3">${buildWorktreeDetailsTableHtml(worktrees)}</td>
-  </tr>`;
-  return summaryRow + detailsRow;
-}
-
-function getWorktreeSortIndicator(col: WorktreeSortColumn): string {
-  if (worktreeSortColumn !== col) { return ""; }
-  return worktreeSortDir === "desc" ? " ▼" : " ▲";
-}
-
-/** Sum of the known (enriched) bytes across a repository's worktrees. */
-function groupKnownBytes(worktrees: WorktreeResult[]): number {
-  return worktrees.reduce((s, w) => s + knownBytes(w), 0);
-}
-
-/** Compare two [repoLabel, worktrees] groups per the active sort column/direction. */
-function compareWorktreeGroups(a: [string, WorktreeResult[]], b: [string, WorktreeResult[]]): number {
-  const dir = worktreeSortDir === "desc" ? -1 : 1;
-  if (worktreeSortColumn === "repo") {
-    return dir * a[0].localeCompare(b[0]);
-  }
-  const value = (g: WorktreeResult[]) => (worktreeSortColumn === "count" ? g.length : groupKnownBytes(g));
-  const diff = value(a[1]) - value(b[1]);
-  // Tie-break by repo name (ascending) so equal groups keep a stable order.
-  return diff !== 0 ? dir * diff : a[0].localeCompare(b[0]);
-}
-
-/** Worktrees eligible for the bulk cleanup: known to be pushed and already enriched. */
-function getCleanupCandidates(): WorktreeResult[] {
-  return worktreeResults.filter((w) => w.pushed === "yes" && !isWorktreePending(w));
-}
-
-/** The cleanup trigger, rendered as its own card inside the hero summary-cards row (to the right of Worktrees/Repositories/Total Size). */
-function renderWorktreeCleanupCard(): string {
-  const pushedCount = getCleanupCandidates().length;
-  const disabled = worktreeCleanupInProgress || worktreeCleanupConfirmPending || worktreeScanInProgress || pushedCount === 0;
-  const label = worktreeCleanupConfirmPending ? "⏳ Waiting…" : `🧹 Clean Up (${pushedCount})`;
-  return `<div class="summary-card worktree-cleanup-card">
-    <div class="summary-label">Pushed Worktrees</div>
-    <div class="worktree-cleanup-card-actions">
-      <button class="button secondary" id="btn-cleanup-pushed-worktrees" ${disabled ? "disabled" : ""}>${label}</button>
-      ${worktreeCleanupInProgress ? '<button class="button secondary" id="btn-cancel-cleanup">✕</button>' : ""}
-    </div>
-  </div>`;
-}
-
-/** Non-deleted cleanup outcomes (skipped/error) — successful deletions just remove the row, no need to list them. */
-function renderWorktreeCleanupLog(): string {
-  const notable = worktreeCleanupLog.filter((e) => e.status !== "deleted");
-  if (notable.length === 0) { return ""; }
-  const rows = notable.map((e) => {
-    const icon = e.status === "skipped" ? "⏭️" : "❌";
-    return `<div class="worktree-cleanup-log-row">
-      <span>${icon}</span>
-      <span class="worktree-cleanup-log-branch">${escapeHtml(e.branch)}</span>
-      <span class="worktree-cleanup-log-repo">${escapeHtml(e.repoLabel)}</span>
-      <span class="worktree-cleanup-log-reason">${escapeHtml(e.reason || "")}</span>
-    </div>`;
-  }).join("");
-  return `<div class="worktree-cleanup-log">${rows}</div>`;
-}
-
-function renderWorktreeCleanupStatus(): string {
-  if (worktreeCleanupInProgress) {
-    const { processed, total } = worktreeCleanupStatus;
-    const pct = total > 0 ? Math.round((processed / total) * 100) : 0;
-    return `<div class="info-box" style="margin-top: 12px;">
-      <div class="info-box-title">🧹 Cleaning up pushed worktrees…</div>
-      <div>${processed} / ${total} processed</div>
-      <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${pct}%;"></div></div>
-    </div>${renderWorktreeCleanupLog()}`;
-  }
-  if (worktreeCleanupLog.length === 0) { return ""; }
-  const deleted = worktreeCleanupLog.filter((e) => e.status === "deleted").length;
-  const skipped = worktreeCleanupLog.filter((e) => e.status === "skipped").length;
-  const errors = worktreeCleanupLog.filter((e) => e.status === "error").length;
-  return `<div class="info-box" style="margin-top: 12px;">
-    <div class="info-box-title">🧹 Cleanup finished</div>
-    <div>✅ ${deleted} deleted · ⏭️ ${skipped} skipped (uncommitted/unpushed) · ${errors > 0 ? `❌ ${errors} error${errors === 1 ? "" : "s"}` : "0 errors"}</div>
-  </div>${renderWorktreeCleanupLog()}`;
-}
-
-function renderWorktreeResults(): string {
-  if (worktreeResults.length === 0) {
-    if (worktreeScanInProgress) { return '<div style="padding: 16px; color: var(--text-muted);">Discovering worktrees…</div>'; }
-    return '<div style="padding: 16px; color: var(--text-muted);">No worktrees found yet. Add root folders above and click Scan.</div>';
-  }
-  const groups = groupWorktreesByRepo(worktreeResults);
-  const totalBytes = worktreeResults.reduce((s, w) => s + knownBytes(w), 0);
-  const anyPending = worktreeResults.some(isWorktreePending);
-  const totalSizeHtml = `${formatFileSize(totalBytes)}${anyPending ? ' <span class="worktree-pending">…</span>' : ''}`;
-  const summary = `<div class="summary-cards">
-    <div class="summary-card"><div class="summary-label">🌳 Worktrees</div><div class="summary-value">${worktreeResults.length}</div></div>
-    <div class="summary-card"><div class="summary-label">📦 Repositories</div><div class="summary-value">${groups.size}</div></div>
-    <div class="summary-card"><div class="summary-label">💾 Total Size</div><div class="summary-value" title="${totalBytes.toLocaleString()} bytes">${totalSizeHtml}</div></div>
-    ${renderWorktreeCleanupCard()}
-  </div>`;
-  const sortedGroups = [...groups.entries()].sort(compareWorktreeGroups);
-  const repoRows = sortedGroups.map(([repo, wts]) => buildWorktreeRepoRowsHtml(repo, wts)).join("");
-  const table = `<div class="table-container">
-    <table class="session-table worktree-repo-table">
-      <thead><tr>
-        <th class="sortable" data-wt-sort="repo">Repository${getWorktreeSortIndicator("repo")}</th>
-        <th class="sortable" data-wt-sort="count">Worktrees${getWorktreeSortIndicator("count")}</th>
-        <th class="sortable" data-wt-sort="size">Size${getWorktreeSortIndicator("size")}</th>
-      </tr></thead>
-      <tbody>${repoRows}</tbody>
-    </table>
-  </div>`;
-  return summary + renderWorktreeCleanupStatus() + table;
-}
-
-function renderWorktreesTab(): string {
-  return `
-    <div id="tab-worktrees" class="tab-content">
-      <div class="info-box">
-        <div class="info-box-title">🌳 Worktree Discovery</div>
-        <div>
-          Scans folders for uncleaned git worktrees and reports disk usage grouped by repository (based on each
-          worktree's git remote). Add one or more root folders below, then click Scan. Results stream in as they're found.
-        </div>
-      </div>
-      <div id="worktree-controls">${renderWorktreeControls()}</div>
-      <div id="worktree-results">${renderWorktreeResults()}</div>
-    </div>`;
-}
-
 function groupSessionFolders(
   raw: Array<{ dir: string; count: number; editorName?: string }>,
 ): Array<{ dir: string; count: number; editorName?: string }> {
@@ -1677,6 +1329,56 @@ function activateTab(tabId: string): boolean {
     return true;
   }
   return false;
+}
+
+/** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
+const TAB_GROUPS: Record<string, string[]> = {
+  diagnostics: ["report", "sessions", "cache", "path-analyzer"],
+  research: ["model-usage", "tool-analysis", "otel-delta"],
+  settings: ["display", "backend", "github", "debug"],
+};
+
+function groupOfTab(tabId: string): string {
+  for (const [group, tabs] of Object.entries(TAB_GROUPS)) {
+    if (tabs.includes(tabId)) { return group; }
+  }
+  return "diagnostics";
+}
+
+/** The first leaf tab in a group that actually has a rendered button (handles the conditional Debug tab). */
+function firstAvailableTabInGroup(groupId: string): string | undefined {
+  return TAB_GROUPS[groupId]?.find((id) => document.querySelector(`.tab[data-tab="${id}"]`));
+}
+
+/** Shows the leaf tab bar for the given group and hides the others; does not change which leaf tab is active. */
+function activateGroup(groupId: string): boolean {
+  const groupButton = document.querySelector(`.group-tab[data-group="${groupId}"]`);
+  const leafBar = document.querySelector(`.leaf-tabs[data-group="${groupId}"]`);
+  if (!groupButton || !leafBar) { return false; }
+
+  document.querySelectorAll(".group-tab").forEach((b) => b.classList.remove("active"));
+  document.querySelectorAll<HTMLElement>(".leaf-tabs").forEach((b) => { b.style.display = "none"; });
+
+  groupButton.classList.add("active");
+  (leafBar as HTMLElement).style.display = "flex";
+  return true;
+}
+
+function setupGroupHandlers(): void {
+  document.querySelectorAll(".group-tab").forEach((button) => {
+    button.addEventListener("click", () => {
+      const groupId = (button as HTMLElement).getAttribute("data-group");
+      if (!groupId || !activateGroup(groupId)) { return; }
+
+      const activeTabInGroup = document.querySelector(`.leaf-tabs[data-group="${groupId}"] .tab.active`);
+      if (!activeTabInGroup) {
+        const nextTab = firstAvailableTabInGroup(groupId);
+        if (nextTab && activateTab(nextTab)) {
+          diagState.patch({ activeTab: nextTab });
+        }
+      }
+    });
+  });
 }
 
 function setupSortHandlers(): void {
@@ -2036,373 +1738,6 @@ function handleModelUsageResult(message: DiagMessage): void {
     message.supportsCache1h !== false,
     String(message.timeRange || "all"),
   );
-}
-
-function updateWorktreeControls(): void {
-  const controlsEl = document.getElementById("worktree-controls");
-  if (controlsEl) { controlsEl.innerHTML = renderWorktreeControls(); }
-}
-
-function updateWorktreeResults(): void {
-  const resultsEl = document.getElementById("worktree-results");
-  if (resultsEl) { resultsEl.innerHTML = renderWorktreeResults(); }
-}
-
-function updateWorktreeProgressArea(): void {
-  const el = document.getElementById("worktree-progress-area");
-  if (el) { el.innerHTML = renderWorktreeProgress(); }
-}
-
-function scheduleWorktreeResultsRender(): void {
-  if (worktreeRenderPending) { return; }
-  worktreeRenderPending = true;
-  requestAnimationFrame(() => {
-    worktreeRenderPending = false;
-    updateWorktreeResults();
-  });
-}
-
-function addWorktreeRootFromInput(): void {
-  const input = document.getElementById("worktree-root-input") as HTMLInputElement | null;
-  const value = input?.value.trim();
-  if (!value) { return; }
-  if (!worktreeRoots.some((r) => r.toLowerCase() === value.toLowerCase())) {
-    worktreeRoots.push(value);
-  }
-  if (input) { input.value = ""; }
-  updateWorktreeControls();
-}
-
-function startWorktreeScan(): void {
-  if (worktreeRoots.length === 0 || worktreeScanInProgress || worktreeCleanupInProgress) { return; }
-  worktreeScanInProgress = true;
-  worktreeResults = [];
-  worktreeScanError = null;
-  worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
-  worktreeCleanupLog = [];
-  updateWorktreeControls();
-  updateWorktreeResults();
-  vscode.postMessage({ command: "scanWorktrees", rootPaths: worktreeRoots });
-}
-
-/**
- * Kicks off the bulk "clean up pushed worktrees" flow. The actual confirmation is a native
- * VS Code modal shown by the extension (see diagHandleCleanupPushedWorktrees) — this only sends
- * the candidate list and waits for cleanupStarted/cleanupDeclined to know the outcome.
- */
-function startWorktreeCleanup(): void {
-  if (worktreeCleanupInProgress || worktreeCleanupConfirmPending || worktreeScanInProgress) { return; }
-  const targets = getCleanupCandidates();
-  if (targets.length === 0) { return; }
-  worktreeCleanupConfirmPending = true;
-  updateWorktreeResults();
-  vscode.postMessage({
-    command: "cleanupPushedWorktrees",
-    worktrees: targets.map((w) => ({ path: w.path, branch: w.branch, repoLabel: w.repoLabel })),
-  });
-}
-
-function _handleWorktreeActionButtonClick(target: HTMLElement): boolean {
-  if (target.id === "btn-browse-worktree-root") {
-    vscode.postMessage({ command: "pickWorktreeRoot" });
-    return true;
-  }
-  if (target.id === "btn-add-worktree-root") {
-    addWorktreeRootFromInput();
-    return true;
-  }
-  if (target.id === "btn-scan-worktrees") {
-    startWorktreeScan();
-    return true;
-  }
-  if (target.id === "btn-cancel-worktree-scan") {
-    vscode.postMessage({ command: "cancelWorktreeScan" });
-    return true;
-  }
-  if (target.id === "btn-cleanup-pushed-worktrees") {
-    startWorktreeCleanup();
-    return true;
-  }
-  if (target.id === "btn-cancel-cleanup") {
-    vscode.postMessage({ command: "cancelCleanupPushedWorktrees" });
-    return true;
-  }
-  return false;
-}
-
-function _handleWorktreeRootsListClick(target: HTMLElement): boolean {
-  if (target.closest("#btn-toggle-worktree-roots")) {
-    worktreeRootsExpanded = !worktreeRootsExpanded;
-    updateWorktreeControls();
-    return true;
-  }
-  if (target.classList.contains("worktree-remove-root")) {
-    const idx = Number(target.getAttribute("data-index"));
-    if (!isNaN(idx)) {
-      worktreeRoots.splice(idx, 1);
-      updateWorktreeControls();
-    }
-    return true;
-  }
-  return false;
-}
-
-function _handleWorktreeRowLinkClick(event: MouseEvent, target: HTMLElement): boolean {
-  const revealLink = target.closest(".worktree-reveal-link") as HTMLElement | null;
-  if (revealLink) {
-    event.preventDefault();
-    const p = decodeURIComponent(revealLink.getAttribute("data-path") || "");
-    if (p) { vscode.postMessage({ command: "revealPath", path: p }); }
-    return true;
-  }
-  const deleteLink = target.closest(".worktree-delete-link") as HTMLElement | null;
-  if (deleteLink) {
-    event.preventDefault();
-    const p = decodeURIComponent(deleteLink.getAttribute("data-path") || "");
-    const branch = decodeURIComponent(deleteLink.getAttribute("data-branch") || "");
-    const repoLabel = decodeURIComponent(deleteLink.getAttribute("data-repo") || "");
-    const pushed = deleteLink.getAttribute("data-pushed") || "?";
-    // The actual confirmation is a native VS Code modal shown by the extension — it owns the
-    // "git worktree remove" call and any dirty-tree force-confirmation, not this webview.
-    if (p) { vscode.postMessage({ command: "deleteWorktree", path: p, branch, repoLabel, pushed }); }
-    return true;
-  }
-  return false;
-}
-
-function _handleWorktreeSortHeaderClick(target: HTMLElement): boolean {
-  const sortHeader = target.closest("[data-wt-sort]") as HTMLElement | null;
-  if (!sortHeader) { return false; }
-  const col = sortHeader.getAttribute("data-wt-sort") as WorktreeSortColumn | null;
-  if (!col) { return true; }
-  if (worktreeSortColumn === col) {
-    worktreeSortDir = worktreeSortDir === "desc" ? "asc" : "desc";
-  } else {
-    worktreeSortColumn = col;
-    worktreeSortDir = col === "repo" ? "asc" : "desc";
-  }
-  updateWorktreeResults();
-  return true;
-}
-
-function _handleWorktreeRepoRowClick(target: HTMLElement): boolean {
-  const repoRow = target.closest(".worktree-repo-row") as HTMLElement | null;
-  if (!repoRow) { return false; }
-  const repo = repoRow.getAttribute("data-repo") ?? "";
-  if (worktreeExpandedRepos.has(repo)) { worktreeExpandedRepos.delete(repo); }
-  else { worktreeExpandedRepos.add(repo); }
-  updateWorktreeResults();
-  return true;
-}
-
-function _handleWorktreeTableInteractionClick(target: HTMLElement): boolean {
-  if (_handleWorktreeSortHeaderClick(target)) { return true; }
-  return _handleWorktreeRepoRowClick(target);
-}
-
-function handleWorktreeTabClick(event: MouseEvent): void {
-  const target = event.target as HTMLElement | null;
-  if (!target) { return; }
-  if (_handleWorktreeActionButtonClick(target)) { return; }
-  if (_handleWorktreeRootsListClick(target)) { return; }
-  if (_handleWorktreeRowLinkClick(event, target)) { return; }
-  _handleWorktreeTableInteractionClick(target);
-}
-
-function setupWorktreesHandlers(): void {
-  const tabEl = document.getElementById("tab-worktrees");
-  if (!tabEl) { return; }
-  tabEl.addEventListener("click", handleWorktreeTabClick);
-  tabEl.addEventListener("keydown", (event) => {
-    const target = event.target as HTMLElement | null;
-    if (target?.id === "worktree-root-input" && (event as KeyboardEvent).key === "Enter") {
-      event.preventDefault();
-      addWorktreeRootFromInput();
-    }
-  });
-}
-
-function sanitizeWorktreeResult(item: unknown): WorktreeResult {
-  const w = (item ?? {}) as Record<string, unknown>;
-  const pushedRaw = String(w.pushed ?? "?");
-  const pushed: WorktreeResult["pushed"] = pushedRaw === "yes" || pushedRaw === "no" ? pushedRaw : "?";
-  return {
-    path: String(w.path ?? ""),
-    repoLabel: String(w.repoLabel ?? "Unknown"),
-    branch: String(w.branch ?? "?"),
-    lastCommit: String(w.lastCommit ?? "?"),
-    lastCommitDate: w.lastCommitDate ? String(w.lastCommitDate) : null,
-    pushed,
-    files: numField(w.files),
-    folders: numField(w.folders),
-    bytes: numField(w.bytes),
-  };
-}
-
-function handleWorktreeRootPicked(message: DiagMessage): void {
-  if (!message.folderPath) { return; }
-  const folderPath = String(message.folderPath);
-  if (!worktreeRoots.some((r) => r.toLowerCase() === folderPath.toLowerCase())) {
-    worktreeRoots.push(folderPath);
-  }
-  updateWorktreeControls();
-}
-
-/**
- * Merge auto-discovered scan roots (from known session folders + session workspace paths,
- * computed by the extension after the background session load) into the editable roots list.
- * Case-insensitive dedup, existing order preserved. Skipped while a scan is running so the
- * list is not mutated mid-scan.
- */
-function handleWorktreeRootsDiscovered(message: DiagMessage): void {
-  if (worktreeScanInProgress || !Array.isArray(message.roots)) { return; }
-  let added = false;
-  for (const raw of message.roots) {
-    if (typeof raw !== "string") { continue; }
-    const root = raw.trim();
-    if (!root) { continue; }
-    if (!worktreeRoots.some((r) => r.toLowerCase() === root.toLowerCase())) {
-      worktreeRoots.push(root);
-      added = true;
-    }
-  }
-  if (added) { updateWorktreeControls(); }
-}
-
-function handleWorktreeScanStarted(): void {
-  worktreeScanInProgress = true;
-  worktreeResults = [];
-  worktreeScanError = null;
-  worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
-  updateWorktreeControls();
-  updateWorktreeResults();
-}
-
-function handleWorktreeScanRootStarted(message: DiagMessage): void {
-  worktreeScanStatus = { ...worktreeScanStatus, root: String(message.root || ""), checked: 0, total: 0, phase: "walking", dirsScanned: 0 };
-  updateWorktreeProgressArea();
-}
-
-function handleWorktreeScanWalkProgress(message: DiagMessage): void {
-  worktreeScanStatus = {
-    ...worktreeScanStatus,
-    root: String(message.root ?? worktreeScanStatus.root),
-    phase: "walking",
-    dirsScanned: numField(message.dirsScanned),
-    elapsedMs: numField(message.elapsedMs),
-  };
-  updateWorktreeProgressArea();
-}
-
-function handleWorktreeScanRootMarkersFound(message: DiagMessage): void {
-  worktreeScanStatus = { ...worktreeScanStatus, total: numField(message.count), phase: "checking" };
-  updateWorktreeProgressArea();
-}
-
-function handleWorktreeScanRootSkipped(message: DiagMessage): void {
-  worktreeScanError = `Skipped "${message.root}": ${message.reason || "not accessible"}`;
-  updateWorktreeControls();
-}
-
-function handleWorktreeScanProgress(message: DiagMessage): void {
-  worktreeScanStatus = {
-    root: String(message.root ?? worktreeScanStatus.root),
-    checked: numField(message.checked),
-    total: message.total !== undefined ? numField(message.total) : worktreeScanStatus.total,
-    foundCount: numField(message.foundCount),
-    elapsedMs: numField(message.elapsedMs),
-  };
-  updateWorktreeProgressArea();
-}
-
-function handleWorktreeFound(message: DiagMessage): void {
-  if (!message.worktree) { return; }
-  worktreeResults.push(sanitizeWorktreeResult(message.worktree));
-  scheduleWorktreeResultsRender();
-}
-
-/** Remove a worktree row after the extension has confirmed and run "git worktree remove". */
-function handleWorktreeDeleted(message: DiagMessage): void {
-  const targetPath = String(message.path ?? "");
-  if (!targetPath) { return; }
-  const idx = worktreeResults.findIndex((w) => w.path === targetPath);
-  if (idx === -1) { return; }
-  worktreeResults.splice(idx, 1);
-  updateWorktreeResults();
-}
-
-/** The extension's confirm modal was dismissed/declined — re-enable the cleanup button. */
-function handleCleanupDeclined(): void {
-  worktreeCleanupConfirmPending = false;
-  updateWorktreeResults();
-}
-
-function handleCleanupStarted(message: DiagMessage): void {
-  worktreeCleanupConfirmPending = false;
-  worktreeCleanupInProgress = true;
-  worktreeCleanupStatus = { processed: 0, total: numField(message.total) };
-  worktreeCleanupLog = [];
-  updateWorktreeResults();
-}
-
-function handleCleanupWorktreeResult(message: DiagMessage): void {
-  worktreeCleanupStatus = { processed: numField(message.processed), total: numField(message.total) };
-  const rawStatus = message.status;
-  const status: WorktreeCleanupOutcome = rawStatus === "deleted" || rawStatus === "skipped" ? rawStatus : "error";
-  worktreeCleanupLog.push({
-    path: String(message.path ?? ""),
-    branch: String(message.branch ?? "?"),
-    repoLabel: String(message.repoLabel ?? ""),
-    status,
-    reason: typeof message.reason === "string" ? message.reason : undefined,
-  });
-  updateWorktreeResults();
-}
-
-function handleCleanupComplete(): void {
-  worktreeCleanupInProgress = false;
-  updateWorktreeResults();
-}
-
-function handleCleanupCancelled(): void {
-  worktreeCleanupInProgress = false;
-  worktreeCleanupConfirmPending = false;
-  updateWorktreeResults();
-}
-
-function handleWorktreeEnrichStarted(message: DiagMessage): void {
-  worktreeScanStatus = { ...worktreeScanStatus, phase: "enriching", enriched: 0, enrichTotal: numField(message.total), elapsedMs: numField(message.elapsedMs) };
-  updateWorktreeProgressArea();
-}
-
-function handleWorktreeEnrichProgress(message: DiagMessage): void {
-  worktreeScanStatus = { ...worktreeScanStatus, phase: "enriching", enriched: numField(message.enriched), enrichTotal: numField(message.total), elapsedMs: numField(message.elapsedMs) };
-  updateWorktreeProgressArea();
-}
-
-/** Patch a discovered worktree's size + push status once the background enrichment computes them. */
-function handleWorktreeEnriched(message: DiagMessage): void {
-  const targetPath = String(message.path ?? "");
-  if (!targetPath) { return; }
-  const wt = worktreeResults.find((w) => w.path === targetPath);
-  if (!wt) { return; }
-  wt.files = numField(message.files);
-  wt.folders = numField(message.folders);
-  wt.bytes = numField(message.bytes);
-  const pushedRaw = String(message.pushed ?? "?");
-  wt.pushed = pushedRaw === "yes" || pushedRaw === "no" ? pushedRaw : "?";
-  scheduleWorktreeResultsRender();
-}
-
-function handleWorktreeScanComplete(): void {
-  worktreeScanInProgress = false;
-  updateWorktreeControls();
-  updateWorktreeResults();
-}
-
-function handleWorktreeScanCancelled(): void {
-  worktreeScanInProgress = false;
-  updateWorktreeControls();
 }
 
 function setupTabHandlers(): void {
@@ -2941,35 +2276,6 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   }
 }
 
-/** Dispatches worktree-tab messages via static, literal command comparisons (no dynamic method lookup). */
-const _worktreeMessageHandlers: Record<string, (message: DiagMessage) => void> = {
-  worktreeRootPicked: handleWorktreeRootPicked,
-  worktreeRootsDiscovered: handleWorktreeRootsDiscovered,
-  worktreeScanStarted: () => handleWorktreeScanStarted(),
-  worktreeScanRootStarted: handleWorktreeScanRootStarted,
-  worktreeScanWalkProgress: handleWorktreeScanWalkProgress,
-  worktreeScanRootMarkersFound: handleWorktreeScanRootMarkersFound,
-  worktreeScanRootSkipped: handleWorktreeScanRootSkipped,
-  worktreeScanProgress: handleWorktreeScanProgress,
-  worktreeFound: handleWorktreeFound,
-  worktreeEnrichStarted: handleWorktreeEnrichStarted,
-  worktreeEnrichProgress: handleWorktreeEnrichProgress,
-  worktreeEnriched: handleWorktreeEnriched,
-  worktreeDeleted: handleWorktreeDeleted,
-  worktreeScanComplete: () => handleWorktreeScanComplete(),
-  worktreeScanCancelled: () => handleWorktreeScanCancelled(),
-  cleanupDeclined: () => handleCleanupDeclined(),
-  cleanupStarted: handleCleanupStarted,
-  cleanupWorktreeResult: handleCleanupWorktreeResult,
-  cleanupComplete: () => handleCleanupComplete(),
-  cleanupCancelled: () => handleCleanupCancelled(),
-};
-
-function handleWorktreeMessage(message: DiagMessage): void {
-  const handler = _worktreeMessageHandlers[message.command];
-  if (handler) { handler(message); }
-}
-
 function setupMessageHandlers(): void {
   window.addEventListener("message", (event) => {
     const message = event.data as DiagMessage;
@@ -2993,8 +2299,6 @@ function setupMessageHandlers(): void {
       handleFolderAnalysisResult(message);
     } else if (message.command === "modelUsageResult") {
       handleModelUsageResult(message);
-    } else {
-      handleWorktreeMessage(message);
     }
   });
 }
@@ -3512,18 +2816,29 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 </div>
 </div>
 
-<div class="tabs">
+<div class="tabs group-tabs">
+<button class="group-tab active" data-group="diagnostics">🩺 Diagnostics</button>
+<button class="group-tab" data-group="research">🔬 Research</button>
+<button class="group-tab" data-group="settings">⚙️ Settings</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="diagnostics" style="display: flex;">
 <button class="tab active" data-tab="report">📋 Report</button>
 <button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
 <button class="tab" data-tab="cache">💾 Cache</button>
-<button class="tab" data-tab="backend">☁️ Backend Storage</button>
-<button class="tab" data-tab="github">🔑 GitHub Auth</button>
-<button class="tab" data-tab="display">⚙️ Settings</button>
 <button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="research" style="display: none;">
 <button class="tab" data-tab="model-usage">🧮 Model Usage</button>
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
-<button class="tab" data-tab="worktrees">🌳 Worktrees</button>
 <button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
+</div>
+
+<div class="tabs leaf-tabs" data-group="settings" style="display: none;">
+<button class="tab" data-tab="display">⚙️ Display</button>
+<button class="tab" data-tab="backend">☁️ Backend Storage</button>
+<button class="tab" data-tab="github">🔑 GitHub Auth</button>
 ${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' : ''}
 </div>
 
@@ -3557,7 +2872,6 @@ ${renderFolderAnalyzerTab()}
 ${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
-${renderWorktreesTab()}
 ${renderOtelDeltaTab(data.otelComparison)}
 </div>
 `;
@@ -3597,6 +2911,7 @@ function renderLayout(data: DiagnosticsData): void {
 
   setupMessageHandlers();
   setupTabHandlers();
+  setupGroupHandlers();
   setupSortHandlers();
   setupEditorFilterHandlers();
   setupContextRefFilterHandlers();
@@ -3609,16 +2924,19 @@ function renderLayout(data: DiagnosticsData): void {
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
   setupModelUsageHandlers();
-  setupWorktreesHandlers();
   setupButtonHandlers();
   setupDisplaySettingHandlers();
   setupToolAnalysisSortHandlers();
   setupOtelDeltaPeriodHandler();
 
   const savedState = diagState.restore();
-  if (savedState?.activeTab && !activateTab(savedState.activeTab)) {
+  let restoredTab = "report";
+  if (savedState?.activeTab && activateTab(savedState.activeTab)) {
+    restoredTab = savedState.activeTab;
+  } else {
     activateTab("report");
   }
+  activateGroup(groupOfTab(restoredTab));
 
   if (savedState?.activeSubtab) {
     activateSubtab(savedState.activeSubtab);
