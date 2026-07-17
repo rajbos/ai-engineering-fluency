@@ -2202,6 +2202,13 @@ function handleWorktreeTabClick(event: MouseEvent): void {
   if (_handleWorktreeRowLinkClick(event, target)) { return; }
   _handleWorktreeTableInteractionClick(target);
 }
+  const target = event.target as HTMLElement | null;
+  if (!target) { return; }
+  if (_handleWorktreeActionButtonClick(target)) { return; }
+  if (_handleWorktreeRootsListClick(target)) { return; }
+  if (_handleWorktreeRowLinkClick(event, target)) { return; }
+  _handleWorktreeTableInteractionClick(target);
+}
 
 function setupWorktreesHandlers(): void {
   const tabEl = document.getElementById("tab-worktrees");
