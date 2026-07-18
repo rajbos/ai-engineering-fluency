@@ -180,6 +180,9 @@ import {
 // --- Chart building ---
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
 
+// --- Task classification ---
+import { classifySessionTask, buildClassificationInputFromUsageAnalysis, type TaskCategory } from '../../src/taskClassification';
+
 // --- Stats helpers ---
 import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, type SessionAggregateInput } from '../../src/statsHelpers';
 
@@ -381,7 +384,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 59; // Detect Auto model and Foundry local models from request-level fields
+	private static readonly CACHE_VERSION = 60; // Added taskCategory (task classification, issue #1650)
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -3334,7 +3337,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (dayKey < cutoffUtcStartKey) { continue; }
 			const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
 			const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dayKey);
-			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage);
+			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, sessionData.taskCategory);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
 		if (lastDayKey && (sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
@@ -3350,7 +3353,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const dateKey = toLocalDayKey(lastActivity);
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
-		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage);
+		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategory);
 		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
 		}
@@ -3358,12 +3361,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dateKey: string): DailyTokenStats {
 		if (!dailyStatsMap.has(dateKey)) {
-			dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
+			dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {}, taskCategoryUsage: {} });
 		}
 		return dailyStatsMap.get(dateKey)!;
 	}
 
-	private addUsageToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: any): void {
+	private addUsageToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: any, taskCategory?: TaskCategory): void {
 		entry.tokens += tokens;
 		entry.sessions += 1;
 		entry.interactions += interactions;
@@ -3377,6 +3380,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+		if (taskCategory) {
+			if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
+			if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
+			entry.taskCategoryUsage[taskCategory].tokens += tokens;
+			entry.taskCategoryUsage[taskCategory].sessions += 1;
+		}
 	}
 
 	private addLocToDailyEntry(entry: DailyTokenStats, linesAdded: number, linesRemoved: number, editorType: string, repository: string, languageUsage?: any): void {
@@ -4646,10 +4655,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const copilotNanoAiu = debugLogTokens?.copilotNanoAiu ?? tokenResult.copilotNanoAiu ?? 0;
 		const copilotExactCostDollars = copilotNanoAiu > 0 ? copilotNanoAiu * NANO_AIU_TO_DOLLARS : undefined;
 		const optionals = this.buildOptionalSessionFields(tokenResult, debugLogTokens, finalCacheReadTokens, copilotExactCostDollars, dailyRollups, usageAnalysis);
+		// Classified once per session (not per-render) using tool names from usageAnalysis and the
+		// already-extracted session title — see src/taskClassification.ts for the heuristic + rationale.
+		const taskCategory = classifySessionTask(buildClassificationInputFromUsageAnalysis(usageAnalysis, sessionMeta.title));
 		return {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
-			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens,
+			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens, taskCategory,
 			// Repository is discovered separately by getSessionFileDetails() (via content-reference
 			// git-root lookup) and is not recomputed here. Without preserving it, every cache-miss
 			// rebuild of this entry (e.g. an actively-edited session whose file keeps changing)
