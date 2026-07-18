@@ -28,6 +28,7 @@ import { AntigravityAdapter } from '../../../src/adapters/antigravityAdapter';
 import { KiroAdapter } from '../../../src/adapters/kiroAdapter';
 import { KiroCliAdapter } from '../../../src/adapters/kiroCliAdapter';
 import { DevinCliAdapter } from '../../../src/adapters/devinCliAdapter';
+import { CodexCliAdapter } from '../../../src/adapters/codexCliAdapter';
 
 import { OpenCodeDataAccess } from '../../../src/opencode';
 import { CrushDataAccess } from '../../../src/crush';
@@ -42,6 +43,7 @@ import { AntigravityDataAccess } from '../../../src/antigravity';
 import { KiroDataAccess } from '../../../src/kiro';
 import { KiroCliDataAccess } from '../../../src/kirocli';
 import { DevinCliDataAccess } from '../../../src/devinCli';
+import { CodexCliDataAccess } from '../../../src/codexcli';
 
 // Stub functions for adapters requiring callbacks
 const noopEstimateTokens = (_text: string, _model?: string) => 0;
@@ -62,6 +64,7 @@ const antigravityDA = new AntigravityDataAccess();
 const kiroDA = new KiroDataAccess();
 const kiroCliDA = new KiroCliDataAccess();
 const devinCliDA = new DevinCliDataAccess();
+const codexCliDA = new CodexCliDataAccess();
 
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
 const crushAdapter = new CrushAdapter(crushDA);
@@ -78,22 +81,24 @@ const antigravityAdapter = new AntigravityAdapter(antigravityDA);
 const kiroAdapter = new KiroAdapter(kiroDA);
 const kiroCliAdapter = new KiroCliAdapter(kiroCliDA);
 const devinCliAdapter = new DevinCliAdapter(devinCliDA);
+const codexCliAdapter = new CodexCliAdapter(codexCliDA);
 
 const allAdapters: IEcosystemAdapter[] = [
     openCodeAdapter, crushAdapter, continueAdapter, eclipseAdapter,
     claudeCodeAdapter, claudeDesktopAdapter, visualStudioAdapter, mistralVibeAdapter, geminiCliAdapter,
     copilotChatAdapter, copilotCliAdapter, antigravityAdapter, kiroAdapter, kiroCliAdapter, devinCliAdapter,
+    codexCliAdapter,
 ];
 
 // ---------------------------------------------------------------------------
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 15 adapters', () => {
+test('isDiscoverable: returns true for all 16 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 15);
+    assert.equal(allAdapters.length, 16);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -128,6 +133,7 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(kiroAdapter.id, 'kiro');
     assert.equal(kiroCliAdapter.id, 'kirocli');
     assert.equal(devinCliAdapter.id, 'devincli');
+    assert.equal(codexCliAdapter.id, 'codexcli');
 });
 
 // ---------------------------------------------------------------------------
@@ -255,6 +261,23 @@ test('DevinCliAdapter.handles: rejects unrelated paths and the Devin desktop dev
     assert.ok(!devinCliAdapter.handles('devin://trajectory/abc123'));
     assert.ok(!devinCliAdapter.handles(path.join(os.homedir(), '.crush', 'crush.db#abc')));
     assert.ok(!devinCliAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
+});
+
+test('CodexCliAdapter.handles: recognises rollout files and state-db virtual thread paths', () => {
+    const rollout = path.join(codexCliDA.getSessionsDir(), '2026', '03', '19', 'rollout-2026-03-19T12-00-00-019d0233-2d86-7c21-b13a-8fa9578d3a0d.jsonl');
+    assert.ok(codexCliAdapter.handles(rollout));
+    const archived = path.join(codexCliDA.getArchivedSessionsDir(), '2026', '03', '19', 'rollout-2026-03-19T12-00-00-019d0233-2d86-7c21-b13a-8fa9578d3a0d.jsonl');
+    assert.ok(codexCliAdapter.handles(archived));
+    const virtual = codexCliDA.virtualPath('019d0233-2d86-7c21-b13a-8fa9578d3a0d');
+    assert.ok(codexCliAdapter.handles(virtual));
+    assert.ok(codexCliAdapter.handles(virtual.replace(/\//g, '\\')));
+});
+
+test('CodexCliAdapter.handles: rejects unrelated paths (incl. the logs db and other adapters)', () => {
+    assert.ok(!codexCliAdapter.handles(path.join(os.homedir(), '.codex', 'logs_1.sqlite')));
+    assert.ok(!codexCliAdapter.handles(path.join(os.homedir(), '.codex', 'models_cache.json')));
+    assert.ok(!codexCliAdapter.handles(path.join(os.homedir(), '.crush', 'crush.db#abc')));
+    assert.ok(!codexCliAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
 });
 
 test('KiroAdapter.handles: recognises kiro.kiroagent workspace-sessions paths', () => {

@@ -29,6 +29,7 @@ import { CursorDataAccess } from '../cursor';
 import { KiroDataAccess } from '../kiro';
 import { KiroCliDataAccess } from '../kirocli';
 import { DevinCliDataAccess } from '../devinCli';
+import { CodexCliDataAccess } from '../codexcli';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
 import { CrushAdapter } from './crushAdapter';
@@ -48,6 +49,7 @@ import { JetBrainsAdapter } from './jetbrainsAdapter';
 import { KiroAdapter } from './kiroAdapter';
 import { KiroCliAdapter } from './kiroCliAdapter';
 import { DevinCliAdapter } from './devinCliAdapter';
+import { CodexCliAdapter } from './codexCliAdapter';
 
 /** Data-access instances and callbacks required to build the adapter registry. */
 export interface AdapterRegistryDeps {
@@ -66,6 +68,7 @@ cursor: CursorDataAccess;
 kiro: KiroDataAccess;
 kiroCli: KiroCliDataAccess;
 devinCli: DevinCliDataAccess;
+codexCli: CodexCliDataAccess;
 /** Estimates token count from raw text for a given model. */
 estimateTokens: (text: string, model?: string) => number;
 /** Returns true when the tool name identifies an MCP server tool. */
@@ -107,6 +110,7 @@ cursor: new CursorDataAccess(extensionUri),
 kiro: new KiroDataAccess(),
 kiroCli: new KiroCliDataAccess(),
 devinCli: new DevinCliDataAccess(),
+codexCli: new CodexCliDataAccess(),
 };
 }
 
@@ -141,6 +145,7 @@ new CursorAdapter(deps.cursor),
 new KiroAdapter(deps.kiro),
 new KiroCliAdapter(deps.kiroCli),
 new DevinCliAdapter(deps.devinCli),
+new CodexCliAdapter(deps.codexCli),
 // Copilot Chat / CLI adapters: discovery-only. Their handles() returns
 // false so processSessionFile() falls through to the shared parser path
 // for VS Code Copilot Chat and CLI files. See issue #654.

@@ -266,6 +266,11 @@ test('getEditorNameFromRoot: Devin CLI config dir returns "Devin CLI" (distinct 
     assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Roaming\\devin\\cli'), 'Devin CLI');
     assert.equal(getEditorNameFromRoot('/home/user/.local/share/devin/cli'), 'Devin CLI');
 });
+
+test('getEditorNameFromRoot: Codex CLI home (~/.codex) returns "Codex CLI", not VS Code', () => {
+    assert.equal(getEditorNameFromRoot('C:\\Users\\user\\.codex'), 'Codex CLI');
+    assert.equal(getEditorNameFromRoot('/home/user/.codex'), 'Codex CLI');
+});
 // ── Mutation-killing tests ──────────────────────────────────────────────
 
 import {
@@ -456,6 +461,13 @@ test('detectEditorSource: detects Devin (Cognition Labs fork/rebrand of Windsurf
 test('detectEditorSource: detects Devin CLI virtual sessions.db paths (distinct from the desktop app)', () => {
         const p = 'C:\\Users\\alice\\AppData\\Roaming\\devin\\cli\\sessions.db#sess-abc123';
         assert.equal(detectEditorSource(p), 'Devin CLI');
+});
+
+test('detectEditorSource: detects Codex CLI rollout files and virtual thread paths (not VS Code, despite the "code" substring)', () => {
+        const rollout = 'C:\\Users\\alice\\.codex\\sessions\\2026\\03\\19\\rollout-2026-03-19T12-00-00-019d0233-2d86-7c21-b13a-8fa9578d3a0d.jsonl';
+        assert.equal(detectEditorSource(rollout), 'Codex CLI');
+        const virtual = '/home/alice/.codex/state_5.sqlite#019d0233-2d86-7c21-b13a-8fa9578d3a0d';
+        assert.equal(detectEditorSource(virtual), 'Codex CLI');
 });
 
 test('detectEditorSource: detects VSCodium', () => {
@@ -1353,6 +1365,13 @@ test('getEditorTypeFromPath: devin:// URI returns Devin', () => {
 test('getEditorTypeFromPath: Devin CLI sessions.db virtual path returns "Devin CLI"', () => {
     const p = 'C:\\Users\\alice\\AppData\\Roaming\\devin\\cli\\sessions.db#sess-abc123';
     assert.equal(getEditorTypeFromPath(p), 'Devin CLI');
+});
+
+test('getEditorTypeFromPath: Codex CLI rollout and virtual thread paths return "Codex CLI"', () => {
+    const rollout = 'C:\\Users\\alice\\.codex\\archived_sessions\\2026\\03\\19\\rollout-2026-03-19T12-00-00-019d0233-2d86-7c21-b13a-8fa9578d3a0d.jsonl';
+    assert.equal(getEditorTypeFromPath(rollout), 'Codex CLI');
+    const virtual = 'C:\\Users\\alice\\.codex\\state_5.sqlite#019d0233-2d86-7c21-b13a-8fa9578d3a0d';
+    assert.equal(getEditorTypeFromPath(virtual), 'Codex CLI');
 });
 
 test('getEditorTypeFromPath: isGeminiCliPath requires all three conditions (missing /chats/session-)', () => {

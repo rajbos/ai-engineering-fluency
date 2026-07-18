@@ -15,4 +15,5 @@ export { JetBrainsAdapter } from './jetbrainsAdapter';
 export { PiAdapter } from './piAdapter';
 export { KiroAdapter } from './kiroAdapter';
 export { KiroCliAdapter } from './kiroCliAdapter';
+export { CodexCliAdapter } from './codexCliAdapter';
 
