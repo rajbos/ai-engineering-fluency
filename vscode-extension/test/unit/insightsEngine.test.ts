@@ -394,3 +394,84 @@ test('large-context-window-unused: does NOT fire when the context actually excee
 	assert.equal(results.find(i => i.id === LC_UNUSED_ID), undefined, 'window was genuinely used past the threshold');
 	assert.ok(results.find(i => i.id === LC_CROSSED_ID), 'crossed/tier warning applies instead');
 });
+
+// ---------------------------------------------------------------------------
+// model-edit-retries insight tests (issue #1649)
+// ---------------------------------------------------------------------------
+
+const RETRIES_ID = 'model-edit-retries';
+
+function effCounters(retries: number, editTurns: number) {
+	return {
+		calls: editTurns, editTurns, oneShotEditTurns: Math.max(0, editTurns - retries),
+		retries, selfCorrections: 0, editToolCalls: editTurns + retries,
+		inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0,
+	};
+}
+
+function makeRetryCtx(modelEfficiency: NonNullable<UsageAnalysisPeriod['modelEfficiency']>): InsightContext {
+	const ctx = makeCtx();
+	ctx.last30Days.modelEfficiency = modelEfficiency;
+	return ctx;
+}
+
+test('model-edit-retries: insight exists in INSIGHT_CATALOG', () => {
+	const def = INSIGHT_CATALOG.find(d => d.id === RETRIES_ID);
+	assert.ok(def, 'model-edit-retries should be in INSIGHT_CATALOG');
+	assert.equal(def!.severity, 'tip');
+	assert.equal(def!.category, 'agentic');
+});
+
+test('model-edit-retries: does NOT fire without model efficiency data', () => {
+	const results = evaluateInsights(makeCtx(), {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
+});
+
+test('model-edit-retries: does NOT fire when models have too few edit turns', () => {
+	// High rate but only 5 edit turns — below the 10-turn minimum
+	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(4, 5) });
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
+});
+
+test('model-edit-retries: fires when a single model has a high retry rate', () => {
+	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(10, 20) }); // 0.5 retries/edit
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === RETRIES_ID);
+	assert.ok(insight, 'should fire at 0.5 retries per edit turn');
+	assert.ok(insight!.body.includes('10 retries across 20 edit turns'), `body should carry the counts, got: ${insight!.body}`);
+});
+
+test('model-edit-retries: does NOT fire for a single model with a modest retry rate', () => {
+	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(6, 20) }); // 0.3 retries/edit, no comparison model
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
+});
+
+test('model-edit-retries: fires on a clear gap between two models and names both', () => {
+	const ctx = makeRetryCtx({
+		'model-worst': effCounters(6, 20),  // 0.3 retries/edit
+		'model-best': effCounters(1, 20),   // 0.05 retries/edit
+	});
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === RETRIES_ID);
+	assert.ok(insight, 'should fire when the worst model retries 2x+ more than the best');
+	assert.ok(insight!.body.includes('model-worst'), 'body should name the high-retry model');
+	assert.ok(insight!.body.includes('model-best'), 'body should name the comparison model');
+});
+
+test('model-edit-retries: does NOT fire when models retry at similar modest rates', () => {
+	const ctx = makeRetryCtx({
+		'model-a': effCounters(6, 20),  // 0.3
+		'model-b': effCounters(5, 20),  // 0.25 — no 2x gap, neither >= 0.5
+	});
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
+});
+
+test('model-edit-retries: action opens the usage analysis view', () => {
+	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(10, 20) });
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === RETRIES_ID);
+	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.showUsageAnalysis');
+});
