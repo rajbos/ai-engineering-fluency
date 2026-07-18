@@ -11,6 +11,7 @@ import {
     trackEnhancedMetrics,
     analyzeSessionUsage,
     getModelUsageFromSession,
+    mergeModelEfficiencyTokens,
     deriveConversationPatterns,
     isParsedSessionJson,
     createEmptySessionUsageAnalysis,
@@ -141,6 +142,48 @@ test('mergeUsageAnalysis: accumulates tool call counts across sessions', () => {
     assert.equal(period.toolCalls.byTool['editFiles'], 3);
     assert.equal(period.toolCalls.byTool['run_in_terminal'], 1);
     assert.equal(period.toolCalls.byTool['listFiles'], 1);
+});
+
+test('mergeUsageAnalysis: accumulates model efficiency counters per model', () => {
+    const period = emptyPeriod();
+    const a = emptyAnalysis();
+    a.modelEfficiency = {
+        'gpt-4o': {
+            calls: 3, editTurns: 2, oneShotEditTurns: 1, retries: 1, selfCorrections: 0,
+            editToolCalls: 3, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0,
+        },
+    };
+    mergeUsageAnalysis(period, a);
+    mergeUsageAnalysis(period, a);
+
+    assert.equal(period.modelEfficiency?.['gpt-4o'].calls, 6);
+    assert.equal(period.modelEfficiency?.['gpt-4o'].editTurns, 4);
+    assert.equal(period.modelEfficiency?.['gpt-4o'].oneShotEditTurns, 2);
+    assert.equal(period.modelEfficiency?.['gpt-4o'].retries, 2);
+});
+
+test('mergeUsageAnalysis: leaves period.modelEfficiency absent when analysis has none', () => {
+    const period = emptyPeriod();
+    mergeUsageAnalysis(period, emptyAnalysis());
+    assert.equal(period.modelEfficiency, undefined);
+});
+
+test('mergeModelEfficiencyTokens: folds per-session model usage tokens and cost into the period', () => {
+    const period = emptyPeriod();
+    mergeModelEfficiencyTokens(period, {
+        'gpt-4o': { inputTokens: 1_000_000, outputTokens: 100_000, cachedReadTokens: 250_000 },
+    }, { 'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10 } } as any);
+
+    const c = period.modelEfficiency?.['gpt-4o'];
+    assert.ok(c);
+    assert.equal(c.inputTokens, 1_000_000);
+    assert.equal(c.outputTokens, 100_000);
+    assert.equal(c.cachedReadTokens, 250_000);
+    assert.ok(c.cost > 0);
+    // Empty usage is a no-op and does not create the aggregate
+    const untouched = emptyPeriod();
+    mergeModelEfficiencyTokens(untouched, {}, {});
+    assert.equal(untouched.modelEfficiency, undefined);
 });
 
 test('mergeUsageAnalysis: accumulates mode usage counts', () => {
@@ -1170,6 +1213,81 @@ test('analyzeSessionUsage: CLI JSONL session extracts LOC from successful edit t
     assert.equal(result.editScope?.totalEditedFiles, 1);
     assert.ok(result.editScope?.languageUsage?.['ts'], 'expected ts language usage');
     assert.equal(result.editScope?.languageUsage?.['ts']?.linesAdded, 4);
+});
+
+test('analyzeSessionUsage: CLI JSONL session produces model efficiency counters with retry detection', async () => {
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-4.6' }, timestamp: '2026-05-01T10:00:00Z' },
+        { type: 'user.message', data: { text: 'fix the bug' } },
+        { type: 'tool.execution_start', data: { toolCallId: 'c1', toolName: 'edit', arguments: { path: '/repo/a.ts', old_str: 'x', new_str: 'y' } } },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c1', success: false } },
+        // Immediate same-file retry after the failed edit
+        { type: 'tool.execution_start', data: { toolCallId: 'c2', toolName: 'edit', arguments: { path: '/repo/a.ts', old_str: 'x2', new_str: 'y' } } },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c2', success: true } },
+        { type: 'user.message', data: { text: 'now the other file' } },
+        { type: 'tool.execution_start', data: { toolCallId: 'c3', toolName: 'create', arguments: { path: '/repo/b.ts', file_text: 'ok\n' } } },
+        { type: 'tool.execution_complete', data: { toolCallId: 'c3', success: true } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    const c = result.modelEfficiency?.['claude-sonnet-4.6'];
+    assert.ok(c, 'expected efficiency counters for the session model');
+    assert.equal(c.calls, 2);
+    assert.equal(c.editTurns, 2);
+    assert.equal(c.retries, 1);
+    assert.equal(c.selfCorrections, 0);
+    assert.equal(c.oneShotEditTurns, 1);
+    assert.equal(c.editToolCalls, 3);
+});
+
+test('analyzeSessionUsage: JSON session produces model efficiency counters from textEditGroup responses', async () => {
+    const content = JSON.stringify({
+        requests: [
+            {
+                modelId: 'copilot/gpt-4o',
+                message: { text: 'edit it' },
+                result: { promptTokens: 10, outputTokens: 5 },
+                response: [
+                    { kind: 'textEditGroup', uri: { path: '/src/a.ts' } },
+                    { kind: 'toolInvocationSerialized', toolId: 'run_in_terminal' },
+                    // Re-edit of the same file after a tool invocation → self-correction
+                    { kind: 'textEditGroup', uri: { path: '/src/a.ts' } },
+                ],
+            },
+            { modelId: 'copilot/gpt-4o', message: { text: 'just a question' }, result: { promptTokens: 10, outputTokens: 5 } },
+        ]
+    });
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, FAKE_JSON_PATH, content);
+    const c = result.modelEfficiency?.['gpt-4o'];
+    assert.ok(c, 'expected efficiency counters for gpt-4o');
+    assert.equal(c.calls, 2);
+    assert.equal(c.editTurns, 1);
+    assert.equal(c.selfCorrections, 1);
+    assert.equal(c.retries, 0);
+    assert.equal(c.oneShotEditTurns, 0);
+});
+
+test('analyzeSessionUsage: delta JSONL session produces model efficiency counters', async () => {
+    const request = {
+        requestId: 'req-1',
+        modelId: 'copilot/gpt-4o',
+        timestamp: 1700000000000,
+        response: [
+            { kind: 'textEditGroup', uri: { path: '/src/foo.ts' }, edits: [[{ text: 'line1\n', range: { startLineNumber: 1, endLineNumber: 1 } }]] },
+        ]
+    };
+    const line0 = JSON.stringify({ kind: 0, v: { version: 3, creationDate: 1700000000000, requests: [] } });
+    const line1 = JSON.stringify({ kind: 2, k: ['requests'], v: request });
+    const content = [line0, line1].join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/tmp/test-session.jsonl', content);
+    const c = result.modelEfficiency?.['gpt-4o'];
+    assert.ok(c, 'expected efficiency counters for gpt-4o from delta JSONL');
+    assert.equal(c.calls, 1);
+    assert.equal(c.editTurns, 1);
+    assert.equal(c.oneShotEditTurns, 1);
 });
 
 test('analyzeSessionUsage: CLI JSONL session extracts LOC from successful create tool calls', async () => {
