@@ -88,6 +88,25 @@ function manualCompactCount(p: UsageAnalysisPeriod): number {
 // ── Long-context pricing tier helpers ──────────────────────────────────────
 const MODEL_PRICING = modelPricingData.pricing as { [key: string]: ModelPricing };
 
+/** Human-friendly model name from the pricing catalog, falling back to the raw id. */
+function modelDisplayName(id: string): string {
+	const names = MODEL_PRICING[id]?.displayNames;
+	return names && names.length > 0 ? names[0] : id;
+}
+
+// ── Model efficiency (edit retries) helpers ────────────────────────────────
+
+/** Minimum edit turns before a model's retry rate is considered meaningful. */
+const RETRY_INSIGHT_MIN_EDIT_TURNS = 10;
+
+/** Models with enough edit turns to compare, ranked worst (highest retry rate) first. */
+function rankModelsByEditRetries(p: UsageAnalysisPeriod): { model: string; retries: number; editTurns: number; retryRate: number }[] {
+	return Object.entries(p.modelEfficiency ?? {})
+		.filter(([, c]) => c.editTurns >= RETRY_INSIGHT_MIN_EDIT_TURNS)
+		.map(([model, c]) => ({ model, retries: c.retries, editTurns: c.editTurns, retryRate: c.retries / c.editTurns }))
+		.sort((a, b) => b.retryRate - a.retryRate);
+}
+
 /** A today-session paired with the long-context tier info of its cheapest-threshold model. */
 interface SessionLongContextStatus {
 	session: TodaySessionSummary;
@@ -851,6 +870,40 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				&& (ms.highCostRequests / ms.totalRequests) > 0.70;
 		},
 		weight: 45,
+	},
+
+	// ── Model efficiency (edit retries, issue #1649) ──────────────────────────
+	{
+		id: 'model-edit-retries',
+		category: 'agentic',
+		severity: 'tip',
+		title: '🔁 Some of your models retry edits often',
+		buildBody: (ctx) => {
+			const ranked = rankModelsByEditRetries(ctx.last30Days);
+			const worst = ranked[0];
+			const best = ranked.length >= 2 ? ranked[ranked.length - 1] : undefined;
+			const intro = `${modelDisplayName(worst.model)} averaged ${worst.retryRate.toFixed(1)} edit retries per edit turn over the last 30 days ` +
+				`(${worst.retries} retries across ${worst.editTurns} edit turns).`;
+			if (best && best.retryRate < worst.retryRate / 2) {
+				return `${intro} ${modelDisplayName(best.model)} managed ${best.retryRate.toFixed(1)} on comparable work — ` +
+					`a model that lands its edits first try is often cheaper overall, even at a higher per-token price. ` +
+					`Compare them side by side in the Model Efficiency table.`;
+			}
+			return `${intro} Frequent retries usually mean failed edits being reattempted. ` +
+				`Compare your models in the Model Efficiency table, or give the model more context (attach the relevant files) before asking for edits.`;
+		},
+		actionLabel: 'View Model Efficiency',
+		actionCommand: 'aiEngineeringFluency.showUsageAnalysis',
+		appliesTo: (ctx) => {
+			const ranked = rankModelsByEditRetries(ctx.last30Days);
+			if (ranked.length === 0) { return false; }
+			const worst = ranked[0];
+			const best = ranked[ranked.length - 1];
+			// Surface either an absolutely high retry rate, or a clear gap between models.
+			return worst.retryRate >= 0.5
+				|| (ranked.length >= 2 && worst.retryRate >= 0.25 && worst.retryRate >= best.retryRate * 2);
+		},
+		weight: 50,
 	},
 
 	// ── Code application habits ───────────────────────────────────────────────

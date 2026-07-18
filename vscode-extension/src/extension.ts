@@ -140,6 +140,7 @@ import {
   trackEnhancedMetrics as _trackEnhancedMetrics,
   analyzeSessionUsage as _analyzeSessionUsage,
   getModelUsageFromSession as _getModelUsageFromSession,
+  mergeModelEfficiencyTokens as _mergeModelEfficiencyTokens,
   type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
 
@@ -3980,6 +3981,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			periods.last30DaysStats.sessions++;
 			this.mergeUsageAnalysis(periods.last30DaysStats, analysis);
 			this._mergeContextWindowStats(periods.last30DaysStats, sessionData);
+			_mergeModelEfficiencyTokens(periods.last30DaysStats, sessionData.modelUsage, this.modelPricing);
 			this.trackWorkspaceForSession(sessionFile, interactions,
 				wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
 				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
@@ -3988,16 +3990,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 			periods.monthStats.sessions++;
 			this.mergeUsageAnalysis(periods.monthStats, analysis);
 			this._mergeContextWindowStats(periods.monthStats, sessionData);
+			_mergeModelEfficiencyTokens(periods.monthStats, sessionData.modelUsage, this.modelPricing);
 		}
 		if (inLastMonth) {
 			periods.lastMonthStats.sessions++;
 			this.mergeUsageAnalysis(periods.lastMonthStats, analysis);
 			this._mergeContextWindowStats(periods.lastMonthStats, sessionData);
+			_mergeModelEfficiencyTokens(periods.lastMonthStats, sessionData.modelUsage, this.modelPricing);
 		}
 		if (lastActivityUtcKey === periods.todayUtcKey) {
 			periods.todayStats.sessions++;
 			this.mergeUsageAnalysis(periods.todayStats, analysis);
 			this._mergeContextWindowStats(periods.todayStats, sessionData);
+			_mergeModelEfficiencyTokens(periods.todayStats, sessionData.modelUsage, this.modelPricing);
 			todaySessionsList.push(this.collectTodaySessionInfo(sessionData, sessionFile, analysis, interactions, mtime));
 		}
 	}

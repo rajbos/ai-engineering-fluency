@@ -348,6 +348,12 @@ export interface SessionUsageAnalysis {
   sessionDuration?: SessionDurationData;
   conversationPatterns?: ConversationPatterns;
   agentTypes?: AgentTypeUsage;
+  /**
+   * Per-model efficiency counters derived from this session's structured tool-call
+   * data. Absent when the session format carries no per-turn tool-call detail.
+   * Token/cost fields are zero here — they are folded in at aggregation time.
+   */
+  modelEfficiency?: ModelEfficiencyUsage;
 }
 
 export interface ToolCallUsage {
@@ -393,6 +399,45 @@ export interface McpToolUsage {
   total: number;
   byServer: { [serverName: string]: number };
   byTool: { [toolName: string]: number };
+}
+
+/**
+ * Per-model efficiency counters (issue #1649).
+ *
+ * Turn-derived counters (calls/editTurns/oneShotEditTurns/retries/selfCorrections)
+ * are computed per session from structured tool-call data where available
+ * (Copilot Chat JSON, Copilot CLI JSONL, and every ecosystem adapter with buildTurns).
+ * Token/cost fields are folded in separately at aggregation time from each
+ * session's ModelUsage so no extra session parsing is needed.
+ *
+ * A "call" is one user-request turn — the closest unit comparable across all
+ * supported editors (one agentic turn may span multiple underlying API calls).
+ */
+export interface ModelEfficiencyCounters {
+  /** User-request turns attributed to this model. */
+  calls: number;
+  /** Turns containing at least one file-edit tool call. */
+  editTurns: number;
+  /** Edit turns with no retries and no self-corrections. */
+  oneShotEditTurns: number;
+  /** Repeat edit calls immediately following an edit to the same file (failed edit retried). */
+  retries: number;
+  /** Repeat edits to a file already edited in the same turn with other tool calls in between (model checked, then corrected itself). */
+  selfCorrections: number;
+  /** Total file-edit tool calls attributed to this model. */
+  editToolCalls: number;
+  /** Total input tokens (incl. cache reads/creation). Folded in from ModelUsage at aggregation time. */
+  inputTokens: number;
+  /** Total output tokens. Folded in from ModelUsage at aggregation time. */
+  outputTokens: number;
+  /** Cache-read portion of inputTokens. Folded in from ModelUsage at aggregation time. */
+  cachedReadTokens: number;
+  /** Estimated cost in USD (provider/API rates). Folded in at aggregation time. */
+  cost: number;
+}
+
+export interface ModelEfficiencyUsage {
+  [modelName: string]: ModelEfficiencyCounters;
 }
 
 export interface EditScopeUsage {
@@ -568,6 +613,12 @@ export interface UsageAnalysisPeriod {
    * Absent when no session in the period carried context-size data.
    */
   contextWindow?: ContextWindowStats;
+  /**
+   * Per-model efficiency metrics aggregated across the period's sessions
+   * (issue #1649). Absent when no session in the period carried
+   * efficiency counters or per-model token usage.
+   */
+  modelEfficiency?: ModelEfficiencyUsage;
 }
 
 /** Aggregated context-window usage for one usage-analysis period. */

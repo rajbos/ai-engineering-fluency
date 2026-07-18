@@ -22,6 +22,13 @@ import type {
 	LanguageUsage,
 } from './types';
 import {
+	computeEfficiencyFromTurns,
+	jsonRequestToToolCalls,
+	mergeModelEfficiency,
+	applyModelUsageToEfficiency,
+	type EfficiencyTurn,
+} from './modelEfficiency';
+import {
 	applyDelta,
 	isJsonlContent,
 	isUuidPointerFile,
@@ -699,7 +706,32 @@ function processDeltaSessionAnalysis(
 
 	_pdsaExtractModelSwitching(deps, sessionState, requests, analysis);
 	_pdsaExtractThinkingEffort(lines, requests, analysis);
+	_applyJsonRequestsEfficiency(requests, _pdsaGetSessionDefaultModel(sessionState), deps.modelPricing, analysis);
 	deriveConversationPatterns(analysis);
+}
+
+/** Session-level default model of a plain JSON Copilot Chat session. */
+function _jsonSessionDefaultModel(parsed: ParsedSessionJson): string {
+	return (parsed.selectedModel?.identifier || parsed.selectedModel?.metadata?.id || 'unknown').replace(/^copilot\//, '');
+}
+
+/**
+ * Compute per-model efficiency counters (issue #1649) from JSON/delta session
+ * requests and attach them to the analysis when any request produced a turn.
+ */
+function _applyJsonRequestsEfficiency(
+	requests: SessionRequestRaw[],
+	defaultModel: string,
+	modelPricing: { [key: string]: ModelPricing },
+	analysis: SessionUsageAnalysis
+): void {
+	const turns: EfficiencyTurn[] = [];
+	for (const req of requests) {
+		if (!req) { continue; }
+		turns.push({ model: _pdsaGetReqModel(req, defaultModel, modelPricing), toolCalls: jsonRequestToToolCalls(req) });
+	}
+	if (turns.length === 0) { return; }
+	analysis.modelEfficiency = computeEfficiencyFromTurns(turns);
 }
 
 // --- processJsonSessionRequests helpers ---
@@ -1068,6 +1100,30 @@ function _muaMergeEnhancedMetrics(period: UsageAnalysisPeriod, analysis: Session
 		period.agentTypes.other += analysis.agentTypes.other;
 	}
 	_muaMergeThinkingEffort(period, analysis);
+	_muaMergeModelEfficiency(period, analysis);
+}
+
+/** Merge a session's per-model efficiency counters (issue #1649) into the period aggregate. */
+function _muaMergeModelEfficiency(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.modelEfficiency) { return; }
+	if (!period.modelEfficiency) { period.modelEfficiency = {}; }
+	mergeModelEfficiency(period.modelEfficiency, analysis.modelEfficiency);
+}
+
+/**
+ * Fold one session's per-model token usage (and estimated provider cost) into a
+ * period's model efficiency aggregate (issue #1649). Called by consumers that
+ * already hold the session's cached ModelUsage, so no extra session parsing is
+ * needed. Safe to call for sessions that produced no turn-derived counters.
+ */
+export function mergeModelEfficiencyTokens(
+	period: UsageAnalysisPeriod,
+	modelUsage: ModelUsage | undefined,
+	modelPricing: { [key: string]: ModelPricing }
+): void {
+	if (!modelUsage || Object.keys(modelUsage).length === 0) { return; }
+	if (!period.modelEfficiency) { period.modelEfficiency = {}; }
+	applyModelUsageToEfficiency(period.modelEfficiency, modelUsage, modelPricing);
 }
 
 /**
@@ -1832,7 +1888,19 @@ type AsuCliState = {
 	effortByRequest: { [effort: string]: number };
 	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string> }>;
 	editedFilePaths: Set<string>;
+	/** Per-user-turn tool-call sequences for model efficiency metrics (issue #1649). */
+	efficiencyTurns: EfficiencyTurn[];
 };
+
+/** Append a tool call to the current (or an implicit first) efficiency turn. */
+function _asuAppendEfficiencyToolCall(cliState: AsuCliState, toolName: string, args: Record<string, string> | undefined): void {
+	let turn = cliState.efficiencyTurns[cliState.efficiencyTurns.length - 1];
+	if (!turn) {
+		turn = { model: cliState.defaultModel, toolCalls: [] };
+		cliState.efficiencyTurns.push(turn);
+	}
+	turn.toolCalls.push({ toolName, arguments: args ? JSON.stringify(args) : undefined });
+}
 
 /** Check if the first JSONL line indicates a delta-based VS Code incremental format. */
 function _asuIsDeltaBased(lines: string[]): boolean {
@@ -1996,6 +2064,7 @@ function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: Sessi
 		cliState.requestCount++;
 		const effort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliState.defaultEffort;
 		if (effort) { cliState.effortByRequest[effort] = (cliState.effortByRequest[effort] || 0) + 1; }
+		cliState.efficiencyTurns.push({ model: event.model || cliState.defaultModel, toolCalls: [] });
 		analyzeCliAttachments(event.data?.attachments, analysis.contextReferences);
 		_asuHandleUserMessageMode(jetBrainsMode, analysis);
 	}
@@ -2048,6 +2117,7 @@ function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
 	const { toolCallId, toolName, arguments: args } = event.data ?? {};
 	if (toolCallId && toolName) {
 		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {} });
+		_asuAppendEfficiencyToolCall(cliState, toolName, args);
 	}
 }
 
@@ -2146,7 +2216,7 @@ async function _asuProcessNonDeltaJsonl(
 	const modeState: AsuModeState = { sessionMode: 'ask' };
 	const cliState: AsuCliState = {
 		defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {},
-		pendingToolCalls: new Map(), editedFilePaths: new Set(),
+		pendingToolCalls: new Map(), editedFilePaths: new Set(), efficiencyTurns: [],
 	};
 	const isJetBrains = isJetBrainsSessionPath(sessionFile);
 	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
@@ -2161,10 +2231,27 @@ async function _asuProcessNonDeltaJsonl(
 
 	_asuApplyCliLocToEditScope(cliState, analysis);
 	_asuApplyCliThinkingEffort(cliState, analysis);
+	if (cliState.efficiencyTurns.length > 0) {
+		analysis.modelEfficiency = computeEfficiencyFromTurns(cliState.efficiencyTurns);
+	}
 	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
 	// Track LOC/edit metrics for CLI sessions (delta path already handles this above)
 	await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
 	deriveConversationPatterns(analysis);
+}
+
+/**
+ * Compute model efficiency counters (issue #1649) for an ecosystem adapter's
+ * session from its buildTurns output, unless the adapter's analyzeUsage
+ * already provided them. Efficiency is optional — never fail analysis over it.
+ */
+async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile: string, analysis: SessionUsageAnalysis): Promise<void> {
+	if (analysis.modelEfficiency || !eco.buildTurns) { return; }
+	try {
+		const { turns } = await eco.buildTurns(sessionFile);
+		const eff = computeEfficiencyFromTurns(turns);
+		if (Object.keys(eff).length > 0) { analysis.modelEfficiency = eff; }
+	} catch { /* efficiency is optional */ }
 }
 
 /**
@@ -2176,7 +2263,9 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 	try {
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco && isAnalyzable(eco)) {
-			return eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
+			const ecoAnalysis = await eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
+			await _addTurnEfficiencyFromAdapter(eco, sessionFile, ecoAnalysis);
+			return ecoAnalysis;
 		}
 		if (sessionFile.startsWith('windsurf://') || sessionFile.startsWith('devin://')) {
 			return analysis;
@@ -2201,6 +2290,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 				return analysis;
 			}
 			processJsonSessionRequests(deps, parsed, analysis);
+			_applyJsonRequestsEfficiency((parsed.requests ?? []) as SessionRequestRaw[], _jsonSessionDefaultModel(parsed), deps.modelPricing, analysis);
 			await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
 			await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
 		}
