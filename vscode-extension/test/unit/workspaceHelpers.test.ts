@@ -877,6 +877,14 @@ test('getEditorTypeFromPath: detects Crush', () => {
     assert.equal(getEditorTypeFromPath('/home/user/.crush/crush.db#session-id'), 'Crush');
 });
 
+test('getEditorTypeFromPath: detects Cline (not VS Code) despite /Code/User/ in path', () => {
+    assert.equal(getEditorTypeFromPath('C:\\Users\\user\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks\\1782681302220\\ui_messages.json'), 'Cline');
+});
+
+test('getEditorTypeFromPath: detects Cline (not Cursor) when hosted in Cursor', () => {
+    assert.equal(getEditorTypeFromPath('/home/user/.config/Cursor/User/globalStorage/saoudrizwan.claude-dev/tasks/1782681302220/ui_messages.json'), 'Cline');
+});
+
 // ── detectEditorSource: missing editor types ───────────────────────────────
 
 test('detectEditorSource: detects Continue', () => {
@@ -896,6 +904,10 @@ test('detectEditorSource: detects OpenCode via callback', () => {
     assert.equal(detectEditorSource('/home/user/.local/share/opencode/opencode.db#ses_abc', isOpenCode), 'OpenCode');
 });
 
+test('detectEditorSource: detects Cline (not VS Code) despite Code in path', () => {
+    assert.equal(detectEditorSource('C:\\Users\\user\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev\\tasks\\1782681302220\\ui_messages.json'), 'Cline');
+});
+
 // ── getEditorNameFromRoot: missing editor types ────────────────────────────
 
 test('getEditorNameFromRoot: Mistral Vibe path returns Mistral Vibe', () => {
@@ -912,6 +924,10 @@ test('getEditorNameFromRoot: VS Code Exploration path returns VS Code Exploratio
 
 test('getEditorNameFromRoot: VSCodium path returns VSCodium', () => {
     assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Roaming\\VSCodium'), 'VSCodium');
+});
+
+test('getEditorNameFromRoot: Cline storage root returns Cline (not VS Code)', () => {
+    assert.equal(getEditorNameFromRoot('C:\\Users\\user\\AppData\\Roaming\\Code\\User\\globalStorage\\saoudrizwan.claude-dev'), 'Cline');
 });
 
 

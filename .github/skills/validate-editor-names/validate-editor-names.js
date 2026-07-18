@@ -44,8 +44,10 @@ function parseArgs(argv) {
 
 const ROOT              = path.resolve(__dirname, '..', '..', '..');
 const CLI_ANALYSIS      = path.join(ROOT, 'cli', 'src', 'analysis.ts');
-const WS_HELPERS        = path.join(ROOT, 'vscode-extension', 'src', 'workspaceHelpers.ts');
-const FORMAT_UTILS      = path.join(ROOT, 'vscode-extension', 'src', 'webview', 'shared', 'formatUtils.ts');
+const WS_HELPERS        = path.join(ROOT, 'src', 'workspaceHelpers.ts');
+// The authoritative icon map lives in editorIcons.ts; formatUtils.ts only
+// re-exports it for the webview bundles.
+const FORMAT_UTILS      = path.join(ROOT, 'vscode-extension', 'src', 'editorIcons.ts');
 
 // ---------------------------------------------------------------------------
 // Source file reading
@@ -146,10 +148,12 @@ function extractIconMapKeys(source) {
 function extractIncludesRules(body) {
   const rules = [];
   // Find every `return 'Name';` statement, then look backward for its `if (`.
-  const returnRe = /\breturn\s+'([^']+)'\s*;/g;
+  // `return detectClaudeCodeEditorVariant(...)` is treated as 'Claude Code'
+  // (that helper's default) so the /.claude/projects/ rule is still simulated.
+  const returnRe = /\breturn\s+(?:'([^']+)'|detectClaudeCodeEditorVariant\([^)]*\))\s*;/g;
   let m;
   while ((m = returnRe.exec(body)) !== null) {
-    const name = m[1];
+    const name = m[1] ?? 'Claude Code';
     if (/^\d+$/.test(name)) continue; // skip numeric strings
 
     // Look backward for the nearest "if (" or "if(" before this return
@@ -290,6 +294,12 @@ const TEST_CASES = [
     expected: 'Crush',
     label: 'Crush DB session'
   },
+  // Cline — must not be misclassified as VS Code (path contains /Code/User/)
+  {
+    path: '/home/user/.config/Code/User/globalStorage/saoudrizwan.claude-dev/tasks/1782681302220/ui_messages.json',
+    expected: 'Cline',
+    label: 'Cline task session'
+  },
   // Mistral Vibe
   {
     path: '/home/user/.vibe/logs/session/session-abc.jsonl',
@@ -408,7 +418,11 @@ function main() {
     process.stderr.write('ERROR: Could not find detectToolEditorFromPath or detectVSCodeVariantFromPath in workspaceHelpers.ts\n');
     process.exit(2);
   }
-  const wsComboBody = detectToolFnBody + '\n' + detectVSFnBody;
+  // detectGlobalStorageEditorFromPath (Kiro, Kiro CLI, Cline) is a helper invoked
+  // from detectToolEditorFromPath before the VS Code variant checks; include its
+  // rules first so the simulation matches the real evaluation order.
+  const detectGlobalStorageFnBody = extractFunctionBody(wsHelpersSource, 'detectGlobalStorageEditorFromPath') ?? '';
+  const wsComboBody = detectGlobalStorageFnBody + '\n' + detectToolFnBody + '\n' + detectVSFnBody;
 
   // -- Extract rules ---------------------------------------------------------
 

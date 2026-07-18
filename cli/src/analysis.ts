@@ -105,6 +105,9 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/.copilot/session-store.db#')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Cline task files live under <variant>/User/globalStorage/saoudrizwan.claude-dev/
+	// — must be checked before the generic /cursor/ and VS Code fallthrough below.
+	if (normalized.includes('/saoudrizwan.claude-dev/tasks/')) { return 'Cline'; }
 	if (normalized.includes('/opencode/')) { return 'OpenCode'; }
 	// Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage) are separate editors.
 	if (normalized.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
