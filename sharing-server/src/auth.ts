@@ -8,6 +8,8 @@ import {
 	UPLOAD_RATE_WINDOW_MS,
 	IP_RATE_MAX,
 	IP_RATE_WINDOW_MS,
+	AUTH_MAP_MAX_ENTRIES,
+	AUTH_MAP_SWEEP_INTERVAL_MS,
 } from './config.js';
 
 interface GitHubUserResponse {
@@ -54,6 +56,34 @@ const uploadRateMap = new Map<number, { count: number; resetAt: number }>();
 // Pre-auth IP rate limiter: IP → { count, resetAt }
 const ipRateMap = new Map<string, { count: number; resetAt: number }>();
 
+/** Removes all expired entries from the auth/rate-limit maps to keep memory bounded. */
+export function sweepExpiredAuthEntries(now: number = Date.now()): void {
+	for (const [key, value] of tokenCache) if (value.expiresAt <= now) tokenCache.delete(key);
+	for (const [key, value] of negativeCache) if (value.bannedUntil <= now) negativeCache.delete(key);
+	for (const [key, value] of uploadRateMap) if (value.resetAt <= now) uploadRateMap.delete(key);
+	for (const [key, value] of ipRateMap) if (value.resetAt <= now) ipRateMap.delete(key);
+}
+
+/**
+ * Ensures `map` has room for one more entry. Expired entries are swept first;
+ * if the map is still at capacity, the oldest entries (Map insertion order)
+ * are evicted so an attacker rotating tokens or spoofed IPs cannot grow the
+ * maps without bound.
+ */
+function ensureMapCapacity<K, V>(map: Map<K, V>): void {
+	if (map.size < AUTH_MAP_MAX_ENTRIES) return;
+	sweepExpiredAuthEntries();
+	while (map.size >= AUTH_MAP_MAX_ENTRIES) {
+		const oldest = map.keys().next();
+		if (oldest.done) break;
+		map.delete(oldest.value);
+	}
+}
+
+// Periodic background sweep so expired entries are reclaimed even without new
+// inserts. unref() keeps the timer from holding the process open.
+setInterval(sweepExpiredAuthEntries, AUTH_MAP_SWEEP_INTERVAL_MS).unref();
+
 /**
  * Validates a GitHub Bearer token supplied by the client (e.g. the VS Code extension).
  * Resolves the token to a local user row, or returns null if the token is invalid,
@@ -93,6 +123,7 @@ export async function validateGitHubToken(token: string): Promise<UserRow | null
 	}
 
 	if (!response.ok) {
+		ensureMapCapacity(negativeCache);
 		negativeCache.set(cacheKey, { bannedUntil: Date.now() + NEGATIVE_CACHE_TTL_MS });
 		return null;
 	}
@@ -118,6 +149,7 @@ export async function validateGitHubToken(token: string): Promise<UserRow | null
 	if (allowedOrg) {
 		const isMember = await checkOrgMembership(token, data.login, allowedOrg);
 		if (!isMember) {
+			ensureMapCapacity(negativeCache);
 			negativeCache.set(cacheKey, { bannedUntil: Date.now() + NEGATIVE_CACHE_TTL_MS });
 			return null;
 		}
@@ -125,6 +157,7 @@ export async function validateGitHubToken(token: string): Promise<UserRow | null
 
 	const user = upsertUser(data.id, data.login, data.name, data.avatar_url);
 
+	ensureMapCapacity(tokenCache);
 	tokenCache.set(cacheKey, { user, expiresAt: Date.now() + TOKEN_CACHE_TTL_MS });
 	return user;
 }
@@ -164,6 +197,7 @@ export function checkIpRateLimit(ip: string): boolean {
 	const now = Date.now();
 	const entry = ipRateMap.get(ip);
 	if (!entry || entry.resetAt <= now) {
+		ensureMapCapacity(ipRateMap);
 		ipRateMap.set(ip, { count: 1, resetAt: now + IP_RATE_WINDOW_MS });
 		return true;
 	}
@@ -177,6 +211,7 @@ export function checkUploadRateLimit(userId: number): boolean {
 	const now = Date.now();
 	const entry = uploadRateMap.get(userId);
 	if (!entry || entry.resetAt <= now) {
+		ensureMapCapacity(uploadRateMap);
 		uploadRateMap.set(userId, { count: 1, resetAt: now + UPLOAD_RATE_WINDOW_MS });
 		return true;
 	}
@@ -193,7 +228,9 @@ export type AuthVariables = { user: UserRow };
  * token to a user and stores it in the Hono context for downstream handlers.
  */
 export async function requireBearerAuth(c: Context, next: Next): Promise<Response | void> {
-	const ip = c.req.header('x-forwarded-for') ?? c.req.header('x-real-ip') ?? 'unknown';
+	// x-forwarded-for may contain a comma-separated chain; use only the first (client) IP.
+	const forwardedFor = c.req.header('x-forwarded-for')?.split(',')[0]?.trim();
+	const ip = forwardedFor || c.req.header('x-real-ip') || 'unknown';
 
 	if (!checkIpRateLimit(ip)) {
 		return c.json({ error: 'Too many requests' }, 429);
