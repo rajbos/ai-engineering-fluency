@@ -26,6 +26,7 @@ import { toLocalDayKey } from './utils/dayKeys';
 // (made available by the /// <reference types="sql.js" /> directive above).
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 type SqlDatabase = initSqlJs.Database;
+type SqlValue = initSqlJs.SqlValue;
 
 export interface CliStoreSession {
 	id: string;
@@ -75,6 +76,16 @@ export function isCliStoreTurn(obj: unknown): obj is CliStoreTurn {
 		&& (r['assistant_response'] === null || typeof r['assistant_response'] === 'string')
 		&& (r['timestamp'] === null || typeof r['timestamp'] === 'string');
 }
+
+/** One parsed row from the `assistant_usage_events` billing table. */
+type UsageEventRow = {
+	model: string;
+	inputTokens: number;
+	outputTokens: number;
+	cacheReadTokens: number;
+	cacheWriteTokens: number;
+	nanoAiu: number;
+};
 
 type CliStoreDbCacheEntry = { db: SqlDatabase; mtimeMs: number; size: number };
 type CliStoreSessionsCacheEntry = { mtimeMs: number; size: number; byId: Map<string, CliStoreSession> };
@@ -471,34 +482,51 @@ export class CopilotCliStoreAccess {
 				[sessionId],
 			);
 			if (!result.length) { return null; }
-			const cols = result[0].columns;
-			const modelUsage: ModelUsage = {};
-			let actualTokens = 0;
-			let cacheReadTokens = 0;
-			let nanoAiu = 0;
-			for (const row of result[0].values) {
-				const obj: Record<string, unknown> = {};
-				cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
-				const model = typeof obj.model === 'string' ? obj.model : 'unknown';
-				const input = typeof obj.input_tokens === 'number' ? obj.input_tokens : 0;
-				const output = typeof obj.output_tokens === 'number' ? obj.output_tokens : 0;
-				const cacheRead = typeof obj.cache_read_tokens === 'number' ? obj.cache_read_tokens : 0;
-				const cacheWrite = typeof obj.cache_write_tokens === 'number' ? obj.cache_write_tokens : 0;
-				const nano = typeof obj.total_nano_aiu === 'number' ? obj.total_nano_aiu : 0;
-				if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
-				modelUsage[model].inputTokens += input;
-				modelUsage[model].outputTokens += output;
-				if (cacheRead > 0) { modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + cacheRead; }
-				if (cacheWrite > 0) { modelUsage[model].cacheCreationTokens = (modelUsage[model].cacheCreationTokens ?? 0) + cacheWrite; }
-				actualTokens += input + output;
-				cacheReadTokens += cacheRead;
-				nanoAiu += nano;
-			}
-			if (actualTokens === 0 && cacheReadTokens === 0 && nanoAiu === 0) { return null; }
-			return { modelUsage, actualTokens, cacheReadTokens, nanoAiu };
+			return this.aggregateUsageEvents(result[0].columns, result[0].values);
 		} catch {
 			return null;
 		}
+	}
+
+	/** Parse one `assistant_usage_events` row into a typed record, defaulting non-numeric fields to 0. */
+	private parseUsageEventRow(cols: string[], row: SqlValue[]): UsageEventRow {
+		const obj: Record<string, unknown> = {};
+		cols.forEach((c: string, i: number) => { obj[c] = row[i]; });
+		return {
+			model: typeof obj.model === 'string' ? obj.model : 'unknown',
+			inputTokens: typeof obj.input_tokens === 'number' ? obj.input_tokens : 0,
+			outputTokens: typeof obj.output_tokens === 'number' ? obj.output_tokens : 0,
+			cacheReadTokens: typeof obj.cache_read_tokens === 'number' ? obj.cache_read_tokens : 0,
+			cacheWriteTokens: typeof obj.cache_write_tokens === 'number' ? obj.cache_write_tokens : 0,
+			nanoAiu: typeof obj.total_nano_aiu === 'number' ? obj.total_nano_aiu : 0,
+		};
+	}
+
+	/** Merge a single usage event into the per-model accumulator (cache fields only when > 0). */
+	private addUsageEventToModelUsage(modelUsage: ModelUsage, event: UsageEventRow): void {
+		if (!modelUsage[event.model]) { modelUsage[event.model] = { inputTokens: 0, outputTokens: 0 }; }
+		const usage = modelUsage[event.model];
+		usage.inputTokens += event.inputTokens;
+		usage.outputTokens += event.outputTokens;
+		if (event.cacheReadTokens > 0) { usage.cachedReadTokens = (usage.cachedReadTokens ?? 0) + event.cacheReadTokens; }
+		if (event.cacheWriteTokens > 0) { usage.cacheCreationTokens = (usage.cacheCreationTokens ?? 0) + event.cacheWriteTokens; }
+	}
+
+	/** Aggregate billing rows into totals; null when every counter is zero (treated as "no billing data"). */
+	private aggregateUsageEvents(cols: string[], rows: SqlValue[][]): { modelUsage: ModelUsage; actualTokens: number; cacheReadTokens: number; nanoAiu: number } | null {
+		const modelUsage: ModelUsage = {};
+		let actualTokens = 0;
+		let cacheReadTokens = 0;
+		let nanoAiu = 0;
+		for (const row of rows) {
+			const event = this.parseUsageEventRow(cols, row);
+			this.addUsageEventToModelUsage(modelUsage, event);
+			actualTokens += event.inputTokens + event.outputTokens;
+			cacheReadTokens += event.cacheReadTokens;
+			nanoAiu += event.nanoAiu;
+		}
+		if (actualTokens === 0 && cacheReadTokens === 0 && nanoAiu === 0) { return null; }
+		return { modelUsage, actualTokens, cacheReadTokens, nanoAiu };
 	}
 
 	/**

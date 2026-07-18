@@ -30,6 +30,7 @@ import { KiroDataAccess } from '../kiro';
 import { KiroCliDataAccess } from '../kirocli';
 import { DevinCliDataAccess } from '../devinCli';
 import { ClineDataAccess } from '../cline';
+import { CodexCliDataAccess } from '../codexcli';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
 import { CrushAdapter } from './crushAdapter';
@@ -50,6 +51,7 @@ import { KiroAdapter } from './kiroAdapter';
 import { KiroCliAdapter } from './kiroCliAdapter';
 import { DevinCliAdapter } from './devinCliAdapter';
 import { ClineAdapter } from './clineAdapter';
+import { CodexCliAdapter } from './codexCliAdapter';
 
 /** Data-access instances and callbacks required to build the adapter registry. */
 export interface AdapterRegistryDeps {
@@ -69,6 +71,7 @@ kiro: KiroDataAccess;
 kiroCli: KiroCliDataAccess;
 devinCli: DevinCliDataAccess;
 cline: ClineDataAccess;
+codexCli: CodexCliDataAccess;
 /** Estimates token count from raw text for a given model. */
 estimateTokens: (text: string, model?: string) => number;
 /** Returns true when the tool name identifies an MCP server tool. */
@@ -111,6 +114,7 @@ kiro: new KiroDataAccess(),
 kiroCli: new KiroCliDataAccess(),
 devinCli: new DevinCliDataAccess(),
 cline: new ClineDataAccess(),
+codexCli: new CodexCliDataAccess(),
 };
 }
 
@@ -149,6 +153,7 @@ new DevinCliAdapter(deps.devinCli),
 // /Code/User/ or /Cursor/User/); its specific saoudrizwan.claude-dev marker
 // must win before the discovery-only Copilot Chat adapter below.
 new ClineAdapter(deps.cline),
+new CodexCliAdapter(deps.codexCli),
 // Copilot Chat / CLI adapters: discovery-only. Their handles() returns
 // false so processSessionFile() falls through to the shared parser path
 // for VS Code Copilot Chat and CLI files. See issue #654.

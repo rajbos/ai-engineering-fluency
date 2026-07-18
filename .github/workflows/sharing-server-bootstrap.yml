@@ -1,0 +1,83 @@
+name: Bootstrap Sharing Server Terraform State
+
+# One-off, manually-triggered workflow. Creates the storage account + blob
+# container that sharing-server-deploy.yml uses as its Terraform remote state
+# backend. Run this once per environment (e.g. after migrating to a new Azure
+# subscription/tenant) before pointing TF_STATE_* variables at it — the main
+# deploy workflow's `terraform init` will fail until this backend exists.
+#
+# Uses local Terraform state (see sharing-server/infra/bootstrap/main.tf) since
+# it can't depend on the backend it's creating. Re-running this after the
+# storage account already exists will try to create a second one — it isn't
+# idempotent across runs, so only run it when you actually need a new backend.
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: 'GitHub Environment to authenticate as (must already have the Azure OIDC federated credential configured)'
+        type: choice
+        options:
+          - testing
+          - production
+        required: true
+      resource_group_name:
+        description: 'Existing Azure resource group to create the state storage account in'
+        type: string
+        required: true
+      location:
+        description: 'Azure region'
+        type: string
+        default: 'westeurope'
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    name: Create Terraform state storage (${{ inputs.environment }})
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    permissions:
+      contents: read
+      id-token: write # required to request the OIDC token for Azure federated login
+    env:
+      ARM_CLIENT_ID:       ${{ secrets.AZURE_CLIENT_ID }}
+      ARM_TENANT_ID:       ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+      ARM_USE_OIDC:        "true"
+      TF_VAR_resource_group_name: ${{ inputs.resource_group_name }}
+      TF_VAR_location:            ${{ inputs.location }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@dfe3c3f87815947d99a8997f908cb6525fc44e9e # v4.0.1
+
+      - name: Terraform init (local state)
+        working-directory: sharing-server/infra/bootstrap
+        run: terraform init
+
+      - name: Terraform apply
+        working-directory: sharing-server/infra/bootstrap
+        run: terraform apply -auto-approve
+
+      - name: Output created resources
+        working-directory: sharing-server/infra/bootstrap
+        run: |
+          {
+            echo "## Terraform state storage created"
+            echo ""
+            echo "| Variable | Value |"
+            echo "|---|---|"
+            echo "| \`TF_STATE_RESOURCE_GROUP\` | \`$(terraform output -raw resource_group_name)\` |"
+            echo "| \`TF_STATE_STORAGE_ACCOUNT\` | \`$(terraform output -raw storage_account_name)\` |"
+            echo "| \`TF_STATE_CONTAINER\` | \`$(terraform output -raw container_name)\` |"
+            echo ""
+            echo "Set these as environment-scoped variables on the \`${{ inputs.environment }}\` GitHub Environment, then re-run the deploy workflow."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -13,6 +13,7 @@ export const EDITOR_ICON_MAP: Record<string, string> = {
 	'Claude Desktop': '🟠',
 	'Claude Desktop Cowork': '🟠',
 	'Cline': '🤖',
+	'Codex CLI': '🌀',
 	'Continue': '▶️',
 	'Copilot CLI': '🤖',
 	'Crush': '🦾',

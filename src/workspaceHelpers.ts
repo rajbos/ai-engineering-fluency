@@ -475,6 +475,10 @@ function detectToolEditorFromRootPath(lower: string): string | undefined {
 	// marker must be checked before the generic VS Code family matches.
 	if (lower.includes('saoudrizwan.claude-dev')) { return 'Cline'; }
 	if (lower.includes('opencode')) { return 'OpenCode'; }
+	// OpenAI Codex CLI home (~/.codex). The dot-prefix keeps this from colliding with
+	// the generic 'code' substring checks further down ('.codex' never matches '/code/'
+	// or endsWith('code')), but it must still run before isVSCodeRoot for clarity.
+	if (lower.includes('.codex')) { return 'Codex CLI'; }
 	// Kiro CLI root (~/.kiro) must be checked before the Kiro IDE root — both
 	// contain 'kiro' but only the CLI root has the dot-prefixed folder.
 	if (lower.includes('/.kiro')) { return 'Kiro CLI'; }
@@ -997,6 +1001,25 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
 }
 
 /**
+ * Detect terminal CLI agents with dedicated data stores from a lower-cased normalised path.
+ * @internal
+ */
+function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
+	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Devin CLI virtual paths: <...>/devin/cli/sessions.db#<id>. Checked here (not merely
+	// the generic 'devin' substring match in detectIDEEditorSource) so it always wins over
+	// the desktop app's devin:// scheme / Windsurf family checks, which are handled earlier
+	// in getEditorTypeFromPath/detectEditorSource before this function is even called.
+	if (lowerPath.includes('devin/cli/sessions.db#')) { return 'Devin CLI'; }
+	// OpenAI Codex CLI: rollout JSONL files under ~/.codex/sessions|archived_sessions and
+	// virtual thread paths ~/.codex/state_<N>.sqlite#<thread-id>. Must be detected here,
+	// before the loose 'code' substring fallbacks in detectIDEEditorSource /
+	// detectVSCodeVariantFromPath ('codex' contains 'code' and would misclassify as VS Code).
+	if (lowerPath.includes('/.codex/')) { return 'Codex CLI'; }
+	return undefined;
+}
+
+/**
  * Detect tool-specific (non-VS Code family) editors from a lower-cased normalised path.
  * Returns the editor name or undefined if none matched.
  * @internal
@@ -1009,12 +1032,8 @@ function detectToolEditorFromPath(
 	const copilotFamily = detectCopilotFamilyFromPath(lowerPath);
 	if (copilotFamily) { return copilotFamily; }
 	if (isOpenCodeSessionFile?.(filePath)) { return 'OpenCode'; }
-	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
-	// Devin CLI virtual paths: <...>/devin/cli/sessions.db#<id>. Checked here (not merely
-	// the generic 'devin' substring match in detectIDEEditorSource) so it always wins over
-	// the desktop app's devin:// scheme / Windsurf family checks, which are handled earlier
-	// in getEditorTypeFromPath/detectEditorSource before this function is even called.
-	if (lowerPath.includes('devin/cli/sessions.db#')) { return 'Devin CLI'; }
+	const cliAgent = detectCliAgentStoreFromPath(lowerPath);
+	if (cliAgent) { return cliAgent; }
 	// Cursor virtual paths must be checked before the generic /cursor/ match in detectVSCodeVariantFromPath.
 	if (lowerPath.includes('/cursor/user/globalstorage/state.vscdb#')) { return 'Cursor'; }
 	if (lowerPath.includes('/.pi/agent/sessions/')) { return 'Pi'; }
