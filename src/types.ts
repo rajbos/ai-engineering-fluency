@@ -3,6 +3,8 @@
  * Extracted from extension.ts to reduce file size and improve reusability.
  */
 
+import type { TaskCategory } from './taskClassification';
+
 /**
  * Character-to-token ratio for a specific AI model.
  * The value is a multiplier applied to the character count to estimate token count
@@ -158,6 +160,8 @@ export interface DailyTokenStats {
    * model usage aggregated from all sessions of that editor type on that day.
    */
   editorModelUsage?: { [editor: string]: ModelUsage };
+  /** Per-task-category token/session breakdown for this day, keyed by `TaskCategory` (e.g. "Coding", "Debugging"). */
+  taskCategoryUsage?: { [category: string]: { tokens: number; sessions: number } };
 }
 
 /** Aggregated data for one time window (day/week/month) in the chart. */
@@ -202,6 +206,8 @@ export interface ChartPeriodData {
    * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
    */
   billingGroupCostDatasets?: object[];
+  /** Token datasets split by task category (e.g. "Coding", "Debugging", "Testing") — one stacked-bar dataset per category. */
+  taskCategoryDatasets?: object[];
 }
 
 /** Shape of the data payload sent to the chart webview (via window.__INITIAL_CHART__ or postMessage). */
@@ -214,6 +220,7 @@ export interface ChartDataPayload {
   editorTotalsMap: Record<string, number>;
   repositoryDatasets: object[];
   repositoryTotalsMap: Record<string, number>;
+  taskCategoryDatasets?: object[];
   dailyCount: number;
   totalTokens: number;
   avgTokensPerDay: number;
@@ -276,6 +283,8 @@ export interface SessionFileCache {
   maxRequestInputTokens?: number;
   /** Copilot CLI context tier from session.start/resume/model_change events (e.g. "default"). */
   contextTier?: string;
+  /** Dominant task category for this session (e.g. "Coding", "Debugging"), computed once via `classifySessionTask()`. */
+  taskCategory?: TaskCategory;
   /** Per-UTC-day token/interaction breakdown (keyed by YYYY-MM-DD UTC). Used for consistent daily stats. */
   dailyRollups?: { [utcDayKey: string]: DailyRollupEntry };
   linesAdded?: number;

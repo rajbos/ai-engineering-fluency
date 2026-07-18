@@ -92,7 +92,7 @@ function fmtKey(d: Date): string {
 }
 
 function emptyEntry(date: string): DailyTokenStats {
-	return { date, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} };
+	return { date, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {}, taskCategoryUsage: {} };
 }
 
 function mergeUsageGroup(
@@ -134,6 +134,8 @@ function mergeInto(target: DailyTokenStats, src: DailyTokenStats): void {
 	addModelUsage(target.modelUsage, src.modelUsage);
 	mergeUsageGroup(target.editorUsage, src.editorUsage);
 	mergeUsageGroup(target.repositoryUsage, src.repositoryUsage);
+	if (!target.taskCategoryUsage) { target.taskCategoryUsage = {}; }
+	mergeUsageGroup(target.taskCategoryUsage, src.taskCategoryUsage ?? {});
 	if (src.linesAdded !== undefined) { target.linesAdded = (target.linesAdded ?? 0) + src.linesAdded; }
 	if (src.linesRemoved !== undefined) { target.linesRemoved = (target.linesRemoved ?? 0) + src.linesRemoved; }
 	mergeLanguageUsage(target, src);
@@ -361,7 +363,13 @@ function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	});
 	const editorCostDatasets = buildEditorCostDatasets(entries, deps);
 	const billingGroupCostDatasets = buildBillingGroupCostDatasets(entries, deps);
-	return { labels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets };
+	const allTaskCategories = new Set<string>();
+	entries.forEach(e => Object.keys(e.taskCategoryUsage ?? {}).forEach(tc => allTaskCategories.add(tc)));
+	const taskCategoryDatasets = Array.from(allTaskCategories).map((category, idx) => {
+		const color = getModelColor(idx);
+		return { label: category, data: entries.map(e => e.taskCategoryUsage?.[category]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+	return { labels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, taskCategoryDatasets };
 }
 
 function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilderDeps) {
@@ -403,6 +411,7 @@ export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDat
 		modelDatasets: dailyPeriod.modelDatasets,
 		editorDatasets: dailyPeriod.editorDatasets,
 		repositoryDatasets: dailyPeriod.repositoryDatasets,
+		taskCategoryDatasets: dailyPeriod.taskCategoryDatasets,
 		editorTotalsMap,
 		repositoryTotalsMap,
 		dailyCount: dailyPeriod.periodCount,
