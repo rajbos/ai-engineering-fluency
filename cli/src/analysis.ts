@@ -106,6 +106,9 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/.copilot/session-state/')) { return 'Copilot CLI'; }
 	if (normalized.includes('/.crush/crush.db#')) { return 'Crush'; }
 	if (normalized.includes('/opencode/')) { return 'OpenCode'; }
+	// OpenAI Codex CLI (~/.codex): must be checked before the generic 'code'-based
+	// fallbacks below ('codex' contains 'code' and would misclassify as VS Code).
+	if (normalized.includes('/.codex/')) { return 'Codex CLI'; }
 	// Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage) are separate editors.
 	if (normalized.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
 	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
