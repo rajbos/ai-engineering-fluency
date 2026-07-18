@@ -470,6 +470,10 @@ function isVSCodeRoot(lower: string): boolean {
  * @internal
  */
 function detectToolEditorFromRootPath(lower: string): string | undefined {
+	// Cline's storage root lives inside a VS Code variant's globalStorage
+	// (a path containing /code/ or /cursor/), so its specific extension-id
+	// marker must be checked before the generic VS Code family matches.
+	if (lower.includes('saoudrizwan.claude-dev')) { return 'Cline'; }
 	if (lower.includes('opencode')) { return 'OpenCode'; }
 	// OpenAI Codex CLI home (~/.codex). The dot-prefix keeps this from colliding with
 	// the generic 'code' substring checks further down ('.codex' never matches '/code/'
@@ -933,14 +937,19 @@ function isCodeInsidersSource(lowerPath: string): boolean {
 // ── getEditorTypeFromPath helpers ───────────────────────────────────────────
 
 /**
- * Detect Kiro editors from a lower-cased normalised path.
+ * Detect editors whose sessions live inside an editor's globalStorage folder
+ * from a lower-cased normalised path.
  * Kiro CLI (~/.kiro/sessions/cli) and Kiro IDE (kiro.kiroagent global storage)
- * are tracked as separate editors.
+ * are tracked as separate editors. Cline task files live under a VS Code
+ * variant's globalStorage (saoudrizwan.claude-dev), so its specific marker must
+ * win before the generic /code/ and /cursor/ VS Code-variant matches in
+ * detectVSCodeVariantFromPath.
  * @internal
  */
-function detectKiroEditorFromPath(lowerPath: string): string | undefined {
+function detectGlobalStorageEditorFromPath(lowerPath: string): string | undefined {
 	if (lowerPath.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
 	if (lowerPath.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
+	if (lowerPath.includes('/saoudrizwan.claude-dev/tasks/')) { return 'Cline'; }
 	return undefined;
 }
 
@@ -1028,8 +1037,8 @@ function detectToolEditorFromPath(
 	// Cursor virtual paths must be checked before the generic /cursor/ match in detectVSCodeVariantFromPath.
 	if (lowerPath.includes('/cursor/user/globalstorage/state.vscdb#')) { return 'Cursor'; }
 	if (lowerPath.includes('/.pi/agent/sessions/')) { return 'Pi'; }
-	const kiroEditor = detectKiroEditorFromPath(lowerPath);
-	if (kiroEditor) { return kiroEditor; }
+	const globalStorageEditor = detectGlobalStorageEditorFromPath(lowerPath);
+	if (globalStorageEditor) { return globalStorageEditor; }
 	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
@@ -1063,7 +1072,8 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
  * Determine the editor type from a session file path.
  * Returns: 'VS Code', 'VS Code Insiders', 'VSCodium', 'Cursor', 'Copilot CLI',
  *          'JetBrains', 'OpenCode', 'Claude Code', 'Claude Desktop', 'Continue',
- *          'Mistral Vibe', 'Gemini CLI', 'Claude Desktop Cowork', 'Crush', or 'Unknown'.
+ *          'Mistral Vibe', 'Gemini CLI', 'Claude Desktop Cowork', 'Crush', 'Cline',
+ *          or 'Unknown'.
  * Note: 'Claude Code' and 'Claude Desktop' share the same ~/.claude/projects/ directory
  * and are distinguished by the `entrypoint` field inside the session file, not the path
  * (see detectClaudeCodeEditorVariant). 'Claude Desktop Cowork' is a separate, unrelated

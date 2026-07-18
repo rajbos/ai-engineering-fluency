@@ -29,6 +29,7 @@ import { CursorDataAccess } from '../cursor';
 import { KiroDataAccess } from '../kiro';
 import { KiroCliDataAccess } from '../kirocli';
 import { DevinCliDataAccess } from '../devinCli';
+import { ClineDataAccess } from '../cline';
 import { CodexCliDataAccess } from '../codexcli';
 
 import { OpenCodeAdapter } from './openCodeAdapter';
@@ -49,6 +50,7 @@ import { JetBrainsAdapter } from './jetbrainsAdapter';
 import { KiroAdapter } from './kiroAdapter';
 import { KiroCliAdapter } from './kiroCliAdapter';
 import { DevinCliAdapter } from './devinCliAdapter';
+import { ClineAdapter } from './clineAdapter';
 import { CodexCliAdapter } from './codexCliAdapter';
 
 /** Data-access instances and callbacks required to build the adapter registry. */
@@ -68,6 +70,7 @@ cursor: CursorDataAccess;
 kiro: KiroDataAccess;
 kiroCli: KiroCliDataAccess;
 devinCli: DevinCliDataAccess;
+cline: ClineDataAccess;
 codexCli: CodexCliDataAccess;
 /** Estimates token count from raw text for a given model. */
 estimateTokens: (text: string, model?: string) => number;
@@ -110,6 +113,7 @@ cursor: new CursorDataAccess(extensionUri),
 kiro: new KiroDataAccess(),
 kiroCli: new KiroCliDataAccess(),
 devinCli: new DevinCliDataAccess(),
+cline: new ClineDataAccess(),
 codexCli: new CodexCliDataAccess(),
 };
 }
@@ -145,6 +149,10 @@ new CursorAdapter(deps.cursor),
 new KiroAdapter(deps.kiro),
 new KiroCliAdapter(deps.kiroCli),
 new DevinCliAdapter(deps.devinCli),
+// Cline lives under each VS Code variant's globalStorage (a path containing
+// /Code/User/ or /Cursor/User/); its specific saoudrizwan.claude-dev marker
+// must win before the discovery-only Copilot Chat adapter below.
+new ClineAdapter(deps.cline),
 new CodexCliAdapter(deps.codexCli),
 // Copilot Chat / CLI adapters: discovery-only. Their handles() returns
 // false so processSessionFile() falls through to the shared parser path

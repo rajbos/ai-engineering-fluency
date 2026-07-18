@@ -28,6 +28,7 @@ import { AntigravityAdapter } from '../../../src/adapters/antigravityAdapter';
 import { KiroAdapter } from '../../../src/adapters/kiroAdapter';
 import { KiroCliAdapter } from '../../../src/adapters/kiroCliAdapter';
 import { DevinCliAdapter } from '../../../src/adapters/devinCliAdapter';
+import { ClineAdapter } from '../../../src/adapters/clineAdapter';
 import { CodexCliAdapter } from '../../../src/adapters/codexCliAdapter';
 
 import { OpenCodeDataAccess } from '../../../src/opencode';
@@ -43,6 +44,7 @@ import { AntigravityDataAccess } from '../../../src/antigravity';
 import { KiroDataAccess } from '../../../src/kiro';
 import { KiroCliDataAccess } from '../../../src/kirocli';
 import { DevinCliDataAccess } from '../../../src/devinCli';
+import { ClineDataAccess } from '../../../src/cline';
 import { CodexCliDataAccess } from '../../../src/codexcli';
 
 // Stub functions for adapters requiring callbacks
@@ -64,6 +66,7 @@ const antigravityDA = new AntigravityDataAccess();
 const kiroDA = new KiroDataAccess();
 const kiroCliDA = new KiroCliDataAccess();
 const devinCliDA = new DevinCliDataAccess();
+const clineDA = new ClineDataAccess();
 const codexCliDA = new CodexCliDataAccess();
 
 const openCodeAdapter = new OpenCodeAdapter(openCodeDA);
@@ -81,12 +84,14 @@ const antigravityAdapter = new AntigravityAdapter(antigravityDA);
 const kiroAdapter = new KiroAdapter(kiroDA);
 const kiroCliAdapter = new KiroCliAdapter(kiroCliDA);
 const devinCliAdapter = new DevinCliAdapter(devinCliDA);
+const clineAdapter = new ClineAdapter(clineDA);
 const codexCliAdapter = new CodexCliAdapter(codexCliDA);
 
 const allAdapters: IEcosystemAdapter[] = [
     openCodeAdapter, crushAdapter, continueAdapter, eclipseAdapter,
     claudeCodeAdapter, claudeDesktopAdapter, visualStudioAdapter, mistralVibeAdapter, geminiCliAdapter,
     copilotChatAdapter, copilotCliAdapter, antigravityAdapter, kiroAdapter, kiroCliAdapter, devinCliAdapter,
+    clineAdapter,
     codexCliAdapter,
 ];
 
@@ -94,11 +99,11 @@ const allAdapters: IEcosystemAdapter[] = [
 // isDiscoverable type guard
 // ---------------------------------------------------------------------------
 
-test('isDiscoverable: returns true for all 16 adapters', () => {
+test('isDiscoverable: returns true for all 17 adapters', () => {
     for (const adapter of allAdapters) {
         assert.ok(isDiscoverable(adapter), `Expected ${adapter.id} to be discoverable`);
     }
-    assert.equal(allAdapters.length, 16);
+    assert.equal(allAdapters.length, 17);
 });
 
 test('isDiscoverable: returns false for plain IEcosystemAdapter without discover()', () => {
@@ -133,6 +138,25 @@ test('adapter IDs are stable lowercase identifiers', () => {
     assert.equal(kiroAdapter.id, 'kiro');
     assert.equal(kiroCliAdapter.id, 'kirocli');
     assert.equal(devinCliAdapter.id, 'devincli');
+    assert.equal(clineAdapter.id, 'cline');
+});
+
+// ---------------------------------------------------------------------------
+// ClineAdapter — path recognition
+// ---------------------------------------------------------------------------
+
+test('ClineAdapter.handles: recognises saoudrizwan.claude-dev task ui_messages.json paths', () => {
+    const p = path.join(os.homedir(), 'AppData', 'Roaming', 'Code', 'User', 'globalStorage',
+        'saoudrizwan.claude-dev', 'tasks', '1782681302220', 'ui_messages.json');
+    assert.ok(clineAdapter.handles(p));
+});
+
+test('ClineAdapter.handles: rejects sibling task files and unrelated paths', () => {
+    const taskDir = path.join(os.homedir(), 'AppData', 'Roaming', 'Code', 'User', 'globalStorage',
+        'saoudrizwan.claude-dev', 'tasks', '1782681302220');
+    assert.ok(!clineAdapter.handles(path.join(taskDir, 'api_conversation_history.json')));
+    assert.ok(!clineAdapter.handles(path.join(taskDir, 'task_metadata.json')));
+    assert.ok(!clineAdapter.handles(path.join(os.homedir(), '.continue', 'sessions', 'abc.json')));
     assert.equal(codexCliAdapter.id, 'codexcli');
 });
 
