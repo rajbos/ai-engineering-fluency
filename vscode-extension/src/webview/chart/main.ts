@@ -423,27 +423,30 @@ function buildSummaryCards(periodData: ChartPeriodData, periodMeta: typeof PERIO
 
 function buildPeriodToggles(periodsReady: boolean): HTMLElement {
 	const periodToggles = el('div', 'period-controls');
-	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, '📅 By Day');
+	const label = el('span', 'period-controls-label', 'Aggregate by');
+	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, 'Day');
 	dayBtn.id = 'period-day';
 	dayBtn.title = 'Aggregate data by day';
-	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, periodsReady ? '🗓️ By Week' : '🗓️ By Week ⌛');
+	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, 'Week');
 	weekBtn.id = 'period-week';
 	weekBtn.title = 'Aggregate data by week';
-	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, periodsReady ? '📆 By Month' : '📆 By Month ⌛');
+	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, 'Month');
 	monthBtn.id = 'period-month';
 	monthBtn.title = 'Aggregate data by month';
 	if (!periodsReady) {
-		(weekBtn as HTMLButtonElement).disabled = true; weekBtn.title = 'Loading historical data…';
-		(monthBtn as HTMLButtonElement).disabled = true; monthBtn.title = 'Loading historical data…';
+		(weekBtn as HTMLButtonElement).disabled = true; weekBtn.title = 'Loading historical data for weekly aggregation…';
+		(monthBtn as HTMLButtonElement).disabled = true; monthBtn.title = 'Loading historical data for monthly aggregation…';
 	}
-	periodToggles.append(dayBtn, weekBtn, monthBtn);
+	periodToggles.append(label, dayBtn, weekBtn, monthBtn);
 	return periodToggles;
 }
 
 function buildChartControls(data: InitialChartData): HTMLElement {
 	const toggles = el('div', 'chart-controls');
+	const periodsReady = data.periodsReady !== false;
 
 	const windowGroup = el('div', 'control-group');
+	windowGroup.append(el('span', 'control-label', 'Time window:'));
 	const windowSelect = document.createElement('select');
 	windowSelect.id = 'time-window-select';
 	windowSelect.className = 'time-window-select';
@@ -453,9 +456,15 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 		option.value = w;
 		option.textContent = TIME_WINDOW_LABELS[w];
 		if (w === currentTimeWindow) { option.selected = true; }
+		if (w === 'allTime' && !periodsReady) { option.disabled = true; }
 		windowSelect.append(option);
 	});
 	windowGroup.append(windowSelect);
+	if (!periodsReady) {
+		const loadingNote = el('span', 'loading-note', 'Loading history…');
+		loadingNote.title = 'Full history is still loading. "All time" and weekly/monthly aggregation are not available yet.';
+		windowGroup.append(loadingNote);
+	}
 
 	const metricGroup = el('div', 'control-group');
 	const tokensBtn = el('button', `toggle${currentMetric === 'tokens' ? ' active' : ''}`, 'Tokens');
@@ -889,12 +898,15 @@ function getChartColors(): ChartColors {
 	};
 }
 
-function buildBaseOptions(c: ChartColors) {
+function buildBaseOptions(c: ChartColors, periodsReady: boolean) {
+	const title = !periodsReady && currentTimeWindow === 'allTime'
+		? `${TIME_WINDOW_LABELS[currentTimeWindow]} (loading history…)`
+		: TIME_WINDOW_LABELS[currentTimeWindow];
 	return {
 		responsive: true, maintainAspectRatio: false,
 		interaction: { mode: 'index' as const, intersect: false },
 		plugins: {
-			title: { display: true, text: TIME_WINDOW_LABELS[currentTimeWindow], color: c.textColor, font: { size: 14, weight: 'bold' }, padding: { top: 4, bottom: 12 } },
+			title: { display: true, text: title, color: c.textColor, font: { size: 14, weight: 'bold' }, padding: { top: 4, bottom: 12 } },
 			legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } },
 			tooltip: { backgroundColor: c.bgColor, titleColor: c.textColor, bodyColor: c.textColor, borderColor: c.borderColor, borderWidth: 1, padding: 10, displayColors: true }
 		},
@@ -1223,7 +1235,8 @@ function createConfig(data: InitialChartData): ChartConfig {
 	const period = getActivePeriodData(data);
 	const view = resolveChartView(currentMetric, currentSplit);
 	const c = getChartColors();
-	const baseOptions = buildBaseOptions(c);
+	const periodsReady = data.periodsReady !== false;
+	const baseOptions = buildBaseOptions(c, periodsReady);
 	if (view.startsWith('sessions')) { return buildSessionsViewConfig(view, period, baseOptions, c); }
 	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
 	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c, data.monthlyBudget ?? 0); }

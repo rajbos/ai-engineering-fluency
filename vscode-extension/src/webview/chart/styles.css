@@ -133,6 +133,18 @@ body {
 	align-items: center;
 }
 
+.control-label {
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.loading-note {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-left: 4px;
+	white-space: nowrap;
+}
+
 .control-group-separator {
 	width: 1px;
 	height: 20px;
@@ -145,6 +157,12 @@ body {
 	display: flex;
 	gap: 4px;
 	align-items: center;
+}
+
+.period-controls-label {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-right: 4px;
 }
 
 .period-controls .toggle {
