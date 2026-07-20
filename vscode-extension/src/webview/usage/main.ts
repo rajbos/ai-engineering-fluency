@@ -3936,10 +3936,10 @@ type EfficiencyColumnDef = {
 	render: (r: EfficiencyRow) => string;
 };
 
-/** Format a small per-unit USD cost (4 decimals below one cent, currency format above). */
+/** Format a per-unit USD cost with 2 decimal places. */
 function formatUnitCost(value: number | null): string {
 	if (value === null) { return '—'; }
-	return value >= 0.01 ? formatCost(value) : `$${value.toFixed(4)}`;
+	return value >= 0.01 ? formatCost(value) : `$${value.toFixed(2)}`;
 }
 
 function formatRatePercent(value: number | null): string {
