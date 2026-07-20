@@ -991,3 +991,45 @@ const result = aggregatePeriodStats([input], ranges);
 assert.deepEqual(result.monthStats.modelUsageNoExact, {}, 'Gemini CLI rollup must not feed the Copilot estimate');
 assert.deepEqual(result.monthStats.modelUsage['gemini-2.5-pro'], { inputTokens: 300, outputTokens: 100 });
 });
+
+// ── per-model / per-provider session counts ───────────────────────────────────
+
+test('aggregatePeriodStats: fallback path increments per-model and per-editor-model session counts', () => {
+const ranges = makeRanges('2025-03-15');
+const usage: ModelUsage = {
+'gpt-4o': { inputTokens: 400, outputTokens: 100 },
+'claude-3-5-sonnet': { inputTokens: 200, outputTokens: 100 },
+};
+const input: SessionAggregateInput = {
+editorType: 'VS Code',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-15T10:00:00.000Z',
+sessionData: makeSession({ modelUsage: usage, interactions: 3 }),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15')!;
+assert.equal(day.modelUsage['gpt-4o']?.sessions, 1);
+assert.equal(day.modelUsage['claude-3-5-sonnet']?.sessions, 1);
+assert.equal(day.editorModelUsage!['VS Code']['gpt-4o']?.sessions, 1);
+assert.equal(day.editorModelUsage!['VS Code']['claude-3-5-sonnet']?.sessions, 1);
+assert.equal(day.editorUsage['VS Code']?.sessions, 1);
+});
+
+test('aggregatePeriodStats: rollup path increments per-model and per-editor-model session counts', () => {
+const ranges = makeRanges('2025-03-15');
+const usage: ModelUsage = { 'gpt-4o': { inputTokens: 300, outputTokens: 100 } };
+const input: SessionAggregateInput = {
+editorType: 'VS Code',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+dailyRollups: {
+'2025-03-15': { tokens: 400, actualTokens: 0, thinkingTokens: 0, interactions: 2, modelUsage: usage },
+},
+}),
+};
+const result = aggregatePeriodStats([input], ranges);
+const day = result.dailyStatsMap.get('2025-03-15')!;
+assert.equal(day.modelUsage['gpt-4o']?.sessions, 1);
+assert.equal(day.editorModelUsage!['VS Code']['gpt-4o']?.sessions, 1);
+assert.equal(day.editorUsage['VS Code']?.sessions, 1);
+});

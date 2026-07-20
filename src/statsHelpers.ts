@@ -59,6 +59,9 @@ target[model].cachedReadTokens = (target[model].cachedReadTokens ?? 0) + usage.c
 if (usage.cacheCreationTokens !== undefined) {
 target[model].cacheCreationTokens = (target[model].cacheCreationTokens ?? 0) + usage.cacheCreationTokens;
 }
+if (usage.sessions !== undefined) {
+target[model].sessions = (target[model].sessions ?? 0) + usage.sessions;
+}
 }
 }
 
@@ -99,6 +102,7 @@ export function reconcileModelUsageToTotal(modelUsage: ModelUsage, targetInputTo
 			inputTokens, outputTokens,
 			...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * inputScale) } : {}),
 			...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * inputScale) } : {}),
+			...(usage.sessions !== undefined ? { sessions: usage.sessions } : {}),
 		};
 	}
 	const residualInput = targetInputTokens - scaledInputTotal;
@@ -243,9 +247,17 @@ function _apsBumpDailyEntry(entry: DailyTokenStats, tokens: number, interactions
 	entry.repositoryUsage[repository].tokens += tokens;
 	entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);
+	for (const model of Object.keys(modelUsage)) {
+		if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
+		entry.modelUsage[model].sessions += 1;
+	}
 	if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 	if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 	addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+	for (const model of Object.keys(modelUsage)) {
+		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
+		entry.editorModelUsage[editorType][model].sessions += 1;
+	}
 }
 
 function _apsBumpPeriod(acc: PeriodAccumulator, f: ApsDayFields, freshSession: boolean): void {
@@ -441,9 +453,17 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	if (!entry.repositoryUsage[repository]) { entry.repositoryUsage[repository] = { tokens: 0, sessions: 0 }; }
 	entry.repositoryUsage[repository].tokens += tokens; entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);
+	for (const model of Object.keys(modelUsage)) {
+		if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
+		entry.modelUsage[model].sessions += 1;
+	}
 	if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 	if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 	addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+	for (const model of Object.keys(modelUsage)) {
+		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
+		entry.editorModelUsage[editorType][model].sessions += 1;
+	}
 }
 
 function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: number, actual: number, thinking: number, cached: number, interactions: number, countSession: boolean, editorType: string, modelUsage: ModelUsage, copilotExactCostDollars?: number): void {

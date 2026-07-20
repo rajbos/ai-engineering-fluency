@@ -159,15 +159,20 @@ function fmtWeekLabel(monday: Date): string {
 
 function buildDailyBuckets(fullDailyStats: DailyTokenStats[], now: Date): BucketEntry[] {
 	const thirtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-	const thirtyDaysAgoStr = fmtKey(thirtyDaysAgo);
+	let startDate = new Date(thirtyDaysAgo);
+	for (const day of fullDailyStats) {
+		const d = new Date(day.date + 'T00:00:00');
+		if (d < startDate) { startDate = d; }
+	}
+	const startStr = fmtKey(startDate);
 	const todayStr = fmtKey(now);
 	const bucketMap = new Map<string, BucketEntry>();
-	for (let cursor = new Date(thirtyDaysAgo); cursor <= now; cursor.setDate(cursor.getDate() + 1)) {
+	for (let cursor = new Date(startDate); cursor <= now; cursor.setDate(cursor.getDate() + 1)) {
 		const key = fmtKey(new Date(cursor));
 		bucketMap.set(key, { key, label: key, stats: emptyEntry(key) });
 	}
 	for (const day of fullDailyStats) {
-		if (day.date >= thirtyDaysAgoStr && day.date <= todayStr) {
+		if (day.date >= startStr && day.date <= todayStr) {
 			const bucket = bucketMap.get(day.date);
 			if (bucket) { mergeInto(bucket.stats, day); }
 		}
@@ -177,9 +182,18 @@ function buildDailyBuckets(fullDailyStats: DailyTokenStats[], now: Date): Bucket
 
 function buildWeeklyBuckets(fullDailyStats: DailyTokenStats[], now: Date): BucketEntry[] {
 	const thisMonday = getMondayOfWeek(now);
-	const bucketMap = new Map<string, BucketEntry>();
+	let earliestMonday = new Date(thisMonday);
 	for (let w = 5; w >= 0; w--) {
 		const monday = new Date(thisMonday); monday.setDate(thisMonday.getDate() - w * 7);
+		if (monday < earliestMonday) { earliestMonday = monday; }
+	}
+	for (const day of fullDailyStats) {
+		const monday = getMondayOfWeek(new Date(day.date + "T00:00:00"));
+		if (monday < earliestMonday) { earliestMonday = monday; }
+	}
+	const bucketMap = new Map<string, BucketEntry>();
+	for (let cursor = new Date(earliestMonday); cursor <= thisMonday; cursor.setDate(cursor.getDate() + 7)) {
+		const monday = new Date(cursor);
 		const key = fmtKey(monday);
 		bucketMap.set(key, { key, label: fmtWeekLabel(monday), stats: emptyEntry(key) });
 	}
@@ -193,8 +207,19 @@ function buildWeeklyBuckets(fullDailyStats: DailyTokenStats[], now: Date): Bucke
 
 function buildMonthlyBuckets(fullDailyStats: DailyTokenStats[], now: Date): BucketEntry[] {
 	const bucketMap = new Map<string, BucketEntry>();
-	for (let m = 11; m >= 0; m--) {
-		const monthDate = new Date(now.getFullYear(), now.getMonth() - m, 1);
+	let earliestYear = now.getFullYear();
+	let earliestMonth = now.getMonth() - 11;
+	while (earliestMonth < 0) { earliestYear--; earliestMonth += 12; }
+	for (const day of fullDailyStats) {
+		const [year, month] = day.date.split('-').map(Number);
+		if (year < earliestYear || (year === earliestYear && month - 1 < earliestMonth)) {
+			earliestYear = year;
+			earliestMonth = month - 1;
+		}
+	}
+	const monthsCount = (now.getFullYear() - earliestYear) * 12 + (now.getMonth() - earliestMonth);
+	for (let i = 0; i <= monthsCount; i++) {
+		const monthDate = new Date(earliestYear, earliestMonth + i, 1);
 		const key = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
 		const label = monthDate.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 		bucketMap.set(key, { key, label, stats: emptyEntry(key) });
@@ -226,6 +251,74 @@ function buildModelDatasets(entries: DailyTokenStats[], deps: ChartDataBuilderDe
 		datasets.push({ label: 'Other models', data: entries.map(e => otherModels.reduce((sum, m) => { const u = e.modelUsage[m]; return sum + (u ? u.inputTokens + u.outputTokens : 0); }, 0)), backgroundColor: 'rgba(150, 150, 150, 0.5)', borderColor: 'rgba(150, 150, 150, 0.8)', borderWidth: 1 });
 	}
 	return datasets;
+}
+
+/** Builds session-count datasets split by model. */
+function buildModelSessionsDatasets(entries: DailyTokenStats[]) {
+	const allModels = new Set<string>();
+	entries.forEach(e => Object.keys(e.modelUsage).forEach(m => allModels.add(m)));
+	const modelSessionTotals = new Map<string, number>();
+	for (const model of allModels) {
+		const total = entries.reduce((sum, e) => sum + (e.modelUsage[model]?.sessions ?? 0), 0);
+		modelSessionTotals.set(model, total);
+	}
+	const sortedModels = Array.from(allModels).sort((a, b) => (modelSessionTotals.get(b) || 0) - (modelSessionTotals.get(a) || 0));
+	const topModels = sortedModels.slice(0, 5);
+	const otherModels = sortedModels.slice(5);
+	const datasets = topModels.map((model, idx) => {
+		const color = getModelColor(idx);
+		return { label: getModelDisplayName(model), data: entries.map(e => e.modelUsage[model]?.sessions ?? 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+	if (otherModels.length > 0) {
+		datasets.push({ label: 'Other models', data: entries.map(e => otherModels.reduce((sum, m) => sum + (e.modelUsage[m]?.sessions ?? 0), 0)), backgroundColor: 'rgba(150, 150, 150, 0.5)', borderColor: 'rgba(150, 150, 150, 0.8)', borderWidth: 1 });
+	}
+	return datasets;
+}
+
+/** Builds session-count datasets split by editor. */
+function buildEditorSessionsDatasets(entries: DailyTokenStats[]) {
+	const allEditors = new Set<string>();
+	entries.forEach(e => Object.keys(e.editorUsage).forEach(ed => allEditors.add(ed)));
+	const editorSessionTotals = new Map<string, number>();
+	for (const editor of allEditors) {
+		const total = entries.reduce((sum, e) => sum + (e.editorUsage[editor]?.sessions ?? 0), 0);
+		editorSessionTotals.set(editor, total);
+	}
+	const sortedEditors = Array.from(allEditors).sort((a, b) => (editorSessionTotals.get(b) || 0) - (editorSessionTotals.get(a) || 0));
+	return sortedEditors.map((editor, idx) => {
+		const color = getModelColor(idx);
+		return { label: editor, data: entries.map(e => e.editorUsage[editor]?.sessions ?? 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+}
+
+/** Aggregates per-editor-model session counts up to billing provider groups. */
+function aggregateBillingGroupSessions(entry: DailyTokenStats): Record<string, number> {
+	const result: Record<string, number> = {};
+	const editorModelUsage = entry.editorModelUsage;
+	if (!editorModelUsage) { return result; }
+	for (const [editor, modelUsage] of Object.entries(editorModelUsage)) {
+		for (const [modelId, usage] of Object.entries(modelUsage)) {
+			const group = getBillingGroup(editor, modelId);
+			result[group] = (result[group] ?? 0) + (usage.sessions ?? 0);
+		}
+	}
+	return result;
+}
+
+/** Builds session-count datasets split by billing provider. */
+function buildProviderSessionsDatasets(entries: DailyTokenStats[]) {
+	const allGroups = new Set<string>();
+	entries.forEach(e => Object.keys(aggregateBillingGroupSessions(e)).forEach(g => allGroups.add(g)));
+	const groupTotals = new Map<string, number>();
+	for (const group of allGroups) {
+		const total = entries.reduce((sum, e) => sum + (aggregateBillingGroupSessions(e)[group] ?? 0), 0);
+		groupTotals.set(group, total);
+	}
+	const sortedGroups = Array.from(allGroups).sort((a, b) => (groupTotals.get(b) || 0) - (groupTotals.get(a) || 0));
+	return sortedGroups.map((group, idx) => {
+		const color = getModelColor(idx);
+		return { label: group, data: entries.map(e => aggregateBillingGroupSessions(e)[group] ?? 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
 }
 
 /**
@@ -320,6 +413,7 @@ function buildBillingGroupCostDatasets(entries: DailyTokenStats[], deps: ChartDa
 function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	const entries = buckets.map(b => b.stats);
 	const labels = buckets.map(b => b.label);
+	const periodKeys = buckets.map(b => b.key);
 	const tokensData = entries.map(e => e.tokens);
 	const sessionsData = entries.map(e => e.sessions);
 	const modelDatasets = buildModelDatasets(entries, deps);
@@ -363,13 +457,16 @@ function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	});
 	const editorCostDatasets = buildEditorCostDatasets(entries, deps);
 	const billingGroupCostDatasets = buildBillingGroupCostDatasets(entries, deps);
+	const modelSessionsDatasets = buildModelSessionsDatasets(entries);
+	const editorSessionsDatasets = buildEditorSessionsDatasets(entries);
+	const providerSessionsDatasets = buildProviderSessionsDatasets(entries);
 	const allTaskCategories = new Set<string>();
 	entries.forEach(e => Object.keys(e.taskCategoryUsage ?? {}).forEach(tc => allTaskCategories.add(tc)));
 	const taskCategoryDatasets = Array.from(allTaskCategories).map((category, idx) => {
 		const color = getModelColor(idx);
 		return { label: category, data: entries.map(e => e.taskCategoryUsage?.[category]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
 	});
-	return { labels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, taskCategoryDatasets };
+	return { labels, periodKeys, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, modelSessionsDatasets, editorSessionsDatasets, providerSessionsDatasets, taskCategoryDatasets };
 }
 
 function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilderDeps) {
@@ -391,7 +488,9 @@ function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilde
 
 /**
  * Aggregate daily token stats into the chart payload used by the chart webview.
- * Produces daily (last 30 days), weekly (last 6 weeks), and monthly (last 12 months) period data.
+ * Produces daily, weekly, and monthly period data covering at least the recent default
+ * window (30 days / 6 weeks / 12 months) and extending back to the earliest available
+ * session so the "All time" time-window option can display the full history.
  */
 export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDataBuilderDeps): ChartDataPayload {
 	const now = deps.now ?? new Date();

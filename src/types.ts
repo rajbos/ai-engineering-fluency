@@ -32,6 +32,8 @@ export interface ModelUsage {
      * the standard `cacheCreationCostPerMillion` (5-minute) rate.
      */
     cacheCreation1hTokens?: number;
+    /** Number of sessions that used this model in the aggregated period. */
+    sessions?: number;
   };
 }
 
@@ -164,9 +166,14 @@ export interface DailyTokenStats {
   taskCategoryUsage?: { [category: string]: { tokens: number; sessions: number } };
 }
 
+/** Time-window selector options available in the Chart view. */
+export type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth' | 'allTime';
+
 /** Aggregated data for one time window (day/week/month) in the chart. */
 export interface ChartPeriodData {
   labels: string[];
+  /** ISO date keys for each bar, used for time-window filtering. Day=YYYY-MM-DD, week=Monday YYYY-MM-DD, month=YYYY-MM. */
+  periodKeys: string[];
   tokensData: number[];
   sessionsData: number[];
   modelDatasets: object[];
@@ -206,6 +213,12 @@ export interface ChartPeriodData {
    * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
    */
   billingGroupCostDatasets?: object[];
+  /** Session-count datasets split by model — one stacked-bar dataset per model. */
+  modelSessionsDatasets?: object[];
+  /** Session-count datasets split by editor — one stacked-bar dataset per editor. */
+  editorSessionsDatasets?: object[];
+  /** Session-count datasets split by billing provider — one stacked-bar dataset per provider group. */
+  providerSessionsDatasets?: object[];
   /** Token datasets split by task category (e.g. "Coding", "Debugging", "Testing") — one stacked-bar dataset per category. */
   taskCategoryDatasets?: object[];
 }

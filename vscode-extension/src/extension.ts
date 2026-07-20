@@ -28,6 +28,7 @@ import type {
   DetailedStats,
   DailyTokenStats,
   ChartDataPayload,
+  ChartTimeWindow,
   SessionFileCache,
   DailyRollupEntry,
   CustomizationFileEntry,
@@ -484,6 +485,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' = 'total';
 	private lastChartMetric: string = 'tokens';
 	private lastChartSplit: string = 'total';
+	private lastChartTimeWindow: ChartTimeWindow = 'last30';
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
 	private lastDashboardData: any | undefined;
 	/** Insight engine: persisted state for all surfaced insights. */
@@ -3377,9 +3379,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		entry.repositoryUsage[repository].tokens += tokens;
 		entry.repositoryUsage[repository].sessions += 1;
 		addModelUsage(entry.modelUsage, modelUsage);
+		for (const model of Object.keys(modelUsage)) {
+			if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
+			entry.modelUsage[model].sessions += 1;
+		}
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+		for (const model of Object.keys(modelUsage)) {
+			if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
+			entry.editorModelUsage[editorType][model].sessions += 1;
+		}
 		if (taskCategory) {
 			if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
 			if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
@@ -6154,6 +6164,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (await this.dispatchSharedCommand(message)) { return; }
 			if (message.command === 'refresh') { await this.dispatch('refresh:chart', () => this.refreshChartPanel()); }
 			if (message.command === 'setPeriodPreference') { this.setChartPeriodPreference(message.period); }
+			if (message.command === 'setTimeWindowPreference') { this.setChartTimeWindowPreference(message.timeWindow); }
 			if (message.command === 'setViewPreference') { this.setChartViewPreference(message); }
 		});
 
@@ -6180,6 +6191,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private setChartPeriodPreference(period: string): void {
 		if (period === 'day' || period === 'week' || period === 'month') { this.lastChartPeriod = period; }
+	}
+
+	private setChartTimeWindowPreference(timeWindow: string): void {
+		const valid: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
+		if (valid.includes(timeWindow as ChartTimeWindow)) { this.lastChartTimeWindow = timeWindow as ChartTimeWindow; }
 	}
 
 	private setChartViewPreference(message: any): void {
@@ -9915,7 +9931,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "chart.js"),
     );
 
-    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialView: this.lastChartView, initialMetric: this.lastChartMetric, initialSplit: this.lastChartSplit, monthlyBudget: this.getEffectiveMonthlyBudget() };
+    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialTimeWindow: this.lastChartTimeWindow, initialView: this.lastChartView, initialMetric: this.lastChartMetric, initialSplit: this.lastChartSplit, monthlyBudget: this.getEffectiveMonthlyBudget() };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
 
