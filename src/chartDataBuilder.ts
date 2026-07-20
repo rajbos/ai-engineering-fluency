@@ -320,6 +320,7 @@ function buildBillingGroupCostDatasets(entries: DailyTokenStats[], deps: ChartDa
 function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	const entries = buckets.map(b => b.stats);
 	const labels = buckets.map(b => b.label);
+	const periodKeys = buckets.map(b => b.key);
 	const tokensData = entries.map(e => e.tokens);
 	const sessionsData = entries.map(e => e.sessions);
 	const modelDatasets = buildModelDatasets(entries, deps);
@@ -369,7 +370,7 @@ function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 		const color = getModelColor(idx);
 		return { label: category, data: entries.map(e => e.taskCategoryUsage?.[category]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
 	});
-	return { labels, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, taskCategoryDatasets };
+	return { labels, periodKeys, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, taskCategoryDatasets };
 }
 
 function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilderDeps) {

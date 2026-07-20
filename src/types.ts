@@ -164,9 +164,14 @@ export interface DailyTokenStats {
   taskCategoryUsage?: { [category: string]: { tokens: number; sessions: number } };
 }
 
+/** Time-window selector options available in the Chart view. */
+export type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth';
+
 /** Aggregated data for one time window (day/week/month) in the chart. */
 export interface ChartPeriodData {
   labels: string[];
+  /** ISO date keys for each bar, used for time-window filtering. Day=YYYY-MM-DD, week=Monday YYYY-MM-DD, month=YYYY-MM. */
+  periodKeys: string[];
   tokensData: number[];
   sessionsData: number[];
   modelDatasets: object[];

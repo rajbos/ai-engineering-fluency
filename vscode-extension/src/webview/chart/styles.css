@@ -219,6 +219,26 @@ body {
 	background: var(--button-secondary-bg);
 }
 
+.time-window-select {
+	background: var(--button-secondary-bg);
+	border: 1px solid var(--border-subtle);
+	color: var(--text-primary);
+	border-radius: 6px;
+	padding: 5px 10px;
+	font-size: 12px;
+	cursor: pointer;
+	outline: none;
+}
+
+.time-window-select:focus {
+	border-color: var(--button-bg);
+}
+
+.time-window-select option {
+	background: var(--bg-secondary);
+	color: var(--text-primary);
+}
+
 /* Language Heatmap */
 .heatmap-container {
 	position: relative;

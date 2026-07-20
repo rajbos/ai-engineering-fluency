@@ -49,6 +49,7 @@ type ChartPeriodData = {
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
+type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth';
 
 type InitialChartData = {
 	labels: string[];
@@ -70,8 +71,9 @@ type InitialChartData = {
 	periodsReady?: boolean;
 	hasLocData?: boolean;
 	initialPeriod?: ChartPeriod;
+	initialTimeWindow?: ChartTimeWindow;
 	initialView?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
-	initialMetric?: 'tokens' | 'output' | 'cost';
+	initialMetric?: 'tokens' | 'output' | 'cost' | 'sessions';
 	initialSplit?: 'total' | 'model' | 'editor' | 'repository' | 'language';
 	monthlyBudget?: number;
 	periods?: {
@@ -103,9 +105,10 @@ async function loadChartModule(): Promise<void> {
 	const mod = await import('chart.js/auto');
 	Chart = mod.default;
 }
-let currentMetric: 'tokens' | 'output' | 'cost' = 'tokens';
+let currentMetric: 'tokens' | 'output' | 'cost' | 'sessions' = 'tokens';
 let currentSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'taskCategory' = 'total';
 let currentPeriod: ChartPeriod = 'day';
+let currentTimeWindow: ChartTimeWindow = 'last30';
 // Stores state to restore after a background data update re-initializes the chart
 let pendingMetric: typeof currentMetric | null = null;
 let pendingSplit: typeof currentSplit | null = null;
@@ -116,7 +119,8 @@ let currentDisplayMode: DisplayMode = 'actual';
 
 type ChartWebviewState = {
 	period: ChartPeriod;
-	metric: 'tokens' | 'output' | 'cost';
+	timeWindow: ChartTimeWindow;
+	metric: 'tokens' | 'output' | 'cost' | 'sessions';
 	split: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'taskCategory';
 	displayMode: DisplayMode;
 	/** @deprecated Use metric + split instead. Kept for migration of old saved state. */
@@ -125,14 +129,144 @@ type ChartWebviewState = {
 
 const chartState = createViewStateManager<ChartWebviewState>(vscode, {
 	period: 'day',
+	timeWindow: 'last30',
 	metric: 'tokens',
 	split: 'total',
 	displayMode: 'actual',
 });
 
 function saveWebviewState(): void {
-	chartState.save({ period: currentPeriod, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode });
+	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode });
 }
+
+const TIME_WINDOW_LABELS: Record<ChartTimeWindow, string> = {
+	today: 'Today',
+	last7: 'Last 7 days',
+	last30: 'Last 30 days',
+	currentMonth: 'Current month',
+};
+
+function getWindowStartDate(timeWindow: ChartTimeWindow, now: Date): string {
+	const y = now.getFullYear();
+	const m = now.getMonth();
+	const d = now.getDate();
+	switch (timeWindow) {
+		case 'today':
+			return `${y}-${String(m + 1).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
+		case 'last7': {
+			const start = new Date(y, m, d - 6);
+			return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+		}
+		case 'last30': {
+			const start = new Date(y, m, d - 29);
+			return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`;
+		}
+		case 'currentMonth':
+			return `${y}-${String(m + 1).padStart(2, '0')}-01`;
+	}
+}
+
+function getWindowStartMonth(timeWindow: ChartTimeWindow, now: Date): string {
+	const y = now.getFullYear();
+	const m = now.getMonth();
+	if (timeWindow === 'currentMonth') {
+		return `${y}-${String(m + 1).padStart(2, '0')}`;
+	}
+	// For today/last7/last30, include the current month and previous month if needed.
+	const start = new Date(y, m, timeWindow === 'today' ? 1 : timeWindow === 'last7' ? -5 : -29);
+	return `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}`;
+}
+
+function sliceByIndices<T>(arr: T[] | undefined, indices: number[]): T[] | undefined {
+	if (!arr) { return undefined; }
+	return indices.map(i => arr[i]);
+}
+
+function sliceDatasetsByIndices(datasets: object[] | undefined, indices: number[]): object[] | undefined {
+	if (!datasets) { return undefined; }
+	return datasets.map(ds => {
+		const d = ds as { data: number[] };
+		return { ...d, data: indices.map(i => d.data[i]) };
+	});
+}
+
+function getFilterStartKey(timeWindow: ChartTimeWindow, periodType: ChartPeriod, now: Date): string {
+	return periodType === 'month' ? getWindowStartMonth(timeWindow, now) : getWindowStartDate(timeWindow, now);
+}
+
+function buildCoreFilteredPeriod(period: ChartPeriodData, indices: number[]): ChartPeriodData {
+	const totalTokens = indices.reduce((sum, i) => sum + period.tokensData[i], 0);
+	const totalSessions = indices.reduce((sum, i) => sum + period.sessionsData[i], 0);
+	const costData = sliceByIndices(period.costData, indices) as number[];
+	const totalCost = costData.reduce((a, b) => a + b, 0);
+	return {
+		labels: indices.map(i => period.labels[i]),
+		periodKeys: indices.map(i => period.periodKeys[i]),
+		tokensData: indices.map(i => period.tokensData[i]),
+		sessionsData: indices.map(i => period.sessionsData[i]),
+		modelDatasets: sliceDatasetsByIndices(period.modelDatasets, indices) as ModelDataset[],
+		editorDatasets: sliceDatasetsByIndices(period.editorDatasets, indices) as EditorDataset[],
+		repositoryDatasets: sliceDatasetsByIndices(period.repositoryDatasets, indices) as RepositoryDataset[],
+		periodCount: indices.length,
+		totalTokens,
+		totalSessions,
+		avgPerPeriod: indices.length > 0 ? Math.round(totalTokens / indices.length) : 0,
+		costData,
+		totalCost,
+		avgCostPerPeriod: indices.length > 0 ? totalCost / indices.length : 0,
+	};
+}
+
+function copyFilteredLocFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
+	const locData = sliceByIndices(source.locData, indices);
+	const linesAddedData = sliceByIndices(source.linesAddedData, indices);
+	const linesRemovedData = sliceByIndices(source.linesRemovedData, indices);
+
+	if (locData) { target.locData = locData as number[]; }
+	if (linesAddedData) { target.linesAddedData = linesAddedData as number[]; }
+	if (linesRemovedData) { target.linesRemovedData = linesRemovedData as number[]; }
+	if (source.totalLinesAdded !== undefined) { target.totalLinesAdded = (linesAddedData as number[] ?? []).reduce((a, b) => a + b, 0); }
+	if (source.totalLinesRemoved !== undefined) { target.totalLinesRemoved = (linesRemovedData as number[] ?? []).reduce((a, b) => a + b, 0); }
+	if (source.avgLocPerPeriod !== undefined) {
+		target.avgLocPerPeriod = locData && locData.length > 0 ? (locData as number[]).reduce((a, b) => a + b, 0) / locData.length : 0;
+	}
+}
+
+function copyFilteredDatasetFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
+	const datasetFields: Array<{ key: keyof ChartPeriodData; source: object[] | undefined }> = [
+		{ key: 'languageDatasets', source: source.languageDatasets },
+		{ key: 'locEditorDatasets', source: source.locEditorDatasets },
+		{ key: 'locRepositoryDatasets', source: source.locRepositoryDatasets },
+		{ key: 'editorCostDatasets', source: source.editorCostDatasets },
+		{ key: 'billingGroupCostDatasets', source: source.billingGroupCostDatasets },
+		{ key: 'taskCategoryDatasets', source: source.taskCategoryDatasets },
+	];
+	for (const { key, source: ds } of datasetFields) {
+		if (ds) { (target as Record<string, object[]>)[key] = sliceDatasetsByIndices(ds, indices) as object[]; }
+	}
+}
+
+function copyFilteredOptionalFields(source: ChartPeriodData, target: ChartPeriodData, indices: number[]): void {
+	copyFilteredLocFields(source, target, indices);
+	copyFilteredDatasetFields(source, target, indices);
+}
+
+function filterPeriodByTimeWindow(period: ChartPeriodData, timeWindow: ChartTimeWindow, periodType: ChartPeriod): ChartPeriodData {
+	if (timeWindow === 'last30' && periodType === 'day') {
+		return period;
+	}
+	const startKey = getFilterStartKey(timeWindow, periodType, new Date());
+	const indices: number[] = [];
+	for (let i = 0; i < period.periodKeys.length; i++) {
+		if (period.periodKeys[i] >= startKey) { indices.push(i); }
+	}
+	if (indices.length === 0) { return period; }
+
+	const filtered = buildCoreFilteredPeriod(period, indices);
+	copyFilteredOptionalFields(period, filtered, indices);
+	return filtered;
+}
+
 const ROLLING_WINDOW: Record<ChartPeriod, number> = { day: 7, week: 4, month: 3 };
 
 function computeRollingAverage(data: number[], window: number): number[] {
@@ -149,8 +283,16 @@ function getRollingLabel(): string {
 	return `${w}-${unit} rolling avg`;
 }
 
+function getTimeWindowSuffix(): string {
+	if (currentTimeWindow === 'last30') { return ''; }
+	return ` — ${TIME_WINDOW_LABELS[currentTimeWindow]}`;
+}
+
 function getChartTitle(): string {
 	const periodMeta = PERIOD_LABELS[currentPeriod];
+	if (currentMetric === 'sessions') {
+		return `Sessions — ${TIME_WINDOW_LABELS[currentTimeWindow]}`;
+	}
 	if (currentMetric === 'cost') {
 		let titleText: string;
 		if (currentSplit === 'editor') {
@@ -163,39 +305,43 @@ function getChartTitle(): string {
 		if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
 			titleText += ` (${getRollingLabel()})`;
 		}
-		return titleText;
+		return titleText + getTimeWindowSuffix();
 	}
 	if (currentMetric === 'output') {
-		return periodMeta.outputTitle;
+		return periodMeta.outputTitle + getTimeWindowSuffix();
 	}
 	let titleText = periodMeta.title;
 	if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
 		titleText += ` (${getRollingLabel()})`;
 	}
-	return titleText;
+	return titleText + getTimeWindowSuffix();
 }
 
 /** Returns period data for the current period, falling back to legacy flat fields. */
 function getActivePeriodData(data: InitialChartData): ChartPeriodData {
+	let period: ChartPeriodData;
 	if (data.periods) {
-		return data.periods[currentPeriod];
+		period = data.periods[currentPeriod];
+	} else {
+		// Fallback for backward compat (no periods field)
+		period = {
+			labels: data.labels,
+			periodKeys: data.labels,
+			tokensData: data.tokensData,
+			sessionsData: data.sessionsData,
+			modelDatasets: data.modelDatasets,
+			editorDatasets: data.editorDatasets,
+			repositoryDatasets: data.repositoryDatasets,
+			periodCount: data.dailyCount,
+			totalTokens: data.totalTokens,
+			totalSessions: data.totalSessions,
+			avgPerPeriod: data.avgTokensPerDay,
+			costData: [],
+			totalCost: 0,
+			avgCostPerPeriod: 0,
+		};
 	}
-	// Fallback for backward compat (no periods field)
-	return {
-		labels: data.labels,
-		tokensData: data.tokensData,
-		sessionsData: data.sessionsData,
-		modelDatasets: data.modelDatasets,
-		editorDatasets: data.editorDatasets,
-		repositoryDatasets: data.repositoryDatasets,
-		periodCount: data.dailyCount,
-		totalTokens: data.totalTokens,
-		totalSessions: data.totalSessions,
-		avgPerPeriod: data.avgTokensPerDay,
-		costData: [],
-		totalCost: 0,
-		avgCostPerPeriod: 0,
-	};
+	return filterPeriodByTimeWindow(period, currentTimeWindow, currentPeriod);
 }
 
 const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string }> = {
@@ -205,6 +351,7 @@ const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countL
 };
 
 function isComboSupported(metric: string, split: string): boolean {
+	if (metric === 'sessions') { return split === 'total'; }
 	if (metric === 'cost') { return split === 'total' || split === 'editor' || split === 'provider'; }
 	if (metric === 'output') { return split !== 'model' && split !== 'provider' && split !== 'taskCategory'; }
 	return split !== 'language' && split !== 'provider';
@@ -222,21 +369,33 @@ function buildChartHeader(data: InitialChartData): HTMLElement {
 	return header;
 }
 
+function getSummaryTotal(periodData: ChartPeriodData): { label: string; value: string } {
+	switch (currentMetric) {
+		case 'cost': return { label: 'Total Cost (est.)', value: `$${periodData.totalCost.toFixed(2)}` };
+		case 'output': return { label: 'Total Lines (AI)', value: ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString() };
+		case 'sessions': return { label: 'Total Sessions', value: periodData.totalSessions.toLocaleString() };
+		default: return { label: 'Total Tokens', value: formatCompact(periodData.totalTokens) };
+	}
+}
+
+function getSummaryAverage(periodData: ChartPeriodData, periodMeta: typeof PERIOD_LABELS[ChartPeriod]): { label: string; value: string } {
+	switch (currentMetric) {
+		case 'cost': return { label: periodMeta.avgCostLabel, value: `$${periodData.avgCostPerPeriod.toFixed(2)}` };
+		case 'output': return { label: periodMeta.avgLocLabel, value: Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString() };
+		case 'sessions': return { label: `Avg Sessions / ${periodMeta.countLabel.replace('Total ', '')}`, value: Math.round(periodData.totalSessions / (periodData.periodCount || 1)).toLocaleString() };
+		default: return { label: periodMeta.avgLabel, value: formatCompact(periodData.avgPerPeriod) };
+	}
+}
+
 function buildSummaryCards(periodData: ChartPeriodData, periodMeta: typeof PERIOD_LABELS[ChartPeriod]): HTMLElement {
-	const totalLabel = currentMetric === 'cost' ? 'Total Cost (est.)' : currentMetric === 'output' ? 'Total Lines (AI)' : 'Total Tokens';
-	const totalValue = currentMetric === 'cost' ? `$${periodData.totalCost.toFixed(2)}`
-		: currentMetric === 'output' ? ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString()
-		: formatCompact(periodData.totalTokens);
-	const avgLabel = currentMetric === 'cost' ? periodMeta.avgCostLabel : currentMetric === 'output' ? periodMeta.avgLocLabel : periodMeta.avgLabel;
-	const avgValue = currentMetric === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}`
-		: currentMetric === 'output' ? Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString()
-		: formatCompact(periodData.avgPerPeriod);
+	const total = getSummaryTotal(periodData);
+	const average = getSummaryAverage(periodData, periodMeta);
 	const cards = el('div', 'cards');
 	cards.id = 'summary-cards';
 	cards.append(
 		buildCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString()),
-		buildCard('card-total-tokens', totalLabel, totalValue),
-		buildCard('card-avg-tokens', avgLabel, avgValue),
+		buildCard('card-total-tokens', total.label, total.value),
+		buildCard('card-avg-tokens', average.label, average.value),
 		buildCard('card-total-sessions', 'Total Sessions', periodData.totalSessions.toLocaleString()),
 	);
 	return cards;
@@ -260,6 +419,21 @@ function buildPeriodToggles(periodsReady: boolean): HTMLElement {
 
 function buildChartControls(data: InitialChartData): HTMLElement {
 	const toggles = el('div', 'chart-controls');
+
+	const windowGroup = el('div', 'control-group');
+	const windowSelect = document.createElement('select');
+	windowSelect.id = 'time-window-select';
+	windowSelect.className = 'time-window-select';
+	const windows: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth'];
+	windows.forEach(w => {
+		const option = document.createElement('option');
+		option.value = w;
+		option.textContent = TIME_WINDOW_LABELS[w];
+		if (w === currentTimeWindow) { option.selected = true; }
+		windowSelect.append(option);
+	});
+	windowGroup.append(windowSelect);
+
 	const metricGroup = el('div', 'control-group');
 	const tokensBtn = el('button', `toggle${currentMetric === 'tokens' ? ' active' : ''}`, 'Tokens');
 	tokensBtn.id = 'metric-tokens';
@@ -268,7 +442,9 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 	if (!data.hasLocData) { outputBtn.title = 'No edit data available yet (VS Code edit/agent sessions only)'; }
 	const costBtn = el('button', `toggle${currentMetric === 'cost' ? ' active' : ''}`, '💰 Cost');
 	costBtn.id = 'metric-cost';
-	metricGroup.append(tokensBtn, outputBtn, costBtn);
+	const sessionsBtn = el('button', `toggle${currentMetric === 'sessions' ? ' active' : ''}`, '📊 Sessions');
+	sessionsBtn.id = 'metric-sessions';
+	metricGroup.append(tokensBtn, outputBtn, costBtn, sessionsBtn);
 	const splitGroup = el('div', 'control-group');
 	const mkSplit = (id: string, split: string, label: string) => {
 		const supported = isComboSupported(currentMetric, split);
@@ -281,12 +457,12 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 		mkSplit('split-editor', 'editor', 'By Editor'), mkSplit('split-provider', 'provider', '🏷️ By Provider'),
 		mkSplit('split-repository', 'repository', 'By Repository'), mkSplit('split-language', 'language', 'By Language'),
 		mkSplit('split-taskcategory', 'taskCategory', 'By Task'));
-	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output';
+	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output' && currentMetric !== 'sessions';
 	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicable ? '' : ' hidden'}`, '📈 Rolling Avg');
 	rollingBtn.id = 'view-rolling';
 	const rollingGroup = el('div', 'control-group');
 	rollingGroup.append(rollingBtn);
-	toggles.append(metricGroup, el('div', 'control-group-separator'), splitGroup, el('div', 'control-group-separator'), rollingGroup);
+	toggles.append(windowGroup, el('div', 'control-group-separator'), metricGroup, el('div', 'control-group-separator'), splitGroup, el('div', 'control-group-separator'), rollingGroup);
 	return toggles;
 }
 
@@ -373,17 +549,10 @@ function updateSummaryCards(data: InitialChartData): void {
 
 	updateCard('card-period-count', periodMeta.countLabel, periodData.periodCount.toLocaleString());
 
-	if (currentMetric === 'cost') {
-		updateCard('card-total-tokens', 'Total Cost (est.)', `$${periodData.totalCost.toFixed(2)}`);
-		updateCard('card-avg-tokens', periodMeta.avgCostLabel, `$${periodData.avgCostPerPeriod.toFixed(2)}`);
-	} else if (currentMetric === 'output') {
-		const totalLines = (periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0);
-		updateCard('card-total-tokens', 'Total Lines (AI)', totalLines.toLocaleString());
-		updateCard('card-avg-tokens', periodMeta.avgLocLabel, Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString());
-	} else {
-		updateCard('card-total-tokens', 'Total Tokens', formatCompact(periodData.totalTokens));
-		updateCard('card-avg-tokens', periodMeta.avgLabel, formatCompact(periodData.avgPerPeriod));
-	}
+	const total = getSummaryTotal(periodData);
+	const average = getSummaryAverage(periodData, periodMeta);
+	updateCard('card-total-tokens', total.label, total.value);
+	updateCard('card-avg-tokens', average.label, average.value);
 
 	updateCard('card-total-sessions', null, periodData.totalSessions.toLocaleString());
 
@@ -431,11 +600,16 @@ function wireInteractions(data: InitialChartData): void {
 		btn?.addEventListener('click', () => { void switchPeriod(period, data); });
 	});
 
+	// Time window selector
+	const timeWindowSelect = document.getElementById('time-window-select') as HTMLSelectElement | null;
+	timeWindowSelect?.addEventListener('change', () => { void switchTimeWindow(timeWindowSelect.value as ChartTimeWindow, data); });
+
 	// Chart metric toggle buttons
 	const metricButtons: Array<{ id: string; metric: typeof currentMetric }> = [
 		{ id: 'metric-tokens', metric: 'tokens' },
 		{ id: 'metric-output', metric: 'output' },
 		{ id: 'metric-cost',   metric: 'cost'   },
+		{ id: 'metric-sessions', metric: 'sessions' },
 	];
 	metricButtons.forEach(({ id, metric }) => {
 		const btn = document.getElementById(id);
@@ -530,8 +704,10 @@ async function switchMetric(metric: typeof currentMetric, data: InitialChartData
 	if (metric === 'output' && currentSplit === 'model') { currentSplit = 'total'; }
 	// When switching to tokens, disable language split
 	if (metric === 'tokens' && currentSplit === 'language') { currentSplit = 'total'; }
+	// Sessions only supports the total split
+	if (metric === 'sessions') { currentSplit = 'total'; }
 	currentMetric = metric;
-	const rollingApplicable = currentSplit === 'total' && metric !== 'output';
+	const rollingApplicable = currentSplit === 'total' && metric !== 'output' && metric !== 'sessions';
 	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
 	vscode.postMessage({ command: 'setViewPreference', metric: currentMetric, split: currentSplit });
 	saveWebviewState();
@@ -547,7 +723,17 @@ async function switchMetric(metric: typeof currentMetric, data: InitialChartData
 	await reinitChart(data);
 }
 
+async function switchTimeWindow(timeWindow: ChartTimeWindow, data: InitialChartData): Promise<void> {
+	if (currentTimeWindow === timeWindow) { return; }
+	currentTimeWindow = timeWindow;
+	vscode.postMessage({ command: 'setTimeWindowPreference', timeWindow });
+	saveWebviewState();
+	updateSummaryCards(data);
+	await reinitChart(data);
+}
+
 function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
+	if (metric === 'sessions') { return split === 'total'; }
 	return (metric === 'cost' && (split === 'total' || split === 'editor' || split === 'provider')) ||
 		(metric === 'output' && split !== 'model' && split !== 'provider' && split !== 'taskCategory') ||
 		(metric === 'tokens' && split !== 'language' && split !== 'provider');
@@ -607,7 +793,7 @@ function setActivePeriod(period: ChartPeriod): void {
 }
 
 function setActiveMetric(metric: typeof currentMetric): void {
-	(['metric-tokens', 'metric-output', 'metric-cost'] as const).forEach(id => {
+	(['metric-tokens', 'metric-output', 'metric-cost', 'metric-sessions'] as const).forEach(id => {
 		const btn = document.getElementById(id);
 		if (!btn) { return; }
 		btn.classList.toggle('active', id === `metric-${metric}`);
@@ -689,6 +875,20 @@ function buildBaseOptions(c: ChartColors) {
 			tooltip: { backgroundColor: c.bgColor, titleColor: c.textColor, bodyColor: c.textColor, borderColor: c.borderColor, borderWidth: 1, padding: 10, displayColors: true }
 		},
 		scales: { x: { grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } } } as const
+	};
+}
+
+function buildSessionsViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: [
+			{ label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(137, 180, 250, 0.7)', borderColor: 'rgba(137, 180, 250, 1)', borderWidth: 1, borderRadius: 4 }
+		] },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { display: false } },
+			scales: { x: { grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
+			}
+		}
 	};
 }
 
@@ -964,6 +1164,7 @@ function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptio
 }
 
 function resolveChartView(metric: typeof currentMetric, split: typeof currentSplit): string {
+	if (metric === 'sessions') { return 'sessions'; }
 	if (metric === 'tokens') {
 		if (split === 'model') { return 'model'; }
 		if (split === 'editor') { return 'editor'; }
@@ -984,6 +1185,7 @@ function createConfig(data: InitialChartData): ChartConfig {
 	const view = resolveChartView(currentMetric, currentSplit);
 	const c = getChartColors();
 	const baseOptions = buildBaseOptions(c);
+	if (view === 'sessions') { return buildSessionsViewConfig(period, baseOptions, c); }
 	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
 	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c, data.monthlyBudget ?? 0); }
 	if (view === 'cost-editor') { return buildCostEditorViewConfig(period, baseOptions, c); }
@@ -1008,6 +1210,7 @@ function restoreChartState(initialData: InitialChartData): void {
 	const saved = chartState.restore();
 	if (!vscode.getState()) {
 		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
+		if (initialData.initialTimeWindow) { currentTimeWindow = initialData.initialTimeWindow; }
 		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
 		if (initialData.initialSplit) { currentSplit = initialData.initialSplit; }
 		else if (initialData.initialView) {
@@ -1017,6 +1220,7 @@ function restoreChartState(initialData: InitialChartData): void {
 		return;
 	}
 	currentPeriod = saved.period;
+	currentTimeWindow = saved.timeWindow ?? 'last30';
 	currentDisplayMode = saved.displayMode;
 	if (saved.view && !saved.metric) {
 		const m = migrateViewKey(saved.view);
