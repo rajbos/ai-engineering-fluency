@@ -620,14 +620,58 @@ export function isMcpTool(toolName: string): boolean {
 /**
  * Normalize an MCP tool name so that equivalent tools from different servers
  * (local stdio vs remote) are counted under a single canonical key in "By Tool" views.
- * Maps mcp_github_github_<action> → mcp_io_github_git_<action>.
+ *
+ * Each rule maps a known equivalent prefix to a canonical prefix. Rules are
+ * evaluated in order; the first match wins.
+ */
+const MCP_NORMALIZATION_RULES: readonly [string, string][] = [
+	// GitHub MCP (remote / server-name variants → local stdio form).
+	['mcp_github_github_', 'mcp_io_github_git_'],
+	['github-mcp-server-', 'mcp_io_github_git_'],
+	['mcp_github_mcp_s2_', 'mcp_io_github_git_'],
+	['mcp_github_mcp_se_', 'mcp_io_github_git_'],
+	['mcp.github.github.', 'mcp.io.github.git.'],
+
+	// Context7 / UPS docs.
+	['mcp__plugin_context7_context7__', 'context7-'],
+	['mcp__context7__', 'context7-'],
+	['mcp_context7_', 'context7-'],
+	['mcp_io_github_ups_', 'context7-'],
+
+	// Playwright MCP.
+	['mcp__microsoft_playwright-mcp__', 'microsoft_playwright-mcp-'],
+	['mcp__playwright__', 'microsoft_playwright-mcp-'],
+	['mcp_playwright_', 'microsoft_playwright-mcp-'],
+	['mcp_microsoft_pla_', 'microsoft_playwright-mcp-'],
+
+	// Tavily MCP.
+	['mcp_tavily-mcp_', 'io_github_tavily-ai_tavily-mcp-'],
+	['mcp_tavily_', 'io_github_tavily-ai_tavily-mcp-'],
+
+	// Claude Browser MCP.
+	['mcp__claude-in-chrome__', 'mcp__claude_browser__'],
+	['mcp__Claude_Browser__', 'mcp__claude_browser__'],
+];
+
+/**
+ * Normalize an MCP tool name so that equivalent tools from different servers
+ * (local stdio vs remote) are counted under a single canonical key in "By Tool" views.
+ *
+ * Known equivalent prefix families that collapse to a single canonical form:
+ * - GitHub MCP: mcp_github_github_, mcp_io_github_git_, github-mcp-server-,
+ *   mcp_github_mcp_s2_, mcp_github_mcp_se_, mcp.github.github., mcp.io.github.git.
+ * - Context7: context7-, mcp_context7_, mcp__context7__, mcp__plugin_context7_context7__,
+ *   mcp_io_github_ups_
+ * - Playwright: mcp_microsoft_pla_, microsoft_playwright-mcp-, mcp__playwright__,
+ *   mcp_playwright_, mcp__microsoft_playwright-mcp__
+ * - Tavily: mcp_tavily-mcp_, io_github_tavily-ai_tavily-mcp-, mcp_tavily_
+ * - Claude Browser: mcp__claude-in-chrome__, mcp__claude_browser__, mcp__Claude_Browser__
  */
 export function normalizeMcpToolName(toolName: string): string {
-	if (toolName.startsWith('mcp_github_github_')) {
-		return 'mcp_io_github_git_' + toolName.substring('mcp_github_github_'.length);
-	}
-	if (toolName.startsWith('mcp.github.github.')) {
-		return 'mcp.io.github.git.' + toolName.substring('mcp.github.github.'.length);
+	for (const [prefix, canonicalPrefix] of MCP_NORMALIZATION_RULES) {
+		if (toolName.startsWith(prefix)) {
+			return canonicalPrefix + toolName.substring(prefix.length);
+		}
 	}
 	return toolName;
 }

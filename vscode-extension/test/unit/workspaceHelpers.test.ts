@@ -162,6 +162,72 @@ test('normalizeMcpToolName: mcp.github.github. prefix maps to mcp.io.github.git.
     );
 });
 
+test('normalizeMcpToolName: github-mcp-server- prefix maps to mcp_io_github_git_', () => {
+    assert.equal(
+        normalizeMcpToolName('github-mcp-server-list_issues'),
+        'mcp_io_github_git_list_issues'
+    );
+});
+
+test('normalizeMcpToolName: mcp_github_mcp_s2_ prefix maps to mcp_io_github_git_', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_github_mcp_s2_issue_read'),
+        'mcp_io_github_git_issue_read'
+    );
+});
+
+test('normalizeMcpToolName: context7 prefix variants normalize to context7-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_context7_query-docs'),
+        'context7-query-docs'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__context7__query-docs'),
+        'context7-query-docs'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_io_github_ups_resolve-library-id'),
+        'context7-resolve-library-id'
+    );
+});
+
+test('normalizeMcpToolName: playwright prefix variants normalize to microsoft_playwright-mcp-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_playwright_browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__microsoft_playwright-mcp__browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_microsoft_pla_browser_click'),
+        'microsoft_playwright-mcp-browser_click'
+    );
+});
+
+test('normalizeMcpToolName: tavily prefix variants normalize to io_github_tavily-ai_tavily-mcp-', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp_tavily_tavily_search'),
+        'io_github_tavily-ai_tavily-mcp-tavily_search'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp_tavily-mcp_tavily_search'),
+        'io_github_tavily-ai_tavily-mcp-tavily_search'
+    );
+});
+
+test('normalizeMcpToolName: claude browser prefix variants normalize to mcp__claude_browser__', () => {
+    assert.equal(
+        normalizeMcpToolName('mcp__claude-in-chrome__navigate'),
+        'mcp__claude_browser__navigate'
+    );
+    assert.equal(
+        normalizeMcpToolName('mcp__Claude_Browser__navigate'),
+        'mcp__claude_browser__navigate'
+    );
+});
+
 test('normalizeMcpToolName: other tool names pass through unchanged', () => {
     assert.equal(normalizeMcpToolName('mcp_io_github_git_list_issues'), 'mcp_io_github_git_list_issues');
     assert.equal(normalizeMcpToolName('editFiles'), 'editFiles');
