@@ -12,7 +12,7 @@ import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
-import { deriveModelEfficiencyRates } from '../../../../src/modelEfficiency';
+import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '../../../../src/modelEfficiency';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 
@@ -1367,6 +1367,7 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 			...(p.modelSwitching ?? {}),
 		},
 		thinkingEffortUsage: p.thinkingEffortUsage,
+		modelEfficiency: p.modelEfficiency,
 	};
 }
 
@@ -3593,6 +3594,7 @@ function buildActivityTabPanelHtml(
 			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
 			${multiModelHtml}
 			${modelCostHtml}
+			${buildModelEfficiencySectionHtml(stats)}
 			${thinkingEffortHtml}
 			${buildContextWindowSectionHtml(stats)}
 		</div>`;
@@ -3928,6 +3930,7 @@ let efficiencyPeriod: EfficiencyPeriodKey = 'last30Days';
 let efficiencySortColumn: EfficiencySortColumn = 'calls';
 let efficiencySortDirection: 'asc' | 'desc' = 'desc';
 let cachedModelEfficiency: Partial<Record<EfficiencyPeriodKey, ModelEfficiencyUsage | undefined>> = {};
+let efficiencyFilterLowUsage = true;
 
 type EfficiencyColumnDef = {
 	sortKey: EfficiencySortColumn;
@@ -3938,10 +3941,10 @@ type EfficiencyColumnDef = {
 	render: (r: EfficiencyRow) => string;
 };
 
-/** Format a small per-unit USD cost (4 decimals below one cent, currency format above). */
+/** Format a per-unit USD cost with 2 decimal places. */
 function formatUnitCost(value: number | null): string {
 	if (value === null) { return '—'; }
-	return value >= 0.01 ? formatCost(value) : `$${value.toFixed(4)}`;
+	return value >= 0.01 ? formatCost(value) : `$${value.toFixed(2)}`;
 }
 
 function formatRatePercent(value: number | null): string {
@@ -3956,7 +3959,7 @@ const EFFICIENCY_COLUMN_DEFS: EfficiencyColumnDef[] = [
 	{ sortKey: 'model', label: 'Model', title: 'Model identifier', align: 'left', sortValue: r => r.model, render: r => escapeHtml(getModelDisplayName(r.model)) },
 	{ sortKey: 'calls', label: 'Turns', title: 'User-request turns attributed to this model', align: 'right', sortValue: r => r.counters.calls, render: r => r.counters.calls > 0 ? formatNumber(r.counters.calls) : '—' },
 	{ sortKey: 'editTurns', label: 'Edit turns', title: 'Turns containing at least one file-edit tool call', align: 'right', sortValue: r => r.counters.editTurns, render: r => r.counters.calls > 0 ? formatNumber(r.counters.editTurns) : '—' },
-	{ sortKey: 'oneShotRate', label: 'One-shot', title: 'Share of edit turns completed without retries or self-corrections', align: 'right', sortValue: r => r.rates.oneShotRate, render: r => formatRatePercent(r.rates.oneShotRate) },
+	{ sortKey: 'oneShotRate', label: 'One-shot edit rate', title: 'Share of edit turns completed without retries or self-corrections', align: 'right', sortValue: r => r.rates.oneShotRate, render: r => formatRatePercent(r.rates.oneShotRate) },
 	{ sortKey: 'retryRate', label: 'Retries/edit', title: 'Average immediate same-file retries per edit turn', align: 'right', sortValue: r => r.rates.retryRate, render: r => formatPerEdit(r.rates.retryRate) },
 	{ sortKey: 'selfCorrectionRate', label: 'Self-corr/edit', title: 'Average self-corrections (re-edits after other tool calls) per edit turn', align: 'right', sortValue: r => r.rates.selfCorrectionRate, render: r => formatPerEdit(r.rates.selfCorrectionRate) },
 	{ sortKey: 'costPerCall', label: 'Cost/turn', title: 'Average estimated cost per turn (provider rates)', align: 'right', sortValue: r => r.rates.costPerCall, render: r => formatUnitCost(r.rates.costPerCall) },
@@ -3993,7 +3996,20 @@ function buildModelEfficiencyTableHtml(): string {
 	if (!usage || Object.keys(usage).length === 0) {
 		return '<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No per-model efficiency data recorded for this period yet.</div>';
 	}
-	const rows = buildEfficiencyRows(usage).map(r => {
+	let rows = buildEfficiencyRows(usage);
+	let hiddenNote = '';
+	if (efficiencyFilterLowUsage) {
+		const threshold = computeEfficiencyLowUsageThreshold(usage);
+		if (threshold !== null) {
+			const before = rows.length;
+			rows = rows.filter(r => r.counters.calls > threshold);
+			const hiddenCount = before - rows.length;
+			if (hiddenCount > 0) {
+				hiddenNote = `<div style="color:var(--text-secondary); font-size:11px; padding:4px 8px 2px;">${hiddenCount} model${hiddenCount === 1 ? '' : 's'} hidden (≤${threshold} turn${threshold === 1 ? '' : 's'})</div>`;
+			}
+		}
+	}
+	const tableRows = rows.map(r => {
 		const cells = EFFICIENCY_COLUMN_DEFS.map(col => {
 			const alignStyle = col.align === 'right' ? 'text-align:right;' : '';
 			return `<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${alignStyle}">${col.render(r)}</td>`;
@@ -4010,9 +4026,10 @@ function buildModelEfficiencyTableHtml(): string {
 			<thead>
 				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">${headerCells}</tr>
 			</thead>
-			<tbody>${rows}</tbody>
+			<tbody>${tableRows}</tbody>
 		</table>
-		</div>`;
+		</div>
+		${hiddenNote}`;
 }
 
 function buildEfficiencyPeriodButtonsHtml(): string {
@@ -4037,6 +4054,12 @@ function buildModelEfficiencySectionHtml(stats: UsageAnalysisStats): string {
 			<div class="section-title"><span>🎯</span><span>Model Efficiency</span></div>
 			<div class="section-subtitle">Compare models on quality and efficiency, not just cost — one-shot edit rate, retries, self-corrections, per-turn cost, and cache hit rate. Retry/self-correction detection needs structured tool-call data, so some editors show token metrics only.</div>
 			<div id="model-efficiency-controls" style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;">${buildEfficiencyPeriodButtonsHtml()}</div>
+			<div style="margin:2px 0 8px 0;">
+				<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;" title="Shows only models above the 25th-percentile turn count (Q1). Uncheck to see all models.">
+					<input type="checkbox" id="eff-filter-low-usage"${efficiencyFilterLowUsage ? ' checked' : ''} style="cursor:pointer;">
+					Hide low-usage models
+				</label>
+			</div>
 			<div id="model-efficiency-table">${buildModelEfficiencyTableHtml()}</div>
 		</div>`;
 }
@@ -4067,7 +4090,7 @@ function handleEfficiencySortClick(th: HTMLElement): void {
 	rerenderModelEfficiencyTable();
 }
 
-/** Wires period buttons and sortable headers for the Model Efficiency section (delegated, survives table re-renders). */
+/** Wires period buttons, sortable headers, and the low-usage filter for the Model Efficiency section (delegated, survives table re-renders). */
 function setupModelEfficiencySection(): void {
 	const section = document.getElementById('section-model-efficiency');
 	if (!section) { return; }
@@ -4077,6 +4100,13 @@ function setupModelEfficiencySection(): void {
 		if (periodBtn) { handleEfficiencyPeriodClick(periodBtn); return; }
 		const th = target.closest<HTMLElement>('th[data-eff-sort]');
 		if (th) { handleEfficiencySortClick(th); }
+	});
+	section.addEventListener('change', (e) => {
+		const target = e.target as HTMLInputElement;
+		if (target.id === 'eff-filter-low-usage') {
+			efficiencyFilterLowUsage = target.checked;
+			rerenderModelEfficiencyTable();
+		}
 	});
 }
 
@@ -4133,7 +4163,6 @@ function buildToolsTabPanelHtml(
 					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
 				</div>
 			</div>
-			${buildModelEfficiencySectionHtml(stats)}
 		</div>`;
 }
 

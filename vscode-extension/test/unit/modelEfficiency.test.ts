@@ -9,6 +9,7 @@ import {
     applyModelUsageToEfficiency,
     deriveModelEfficiencyRates,
     createEmptyModelEfficiencyCounters,
+    computeEfficiencyLowUsageThreshold,
     type EfficiencyTurn,
 } from '../../../src/modelEfficiency';
 import type { ModelEfficiencyUsage, ModelPricing } from '../../../src/types';
@@ -247,4 +248,46 @@ test('deriveModelEfficiencyRates: zero denominators produce nulls', () => {
     assert.equal(rates.costPerEdit, null);
     assert.equal(rates.outputTokensPerCall, null);
     assert.equal(rates.cacheHitRate, null);
+});
+
+test('deriveModelEfficiencyRates: cacheHitRate is capped at 1.0 when cachedReadTokens > inputTokens', () => {
+    // Some providers (e.g. DeepSeek) report cachedReadTokens > inputTokens; cap at 100%.
+    const rates = deriveModelEfficiencyRates({
+        calls: 5, editTurns: 0, oneShotEditTurns: 0, retries: 0, selfCorrections: 0,
+        editToolCalls: 0, inputTokens: 100, outputTokens: 200, cachedReadTokens: 3000, cost: 0,
+    });
+    assert.equal(rates.cacheHitRate, 1);
+});
+
+// ---------------------------------------------------------------------------
+// computeEfficiencyLowUsageThreshold
+// ---------------------------------------------------------------------------
+
+test('computeEfficiencyLowUsageThreshold: returns null for fewer than 4 models', () => {
+    const usage: ModelEfficiencyUsage = {
+        a: { ...createEmptyModelEfficiencyCounters(), calls: 100 },
+        b: { ...createEmptyModelEfficiencyCounters(), calls: 50 },
+        c: { ...createEmptyModelEfficiencyCounters(), calls: 10 },
+    };
+    assert.equal(computeEfficiencyLowUsageThreshold(usage), null);
+});
+
+test('computeEfficiencyLowUsageThreshold: returns Q1 (25th-percentile) turn count', () => {
+    // 4 models sorted by calls: 1, 5, 20, 100 → index floor(3 * 0.25) = 0 → value 1
+    const usage: ModelEfficiencyUsage = {
+        a: { ...createEmptyModelEfficiencyCounters(), calls: 100 },
+        b: { ...createEmptyModelEfficiencyCounters(), calls: 20 },
+        c: { ...createEmptyModelEfficiencyCounters(), calls: 5 },
+        d: { ...createEmptyModelEfficiencyCounters(), calls: 1 },
+    };
+    assert.equal(computeEfficiencyLowUsageThreshold(usage), 1);
+});
+
+test('computeEfficiencyLowUsageThreshold: correctly identifies Q1 across larger dataset', () => {
+    // 8 models sorted: 1, 2, 3, 5, 10, 20, 50, 100 → index floor(7 * 0.25) = 1 → value 2
+    const usage: ModelEfficiencyUsage = {};
+    [100, 50, 20, 10, 5, 3, 2, 1].forEach((calls, i) => {
+        usage[`model-${i}`] = { ...createEmptyModelEfficiencyCounters(), calls };
+    });
+    assert.equal(computeEfficiencyLowUsageThreshold(usage), 2);
 });
