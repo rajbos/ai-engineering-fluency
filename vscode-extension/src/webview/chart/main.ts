@@ -49,7 +49,7 @@ type ChartPeriodData = {
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
-type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth';
+type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth' | 'allTime';
 
 type InitialChartData = {
 	labels: string[];
@@ -365,9 +365,9 @@ function getActivePeriodData(data: InitialChartData): ChartPeriodData {
 }
 
 const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; aggregationLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string }> = {
-	day:   { title: 'Token Usage – Last 30 Days',  footer: 'Day-by-day token usage for the last 30 days',   countLabel: 'Total Days',   avgLabel: 'Avg Tokens / Day',   aggregationLabel: 'Aggregated by Day',   costTitle: 'Est. Cost – Last 30 Days',  avgCostLabel: 'Avg Cost / Day',   outputTitle: 'Lines of Code – Last 30 Days',  avgLocLabel: 'Avg Lines / Day'   },
-	week:  { title: 'Token Usage – Last 6 Weeks',  footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks',  avgLabel: 'Avg Tokens / Week',  aggregationLabel: 'Aggregated by Week',  costTitle: 'Est. Cost – Last 6 Weeks',  avgCostLabel: 'Avg Cost / Week',  outputTitle: 'Lines of Code – Last 6 Weeks',  avgLocLabel: 'Avg Lines / Week'  },
-	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', aggregationLabel: 'Aggregated by Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month' },
+	day:   { title: 'Token Usage',  footer: 'Day-by-day token usage',   countLabel: 'Total Days',   avgLabel: 'Avg Tokens / Day',   aggregationLabel: 'Aggregated by Day',   costTitle: 'Est. Cost',  avgCostLabel: 'Avg Cost / Day',   outputTitle: 'Lines of Code',  avgLocLabel: 'Avg Lines / Day'   },
+	week:  { title: 'Token Usage',  footer: 'Week-by-week token usage', countLabel: 'Total Weeks',  avgLabel: 'Avg Tokens / Week',  aggregationLabel: 'Aggregated by Week',  costTitle: 'Est. Cost',  avgCostLabel: 'Avg Cost / Week',  outputTitle: 'Lines of Code',  avgLocLabel: 'Avg Lines / Week'  },
+	month: { title: 'Token Usage', footer: 'Monthly token usage',       countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', aggregationLabel: 'Aggregated by Month', costTitle: 'Est. Cost', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code', avgLocLabel: 'Avg Lines / Month' },
 };
 
 function isComboSupported(metric: string, split: string): boolean {

@@ -159,15 +159,20 @@ function fmtWeekLabel(monday: Date): string {
 
 function buildDailyBuckets(fullDailyStats: DailyTokenStats[], now: Date): BucketEntry[] {
 	const thirtyDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-	const thirtyDaysAgoStr = fmtKey(thirtyDaysAgo);
+	let startDate = new Date(thirtyDaysAgo);
+	for (const day of fullDailyStats) {
+		const d = new Date(day.date + 'T00:00:00');
+		if (d < startDate) { startDate = d; }
+	}
+	const startStr = fmtKey(startDate);
 	const todayStr = fmtKey(now);
 	const bucketMap = new Map<string, BucketEntry>();
-	for (let cursor = new Date(thirtyDaysAgo); cursor <= now; cursor.setDate(cursor.getDate() + 1)) {
+	for (let cursor = new Date(startDate); cursor <= now; cursor.setDate(cursor.getDate() + 1)) {
 		const key = fmtKey(new Date(cursor));
 		bucketMap.set(key, { key, label: key, stats: emptyEntry(key) });
 	}
 	for (const day of fullDailyStats) {
-		if (day.date >= thirtyDaysAgoStr && day.date <= todayStr) {
+		if (day.date >= startStr && day.date <= todayStr) {
 			const bucket = bucketMap.get(day.date);
 			if (bucket) { mergeInto(bucket.stats, day); }
 		}
@@ -177,9 +182,18 @@ function buildDailyBuckets(fullDailyStats: DailyTokenStats[], now: Date): Bucket
 
 function buildWeeklyBuckets(fullDailyStats: DailyTokenStats[], now: Date): BucketEntry[] {
 	const thisMonday = getMondayOfWeek(now);
-	const bucketMap = new Map<string, BucketEntry>();
+	let earliestMonday = new Date(thisMonday);
 	for (let w = 5; w >= 0; w--) {
 		const monday = new Date(thisMonday); monday.setDate(thisMonday.getDate() - w * 7);
+		if (monday < earliestMonday) { earliestMonday = monday; }
+	}
+	for (const day of fullDailyStats) {
+		const monday = getMondayOfWeek(new Date(day.date + "T00:00:00"));
+		if (monday < earliestMonday) { earliestMonday = monday; }
+	}
+	const bucketMap = new Map<string, BucketEntry>();
+	for (let cursor = new Date(earliestMonday); cursor <= thisMonday; cursor.setDate(cursor.getDate() + 7)) {
+		const monday = new Date(cursor);
 		const key = fmtKey(monday);
 		bucketMap.set(key, { key, label: fmtWeekLabel(monday), stats: emptyEntry(key) });
 	}
@@ -193,8 +207,19 @@ function buildWeeklyBuckets(fullDailyStats: DailyTokenStats[], now: Date): Bucke
 
 function buildMonthlyBuckets(fullDailyStats: DailyTokenStats[], now: Date): BucketEntry[] {
 	const bucketMap = new Map<string, BucketEntry>();
-	for (let m = 11; m >= 0; m--) {
-		const monthDate = new Date(now.getFullYear(), now.getMonth() - m, 1);
+	let earliestYear = now.getFullYear();
+	let earliestMonth = now.getMonth() - 11;
+	while (earliestMonth < 0) { earliestYear--; earliestMonth += 12; }
+	for (const day of fullDailyStats) {
+		const [year, month] = day.date.split('-').map(Number);
+		if (year < earliestYear || (year === earliestYear && month - 1 < earliestMonth)) {
+			earliestYear = year;
+			earliestMonth = month - 1;
+		}
+	}
+	const monthsCount = (now.getFullYear() - earliestYear) * 12 + (now.getMonth() - earliestMonth);
+	for (let i = 0; i <= monthsCount; i++) {
+		const monthDate = new Date(earliestYear, earliestMonth + i, 1);
 		const key = `${monthDate.getFullYear()}-${String(monthDate.getMonth() + 1).padStart(2, "0")}`;
 		const label = monthDate.toLocaleDateString("en-US", { month: "short", year: "numeric" });
 		bucketMap.set(key, { key, label, stats: emptyEntry(key) });
@@ -392,7 +417,9 @@ function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilde
 
 /**
  * Aggregate daily token stats into the chart payload used by the chart webview.
- * Produces daily (last 30 days), weekly (last 6 weeks), and monthly (last 12 months) period data.
+ * Produces daily, weekly, and monthly period data covering at least the recent default
+ * window (30 days / 6 weeks / 12 months) and extending back to the earliest available
+ * session so the "All time" time-window option can display the full history.
  */
 export function buildChartData(fullDailyStats: DailyTokenStats[], deps: ChartDataBuilderDeps): ChartDataPayload {
 	const now = deps.now ?? new Date();
