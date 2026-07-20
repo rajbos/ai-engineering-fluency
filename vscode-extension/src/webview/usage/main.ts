@@ -1,5 +1,6 @@
 // Usage Analysis webview
 import { el } from '../shared/domUtils';
+import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
 import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
@@ -1008,7 +1009,7 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 
 // --- Recent Sessions table with sortable, toggleable columns ---
 type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity';
-type SessionsLookback = 'today' | '7' | '30';
+type SessionsLookback = Period;
 
 /** Optional (toggleable) session table columns. Title is always shown and is not part of this set. */
 type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity';
@@ -1063,7 +1064,7 @@ let use24HourTime = true;
 // longer windows are lazily requested from the extension host and cached here.
 let sessionsLookback: SessionsLookback = 'today';
 let latestTodaySessions: TodaySessionSummary[] = [];
-const recentSessionsCache: { [days: string]: TodaySessionSummary[] } = {};
+const recentSessionsCache: { [period: string]: TodaySessionSummary[] } = {};
 /** Which optional columns are currently visible. Title (and the row number) are always shown. */
 let enabledSessionColumns: Set<SessionColumnId> = new Set(ALL_SESSION_COLUMN_IDS);
 
@@ -1195,7 +1196,7 @@ function setupSessionsTableSort(): void {
 		const container = document.getElementById('sessions-table-container');
 		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
 	});
-	setupSessionsLookbackSelector();
+	renderSessionsLookbackSelector();
 	setupSessionColumnsMenu();
 }
 
@@ -1230,15 +1231,22 @@ function setupSessionColumnsMenu(): void {
 	}
 }
 
-function setupSessionsLookbackSelector(): void {
-	const select = document.getElementById('sessions-lookback') as HTMLSelectElement | null;
-	if (!select) { return; }
-	select.value = sessionsLookback;
-	select.addEventListener('change', () => {
-		const value = select.value;
-		sessionsLookback = (value === '7' || value === '30') ? value : 'today';
-		refreshSessionsPanelBody();
+function renderSessionsLookbackSelector(): void {
+	const wrapper = document.getElementById('sessions-lookback-wrapper');
+	if (!wrapper) { return; }
+	wrapper.replaceChildren();
+	const { wrapper: selectorWrapper } = createPeriodSelector({
+		id: 'sessions-lookback',
+		selected: sessionsLookback,
+		disabled: ['allTime'],
+		disabledTitle: 'All-time sessions are not loaded yet',
+		label: '',
+		onChange: (value) => {
+			sessionsLookback = value;
+			refreshSessionsPanelBody();
+		},
 	});
+	wrapper.append(selectorWrapper);
 	// A full re-render may have restored a non-today lookback whose data was
 	// rendered from cache already; if the cache is empty, request it now.
 	if (sessionsLookback !== 'today' && !recentSessionsCache[sessionsLookback]) {
@@ -1259,18 +1267,18 @@ function refreshSessionsPanelBody(): void {
 		body.innerHTML = renderTodaySessionsTable(cached);
 		return;
 	}
-	body.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
-	vscode.postMessage({ command: 'loadRecentSessions', days: Number(sessionsLookback) });
+	body.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>`;
+	vscode.postMessage({ command: 'loadRecentSessions', period: sessionsLookback });
 }
 
 function handleRecentSessionsLoaded(message: any): void {
-	const days = Number(message.days);
-	if (days !== 7 && days !== 30) { return; }
+	const period = message.period as Period;
+	if (!period) { return; }
 	const sessions = Array.isArray(message.sessions)
 		? message.sessions.filter((s: any) => s && typeof s === 'object' && typeof s.interactions === 'number') as TodaySessionSummary[]
 		: [];
-	recentSessionsCache[String(days)] = sessions;
-	if (sessionsLookback === String(days)) {
+	recentSessionsCache[period] = sessions;
+	if (sessionsLookback === period) {
 		refreshSessionsPanelBody();
 	}
 }
@@ -3427,17 +3435,13 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	const cachedForLookback = sessionsLookback === 'today' ? latestTodaySessions : recentSessionsCache[sessionsLookback];
 	const bodyHtml = cachedForLookback
 		? renderTodaySessionsTable(cachedForLookback)
-		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${sessionsLookback} days…</div>`;
+		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>`;
 	return `
 		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
 			<div class="section">
 				<div class="section-title" style="display:flex; align-items:center; gap:8px;">
 					<span>📋</span><span>Recent Sessions</span>
-					<select id="sessions-lookback" style="margin-left:auto; font-size:12px; padding:2px 6px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px;">
-						<option value="today"${sessionsLookback === 'today' ? ' selected' : ''}>Today</option>
-						<option value="7"${sessionsLookback === '7' ? ' selected' : ''}>Last 7 days</option>
-						<option value="30"${sessionsLookback === '30' ? ' selected' : ''}>Last 30 days</option>
-					</select>
+					<span id="sessions-lookback-wrapper" style="margin-left:auto;"></span>
 					${buildSessionColumnsMenuHtml()}
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
@@ -3915,17 +3919,17 @@ function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 
 // --- Model Efficiency section (issue #1649) ---
 
-type EfficiencyPeriodKey = 'today' | 'last30Days' | 'month' | 'lastMonth';
+type EfficiencyPeriodKey = 'today' | 'last30Days' | 'month';
 type EfficiencyRow = { model: string; counters: ModelEfficiencyCounters; rates: ReturnType<typeof deriveModelEfficiencyRates> };
 type EfficiencySortColumn = 'model' | 'calls' | 'editTurns' | 'oneShotRate' | 'retryRate' | 'selfCorrectionRate' | 'costPerCall' | 'costPerEdit' | 'outputTokensPerCall' | 'cacheHitRate';
 
-const EFFICIENCY_PERIOD_LABELS: { key: EfficiencyPeriodKey; label: string }[] = [
-	{ key: 'today', label: '📅 Today' },
-	{ key: 'last30Days', label: '📆 Last 30 Days' },
-	{ key: 'month', label: '📅 This Month' },
-	{ key: 'lastMonth', label: '📅 Previous Month' },
-];
+const EFFICIENCY_PERIOD_TO_DATA_KEY: Partial<Record<Period, EfficiencyPeriodKey>> = {
+	today: 'today',
+	last30: 'last30Days',
+	currentMonth: 'month',
+};
 
+let efficiencySelectedPeriod: Period = 'last30';
 let efficiencyPeriod: EfficiencyPeriodKey = 'last30Days';
 let efficiencySortColumn: EfficiencySortColumn = 'calls';
 let efficiencySortDirection: 'asc' | 'desc' = 'desc';
@@ -4032,28 +4036,17 @@ function buildModelEfficiencyTableHtml(): string {
 		${hiddenNote}`;
 }
 
-function buildEfficiencyPeriodButtonsHtml(): string {
-	return EFFICIENCY_PERIOD_LABELS.map(p => {
-		const active = p.key === efficiencyPeriod;
-		const style = active
-			? 'background:var(--vscode-button-background, #0e639c); color:var(--vscode-button-foreground, #fff); border:1px solid transparent;'
-			: 'background:var(--bg-secondary); color:var(--text-primary); border:1px solid var(--border-subtle);';
-		return `<button type="button" class="eff-period-btn" data-eff-period="${p.key}" style="font-size:12px; padding:2px 10px; border-radius:4px; cursor:pointer; ${style}">${p.label}</button>`;
-	}).join('');
-}
-
 function buildModelEfficiencySectionHtml(stats: UsageAnalysisStats): string {
 	cachedModelEfficiency = {
 		today: stats.today.modelEfficiency,
 		last30Days: stats.last30Days.modelEfficiency,
 		month: stats.month.modelEfficiency,
-		lastMonth: stats.lastMonth.modelEfficiency,
 	};
 	return `
 		<div class="section" id="section-model-efficiency">
 			<div class="section-title"><span>🎯</span><span>Model Efficiency</span></div>
 			<div class="section-subtitle">Compare models on quality and efficiency, not just cost — one-shot edit rate, retries, self-corrections, per-turn cost, and cache hit rate. Retry/self-correction detection needs structured tool-call data, so some editors show token metrics only.</div>
-			<div id="model-efficiency-controls" style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;">${buildEfficiencyPeriodButtonsHtml()}</div>
+			<div id="model-efficiency-controls" style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;"><span id="model-efficiency-period-selector"></span></div>
 			<div style="margin:2px 0 8px 0;">
 				<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;" title="Shows only models above the 25th-percentile turn count (Q1). Uncheck to see all models.">
 					<input type="checkbox" id="eff-filter-low-usage"${efficiencyFilterLowUsage ? ' checked' : ''} style="cursor:pointer;">
@@ -4064,18 +4057,29 @@ function buildModelEfficiencySectionHtml(stats: UsageAnalysisStats): string {
 		</div>`;
 }
 
+function renderModelEfficiencyPeriodSelector(): void {
+	const wrapper = document.getElementById('model-efficiency-period-selector');
+	if (!wrapper) { return; }
+	wrapper.replaceChildren();
+	const { wrapper: selectorWrapper } = createPeriodSelector({
+		selected: efficiencySelectedPeriod,
+		disabled: ['last7', 'allTime'],
+		disabledTitle: 'Not available for model efficiency',
+		label: '',
+		onChange: (value) => {
+			const dataKey = EFFICIENCY_PERIOD_TO_DATA_KEY[value];
+			if (!dataKey) { return; }
+			efficiencySelectedPeriod = value;
+			efficiencyPeriod = dataKey;
+			rerenderModelEfficiencyTable();
+		},
+	});
+	wrapper.append(selectorWrapper);
+}
+
 function rerenderModelEfficiencyTable(): void {
 	const table = document.getElementById('model-efficiency-table');
 	if (table) { table.innerHTML = buildModelEfficiencyTableHtml(); }
-}
-
-function handleEfficiencyPeriodClick(periodBtn: HTMLElement): void {
-	const key = periodBtn.getAttribute('data-eff-period') as EfficiencyPeriodKey | null;
-	if (!key) { return; }
-	efficiencyPeriod = key;
-	const controls = document.getElementById('model-efficiency-controls');
-	if (controls) { controls.innerHTML = buildEfficiencyPeriodButtonsHtml(); }
-	rerenderModelEfficiencyTable();
 }
 
 function handleEfficiencySortClick(th: HTMLElement): void {
@@ -4090,14 +4094,12 @@ function handleEfficiencySortClick(th: HTMLElement): void {
 	rerenderModelEfficiencyTable();
 }
 
-/** Wires period buttons, sortable headers, and the low-usage filter for the Model Efficiency section (delegated, survives table re-renders). */
+/** Wires sortable headers and the low-usage filter for the Model Efficiency section (delegated, survives table re-renders). */
 function setupModelEfficiencySection(): void {
 	const section = document.getElementById('section-model-efficiency');
 	if (!section) { return; }
 	section.addEventListener('click', (e) => {
 		const target = e.target as HTMLElement;
-		const periodBtn = target.closest<HTMLElement>('button.eff-period-btn');
-		if (periodBtn) { handleEfficiencyPeriodClick(periodBtn); return; }
 		const th = target.closest<HTMLElement>('th[data-eff-sort]');
 		if (th) { handleEfficiencySortClick(th); }
 	});
@@ -4236,6 +4238,8 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	renderRepositoryHygienePanels();
 	setupTabs();
 	setupModelEfficiencySection();
+	renderModelEfficiencyPeriodSelector();
+	renderSessionsLookbackSelector();
 	setupWorktreesHandlers();
 	wireCopyButtons();
 	// Initialize currentInsights from the stats and wire card buttons
@@ -4375,8 +4379,9 @@ function handleUpdateStats(message: any): void {
 	if (sanitized) {
 		_ulLoadingActive = false;
 		// New stats invalidate any lazily-loaded lookback data; it is re-requested on demand.
-		delete recentSessionsCache['7'];
-		delete recentSessionsCache['30'];
+		for (const key of Object.keys(recentSessionsCache)) {
+			delete recentSessionsCache[key];
+		}
 		renderLayout(sanitized);
 		setupSessionsTableSort();
 		renderRepositoryHygienePanels();

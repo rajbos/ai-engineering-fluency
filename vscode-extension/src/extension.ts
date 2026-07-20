@@ -3835,15 +3835,29 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Build session summaries for a lookback window (last 7/30 days) and send them
-	 * to the analysis panel. Used by the "Recent Sessions" tab lookback selector;
-	 * the default "Today" view keeps using the summaries bundled with updateStats.
+	 * Build session summaries for a lookback window and send them to the analysis panel.
+	 * Used by the "Recent Sessions" tab lookback selector; the default "Today" view
+	 * keeps using the summaries bundled with updateStats.
 	 */
-	private async loadRecentSessions(days: number): Promise<void> {
+	private async loadRecentSessions(period: ChartTimeWindow): Promise<void> {
 		if (!this.analysisPanel) { return; }
-		const lookbackDays = days === 30 ? 30 : 7;
 		const now = new Date();
-		const windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - lookbackDays);
+		let windowStart: Date;
+		switch (period) {
+			case 'last7':
+				windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
+				break;
+			case 'last30':
+				windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
+				break;
+			case 'currentMonth':
+				windowStart = new Date(now.getFullYear(), now.getMonth(), 1);
+				break;
+			case 'today':
+			case 'allTime':
+			default:
+				return;
+		}
 		const windowStartKey = toLocalDayKey(windowStart);
 		const sessions: TodaySessionSummary[] = [];
 		try {
@@ -3858,7 +3872,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.error('Error loading recent sessions:', error);
 		}
 		sessions.sort((a, b) => b.interactions - a.interactions);
-		this.analysisPanel.webview.postMessage({ command: 'recentSessionsLoaded', days: lookbackDays, sessions });
+		this.analysisPanel.webview.postMessage({ command: 'recentSessionsLoaded', period, sessions });
 	}
 
 	private computeLastActivityKey(sessionData: SessionFileCache, mtime: number): string {
@@ -6291,7 +6305,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
 			loadAgentSessions: () => this.dispatch('loadAgentSessions', () => this.loadAgentSessions()),
-			loadRecentSessions: (message) => this.dispatch('loadRecentSessions', () => this.loadRecentSessions(Number(message.days))),
+			loadRecentSessions: (message) => this.dispatch('loadRecentSessions', () => this.loadRecentSessions(message.period as ChartTimeWindow)),
 			openSessionFile: (message) => this._handleOpenSessionFile(message),
 			insightAction: (message) => this.dispatch(`insightAction:${message.id ?? ''}`, () => this.handleInsightAction(message)),
 			traceUsageCuration: (message) => this._logTraceCuration(message),
