@@ -3379,9 +3379,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		entry.repositoryUsage[repository].tokens += tokens;
 		entry.repositoryUsage[repository].sessions += 1;
 		addModelUsage(entry.modelUsage, modelUsage);
+		for (const model of Object.keys(modelUsage)) {
+			if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
+			entry.modelUsage[model].sessions += 1;
+		}
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+		for (const model of Object.keys(modelUsage)) {
+			if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
+			entry.editorModelUsage[editorType][model].sessions += 1;
+		}
 		if (taskCategory) {
 			if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
 			if (!entry.taskCategoryUsage[taskCategory]) { entry.taskCategoryUsage[taskCategory] = { tokens: 0, sessions: 0 }; }
