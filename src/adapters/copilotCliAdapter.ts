@@ -24,7 +24,7 @@ import type {
 	CandidatePath,
 	UsageAnalysisAdapterContext,
 } from '../ecosystemAdapter';
-import { CopilotCliStoreAccess, isMicrosoftScoutCwd } from '../copilotCliStore';
+import { CopilotCliStoreAccess, isMicrosoftScoutCwd, isCopilotAppClientName } from '../copilotCliStore';
 import { getCopilotCliExactUsage } from '../copilotCliOtel';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
@@ -44,22 +44,30 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	private readonly store = new CopilotCliStoreAccess();
 	/** UUIDs of sessions discovered to have been created by Microsoft Scout. */
 	private readonly _scoutSessionIds = new Set<string>();
+	/**
+	 * UUIDs of sessions whose workspace.yaml records `client_name: github/autopilot`,
+	 * meaning they were started via the Copilot desktop app (which wraps the CLI)
+	 * rather than the plain terminal CLI (`client_name: github/cli`, or absent on
+	 * older sessions predating this field).
+	 */
+	private readonly _appSessionIds = new Set<string>();
 
 	/**
 	 * Returns the per-session display name.
 	 * Sessions whose cwd is under Documents\Microsoft Scout are shown as
 	 * "MS Scout (Copilot CLI)" to distinguish them from regular CLI sessions.
+	 * Sessions started via the Copilot desktop app are shown as "Copilot CLI (App)".
 	 */
 	getDisplayName(sessionFile: string): string {
 		// DB virtual path: session-store.db#<uuid>
 		const sessionId = this.store.getSessionId(sessionFile);
-		if (sessionId && this._scoutSessionIds.has(sessionId)) {
-			return 'MS Scout (Copilot CLI)';
-		}
 		// events.jsonl path: ~/.copilot/session-state/<uuid>/events.jsonl
 		const eventsUuid = path.basename(path.dirname(sessionFile));
-		if (eventsUuid && this._scoutSessionIds.has(eventsUuid)) {
+		if ((sessionId && this._scoutSessionIds.has(sessionId)) || (eventsUuid && this._scoutSessionIds.has(eventsUuid))) {
 			return 'MS Scout (Copilot CLI)';
+		}
+		if ((sessionId && this._appSessionIds.has(sessionId)) || (eventsUuid && this._appSessionIds.has(eventsUuid))) {
+			return 'Copilot CLI (App)';
 		}
 		return 'Copilot CLI';
 	}
@@ -67,13 +75,16 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	/**
 	 * Called for files that were *discovered* by this adapter but not *handled*
 	 * (i.e. events.jsonl files, which are parsed by the JSONL fallback parser).
-	 * Returns 'MS Scout (Copilot CLI)' when the session UUID was marked as Scout
-	 * during discover(), undefined otherwise.
+	 * Returns 'MS Scout (Copilot CLI)' or 'Copilot CLI (App)' when the session UUID
+	 * was marked as such during discover(), undefined otherwise.
 	 */
 	getDisplayNameForDiscoveredPath(sessionFile: string): string | undefined {
 		const eventsUuid = path.basename(path.dirname(sessionFile));
 		if (eventsUuid && this._scoutSessionIds.has(eventsUuid)) {
 			return 'MS Scout (Copilot CLI)';
+		}
+		if (eventsUuid && this._appSessionIds.has(eventsUuid)) {
+			return 'Copilot CLI (App)';
 		}
 		return undefined;
 	}
@@ -194,16 +205,21 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 
 	/**
 	 * Reads workspace.yaml from a UUID session directory and adds the UUID to
-	 * _scoutSessionIds if the cwd indicates a Microsoft Scout session.
+	 * _scoutSessionIds if the cwd indicates a Microsoft Scout session, and/or to
+	 * _appSessionIds if client_name indicates the Copilot desktop app.
 	 * Silently ignores missing or unreadable files.
 	 */
 	private async _tryMarkScoutFromWorkspaceYaml(uuidDir: string, uuid: string): Promise<void> {
 		const yamlPath = path.join(uuidDir, 'workspace.yaml');
 		try {
 			const content = await fs.promises.readFile(yamlPath, 'utf8');
-			const match = content.match(/^cwd:\s*(.+)$/m);
-			if (match && isMicrosoftScoutCwd(match[1].trim())) {
+			const cwdMatch = content.match(/^cwd:\s*(.+)$/m);
+			if (cwdMatch && isMicrosoftScoutCwd(cwdMatch[1].trim())) {
 				this._scoutSessionIds.add(uuid);
+			}
+			const clientMatch = content.match(/^client_name:\s*(.+)$/m);
+			if (clientMatch && isCopilotAppClientName(clientMatch[1].trim())) {
+				this._appSessionIds.add(uuid);
 			}
 		} catch { /* workspace.yaml may not exist */ }
 	}
@@ -286,10 +302,15 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			const dbOnlySessions = await this.store.discoverNewSessionsWithCwd(knownUuids);
 			if (dbOnlySessions.length > 0) {
 				log(`📄 Found ${dbOnlySessions.length} chat-only session(s) in Copilot CLI session-store.db`);
-				for (const { id, cwd } of dbOnlySessions) {
+				await Promise.all(dbOnlySessions.map(async ({ id, cwd }) => {
 					if (isMicrosoftScoutCwd(cwd)) {
 						this._scoutSessionIds.add(id);
 					}
+					// Chat-only sessions still get a session-state/<uuid>/ dir with workspace.yaml
+					// (just no events.jsonl), so client_name (app vs. terminal CLI) is still detectable.
+					await this._tryMarkScoutFromWorkspaceYaml(path.join(root, id), id);
+				}));
+				for (const { id } of dbOnlySessions) {
 					sessionFiles.push(this.store.virtualPath(id));
 				}
 			}
