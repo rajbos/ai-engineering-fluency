@@ -157,6 +157,12 @@ When adding a new tool to `toolNames.json`, also determine if it belongs in `aut
 - Insert new non-MCP entries alphabetically or near logically related tools
 - Never remove existing entries
 - **Case-insensitive deduplication**: Before adding a new tool ID, check whether a lowercase (or differently-cased) variant already exists. If `grep` is already mapped, do **not** add `Grep`. If `tool_search` is already mapped, do **not** add `ToolSearch`. The lookup code handles exact-match only, so capitalized variants do map differently — but if both would resolve to the *exact same friendly name*, skip the duplicate. Only add a capitalized variant when it has a meaningfully different name or the lowercase form does not exist at all.
+- **Canonical deduplication**: Tool IDs can arrive in many equivalent forms (different MCP server registrations or separator styles). Before adding a new ID, run `.github/scripts/toolnames_utils.py` and check whether the new ID normalizes to the same canonical key as an existing entry. If it does, **do not add it** — the existing entry already covers it. Common equivalent families include:
+  - GitHub MCP: `mcp_github_github_*` ↔ `mcp_io_github_git_*` ↔ `github-mcp-server-*` ↔ `mcp_github_mcp_s2_*` ↔ `mcp_github_mcp_se_*`
+  - Context7: `context7-*` ↔ `mcp_context7_*` ↔ `mcp__context7__*` ↔ `mcp_io_github_ups_*`
+  - Playwright: `mcp_microsoft_pla_*` ↔ `mcp_playwright_*` ↔ `mcp__playwright__*` ↔ `microsoft_playwright-mcp-*`
+  - Tavily: `mcp_tavily_*` ↔ `mcp_tavily-mcp_*` ↔ `io_github_tavily-ai_tavily-mcp-*`
+  - Claude Browser: `mcp__claude-in-chrome__*` ↔ `mcp__claude_browser__*` ↔ `mcp__Claude_Browser__*`
 
 ### Validation
 

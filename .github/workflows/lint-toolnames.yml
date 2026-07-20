@@ -1,0 +1,71 @@
+name: Lint Tool Names
+
+# Prevent duplicate-like entries from being added to src/toolNames.json.
+# The script flags:
+#   - strict duplicates: multiple keys mapping to the same friendly name
+#   - canonical equivalents: same tool under different MCP registrations
+#
+# Strict duplicates fail the build; canonical equivalents are reported as
+# warnings for human review.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/toolNames.json"
+      - ".github/scripts/toolnames_utils.py"
+      - ".github/workflows/lint-toolnames.yml"
+  push:
+    branches: [main]
+    paths:
+      - "src/toolNames.json"
+      - ".github/scripts/toolnames_utils.py"
+      - ".github/workflows/lint-toolnames.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: lint-toolnames-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    if: github.event.pull_request.draft != true && github.actor != 'dependabot[bot]'
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Check for duplicate-like entries
+        id: check
+        run: |
+          # Only fail on duplicates newly introduced by this change; the file
+          # already contains historical duplicates that need a separate cleanup.
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            BASE_SHA="${{ github.event.pull_request.base.sha }}"
+          elif [ "${{ github.event_name }}" = "push" ]; then
+            BASE_SHA="${{ github.event.before }}"
+          else
+            BASE_SHA=""
+          fi
+
+          if [ -n "$BASE_SHA" ]; then
+            git show "${BASE_SHA}:src/toolNames.json" > /tmp/toolNames-base.json
+            python3 .github/scripts/toolnames_utils.py --base /tmp/toolNames-base.json
+          else
+            python3 .github/scripts/toolnames_utils.py
+          fi
+
+      - name: Report canonical equivalents as warnings
+        if: failure() || success()
+        run: |
+          # Re-run the check without the base filter so canonical equivalents
+          # are visible in the log even when no new strict duplicates exist.
+          python3 .github/scripts/toolnames_utils.py || true

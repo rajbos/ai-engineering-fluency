@@ -57,6 +57,9 @@ jobs:
           import re
           import sys
           
+          sys.path.insert(0, ".github/scripts")
+          from toolnames_utils import find_matches_for_new_tool
+          
           issue_body = os.environ.get("ISSUE_BODY", "")
           issue_number = os.environ.get("ISSUE_NUMBER", "")
           repo = os.environ.get("REPO", "")
@@ -92,20 +95,20 @@ jobs:
               already_added = []
               needs_adding = []
               case_variants = []
+              canonical_equivalents = []
           
               for tool in tools:
-                  if tool in known_tools:
+                  matches = find_matches_for_new_tool(tool, known_tools)
+                  if matches["exact"]:
                       already_added.append((tool, known_tools[tool]))
+                  elif matches["case_variant"]:
+                      existing_id, friendly = matches["case_variant"][0]
+                      case_variants.append((tool, existing_id, friendly))
+                  elif matches["canonical_equivalent"]:
+                      existing_id, friendly = matches["canonical_equivalent"][0]
+                      canonical_equivalents.append((tool, existing_id, friendly))
                   else:
-                      # Case-insensitive check: if a differently-cased variant already
-                      # exists with the same friendly name, flag it as a case variant
-                      # rather than a missing entry — it should NOT be added separately.
-                      lower_tool = tool.lower()
-                      case_match = next((k for k in known_tools if k.lower() == lower_tool), None)
-                      if case_match and known_tools[case_match] == known_tools.get(tool, known_tools[case_match]):
-                          case_variants.append((tool, case_match, known_tools[case_match]))
-                      else:
-                          needs_adding.append(tool)
+                      needs_adding.append(tool)
           
               lines = ["## 🔍 Toolnames Checkup", ""]
               lines.append("Checked the tool names in this issue against `src/toolNames.json` on the `main` branch:")
@@ -132,6 +135,18 @@ jobs:
                       lines.append(f"| `{tool}` | `{existing}` | {friendly} |")
                   lines.append("")
           
+              if canonical_equivalents:
+                  lines.append("### ⚠️ Equivalent to an existing entry — do not add")
+                  lines.append("")
+                  lines.append("These tool names normalize to the same canonical form as an existing entry (e.g. different MCP server registration or separator style).")
+                  lines.append("**Do not add a separate entry** — the existing entry covers this tool.")
+                  lines.append("")
+                  lines.append("| Tool Name (from issue) | Existing Entry | Friendly Name |")
+                  lines.append("| --- | --- | --- |")
+                  for tool, existing, friendly in canonical_equivalents:
+                      lines.append(f"| `{tool}` | `{existing}` | {friendly} |")
+                  lines.append("")
+          
               if needs_adding:
                   lines.append("### ❌ Not yet in `toolNames.json`")
                   lines.append("")
@@ -141,10 +156,11 @@ jobs:
                       lines.append(f"| `{tool}` |")
                   lines.append("")
           
-              if already_added and not needs_adding and not case_variants:
+              has_issues = case_variants or canonical_equivalents
+              if already_added and not needs_adding and not has_issues:
                   lines.append("> **All tool names in this issue are already mapped.** This issue may be a duplicate — consider closing it.")
-              elif case_variants and not needs_adding:
-                  lines.append("> **All unmapped tool names are case variants of existing entries.** No new entries should be added. Consider closing this issue.")
+              elif has_issues and not needs_adding:
+                  lines.append("> **All unmapped tool names are variants of existing entries.** No new entries should be added. Consider closing this issue.")
               elif needs_adding:
                   lines.append(f"> **{len(needs_adding)} tool name(s) still need to be added.** Please use the `tool-names` custom agent or update `src/toolNames.json` manually.")
           
@@ -215,6 +231,9 @@ jobs:
           python3 - << 'PYEOF'
           import json, os, re, sys
 
+          sys.path.insert(0, ".github/scripts")
+          from toolnames_utils import find_matches_for_new_tool
+
           issue_body = os.environ.get("ISSUE_BODY", "")
           MAX_BODY_LEN = 100_000
           if len(issue_body) > MAX_BODY_LEN:
@@ -237,11 +256,15 @@ jobs:
 
           missing = []
           for tool in tools:
-              if tool not in known_tools:
-                  lower = tool.lower()
-                  case_match = next((k for k in known_tools if k.lower() == lower), None)
-                  if not case_match:
-                      missing.append(tool)
+              matches = find_matches_for_new_tool(tool, known_tools)
+              if not (matches["exact"] or matches["case_variant"] or matches["canonical_equivalent"]):
+                  missing.append(tool)
+              elif matches["canonical_equivalent"]:
+                  existing_id, friendly = matches["canonical_equivalent"][0]
+                  print(
+                      f"Skipping {tool!r} — canonical equivalent of {existing_id!r} ({friendly})",
+                      file=sys.stderr
+                  )
 
           print(f"Missing tools: {missing}", file=sys.stderr)
           with open("/tmp/missing-tools.json", "w") as f:
@@ -433,6 +456,9 @@ jobs:
           python3 - << 'PYEOF'
           import json, re, sys
 
+          sys.path.insert(0, ".github/scripts")
+          from toolnames_utils import find_friendly_duplicates, find_matches_for_new_tool
+
           TOOLNAMES_FILE = "src/toolNames.json"
 
           with open("/tmp/slm-names.json") as f:
@@ -447,11 +473,26 @@ jobs:
 
           to_add = {}
           for tool_id, friendly_name in new_entries.items():
-              if tool_id in known_tools:
+              matches = find_matches_for_new_tool(tool_id, known_tools)
+              if matches["exact"]:
                   print(f"Skipping {tool_id!r} — already present", file=sys.stderr)
                   continue
-              if any(k.lower() == tool_id.lower() for k in known_tools):
-                  print(f"Skipping {tool_id!r} — case variant present", file=sys.stderr)
+              if matches["case_variant"]:
+                  existing_id = matches["case_variant"][0][0]
+                  print(f"Skipping {tool_id!r} — case variant of {existing_id!r}", file=sys.stderr)
+                  continue
+              if matches["canonical_equivalent"]:
+                  existing_id = matches["canonical_equivalent"][0][0]
+                  print(f"Skipping {tool_id!r} — canonical equivalent of {existing_id!r}", file=sys.stderr)
+                  continue
+              friendly_dups = find_friendly_duplicates(friendly_name, known_tools)
+              if friendly_dups:
+                  existing_id, existing_friendly = friendly_dups[0]
+                  print(
+                      f"Skipping {tool_id!r} — friendly name '{friendly_name}' already used by "
+                      f"{existing_id!r} ({existing_friendly})",
+                      file=sys.stderr
+                  )
                   continue
               to_add[tool_id] = friendly_name
 
