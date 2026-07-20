@@ -115,6 +115,47 @@ export function reconcileModelUsageToTotal(modelUsage: ModelUsage, targetInputTo
 }
 
 /**
+ * Reconciles a per-model usage breakdown so its input+output total matches an
+ * authoritative session total (e.g. `actualTokens` from a debug log, OTel export,
+ * or ecosystem adapter).
+ *
+ * This is needed when the breakdown source and the total source use different
+ * estimation methods — for example, event-based CLI sessions estimate the session
+ * total from real output via an input:output ratio, while the per-model breakdown
+ * estimates input from accumulated message content scaled by a context-growth factor.
+ * In sessions with large user content but small model output, the breakdown input
+ * can exceed the session total, causing the details view to show "Input tokens" >
+ * "Total tokens".
+ *
+ * Output counts are treated as authoritative when they do not already exceed the
+ * total (the output value usually comes from real API counts); otherwise both input
+ * and output are scaled proportionally. Any residual from rounding is swept into the
+ * existing `unknown` bucket by `reconcileModelUsageToTotal`.
+ */
+export function reconcileModelUsageToActualTokens(modelUsage: ModelUsage, actualTokens: number): ModelUsage {
+	if (actualTokens <= 0) { return modelUsage; }
+	const currentInput = Object.values(modelUsage).reduce((s, u) => s + u.inputTokens, 0);
+	const currentOutput = Object.values(modelUsage).reduce((s, u) => s + u.outputTokens, 0);
+	const currentTotal = currentInput + currentOutput;
+	if (currentTotal === 0) {
+		return Object.keys(modelUsage).length === 0
+			? { unknown: { inputTokens: actualTokens, outputTokens: 0 } }
+			: modelUsage;
+	}
+	if (currentTotal === actualTokens) { return modelUsage; }
+
+	if (currentOutput > 0 && currentOutput <= actualTokens) {
+		// Preserve the (presumably real) output counts and scale input to fit.
+		return reconcileModelUsageToTotal(modelUsage, actualTokens - currentOutput, currentOutput);
+	}
+
+	// Proportional scaling of both input and output to the actual total.
+	const inputTarget = Math.round(actualTokens * (currentInput / currentTotal));
+	const outputTarget = actualTokens - inputTarget;
+	return reconcileModelUsageToTotal(modelUsage, inputTarget, outputTarget);
+}
+
+/**
  * Merges `source` language usage into `target` (in-place).
  */
 export function addLanguageUsage(target: LanguageUsage, source: LanguageUsage): void {

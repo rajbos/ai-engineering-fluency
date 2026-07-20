@@ -185,7 +185,7 @@ import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceFor
 import { classifySessionTask, buildClassificationInputFromUsageAnalysis, type TaskCategory } from '../../src/taskClassification';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -385,7 +385,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 60; // Added taskCategory (task classification, issue #1650)
+	private static readonly CACHE_VERSION = 61; // Reconcile modelUsage to actualTokens for event-based sessions without debug logs
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -4557,9 +4557,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.extractSessionMetadata(sessionFilePath, preloadedContent, preloadedParsedJson),
 		]);
 
-		const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, modelUsage, interactions);
+		// Reconcile the per-model breakdown to the session total. Different sources estimate
+		// these independently (e.g. event-based CLI sessions derive actualTokens from real
+		// output via a ratio, while modelUsage derives input from accumulated message content),
+		// which can make Input+Output exceed Total in the details view.
+		const reconciledModelUsage = reconcileModelUsageToActualTokens(modelUsage, tokenResult.actualTokens ?? tokenResult.tokens);
+
+		const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, reconciledModelUsage, interactions);
 		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
-		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, modelUsage, dailyRollups, totalInteractions);
+		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, reconciledModelUsage, dailyRollups, totalInteractions);
 
 		await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 

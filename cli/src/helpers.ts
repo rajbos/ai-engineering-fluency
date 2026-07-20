@@ -20,6 +20,7 @@ import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { parseJetBrainsPartition } from '../../src/jetbrains';
 import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizationMatrix, TodaySessionSummary } from '../../src/types';
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
+import { reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
 import { withErrorRecovery } from '../../src/utils/errors';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
@@ -353,6 +354,12 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 					fileModelUsage = { [modelKey]: { inputTokens: jbResult.tokens, outputTokens: 0 } };
 				}
 			}
+
+			// Reconcile the per-model breakdown to the session total so Input+Output never
+			// exceeds Total in CLI reports. Event-based sessions (Copilot CLI without exact
+			// usage, JetBrains, …) derive actualTokens from real output while modelUsage
+			// derives input from accumulated message content; those heuristics can diverge.
+			fileModelUsage = reconcileModelUsageToActualTokens(fileModelUsage, actualTokens || tokens);
 
 			// Count interactions from JSONL
 			const lines = content.trim().split('\n');

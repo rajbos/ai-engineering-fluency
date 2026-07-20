@@ -9,6 +9,7 @@ aggregatePeriodStats,
 computeSessionTotalTokens,
 computeSessionDurationMs,
 reconcileModelUsageToTotal,
+reconcileModelUsageToActualTokens,
 type SessionAggregateInput,
 type UtcDateRanges,
 } from '../../../src/statsHelpers';
@@ -227,6 +228,58 @@ const totalInput = Object.values(result).reduce((s, u) => s + u.inputTokens, 0);
 const totalOutput = Object.values(result).reduce((s, u) => s + u.outputTokens, 0);
 assert.strictEqual(totalInput, 1000);
 assert.strictEqual(totalOutput, 333);
+});
+
+// ── reconcileModelUsageToActualTokens ─────────────────────────────────────────
+
+test('reconcileModelUsageToActualTokens: no-op when the breakdown already sums to the actual total', () => {
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 70, outputTokens: 30 } };
+const result = reconcileModelUsageToActualTokens(modelUsage, 100);
+assert.deepEqual(result, { 'gpt-4': { inputTokens: 70, outputTokens: 30 } });
+});
+
+test('reconcileModelUsageToActualTokens: scales input down while preserving real output counts', () => {
+// Event-based CLI sessions can estimate total input from accumulated message content
+// while the session total is derived from real output via an input:output ratio. When
+// user content is large and model output is small, the breakdown input can exceed total.
+const modelUsage: ModelUsage = { 'gpt-4o': { inputTokens: 1000, outputTokens: 100 } };
+const result = reconcileModelUsageToActualTokens(modelUsage, 300);
+// Output stays authoritative (100), input shrinks to fit the 300 total.
+assert.deepEqual(result['gpt-4o'], { inputTokens: 200, outputTokens: 100 });
+const total = Object.values(result).reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
+assert.strictEqual(total, 300);
+});
+
+test('reconcileModelUsageToActualTokens: proportional fallback when output already exceeds the actual total', () => {
+const modelUsage: ModelUsage = { 'o1': { inputTokens: 50, outputTokens: 200 } };
+const result = reconcileModelUsageToActualTokens(modelUsage, 100);
+const total = Object.values(result).reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
+assert.strictEqual(total, 100);
+assert.ok(result['o1'].outputTokens <= 100);
+assert.ok(result['o1'].inputTokens <= 100);
+});
+
+test('reconcileModelUsageToActualTokens: distributes across multiple models preserving output shares', () => {
+const modelUsage: ModelUsage = {
+'gpt-4': { inputTokens: 500, outputTokens: 80 },
+'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 20 },
+};
+const result = reconcileModelUsageToActualTokens(modelUsage, 250);
+assert.deepEqual(result['gpt-4'], { inputTokens: 94, outputTokens: 80 });
+assert.deepEqual(result['claude-3-5-sonnet'], { inputTokens: 56, outputTokens: 20 });
+const total = Object.values(result).reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
+assert.strictEqual(total, 250);
+});
+
+test('reconcileModelUsageToActualTokens: no-op when actualTokens is zero or negative', () => {
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+assert.deepEqual(reconcileModelUsageToActualTokens(modelUsage, 0), modelUsage);
+assert.deepEqual(reconcileModelUsageToActualTokens(modelUsage, -1), modelUsage);
+});
+
+test('reconcileModelUsageToActualTokens: creates unknown bucket for empty modelUsage', () => {
+const result = reconcileModelUsageToActualTokens({}, 100);
+assert.deepEqual(result, { unknown: { inputTokens: 100, outputTokens: 0 } });
 });
 
 // ── addEditorUsage ────────────────────────────────────────────────────────────
