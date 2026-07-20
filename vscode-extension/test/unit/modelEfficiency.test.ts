@@ -248,3 +248,12 @@ test('deriveModelEfficiencyRates: zero denominators produce nulls', () => {
     assert.equal(rates.outputTokensPerCall, null);
     assert.equal(rates.cacheHitRate, null);
 });
+
+test('deriveModelEfficiencyRates: cacheHitRate is capped at 1.0 when cachedReadTokens > inputTokens', () => {
+    // Some providers (e.g. DeepSeek) report cachedReadTokens > inputTokens; cap at 100%.
+    const rates = deriveModelEfficiencyRates({
+        calls: 5, editTurns: 0, oneShotEditTurns: 0, retries: 0, selfCorrections: 0,
+        editToolCalls: 0, inputTokens: 100, outputTokens: 200, cachedReadTokens: 3000, cost: 0,
+    });
+    assert.equal(rates.cacheHitRate, 1);
+});

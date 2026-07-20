@@ -1362,6 +1362,7 @@ function sanitizePeriod(period: any): UsageAnalysisPeriod {
 			...(p.modelSwitching ?? {}),
 		},
 		thinkingEffortUsage: p.thinkingEffortUsage,
+		modelEfficiency: p.modelEfficiency,
 	};
 }
 
@@ -3588,6 +3589,7 @@ function buildActivityTabPanelHtml(
 			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
 			${multiModelHtml}
 			${modelCostHtml}
+			${buildModelEfficiencySectionHtml(stats)}
 			${thinkingEffortHtml}
 			${buildContextWindowSectionHtml(stats)}
 		</div>`;
@@ -4128,7 +4130,6 @@ function buildToolsTabPanelHtml(
 					${renderMultiModelPeriod('📅 Previous Month', stats.month.modelSwitching, allLowCostModels, allMediumCostModels, allHighCostModels, allUnknownModels)}
 				</div>
 			</div>
-			${buildModelEfficiencySectionHtml(stats)}
 		</div>`;
 }
 
