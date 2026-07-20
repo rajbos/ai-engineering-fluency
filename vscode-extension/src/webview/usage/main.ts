@@ -12,7 +12,7 @@ import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
-import { deriveModelEfficiencyRates } from '../../../../src/modelEfficiency';
+import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '../../../../src/modelEfficiency';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 
@@ -3925,6 +3925,7 @@ let efficiencyPeriod: EfficiencyPeriodKey = 'last30Days';
 let efficiencySortColumn: EfficiencySortColumn = 'calls';
 let efficiencySortDirection: 'asc' | 'desc' = 'desc';
 let cachedModelEfficiency: Partial<Record<EfficiencyPeriodKey, ModelEfficiencyUsage | undefined>> = {};
+let efficiencyFilterLowUsage = false;
 
 type EfficiencyColumnDef = {
 	sortKey: EfficiencySortColumn;
@@ -3990,7 +3991,20 @@ function buildModelEfficiencyTableHtml(): string {
 	if (!usage || Object.keys(usage).length === 0) {
 		return '<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No per-model efficiency data recorded for this period yet.</div>';
 	}
-	const rows = buildEfficiencyRows(usage).map(r => {
+	let rows = buildEfficiencyRows(usage);
+	let hiddenNote = '';
+	if (efficiencyFilterLowUsage) {
+		const threshold = computeEfficiencyLowUsageThreshold(usage);
+		if (threshold !== null) {
+			const before = rows.length;
+			rows = rows.filter(r => r.counters.calls > threshold);
+			const hiddenCount = before - rows.length;
+			if (hiddenCount > 0) {
+				hiddenNote = `<div style="color:var(--text-secondary); font-size:11px; padding:4px 8px 2px;">${hiddenCount} model${hiddenCount === 1 ? '' : 's'} hidden (≤${threshold} turn${threshold === 1 ? '' : 's'})</div>`;
+			}
+		}
+	}
+	const tableRows = rows.map(r => {
 		const cells = EFFICIENCY_COLUMN_DEFS.map(col => {
 			const alignStyle = col.align === 'right' ? 'text-align:right;' : '';
 			return `<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${alignStyle}">${col.render(r)}</td>`;
@@ -4007,9 +4021,10 @@ function buildModelEfficiencyTableHtml(): string {
 			<thead>
 				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">${headerCells}</tr>
 			</thead>
-			<tbody>${rows}</tbody>
+			<tbody>${tableRows}</tbody>
 		</table>
-		</div>`;
+		</div>
+		${hiddenNote}`;
 }
 
 function buildEfficiencyPeriodButtonsHtml(): string {
@@ -4034,6 +4049,12 @@ function buildModelEfficiencySectionHtml(stats: UsageAnalysisStats): string {
 			<div class="section-title"><span>🎯</span><span>Model Efficiency</span></div>
 			<div class="section-subtitle">Compare models on quality and efficiency, not just cost — one-shot edit rate, retries, self-corrections, per-turn cost, and cache hit rate. Retry/self-correction detection needs structured tool-call data, so some editors show token metrics only.</div>
 			<div id="model-efficiency-controls" style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;">${buildEfficiencyPeriodButtonsHtml()}</div>
+			<div style="margin:2px 0 8px 0;">
+				<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;" title="Hides the bottom 25% of models by turn count (Q1 threshold)">
+					<input type="checkbox" id="eff-filter-low-usage"${efficiencyFilterLowUsage ? ' checked' : ''} style="cursor:pointer;">
+					Exclude low-usage models
+				</label>
+			</div>
 			<div id="model-efficiency-table">${buildModelEfficiencyTableHtml()}</div>
 		</div>`;
 }
@@ -4064,7 +4085,7 @@ function handleEfficiencySortClick(th: HTMLElement): void {
 	rerenderModelEfficiencyTable();
 }
 
-/** Wires period buttons and sortable headers for the Model Efficiency section (delegated, survives table re-renders). */
+/** Wires period buttons, sortable headers, and the low-usage filter for the Model Efficiency section (delegated, survives table re-renders). */
 function setupModelEfficiencySection(): void {
 	const section = document.getElementById('section-model-efficiency');
 	if (!section) { return; }
@@ -4074,6 +4095,13 @@ function setupModelEfficiencySection(): void {
 		if (periodBtn) { handleEfficiencyPeriodClick(periodBtn); return; }
 		const th = target.closest<HTMLElement>('th[data-eff-sort]');
 		if (th) { handleEfficiencySortClick(th); }
+	});
+	section.addEventListener('change', (e) => {
+		const target = e.target as HTMLInputElement;
+		if (target.id === 'eff-filter-low-usage') {
+			efficiencyFilterLowUsage = target.checked;
+			rerenderModelEfficiencyTable();
+		}
 	});
 }
 
