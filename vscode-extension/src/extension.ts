@@ -170,6 +170,7 @@ import {
   detectEditorSource as _detectEditorSource,
   parseGitRemoteUrl as _parseGitRemoteUrl,
   extractRepositoryFromContentReferences as _extractRepositoryFromContentReferences,
+  resolveSessionWorkspaceName as _resolveSessionWorkspaceName,
   isMcpTool as _isMcpTool,
   normalizeMcpToolName as _normalizeMcpToolName,
   extractMcpServerName as _extractMcpServerName,
@@ -3911,18 +3912,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	/**
-	 * Best-effort workspace name for a session summary. Uses the repository name
-	 * already cached on the session data, falling back to the workspaceStorage
-	 * folder resolution (cached per workspace id). Returns undefined when
+	 * Best-effort workspace name for a session summary. Prefers the workspace
+	 * folder path already cached on the session data, then the repository name,
+	 * then workspaceStorage folder resolution. Returns undefined when
 	 * attribution is unavailable.
 	 */
 	private resolveSessionWorkspaceName(sessionData: SessionFileCache, sessionFile: string): string | undefined {
-		if (sessionData.repository) { return sessionData.repository; }
-		try {
-			const workspaceFolder = _resolveWorkspaceFolderFromSessionPath(sessionFile, this._workspaceIdToFolderCache);
-			if (workspaceFolder) { return path.basename(workspaceFolder); }
-		} catch { /* attribution is optional */ }
-		return undefined;
+		return _resolveSessionWorkspaceName(sessionData, sessionFile, this._workspaceIdToFolderCache);
 	}
 
 	private _mergeCodeWorkspaceCustomizationFiles(norm: string): CustomizationFileEntry[] {
@@ -4398,8 +4394,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		lastInteraction: string | null;
 		dailyInteractions: { [localDayKey: string]: number };
 		dailyFractions?: Record<string, number>;
+		workspacePath?: string;
 	}> {
 		let title: string | undefined;
+		let workspacePath: string | undefined;
 		const timestamps: number[] = [];
 		const requestTimestamps: number[] = [];
 
@@ -4411,6 +4409,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return { ...meta, dailyInteractions: {}, ...(dailyFractions ? { dailyFractions } : {}) };
 			}
 
+			// Some adapters discover files they do not handle (e.g. Copilot CLI events.jsonl).
+			// Ask them for workspace attribution before falling back to generic parsing.
+			workspacePath = await this.findWorkspacePathForDiscoveredPath(sessionFile);
+
 			// Handle Windsurf virtual sessions
 			if (this.windsurf.isWindsurfSessionFile(sessionFile)) {
 				return this.extractWindsurfSessionMetadata(sessionFile);
@@ -4418,7 +4420,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			const fileContent = preloadedContent ?? await fs.promises.readFile(sessionFile, 'utf8');
 			if (_isUuidPointerFile(fileContent)) {
-				return { title, firstInteraction: null, lastInteraction: null, dailyInteractions: {} };
+				return { title, firstInteraction: null, lastInteraction: null, dailyInteractions: {}, workspacePath };
 			}
 
 			const isJsonlContent = sessionFile.endsWith('.jsonl') || _isJsonlContent(fileContent);
@@ -4445,7 +4447,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 			dailyInteractions[dayKey] = (dailyInteractions[dayKey] || 0) + 1;
 		}
 
-		return { title, firstInteraction, lastInteraction, dailyInteractions };
+		return { title, firstInteraction, lastInteraction, dailyInteractions, workspacePath };
+	}
+
+	/**
+	 * Ask any discoverable ecosystem adapter that does *not* handle this file whether
+	 * it can still supply a workspace directory path for it. Used for files like
+	 * Copilot CLI events.jsonl that are discovered by an adapter but parsed generically.
+	 */
+	private async findWorkspacePathForDiscoveredPath(sessionFile: string): Promise<string | undefined> {
+		for (const eco of this.ecosystems) {
+			if (eco.handles(sessionFile)) { continue; }
+			if (typeof eco.getWorkspacePathForDiscoveredPath !== 'function') { continue; }
+			try {
+				const cwd = await eco.getWorkspacePathForDiscoveredPath(sessionFile);
+				if (cwd) { return cwd; }
+			} catch { /* adapter failed; try next */ }
+		}
+		return undefined;
 	}
 
 	private extractMetadataFromJsonl(lines: string[]): { title: string | undefined; timestamps: number[]; requestTimestamps: number[] } {
@@ -4665,7 +4684,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		mtime: number,
 		fileSize: number,
 		usageAnalysis: SessionUsageAnalysis,
-		sessionMeta: { title?: string; firstInteraction: string | null; lastInteraction: string | null },
+		sessionMeta: { title?: string; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string },
 		resolvedActualTokens: number | undefined,
 		finalCacheReadTokens: number | undefined,
 		debugLogTokens: { inputTokens: number; outputTokens: number; modelTurns?: number; copilotNanoAiu?: number } | null | undefined,
@@ -4682,6 +4701,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
 			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens, taskCategory,
+			// Persist workspace attribution from the adapter so the Recent Sessions list can
+			// show it without requiring a separate getSessionFileDetails() parse pass.
+			...(sessionMeta.workspacePath ? { workspaceFolderPath: sessionMeta.workspacePath } : {}),
 			// Repository is discovered separately by getSessionFileDetails() (via content-reference
 			// git-root lookup) and is not recomputed here. Without preserving it, every cache-miss
 			// rebuild of this entry (e.g. an actively-edited session whose file keeps changing)

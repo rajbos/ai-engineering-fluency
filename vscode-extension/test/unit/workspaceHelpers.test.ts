@@ -15,6 +15,7 @@ import {
     normalizePathForDedup,
     fileUriToPath,
     parseWorkspaceStorageJsonFile,
+    resolveSessionWorkspaceName,
 } from '../../../src/workspaceHelpers';
 
 // ---------------------------------------------------------------------------
@@ -1785,4 +1786,51 @@ test('parseCodeWorkspaceFolders: returns empty array when folders key is missing
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+});
+
+// ── resolveSessionWorkspaceName ──────────────────────────────────────────
+
+test('resolveSessionWorkspaceName: prefers workspaceFolderPath over repository', () => {
+    const name = resolveSessionWorkspaceName(
+        { workspaceFolderPath: 'C:\\Users\\me\\code\\my-project', repository: 'owner/repo' },
+        'C:\\Users\\me\\.copilot\\session-store.db#session-id'
+    );
+    assert.equal(name, 'my-project');
+});
+
+test('resolveSessionWorkspaceName: falls back to repository when workspaceFolderPath is absent', () => {
+    const name = resolveSessionWorkspaceName(
+        { repository: 'owner/repo' },
+        'some-session.jsonl'
+    );
+    assert.equal(name, 'owner/repo');
+});
+
+test('resolveSessionWorkspaceName: falls back to workspaceStorage resolution', () => {
+    const tmpDir = fs.mkdtempSync(nodePath.join(os.tmpdir(), 'wh-rsws-'));
+    try {
+        const workspaceFolder = nodePath.join(tmpDir, 'my-vscode-project');
+        fs.mkdirSync(workspaceFolder, { recursive: true });
+        const workspaceStorage = nodePath.join(tmpDir, 'workspaceStorage', 'wsid123');
+        fs.mkdirSync(workspaceStorage, { recursive: true });
+        fs.writeFileSync(
+            nodePath.join(workspaceStorage, 'workspace.json'),
+            JSON.stringify({ folder: workspaceFolder }),
+            'utf8'
+        );
+        const sessionFile = nodePath.join(workspaceStorage, 'chatSessions', 'session.json');
+        const cache = new Map<string, string | undefined>();
+        const name = resolveSessionWorkspaceName({}, sessionFile, cache);
+        assert.equal(name, 'my-vscode-project');
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('resolveSessionWorkspaceName: returns undefined when no attribution is available', () => {
+    const name = resolveSessionWorkspaceName(
+        {},
+        '/home/user/.claude/projects/hash/session.jsonl'
+    );
+    assert.equal(name, undefined);
 });

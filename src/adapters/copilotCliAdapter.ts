@@ -79,6 +79,23 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	}
 
 	/**
+	 * Read workspace.yaml next to a discovered events.jsonl file and return its
+	 * cwd value. This supplies workspace attribution for worktree CLI sessions
+	 * without changing the handles() contract.
+	 */
+	async getWorkspacePathForDiscoveredPath(sessionFile: string): Promise<string | undefined> {
+		const yamlPath = path.join(path.dirname(sessionFile), 'workspace.yaml');
+		try {
+			const content = await fs.promises.readFile(yamlPath, 'utf8');
+			const match = content.match(/^cwd:\s*(.+)$/m);
+			const cwd = match?.[1]?.trim();
+			return cwd || undefined;
+		} catch {
+			return undefined;
+		}
+	}
+
+	/**
 	 * Returns true only for session-store.db virtual paths.
 	 * For events.jsonl files the adapter participates in discovery only; the
 	 * existing fallback JSONL parser in extension.ts continues to own those.
@@ -140,8 +157,7 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 				title: session.summary ?? undefined,
 				firstInteraction: session.created_at,
 				lastInteraction: session.updated_at,
-				// workspacePath is intentionally absent for NULL-repository sessions
-				// so callers can detect the no-workspace case via its absence.
+				workspacePath: session.cwd ?? undefined,
 			};
 		}
 		return { title: undefined, firstInteraction: null, lastInteraction: null };
