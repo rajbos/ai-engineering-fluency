@@ -131,11 +131,13 @@ body {
 	align-items: center;
 	gap: 10px;
 	justify-content: flex-start;
-}
-
-.scope-row {
 	padding-bottom: 10px;
 	border-bottom: 1px solid var(--border-subtle);
+}
+
+.chart-controls-row:last-child {
+	padding-bottom: 0;
+	border-bottom: none;
 }
 
 .control-group {

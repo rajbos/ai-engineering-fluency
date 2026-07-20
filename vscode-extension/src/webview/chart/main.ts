@@ -516,12 +516,15 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 	const periodsReady = data.periodsReady !== false;
 
 	const scopeRow = el('div', 'chart-controls-row scope-row');
-	scopeRow.append(buildTimeWindowControl(periodsReady), el('div', 'control-group-separator'), buildPeriodToggles(periodsReady));
+	scopeRow.append(buildTimeWindowControl(periodsReady), el('div', 'control-group-separator'), buildPeriodToggles(periodsReady), el('div', 'control-group-separator'), buildRollingControl());
 
-	const viewRow = el('div', 'chart-controls-row view-row');
-	viewRow.append(buildMetricControl(data), el('div', 'control-group-separator'), buildSplitControl(), el('div', 'control-group-separator'), buildRollingControl());
+	const metricRow = el('div', 'chart-controls-row metric-row');
+	metricRow.append(buildMetricControl(data));
 
-	controls.append(scopeRow, viewRow);
+	const splitRow = el('div', 'chart-controls-row split-row');
+	splitRow.append(buildSplitControl());
+
+	controls.append(scopeRow, metricRow, splitRow);
 	return controls;
 }
 
