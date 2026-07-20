@@ -32,6 +32,7 @@ Per-component guides and READMEs.
 |---|---|
 | [cli/](cli/README.md) | CLI tool — commands, options, and development guide |
 | [vscode-extension/](vscode-extension/README.md) | VS Code extension guide |
+| [vscode-extension/DESIGN.md](vscode-extension/DESIGN.md) | VS Code extension UI design system (DESIGN.md spec) |
 | [visual-studio/](visual-studio/README.md) | Visual Studio extension guide |
 | [sharing-server/](sharing-server/README.md) | Sharing server guide |
 | [specs/backend.md](specs/backend.md) | Backend API specification |
