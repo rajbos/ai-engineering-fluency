@@ -144,6 +144,7 @@ const TIME_WINDOW_LABELS: Record<ChartTimeWindow, string> = {
 	last7: 'Last 7 days',
 	last30: 'Last 30 days',
 	currentMonth: 'Current month',
+	allTime: 'All time',
 };
 
 function getWindowStartDate(timeWindow: ChartTimeWindow, now: Date): string {
@@ -163,10 +164,15 @@ function getWindowStartDate(timeWindow: ChartTimeWindow, now: Date): string {
 		}
 		case 'currentMonth':
 			return `${y}-${String(m + 1).padStart(2, '0')}-01`;
+		case 'allTime':
+			return '0000-00-00';
 	}
 }
 
 function getWindowStartMonth(timeWindow: ChartTimeWindow, now: Date): string {
+	if (timeWindow === 'allTime') {
+		return '0000-00';
+	}
 	const y = now.getFullYear();
 	const m = now.getMonth();
 	if (timeWindow === 'currentMonth') {
@@ -288,10 +294,20 @@ function getTimeWindowSuffix(): string {
 	return ` — ${TIME_WINDOW_LABELS[currentTimeWindow]}`;
 }
 
+function getSessionsChartTitle(): string {
+	const suffix = ` — ${TIME_WINDOW_LABELS[currentTimeWindow]}`;
+	switch (currentSplit) {
+		case 'model': return `Sessions by Model${suffix}`;
+		case 'editor': return `Sessions by Editor${suffix}`;
+		case 'provider': return `Sessions by Provider${suffix}`;
+		default: return `Sessions${suffix}`;
+	}
+}
+
 function getChartTitle(): string {
 	const periodMeta = PERIOD_LABELS[currentPeriod];
 	if (currentMetric === 'sessions') {
-		return `Sessions — ${TIME_WINDOW_LABELS[currentTimeWindow]}`;
+		return getSessionsChartTitle();
 	}
 	if (currentMetric === 'cost') {
 		let titleText: string;
@@ -315,6 +331,10 @@ function getChartTitle(): string {
 		titleText += ` (${getRollingLabel()})`;
 	}
 	return titleText + getTimeWindowSuffix();
+}
+
+function getAggregationIndicator(): string {
+	return PERIOD_LABELS[currentPeriod].aggregationLabel;
 }
 
 /** Returns period data for the current period, falling back to legacy flat fields. */
@@ -344,14 +364,14 @@ function getActivePeriodData(data: InitialChartData): ChartPeriodData {
 	return filterPeriodByTimeWindow(period, currentTimeWindow, currentPeriod);
 }
 
-const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string }> = {
-	day:   { title: 'Token Usage – Last 30 Days',  footer: 'Day-by-day token usage for the last 30 days',   countLabel: 'Total Days',   avgLabel: 'Avg Tokens / Day',   costTitle: 'Est. Cost – Last 30 Days',  avgCostLabel: 'Avg Cost / Day',   outputTitle: 'Lines of Code – Last 30 Days',  avgLocLabel: 'Avg Lines / Day'   },
-	week:  { title: 'Token Usage – Last 6 Weeks',  footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks',  avgLabel: 'Avg Tokens / Week',  costTitle: 'Est. Cost – Last 6 Weeks',  avgCostLabel: 'Avg Cost / Week',  outputTitle: 'Lines of Code – Last 6 Weeks',  avgLocLabel: 'Avg Lines / Week'  },
-	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month' },
+const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countLabel: string; avgLabel: string; aggregationLabel: string; costTitle: string; avgCostLabel: string; outputTitle: string; avgLocLabel: string }> = {
+	day:   { title: 'Token Usage – Last 30 Days',  footer: 'Day-by-day token usage for the last 30 days',   countLabel: 'Total Days',   avgLabel: 'Avg Tokens / Day',   aggregationLabel: 'Aggregated by Day',   costTitle: 'Est. Cost – Last 30 Days',  avgCostLabel: 'Avg Cost / Day',   outputTitle: 'Lines of Code – Last 30 Days',  avgLocLabel: 'Avg Lines / Day'   },
+	week:  { title: 'Token Usage – Last 6 Weeks',  footer: 'Week-by-week token usage for the last 6 weeks', countLabel: 'Total Weeks',  avgLabel: 'Avg Tokens / Week',  aggregationLabel: 'Aggregated by Week',  costTitle: 'Est. Cost – Last 6 Weeks',  avgCostLabel: 'Avg Cost / Week',  outputTitle: 'Lines of Code – Last 6 Weeks',  avgLocLabel: 'Avg Lines / Week'  },
+	month: { title: 'Token Usage – Last 12 Months', footer: 'Monthly token usage for the last 12 months',   countLabel: 'Total Months', avgLabel: 'Avg Tokens / Month', aggregationLabel: 'Aggregated by Month', costTitle: 'Est. Cost – Last 12 Months', avgCostLabel: 'Avg Cost / Month', outputTitle: 'Lines of Code – Last 12 Months', avgLocLabel: 'Avg Lines / Month' },
 };
 
 function isComboSupported(metric: string, split: string): boolean {
-	if (metric === 'sessions') { return split === 'total'; }
+	if (metric === 'sessions') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider'; }
 	if (metric === 'cost') { return split === 'total' || split === 'editor' || split === 'provider'; }
 	if (metric === 'output') { return split !== 'model' && split !== 'provider' && split !== 'taskCategory'; }
 	return split !== 'language' && split !== 'provider';
@@ -403,12 +423,15 @@ function buildSummaryCards(periodData: ChartPeriodData, periodMeta: typeof PERIO
 
 function buildPeriodToggles(periodsReady: boolean): HTMLElement {
 	const periodToggles = el('div', 'period-controls');
-	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, '📅 Day');
+	const dayBtn = el('button', `toggle${currentPeriod === 'day' ? ' active' : ''}`, '📅 By Day');
 	dayBtn.id = 'period-day';
-	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, periodsReady ? '🗓️ Week' : '🗓️ Week ⌛');
+	dayBtn.title = 'Aggregate data by day';
+	const weekBtn = el('button', `toggle${currentPeriod === 'week' ? ' active' : ''}`, periodsReady ? '🗓️ By Week' : '🗓️ By Week ⌛');
 	weekBtn.id = 'period-week';
-	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, periodsReady ? '📆 Month' : '📆 Month ⌛');
+	weekBtn.title = 'Aggregate data by week';
+	const monthBtn = el('button', `toggle${currentPeriod === 'month' ? ' active' : ''}`, periodsReady ? '📆 By Month' : '📆 By Month ⌛');
 	monthBtn.id = 'period-month';
+	monthBtn.title = 'Aggregate data by month';
 	if (!periodsReady) {
 		(weekBtn as HTMLButtonElement).disabled = true; weekBtn.title = 'Loading historical data…';
 		(monthBtn as HTMLButtonElement).disabled = true; monthBtn.title = 'Loading historical data…';
@@ -424,7 +447,7 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 	const windowSelect = document.createElement('select');
 	windowSelect.id = 'time-window-select';
 	windowSelect.className = 'time-window-select';
-	const windows: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth'];
+	const windows: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
 	windows.forEach(w => {
 		const option = document.createElement('option');
 		option.value = w;
@@ -490,7 +513,7 @@ function renderLayout(data: InitialChartData): void {
 	const chartSection = el('div', 'section');
 	chartSection.append(chartSectionHeader, chartShell);
 	const footer = el('div', 'footer',
-		`${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`);
+		`${periodMeta.footer} (${periodMeta.aggregationLabel})\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`);
 	footer.id = 'chart-footer';
 	const container = el('div', 'container');
 	container.append(buildChartHeader(data), summarySection, chartSection, footer);
@@ -561,7 +584,7 @@ function updateSummaryCards(data: InitialChartData): void {
 
 	const footer = document.getElementById('chart-footer');
 	if (footer) {
-		footer.textContent = `${periodMeta.footer}\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`;
+		footer.textContent = `${periodMeta.footer} (${periodMeta.aggregationLabel})\nLast updated: ${new Date(data.lastUpdated).toLocaleString()}\nUpdates automatically every 5 minutes.`;
 	}
 }
 
@@ -696,16 +719,16 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 	chart = new Chart(ctx, createConfig(data));
 }
 
+function clampSplitForMetric(metric: typeof currentMetric): void {
+	if (metric === 'cost' && currentSplit !== 'editor' && currentSplit !== 'provider') { currentSplit = 'total'; return; }
+	if (metric === 'output' && currentSplit === 'model') { currentSplit = 'total'; return; }
+	if (metric === 'tokens' && currentSplit === 'language') { currentSplit = 'total'; return; }
+	if (metric === 'sessions' && currentSplit !== 'total' && currentSplit !== 'model' && currentSplit !== 'editor' && currentSplit !== 'provider') { currentSplit = 'total'; }
+}
+
 async function switchMetric(metric: typeof currentMetric, data: InitialChartData): Promise<void> {
 	if (currentMetric === metric) { return; }
-	// When switching to cost, keep editor/provider split if active; otherwise fall back to total
-	if (metric === 'cost' && currentSplit !== 'editor' && currentSplit !== 'provider') { currentSplit = 'total'; }
-	// When switching to output, disable unsupported splits
-	if (metric === 'output' && currentSplit === 'model') { currentSplit = 'total'; }
-	// When switching to tokens, disable language split
-	if (metric === 'tokens' && currentSplit === 'language') { currentSplit = 'total'; }
-	// Sessions only supports the total split
-	if (metric === 'sessions') { currentSplit = 'total'; }
+	clampSplitForMetric(metric);
 	currentMetric = metric;
 	const rollingApplicable = currentSplit === 'total' && metric !== 'output' && metric !== 'sessions';
 	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
@@ -733,7 +756,7 @@ async function switchTimeWindow(timeWindow: ChartTimeWindow, data: InitialChartD
 }
 
 function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
-	if (metric === 'sessions') { return split === 'total'; }
+	if (metric === 'sessions') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider'; }
 	return (metric === 'cost' && (split === 'total' || split === 'editor' || split === 'provider')) ||
 		(metric === 'output' && split !== 'model' && split !== 'provider' && split !== 'taskCategory') ||
 		(metric === 'tokens' && split !== 'language' && split !== 'provider');
@@ -878,15 +901,19 @@ function buildBaseOptions(c: ChartColors) {
 	};
 }
 
-function buildSessionsViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+function buildSessionsViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = view === 'sessions-model' ? period.modelDatasets
+		: view === 'sessions-editor' ? period.editorDatasets
+			: view === 'sessions-provider' ? (period.billingGroupCostDatasets ?? [])
+				: undefined;
+	const isStacked = !!datasets;
+	const seriesDatasets = isStacked ? datasets as ModelDataset[] : [{ label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(137, 180, 250, 0.7)', borderColor: 'rgba(137, 180, 250, 1)', borderWidth: 1, borderRadius: 4 }];
 	return {
 		type: 'bar' as const,
-		data: { labels: period.labels, datasets: [
-			{ label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(137, 180, 250, 0.7)', borderColor: 'rgba(137, 180, 250, 1)', borderWidth: 1, borderRadius: 4 }
-		] },
-		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { display: false } },
-			scales: { x: { grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
-				y: { type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
+		data: { labels: period.labels, datasets: seriesDatasets as any },
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { display: isStacked, position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } }, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` ${ctx.dataset.label}: ${Number(ctx.parsed.y).toLocaleString()} sessions` } } },
+			scales: { x: { stacked: isStacked, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { stacked: isStacked, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
 			}
 		}
 	};
@@ -1163,20 +1190,31 @@ function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptio
 	};
 }
 
+function resolveTokensView(split: typeof currentSplit): string {
+	if (split === 'model') { return 'model'; }
+	if (split === 'editor') { return 'editor'; }
+	if (split === 'repository') { return 'repository'; }
+	if (split === 'taskCategory') { return 'taskCategory'; }
+	return 'total';
+}
+
+function resolveCostView(split: typeof currentSplit): string {
+	if (split === 'editor') { return 'cost-editor'; }
+	if (split === 'provider') { return 'cost-provider'; }
+	return 'cost';
+}
+
+function resolveSessionsView(split: typeof currentSplit): string {
+	if (split === 'model') { return 'sessions-model'; }
+	if (split === 'editor') { return 'sessions-editor'; }
+	if (split === 'provider') { return 'sessions-provider'; }
+	return 'sessions';
+}
+
 function resolveChartView(metric: typeof currentMetric, split: typeof currentSplit): string {
-	if (metric === 'sessions') { return 'sessions'; }
-	if (metric === 'tokens') {
-		if (split === 'model') { return 'model'; }
-		if (split === 'editor') { return 'editor'; }
-		if (split === 'repository') { return 'repository'; }
-		if (split === 'taskCategory') { return 'taskCategory'; }
-		return 'total';
-	}
-	if (metric === 'cost') {
-		if (split === 'editor') { return 'cost-editor'; }
-		if (split === 'provider') { return 'cost-provider'; }
-		return 'cost';
-	}
+	if (metric === 'sessions') { return resolveSessionsView(split); }
+	if (metric === 'tokens') { return resolveTokensView(split); }
+	if (metric === 'cost') { return resolveCostView(split); }
 	return `output-${split}`;
 }
 
@@ -1185,7 +1223,7 @@ function createConfig(data: InitialChartData): ChartConfig {
 	const view = resolveChartView(currentMetric, currentSplit);
 	const c = getChartColors();
 	const baseOptions = buildBaseOptions(c);
-	if (view === 'sessions') { return buildSessionsViewConfig(period, baseOptions, c); }
+	if (view.startsWith('sessions')) { return buildSessionsViewConfig(view, period, baseOptions, c); }
 	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
 	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c, data.monthlyBudget ?? 0); }
 	if (view === 'cost-editor') { return buildCostEditorViewConfig(period, baseOptions, c); }

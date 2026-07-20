@@ -165,7 +165,7 @@ export interface DailyTokenStats {
 }
 
 /** Time-window selector options available in the Chart view. */
-export type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth';
+export type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth' | 'allTime';
 
 /** Aggregated data for one time window (day/week/month) in the chart. */
 export interface ChartPeriodData {

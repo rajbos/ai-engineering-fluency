@@ -6186,7 +6186,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private setChartTimeWindowPreference(timeWindow: string): void {
-		const valid: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth'];
+		const valid: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
 		if (valid.includes(timeWindow as ChartTimeWindow)) { this.lastChartTimeWindow = timeWindow as ChartTimeWindow; }
 	}
 
