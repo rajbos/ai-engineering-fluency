@@ -942,6 +942,27 @@ export function resolveWorkspaceFolderFromSessionPath(sessionFilePath: string, w
 	}
 }
 
+/**
+ * Best-effort workspace display name for a session summary. Prefers an explicit
+ * workspace folder path cached on the session, then the repository name, then
+ * workspaceStorage folder resolution. Returns undefined when attribution is
+ * unavailable.
+ */
+export function resolveSessionWorkspaceName(
+	sessionData: { workspaceFolderPath?: string; repository?: string },
+	sessionFilePath: string,
+	workspaceIdToFolderCache?: Map<string, string | undefined>
+): string | undefined {
+	if (sessionData.workspaceFolderPath) { return path.basename(sessionData.workspaceFolderPath); }
+	if (sessionData.repository) { return sessionData.repository; }
+	if (!workspaceIdToFolderCache) { return undefined; }
+	try {
+		const workspaceFolder = resolveWorkspaceFolderFromSessionPath(sessionFilePath, workspaceIdToFolderCache);
+		if (workspaceFolder) { return path.basename(workspaceFolder); }
+	} catch { /* attribution is optional */ }
+	return undefined;
+}
+
 // ── Editor-detection private predicates ──────────────────────────────────────
 
 /** Returns true for Gemini CLI session paths (`.gemini/tmp/.../chats/session-*.jsonl`). */

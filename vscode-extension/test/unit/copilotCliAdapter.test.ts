@@ -162,6 +162,103 @@ test('CopilotCliAdapter: safe-default methods return zero values', async () => {
 });
 
 // ---------------------------------------------------------------------------
+// getMeta workspace attribution for DB-only sessions
+// ---------------------------------------------------------------------------
+
+test('CopilotCliAdapter.getMeta: returns workspacePath from DB session cwd', async () => {
+    const sessionId = 'db-session-1111-1111-1111-111111111111';
+    const virtualPath = path.join(os.homedir(), '.copilot', `session-store.db#${sessionId}`);
+    const cwd = 'C:\\Users\\me\\code\\my-project';
+
+    const mockStore = {
+        isCliStoreSession: (p: string) => p === virtualPath,
+        readSession: async (_p: string) => ({
+            id: sessionId,
+            cwd,
+            repository: null,
+            branch: null,
+            summary: 'Summary from DB',
+            created_at: '2026-07-20T10:00:00.000Z',
+            updated_at: '2026-07-20T10:05:00.000Z',
+        }),
+    };
+
+    const fresh = new CopilotCliAdapter();
+    (fresh as unknown as { store: typeof mockStore }).store = mockStore;
+
+    const meta = await fresh.getMeta(virtualPath);
+    assert.equal(meta.title, 'Summary from DB');
+    assert.equal(meta.workspacePath, cwd);
+});
+
+test('CopilotCliAdapter.getMeta: omits workspacePath when DB cwd is null', async () => {
+    const sessionId = 'db-session-2222-2222-2222-222222222222';
+    const virtualPath = path.join(os.homedir(), '.copilot', `session-store.db#${sessionId}`);
+
+    const mockStore = {
+        isCliStoreSession: (p: string) => p === virtualPath,
+        readSession: async (_p: string) => ({
+            id: sessionId,
+            cwd: null,
+            repository: null,
+            branch: null,
+            summary: 'Chat-only session',
+            created_at: '2026-07-20T10:00:00.000Z',
+            updated_at: '2026-07-20T10:05:00.000Z',
+        }),
+    };
+
+    const fresh = new CopilotCliAdapter();
+    (fresh as unknown as { store: typeof mockStore }).store = mockStore;
+
+    const meta = await fresh.getMeta(virtualPath);
+    assert.equal(meta.title, 'Chat-only session');
+    assert.equal(meta.workspacePath, undefined);
+});
+
+// ---------------------------------------------------------------------------
+// getWorkspacePathForDiscoveredPath — workspace.yaml next to events.jsonl
+// ---------------------------------------------------------------------------
+
+test('CopilotCliAdapter.getWorkspacePathForDiscoveredPath: reads cwd from workspace.yaml', async (t) => {
+    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-ws-'));
+    const stateDir = path.join(tmpHome, '.copilot', 'session-state');
+    const uuid = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+    const uuidDir = path.join(stateDir, uuid);
+    await fs.promises.mkdir(uuidDir, { recursive: true });
+    const eventsPath = path.join(uuidDir, 'events.jsonl');
+    const cwd = 'C:\\Users\\me\\code\\my-project';
+    await fs.promises.writeFile(path.join(uuidDir, 'workspace.yaml'), `cwd: ${cwd}\n`);
+    await fs.promises.writeFile(eventsPath, '{"type":"start"}\n');
+
+    t.after(async () => {
+        await fs.promises.rm(tmpHome, { recursive: true, force: true });
+    });
+
+    const fresh = new CopilotCliAdapter();
+    const workspacePath = await fresh.getWorkspacePathForDiscoveredPath!(eventsPath);
+    assert.equal(workspacePath, cwd);
+});
+
+test('CopilotCliAdapter.getWorkspacePathForDiscoveredPath: returns undefined when workspace.yaml is missing', async (t) => {
+    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-ws-missing-'));
+    const stateDir = path.join(tmpHome, '.copilot', 'session-state');
+    const uuid = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+    const uuidDir = path.join(stateDir, uuid);
+    await fs.promises.mkdir(uuidDir, { recursive: true });
+    const eventsPath = path.join(uuidDir, 'events.jsonl');
+    await fs.promises.writeFile(eventsPath, '{"type":"start"}\n');
+
+    t.after(async () => {
+        await fs.promises.rm(tmpHome, { recursive: true, force: true });
+    });
+
+    const fresh = new CopilotCliAdapter();
+    const workspacePath = await fresh.getWorkspacePathForDiscoveredPath!(eventsPath);
+    assert.equal(workspacePath, undefined);
+});
+
+// ---------------------------------------------------------------------------
 // discover() against a synthetic ~/.copilot/session-state/ layout
 // ---------------------------------------------------------------------------
 
