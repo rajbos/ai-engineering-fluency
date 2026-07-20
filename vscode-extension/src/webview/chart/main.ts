@@ -289,18 +289,12 @@ function getRollingLabel(): string {
 	return `${w}-${unit} rolling avg`;
 }
 
-function getTimeWindowSuffix(): string {
-	if (currentTimeWindow === 'last30') { return ''; }
-	return ` — ${TIME_WINDOW_LABELS[currentTimeWindow]}`;
-}
-
 function getSessionsChartTitle(): string {
-	const suffix = ` — ${TIME_WINDOW_LABELS[currentTimeWindow]}`;
 	switch (currentSplit) {
-		case 'model': return `Sessions by Model${suffix}`;
-		case 'editor': return `Sessions by Editor${suffix}`;
-		case 'provider': return `Sessions by Provider${suffix}`;
-		default: return `Sessions${suffix}`;
+		case 'model': return 'Sessions by Model';
+		case 'editor': return 'Sessions by Editor';
+		case 'provider': return 'Sessions by Provider';
+		default: return 'Sessions';
 	}
 }
 
@@ -321,16 +315,16 @@ function getChartTitle(): string {
 		if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
 			titleText += ` (${getRollingLabel()})`;
 		}
-		return titleText + getTimeWindowSuffix();
+		return titleText;
 	}
 	if (currentMetric === 'output') {
-		return periodMeta.outputTitle + getTimeWindowSuffix();
+		return periodMeta.outputTitle;
 	}
 	let titleText = periodMeta.title;
 	if (currentDisplayMode === 'rolling' && currentSplit === 'total') {
 		titleText += ` (${getRollingLabel()})`;
 	}
-	return titleText + getTimeWindowSuffix();
+	return titleText;
 }
 
 function getAggregationIndicator(): string {
@@ -894,6 +888,7 @@ function buildBaseOptions(c: ChartColors) {
 		responsive: true, maintainAspectRatio: false,
 		interaction: { mode: 'index' as const, intersect: false },
 		plugins: {
+			title: { display: true, text: TIME_WINDOW_LABELS[currentTimeWindow], color: c.textColor, font: { size: 14, weight: 'bold' }, padding: { top: 4, bottom: 12 } },
 			legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } },
 			tooltip: { backgroundColor: c.bgColor, titleColor: c.textColor, bodyColor: c.textColor, borderColor: c.borderColor, borderWidth: 1, padding: 10, displayColors: true }
 		},
