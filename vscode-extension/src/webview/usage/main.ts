@@ -3925,7 +3925,7 @@ let efficiencyPeriod: EfficiencyPeriodKey = 'last30Days';
 let efficiencySortColumn: EfficiencySortColumn = 'calls';
 let efficiencySortDirection: 'asc' | 'desc' = 'desc';
 let cachedModelEfficiency: Partial<Record<EfficiencyPeriodKey, ModelEfficiencyUsage | undefined>> = {};
-let efficiencyFilterLowUsage = false;
+let efficiencyFilterLowUsage = true;
 
 type EfficiencyColumnDef = {
 	sortKey: EfficiencySortColumn;
@@ -4050,9 +4050,9 @@ function buildModelEfficiencySectionHtml(stats: UsageAnalysisStats): string {
 			<div class="section-subtitle">Compare models on quality and efficiency, not just cost — one-shot edit rate, retries, self-corrections, per-turn cost, and cache hit rate. Retry/self-correction detection needs structured tool-call data, so some editors show token metrics only.</div>
 			<div id="model-efficiency-controls" style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;">${buildEfficiencyPeriodButtonsHtml()}</div>
 			<div style="margin:2px 0 8px 0;">
-				<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;" title="Hides the bottom 25% of models by turn count (Q1 threshold)">
+				<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;" title="Shows only models above the 25th-percentile turn count (Q1). Uncheck to see all models.">
 					<input type="checkbox" id="eff-filter-low-usage"${efficiencyFilterLowUsage ? ' checked' : ''} style="cursor:pointer;">
-					Exclude low-usage models
+					Hide low-usage models
 				</label>
 			</div>
 			<div id="model-efficiency-table">${buildModelEfficiencyTableHtml()}</div>
