@@ -70,6 +70,7 @@ type TodaySessionSummary = {
 	contextWindowLimit?: number;
 	contextReachedTokens?: number;
 	durationMs?: number;
+	activeDurationMs?: number;
 	workspace?: string;
 };
 
@@ -1035,7 +1036,11 @@ const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'editor', label: 'Editor', sortKey: 'editor', align: 'left', render: s => ({ html: escapeHtml(s.editor || 'unknown') }) },
 	{ id: 'workspace', label: 'Workspace', sortKey: 'workspace', align: 'left', cellStyle: 'max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const workspace = escapeHtml(s.workspace || '—'); return { html: workspace, title: workspace }; } },
 	{ id: 'models', label: 'Models', align: 'left', cellStyle: 'font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;', render: s => { const models = s.models.map(m => escapeHtml(getModelDisplayName(m))).join(', ') || '—'; return { html: models, title: models }; } },
-	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => ({ html: formatDurationShort(s.durationMs) }) },
+	{ id: 'durationMs', label: 'Duration', sortKey: 'durationMs', align: 'right', cellStyle: 'white-space:nowrap;', render: s => {
+		const net = s.activeDurationMs ?? s.durationMs;
+		const wallLabel = s.durationMs !== undefined ? `Wall time: ${formatDurationShort(s.durationMs)}` : undefined;
+		return { html: formatDurationShort(net), ...(wallLabel ? { title: wallLabel } : {}) };
+	} },
 	{
 		id: 'lastActivity', label: 'Last Active', sortKey: 'lastActivity', align: 'right', cellStyle: 'white-space:nowrap;',
 		render: s => ({
@@ -1075,7 +1080,7 @@ const _todaySessionColumnComparators: Partial<Record<SessionSortColumn, (a: Toda
 	title: (a, b) => (a.title || '').localeCompare(b.title || ''),
 	editor: (a, b) => (a.editor || '').localeCompare(b.editor || ''),
 	workspace: (a, b) => (a.workspace || '').localeCompare(b.workspace || ''),
-	durationMs: (a, b) => (a.durationMs ?? -1) - (b.durationMs ?? -1),
+	durationMs: (a, b) => (a.activeDurationMs ?? a.durationMs ?? -1) - (b.activeDurationMs ?? b.durationMs ?? -1),
 	lastActivity: (a, b) => (a.lastActivity || '').localeCompare(b.lastActivity || ''),
 };
 
