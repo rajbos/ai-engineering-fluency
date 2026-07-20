@@ -3888,7 +3888,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	): TodaySessionSummary {
 		const modelUsage = sessionData.modelUsage || {};
 		const { inputTok, outputTok, cachedTok } = this._resolveSessionModelTokens(sessionData, modelUsage);
+		// Wall-clock duration (includes idle gaps between turns) — kept for reference/future use.
 		const durationMs = computeSessionDurationMs(sessionData.firstInteraction, sessionData.lastInteraction);
+		// Net/active duration (excludes idle gaps between turns) — this is what's shown as "Duration".
+		const activeDurationMs = analysis.sessionDuration?.activeDurationMs;
 		const workspace = this.resolveSessionWorkspaceName(sessionData, sessionFile);
 		return {
 			title: sessionData.title || null, filePath: sessionFile, interactions,
@@ -3902,6 +3905,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(sessionData.maxRequestInputTokens ? { maxRequestInputTokens: sessionData.maxRequestInputTokens } : {}),
 			...(sessionData.contextTier ? { contextTier: sessionData.contextTier } : {}),
 			...(durationMs !== undefined ? { durationMs } : {}),
+			...(activeDurationMs !== undefined ? { activeDurationMs } : {}),
 			...(workspace ? { workspace } : {}),
 		};
 	}

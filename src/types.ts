@@ -555,8 +555,10 @@ export interface TodaySessionSummary {
   contextWindowLimit?: number;
   /** Last known context fill in tokens (Copilot CLI, from data.db context_current_tokens). */
   contextReachedTokens?: number;
-  /** Session duration in milliseconds (last interaction − first interaction). Absent when not derivable. */
+  /** Wall-clock session duration in milliseconds (last interaction − first interaction), including idle gaps between turns. Absent when not derivable. Kept for reference/future use; prefer `activeDurationMs` for display. */
   durationMs?: number;
+  /** Net ("active") session duration in milliseconds: sum of merged [requestTimestamp, requestTimestamp+totalElapsed] windows, excluding idle gaps between turns. This is the value shown as "Duration" in the Recent Sessions list. Absent when not derivable. */
+  activeDurationMs?: number;
   /** Workspace/repository name the session belongs to. Absent when attribution is unavailable. */
   workspace?: string;
 }

@@ -580,6 +580,8 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 						editor: data.editorSource,
 						models: Object.keys(data.modelUsage),
 						lastActivity: data.lastModified.toISOString(),
+						...(analysis.sessionDuration?.totalDurationMs !== undefined ? { durationMs: analysis.sessionDuration.totalDurationMs } : {}),
+						...(analysis.sessionDuration?.activeDurationMs !== undefined ? { activeDurationMs: analysis.sessionDuration.activeDurationMs } : {}),
 					});
 				}
 			}
