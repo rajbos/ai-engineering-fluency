@@ -300,7 +300,11 @@ function getSessionsChartTitle(): string {
 		case 'model': return 'Sessions by Model';
 		case 'editor': return 'Sessions by Editor';
 		case 'provider': return 'Sessions by Provider';
-		default: return 'Sessions';
+		default: {
+			let title = 'Sessions';
+			if (currentDisplayMode === 'rolling') { title += ` (${getRollingLabel()})`; }
+			return title;
+		}
 	}
 }
 
@@ -489,7 +493,7 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 		mkSplit('split-editor', 'editor', 'By Editor'), mkSplit('split-provider', 'provider', '🏷️ By Provider'),
 		mkSplit('split-repository', 'repository', 'By Repository'), mkSplit('split-language', 'language', 'By Language'),
 		mkSplit('split-taskcategory', 'taskCategory', 'By Task'));
-	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output' && currentMetric !== 'sessions';
+	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output';
 	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicable ? '' : ' hidden'}`, '📈 Rolling Avg');
 	rollingBtn.id = 'view-rolling';
 	const rollingGroup = el('div', 'control-group');
@@ -739,7 +743,7 @@ async function switchMetric(metric: typeof currentMetric, data: InitialChartData
 	if (currentMetric === metric) { return; }
 	clampSplitForMetric(metric);
 	currentMetric = metric;
-	const rollingApplicable = currentSplit === 'total' && metric !== 'output' && metric !== 'sessions';
+	const rollingApplicable = currentSplit === 'total' && metric !== 'output';
 	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
 	vscode.postMessage({ command: 'setViewPreference', metric: currentMetric, split: currentSplit });
 	saveWebviewState();
@@ -914,13 +918,32 @@ function buildBaseOptions(c: ChartColors, periodsReady: boolean) {
 	};
 }
 
+function resolveSessionsDatasets(view: string, period: ChartPeriodData): ModelDataset[] | undefined {
+	if (view === 'sessions-model') { return period.modelSessionsDatasets ?? period.modelDatasets; }
+	if (view === 'sessions-editor') { return period.editorSessionsDatasets ?? period.editorDatasets; }
+	if (view === 'sessions-provider') { return period.providerSessionsDatasets ?? period.billingGroupCostDatasets ?? []; }
+	return undefined;
+}
+
+function buildSessionsTotalDataset(period: ChartPeriodData): any {
+	const isRolling = currentDisplayMode === 'rolling';
+	return {
+		label: isRolling ? getRollingLabel() : 'Sessions',
+		data: isRolling ? computeRollingAverage(period.sessionsData, ROLLING_WINDOW[currentPeriod]) : period.sessionsData,
+		backgroundColor: isRolling ? 'rgba(137, 180, 250, 0.15)' : 'rgba(137, 180, 250, 0.7)',
+		borderColor: 'rgba(137, 180, 250, 1)',
+		borderWidth: isRolling ? 2 : 1,
+		borderRadius: isRolling ? undefined : 4,
+		type: isRolling ? 'line' as const : undefined,
+		tension: isRolling ? 0.4 : undefined,
+		fill: isRolling ? false : undefined
+	};
+}
+
 function buildSessionsViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	const datasets = view === 'sessions-model' ? (period.modelSessionsDatasets ?? period.modelDatasets)
-		: view === 'sessions-editor' ? (period.editorSessionsDatasets ?? period.editorDatasets)
-			: view === 'sessions-provider' ? (period.providerSessionsDatasets ?? period.billingGroupCostDatasets ?? [])
-				: undefined;
+	const datasets = resolveSessionsDatasets(view, period);
 	const isStacked = !!datasets;
-	const seriesDatasets = isStacked ? datasets as ModelDataset[] : [{ label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(137, 180, 250, 0.7)', borderColor: 'rgba(137, 180, 250, 1)', borderWidth: 1, borderRadius: 4 }];
+	const seriesDatasets = isStacked ? datasets as ModelDataset[] : [buildSessionsTotalDataset(period)];
 	return {
 		type: 'bar' as const,
 		data: { labels: period.labels, datasets: seriesDatasets as any },
