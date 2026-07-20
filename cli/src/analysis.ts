@@ -61,7 +61,7 @@ export interface DailyEntry {
 const COPILOT_EDITOR_NAMES = new Set([
 	'VS Code', 'VS Code Insiders', 'VS Code Exploration',
 	'VS Code Server', 'VS Code Server (Insiders)', 'VSCodium',
-	'Visual Studio', 'JetBrains', 'Copilot CLI', 'MS Scout (Copilot CLI)',
+	'Visual Studio', 'JetBrains', 'Copilot CLI', 'Copilot CLI (App)', 'MS Scout (Copilot CLI)',
 ]);
 
 const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [

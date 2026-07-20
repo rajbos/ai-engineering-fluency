@@ -47,6 +47,15 @@ export function isMicrosoftScoutCwd(cwd: string | null | undefined): boolean {
 	return cwd.replace(/\\/g, '/').toLowerCase().includes('/microsoft scout');
 }
 
+/**
+ * Returns true when a session's workspace.yaml `client_name` value indicates it was
+ * started via the Copilot desktop app (which wraps the CLI process), as opposed to the
+ * plain terminal CLI (`github/cli`) or an older session predating this field.
+ */
+export function isCopilotAppClientName(clientName: string | null | undefined): boolean {
+	return clientName === 'github/autopilot';
+}
+
 export interface CliStoreTurn {
 	session_id: string;
 	turn_index: number;

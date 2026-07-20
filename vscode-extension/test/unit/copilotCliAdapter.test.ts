@@ -71,6 +71,35 @@ test('CopilotCliAdapter.getDisplayName: returns MS Scout label for tracked Scout
     }
 });
 
+test('CopilotCliAdapter.getDisplayName: returns Copilot CLI (App) label for tracked app sessions via DB virtual path', () => {
+    const appSessionId = '44444444-4444-4444-4444-444444444444';
+    const appVirtualPath = path.join(os.homedir(), '.copilot', `session-store.db#${appSessionId}`);
+    const appSessionIds = (adapter as unknown as { _appSessionIds: Set<string> })._appSessionIds;
+
+    appSessionIds.add(appSessionId);
+    try {
+        assert.equal(adapter.getDisplayName(appVirtualPath), 'Copilot CLI (App)');
+        assert.equal(adapter.getDisplayName(path.join(os.homedir(), '.copilot', 'session-store.db#other-session')), 'Copilot CLI');
+    } finally {
+        appSessionIds.delete(appSessionId);
+    }
+});
+
+test('CopilotCliAdapter.getDisplayNameForDiscoveredPath: returns Copilot CLI (App) label for tracked app UUID, undefined otherwise', () => {
+    const appUuid = '55555555-5555-5555-5555-555555555555';
+    const eventsPath = path.join(os.homedir(), '.copilot', 'session-state', appUuid, 'events.jsonl');
+    const otherPath = path.join(os.homedir(), '.copilot', 'session-state', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', 'events.jsonl');
+    const appSessionIds = (adapter as unknown as { _appSessionIds: Set<string> })._appSessionIds;
+
+    appSessionIds.add(appUuid);
+    try {
+        assert.equal(adapter.getDisplayNameForDiscoveredPath!(eventsPath), 'Copilot CLI (App)');
+        assert.equal(adapter.getDisplayNameForDiscoveredPath!(otherPath), undefined);
+    } finally {
+        appSessionIds.delete(appUuid);
+    }
+});
+
 test('CopilotCliAdapter: implements IDiscoverableEcosystem', () => {
     assert.ok(isDiscoverable(adapter));
 });
@@ -228,6 +257,55 @@ test('CopilotCliAdapter.discover: marks sessions with Scout workspace.yaml cwd a
         'Scout session should be labelled MS Scout (Copilot CLI)');
     assert.equal(fresh.getDisplayName(regularEventsPath), 'Copilot CLI',
         'Regular CLI session should be labelled Copilot CLI');
+});
+
+test('CopilotCliAdapter.discover: marks sessions with client_name: github/autopilot workspace.yaml as App', async (t) => {
+    const tmpHome = await fs.promises.mkdtemp(path.join(os.tmpdir(), 'cli-home-app-'));
+    const stateDir = path.join(tmpHome, '.copilot', 'session-state');
+    await fs.promises.mkdir(stateDir, { recursive: true });
+
+    const originalHome = process.env.HOME;
+    const originalUserProfile = process.env.USERPROFILE;
+    process.env.HOME = tmpHome;
+    process.env.USERPROFILE = tmpHome;
+
+    t.after(async () => {
+        if (originalHome === undefined) { delete process.env.HOME; } else { process.env.HOME = originalHome; }
+        if (originalUserProfile === undefined) { delete process.env.USERPROFILE; } else { process.env.USERPROFILE = originalUserProfile; }
+        await fs.promises.rm(tmpHome, { recursive: true, force: true });
+    });
+
+    if (os.homedir() !== tmpHome) {
+        t.skip(`os.homedir() doesn't honour env override on this platform (got ${os.homedir()})`);
+        return;
+    }
+
+    // App session: has events.jsonl + workspace.yaml with client_name: github/autopilot
+    const appUuid = 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee';
+    const appDir = path.join(stateDir, appUuid);
+    await fs.promises.mkdir(appDir, { recursive: true });
+    await fs.promises.writeFile(path.join(appDir, 'events.jsonl'), '{"type":"start"}\n');
+    await fs.promises.writeFile(path.join(appDir, 'workspace.yaml'),
+        'cwd: C:\\Users\\me\\code\\my-project\nclient_name: github/autopilot\n');
+
+    // Regular terminal CLI session: client_name: github/cli
+    const cliUuid = 'ffffffff-ffff-ffff-ffff-ffffffffffff';
+    const cliDir = path.join(stateDir, cliUuid);
+    await fs.promises.mkdir(cliDir, { recursive: true });
+    await fs.promises.writeFile(path.join(cliDir, 'events.jsonl'), '{"type":"start"}\n');
+    await fs.promises.writeFile(path.join(cliDir, 'workspace.yaml'),
+        'cwd: C:\\Users\\me\\code\\my-project\nclient_name: github/cli\n');
+
+    const fresh = new CopilotCliAdapter();
+    await fresh.discover(() => { /* noop */ });
+
+    const appEventsPath = path.join(appDir, 'events.jsonl');
+    const cliEventsPath = path.join(cliDir, 'events.jsonl');
+
+    assert.equal(fresh.getDisplayName(appEventsPath), 'Copilot CLI (App)',
+        'App-wrapped session should be labelled Copilot CLI (App)');
+    assert.equal(fresh.getDisplayName(cliEventsPath), 'Copilot CLI',
+        'Terminal CLI session should be labelled Copilot CLI');
 });
 
 test('CopilotCliAdapter.discover: returns empty result when session-state dir does not exist', async (t) => {

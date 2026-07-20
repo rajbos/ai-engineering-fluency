@@ -16,6 +16,7 @@ export const EDITOR_ICON_MAP: Record<string, string> = {
 	'Codex CLI': '🌀',
 	'Continue': '▶️',
 	'Copilot CLI': '🤖',
+	'Copilot CLI (App)': '🤖',
 	'Crush': '🦾',
 	'Cursor': '🖱️',
 	'Devin': '🧠',
