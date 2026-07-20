@@ -3,6 +3,7 @@ import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
 import { createViewStateManager } from '../shared/viewState';
 // CSS imported as text via esbuild
@@ -52,7 +53,7 @@ type ChartPeriodData = {
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
-type ChartTimeWindow = 'today' | 'last7' | 'last30' | 'currentMonth' | 'allTime';
+type ChartTimeWindow = Period;
 
 type InitialChartData = {
 	labels: string[];
@@ -141,14 +142,6 @@ const chartState = createViewStateManager<ChartWebviewState>(vscode, {
 function saveWebviewState(): void {
 	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode });
 }
-
-const TIME_WINDOW_LABELS: Record<ChartTimeWindow, string> = {
-	today: 'Today',
-	last7: 'Last 7 days',
-	last30: 'Last 30 days',
-	currentMonth: 'Current month',
-	allTime: 'All time',
-};
 
 function getWindowStartDate(timeWindow: ChartTimeWindow, now: Date): string {
 	const y = now.getFullYear();
@@ -445,22 +438,19 @@ function buildPeriodToggles(periodsReady: boolean): HTMLElement {
 	return periodToggles;
 }
 
-function buildTimeWindowControl(periodsReady: boolean): HTMLElement {
+function buildTimeWindowControl(data: InitialChartData): HTMLElement {
+	const periodsReady = data.periodsReady !== false;
 	const group = el('div', 'control-group');
-	group.append(el('span', 'control-label', 'Time window:'));
-	const windowSelect = document.createElement('select');
-	windowSelect.id = 'time-window-select';
-	windowSelect.className = 'time-window-select';
-	const windows: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
-	windows.forEach(w => {
-		const option = document.createElement('option');
-		option.value = w;
-		option.textContent = TIME_WINDOW_LABELS[w];
-		if (w === currentTimeWindow) { option.selected = true; }
-		if (w === 'allTime' && !periodsReady) { option.disabled = true; }
-		windowSelect.append(option);
+	const { wrapper } = createPeriodSelector({
+		id: 'time-window-select',
+		selected: currentTimeWindow,
+		disabled: periodsReady ? [] : ['allTime'],
+		disabledTitle: 'Full history is still loading',
+		label: 'Time window:',
+		onChange: (value) => { void switchTimeWindow(value as ChartTimeWindow, data); },
 	});
-	group.append(windowSelect);
+	wrapper.classList.add('chart-time-window');
+	group.append(wrapper);
 	if (!periodsReady) {
 		const loadingNote = el('span', 'loading-note', 'Loading history…');
 		loadingNote.title = 'Full history is still loading. "All time" and weekly/monthly aggregation are not available yet.';
@@ -513,10 +503,9 @@ function buildRollingControl(): HTMLElement {
 
 function buildChartControls(data: InitialChartData): HTMLElement {
 	const controls = el('div', 'chart-controls');
-	const periodsReady = data.periodsReady !== false;
 
 	const scopeRow = el('div', 'chart-controls-row scope-row');
-	scopeRow.append(buildTimeWindowControl(periodsReady), el('div', 'control-group-separator'), buildPeriodToggles(periodsReady), el('div', 'control-group-separator'), buildRollingControl());
+	scopeRow.append(buildTimeWindowControl(data), el('div', 'control-group-separator'), buildPeriodToggles(data.periodsReady !== false), el('div', 'control-group-separator'), buildRollingControl());
 
 	const metricRow = el('div', 'chart-controls-row metric-row');
 	metricRow.append(buildMetricControl(data));
@@ -661,10 +650,6 @@ function wireInteractions(data: InitialChartData): void {
 		const btn = document.getElementById(id);
 		btn?.addEventListener('click', () => { void switchPeriod(period, data); });
 	});
-
-	// Time window selector
-	const timeWindowSelect = document.getElementById('time-window-select') as HTMLSelectElement | null;
-	timeWindowSelect?.addEventListener('change', () => { void switchTimeWindow(timeWindowSelect.value as ChartTimeWindow, data); });
 
 	// Chart metric toggle buttons
 	const metricButtons: Array<{ id: string; metric: typeof currentMetric }> = [
@@ -930,8 +915,8 @@ function getChartColors(): ChartColors {
 
 function buildBaseOptions(c: ChartColors, periodsReady: boolean) {
 	const title = !periodsReady && currentTimeWindow === 'allTime'
-		? `${TIME_WINDOW_LABELS[currentTimeWindow]} (loading history…)`
-		: TIME_WINDOW_LABELS[currentTimeWindow];
+		? `${PERIOD_LABELS[currentTimeWindow]} (loading history…)`
+		: PERIOD_LABELS[currentTimeWindow];
 	return {
 		responsive: true, maintainAspectRatio: false,
 		interaction: { mode: 'index' as const, intersect: false },

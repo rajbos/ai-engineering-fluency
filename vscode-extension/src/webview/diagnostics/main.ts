@@ -2,6 +2,7 @@
 import { navButtonsHtml } from "../shared/buttonConfig";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import { escapeHtml, formatFileSize, getTimeSince, getEditorIcon } from "../shared/formatUtils";
+import { createPeriodSelector, type Period } from "../shared/periodSelector";
 import { createViewStateManager } from "../shared/viewState";
 // CSS imported as text via esbuild
 import themeStyles from "../shared/theme.css";
@@ -225,6 +226,7 @@ let storedDetailedFiles: SessionFileDetails[] = [];
 let isLoading = true;
 let currentBackendInfo: BackendStorageInfo | undefined;
 let currentGithubAuth: GitHubAuthStatus | undefined;
+let currentModelUsageTimeRange = "all";
 
 function removeSessionFilesSection(reportText: string): string {
   return reportText.replace(SESSION_FILES_SECTION_REGEX, "");
@@ -992,20 +994,30 @@ function renderFolderAnalysisResults(
     </div>`;
 }
 
+const MODEL_USAGE_PERIOD_ORDER: Period[] = ["allTime", "lastMonth", "currentMonth", "thisWeek", "today"];
+const MODEL_USAGE_PERIOD_TO_TIME_RANGE: Record<string, string> = {
+  today: "today",
+  thisWeek: "week",
+  currentMonth: "month",
+  lastMonth: "lastMonth",
+  allTime: "all",
+  yesterday: "yesterday",
+};
+const MODEL_USAGE_TIME_RANGE_TO_PERIOD: Record<string, string> = {
+  today: "today",
+  week: "thisWeek",
+  month: "currentMonth",
+  lastMonth: "lastMonth",
+  all: "allTime",
+  yesterday: "yesterday",
+};
+
 function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessions: boolean = false): string {
   const editorStats = getEditorStats(detailedFiles);
   const editorOptions = Object.keys(editorStats).sort()
     .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
     .join("");
   const statusText = isLoadingSessions ? "⏳ Loading sessions…" : "";
-  const timeRangeOptions = [
-    { value: "all", label: "🕐 All Time" },
-    { value: "lastMonth", label: "📅 Last Month" },
-    { value: "month", label: "📆 Current Month" },
-    { value: "week", label: "🗓️ This Week" },
-    { value: "today", label: "☀️ Today" },
-    { value: "yesterday", label: "🌙 Yesterday" },
-  ].map((o) => `<option value="${o.value}">${o.label}</option>`).join("");
   return `
     <div class="info-box">
       <div class="info-box-title">🧮 Model Usage Breakdown</div>
@@ -1023,14 +1035,34 @@ function renderModelUsageTab(detailedFiles: SessionFileDetails[], isLoadingSessi
           <option value="all">🌐 All Editors</option>
           ${editorOptions}
         </select>
-        <select id="model-usage-time-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
-          ${timeRangeOptions}
-        </select>
+        <span id="model-usage-time-selector"></span>
         <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${escapeHtml(statusText)}</span>
       </div>
     </div>
     <div id="model-usage-results"></div>
   `;
+}
+
+function renderModelUsageTimeSelector(disabled: boolean = false): void {
+  const wrapper = document.getElementById("model-usage-time-selector");
+  if (!wrapper) { return; }
+  wrapper.replaceChildren();
+  const selectedPeriod = MODEL_USAGE_TIME_RANGE_TO_PERIOD[currentModelUsageTimeRange] ?? "allTime";
+  const { select } = createPeriodSelector({
+    id: "model-usage-time-select",
+    selected: selectedPeriod,
+    periods: MODEL_USAGE_PERIOD_ORDER,
+    extraOptions: [{ value: "yesterday", label: "Yesterday" }],
+    label: "",
+    onChange: (value) => {
+      const timeRange = MODEL_USAGE_PERIOD_TO_TIME_RANGE[value];
+      if (!timeRange) { return; }
+      currentModelUsageTimeRange = timeRange;
+      triggerModelUsageAnalysis();
+    },
+  });
+  select.disabled = disabled;
+  wrapper.append(select);
 }
 
 function buildModelUsageTableRow(row: ModelUsageRow, showCache1h: boolean): string {
@@ -1692,10 +1724,9 @@ function setupFolderAnalyzerHandlers(): void {
 
 function triggerModelUsageAnalysis(): void {
   const select = document.getElementById("model-usage-editor-select") as HTMLSelectElement | null;
-  const timeSelect = document.getElementById("model-usage-time-select") as HTMLSelectElement | null;
   if (!select || select.disabled) { return; }
   const editor = select.value || "all";
-  const timeRange = timeSelect?.value || "all";
+  const timeRange = currentModelUsageTimeRange || "all";
 
   const resultsDiv = document.getElementById("model-usage-results");
   if (resultsDiv) {
@@ -1713,14 +1744,15 @@ function setupModelUsageHandlers(): void {
   document.getElementById("model-usage-editor-select")?.addEventListener("change", () => {
     triggerModelUsageAnalysis();
   });
-  document.getElementById("model-usage-time-select")?.addEventListener("change", () => {
-    triggerModelUsageAnalysis();
-  });
 }
 
 function handleModelUsageResult(message: DiagMessage): void {
   const resultsDiv = document.getElementById("model-usage-results");
   if (!resultsDiv) { return; }
+  if (typeof message.timeRange === "string" && message.timeRange) {
+    currentModelUsageTimeRange = message.timeRange;
+    renderModelUsageTimeSelector(false);
+  }
   if (message.stillLoading) {
     resultsDiv.innerHTML = `
       <div class="info-box" style="margin-top: 12px;">
@@ -2183,8 +2215,7 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
     modelUsageSelect.innerHTML = `<option value="all">🌐 All Editors</option>${editorOptions}`;
     modelUsageSelect.disabled = false;
   }
-  const modelUsageTimeSelect = document.getElementById("model-usage-time-select") as HTMLSelectElement | null;
-  if (modelUsageTimeSelect) { modelUsageTimeSelect.disabled = false; }
+  renderModelUsageTimeSelector(false);
   const modelUsageStatus = document.getElementById("model-usage-status");
   if (modelUsageStatus) { modelUsageStatus.textContent = ""; }
 
@@ -2924,6 +2955,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupGitHubAuthHandlers();
   setupFolderAnalyzerHandlers();
   setupModelUsageHandlers();
+  renderModelUsageTimeSelector(isLoading);
   setupButtonHandlers();
   setupDisplaySettingHandlers();
   setupToolAnalysisSortHandlers();
