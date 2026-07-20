@@ -1132,4 +1132,7 @@
   ,"mcp__dart__pub_dev_search": "Dart MCP: Pub Dev Search"
   ,"mcp__dart__resolve_workspace_symbol": "Dart MCP: Resolve Workspace Symbol"
   ,"mcp__dart__stop_app": "Dart MCP: Stop App"
+  ,"mcp_github_mcp_s2_add_issue_comment": "GitHub MCP (Remote): Add Issue Comment"
+  ,"mcp_github_mcp_s2_issue_read": "GitHub MCP (Remote): Issue Read"
+  ,"mcp_github_mcp_s2_issue_write": "GitHub MCP (Remote): Issue Write"
 }
