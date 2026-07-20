@@ -46,6 +46,9 @@ type ChartPeriodData = {
 	avgLocPerPeriod?: number;
 	editorCostDatasets?: ModelDataset[];
 	billingGroupCostDatasets?: ModelDataset[];
+	modelSessionsDatasets?: ModelDataset[];
+	editorSessionsDatasets?: ModelDataset[];
+	providerSessionsDatasets?: ModelDataset[];
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
@@ -245,6 +248,9 @@ function copyFilteredDatasetFields(source: ChartPeriodData, target: ChartPeriodD
 		{ key: 'locRepositoryDatasets', source: source.locRepositoryDatasets },
 		{ key: 'editorCostDatasets', source: source.editorCostDatasets },
 		{ key: 'billingGroupCostDatasets', source: source.billingGroupCostDatasets },
+		{ key: 'modelSessionsDatasets', source: source.modelSessionsDatasets },
+		{ key: 'editorSessionsDatasets', source: source.editorSessionsDatasets },
+		{ key: 'providerSessionsDatasets', source: source.providerSessionsDatasets },
 		{ key: 'taskCategoryDatasets', source: source.taskCategoryDatasets },
 	];
 	for (const { key, source: ds } of datasetFields) {
@@ -897,9 +903,9 @@ function buildBaseOptions(c: ChartColors) {
 }
 
 function buildSessionsViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	const datasets = view === 'sessions-model' ? period.modelDatasets
-		: view === 'sessions-editor' ? period.editorDatasets
-			: view === 'sessions-provider' ? (period.billingGroupCostDatasets ?? [])
+	const datasets = view === 'sessions-model' ? (period.modelSessionsDatasets ?? period.modelDatasets)
+		: view === 'sessions-editor' ? (period.editorSessionsDatasets ?? period.editorDatasets)
+			: view === 'sessions-provider' ? (period.providerSessionsDatasets ?? period.billingGroupCostDatasets ?? [])
 				: undefined;
 	const isStacked = !!datasets;
 	const seriesDatasets = isStacked ? datasets as ModelDataset[] : [{ label: 'Sessions', data: period.sessionsData, backgroundColor: 'rgba(137, 180, 250, 0.7)', borderColor: 'rgba(137, 180, 250, 1)', borderWidth: 1, borderRadius: 4 }];

@@ -32,6 +32,8 @@ export interface ModelUsage {
      * the standard `cacheCreationCostPerMillion` (5-minute) rate.
      */
     cacheCreation1hTokens?: number;
+    /** Number of sessions that used this model in the aggregated period. */
+    sessions?: number;
   };
 }
 
@@ -211,6 +213,12 @@ export interface ChartPeriodData {
    * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
    */
   billingGroupCostDatasets?: object[];
+  /** Session-count datasets split by model — one stacked-bar dataset per model. */
+  modelSessionsDatasets?: object[];
+  /** Session-count datasets split by editor — one stacked-bar dataset per editor. */
+  editorSessionsDatasets?: object[];
+  /** Session-count datasets split by billing provider — one stacked-bar dataset per provider group. */
+  providerSessionsDatasets?: object[];
   /** Token datasets split by task category (e.g. "Coding", "Debugging", "Testing") — one stacked-bar dataset per category. */
   taskCategoryDatasets?: object[];
 }

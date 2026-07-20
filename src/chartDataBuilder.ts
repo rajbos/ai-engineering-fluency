@@ -253,6 +253,74 @@ function buildModelDatasets(entries: DailyTokenStats[], deps: ChartDataBuilderDe
 	return datasets;
 }
 
+/** Builds session-count datasets split by model. */
+function buildModelSessionsDatasets(entries: DailyTokenStats[]) {
+	const allModels = new Set<string>();
+	entries.forEach(e => Object.keys(e.modelUsage).forEach(m => allModels.add(m)));
+	const modelSessionTotals = new Map<string, number>();
+	for (const model of allModels) {
+		const total = entries.reduce((sum, e) => sum + (e.modelUsage[model]?.sessions ?? 0), 0);
+		modelSessionTotals.set(model, total);
+	}
+	const sortedModels = Array.from(allModels).sort((a, b) => (modelSessionTotals.get(b) || 0) - (modelSessionTotals.get(a) || 0));
+	const topModels = sortedModels.slice(0, 5);
+	const otherModels = sortedModels.slice(5);
+	const datasets = topModels.map((model, idx) => {
+		const color = getModelColor(idx);
+		return { label: getModelDisplayName(model), data: entries.map(e => e.modelUsage[model]?.sessions ?? 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+	if (otherModels.length > 0) {
+		datasets.push({ label: 'Other models', data: entries.map(e => otherModels.reduce((sum, m) => sum + (e.modelUsage[m]?.sessions ?? 0), 0)), backgroundColor: 'rgba(150, 150, 150, 0.5)', borderColor: 'rgba(150, 150, 150, 0.8)', borderWidth: 1 });
+	}
+	return datasets;
+}
+
+/** Builds session-count datasets split by editor. */
+function buildEditorSessionsDatasets(entries: DailyTokenStats[]) {
+	const allEditors = new Set<string>();
+	entries.forEach(e => Object.keys(e.editorUsage).forEach(ed => allEditors.add(ed)));
+	const editorSessionTotals = new Map<string, number>();
+	for (const editor of allEditors) {
+		const total = entries.reduce((sum, e) => sum + (e.editorUsage[editor]?.sessions ?? 0), 0);
+		editorSessionTotals.set(editor, total);
+	}
+	const sortedEditors = Array.from(allEditors).sort((a, b) => (editorSessionTotals.get(b) || 0) - (editorSessionTotals.get(a) || 0));
+	return sortedEditors.map((editor, idx) => {
+		const color = getModelColor(idx);
+		return { label: editor, data: entries.map(e => e.editorUsage[editor]?.sessions ?? 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+}
+
+/** Aggregates per-editor-model session counts up to billing provider groups. */
+function aggregateBillingGroupSessions(entry: DailyTokenStats): Record<string, number> {
+	const result: Record<string, number> = {};
+	const editorModelUsage = entry.editorModelUsage;
+	if (!editorModelUsage) { return result; }
+	for (const [editor, modelUsage] of Object.entries(editorModelUsage)) {
+		for (const [modelId, usage] of Object.entries(modelUsage)) {
+			const group = getBillingGroup(editor, modelId);
+			result[group] = (result[group] ?? 0) + (usage.sessions ?? 0);
+		}
+	}
+	return result;
+}
+
+/** Builds session-count datasets split by billing provider. */
+function buildProviderSessionsDatasets(entries: DailyTokenStats[]) {
+	const allGroups = new Set<string>();
+	entries.forEach(e => Object.keys(aggregateBillingGroupSessions(e)).forEach(g => allGroups.add(g)));
+	const groupTotals = new Map<string, number>();
+	for (const group of allGroups) {
+		const total = entries.reduce((sum, e) => sum + (aggregateBillingGroupSessions(e)[group] ?? 0), 0);
+		groupTotals.set(group, total);
+	}
+	const sortedGroups = Array.from(allGroups).sort((a, b) => (groupTotals.get(b) || 0) - (groupTotals.get(a) || 0));
+	return sortedGroups.map((group, idx) => {
+		const color = getModelColor(idx);
+		return { label: group, data: entries.map(e => aggregateBillingGroupSessions(e)[group] ?? 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+}
+
 /**
  * Builds cost datasets split by editor/hosting surface.
  * Each dataset holds per-bucket estimated costs for one editor type, using the
@@ -389,13 +457,16 @@ function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	});
 	const editorCostDatasets = buildEditorCostDatasets(entries, deps);
 	const billingGroupCostDatasets = buildBillingGroupCostDatasets(entries, deps);
+	const modelSessionsDatasets = buildModelSessionsDatasets(entries);
+	const editorSessionsDatasets = buildEditorSessionsDatasets(entries);
+	const providerSessionsDatasets = buildProviderSessionsDatasets(entries);
 	const allTaskCategories = new Set<string>();
 	entries.forEach(e => Object.keys(e.taskCategoryUsage ?? {}).forEach(tc => allTaskCategories.add(tc)));
 	const taskCategoryDatasets = Array.from(allTaskCategories).map((category, idx) => {
 		const color = getModelColor(idx);
 		return { label: category, data: entries.map(e => e.taskCategoryUsage?.[category]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
 	});
-	return { labels, periodKeys, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, taskCategoryDatasets };
+	return { labels, periodKeys, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, modelSessionsDatasets, editorSessionsDatasets, providerSessionsDatasets, taskCategoryDatasets };
 }
 
 function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilderDeps) {
