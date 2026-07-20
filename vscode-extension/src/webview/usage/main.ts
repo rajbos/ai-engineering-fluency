@@ -1242,7 +1242,7 @@ function renderSessionsLookbackSelector(): void {
 		disabledTitle: 'All-time sessions are not loaded yet',
 		label: '',
 		onChange: (value) => {
-			sessionsLookback = value;
+			sessionsLookback = value as Period;
 			refreshSessionsPanelBody();
 		},
 	});
@@ -4067,9 +4067,9 @@ function renderModelEfficiencyPeriodSelector(): void {
 		disabledTitle: 'Not available for model efficiency',
 		label: '',
 		onChange: (value) => {
-			const dataKey = EFFICIENCY_PERIOD_TO_DATA_KEY[value];
+			const dataKey = EFFICIENCY_PERIOD_TO_DATA_KEY[value as Period];
 			if (!dataKey) { return; }
-			efficiencySelectedPeriod = value;
+			efficiencySelectedPeriod = value as Period;
 			efficiencyPeriod = dataKey;
 			rerenderModelEfficiencyTable();
 		},

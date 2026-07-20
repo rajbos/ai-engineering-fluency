@@ -1,7 +1,7 @@
 import { el } from './domUtils';
 
-/** Canonical time-window periods used across the extension's webviews. */
-export type Period = 'today' | 'last7' | 'last30' | 'currentMonth' | 'allTime';
+/** Time-window periods supported by the shared period selector. */
+export type Period = 'today' | 'last7' | 'last30' | 'currentMonth' | 'lastMonth' | 'thisWeek' | 'allTime';
 
 /** Human-readable labels for each period, matching the Chart time-window dropdown. */
 export const PERIOD_LABELS: Record<Period, string> = {
@@ -9,25 +9,43 @@ export const PERIOD_LABELS: Record<Period, string> = {
 	last7: 'Last 7 days',
 	last30: 'Last 30 days',
 	currentMonth: 'Current month',
+	lastMonth: 'Previous month',
+	thisWeek: 'This week',
 	allTime: 'All time',
 };
 
-/** Ordered list of all canonical periods. */
-export const ALL_PERIODS: Period[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
+/** Ordered list of the canonical periods used by default. */
+export const CANONICAL_PERIODS: Period[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
+
+/** Ordered list of every known period, including extras such as Previous month / This week. */
+export const ALL_PERIODS: Period[] = ['today', 'last7', 'last30', 'currentMonth', 'lastMonth', 'thisWeek', 'allTime'];
+
+export type PeriodSelectorExtraOption = {
+	value: string;
+	label: string;
+	/** When true the option is visible but cannot be selected. */
+	disabled?: boolean;
+	/** Optional tooltip for this option. */
+	title?: string;
+};
 
 export type PeriodSelectorOptions = {
 	/** Value currently selected. */
-	selected: Period;
-	/** Periods that should be visible but unselectable. */
+	selected: string;
+	/** Which known periods to show and in which order. Defaults to the canonical 5. */
+	periods?: Period[];
+	/** Extra ad-hoc options appended after the known periods (e.g. "Yesterday"). */
+	extraOptions?: PeriodSelectorExtraOption[];
+	/** Known periods that should be visible but unselectable. */
 	disabled?: Period[] | Set<Period>;
-	/** Optional tooltip shown on disabled options. */
+	/** Optional tooltip shown on disabled known periods. */
 	disabledTitle?: string;
 	/** Label shown before the dropdown. Pass an empty string to omit the label. */
 	label?: string;
 	/** `id` for the underlying `<select>`. */
 	id?: string;
-	/** Called whenever the user selects a new period. */
-	onChange: (value: Period) => void;
+	/** Called whenever the user selects a new value. */
+	onChange: (value: string) => void;
 };
 
 export type PeriodSelectorResult = {
@@ -37,12 +55,18 @@ export type PeriodSelectorResult = {
 	select: HTMLSelectElement;
 };
 
+function setOptionSelected(option: HTMLOptionElement, value: string, selected: string): void {
+	if (value === selected) {
+		option.selected = true;
+	}
+}
+
 /**
  * Creates a reusable period dropdown styled consistently across webviews.
  *
- * The dropdown always shows the canonical periods from the Chart time-window
- * selector. Consumers can disable individual periods (e.g. "All time" when
- * historical data is still loading).
+ * By default the dropdown shows the canonical Chart time-window periods.
+ * Consumers can supply a custom period list, disable periods (e.g. "All time"
+ * when historical data is still loading), and append extra options.
  */
 export function createPeriodSelector(options: PeriodSelectorOptions): PeriodSelectorResult {
 	const wrapper = el('div', 'period-selector');
@@ -73,13 +97,12 @@ export function createPeriodSelector(options: PeriodSelectorOptions): PeriodSele
 	select.style.minHeight = '24px';
 
 	const disabledSet = new Set<Period>(options.disabled ?? []);
-	for (const period of ALL_PERIODS) {
+	const periods = options.periods ?? CANONICAL_PERIODS;
+	for (const period of periods) {
 		const option = document.createElement('option');
 		option.value = period;
 		option.textContent = PERIOD_LABELS[period];
-		if (period === options.selected) {
-			option.selected = true;
-		}
+		setOptionSelected(option, period, options.selected);
 		if (disabledSet.has(period)) {
 			option.disabled = true;
 			if (options.disabledTitle) {
@@ -89,8 +112,22 @@ export function createPeriodSelector(options: PeriodSelectorOptions): PeriodSele
 		select.append(option);
 	}
 
+	for (const extra of options.extraOptions ?? []) {
+		const option = document.createElement('option');
+		option.value = extra.value;
+		option.textContent = extra.label;
+		if (extra.title) {
+			option.title = extra.title;
+		}
+		setOptionSelected(option, extra.value, options.selected);
+		if (extra.disabled) {
+			option.disabled = true;
+		}
+		select.append(option);
+	}
+
 	select.addEventListener('change', () => {
-		options.onChange(select.value as Period);
+		options.onChange(select.value);
 	});
 
 	wrapper.append(select);

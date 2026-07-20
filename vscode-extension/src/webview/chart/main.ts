@@ -447,7 +447,7 @@ function buildTimeWindowControl(data: InitialChartData): HTMLElement {
 		disabled: periodsReady ? [] : ['allTime'],
 		disabledTitle: 'Full history is still loading',
 		label: 'Time window:',
-		onChange: (value) => { void switchTimeWindow(value, data); },
+		onChange: (value) => { void switchTimeWindow(value as ChartTimeWindow, data); },
 	});
 	wrapper.classList.add('chart-time-window');
 	group.append(wrapper);
