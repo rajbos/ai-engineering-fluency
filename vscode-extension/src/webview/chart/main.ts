@@ -966,16 +966,34 @@ function buildSessionsTotalDataset(period: ChartPeriodData): any {
 	};
 }
 
+function buildSessionsProjectionDataset(period: ChartPeriodData): any | null {
+	const lastIdx = period.sessionsData.length - 1;
+	if (lastIdx < 0) { return null; }
+	const projExtra = computeProjectionExtra(period.sessionsData[lastIdx], getCurrentPeriodFraction(currentPeriod));
+	if (projExtra === null) { return null; }
+	return {
+		label: PROJECTION_LABELS[currentPeriod],
+		data: period.sessionsData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0),
+		backgroundColor: 'rgba(137, 180, 250, 0.25)',
+		borderColor: 'rgba(137, 180, 250, 0.5)',
+		borderWidth: 1
+	};
+}
+
 function buildSessionsViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
 	const datasets = resolveSessionsDatasets(view, period);
 	const isStacked = !!datasets;
-	const seriesDatasets = isStacked ? datasets as ModelDataset[] : [buildSessionsTotalDataset(period)];
+	const isRolling = !isStacked && currentDisplayMode === 'rolling';
+	const projDs = !isStacked && !isRolling ? buildSessionsProjectionDataset(period) : null;
+	const showLegend = isStacked || !!projDs;
+	const stackAxes = isStacked || !!projDs;
+	const seriesDatasets = isStacked ? datasets as ModelDataset[] : [buildSessionsTotalDataset(period), ...(projDs ? [projDs] : [])];
 	return {
 		type: 'bar' as const,
 		data: { labels: period.labels, datasets: seriesDatasets as any },
-		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { display: isStacked, position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } }, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` ${ctx.dataset.label}: ${Number(ctx.parsed.y).toLocaleString()} sessions` } } },
-			scales: { x: { stacked: isStacked, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
-				y: { stacked: isStacked, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
+		options: { ...baseOptions, plugins: { ...baseOptions.plugins, legend: { display: showLegend, position: 'top' as const, labels: { color: c.textColor, font: { size: 12 } } }, tooltip: { ...baseOptions.plugins.tooltip, callbacks: { label: (ctx: any) => ` ${ctx.dataset.label}: ${Number(ctx.parsed.y).toLocaleString()} sessions` } } },
+			scales: { x: { stacked: stackAxes, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { stacked: stackAxes, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => Number(value).toLocaleString() }, title: { display: true, text: 'Sessions', color: c.textColor, font: { size: 12, weight: 'bold' } } }
 			}
 		}
 	};
