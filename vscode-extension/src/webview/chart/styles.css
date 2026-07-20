@@ -179,19 +179,22 @@ body {
 }
 
 .period-controls .toggle {
-	font-size: 11px;
-	padding: 4px 9px;
+	padding: 6px 10px;
 }
 
 .toggle {
 	background: var(--button-secondary-bg);
 	border: 1px solid var(--border-subtle);
 	color: var(--text-primary);
-	padding: 8px 12px;
+	padding: 6px 12px;
 	border-radius: 6px;
 	font-size: 12px;
 	cursor: pointer;
 	transition: all 0.15s ease;
+	min-height: 30px;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
 }
 
 .toggle.active {
@@ -255,10 +258,11 @@ body {
 	border: 1px solid var(--border-subtle);
 	color: var(--text-primary);
 	border-radius: 6px;
-	padding: 5px 10px;
+	padding: 6px 10px;
 	font-size: 12px;
 	cursor: pointer;
 	outline: none;
+	min-height: 30px;
 }
 
 .time-window-select:focus {
