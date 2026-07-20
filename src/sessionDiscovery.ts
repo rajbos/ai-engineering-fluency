@@ -154,7 +154,8 @@ export class SessionDiscovery {
 	}
 
 	private async tryGetSampleDataFiles(now: number): Promise<string[] | undefined> {
-		const sampleDir = this.deps.sampleDataDirectoryOverride?.()
+		const sampleDir = process.env.COPILOT_TEST_DATA_PATH
+			?? this.deps.sampleDataDirectoryOverride?.()
 			?? vscode.workspace.getConfiguration('aiEngineeringFluency').get<string>('sampleDataDirectory');
 		if (!sampleDir || sampleDir.trim().length === 0) { return undefined; }
 		const resolvedSampleDir = sampleDir.trim();

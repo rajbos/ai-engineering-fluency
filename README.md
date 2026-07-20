@@ -53,6 +53,10 @@ Real-time token usage in the status bar, fluency score dashboard, usage analysis
 
 [![Install - VS Code](https://img.shields.io/badge/Install-VS%20Code-007ACC?logo=visualstudiocode)](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency) [![VS Code installs](https://badgen.net/vs-marketplace/i/RobBos.ai-engineering-fluency)](https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency) [![Install - Windsurf (Open VSX)](https://img.shields.io/badge/Install-Windsurf-00B4D8?logo=open-vsx)](https://open-vsx.org/extension/RobBos/ai-engineering-fluency) [![Open VSX installs](https://img.shields.io/open-vsx/dt/RobBos/ai-engineering-fluency?label=Open%20VSX%20installs)](https://open-vsx.org/extension/RobBos/ai-engineering-fluency)
 
+### Generating Screenshots
+
+The extension includes test data and automation tools for generating documentation screenshots. See [docs/SCREENSHOTS.md](docs/SCREENSHOTS.md) for complete instructions.
+
 ```bash
 # Install from the VS Code Marketplace
 ext install RobBos.ai-engineering-fluency
