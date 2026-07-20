@@ -1791,9 +1791,10 @@ test('parseCodeWorkspaceFolders: returns empty array when folders key is missing
 // ── resolveSessionWorkspaceName ──────────────────────────────────────────
 
 test('resolveSessionWorkspaceName: prefers workspaceFolderPath over repository', () => {
+    const workspaceFolderPath = nodePath.join('C:', 'Users', 'me', 'code', 'my-project');
     const name = resolveSessionWorkspaceName(
-        { workspaceFolderPath: 'C:\\Users\\me\\code\\my-project', repository: 'owner/repo' },
-        'C:\\Users\\me\\.copilot\\session-store.db#session-id'
+        { workspaceFolderPath, repository: 'owner/repo' },
+        nodePath.join('C:', 'Users', 'me', '.copilot', 'session-store.db#session-id')
     );
     assert.equal(name, 'my-project');
 });
