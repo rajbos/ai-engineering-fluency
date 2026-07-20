@@ -445,12 +445,9 @@ function buildPeriodToggles(periodsReady: boolean): HTMLElement {
 	return periodToggles;
 }
 
-function buildChartControls(data: InitialChartData): HTMLElement {
-	const toggles = el('div', 'chart-controls');
-	const periodsReady = data.periodsReady !== false;
-
-	const windowGroup = el('div', 'control-group');
-	windowGroup.append(el('span', 'control-label', 'Time window:'));
+function buildTimeWindowControl(periodsReady: boolean): HTMLElement {
+	const group = el('div', 'control-group');
+	group.append(el('span', 'control-label', 'Time window:'));
 	const windowSelect = document.createElement('select');
 	windowSelect.id = 'time-window-select';
 	windowSelect.className = 'time-window-select';
@@ -463,14 +460,18 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 		if (w === 'allTime' && !periodsReady) { option.disabled = true; }
 		windowSelect.append(option);
 	});
-	windowGroup.append(windowSelect);
+	group.append(windowSelect);
 	if (!periodsReady) {
 		const loadingNote = el('span', 'loading-note', 'Loading history…');
 		loadingNote.title = 'Full history is still loading. "All time" and weekly/monthly aggregation are not available yet.';
-		windowGroup.append(loadingNote);
+		group.append(loadingNote);
 	}
+	return group;
+}
 
-	const metricGroup = el('div', 'control-group');
+function buildMetricControl(data: InitialChartData): HTMLElement {
+	const group = el('div', 'control-group');
+	group.append(el('span', 'control-label', 'Metric:'));
 	const tokensBtn = el('button', `toggle${currentMetric === 'tokens' ? ' active' : ''}`, 'Tokens');
 	tokensBtn.id = 'metric-tokens';
 	const outputBtn = el('button', `toggle${currentMetric === 'output' ? ' active' : ''}${!data.hasLocData ? ' dim' : ''}`, '✏️ Output');
@@ -480,8 +481,13 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 	costBtn.id = 'metric-cost';
 	const sessionsBtn = el('button', `toggle${currentMetric === 'sessions' ? ' active' : ''}`, '📊 Sessions');
 	sessionsBtn.id = 'metric-sessions';
-	metricGroup.append(tokensBtn, outputBtn, costBtn, sessionsBtn);
-	const splitGroup = el('div', 'control-group');
+	group.append(tokensBtn, outputBtn, costBtn, sessionsBtn);
+	return group;
+}
+
+function buildSplitControl(): HTMLElement {
+	const group = el('div', 'control-group');
+	group.append(el('span', 'control-label', 'Split:'));
 	const mkSplit = (id: string, split: string, label: string) => {
 		const supported = isComboSupported(currentMetric, split);
 		const btn = el('button', `toggle${currentSplit === split ? ' active' : ''}${!supported ? ' disabled' : ''}`, label);
@@ -489,17 +495,34 @@ function buildChartControls(data: InitialChartData): HTMLElement {
 		if (!supported) { (btn as HTMLButtonElement).disabled = true; btn.title = `Not available for ${currentMetric} metric`; }
 		return btn;
 	};
-	splitGroup.append(mkSplit('split-total', 'total', 'Total'), mkSplit('split-model', 'model', 'By Model'),
+	group.append(mkSplit('split-total', 'total', 'Total'), mkSplit('split-model', 'model', 'By Model'),
 		mkSplit('split-editor', 'editor', 'By Editor'), mkSplit('split-provider', 'provider', '🏷️ By Provider'),
 		mkSplit('split-repository', 'repository', 'By Repository'), mkSplit('split-language', 'language', 'By Language'),
 		mkSplit('split-taskcategory', 'taskCategory', 'By Task'));
+	return group;
+}
+
+function buildRollingControl(): HTMLElement {
+	const group = el('div', 'control-group');
 	const rollingApplicable = currentSplit === 'total' && currentMetric !== 'output';
 	const rollingBtn = el('button', `toggle${currentDisplayMode === 'rolling' ? ' active' : ''}${rollingApplicable ? '' : ' hidden'}`, '📈 Rolling Avg');
 	rollingBtn.id = 'view-rolling';
-	const rollingGroup = el('div', 'control-group');
-	rollingGroup.append(rollingBtn);
-	toggles.append(windowGroup, el('div', 'control-group-separator'), metricGroup, el('div', 'control-group-separator'), splitGroup, el('div', 'control-group-separator'), rollingGroup);
-	return toggles;
+	group.append(rollingBtn);
+	return group;
+}
+
+function buildChartControls(data: InitialChartData): HTMLElement {
+	const controls = el('div', 'chart-controls');
+	const periodsReady = data.periodsReady !== false;
+
+	const scopeRow = el('div', 'chart-controls-row scope-row');
+	scopeRow.append(buildTimeWindowControl(periodsReady), el('div', 'control-group-separator'), buildPeriodToggles(periodsReady));
+
+	const viewRow = el('div', 'chart-controls-row view-row');
+	viewRow.append(buildMetricControl(data), el('div', 'control-group-separator'), buildSplitControl(), el('div', 'control-group-separator'), buildRollingControl());
+
+	controls.append(scopeRow, viewRow);
+	return controls;
 }
 
 function renderLayout(data: InitialChartData): void {
@@ -516,7 +539,7 @@ function renderLayout(data: InitialChartData): void {
 	const editorCards = buildEditorCards(data.editorTotalsMap);
 	if (editorCards) { summarySection.append(editorCards); }
 	const chartSectionHeader = el('div', 'chart-section-header');
-	chartSectionHeader.append(iconHeading('h3', 'graph-line', 'Charts'), buildPeriodToggles(data.periodsReady !== false));
+	chartSectionHeader.append(iconHeading('h3', 'graph-line', 'Charts'));
 	const canvasWrap = el('div', 'canvas-wrap');
 	const canvas = document.createElement('canvas'); canvas.id = 'token-chart'; canvasWrap.append(canvas);
 	const heatmapContainer = el('div', 'heatmap-container hidden');

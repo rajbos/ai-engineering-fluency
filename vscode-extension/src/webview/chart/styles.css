@@ -120,11 +120,22 @@ body {
 
 .chart-controls {
 	display: flex;
+	flex-direction: column;
+	gap: 10px;
+	margin-bottom: 12px;
+}
+
+.chart-controls-row {
+	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
-	gap: 12px;
-	margin-bottom: 8px;
-	justify-content: center;
+	gap: 10px;
+	justify-content: flex-start;
+}
+
+.scope-row {
+	padding-bottom: 10px;
+	border-bottom: 1px solid var(--border-subtle);
 }
 
 .control-group {
