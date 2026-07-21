@@ -1,9 +1,9 @@
-"use strict";(()=>{var pn=Object.defineProperty;var b=(t,e,o)=>()=>{if(o)throw o[0];try{return t&&(e=t(t=0)),e}catch(n){throw o=[n],n}};var un=(t,e)=>{for(var o in e)pn(t,o,{get:e[o],enumerable:!0})};var Lt,Bt,oe,Qe,gt,Dt,J,to,ne,se=b(()=>{Lt=globalThis,Bt=Lt.ShadowRoot&&(Lt.ShadyCSS===void 0||Lt.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,oe=Symbol(),Qe=new WeakMap,gt=class{constructor(e,o,n){if(this._$cssResult$=!0,n!==oe)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=e,this.t=o}get styleSheet(){let e=this.o,o=this.t;if(Bt&&e===void 0){let n=o!==void 0&&o.length===1;n&&(e=Qe.get(o)),e===void 0&&((this.o=e=new CSSStyleSheet).replaceSync(this.cssText),n&&Qe.set(o,e))}return e}toString(){return this.cssText}},Dt=t=>new gt(typeof t=="string"?t:t+"",void 0,oe),J=(t,...e)=>{let o=t.length===1?t[0]:e.reduce((n,s,r)=>n+(i=>{if(i._$cssResult$===!0)return i.cssText;if(typeof i=="number")return i;throw Error("Value passed to 'css' function must be a 'css' function result: "+i+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(s)+t[r+1],t[0]);return new gt(o,t,oe)},to=(t,e)=>{if(Bt)t.adoptedStyleSheets=e.map(o=>o instanceof CSSStyleSheet?o:o.styleSheet);else for(let o of e){let n=document.createElement("style"),s=Lt.litNonce;s!==void 0&&n.setAttribute("nonce",s),n.textContent=o.cssText,t.appendChild(n)}},ne=Bt?t=>t:t=>t instanceof CSSStyleSheet?(e=>{let o="";for(let n of e.cssRules)o+=n.cssText;return Dt(o)})(t):t});var Cn,Tn,Sn,$n,An,En,O,eo,Rn,Mn,mt,bt,Nt,oo,L,ft=b(()=>{se();se();({is:Cn,defineProperty:Tn,getOwnPropertyDescriptor:Sn,getOwnPropertyNames:$n,getOwnPropertySymbols:An,getPrototypeOf:En}=Object),O=globalThis,eo=O.trustedTypes,Rn=eo?eo.emptyScript:"",Mn=O.reactiveElementPolyfillSupport,mt=(t,e)=>t,bt={toAttribute(t,e){switch(e){case Boolean:t=t?Rn:null;break;case Object:case Array:t=t==null?t:JSON.stringify(t)}return t},fromAttribute(t,e){let o=t;switch(e){case Boolean:o=t!==null;break;case Number:o=t===null?null:Number(t);break;case Object:case Array:try{o=JSON.parse(t)}catch{o=null}}return o}},Nt=(t,e)=>!Cn(t,e),oo={attribute:!0,type:String,converter:bt,reflect:!1,useDefault:!1,hasChanged:Nt};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),O.litPropertyMetadata??(O.litPropertyMetadata=new WeakMap);L=class extends HTMLElement{static addInitializer(e){this._$Ei(),(this.l??(this.l=[])).push(e)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(e,o=oo){if(o.state&&(o.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(e)&&((o=Object.create(o)).wrapped=!0),this.elementProperties.set(e,o),!o.noAccessor){let n=Symbol(),s=this.getPropertyDescriptor(e,n,o);s!==void 0&&Tn(this.prototype,e,s)}}static getPropertyDescriptor(e,o,n){let{get:s,set:r}=Sn(this.prototype,e)??{get(){return this[o]},set(i){this[o]=i}};return{get:s,set(i){let a=s?.call(this);r?.call(this,i),this.requestUpdate(e,a,n)},configurable:!0,enumerable:!0}}static getPropertyOptions(e){return this.elementProperties.get(e)??oo}static _$Ei(){if(this.hasOwnProperty(mt("elementProperties")))return;let e=En(this);e.finalize(),e.l!==void 0&&(this.l=[...e.l]),this.elementProperties=new Map(e.elementProperties)}static finalize(){if(this.hasOwnProperty(mt("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(mt("properties"))){let o=this.properties,n=[...$n(o),...An(o)];for(let s of n)this.createProperty(s,o[s])}let e=this[Symbol.metadata];if(e!==null){let o=litPropertyMetadata.get(e);if(o!==void 0)for(let[n,s]of o)this.elementProperties.set(n,s)}this._$Eh=new Map;for(let[o,n]of this.elementProperties){let s=this._$Eu(o,n);s!==void 0&&this._$Eh.set(s,o)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(e){let o=[];if(Array.isArray(e)){let n=new Set(e.flat(1/0).reverse());for(let s of n)o.unshift(ne(s))}else e!==void 0&&o.push(ne(e));return o}static _$Eu(e,o){let n=o.attribute;return n===!1?void 0:typeof n=="string"?n:typeof e=="string"?e.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(e=>this.enableUpdating=e),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(e=>e(this))}addController(e){(this._$EO??(this._$EO=new Set)).add(e),this.renderRoot!==void 0&&this.isConnected&&e.hostConnected?.()}removeController(e){this._$EO?.delete(e)}_$E_(){let e=new Map,o=this.constructor.elementProperties;for(let n of o.keys())this.hasOwnProperty(n)&&(e.set(n,this[n]),delete this[n]);e.size>0&&(this._$Ep=e)}createRenderRoot(){let e=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return to(e,this.constructor.elementStyles),e}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(e=>e.hostConnected?.())}enableUpdating(e){}disconnectedCallback(){this._$EO?.forEach(e=>e.hostDisconnected?.())}attributeChangedCallback(e,o,n){this._$AK(e,n)}_$ET(e,o){let n=this.constructor.elementProperties.get(e),s=this.constructor._$Eu(e,n);if(s!==void 0&&n.reflect===!0){let r=(n.converter?.toAttribute!==void 0?n.converter:bt).toAttribute(o,n.type);this._$Em=e,r==null?this.removeAttribute(s):this.setAttribute(s,r),this._$Em=null}}_$AK(e,o){let n=this.constructor,s=n._$Eh.get(e);if(s!==void 0&&this._$Em!==s){let r=n.getPropertyOptions(s),i=typeof r.converter=="function"?{fromAttribute:r.converter}:r.converter?.fromAttribute!==void 0?r.converter:bt;this._$Em=s;let a=i.fromAttribute(o,r.type);this[s]=a??this._$Ej?.get(s)??a,this._$Em=null}}requestUpdate(e,o,n,s=!1,r){if(e!==void 0){let i=this.constructor;if(s===!1&&(r=this[e]),n??(n=i.getPropertyOptions(e)),!((n.hasChanged??Nt)(r,o)||n.useDefault&&n.reflect&&r===this._$Ej?.get(e)&&!this.hasAttribute(i._$Eu(e,n))))return;this.C(e,o,n)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(e,o,{useDefault:n,reflect:s,wrapped:r},i){n&&!(this._$Ej??(this._$Ej=new Map)).has(e)&&(this._$Ej.set(e,i??o??this[e]),r!==!0||i!==void 0)||(this._$AL.has(e)||(this.hasUpdated||n||(o=void 0),this._$AL.set(e,o)),s===!0&&this._$Em!==e&&(this._$Eq??(this._$Eq=new Set)).add(e))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(o){Promise.reject(o)}let e=this.scheduleUpdate();return e!=null&&await e,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[s,r]of this._$Ep)this[s]=r;this._$Ep=void 0}let n=this.constructor.elementProperties;if(n.size>0)for(let[s,r]of n){let{wrapped:i}=r,a=this[s];i!==!0||this._$AL.has(s)||a===void 0||this.C(s,void 0,r,a)}}let e=!1,o=this._$AL;try{e=this.shouldUpdate(o),e?(this.willUpdate(o),this._$EO?.forEach(n=>n.hostUpdate?.()),this.update(o)):this._$EM()}catch(n){throw e=!1,this._$EM(),n}e&&this._$AE(o)}willUpdate(e){}_$AE(e){this._$EO?.forEach(o=>o.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(e)),this.updated(e)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(e){return!0}update(e){this._$Eq&&(this._$Eq=this._$Eq.forEach(o=>this._$ET(o,this[o]))),this._$EM()}updated(e){}firstUpdated(e){}};L.elementStyles=[],L.shadowRootOptions={mode:"open"},L[mt("elementProperties")]=new Map,L[mt("finalized")]=new Map,Mn?.({ReactiveElement:L}),(O.reactiveElementVersions??(O.reactiveElementVersions=[])).push("2.1.2")});function mo(t,e){if(!pe(t)||!t.hasOwnProperty("raw"))throw Error("invalid template strings array");return so!==void 0?so.createHTML(e):e}function ot(t,e,o=t,n){if(e===R)return e;let s=n!==void 0?o._$Co?.[n]:o._$Cl,r=xt(e)?void 0:e._$litDirective$;return s?.constructor!==r&&(s?._$AO?.(!1),r===void 0?s=void 0:(s=new r(t),s._$AT(t,o,n)),n!==void 0?(o._$Co??(o._$Co=[]))[n]=s:o._$Cl=s),s!==void 0&&(e=ot(t,s._$AS(t,e.values),s,n)),e}var yt,no,Ht,so,po,j,uo,_n,Z,vt,xt,pe,zn,re,ht,ro,io,Y,ao,lo,go,ue,B,xi,ki,R,w,co,X,Pn,kt,ie,wt,nt,ae,le,de,ce,In,bo,st=b(()=>{yt=globalThis,no=t=>t,Ht=yt.trustedTypes,so=Ht?Ht.createPolicy("lit-html",{createHTML:t=>t}):void 0,po="$lit$",j=`lit$${Math.random().toFixed(9).slice(2)}$`,uo="?"+j,_n=`<${uo}>`,Z=document,vt=()=>Z.createComment(""),xt=t=>t===null||typeof t!="object"&&typeof t!="function",pe=Array.isArray,zn=t=>pe(t)||typeof t?.[Symbol.iterator]=="function",re=`[ 	
-\f\r]`,ht=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,ro=/-->/g,io=/>/g,Y=RegExp(`>|${re}(?:([^\\s"'>=/]+)(${re}*=${re}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`,"g"),ao=/'/g,lo=/"/g,go=/^(?:script|style|textarea|title)$/i,ue=t=>(e,...o)=>({_$litType$:t,strings:e,values:o}),B=ue(1),xi=ue(2),ki=ue(3),R=Symbol.for("lit-noChange"),w=Symbol.for("lit-nothing"),co=new WeakMap,X=Z.createTreeWalker(Z,129);Pn=(t,e)=>{let o=t.length-1,n=[],s,r=e===2?"<svg>":e===3?"<math>":"",i=ht;for(let a=0;a<o;a++){let l=t[a],p,d,u=-1,h=0;for(;h<l.length&&(i.lastIndex=h,d=i.exec(l),d!==null);)h=i.lastIndex,i===ht?d[1]==="!--"?i=ro:d[1]!==void 0?i=io:d[2]!==void 0?(go.test(d[2])&&(s=RegExp("</"+d[2],"g")),i=Y):d[3]!==void 0&&(i=Y):i===Y?d[0]===">"?(i=s??ht,u=-1):d[1]===void 0?u=-2:(u=i.lastIndex-d[2].length,p=d[1],i=d[3]===void 0?Y:d[3]==='"'?lo:ao):i===lo||i===ao?i=Y:i===ro||i===io?i=ht:(i=Y,s=void 0);let k=i===Y&&t[a+1].startsWith("/>")?" ":"";r+=i===ht?l+_n:u>=0?(n.push(p),l.slice(0,u)+po+l.slice(u)+j+k):l+j+(u===-2?a:k)}return[mo(t,r+(t[o]||"<?>")+(e===2?"</svg>":e===3?"</math>":"")),n]},kt=class t{constructor({strings:e,_$litType$:o},n){let s;this.parts=[];let r=0,i=0,a=e.length-1,l=this.parts,[p,d]=Pn(e,o);if(this.el=t.createElement(p,n),X.currentNode=this.el.content,o===2||o===3){let u=this.el.content.firstChild;u.replaceWith(...u.childNodes)}for(;(s=X.nextNode())!==null&&l.length<a;){if(s.nodeType===1){if(s.hasAttributes())for(let u of s.getAttributeNames())if(u.endsWith(po)){let h=d[i++],k=s.getAttribute(u).split(j),C=/([.?@])?(.*)/.exec(h);l.push({type:1,index:r,name:C[2],strings:k,ctor:C[1]==="."?ae:C[1]==="?"?le:C[1]==="@"?de:nt}),s.removeAttribute(u)}else u.startsWith(j)&&(l.push({type:6,index:r}),s.removeAttribute(u));if(go.test(s.tagName)){let u=s.textContent.split(j),h=u.length-1;if(h>0){s.textContent=Ht?Ht.emptyScript:"";for(let k=0;k<h;k++)s.append(u[k],vt()),X.nextNode(),l.push({type:2,index:++r});s.append(u[h],vt())}}}else if(s.nodeType===8)if(s.data===uo)l.push({type:2,index:r});else{let u=-1;for(;(u=s.data.indexOf(j,u+1))!==-1;)l.push({type:7,index:r}),u+=j.length-1}r++}}static createElement(e,o){let n=Z.createElement("template");return n.innerHTML=e,n}};ie=class{constructor(e,o){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=o}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){let{el:{content:o},parts:n}=this._$AD,s=(e?.creationScope??Z).importNode(o,!0);X.currentNode=s;let r=X.nextNode(),i=0,a=0,l=n[0];for(;l!==void 0;){if(i===l.index){let p;l.type===2?p=new wt(r,r.nextSibling,this,e):l.type===1?p=new l.ctor(r,l.name,l.strings,this,e):l.type===6&&(p=new ce(r,this,e)),this._$AV.push(p),l=n[++a]}i!==l?.index&&(r=X.nextNode(),i++)}return X.currentNode=Z,s}p(e){let o=0;for(let n of this._$AV)n!==void 0&&(n.strings!==void 0?(n._$AI(e,n,o),o+=n.strings.length-2):n._$AI(e[o])),o++}},wt=class t{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(e,o,n,s){this.type=2,this._$AH=w,this._$AN=void 0,this._$AA=e,this._$AB=o,this._$AM=n,this.options=s,this._$Cv=s?.isConnected??!0}get parentNode(){let e=this._$AA.parentNode,o=this._$AM;return o!==void 0&&e?.nodeType===11&&(e=o.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,o=this){e=ot(this,e,o),xt(e)?e===w||e==null||e===""?(this._$AH!==w&&this._$AR(),this._$AH=w):e!==this._$AH&&e!==R&&this._(e):e._$litType$!==void 0?this.$(e):e.nodeType!==void 0?this.T(e):zn(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==w&&xt(this._$AH)?this._$AA.nextSibling.data=e:this.T(Z.createTextNode(e)),this._$AH=e}$(e){let{values:o,_$litType$:n}=e,s=typeof n=="number"?this._$AC(e):(n.el===void 0&&(n.el=kt.createElement(mo(n.h,n.h[0]),this.options)),n);if(this._$AH?._$AD===s)this._$AH.p(o);else{let r=new ie(s,this),i=r.u(this.options);r.p(o),this.T(i),this._$AH=r}}_$AC(e){let o=co.get(e.strings);return o===void 0&&co.set(e.strings,o=new kt(e)),o}k(e){pe(this._$AH)||(this._$AH=[],this._$AR());let o=this._$AH,n,s=0;for(let r of e)s===o.length?o.push(n=new t(this.O(vt()),this.O(vt()),this,this.options)):n=o[s],n._$AI(r),s++;s<o.length&&(this._$AR(n&&n._$AB.nextSibling,s),o.length=s)}_$AR(e=this._$AA.nextSibling,o){for(this._$AP?.(!1,!0,o);e!==this._$AB;){let n=no(e).nextSibling;no(e).remove(),e=n}}setConnected(e){this._$AM===void 0&&(this._$Cv=e,this._$AP?.(e))}},nt=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,o,n,s,r){this.type=1,this._$AH=w,this._$AN=void 0,this.element=e,this.name=o,this._$AM=s,this.options=r,n.length>2||n[0]!==""||n[1]!==""?(this._$AH=Array(n.length-1).fill(new String),this.strings=n):this._$AH=w}_$AI(e,o=this,n,s){let r=this.strings,i=!1;if(r===void 0)e=ot(this,e,o,0),i=!xt(e)||e!==this._$AH&&e!==R,i&&(this._$AH=e);else{let a=e,l,p;for(e=r[0],l=0;l<r.length-1;l++)p=ot(this,a[n+l],o,l),p===R&&(p=this._$AH[l]),i||(i=!xt(p)||p!==this._$AH[l]),p===w?e=w:e!==w&&(e+=(p??"")+r[l+1]),this._$AH[l]=p}i&&!s&&this.j(e)}j(e){e===w?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}},ae=class extends nt{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===w?void 0:e}},le=class extends nt{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==w)}},de=class extends nt{constructor(e,o,n,s,r){super(e,o,n,s,r),this.type=5}_$AI(e,o=this){if((e=ot(this,e,o,0)??w)===R)return;let n=this._$AH,s=e===w&&n!==w||e.capture!==n.capture||e.once!==n.once||e.passive!==n.passive,r=e!==w&&(n===w||s);s&&this.element.removeEventListener(this.name,this,n),r&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,e):this._$AH.handleEvent(e)}},ce=class{constructor(e,o,n){this.element=e,this.type=6,this._$AN=void 0,this._$AM=o,this.options=n}get _$AU(){return this._$AM._$AU}_$AI(e){ot(this,e)}},In=yt.litHtmlPolyfillSupport;In?.(kt,wt),(yt.litHtmlVersions??(yt.litHtmlVersions=[])).push("3.3.3");bo=(t,e,o)=>{let n=o?.renderBefore??e,s=n._$litPart$;if(s===void 0){let r=o?.renderBefore??null;n._$litPart$=s=new wt(e.insertBefore(vt(),r),r,void 0,o??{})}return s._$AI(t),s}});var Ct,F,Ln,fo=b(()=>{ft();ft();st();st();Ct=globalThis,F=class extends L{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var o;let e=super.createRenderRoot();return(o=this.renderOptions).renderBefore??(o.renderBefore=e.firstChild),e}update(e){let o=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(e),this._$Do=bo(o,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return R}};F._$litElement$=!0,F.finalized=!0,Ct.litElementHydrateSupport?.({LitElement:F});Ln=Ct.litElementPolyfillSupport;Ln?.({LitElement:F});(Ct.litElementVersions??(Ct.litElementVersions=[])).push("4.2.2")});var ho=b(()=>{});var q=b(()=>{ft();st();fo();ho()});var yo=b(()=>{});function y(t){return(e,o)=>typeof o=="object"?Dn(t,e,o):((n,s,r)=>{let i=s.hasOwnProperty(r);return s.constructor.createProperty(r,n),i?Object.getOwnPropertyDescriptor(s,r):void 0})(t,e,o)}var Bn,Dn,ge=b(()=>{ft();Bn={attribute:!0,type:String,converter:bt,reflect:!1,hasChanged:Nt},Dn=(t=Bn,e,o)=>{let{kind:n,metadata:s}=o,r=globalThis.litPropertyMetadata.get(s);if(r===void 0&&globalThis.litPropertyMetadata.set(s,r=new Map),n==="setter"&&((t=Object.create(t)).wrapped=!0),r.set(o.name,t),n==="accessor"){let{name:i}=o;return{set(a){let l=e.get.call(this);e.set.call(this,a),this.requestUpdate(i,l,t,!0,a)},init(a){return a!==void 0&&this.C(i,void 0,t,a),a}}}if(n==="setter"){let{name:i}=o;return function(a){let l=this[i];e.call(this,a),this.requestUpdate(i,l,t,!0,a)}}throw Error("Unsupported decorator location: "+n)}});function me(t){return y({...t,state:!0,attribute:!1})}var vo=b(()=>{ge();});var xo=b(()=>{});var rt=b(()=>{});var ko=b(()=>{rt();});var wo=b(()=>{rt();});var Co=b(()=>{rt();});var To=b(()=>{rt();});var So=b(()=>{rt();});var be=b(()=>{yo();ge();vo();xo();ko();wo();Co();To();So()});var Ot,jt,it,fe=b(()=>{Ot={ATTRIBUTE:1,CHILD:2,PROPERTY:3,BOOLEAN_ATTRIBUTE:4,EVENT:5,ELEMENT:6},jt=t=>(...e)=>({_$litDirective$:t,values:e}),it=class{constructor(e){}get _$AU(){return this._$AM._$AU}_$AT(e,o,n){this._$Ct=e,this._$AM=o,this._$Ci=n}_$AS(e,o){return this.update(e,o)}update(e,o){return this.render(...o)}}});var Ft,$o=b(()=>{st();fe();Ft=jt(class extends it{constructor(t){if(super(t),t.type!==Ot.ATTRIBUTE||t.name!=="class"||t.strings?.length>2)throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.")}render(t){return" "+Object.keys(t).filter(e=>t[e]).join(" ")+" "}update(t,[e]){if(this.st===void 0){this.st=new Set,t.strings!==void 0&&(this.nt=new Set(t.strings.join(" ").split(/\s/).filter(n=>n!=="")));for(let n in e)e[n]&&!this.nt?.has(n)&&this.st.add(n);return this.render(e)}let o=t.element.classList;for(let n of this.st)n in e||(o.remove(n),this.st.delete(n));for(let n in e){let s=!!e[n];s===this.st.has(n)||this.nt?.has(n)||(s?(o.add(n),this.st.add(n)):(o.remove(n),this.st.delete(n)))}return R}})});var he=b(()=>{$o()});var qt,Ao,Eo,at,Wt,ye=b(()=>{q();qt="2.5.1",Ao="__vscodeElements_disableRegistryWarning__",Eo=(t,e)=>{console.warn(e?`[VSCode Elements] ${t}
+"use strict";(()=>{var ir=Object.defineProperty;var b=(t,e,o)=>()=>{if(o)throw o[0];try{return t&&(e=t(t=0)),e}catch(n){throw o=[n],n}};var ar=(t,e)=>{for(var o in e)ir(t,o,{get:e[o],enumerable:!0})};var ee,oe,Ae,Io,$t,ne,rt,Lo,Ee,Re=b(()=>{ee=globalThis,oe=ee.ShadowRoot&&(ee.ShadyCSS===void 0||ee.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,Ae=Symbol(),Io=new WeakMap,$t=class{constructor(e,o,n){if(this._$cssResult$=!0,n!==Ae)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=e,this.t=o}get styleSheet(){let e=this.o,o=this.t;if(oe&&e===void 0){let n=o!==void 0&&o.length===1;n&&(e=Io.get(o)),e===void 0&&((this.o=e=new CSSStyleSheet).replaceSync(this.cssText),n&&Io.set(o,e))}return e}toString(){return this.cssText}},ne=t=>new $t(typeof t=="string"?t:t+"",void 0,Ae),rt=(t,...e)=>{let o=t.length===1?t[0]:e.reduce((n,r,s)=>n+(i=>{if(i._$cssResult$===!0)return i.cssText;if(typeof i=="number")return i;throw Error("Value passed to 'css' function must be a 'css' function result: "+i+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(r)+t[s+1],t[0]);return new $t(o,t,Ae)},Lo=(t,e)=>{if(oe)t.adoptedStyleSheets=e.map(o=>o instanceof CSSStyleSheet?o:o.styleSheet);else for(let o of e){let n=document.createElement("style"),r=ee.litNonce;r!==void 0&&n.setAttribute("nonce",r),n.textContent=o.cssText,t.appendChild(n)}},Ee=oe?t=>t:t=>t instanceof CSSStyleSheet?(e=>{let o="";for(let n of e.cssRules)o+=n.cssText;return ne(o)})(t):t});var xr,kr,wr,Cr,Tr,Sr,X,Bo,$r,Ar,At,Et,re,Do,W,Rt=b(()=>{Re();Re();({is:xr,defineProperty:kr,getOwnPropertyDescriptor:wr,getOwnPropertyNames:Cr,getOwnPropertySymbols:Tr,getPrototypeOf:Sr}=Object),X=globalThis,Bo=X.trustedTypes,$r=Bo?Bo.emptyScript:"",Ar=X.reactiveElementPolyfillSupport,At=(t,e)=>t,Et={toAttribute(t,e){switch(e){case Boolean:t=t?$r:null;break;case Object:case Array:t=t==null?t:JSON.stringify(t)}return t},fromAttribute(t,e){let o=t;switch(e){case Boolean:o=t!==null;break;case Number:o=t===null?null:Number(t);break;case Object:case Array:try{o=JSON.parse(t)}catch{o=null}}return o}},re=(t,e)=>!xr(t,e),Do={attribute:!0,type:String,converter:Et,reflect:!1,useDefault:!1,hasChanged:re};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),X.litPropertyMetadata??(X.litPropertyMetadata=new WeakMap);W=class extends HTMLElement{static addInitializer(e){this._$Ei(),(this.l??(this.l=[])).push(e)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(e,o=Do){if(o.state&&(o.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(e)&&((o=Object.create(o)).wrapped=!0),this.elementProperties.set(e,o),!o.noAccessor){let n=Symbol(),r=this.getPropertyDescriptor(e,n,o);r!==void 0&&kr(this.prototype,e,r)}}static getPropertyDescriptor(e,o,n){let{get:r,set:s}=wr(this.prototype,e)??{get(){return this[o]},set(i){this[o]=i}};return{get:r,set(i){let a=r?.call(this);s?.call(this,i),this.requestUpdate(e,a,n)},configurable:!0,enumerable:!0}}static getPropertyOptions(e){return this.elementProperties.get(e)??Do}static _$Ei(){if(this.hasOwnProperty(At("elementProperties")))return;let e=Sr(this);e.finalize(),e.l!==void 0&&(this.l=[...e.l]),this.elementProperties=new Map(e.elementProperties)}static finalize(){if(this.hasOwnProperty(At("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(At("properties"))){let o=this.properties,n=[...Cr(o),...Tr(o)];for(let r of n)this.createProperty(r,o[r])}let e=this[Symbol.metadata];if(e!==null){let o=litPropertyMetadata.get(e);if(o!==void 0)for(let[n,r]of o)this.elementProperties.set(n,r)}this._$Eh=new Map;for(let[o,n]of this.elementProperties){let r=this._$Eu(o,n);r!==void 0&&this._$Eh.set(r,o)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(e){let o=[];if(Array.isArray(e)){let n=new Set(e.flat(1/0).reverse());for(let r of n)o.unshift(Ee(r))}else e!==void 0&&o.push(Ee(e));return o}static _$Eu(e,o){let n=o.attribute;return n===!1?void 0:typeof n=="string"?n:typeof e=="string"?e.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(e=>this.enableUpdating=e),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(e=>e(this))}addController(e){(this._$EO??(this._$EO=new Set)).add(e),this.renderRoot!==void 0&&this.isConnected&&e.hostConnected?.()}removeController(e){this._$EO?.delete(e)}_$E_(){let e=new Map,o=this.constructor.elementProperties;for(let n of o.keys())this.hasOwnProperty(n)&&(e.set(n,this[n]),delete this[n]);e.size>0&&(this._$Ep=e)}createRenderRoot(){let e=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return Lo(e,this.constructor.elementStyles),e}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(e=>e.hostConnected?.())}enableUpdating(e){}disconnectedCallback(){this._$EO?.forEach(e=>e.hostDisconnected?.())}attributeChangedCallback(e,o,n){this._$AK(e,n)}_$ET(e,o){let n=this.constructor.elementProperties.get(e),r=this.constructor._$Eu(e,n);if(r!==void 0&&n.reflect===!0){let s=(n.converter?.toAttribute!==void 0?n.converter:Et).toAttribute(o,n.type);this._$Em=e,s==null?this.removeAttribute(r):this.setAttribute(r,s),this._$Em=null}}_$AK(e,o){let n=this.constructor,r=n._$Eh.get(e);if(r!==void 0&&this._$Em!==r){let s=n.getPropertyOptions(r),i=typeof s.converter=="function"?{fromAttribute:s.converter}:s.converter?.fromAttribute!==void 0?s.converter:Et;this._$Em=r;let a=i.fromAttribute(o,s.type);this[r]=a??this._$Ej?.get(r)??a,this._$Em=null}}requestUpdate(e,o,n,r=!1,s){if(e!==void 0){let i=this.constructor;if(r===!1&&(s=this[e]),n??(n=i.getPropertyOptions(e)),!((n.hasChanged??re)(s,o)||n.useDefault&&n.reflect&&s===this._$Ej?.get(e)&&!this.hasAttribute(i._$Eu(e,n))))return;this.C(e,o,n)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(e,o,{useDefault:n,reflect:r,wrapped:s},i){n&&!(this._$Ej??(this._$Ej=new Map)).has(e)&&(this._$Ej.set(e,i??o??this[e]),s!==!0||i!==void 0)||(this._$AL.has(e)||(this.hasUpdated||n||(o=void 0),this._$AL.set(e,o)),r===!0&&this._$Em!==e&&(this._$Eq??(this._$Eq=new Set)).add(e))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(o){Promise.reject(o)}let e=this.scheduleUpdate();return e!=null&&await e,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[r,s]of this._$Ep)this[r]=s;this._$Ep=void 0}let n=this.constructor.elementProperties;if(n.size>0)for(let[r,s]of n){let{wrapped:i}=s,a=this[r];i!==!0||this._$AL.has(r)||a===void 0||this.C(r,void 0,s,a)}}let e=!1,o=this._$AL;try{e=this.shouldUpdate(o),e?(this.willUpdate(o),this._$EO?.forEach(n=>n.hostUpdate?.()),this.update(o)):this._$EM()}catch(n){throw e=!1,this._$EM(),n}e&&this._$AE(o)}willUpdate(e){}_$AE(e){this._$EO?.forEach(o=>o.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(e)),this.updated(e)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(e){return!0}update(e){this._$Eq&&(this._$Eq=this._$Eq.forEach(o=>this._$ET(o,this[o]))),this._$EM()}updated(e){}firstUpdated(e){}};W.elementStyles=[],W.shadowRootOptions={mode:"open"},W[At("elementProperties")]=new Map,W[At("finalized")]=new Map,Ar?.({ReactiveElement:W}),(X.reactiveElementVersions??(X.reactiveElementVersions=[])).push("2.1.2")});function Go(t,e){if(!Be(t)||!t.hasOwnProperty("raw"))throw Error("invalid template strings array");return No!==void 0?No.createHTML(e):e}function ut(t,e,o=t,n){if(e===I)return e;let r=n!==void 0?o._$Co?.[n]:o._$Cl,s=zt(e)?void 0:e._$litDirective$;return r?.constructor!==s&&(r?._$AO?.(!1),s===void 0?r=void 0:(r=new s(t),r._$AT(t,o,n)),n!==void 0?(o._$Co??(o._$Co=[]))[n]=r:o._$Cl=r),r!==void 0&&(e=ut(t,r._$AS(t,e.values),r,n)),e}var Pt,Ho,se,No,qo,Z,Ko,Er,at,_t,zt,Be,Rr,Me,Mt,Uo,Oo,st,jo,Wo,Vo,De,F,xl,kl,I,w,Fo,it,Mr,It,Pe,Lt,gt,_e,ze,Ie,Le,Pr,Jo,mt=b(()=>{Pt=globalThis,Ho=t=>t,se=Pt.trustedTypes,No=se?se.createPolicy("lit-html",{createHTML:t=>t}):void 0,qo="$lit$",Z=`lit$${Math.random().toFixed(9).slice(2)}$`,Ko="?"+Z,Er=`<${Ko}>`,at=document,_t=()=>at.createComment(""),zt=t=>t===null||typeof t!="object"&&typeof t!="function",Be=Array.isArray,Rr=t=>Be(t)||typeof t?.[Symbol.iterator]=="function",Me=`[ 	
+\f\r]`,Mt=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,Uo=/-->/g,Oo=/>/g,st=RegExp(`>|${Me}(?:([^\\s"'>=/]+)(${Me}*=${Me}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`,"g"),jo=/'/g,Wo=/"/g,Vo=/^(?:script|style|textarea|title)$/i,De=t=>(e,...o)=>({_$litType$:t,strings:e,values:o}),F=De(1),xl=De(2),kl=De(3),I=Symbol.for("lit-noChange"),w=Symbol.for("lit-nothing"),Fo=new WeakMap,it=at.createTreeWalker(at,129);Mr=(t,e)=>{let o=t.length-1,n=[],r,s=e===2?"<svg>":e===3?"<math>":"",i=Mt;for(let a=0;a<o;a++){let l=t[a],p,d,u=-1,h=0;for(;h<l.length&&(i.lastIndex=h,d=i.exec(l),d!==null);)h=i.lastIndex,i===Mt?d[1]==="!--"?i=Uo:d[1]!==void 0?i=Oo:d[2]!==void 0?(Vo.test(d[2])&&(r=RegExp("</"+d[2],"g")),i=st):d[3]!==void 0&&(i=st):i===st?d[0]===">"?(i=r??Mt,u=-1):d[1]===void 0?u=-2:(u=i.lastIndex-d[2].length,p=d[1],i=d[3]===void 0?st:d[3]==='"'?Wo:jo):i===Wo||i===jo?i=st:i===Uo||i===Oo?i=Mt:(i=st,r=void 0);let k=i===st&&t[a+1].startsWith("/>")?" ":"";s+=i===Mt?l+Er:u>=0?(n.push(p),l.slice(0,u)+qo+l.slice(u)+Z+k):l+Z+(u===-2?a:k)}return[Go(t,s+(t[o]||"<?>")+(e===2?"</svg>":e===3?"</math>":"")),n]},It=class t{constructor({strings:e,_$litType$:o},n){let r;this.parts=[];let s=0,i=0,a=e.length-1,l=this.parts,[p,d]=Mr(e,o);if(this.el=t.createElement(p,n),it.currentNode=this.el.content,o===2||o===3){let u=this.el.content.firstChild;u.replaceWith(...u.childNodes)}for(;(r=it.nextNode())!==null&&l.length<a;){if(r.nodeType===1){if(r.hasAttributes())for(let u of r.getAttributeNames())if(u.endsWith(qo)){let h=d[i++],k=r.getAttribute(u).split(Z),T=/([.?@])?(.*)/.exec(h);l.push({type:1,index:s,name:T[2],strings:k,ctor:T[1]==="."?_e:T[1]==="?"?ze:T[1]==="@"?Ie:gt}),r.removeAttribute(u)}else u.startsWith(Z)&&(l.push({type:6,index:s}),r.removeAttribute(u));if(Vo.test(r.tagName)){let u=r.textContent.split(Z),h=u.length-1;if(h>0){r.textContent=se?se.emptyScript:"";for(let k=0;k<h;k++)r.append(u[k],_t()),it.nextNode(),l.push({type:2,index:++s});r.append(u[h],_t())}}}else if(r.nodeType===8)if(r.data===Ko)l.push({type:2,index:s});else{let u=-1;for(;(u=r.data.indexOf(Z,u+1))!==-1;)l.push({type:7,index:s}),u+=Z.length-1}s++}}static createElement(e,o){let n=at.createElement("template");return n.innerHTML=e,n}};Pe=class{constructor(e,o){this._$AV=[],this._$AN=void 0,this._$AD=e,this._$AM=o}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(e){let{el:{content:o},parts:n}=this._$AD,r=(e?.creationScope??at).importNode(o,!0);it.currentNode=r;let s=it.nextNode(),i=0,a=0,l=n[0];for(;l!==void 0;){if(i===l.index){let p;l.type===2?p=new Lt(s,s.nextSibling,this,e):l.type===1?p=new l.ctor(s,l.name,l.strings,this,e):l.type===6&&(p=new Le(s,this,e)),this._$AV.push(p),l=n[++a]}i!==l?.index&&(s=it.nextNode(),i++)}return it.currentNode=at,r}p(e){let o=0;for(let n of this._$AV)n!==void 0&&(n.strings!==void 0?(n._$AI(e,n,o),o+=n.strings.length-2):n._$AI(e[o])),o++}},Lt=class t{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(e,o,n,r){this.type=2,this._$AH=w,this._$AN=void 0,this._$AA=e,this._$AB=o,this._$AM=n,this.options=r,this._$Cv=r?.isConnected??!0}get parentNode(){let e=this._$AA.parentNode,o=this._$AM;return o!==void 0&&e?.nodeType===11&&(e=o.parentNode),e}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(e,o=this){e=ut(this,e,o),zt(e)?e===w||e==null||e===""?(this._$AH!==w&&this._$AR(),this._$AH=w):e!==this._$AH&&e!==I&&this._(e):e._$litType$!==void 0?this.$(e):e.nodeType!==void 0?this.T(e):Rr(e)?this.k(e):this._(e)}O(e){return this._$AA.parentNode.insertBefore(e,this._$AB)}T(e){this._$AH!==e&&(this._$AR(),this._$AH=this.O(e))}_(e){this._$AH!==w&&zt(this._$AH)?this._$AA.nextSibling.data=e:this.T(at.createTextNode(e)),this._$AH=e}$(e){let{values:o,_$litType$:n}=e,r=typeof n=="number"?this._$AC(e):(n.el===void 0&&(n.el=It.createElement(Go(n.h,n.h[0]),this.options)),n);if(this._$AH?._$AD===r)this._$AH.p(o);else{let s=new Pe(r,this),i=s.u(this.options);s.p(o),this.T(i),this._$AH=s}}_$AC(e){let o=Fo.get(e.strings);return o===void 0&&Fo.set(e.strings,o=new It(e)),o}k(e){Be(this._$AH)||(this._$AH=[],this._$AR());let o=this._$AH,n,r=0;for(let s of e)r===o.length?o.push(n=new t(this.O(_t()),this.O(_t()),this,this.options)):n=o[r],n._$AI(s),r++;r<o.length&&(this._$AR(n&&n._$AB.nextSibling,r),o.length=r)}_$AR(e=this._$AA.nextSibling,o){for(this._$AP?.(!1,!0,o);e!==this._$AB;){let n=Ho(e).nextSibling;Ho(e).remove(),e=n}}setConnected(e){this._$AM===void 0&&(this._$Cv=e,this._$AP?.(e))}},gt=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(e,o,n,r,s){this.type=1,this._$AH=w,this._$AN=void 0,this.element=e,this.name=o,this._$AM=r,this.options=s,n.length>2||n[0]!==""||n[1]!==""?(this._$AH=Array(n.length-1).fill(new String),this.strings=n):this._$AH=w}_$AI(e,o=this,n,r){let s=this.strings,i=!1;if(s===void 0)e=ut(this,e,o,0),i=!zt(e)||e!==this._$AH&&e!==I,i&&(this._$AH=e);else{let a=e,l,p;for(e=s[0],l=0;l<s.length-1;l++)p=ut(this,a[n+l],o,l),p===I&&(p=this._$AH[l]),i||(i=!zt(p)||p!==this._$AH[l]),p===w?e=w:e!==w&&(e+=(p??"")+s[l+1]),this._$AH[l]=p}i&&!r&&this.j(e)}j(e){e===w?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,e??"")}},_e=class extends gt{constructor(){super(...arguments),this.type=3}j(e){this.element[this.name]=e===w?void 0:e}},ze=class extends gt{constructor(){super(...arguments),this.type=4}j(e){this.element.toggleAttribute(this.name,!!e&&e!==w)}},Ie=class extends gt{constructor(e,o,n,r,s){super(e,o,n,r,s),this.type=5}_$AI(e,o=this){if((e=ut(this,e,o,0)??w)===I)return;let n=this._$AH,r=e===w&&n!==w||e.capture!==n.capture||e.once!==n.once||e.passive!==n.passive,s=e!==w&&(n===w||r);r&&this.element.removeEventListener(this.name,this,n),s&&this.element.addEventListener(this.name,this,e),this._$AH=e}handleEvent(e){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,e):this._$AH.handleEvent(e)}},Le=class{constructor(e,o,n){this.element=e,this.type=6,this._$AN=void 0,this._$AM=o,this.options=n}get _$AU(){return this._$AM._$AU}_$AI(e){ut(this,e)}},Pr=Pt.litHtmlPolyfillSupport;Pr?.(It,Lt),(Pt.litHtmlVersions??(Pt.litHtmlVersions=[])).push("3.3.3");Jo=(t,e,o)=>{let n=o?.renderBefore??e,r=n._$litPart$;if(r===void 0){let s=o?.renderBefore??null;n._$litPart$=r=new Lt(e.insertBefore(_t(),s),s,void 0,o??{})}return r._$AI(t),r}});var Bt,Q,_r,Yo=b(()=>{Rt();Rt();mt();mt();Bt=globalThis,Q=class extends W{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var o;let e=super.createRenderRoot();return(o=this.renderOptions).renderBefore??(o.renderBefore=e.firstChild),e}update(e){let o=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(e),this._$Do=Jo(o,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return I}};Q._$litElement$=!0,Q.finalized=!0,Bt.litElementHydrateSupport?.({LitElement:Q});_r=Bt.litElementPolyfillSupport;_r?.({LitElement:Q});(Bt.litElementVersions??(Bt.litElementVersions=[])).push("4.2.2")});var Xo=b(()=>{});var tt=b(()=>{Rt();mt();Yo();Xo()});var Zo=b(()=>{});function y(t){return(e,o)=>typeof o=="object"?Ir(t,e,o):((n,r,s)=>{let i=r.hasOwnProperty(s);return r.constructor.createProperty(s,n),i?Object.getOwnPropertyDescriptor(r,s):void 0})(t,e,o)}var zr,Ir,He=b(()=>{Rt();zr={attribute:!0,type:String,converter:Et,reflect:!1,hasChanged:re},Ir=(t=zr,e,o)=>{let{kind:n,metadata:r}=o,s=globalThis.litPropertyMetadata.get(r);if(s===void 0&&globalThis.litPropertyMetadata.set(r,s=new Map),n==="setter"&&((t=Object.create(t)).wrapped=!0),s.set(o.name,t),n==="accessor"){let{name:i}=o;return{set(a){let l=e.get.call(this);e.set.call(this,a),this.requestUpdate(i,l,t,!0,a)},init(a){return a!==void 0&&this.C(i,void 0,t,a),a}}}if(n==="setter"){let{name:i}=o;return function(a){let l=this[i];e.call(this,a),this.requestUpdate(i,l,t,!0,a)}}throw Error("Unsupported decorator location: "+n)}});function Ne(t){return y({...t,state:!0,attribute:!1})}var Qo=b(()=>{He();});var tn=b(()=>{});var ft=b(()=>{});var en=b(()=>{ft();});var on=b(()=>{ft();});var nn=b(()=>{ft();});var rn=b(()=>{ft();});var sn=b(()=>{ft();});var Ue=b(()=>{Zo();He();Qo();tn();en();on();nn();rn();sn()});var ae,le,bt,Oe=b(()=>{ae={ATTRIBUTE:1,CHILD:2,PROPERTY:3,BOOLEAN_ATTRIBUTE:4,EVENT:5,ELEMENT:6},le=t=>(...e)=>({_$litDirective$:t,values:e}),bt=class{constructor(e){}get _$AU(){return this._$AM._$AU}_$AT(e,o,n){this._$Ct=e,this._$AM=o,this._$Ci=n}_$AS(e,o){return this.update(e,o)}update(e,o){return this.render(...o)}}});var de,an=b(()=>{mt();Oe();de=le(class extends bt{constructor(t){if(super(t),t.type!==ae.ATTRIBUTE||t.name!=="class"||t.strings?.length>2)throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.")}render(t){return" "+Object.keys(t).filter(e=>t[e]).join(" ")+" "}update(t,[e]){if(this.st===void 0){this.st=new Set,t.strings!==void 0&&(this.nt=new Set(t.strings.join(" ").split(/\s/).filter(n=>n!=="")));for(let n in e)e[n]&&!this.nt?.has(n)&&this.st.add(n);return this.render(e)}let o=t.element.classList;for(let n of this.st)n in e||(o.remove(n),this.st.delete(n));for(let n in e){let r=!!e[n];r===this.st.has(n)||this.nt?.has(n)||(r?(o.add(n),this.st.add(n)):(o.remove(n),this.st.delete(n)))}return I}})});var je=b(()=>{an()});var ce,ln,dn,ht,pe,We=b(()=>{tt();ce="2.5.1",ln="__vscodeElements_disableRegistryWarning__",dn=(t,e)=>{console.warn(e?`[VSCode Elements] ${t}
 %o`:`${t}
-%o`,e)},at=class extends F{get version(){return qt}warn(e){Eo(e,this)}},Wt=t=>e=>{if(!customElements.get(t)){customElements.define(t,e);return}if(Ao in window)return;let s=document.createElement(t)?.version,r="";s?s!==qt?(r+="is already registered by a different version of VSCode Elements. ",r+=`This version is "${qt}", while the other one is "${s}".`):r+=`is already registered by the same version of VSCode Elements (${qt}).`:r+="is already registered by an unknown custom element handler class.",Eo(`The custom element "${t}" ${r}
-To suppress this warning, set window.${Ao} to true`)}});var lt,Ro=b(()=>{st();lt=t=>t??w});var ve=b(()=>{Ro()});var Mo=b(()=>{fe()});var xe,_o,zo=b(()=>{q();Mo();xe=class extends it{constructor(e){if(super(e),this._prevProperties={},e.type!==Ot.PROPERTY||e.name!=="style")throw new Error("The `stylePropertyMap` directive must be used in the `style` property")}update(e,[o]){return Object.entries(o).forEach(([n,s])=>{this._prevProperties[n]!==s&&(n.startsWith("--")?e.element.style.setProperty(n,s):e.element.style[n]=s,this._prevProperties[n]=s)}),R}render(e){return R}},_o=jt(xe)});var Kt,ke=b(()=>{q();Kt=J`
+%o`,e)},ht=class extends Q{get version(){return ce}warn(e){dn(e,this)}},pe=t=>e=>{if(!customElements.get(t)){customElements.define(t,e);return}if(ln in window)return;let r=document.createElement(t)?.version,s="";r?r!==ce?(s+="is already registered by a different version of VSCode Elements. ",s+=`This version is "${ce}", while the other one is "${r}".`):s+=`is already registered by the same version of VSCode Elements (${ce}).`:s+="is already registered by an unknown custom element handler class.",dn(`The custom element "${t}" ${s}
+To suppress this warning, set window.${ln} to true`)}});var yt,cn=b(()=>{mt();yt=t=>t??w});var Fe=b(()=>{cn()});var pn=b(()=>{Oe()});var qe,un,gn=b(()=>{tt();pn();qe=class extends bt{constructor(e){if(super(e),this._prevProperties={},e.type!==ae.PROPERTY||e.name!=="style")throw new Error("The `stylePropertyMap` directive must be used in the `style` property")}update(e,[o]){return Object.entries(o).forEach(([n,r])=>{this._prevProperties[n]!==r&&(n.startsWith("--")?e.element.style.setProperty(n,r):e.element.style[n]=r,this._prevProperties[n]=r)}),I}render(e){return I}},un=le(qe)});var ue,Ke=b(()=>{tt();ue=rt`
   :host([hidden]) {
     display: none;
   }
@@ -14,7 +14,7 @@ To suppress this warning, set window.${Ao} to true`)}});var lt,Ro=b(()=>{st();lt
     opacity: 0.4;
     pointer-events: none;
   }
-`});var Nn,Po,Io=b(()=>{q();ke();Nn=[Kt,J`
+`});var Lr,mn,fn=b(()=>{tt();Ke();Lr=[ue,rt`
     :host {
       color: var(--vscode-icon-foreground, #cccccc);
       display: inline-block;
@@ -74,25 +74,25 @@ To suppress this warning, set window.${Ao} to true`)}});var lt,Ro=b(()=>{st();lt
       animation-timing-function: linear;
       animation-iteration-count: infinite;
     }
-  `],Po=Nn});var Q,Tt,M,Lo=b(()=>{q();be();he();ve();ye();zo();Io();Q=function(t,e,o,n){var s=arguments.length,r=s<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,o):n,i;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")r=Reflect.decorate(t,e,o,n);else for(var a=t.length-1;a>=0;a--)(i=t[a])&&(r=(s<3?i(r):s>3?i(e,o,r):i(e,o))||r);return s>3&&r&&Object.defineProperty(e,o,r),r},M=Tt=class extends at{constructor(){super(...arguments),this.label="",this.name="",this.size=16,this.spin=!1,this.spinDuration=1.5,this.actionIcon=!1,this._onButtonClick=e=>{this.dispatchEvent(new CustomEvent("vsc-click",{detail:{originalEvent:e}}))}}connectedCallback(){super.connectedCallback();let{href:e,nonce:o}=this._getStylesheetConfig();Tt.stylesheetHref=e,Tt.nonce=o}_getStylesheetConfig(){if(typeof document>"u")return{nonce:void 0,href:void 0};let e=document.getElementById("vscode-codicon-stylesheet"),o=e?.getAttribute("href")||void 0,n=e?.nonce||void 0;if(!e){let s='To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';s+="See https://vscode-elements.github.io/components/icon/ for more details.",this.warn(s)}return{nonce:n,href:o}}render(){let{stylesheetHref:e,nonce:o}=Tt,n=B`<span
-      class=${Ft({codicon:!0,["codicon-"+this.name]:!0,spin:this.spin})}
-      .style=${_o({animationDuration:String(this.spinDuration)+"s",fontSize:this.size+"px",height:this.size+"px",width:this.size+"px"})}
-    ></span>`,s=this.actionIcon?B` <button
+  `],mn=Lr});var lt,Dt,L,bn=b(()=>{tt();Ue();je();Fe();We();gn();fn();lt=function(t,e,o,n){var r=arguments.length,s=r<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,o):n,i;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(t,e,o,n);else for(var a=t.length-1;a>=0;a--)(i=t[a])&&(s=(r<3?i(s):r>3?i(e,o,s):i(e,o))||s);return r>3&&s&&Object.defineProperty(e,o,s),s},L=Dt=class extends ht{constructor(){super(...arguments),this.label="",this.name="",this.size=16,this.spin=!1,this.spinDuration=1.5,this.actionIcon=!1,this._onButtonClick=e=>{this.dispatchEvent(new CustomEvent("vsc-click",{detail:{originalEvent:e}}))}}connectedCallback(){super.connectedCallback();let{href:e,nonce:o}=this._getStylesheetConfig();Dt.stylesheetHref=e,Dt.nonce=o}_getStylesheetConfig(){if(typeof document>"u")return{nonce:void 0,href:void 0};let e=document.getElementById("vscode-codicon-stylesheet"),o=e?.getAttribute("href")||void 0,n=e?.nonce||void 0;if(!e){let r='To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';r+="See https://vscode-elements.github.io/components/icon/ for more details.",this.warn(r)}return{nonce:n,href:o}}render(){let{stylesheetHref:e,nonce:o}=Dt,n=F`<span
+      class=${de({codicon:!0,["codicon-"+this.name]:!0,spin:this.spin})}
+      .style=${un({animationDuration:String(this.spinDuration)+"s",fontSize:this.size+"px",height:this.size+"px",width:this.size+"px"})}
+    ></span>`,r=this.actionIcon?F` <button
           class="button"
           @click=${this._onButtonClick}
           aria-label=${this.label}
         >
           ${n}
-        </button>`:B` <span class="icon" aria-hidden="true" role="presentation"
+        </button>`:F` <span class="icon" aria-hidden="true" role="presentation"
           >${n}</span
-        >`;return B`
+        >`;return F`
       <link
         rel="stylesheet"
-        href=${lt(e)}
-        nonce=${lt(o)}
+        href=${yt(e)}
+        nonce=${yt(o)}
       />
-      ${s}
-    `}};M.styles=Po;M.stylesheetHref="";M.nonce="";Q([y()],M.prototype,"label",void 0);Q([y({type:String})],M.prototype,"name",void 0);Q([y({type:Number})],M.prototype,"size",void 0);Q([y({type:Boolean,reflect:!0})],M.prototype,"spin",void 0);Q([y({type:Number,attribute:"spin-duration"})],M.prototype,"spinDuration",void 0);Q([y({type:Boolean,reflect:!0,attribute:"action-icon"})],M.prototype,"actionIcon",void 0);M=Tt=Q([Wt("vscode-icon")],M)});var Bo=b(()=>{Lo()});function Do(){return navigator.userAgent.indexOf("Linux")>-1?'system-ui, "Ubuntu", "Droid Sans", sans-serif':navigator.userAgent.indexOf("Mac")>-1?"-apple-system, BlinkMacSystemFont, sans-serif":navigator.userAgent.indexOf("Windows")>-1?'"Segoe WPC", "Segoe UI", sans-serif':"sans-serif"}var No=b(()=>{});var Hn,Un,Ho,Uo=b(()=>{q();ke();No();Hn=Dt(Do()),Un=[Kt,J`
+      ${r}
+    `}};L.styles=mn;L.stylesheetHref="";L.nonce="";lt([y()],L.prototype,"label",void 0);lt([y({type:String})],L.prototype,"name",void 0);lt([y({type:Number})],L.prototype,"size",void 0);lt([y({type:Boolean,reflect:!0})],L.prototype,"spin",void 0);lt([y({type:Number,attribute:"spin-duration"})],L.prototype,"spinDuration",void 0);lt([y({type:Boolean,reflect:!0,attribute:"action-icon"})],L.prototype,"actionIcon",void 0);L=Dt=lt([pe("vscode-icon")],L)});var hn=b(()=>{bn()});function yn(){return navigator.userAgent.indexOf("Linux")>-1?'system-ui, "Ubuntu", "Droid Sans", sans-serif':navigator.userAgent.indexOf("Mac")>-1?"-apple-system, BlinkMacSystemFont, sans-serif":navigator.userAgent.indexOf("Windows")>-1?'"Segoe WPC", "Segoe UI", sans-serif':"sans-serif"}var vn=b(()=>{});var Br,Dr,xn,kn=b(()=>{tt();Ke();vn();Br=ne(yn()),Dr=[ue,rt`
     :host {
       cursor: pointer;
       display: inline-block;
@@ -120,7 +120,7 @@ To suppress this warning, set window.${Ao} to true`)}});var lt,Ro=b(()=>{st();lt
       box-sizing: border-box;
       color: var(--vscode-button-foreground, #ffffff);
       display: flex;
-      font-family: var(--vscode-font-family, ${Hn});
+      font-family: var(--vscode-font-family, ${Br});
       font-size: var(--vscode-font-size, 13px);
       font-weight: var(--vscode-font-weight, normal);
       height: 100%;
@@ -276,30 +276,30 @@ To suppress this warning, set window.${Ao} to true`)}});var lt,Ro=b(()=>{st();lt
     :host([icon]) .icon-after {
       margin-left: 3px;
     }
-  `],Ho=Un});var T,x,Oo=b(()=>{q();be();he();ye();Bo();Uo();ve();T=function(t,e,o,n){var s=arguments.length,r=s<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,o):n,i;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")r=Reflect.decorate(t,e,o,n);else for(var a=t.length-1;a>=0;a--)(i=t[a])&&(r=(s<3?i(r):s>3?i(e,o,r):i(e,o))||r);return s>3&&r&&Object.defineProperty(e,o,r),r},x=class extends at{get form(){return this._internals.form}constructor(){super(),this.autofocus=!1,this.tabIndex=0,this.secondary=!1,this.block=!1,this.role="button",this.disabled=!1,this.icon="",this.iconSpin=!1,this.iconAfter="",this.iconAfterSpin=!1,this.focused=!1,this.name=void 0,this.iconOnly=!1,this.type="button",this.value="",this._prevTabindex=0,this._hasContentBefore=!1,this._hasContentAfter=!1,this._handleFocus=()=>{this.focused=!0},this._handleBlur=()=>{this.focused=!1},this.addEventListener("keydown",this._handleKeyDown.bind(this)),this.addEventListener("click",this._handleClick.bind(this)),this._internals=this.attachInternals()}connectedCallback(){super.connectedCallback(),this.autofocus&&(this.tabIndex<0&&(this.tabIndex=0),this.updateComplete.then(()=>{this.focus(),this.requestUpdate()})),this.addEventListener("focus",this._handleFocus),this.addEventListener("blur",this._handleBlur)}disconnectedCallback(){super.disconnectedCallback(),this.removeEventListener("focus",this._handleFocus),this.removeEventListener("blur",this._handleBlur)}update(e){super.update(e),e.has("value")&&this._internals.setFormValue(this.value),e.has("disabled")&&(this.disabled?(this._prevTabindex=this.tabIndex,this.tabIndex=-1):this.tabIndex=this._prevTabindex)}_executeAction(){this.type==="submit"&&this._internals.form&&this._internals.form.requestSubmit(),this.type==="reset"&&this._internals.form&&this._internals.form.reset()}_handleKeyDown(e){if((e.key==="Enter"||e.key===" ")&&!this.hasAttribute("disabled")){let o=new MouseEvent("click",{bubbles:!0,cancelable:!0});o.synthetic=!0,this.dispatchEvent(o),this._executeAction()}}_handleClick(e){e.synthetic||this.hasAttribute("disabled")||this._executeAction()}_handleSlotChange(e){let o=e.target;o.name==="content-before"&&(this._hasContentBefore=o.assignedElements().length>0),o.name==="content-after"&&(this._hasContentAfter=o.assignedElements().length>0)}render(){let e=this.icon!=="",o=this.iconAfter!=="",n={base:!0,"icon-only":this.iconOnly,"has-content-before":this._hasContentBefore,"has-content-after":this._hasContentAfter},s=e?B`<vscode-icon
+  `],xn=Dr});var S,x,wn=b(()=>{tt();Ue();je();We();hn();kn();Fe();S=function(t,e,o,n){var r=arguments.length,s=r<3?e:n===null?n=Object.getOwnPropertyDescriptor(e,o):n,i;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")s=Reflect.decorate(t,e,o,n);else for(var a=t.length-1;a>=0;a--)(i=t[a])&&(s=(r<3?i(s):r>3?i(e,o,s):i(e,o))||s);return r>3&&s&&Object.defineProperty(e,o,s),s},x=class extends ht{get form(){return this._internals.form}constructor(){super(),this.autofocus=!1,this.tabIndex=0,this.secondary=!1,this.block=!1,this.role="button",this.disabled=!1,this.icon="",this.iconSpin=!1,this.iconAfter="",this.iconAfterSpin=!1,this.focused=!1,this.name=void 0,this.iconOnly=!1,this.type="button",this.value="",this._prevTabindex=0,this._hasContentBefore=!1,this._hasContentAfter=!1,this._handleFocus=()=>{this.focused=!0},this._handleBlur=()=>{this.focused=!1},this.addEventListener("keydown",this._handleKeyDown.bind(this)),this.addEventListener("click",this._handleClick.bind(this)),this._internals=this.attachInternals()}connectedCallback(){super.connectedCallback(),this.autofocus&&(this.tabIndex<0&&(this.tabIndex=0),this.updateComplete.then(()=>{this.focus(),this.requestUpdate()})),this.addEventListener("focus",this._handleFocus),this.addEventListener("blur",this._handleBlur)}disconnectedCallback(){super.disconnectedCallback(),this.removeEventListener("focus",this._handleFocus),this.removeEventListener("blur",this._handleBlur)}update(e){super.update(e),e.has("value")&&this._internals.setFormValue(this.value),e.has("disabled")&&(this.disabled?(this._prevTabindex=this.tabIndex,this.tabIndex=-1):this.tabIndex=this._prevTabindex)}_executeAction(){this.type==="submit"&&this._internals.form&&this._internals.form.requestSubmit(),this.type==="reset"&&this._internals.form&&this._internals.form.reset()}_handleKeyDown(e){if((e.key==="Enter"||e.key===" ")&&!this.hasAttribute("disabled")){let o=new MouseEvent("click",{bubbles:!0,cancelable:!0});o.synthetic=!0,this.dispatchEvent(o),this._executeAction()}}_handleClick(e){e.synthetic||this.hasAttribute("disabled")||this._executeAction()}_handleSlotChange(e){let o=e.target;o.name==="content-before"&&(this._hasContentBefore=o.assignedElements().length>0),o.name==="content-after"&&(this._hasContentAfter=o.assignedElements().length>0)}render(){let e=this.icon!=="",o=this.iconAfter!=="",n={base:!0,"icon-only":this.iconOnly,"has-content-before":this._hasContentBefore,"has-content-after":this._hasContentAfter},r=e?F`<vscode-icon
           name=${this.icon}
           ?spin=${this.iconSpin}
-          spin-duration=${lt(this.iconSpinDuration)}
+          spin-duration=${yt(this.iconSpinDuration)}
           class="icon"
-        ></vscode-icon>`:w,r=o?B`<vscode-icon
+        ></vscode-icon>`:w,s=o?F`<vscode-icon
           name=${this.iconAfter}
           ?spin=${this.iconAfterSpin}
-          spin-duration=${lt(this.iconAfterSpinDuration)}
+          spin-duration=${yt(this.iconAfterSpinDuration)}
           class="icon-after"
-        ></vscode-icon>`:w;return B`
+        ></vscode-icon>`:w;return F`
       <div
-        class=${Ft(n)}
+        class=${de(n)}
         part="base"
         @slotchange=${this._handleSlotChange}
       >
         <slot name="content-before"></slot>
-        ${s}
-        <slot></slot>
         ${r}
+        <slot></slot>
+        ${s}
         <slot name="content-after"></slot>
       </div>
-    `}};x.styles=Ho;x.formAssociated=!0;T([y({type:Boolean,reflect:!0})],x.prototype,"autofocus",void 0);T([y({type:Number,reflect:!0})],x.prototype,"tabIndex",void 0);T([y({type:Boolean,reflect:!0})],x.prototype,"secondary",void 0);T([y({type:Boolean,reflect:!0})],x.prototype,"block",void 0);T([y({reflect:!0})],x.prototype,"role",void 0);T([y({type:Boolean,reflect:!0})],x.prototype,"disabled",void 0);T([y()],x.prototype,"icon",void 0);T([y({type:Boolean,reflect:!0,attribute:"icon-spin"})],x.prototype,"iconSpin",void 0);T([y({type:Number,reflect:!0,attribute:"icon-spin-duration"})],x.prototype,"iconSpinDuration",void 0);T([y({attribute:"icon-after"})],x.prototype,"iconAfter",void 0);T([y({type:Boolean,reflect:!0,attribute:"icon-after-spin"})],x.prototype,"iconAfterSpin",void 0);T([y({type:Number,reflect:!0,attribute:"icon-after-spin-duration"})],x.prototype,"iconAfterSpinDuration",void 0);T([y({type:Boolean,reflect:!0})],x.prototype,"focused",void 0);T([y({type:String,reflect:!0})],x.prototype,"name",void 0);T([y({type:Boolean,reflect:!0,attribute:"icon-only"})],x.prototype,"iconOnly",void 0);T([y({reflect:!0})],x.prototype,"type",void 0);T([y()],x.prototype,"value",void 0);T([me()],x.prototype,"_hasContentBefore",void 0);T([me()],x.prototype,"_hasContentAfter",void 0);x=T([Wt("vscode-button")],x)});var jo={};un(jo,{VscodeButton:()=>x});var Fo=b(()=>{Oo()});function m(t,e,o){let n=document.createElement(t);return e&&(n.className=e),o!==void 0&&(n.textContent=o),n}var Oe={"btn-refresh":{id:"btn-refresh",label:"Refresh",icon:"refresh",appearance:"primary"},"btn-details":{id:"btn-details",label:"Details",icon:"robot",iconColor:"#c37bff",appearance:"secondary"},"btn-chart":{id:"btn-chart",label:"Chart",icon:"graph-line",iconColor:"#60a5fa",appearance:"secondary"},"btn-usage":{id:"btn-usage",label:"Usage Analysis",icon:"graph",iconColor:"#22d3ee",appearance:"secondary"},"btn-diagnostics":{id:"btn-diagnostics",label:"Diagnostics",icon:"search",iconColor:"#fb7185",appearance:"secondary"},"btn-maturity":{id:"btn-maturity",label:"Fluency Score",icon:"target",iconColor:"#fbbf24",appearance:"secondary"},"btn-dashboard":{id:"btn-dashboard",label:"Team Dashboard",icon:"organization",iconColor:"#818cf8",appearance:"secondary"},"btn-level-viewer":{id:"btn-level-viewer",label:"Level Viewer",icon:"list-tree",iconColor:"#94a3b8",appearance:"secondary"},"btn-environmental":{id:"btn-environmental",label:"Environmental Impact",icon:"globe",iconColor:"#4ade80",appearance:"secondary"}};var gn=["btn-refresh","btn-details","btn-chart","btn-usage","btn-maturity","btn-environmental","btn-diagnostics","btn-dashboard"];function mn(t,e){return gn.filter(o=>o!=="btn-dashboard"||e).map(o=>({...Oe[o],active:o===t}))}function bn(t){let e=typeof t=="string"?Oe[t]:t;if(e.hidden)return"";let o=e.appearance?` appearance="${e.appearance}"`:"",n=e.active?' class="nav-active" disabled aria-current="page"':"",s=e.iconColor?` style="--icon-accent:${e.iconColor}"`:"",r=e.icon?`<span class="codicon codicon-${e.icon} nav-icon"${s}></span>`:"";return`<vscode-button id="${e.id}"${o}${n}>${r}${e.label}</vscode-button>`}function je(t,e){return mn(t,e).map(o=>bn(o)).join(`
-`)}function ut(t){return t.file+t.selection+t.implicitSelection+t.symbol+t.codebase+t.workspace+t.terminal+t.vscode+t.copilotInstructions+t.agentsMd+(t.terminalLastCommand||0)+(t.terminalSelection||0)+(t.clipboard||0)+(t.changes||0)+(t.outputPanel||0)+(t.problemsPanel||0)+(t.pullRequest||0)}function I(t){let e=globalThis.window;return e?e[t]:void 0}var fn=I("__TOKEN_ESTIMATORS__"),ei=fn?.estimators??{},Qt;function te(t){Qt=t}function S(t,e){return new Intl.NumberFormat(Qt,{minimumFractionDigits:e,maximumFractionDigits:e}).format(t)}function V(t,e=1){return`${S(t,e)}%`}function g(t){return t.toLocaleString(Qt)}function c(t){return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}function Fe(t){if(t===void 0||!Number.isFinite(t)||t<0)return"\u2014";let e=Math.round(t/6e4);if(e<1)return"<1m";if(e<60)return`${e}m`;let o=Math.floor(e/60),n=e%60;return`${o}h ${String(n).padStart(2,"0")}m`}function qe(t){let e=window.__EXTENSION_POINT_BUTTONS__??[];if(e.length===0)return;let o=document.querySelector(".button-row");if(o)for(let n of e){let s=document.createElement("vscode-button");s.id=`ext-point-${n.id}`,s.textContent=n.label,s.addEventListener("click",()=>{t.postMessage({command:"extensionPointAction",buttonId:n.id})}),o.append(s)}}var We=`/**
+    `}};x.styles=xn;x.formAssociated=!0;S([y({type:Boolean,reflect:!0})],x.prototype,"autofocus",void 0);S([y({type:Number,reflect:!0})],x.prototype,"tabIndex",void 0);S([y({type:Boolean,reflect:!0})],x.prototype,"secondary",void 0);S([y({type:Boolean,reflect:!0})],x.prototype,"block",void 0);S([y({reflect:!0})],x.prototype,"role",void 0);S([y({type:Boolean,reflect:!0})],x.prototype,"disabled",void 0);S([y()],x.prototype,"icon",void 0);S([y({type:Boolean,reflect:!0,attribute:"icon-spin"})],x.prototype,"iconSpin",void 0);S([y({type:Number,reflect:!0,attribute:"icon-spin-duration"})],x.prototype,"iconSpinDuration",void 0);S([y({attribute:"icon-after"})],x.prototype,"iconAfter",void 0);S([y({type:Boolean,reflect:!0,attribute:"icon-after-spin"})],x.prototype,"iconAfterSpin",void 0);S([y({type:Number,reflect:!0,attribute:"icon-after-spin-duration"})],x.prototype,"iconAfterSpinDuration",void 0);S([y({type:Boolean,reflect:!0})],x.prototype,"focused",void 0);S([y({type:String,reflect:!0})],x.prototype,"name",void 0);S([y({type:Boolean,reflect:!0,attribute:"icon-only"})],x.prototype,"iconOnly",void 0);S([y({reflect:!0})],x.prototype,"type",void 0);S([y()],x.prototype,"value",void 0);S([Ne()],x.prototype,"_hasContentBefore",void 0);S([Ne()],x.prototype,"_hasContentAfter",void 0);x=S([pe("vscode-button")],x)});var Cn={};ar(Cn,{VscodeButton:()=>x});var Tn=b(()=>{wn()});function m(t,e,o){let n=document.createElement(t);return e&&(n.className=e),o!==void 0&&(n.textContent=o),n}var Zt={today:"Today",last7:"Last 7 days",last30:"Last 30 days",currentMonth:"Current month",lastMonth:"Previous month",thisWeek:"This week",allTime:"All time"},lr=["today","last7","last30","currentMonth","allTime"];function yo(t,e,o){e===o&&(t.selected=!0)}function Ce(t){let e=m("div","period-selector");e.style.display="inline-flex",e.style.alignItems="center",e.style.gap="4px";let o=t.label??"Time window:";if(o){let i=m("span","period-selector-label",o);i.style.fontSize="11px",i.style.color="var(--vscode-descriptionForeground, var(--text-secondary, #9ca3af))",e.append(i)}let n=document.createElement("select");n.className="period-selector-select",t.id&&(n.id=t.id),n.style.background="var(--vscode-dropdown-background, var(--button-secondary-bg, #2d2d2d))",n.style.color="var(--vscode-dropdown-foreground, var(--text-primary, #cccccc))",n.style.border="1px solid var(--border-subtle, #555555)",n.style.borderRadius="4px",n.style.padding="4px 8px",n.style.fontSize="13px",n.style.cursor="pointer",n.style.minHeight="24px";let r=new Set(t.disabled??[]),s=t.periods??lr;for(let i of s){let a=document.createElement("option");a.value=i,a.textContent=Zt[i],yo(a,i,t.selected),r.has(i)&&(a.disabled=!0,t.disabledTitle&&(a.title=t.disabledTitle)),n.append(a)}for(let i of t.extraOptions??[]){let a=document.createElement("option");a.value=i.value,a.textContent=i.label,i.title&&(a.title=i.title),yo(a,i.value,t.selected),i.disabled&&(a.disabled=!0),n.append(a)}return n.addEventListener("change",()=>{t.onChange(n.value)}),e.append(n),{wrapper:e,select:n}}var vo={"btn-refresh":{id:"btn-refresh",label:"Refresh",icon:"refresh",appearance:"primary"},"btn-details":{id:"btn-details",label:"Details",icon:"robot",iconColor:"#c37bff",appearance:"secondary"},"btn-chart":{id:"btn-chart",label:"Chart",icon:"graph-line",iconColor:"#60a5fa",appearance:"secondary"},"btn-usage":{id:"btn-usage",label:"Usage Analysis",icon:"graph",iconColor:"#22d3ee",appearance:"secondary"},"btn-diagnostics":{id:"btn-diagnostics",label:"Diagnostics",icon:"search",iconColor:"#fb7185",appearance:"secondary"},"btn-maturity":{id:"btn-maturity",label:"Fluency Score",icon:"target",iconColor:"#fbbf24",appearance:"secondary"},"btn-dashboard":{id:"btn-dashboard",label:"Team Dashboard",icon:"organization",iconColor:"#818cf8",appearance:"secondary"},"btn-level-viewer":{id:"btn-level-viewer",label:"Level Viewer",icon:"list-tree",iconColor:"#94a3b8",appearance:"secondary"},"btn-environmental":{id:"btn-environmental",label:"Environmental Impact",icon:"globe",iconColor:"#4ade80",appearance:"secondary"}};var dr=["btn-refresh","btn-details","btn-chart","btn-usage","btn-maturity","btn-environmental","btn-diagnostics","btn-dashboard"];function cr(t,e){return dr.filter(o=>o!=="btn-dashboard"||e).map(o=>({...vo[o],active:o===t}))}function pr(t){let e=typeof t=="string"?vo[t]:t;if(e.hidden)return"";let o=e.appearance?` appearance="${e.appearance}"`:"",n=e.active?' class="nav-active" disabled aria-current="page"':"",r=e.iconColor?` style="--icon-accent:${e.iconColor}"`:"",s=e.icon?`<span class="codicon codicon-${e.icon} nav-icon"${r}></span>`:"";return`<vscode-button id="${e.id}"${o}${n}>${s}${e.label}</vscode-button>`}function xo(t,e){return cr(t,e).map(o=>pr(o)).join(`
+`)}function Ct(t){return t.file+t.selection+t.implicitSelection+t.symbol+t.codebase+t.workspace+t.terminal+t.vscode+t.copilotInstructions+t.agentsMd+(t.terminalLastCommand||0)+(t.terminalSelection||0)+(t.clipboard||0)+(t.changes||0)+(t.outputPanel||0)+(t.problemsPanel||0)+(t.pullRequest||0)}function j(t){let e=globalThis.window;return e?e[t]:void 0}var ur=j("__TOKEN_ESTIMATORS__"),Za=ur?.estimators??{},Tt,gr=!0;function Te(t){Tt=t}function $(t,e){return new Intl.NumberFormat(Tt,{minimumFractionDigits:e,maximumFractionDigits:e}).format(t)}function Y(t,e=1){return`${$(t,e)}%`}function g(t){return t.toLocaleString(Tt)}function ko(t){return gr?new Intl.NumberFormat(Tt,{notation:"compact",maximumFractionDigits:1}).format(t):g(t)}function wo(t){return new Intl.NumberFormat(Tt,{style:"currency",currency:"USD",minimumFractionDigits:2,maximumFractionDigits:2}).format(t)}function c(t){return t.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}function Qt(t){let e=Number(t);if(!Number.isFinite(e)||e<0)return"N/A";if(e<1024)return`${e} B`;let o=["KB","MB","GB","TB","PB"],n=e/1024,r=0;for(;n>=1024&&r<o.length-1;)n/=1024,r++;let s=r===0?1:2;return`${n.toFixed(s)} ${o[r]}`}function Se(t){if(t===void 0||!Number.isFinite(t)||t<0)return"\u2014";let e=Math.round(t/6e4);if(e<1)return"<1m";if(e<60)return`${e}m`;let o=Math.floor(e/60),n=e%60;return`${o}h ${String(n).padStart(2,"0")}m`}function Co(t){let e=window.__EXTENSION_POINT_BUTTONS__??[];if(e.length===0)return;let o=document.querySelector(".button-row");if(o)for(let n of e){let r=document.createElement("vscode-button");r.id=`ext-point-${n.id}`,r.textContent=n.label,r.addEventListener("click",()=>{t.postMessage({command:"extensionPointAction",buttonId:n.id})}),o.append(r)}}var To=`/**
  * Shared theme variables for all webview panels
  * Uses VS Code theme tokens for automatic light/dark theme support.
  *
@@ -629,7 +629,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
 	text-shadow: 2px 2px 0 var(--vscode-panel-border);
 	white-space: nowrap;
 }
-`;var Ke=`* {
+`;var So=`* {
 	margin: 0;
 	padding: 0;
 	box-sizing: border-box;
@@ -1085,7 +1085,297 @@ background: var(--bg-tertiary);
 .sessions-table tr:hover td {
 	background: var(--list-hover-bg);
 }
-`;function Ge(t){window.addEventListener("message",e=>{t(e.data)})}var vn=I("__MODEL_PRICING__"),ee={};for(let[t,e]of Object.entries(vn?.pricing??{}))e.displayNames&&e.displayNames.length>0&&(ee[t]=e.displayNames[0]);function Pt(t){if(ee[t])return ee[t];try{return decodeURIComponent(t)}catch{return t}}var ui=1/1e11;function xn(t){if(!t)return null;let e=/([\d.]+)\s*([KkMm])?/.exec(t);if(!e)return null;let o=parseFloat(e[1]);if(!isFinite(o)||o<=0)return null;let n=(e[2]??"").toUpperCase();return Math.round(o*(n==="M"?1e6:n==="K"?1e3:1))}function Ve(t,e={}){let o=e[t];if(!o){let r=t.toLowerCase();for(let[i,a]of Object.entries(e))if(r.includes(i.toLowerCase())||i.toLowerCase().includes(r)){o=a;break}}let n=o?.copilotPricing?.longContext;if(!n)return null;let s=xn(n.threshold);return s?{thresholdTokens:s,defaultInputCostPerMillion:o.copilotPricing.inputCostPerMillion,longContextInputCostPerMillion:n.inputCostPerMillion}:null}var kn=new Set(["\u2705","\u26A0\uFE0F","\u274C"]);function It(t){let e=Number(t);return Number.isFinite(e)?e:0}function Je(t){if(!t||typeof t!="object")return;let e=t,o=Array.isArray(e.customizationTypes)?e.customizationTypes.filter(s=>!!s&&typeof s=="object").map(s=>({id:typeof s.id=="string"?s.id:"",icon:typeof s.icon=="string"?s.icon:"",label:typeof s.label=="string"?s.label:""})).filter(s=>s.id!==""):[],n=Array.isArray(e.workspaces)?e.workspaces.filter(s=>!!s&&typeof s=="object").map(s=>{let r=s.typeStatuses&&typeof s.typeStatuses=="object"?s.typeStatuses:{},i={};for(let[a,l]of Object.entries(r))i[a]=kn.has(l)?l:"\u274C";return{workspacePath:typeof s.workspacePath=="string"?s.workspacePath:"",workspaceName:typeof s.workspaceName=="string"?s.workspaceName:"",sessionCount:It(s.sessionCount),interactionCount:It(s.interactionCount),typeStatuses:i}}):[];return{customizationTypes:o,workspaces:n,totalWorkspaces:It(e.totalWorkspaces),workspacesWithIssues:It(e.workspacesWithIssues)}}var Ye=/^mcp__[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}__(.+)$/i;function wn(t){return t.replace(/_/g," ").replace(/\b\w/g,e=>e.toUpperCase())}function Xe(t){let e=Ye.exec(t);if(e)return`Claude MCP: M365 Connector - ${wn(e[1])}`}function Ze(t){return Ye.test(t)}function z(t,e){let o=e?` title="${c(e)}"`:"",n="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font-weight:700;flex-shrink:0;";return t==="\u2705"?`<span style="${n}background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#4ade80;font-size:12px;"${o} aria-label="${c(e??"Present and fresh")}">\u2713</span>`:t==="\u26A0\uFE0F"?`<span style="${n}background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;font-size:12px;"${o} aria-label="${c(e??"Present but stale")}">!</span>`:`<span style="${n}background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);color:#f87171;font-size:12px;"${o} aria-label="${c(e??"Missing")}">\u2715</span>`}var f=acquireVsCodeApi(),qo=new Set,D=f.getState()?.aboutCollapsed??!1;function U(t,e){try{f.postMessage({command:"traceUsageCuration",stage:t,details:e??{}})}catch{}}function tt(t,e,o){qo.has(t)||(qo.add(t),U(e,o))}var W=I("__INITIAL_USAGE__"),P=null,zt=new Map,E=null,et=!1,_t=!1,Xo=[],A="activity",Jt=null,Pe=[],Yt=null,On=`
+
+/* Worktrees tab */
+.summary-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.summary-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 12px;
+	text-align: center;
+}
+
+.summary-label {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-bottom: 4px;
+}
+
+.summary-value {
+	font-size: 18px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.table-container {
+	overflow: auto;
+	max-height: 500px;
+}
+
+.session-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 12px;
+}
+
+.session-table th,
+.session-table td {
+	padding: 8px 10px;
+	text-align: left;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.session-table th {
+	background: var(--bg-tertiary);
+	color: var(--text-primary);
+	font-weight: 600;
+	position: sticky;
+	top: 0;
+}
+
+.session-table th.sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+.session-table th.sortable:hover {
+	background: var(--list-hover-bg);
+	color: var(--link-color);
+}
+
+.button {
+	background: var(--button-secondary-bg);
+	border: 1px solid var(--border-subtle);
+	color: var(--text-primary);
+	padding: 8px 12px;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 500;
+	transition: background-color 0.15s ease;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.button:hover {
+	background: var(--bg-tertiary);
+}
+
+.button:active {
+	background: var(--button-bg);
+}
+
+.button:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.button.secondary {
+	background: var(--bg-tertiary);
+	border-color: var(--border-subtle);
+	color: var(--text-primary);
+}
+
+.button.secondary:hover {
+	background: var(--list-hover-bg);
+}
+
+.folder-input-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.folder-input {
+	flex: 1;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, var(--border-color));
+	border-radius: 4px;
+	padding: 6px 10px;
+	font-size: 13px;
+	min-width: 0;
+}
+
+.folder-input:focus {
+	outline: 1px solid var(--link-color);
+	border-color: var(--link-color);
+}
+
+.worktree-roots-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.worktree-root-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 6px 10px;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+}
+
+.worktree-root-item span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.worktree-progress-bar {
+	height: 6px;
+	border-radius: 3px;
+	background: var(--bg-tertiary);
+	overflow: hidden;
+	margin-top: 8px;
+}
+
+.worktree-progress-fill {
+	height: 100%;
+	background: var(--link-color);
+	transition: width 0.2s ease;
+}
+
+/* While walking the folder tree we have no percentage yet, so pulse the bar to
+   signal ongoing activity instead of showing a misleading fixed progress. */
+.worktree-progress-fill.indeterminate {
+	animation: worktree-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes worktree-pulse {
+	0%,
+	100% {
+		opacity: 0.35;
+	}
+
+	50% {
+		opacity: 1;
+	}
+}
+
+.worktree-repo-row {
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.worktree-repo-row:hover {
+	background: var(--bg-tertiary);
+}
+
+.worktree-repo-row.expanded {
+	background: var(--bg-tertiary);
+}
+
+.worktree-delete-link {
+	margin-left: 8px;
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.worktree-delete-link:hover {
+	text-decoration: underline;
+}
+
+.worktree-caret {
+	display: inline-block;
+	width: 14px;
+	color: var(--text-muted);
+	font-size: 10px;
+}
+
+.worktree-roots-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin: 8px 0;
+	padding: 0;
+	background: none;
+	border: none;
+	color: var(--link-color);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.worktree-roots-toggle:hover {
+	text-decoration: underline;
+}
+
+.worktree-pending {
+	color: var(--text-muted);
+	font-style: italic;
+	opacity: 0.8;
+}
+
+/* The details row's cell wraps the per-worktree table; trim its padding so the
+   nested table aligns with the parent columns. */
+.worktree-repo-details > td {
+	padding: 0 0 12px;
+}
+
+.worktree-cleanup-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+.worktree-cleanup-card-actions {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.worktree-cleanup-card-actions .button {
+	font-size: 12px;
+	padding: 4px 10px;
+}
+
+.worktree-cleanup-log {
+	margin-top: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 12px;
+}
+
+.worktree-cleanup-log-row {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+	padding: 4px 6px;
+	border-radius: 4px;
+	background: var(--bg-tertiary);
+}
+
+.worktree-cleanup-log-branch {
+	font-weight: 600;
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.worktree-cleanup-log-repo {
+	color: var(--text-muted);
+}
+
+.worktree-cleanup-log-reason {
+	color: var(--text-muted);
+	flex: 1;
+}
+`;function $o(t){window.addEventListener("message",e=>{t(e.data)})}var br=j("__MODEL_PRICING__"),$e={};for(let[t,e]of Object.entries(br?.pricing??{}))e.displayNames&&e.displayNames.length>0&&($e[t]=e.displayNames[0]);function St(t){if($e[t])return $e[t];try{return decodeURIComponent(t)}catch{return t}}var dl=1/1e11;function hr(t){if(!t)return null;let e=/([\d.]+)\s*([KkMm])?/.exec(t);if(!e)return null;let o=parseFloat(e[1]);if(!isFinite(o)||o<=0)return null;let n=(e[2]??"").toUpperCase();return Math.round(o*(n==="M"?1e6:n==="K"?1e3:1))}function Ao(t,e={}){let o=e[t];if(!o){let s=t.toLowerCase();for(let[i,a]of Object.entries(e))if(s.includes(i.toLowerCase())||i.toLowerCase().includes(s)){o=a;break}}let n=o?.copilotPricing?.longContext;if(!n)return null;let r=hr(n.threshold);return r?{thresholdTokens:r,defaultInputCostPerMillion:o.copilotPricing.inputCostPerMillion,longContextInputCostPerMillion:n.inputCostPerMillion}:null}function Eo(t){return{oneShotRate:t.editTurns>0?t.oneShotEditTurns/t.editTurns:null,retryRate:t.editTurns>0?t.retries/t.editTurns:null,selfCorrectionRate:t.editTurns>0?t.selfCorrections/t.editTurns:null,costPerCall:t.calls>0?t.cost/t.calls:null,costPerEdit:t.editTurns>0?t.cost/t.editTurns:null,outputTokensPerCall:t.calls>0?t.outputTokens/t.calls:null,cacheHitRate:t.inputTokens>0?Math.min(1,t.cachedReadTokens/t.inputTokens):null}}function Ro(t){let e=Object.values(t).map(o=>o.calls).sort((o,n)=>o-n);return e.length<4?null:e[Math.floor((e.length-1)*.25)]}var yr=new Set(["\u2705","\u26A0\uFE0F","\u274C"]);function te(t){let e=Number(t);return Number.isFinite(e)?e:0}function Mo(t){if(!t||typeof t!="object")return;let e=t,o=Array.isArray(e.customizationTypes)?e.customizationTypes.filter(r=>!!r&&typeof r=="object").map(r=>({id:typeof r.id=="string"?r.id:"",icon:typeof r.icon=="string"?r.icon:"",label:typeof r.label=="string"?r.label:""})).filter(r=>r.id!==""):[],n=Array.isArray(e.workspaces)?e.workspaces.filter(r=>!!r&&typeof r=="object").map(r=>{let s=r.typeStatuses&&typeof r.typeStatuses=="object"?r.typeStatuses:{},i={};for(let[a,l]of Object.entries(s))i[a]=yr.has(l)?l:"\u274C";return{workspacePath:typeof r.workspacePath=="string"?r.workspacePath:"",workspaceName:typeof r.workspaceName=="string"?r.workspaceName:"",sessionCount:te(r.sessionCount),interactionCount:te(r.interactionCount),typeStatuses:i}}):[];return{customizationTypes:o,workspaces:n,totalWorkspaces:te(e.totalWorkspaces),workspacesWithIssues:te(e.workspacesWithIssues)}}var Po=/^mcp__[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}__(.+)$/i;function vr(t){return t.replace(/_/g," ").replace(/\b\w/g,e=>e.toUpperCase())}function _o(t){let e=Po.exec(t);if(e)return`Claude MCP: M365 Connector - ${vr(e[1])}`}function zo(t){return Po.test(t)}function H(t,e){let o=e?` title="${c(e)}"`:"",n="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:4px;font-weight:700;flex-shrink:0;";return t==="\u2705"?`<span style="${n}background:rgba(34,197,94,0.2);border:1px solid rgba(34,197,94,0.5);color:#4ade80;font-size:12px;"${o} aria-label="${c(e??"Present and fresh")}">\u2713</span>`:t==="\u26A0\uFE0F"?`<span style="${n}background:rgba(251,191,36,0.2);border:1px solid rgba(251,191,36,0.5);color:#fbbf24;font-size:12px;"${o} aria-label="${c(e??"Present but stale")}">!</span>`:`<span style="${n}background:rgba(239,68,68,0.2);border:1px solid rgba(239,68,68,0.5);color:#f87171;font-size:12px;"${o} aria-label="${c(e??"Missing")}">\u2715</span>`}var f=acquireVsCodeApi(),Sn=new Set,q=f.getState()?.aboutCollapsed??!1;function G(t,e){try{f.postMessage({command:"traceUsageCuration",stage:t,details:e??{}})}catch{}}function dt(t,e,o){Sn.has(t)||(Sn.add(t),G(e,o))}var U=j("__INITIAL_USAGE__"),N=null,Xt=new Map,_=null,ct=!1,Vt=!1,Dn=[],A="activity",fe=null,io=[],be=null,M=U?.worktreeScanRoots?[...U.worktreeScanRoots]:[],D=[],E=!1,R={root:"",checked:0,total:0,foundCount:0,elapsedMs:0},Gt=null,Ve=!1,he=new Set,Ht=!1,Jt="count",Nt="desc",J=!1,pt=!1,ao={processed:0,total:0},et=[];function C(t){return Number(t??0)||0}var Hr=`
 <style id="usage-loading-css">
 :root {
   --ul-bg: var(--vscode-sideBar-background, #181825);
@@ -1129,7 +1419,7 @@ background: var(--bg-tertiary);
 .ul-cnt { font-size: 11px; opacity: 0.75; font-variant-numeric: tabular-nums; }
 @keyframes ul-pop { 0% { transform: scale(0.4); opacity: 0; } 60% { transform: scale(1.3); } 100% { transform: scale(1); opacity: 1; } }
 .ul-pop { animation: ul-pop 0.3s ease both; }
-</style>`,St=[{id:"ul-s-start",label:"Starting usage analysis"},{id:"ul-s-tools",label:"Collecting runtime tools"},{id:"ul-s-mcp",label:"Discovering MCP servers"},{id:"ul-s-skills",label:"Scanning skill directories"},{id:"ul-s-crunch",label:"Computing curation analysis"},{id:"ul-s-ready",label:"Ready!"}],jn={start:{pct:5,stepId:"ul-s-start",subtitle:"Starting usage analysis\u2026"},"curation:start":{pct:20,stepId:"ul-s-tools",subtitle:"Collecting tools and skills\u2026"},"curation:runtimeTools":{pct:32,stepId:"ul-s-tools",subtitle:"Collected runtime tools"},"curation:mcpJson":{pct:44,stepId:"ul-s-mcp",subtitle:"Scanning MCP config files\u2026"},"curation:mcpSources":{pct:55,stepId:"ul-s-mcp",subtitle:"Collected MCP servers"},"curation:skillsScanStart":{pct:63,stepId:"ul-s-skills",subtitle:"Scanning skill directories\u2026"},"curation:skillsScanDone":{pct:75,stepId:"ul-s-skills",subtitle:"Skill discovery complete"},"curation:analyzing":{pct:85,stepId:"ul-s-crunch",subtitle:"Analyzing tool usage patterns\u2026"},"curation:done":{pct:96,stepId:"ul-s-crunch",subtitle:"Curation analysis complete"},ready:{pct:100,stepId:"ul-s-ready",subtitle:"Usage analysis ready"},error:{pct:100,stepId:"ul-s-ready",subtitle:"Analysis completed with errors"},"curation:error":{pct:85,stepId:"ul-s-crunch",subtitle:"Curation analysis skipped"}};function Ie(t="Loading usage analysis..."){let e=document.getElementById("root");if(!e)return;Le=!0;let o=St.map((n,s)=>{let r=s===0,i=r?"ul-step ul-active":"ul-step",a=r?'<span class="ul-spin">\u21BB</span>':"\u25CB";return`<div class="${i}" id="${n.id}"><span class="ul-ico">${a}</span><span class="ul-lbl">${c(n.label)}</span><span class="ul-cnt" id="${n.id}-cnt"></span></div>`}).join("");e.innerHTML=`${On}
+</style>`,Ut=[{id:"ul-s-start",label:"Starting usage analysis"},{id:"ul-s-tools",label:"Collecting runtime tools"},{id:"ul-s-mcp",label:"Discovering MCP servers"},{id:"ul-s-skills",label:"Scanning skill directories"},{id:"ul-s-crunch",label:"Computing curation analysis"},{id:"ul-s-ready",label:"Ready!"}],Nr={start:{pct:5,stepId:"ul-s-start",subtitle:"Starting usage analysis\u2026"},"curation:start":{pct:20,stepId:"ul-s-tools",subtitle:"Collecting tools and skills\u2026"},"curation:runtimeTools":{pct:32,stepId:"ul-s-tools",subtitle:"Collected runtime tools"},"curation:mcpJson":{pct:44,stepId:"ul-s-mcp",subtitle:"Scanning MCP config files\u2026"},"curation:mcpSources":{pct:55,stepId:"ul-s-mcp",subtitle:"Collected MCP servers"},"curation:skillsScanStart":{pct:63,stepId:"ul-s-skills",subtitle:"Scanning skill directories\u2026"},"curation:skillsScanDone":{pct:75,stepId:"ul-s-skills",subtitle:"Skill discovery complete"},"curation:analyzing":{pct:85,stepId:"ul-s-crunch",subtitle:"Analyzing tool usage patterns\u2026"},"curation:done":{pct:96,stepId:"ul-s-crunch",subtitle:"Curation analysis complete"},ready:{pct:100,stepId:"ul-s-ready",subtitle:"Usage analysis ready"},error:{pct:100,stepId:"ul-s-ready",subtitle:"Analysis completed with errors"},"curation:error":{pct:85,stepId:"ul-s-crunch",subtitle:"Curation analysis skipped"}};function lo(t="Loading usage analysis..."){let e=document.getElementById("root");if(!e)return;co=!0;let o=Ut.map((n,r)=>{let s=r===0,i=s?"ul-step ul-active":"ul-step",a=s?'<span class="ul-spin">\u21BB</span>':"\u25CB";return`<div class="${i}" id="${n.id}"><span class="ul-ico">${a}</span><span class="ul-lbl">${c(n.label)}</span><span class="ul-cnt" id="${n.id}-cnt"></span></div>`}).join("");e.innerHTML=`${Hr}
 <div id="usage-loading-wrap">
   <div id="usage-loading-card">
     <div id="ul-header">
@@ -1146,38 +1436,38 @@ background: var(--bg-tertiary);
     <div id="ul-track"><div id="ul-fill" class="ul-indeterminate"></div></div>
     <div id="ul-steps">${o}</div>
   </div>
-</div>`}function Wo(t){let e=document.getElementById(t);if(!e)return;e.className="ul-step ul-done";let o=e.querySelector(".ul-ico");o&&(o.innerHTML='<span class="ul-pop">\u2713</span>')}function Fn(t){let e=document.getElementById(t);if(!e)return;e.className="ul-step ul-active";let o=e.querySelector(".ul-ico");o&&(o.innerHTML='<span class="ul-spin">\u21BB</span>')}function qn(t,e){let o=document.getElementById(`${t}-cnt`);o&&(o.textContent=e)}var $t=0,Le=!1;function Wn(t,e){for(let o=$t;o<t;o++)Wo(St[o].id);t>$t&&($t=t),e<100?Fn(St[t].id):Wo(St[t].id)}function Kn(t){return typeof t.count=="number"?`${t.count}`:typeof t.skills=="number"?`${t.skills} skills`:typeof t.availableTools=="number"?`${t.availableTools} tools`:""}function Gn(){let t=document.getElementById("root");return t?t.querySelector("#usage-loading-card")?!0:Le?(Ie("Building Usage Analysis"),$t=0,!0):!1:!1}function Vn(t){if(!Gn())return;let e=typeof t?.stage=="string"?t.stage:"",o=jn[e];if(!o)return;let n=o.pct,s=document.getElementById("ul-fill");s&&(s.classList.remove("ul-indeterminate"),s.style.width=`${Math.max(n,3)}%`);let r=document.getElementById("ul-pct");r&&(r.textContent=n===100?"100%":`${n}%`);let i=document.getElementById("ul-subtitle");i&&(i.textContent=o.subtitle);let a=St.findIndex(p=>p.id===o.stepId);a>=0&&Wn(a,n);let l=t?.details;if(l&&typeof l=="object"){let p=Kn(l);p&&qn(o.stepId,`(${p})`)}}function $e(){Jt!==null&&(clearTimeout(Jt),Jt=null)}function Be(){let t=document.createElement("button");return t.textContent="\u{1F504} Refresh",t.style.cssText="padding: 6px 16px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); border-radius: 2px; font-size: 13px;",t.addEventListener("click",()=>f.postMessage({command:"refresh"})),t}function Zo(t){let e=document.getElementById("root");if(!e)return;let o=document.createElement("div");o.style.cssText="padding: 32px; text-align: center; font-size: 14px;";let n=document.createElement("div");n.style.cssText="font-size: 24px; margin-bottom: 12px;",n.innerHTML=z("\u274C","Error");let s=document.createElement("div");s.style.cssText="color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;",s.textContent=t,o.append(n,s,Be()),e.textContent="",e.append(o)}var Ae=!1,At=null,Ee=!1,Et=null,Jn={xhigh:"Extra High"};function Yn(t){return Jn[t]??t}var Rt=I("__TOOL_NAMES__")??null,Xn=I("__AUTOMATIC_TOOLS__")??[],Zn=new Set(Xn.map(t=>t.toLowerCase()));function Qo(t){return Rt?Rt[t]??Rt[t.toLowerCase()]??Xe(t)??t:t}function we(t){let e=Qo(t),o=e.indexOf(":");return o!==-1?e.substring(o+1).trim():e}function Qn(t){let e=new Set;Object.entries(t.today.mcpTools.byTool).forEach(([n])=>e.add(n)),Object.entries(t.last30Days.mcpTools.byTool).forEach(([n])=>e.add(n)),Object.entries(t.month.mcpTools.byTool).forEach(([n])=>e.add(n)),Object.entries(t.today.toolCalls.byTool).forEach(([n])=>e.add(n)),Object.entries(t.last30Days.toolCalls.byTool).forEach(([n])=>e.add(n)),Object.entries(t.month.toolCalls.byTool).forEach(([n])=>e.add(n));let o=new Set(t.suppressedUnknownTools??[]);return Array.from(e).filter(n=>!Rt?.[n]&&!Rt?.[n.toLowerCase()]&&!Ze(n)&&!o.has(n)).sort()}function ts(t){let e="https://github.com/rajbos/ai-engineering-fluency",o=encodeURIComponent("Add missing friendly names for tools"),n=t.map(i=>`- \`${i}\``).join(`
-`),s=encodeURIComponent(`## Unknown Tools Found
+</div>`}function $n(t){let e=document.getElementById(t);if(!e)return;e.className="ul-step ul-done";let o=e.querySelector(".ul-ico");o&&(o.innerHTML='<span class="ul-pop">\u2713</span>')}function Ur(t){let e=document.getElementById(t);if(!e)return;e.className="ul-step ul-active";let o=e.querySelector(".ul-ico");o&&(o.innerHTML='<span class="ul-spin">\u21BB</span>')}function Or(t,e){let o=document.getElementById(`${t}-cnt`);o&&(o.textContent=e)}var Ot=0,co=!1;function jr(t,e){for(let o=Ot;o<t;o++)$n(Ut[o].id);t>Ot&&(Ot=t),e<100?Ur(Ut[t].id):$n(Ut[t].id)}function Wr(t){return typeof t.count=="number"?`${t.count}`:typeof t.skills=="number"?`${t.skills} skills`:typeof t.availableTools=="number"?`${t.availableTools} tools`:""}function Fr(){let t=document.getElementById("root");return t?t.querySelector("#usage-loading-card")?!0:co?(lo("Building Usage Analysis"),Ot=0,!0):!1:!1}function qr(t){if(!Fr())return;let e=typeof t?.stage=="string"?t.stage:"",o=Nr[e];if(!o)return;let n=o.pct,r=document.getElementById("ul-fill");r&&(r.classList.remove("ul-indeterminate"),r.style.width=`${Math.max(n,3)}%`);let s=document.getElementById("ul-pct");s&&(s.textContent=n===100?"100%":`${n}%`);let i=document.getElementById("ul-subtitle");i&&(i.textContent=o.subtitle);let a=Ut.findIndex(p=>p.id===o.stepId);a>=0&&jr(a,n);let l=t?.details;if(l&&typeof l=="object"){let p=Wr(l);p&&Or(o.stepId,`(${p})`)}}function Qe(){fe!==null&&(clearTimeout(fe),fe=null)}function po(){let t=document.createElement("button");return t.textContent="\u{1F504} Refresh",t.style.cssText="padding: 6px 16px; cursor: pointer; border: 1px solid var(--vscode-button-border, transparent); background: var(--vscode-button-background, #0e639c); color: var(--vscode-button-foreground, #fff); border-radius: 2px; font-size: 13px;",t.addEventListener("click",()=>f.postMessage({command:"refresh"})),t}function Hn(t){let e=document.getElementById("root");if(!e)return;let o=document.createElement("div");o.style.cssText="padding: 32px; text-align: center; font-size: 14px;";let n=document.createElement("div");n.style.cssText="font-size: 24px; margin-bottom: 12px;",n.innerHTML=H("\u274C","Error");let r=document.createElement("div");r.style.cssText="color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;",r.textContent=t,o.append(n,r,po()),e.textContent="",e.append(o)}var to=!1,jt=null,eo=!1,Wt=null,Kr={xhigh:"Extra High"};function Vr(t){return Kr[t]??t}var Ft=j("__TOOL_NAMES__")??null,Gr=j("__AUTOMATIC_TOOLS__")??[],Jr=new Set(Gr.map(t=>t.toLowerCase()));function Nn(t){return Ft?Ft[t]??Ft[t.toLowerCase()]??_o(t)??t:t}function Ge(t){let e=Nn(t),o=e.indexOf(":");return o!==-1?e.substring(o+1).trim():e}function Yr(t){let e=new Set;Object.entries(t.today.mcpTools.byTool).forEach(([n])=>e.add(n)),Object.entries(t.last30Days.mcpTools.byTool).forEach(([n])=>e.add(n)),Object.entries(t.month.mcpTools.byTool).forEach(([n])=>e.add(n)),Object.entries(t.today.toolCalls.byTool).forEach(([n])=>e.add(n)),Object.entries(t.last30Days.toolCalls.byTool).forEach(([n])=>e.add(n)),Object.entries(t.month.toolCalls.byTool).forEach(([n])=>e.add(n));let o=new Set(t.suppressedUnknownTools??[]);return Array.from(e).filter(n=>!Ft?.[n]&&!Ft?.[n.toLowerCase()]&&!zo(n)&&!o.has(n)).sort()}function Xr(t){let e="https://github.com/rajbos/ai-engineering-fluency",o=encodeURIComponent("Add missing friendly names for tools"),n=t.map(i=>`- \`${i}\``).join(`
+`),r=encodeURIComponent(`## Unknown Tools Found
 
 The following tools were detected but don't have friendly display names:
 
 ${n}
 
-Please add friendly names for these tools to improve the user experience.`),r=encodeURIComponent("MCP Toolnames");return`${e}/issues/new?title=${o}&body=${s}&labels=${r}`}var es=[{label:"\u{1F4AC} Ask Mode",key:"ask",gradient:"linear-gradient(90deg, #3b82f6, #60a5fa)"},{label:"\u270F\uFE0F Edit Mode",key:"edit",gradient:"linear-gradient(90deg, #10b981, #34d399)"},{label:"\u{1F916} Agent Mode",key:"agent",gradient:"linear-gradient(90deg, #7c3aed, #a855f7)"},{label:"\u{1F4CB} Plan Mode",key:"plan",gradient:"linear-gradient(90deg, #f59e0b, #fbbf24)"},{label:"\u26A1 Custom Agent",key:"customAgent",gradient:"linear-gradient(90deg, #ec4899, #f472b6)"},{label:"\u{1F5A5}\uFE0F CLI",key:"cli",gradient:"linear-gradient(90deg, #06b6d4, #22d3ee)"}];function os(t,e,o,n){let s=o>0?e/o*100:0;return`
+Please add friendly names for these tools to improve the user experience.`),s=encodeURIComponent("MCP Toolnames");return`${e}/issues/new?title=${o}&body=${r}&labels=${s}`}var Zr=[{label:"\u{1F4AC} Ask Mode",key:"ask",gradient:"linear-gradient(90deg, #3b82f6, #60a5fa)"},{label:"\u270F\uFE0F Edit Mode",key:"edit",gradient:"linear-gradient(90deg, #10b981, #34d399)"},{label:"\u{1F916} Agent Mode",key:"agent",gradient:"linear-gradient(90deg, #7c3aed, #a855f7)"},{label:"\u{1F4CB} Plan Mode",key:"plan",gradient:"linear-gradient(90deg, #f59e0b, #fbbf24)"},{label:"\u26A1 Custom Agent",key:"customAgent",gradient:"linear-gradient(90deg, #ec4899, #f472b6)"},{label:"\u{1F5A5}\uFE0F CLI",key:"cli",gradient:"linear-gradient(90deg, #06b6d4, #22d3ee)"}];function Qr(t,e,o,n){let r=o>0?e/o*100:0;return`
 <div class="bar-item">
-<div class="bar-label"><span>${t}</span><span><strong>${g(e)}</strong> (${V(s,0)})</span></div>
-<div class="bar-track"><div class="bar-fill" style="width: ${s.toFixed(1)}%; background: ${n};"></div></div>
-</div>`}function Ko(t,e){let o=t.ask+t.edit+t.agent+t.plan+t.customAgent+t.cli,n=es.map(({label:s,key:r,gradient:i})=>os(s,t[r],o,i)).join("");return`
+<div class="bar-label"><span>${t}</span><span><strong>${g(e)}</strong> (${Y(r,0)})</span></div>
+<div class="bar-track"><div class="bar-fill" style="width: ${r.toFixed(1)}%; background: ${n};"></div></div>
+</div>`}function An(t,e){let o=t.ask+t.edit+t.agent+t.plan+t.customAgent+t.cli,n=Zr.map(({label:r,key:s,gradient:i})=>Qr(r,t[s],o,i)).join("");return`
 <div>
 <h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${e}</h4>
 <div class="bar-chart">${n}
 </div>
-</div>`}function ns(t){return`
+</div>`}function ts(t){return`
 <div class="stats-grid" style="grid-template-columns: 1fr;">
 <div class="stat-card">
 <div class="stat-label">\u{1F4CA} Avg Models per Conversation</div>
-<div class="stat-value">${S(t.averageModelsPerSession,1)}</div>
+<div class="stat-value">${$(t.averageModelsPerSession,1)}</div>
 </div>
 <div class="stat-card">
 <div class="stat-label">\u{1F504} Switching Frequency</div>
-<div class="stat-value">${V(t.switchingFrequency,0)}</div>
+<div class="stat-value">${Y(t.switchingFrequency,0)}</div>
 <div style="font-size: 10px; color: var(--text-muted); margin-top: 4px;">Sessions with &gt;1 model</div>
 </div>
 <div class="stat-card">
 <div class="stat-label">\u{1F4C8} Max Models in Session</div>
 <div class="stat-value">${g(t.maxModelsPerSession||0)}</div>
 </div>
-</div>`}function ss(t,e,o,n){return`
+</div>`}function es(t,e,o,n){return`
 <div style="min-height: 110px;">
 ${t.length>0?`
 <div style="margin-bottom: 6px;">
@@ -1203,50 +1493,50 @@ ${n.length>0?`
 <span style="font-size: 11px; color: var(--text-primary);">${n.map(c).join(", ")}</span>
 </div>
 `:""}
-</div>`}function rs(t){return t.totalRequests<=0?"":`
+</div>`}function os(t){return t.totalRequests<=0?"":`
 <div style="padding-top: 8px; border-top: 1px solid var(--border-subtle); min-height: 85px;">
 <div style="font-size: 11px; font-weight: 600; color: var(--text-primary); margin-bottom: 4px;">Request Count:</div>
 ${t.lowCostRequests>0?`
 <div style="margin-bottom: 4px; font-size: 11px;">
 <span style="color: #4ade80;">\u{1F49A} Low cost: </span>
-<span style="color: var(--text-primary);">${g(t.lowCostRequests)} (${V(t.lowCostRequests/t.totalRequests*100)})</span>
+<span style="color: var(--text-primary);">${g(t.lowCostRequests)} (${Y(t.lowCostRequests/t.totalRequests*100)})</span>
 </div>
 `:""}
 ${t.mediumCostRequests>0?`
 <div style="margin-bottom: 4px; font-size: 11px;">
 <span style="color: var(--link-color);">\u{1F7E1} Medium cost: </span>
-<span style="color: var(--text-primary);">${g(t.mediumCostRequests)} (${V(t.mediumCostRequests/t.totalRequests*100)})</span>
+<span style="color: var(--text-primary);">${g(t.mediumCostRequests)} (${Y(t.mediumCostRequests/t.totalRequests*100)})</span>
 </div>
 `:""}
 ${t.highCostRequests>0?`
 <div style="margin-bottom: 4px; font-size: 11px;">
 <span style="color: var(--warning-fg);">\u{1F4B8} High cost: </span>
-<span style="color: var(--text-primary);">${g(t.highCostRequests)} (${V(t.highCostRequests/t.totalRequests*100)})</span>
+<span style="color: var(--text-primary);">${g(t.highCostRequests)} (${Y(t.highCostRequests/t.totalRequests*100)})</span>
 </div>
 `:""}
 ${t.unknownRequests>0?`
 <div style="margin-bottom: 4px; font-size: 11px;">
 <span style="color: var(--text-muted);">\u2753 Unknown: </span>
-<span style="color: var(--text-primary);">${g(t.unknownRequests)} (${V(t.unknownRequests/t.totalRequests*100)})</span>
+<span style="color: var(--text-primary);">${g(t.unknownRequests)} (${Y(t.unknownRequests/t.totalRequests*100)})</span>
 </div>
 `:""}
-</div>`}function is(t){return t.mixedCostSessions<=0?"":`
+</div>`}function ns(t){return t.mixedCostSessions<=0?"":`
 <div style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border-subtle);">
 <span style="font-size: 11px; color: var(--link-color);">\u{1F500} Mixed cost sessions: ${g(t.mixedCostSessions)}</span>
-</div>`}function Ce(t,e,o,n,s,r){return`
+</div>`}function Je(t,e,o,n,r,s){return`
 <div>
 <h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${t}</h4>
-${ns(e)}
+${ts(e)}
 <div style="margin-top: 12px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
 <div style="font-size: 12px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Models by Cost Level:</div>
-${ss(o,n,s,r)}
-${rs(e)}
-${is(e)}
+${es(o,n,r,s)}
+${os(e)}
+${ns(e)}
 </div>
-</div>`}function Go(t,e,o,n,s){let r=document.querySelector(t);if(!r)return;let i=s>0?Math.round(n/s*100):0,a=`${o} ${n}/${s} repos (${i}%)`,l=r.querySelector(`.${e}`);if(l)l.textContent=a;else{Array.from(r.children).forEach(d=>{let u=d;!u.classList.contains("section-title")&&!u.classList.contains("section-subtitle")&&u.remove()});let p=document.createElement("div");p.className=e,p.style.cssText="margin-top:8px; font-size:12px; color:var(--text-secondary);",p.textContent=a,r.appendChild(p)}}function as(t){let e=t.missedPotential||W?.missedPotential||[];return e.length===0?`
+</div>`}function En(t,e,o,n,r){let s=document.querySelector(t);if(!s)return;let i=r>0?Math.round(n/r*100):0,a=`${o} ${n}/${r} repos (${i}%)`,l=s.querySelector(`.${e}`);if(l)l.textContent=a;else{Array.from(s.children).forEach(d=>{let u=d;!u.classList.contains("section-title")&&!u.classList.contains("section-subtitle")&&u.remove()});let p=document.createElement("div");p.className=e,p.style.cssText="margin-top:8px; font-size:12px; color:var(--text-secondary);",p.textContent=a,s.appendChild(p)}}function rs(t){let e=t.missedPotential||U?.missedPotential||[];return e.length===0?`
 			<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 6px;">
 				<div style="font-size: 13px; font-weight: 600; color: var(--success-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-					${z("\u2705")} No other AI tool configs missing a Copilot counterpart
+					${H("\u2705")} No other AI tool configs missing a Copilot counterpart
 				</div>
 				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 8px;">
 					All active workspaces that contain instruction files for other AI tools (e.g. .cursorrules, CLAUDE.md, AGENTS.md) also have Copilot customization files configured.
@@ -1258,7 +1548,7 @@ ${is(e)}
 		`:`
         <div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: rgba(251, 191, 36, 0.1); border: 1px solid rgba(251, 191, 36, 0.3); border-radius: 6px;">
             <div style="font-size: 13px; font-weight: 600; color: var(--warning-fg); margin-bottom: 8px; display: flex; align-items: center; gap: 6px;">
-                ${z("\u26A0\uFE0F")} Missed Potential: Non-Copilot Instruction Files
+                ${H("\u26A0\uFE0F")} Missed Potential: Non-Copilot Instruction Files
             </div>
             <div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
                 These active workspaces use other AI tools but lack Copilot customizations. <a href="https://code.visualstudio.com/docs/copilot/customization/custom-instructions" style="color: var(--link-color);" target="_blank">Learn how to add Copilot instructions</a>.
@@ -1302,7 +1592,7 @@ ${is(e)}
                 </table>
             </div>
         </div>
-    `}function N(t,e=10,o=Qo){let n=Object.entries(t).sort(([,r],[,i])=>i-r).slice(0,e);return n.length===0?'<div style="color: var(--text-muted);">No tools used yet</div>':`
+    `}function K(t,e=10,o=Nn){let n=Object.entries(t).sort(([,s],[,i])=>i-s).slice(0,e);return n.length===0?'<div style="color: var(--text-muted);">No tools used yet</div>':`
 		<table style="width:100%; border-collapse:collapse; table-layout:fixed;">
 			<thead>
 				<tr style="color:var(--text-secondary); font-size:12px; text-align:left;">
@@ -1312,49 +1602,49 @@ ${is(e)}
 				</tr>
 			</thead>
 			<tbody>
-				${n.map(([r,i],a)=>{let l=c(o(r)),p=c(r),d=Zn.has(r.toLowerCase())?'<span class="auto-badge" title="Automatic tool \u2014 Copilot uses this internally and it does not count toward fluency scoring">auto</span>':"";return`
+				${n.map(([s,i],a)=>{let l=c(o(s)),p=c(s),d=Jr.has(s.toLowerCase())?'<span class="auto-badge" title="Automatic tool \u2014 Copilot uses this internally and it does not count toward fluency scoring">auto</span>':"";return`
 		    <tr>
 			    <td style="padding:8px 12px; border-bottom:1px solid var(--border-subtle); width:40px; max-width:40px; text-align:center;">${a+1}</td>
 			    <td style="padding:8px 12px; border-bottom:1px solid var(--border-subtle); word-break:break-word; overflow-wrap:break-word; max-width:0;"> <strong title="${p}">${l}</strong>${d}</td>
 			    <td style="padding:8px 12px; border-bottom:1px solid var(--border-subtle); text-align:right; width:90px; white-space:nowrap;">${g(i)}</td>
 		    </tr>`}).join("")}
 			</tbody>
-		</table>`}var De=[{id:"interactions",label:"Turns",sortKey:"interactions",align:"right",render:t=>({html:g(t.interactions)})},{id:"toolCalls",label:"Tools",sortKey:"toolCalls",align:"right",render:t=>({html:g(t.toolCalls)})},{id:"inputTokens",label:"Input",sortKey:"inputTokens",align:"right",render:t=>({html:g(t.inputTokens)})},{id:"outputTokens",label:"Output",sortKey:"outputTokens",align:"right",render:t=>({html:g(t.outputTokens)})},{id:"thinkingTokens",label:"Thinking",sortKey:"thinkingTokens",align:"right",render:t=>({html:g(t.thinkingTokens)})},{id:"cachedTokens",label:"Cached",sortKey:"cachedTokens",align:"right",render:t=>({html:g(t.cachedTokens)})},{id:"totalTokens",label:"Total",sortKey:"totalTokens",align:"right",render:t=>({html:g(t.totalTokens)})},{id:"estimatedCost",label:"Cost",sortKey:"estimatedCost",align:"right",render:t=>({html:t.estimatedCost>0?`$${t.estimatedCost.toFixed(4)}`:"\u2014"})},{id:"editor",label:"Editor",sortKey:"editor",align:"left",render:t=>({html:c(t.editor||"unknown")})},{id:"workspace",label:"Workspace",sortKey:"workspace",align:"left",cellStyle:"max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",render:t=>{let e=c(t.workspace||"\u2014");return{html:e,title:e}}},{id:"models",label:"Models",align:"left",cellStyle:"font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",render:t=>{let e=t.models.map(o=>c(Pt(o))).join(", ")||"\u2014";return{html:e,title:e}}},{id:"durationMs",label:"Duration",sortKey:"durationMs",align:"right",cellStyle:"white-space:nowrap;",render:t=>({html:Fe(t.durationMs)})},{id:"lastActivity",label:"Last Active",sortKey:"lastActivity",align:"right",cellStyle:"white-space:nowrap;",render:t=>({html:t.lastActivity?$==="today"?new Date(t.lastActivity).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:!Xt}):new Date(t.lastActivity).toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:!Xt}):"\u2014"})}],tn=De.map(t=>t.id),dt="interactions",Mt="desc",Ne=[],Xt=!0,$="today",Re=[],ct={},pt=new Set(tn);function ls(){f.postMessage({command:"saveSessionColumnSettings",settings:{enabledColumns:Array.from(pt)}})}function Vo(t){return dt!==t?"":Mt==="desc"?" \u25BC":" \u25B2"}var ds={title:(t,e)=>(t.title||"").localeCompare(e.title||""),editor:(t,e)=>(t.editor||"").localeCompare(e.editor||""),workspace:(t,e)=>(t.workspace||"").localeCompare(e.workspace||""),durationMs:(t,e)=>(t.durationMs??-1)-(e.durationMs??-1),lastActivity:(t,e)=>(t.lastActivity||"").localeCompare(e.lastActivity||"")};function cs(t,e){let o=ds[dt];return o?o(t,e):t[dt]-e[dt]}function ps(t){return[...t].sort((e,o)=>{let n=cs(e,o);return Mt==="desc"?-n:n})}function Me(t){return Ne=t,!t||t.length===0?`<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">${$==="today"?"No sessions recorded today yet.":"No sessions recorded in this period."}</div>`:`<div id="sessions-table-container">${He(t)}</div>`}function He(t){let e=ps(t),o=De.filter(r=>pt.has(r.id)),n=e.map((r,i)=>{let a=c(r.title||"Untitled session"),l=c(r.filePath||""),p=o.map(d=>{let{html:u,title:h}=d.render(r),k=d.align==="right"?"text-align:right;":"",C=h!==void 0?` title="${h}"`:"";return`<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${k}${d.cellStyle||""}"${C}>${u}</td>`}).join("");return`<tr>
+		</table>`}var uo=[{id:"interactions",label:"Turns",sortKey:"interactions",align:"right",render:t=>({html:g(t.interactions)})},{id:"toolCalls",label:"Tools",sortKey:"toolCalls",align:"right",render:t=>({html:g(t.toolCalls)})},{id:"inputTokens",label:"Input",sortKey:"inputTokens",align:"right",render:t=>({html:g(t.inputTokens)})},{id:"outputTokens",label:"Output",sortKey:"outputTokens",align:"right",render:t=>({html:g(t.outputTokens)})},{id:"thinkingTokens",label:"Thinking",sortKey:"thinkingTokens",align:"right",render:t=>({html:g(t.thinkingTokens)})},{id:"cachedTokens",label:"Cached",sortKey:"cachedTokens",align:"right",render:t=>({html:g(t.cachedTokens)})},{id:"totalTokens",label:"Total",sortKey:"totalTokens",align:"right",render:t=>({html:g(t.totalTokens)})},{id:"estimatedCost",label:"Cost",sortKey:"estimatedCost",align:"right",render:t=>({html:t.estimatedCost>0?`$${t.estimatedCost.toFixed(4)}`:"\u2014"})},{id:"editor",label:"Editor",sortKey:"editor",align:"left",render:t=>({html:c(t.editor||"unknown")})},{id:"workspace",label:"Workspace",sortKey:"workspace",align:"left",cellStyle:"max-width:140px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",render:t=>{let e=c(t.workspace||"\u2014");return{html:e,title:e}}},{id:"models",label:"Models",align:"left",cellStyle:"font-size:11px; max-width:180px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;",render:t=>{let e=t.models.map(o=>c(St(o))).join(", ")||"\u2014";return{html:e,title:e}}},{id:"durationMs",label:"Duration",sortKey:"durationMs",align:"right",cellStyle:"white-space:nowrap;",render:t=>{let e=t.activeDurationMs??t.durationMs,o=t.durationMs!==void 0?`Wall time: ${Se(t.durationMs)}`:void 0;return{html:Se(e),...o?{title:o}:{}}}},{id:"lastActivity",label:"Last Active",sortKey:"lastActivity",align:"right",cellStyle:"white-space:nowrap;",render:t=>({html:t.lastActivity?P==="today"?new Date(t.lastActivity).toLocaleTimeString([],{hour:"2-digit",minute:"2-digit",hour12:!ye}):new Date(t.lastActivity).toLocaleString([],{month:"short",day:"numeric",hour:"2-digit",minute:"2-digit",hour12:!ye}):"\u2014"})}],Un=uo.map(t=>t.id),vt="interactions",qt="desc",go=[],ye=!0,P="today",oo=[],xt={},kt=new Set(Un);function ss(){f.postMessage({command:"saveSessionColumnSettings",settings:{enabledColumns:Array.from(kt)}})}function Rn(t){return vt!==t?"":qt==="desc"?" \u25BC":" \u25B2"}var is={title:(t,e)=>(t.title||"").localeCompare(e.title||""),editor:(t,e)=>(t.editor||"").localeCompare(e.editor||""),workspace:(t,e)=>(t.workspace||"").localeCompare(e.workspace||""),durationMs:(t,e)=>(t.activeDurationMs??t.durationMs??-1)-(e.activeDurationMs??e.durationMs??-1),lastActivity:(t,e)=>(t.lastActivity||"").localeCompare(e.lastActivity||"")};function as(t,e){let o=is[vt];return o?o(t,e):t[vt]-e[vt]}function ls(t){return[...t].sort((e,o)=>{let n=as(e,o);return qt==="desc"?-n:n})}function no(t){return go=t,!t||t.length===0?`<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">${P==="today"?"No sessions recorded today yet.":"No sessions recorded in this period."}</div>`:`<div id="sessions-table-container">${mo(t)}</div>`}function mo(t){let e=ls(t),o=uo.filter(s=>kt.has(s.id)),n=e.map((s,i)=>{let a=c(s.title||"Untitled session"),l=c(s.filePath||""),p=o.map(d=>{let{html:u,title:h}=d.render(s),k=d.align==="right"?"text-align:right;":"",T=h!==void 0?` title="${h}"`:"";return`<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${k}${d.cellStyle||""}"${T}>${u}</td>`}).join("");return`<tr>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; color:var(--text-secondary);">${i+1}</td>
 			<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; max-width:200px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="Open viewer for session &quot;${a}&quot;"><a href="#" class="session-title-link" data-file="${l}" style="color:var(--link-color, #4fc1ff); text-decoration:none; cursor:pointer;">${a}</a></td>
 			${p}
-		</tr>`}).join(""),s=o.map(r=>{let i=r.align==="right"?" text-align:right;":"";return r.sortKey?`<th class="sortable" data-sort="${r.sortKey}" style="padding:6px 8px;${i}">${r.label}${Vo(r.sortKey)}</th>`:`<th style="padding:6px 8px;${i}">${r.label}</th>`}).join("");return`
+		</tr>`}).join(""),r=o.map(s=>{let i=s.align==="right"?" text-align:right;":"";return s.sortKey?`<th class="sortable" data-sort="${s.sortKey}" style="padding:6px 8px;${i}">${s.label}${Rn(s.sortKey)}</th>`:`<th style="padding:6px 8px;${i}">${s.label}</th>`}).join("");return`
 		<div style="overflow-x:auto;">
 		<table class="sessions-table" style="width:100%; border-collapse:collapse; min-width:1050px;">
 			<thead>
 				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">
 					<th style="padding:6px 8px;">#</th>
-					<th class="sortable" data-sort="title" style="padding:6px 8px;">Title${Vo("title")}</th>
-					${s}
+					<th class="sortable" data-sort="title" style="padding:6px 8px;">Title${Rn("title")}</th>
+					${r}
 				</tr>
 			</thead>
 			<tbody>
 				${n}
 			</tbody>
 		</table>
-		</div>`}function us(){return`
+		</div>`}function ds(){return`
 		<div class="columns-menu-wrap" style="position:relative;">
 			<button id="sessions-columns-toggle" type="button" style="font-size:12px; padding:2px 8px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px; cursor:pointer;">\u2699 Columns</button>
 			<div id="sessions-columns-menu" style="display:none; position:absolute; right:0; top:100%; margin-top:4px; z-index:20; background:var(--bg-secondary); border:1px solid var(--border-color); border-radius:6px; box-shadow:0 4px 10px var(--shadow-color); padding:4px 0; min-width:160px;">
-				${De.map(e=>`
+				${uo.map(e=>`
 		<label style="display:flex; align-items:center; gap:6px; padding:4px 8px; font-size:12px; white-space:nowrap; cursor:pointer;">
-			<input type="checkbox" data-column="${e.id}"${pt.has(e.id)?" checked":""} />
+			<input type="checkbox" data-column="${e.id}"${kt.has(e.id)?" checked":""} />
 			<span>${e.label}</span>
 		</label>`).join("")}
 			</div>
-		</div>`}function en(){let t=document.getElementById("sessions-panel-body");t&&(t.addEventListener("click",e=>{let o=e.target.closest("a.session-title-link");if(o){e.preventDefault();let i=o.getAttribute("data-file");i&&f.postMessage({command:"openSessionFile",file:i});return}let n=e.target.closest("th.sortable");if(!n)return;let s=n.getAttribute("data-sort");if(!s)return;dt===s?Mt=Mt==="desc"?"asc":"desc":(dt=s,Mt="desc");let r=document.getElementById("sessions-table-container");r&&(r.innerHTML=He(Ne))}),ms(),gs())}var Jo=!1;function gs(){let t=document.getElementById("sessions-columns-toggle"),e=document.getElementById("sessions-columns-menu");!t||!e||(t.addEventListener("click",o=>{o.stopPropagation(),e.style.display=e.style.display==="none"?"block":"none"}),e.addEventListener("click",o=>o.stopPropagation()),e.addEventListener("change",o=>{let n=o.target,s=n.getAttribute("data-column");if(!s)return;n.checked?pt.add(s):pt.delete(s);let r=document.getElementById("sessions-table-container");r&&(r.innerHTML=He(Ne)),ls()}),Jo||(Jo=!0,document.addEventListener("click",()=>{let o=document.getElementById("sessions-columns-menu");o&&(o.style.display="none")})))}function ms(){let t=document.getElementById("sessions-lookback");t&&(t.value=$,t.addEventListener("change",()=>{let e=t.value;$=e==="7"||e==="30"?e:"today",_e()}),$!=="today"&&!ct[$]&&_e())}function _e(){let t=document.getElementById("sessions-panel-body");if(!t)return;if($==="today"){t.innerHTML=Me(Re);return}let e=ct[$];if(e){t.innerHTML=Me(e);return}t.innerHTML=`<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${$} days\u2026</div>`,f.postMessage({command:"loadRecentSessions",days:Number($)})}function bs(t){let e=Number(t.days);if(e!==7&&e!==30)return;let o=Array.isArray(t.sessions)?t.sessions.filter(n=>n&&typeof n=="object"&&typeof n.interactions=="number"):[];ct[String(e)]=o,$===String(e)&&_e()}function H(t,e){let o={...t};for(let n of e)n in o||(o[n]=0);return o}function v(t){let e=Number(t);return Number.isFinite(e)?e:0}function fs(t){let e=t&&typeof t=="object"?t:{};return{ask:v(e.ask),edit:v(e.edit),agent:v(e.agent),plan:v(e.plan),customAgent:v(e.customAgent),cli:v(e.cli)}}function hs(t){let e=t&&typeof t=="object"?t:{};return{file:v(e.file),selection:v(e.selection),implicitSelection:v(e.implicitSelection),symbol:v(e.symbol),codebase:v(e.codebase),workspace:v(e.workspace),terminal:v(e.terminal),vscode:v(e.vscode),terminalLastCommand:v(e.terminalLastCommand),terminalSelection:v(e.terminalSelection),clipboard:v(e.clipboard),changes:v(e.changes),outputPanel:v(e.outputPanel),problemsPanel:v(e.problemsPanel),pullRequest:v(e.pullRequest),byKind:e.byKind??{},copilotInstructions:v(e.copilotInstructions),agentsMd:v(e.agentsMd),byPath:e.byPath??{}}}function Gt(t){let e=t&&typeof t=="object"?t:{},o=e.toolCalls&&typeof e.toolCalls=="object"?e.toolCalls:{},n=e.mcpTools&&typeof e.mcpTools=="object"?e.mcpTools:{};return{sessions:v(e.sessions),modeUsage:fs(e.modeUsage),contextReferences:hs(e.contextReferences),toolCalls:{total:v(o.total),byTool:o.byTool??{}},mcpTools:{total:v(n.total),byServer:n.byServer??{},byTool:n.byTool??{}},modelSwitching:{modelsPerSession:[],totalSessions:0,averageModelsPerSession:0,maxModelsPerSession:0,minModelsPerSession:0,switchingFrequency:0,standardModels:[],premiumModels:[],unknownModels:[],mixedTierSessions:0,lowCostModels:[],mediumCostModels:[],highCostModels:[],mixedCostSessions:0,standardRequests:0,premiumRequests:0,lowCostRequests:0,mediumCostRequests:0,highCostRequests:0,unknownRequests:0,totalRequests:0,...e.modelSwitching??{}},thinkingEffortUsage:e.thinkingEffortUsage}}function on(t){return t.filter(e=>e&&typeof e=="object"&&typeof e.id=="string").map(e=>({id:String(e.id),category:typeof e.category=="string"?e.category:"general",severity:["tip","opportunity","celebration"].includes(e.severity)?e.severity:"tip",title:typeof e.title=="string"?e.title:"",body:typeof e.body=="string"?e.body:"",actionLabel:typeof e.actionLabel=="string"?e.actionLabel:void 0,actionCommand:typeof e.actionCommand=="string"?e.actionCommand:void 0,status:["new","seen","dismissed","snoozed","done"].includes(e.status)?e.status:"new",allowToast:!!e.allowToast}))}function ys(t){if(!t||typeof t!="object")return null;let e=t;return{windowDays:typeof e.windowDays=="number"?e.windowDays:30,availableTools:Array.isArray(e.availableTools)?e.availableTools:[],usedTools:Array.isArray(e.usedTools)?e.usedTools:[],unusedTools:Array.isArray(e.unusedTools)?e.unusedTools:[],underusedMcpServers:Array.isArray(e.underusedMcpServers)?e.underusedMcpServers:[],underusedAgentPlugins:Array.isArray(e.underusedAgentPlugins)?e.underusedAgentPlugins:[],estimatedPromptBloat:e.estimatedPromptBloat&&typeof e.estimatedPromptBloat=="object"?e.estimatedPromptBloat:{totalTokens:0,byServer:{}},recommendations:Array.isArray(e.recommendations)?e.recommendations:[]}}function vs(t){if(!t||typeof t!="object")return tt("sanitize-invalid-root","sanitizeStats.invalidRoot"),null;try{let e={today:Gt(t.today),last30Days:Gt(t.last30Days),month:Gt(t.month),lastMonth:Gt(t.lastMonth),lastUpdated:typeof t.lastUpdated=="string"?t.lastUpdated:"",backendConfigured:!!t.backendConfigured,locale:typeof t.locale=="string"?t.locale:void 0,currentWorkspacePaths:Array.isArray(t.currentWorkspacePaths)?t.currentWorkspacePaths.filter(s=>typeof s=="string"):void 0,suppressedUnknownTools:Array.isArray(t.suppressedUnknownTools)?t.suppressedUnknownTools.filter(s=>typeof s=="string"):void 0},o=Je(t.customizationMatrix);o&&(e.customizationMatrix=o),Array.isArray(t.missedPotential)&&(e.missedPotential=t.missedPotential.filter(s=>s&&typeof s=="object"&&typeof s.workspacePath=="string")),Array.isArray(t.todaySessions)&&(e.todaySessions=t.todaySessions.filter(s=>s&&typeof s=="object"&&typeof s.interactions=="number")),Array.isArray(t.insights)&&(e.insights=on(t.insights));let n=ys(t.curationAnalysis);return n?(e.curationAnalysis=n,U("sanitizeStats.curation.present",{availableTools:n.availableTools.length,unusedTools:n.unusedTools.length,unusedServers:n.underusedMcpServers.filter(s=>s&&s.usedToolCount===0).length})):tt("sanitize-no-curation","sanitizeStats.curation.missing"),e}catch(e){return tt("sanitize-error","sanitizeStats.error",{error:e instanceof Error?e.message:String(e)}),null}}function xs(){let t=document.querySelectorAll(".tab-button");t.forEach(e=>{e.addEventListener("click",()=>{let o=e.getAttribute("data-tab");if(!o)return;A=o,t.forEach(s=>s.classList.toggle("active",s.getAttribute("data-tab")===o)),document.querySelectorAll(".tab-panel").forEach(s=>{s.style.display="none"});let n=document.getElementById(`tab-panel-${o}`);n&&(n.style.display="block"),o==="repos"&&!Ae&&(Ae=!0,f.postMessage({command:"loadRepoPrStats"})),o==="agent"&&!Ee&&(Ee=!0,f.postMessage({command:"loadAgentSessions"})),o==="insights"&&Pe.filter(s=>s.status==="new").forEach(s=>f.postMessage({command:"insightAction",id:s.id,action:"seen"}))})})}function _(t){let e=Number(t);return Number.isFinite(e)&&e>=0?e:0}function ze(t){let e=typeof t=="string"?t.trim():"";try{let o=new URL(e);if(o.protocol==="http:"||o.protocol==="https:")return o.toString()}catch{}return"#"}function ks(t){let e=t&&typeof t=="object"?t:{},o=Array.isArray(e.repos)?e.repos:[];return{authenticated:!!e.authenticated,since:typeof e.since=="string"||typeof e.since=="number"?e.since:Date.now(),repos:o.map(n=>{let s=n&&typeof n=="object"?n:{},r=Array.isArray(s.aiDetails)?s.aiDetails:[];return{repoUrl:ze(s.repoUrl),owner:c(typeof s.owner=="string"?s.owner:""),repo:c(typeof s.repo=="string"?s.repo:""),error:typeof s.error=="string"?c(s.error):"",totalPrs:_(s.totalPrs),aiAuthoredPrs:_(s.aiAuthoredPrs),aiReviewRequestedPrs:_(s.aiReviewRequestedPrs),aiDetails:r.map(i=>{let a=i&&typeof i=="object"?i:{},l=["copilot","claude","openai","other-ai"],p=["author","reviewer-requested"],d=l.includes(a.aiType)?a.aiType:"other-ai",u=p.includes(a.role)?a.role:"author";return{number:_(a.number),title:c(typeof a.title=="string"?a.title:""),url:ze(a.url),aiType:d,role:u}})}})}}function ws(t){let e=c(new Date(t.since).toLocaleDateString());if(!t.authenticated)return`
+		</div>`}function On(){let t=document.getElementById("sessions-panel-body");t&&(t.addEventListener("click",e=>{let o=e.target.closest("a.session-title-link");if(o){e.preventDefault();let i=o.getAttribute("data-file");i&&f.postMessage({command:"openSessionFile",file:i});return}let n=e.target.closest("th.sortable");if(!n)return;let r=n.getAttribute("data-sort");if(!r)return;vt===r?qt=qt==="desc"?"asc":"desc":(vt=r,qt="desc");let s=document.getElementById("sessions-table-container");s&&(s.innerHTML=mo(go))}),jn(),cs())}var Mn=!1;function cs(){let t=document.getElementById("sessions-columns-toggle"),e=document.getElementById("sessions-columns-menu");!t||!e||(t.addEventListener("click",o=>{o.stopPropagation(),e.style.display=e.style.display==="none"?"block":"none"}),e.addEventListener("click",o=>o.stopPropagation()),e.addEventListener("change",o=>{let n=o.target,r=n.getAttribute("data-column");if(!r)return;n.checked?kt.add(r):kt.delete(r);let s=document.getElementById("sessions-table-container");s&&(s.innerHTML=mo(go)),ss()}),Mn||(Mn=!0,document.addEventListener("click",()=>{let o=document.getElementById("sessions-columns-menu");o&&(o.style.display="none")})))}function jn(){let t=document.getElementById("sessions-lookback-wrapper");if(!t)return;t.replaceChildren();let{wrapper:e}=Ce({id:"sessions-lookback",selected:P,disabled:["allTime"],disabledTitle:"All-time sessions are not loaded yet",label:"",onChange:o=>{P=o,ro()}});t.append(e),P!=="today"&&!xt[P]&&ro()}function ro(){let t=document.getElementById("sessions-panel-body");if(!t)return;if(P==="today"){t.innerHTML=no(oo);return}let e=xt[P];if(e){t.innerHTML=no(e);return}t.innerHTML=`<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${Zt[P]}\u2026</div>`,f.postMessage({command:"loadRecentSessions",period:P})}function ps(t){let e=t.period;if(!e)return;let o=Array.isArray(t.sessions)?t.sessions.filter(n=>n&&typeof n=="object"&&typeof n.interactions=="number"):[];xt[e]=o,P===e&&ro()}function V(t,e){let o={...t};for(let n of e)n in o||(o[n]=0);return o}function v(t){let e=Number(t);return Number.isFinite(e)?e:0}function us(t){let e=t&&typeof t=="object"?t:{};return{ask:v(e.ask),edit:v(e.edit),agent:v(e.agent),plan:v(e.plan),customAgent:v(e.customAgent),cli:v(e.cli)}}function gs(t){let e=t&&typeof t=="object"?t:{};return{file:v(e.file),selection:v(e.selection),implicitSelection:v(e.implicitSelection),symbol:v(e.symbol),codebase:v(e.codebase),workspace:v(e.workspace),terminal:v(e.terminal),vscode:v(e.vscode),terminalLastCommand:v(e.terminalLastCommand),terminalSelection:v(e.terminalSelection),clipboard:v(e.clipboard),changes:v(e.changes),outputPanel:v(e.outputPanel),problemsPanel:v(e.problemsPanel),pullRequest:v(e.pullRequest),byKind:e.byKind??{},copilotInstructions:v(e.copilotInstructions),agentsMd:v(e.agentsMd),byPath:e.byPath??{}}}function ge(t){let e=t&&typeof t=="object"?t:{},o=e.toolCalls&&typeof e.toolCalls=="object"?e.toolCalls:{},n=e.mcpTools&&typeof e.mcpTools=="object"?e.mcpTools:{};return{sessions:v(e.sessions),modeUsage:us(e.modeUsage),contextReferences:gs(e.contextReferences),toolCalls:{total:v(o.total),byTool:o.byTool??{}},mcpTools:{total:v(n.total),byServer:n.byServer??{},byTool:n.byTool??{}},modelSwitching:{modelsPerSession:[],totalSessions:0,averageModelsPerSession:0,maxModelsPerSession:0,minModelsPerSession:0,switchingFrequency:0,standardModels:[],premiumModels:[],unknownModels:[],mixedTierSessions:0,lowCostModels:[],mediumCostModels:[],highCostModels:[],mixedCostSessions:0,standardRequests:0,premiumRequests:0,lowCostRequests:0,mediumCostRequests:0,highCostRequests:0,unknownRequests:0,totalRequests:0,...e.modelSwitching??{}},thinkingEffortUsage:e.thinkingEffortUsage,modelEfficiency:e.modelEfficiency}}function Wn(t){return t.filter(e=>e&&typeof e=="object"&&typeof e.id=="string").map(e=>({id:String(e.id),category:typeof e.category=="string"?e.category:"general",severity:["tip","opportunity","celebration"].includes(e.severity)?e.severity:"tip",title:typeof e.title=="string"?e.title:"",body:typeof e.body=="string"?e.body:"",actionLabel:typeof e.actionLabel=="string"?e.actionLabel:void 0,actionCommand:typeof e.actionCommand=="string"?e.actionCommand:void 0,status:["new","seen","dismissed","snoozed","done"].includes(e.status)?e.status:"new",allowToast:!!e.allowToast}))}function ms(t){if(!t||typeof t!="object")return null;let e=t;return{windowDays:typeof e.windowDays=="number"?e.windowDays:30,availableTools:Array.isArray(e.availableTools)?e.availableTools:[],usedTools:Array.isArray(e.usedTools)?e.usedTools:[],unusedTools:Array.isArray(e.unusedTools)?e.unusedTools:[],underusedMcpServers:Array.isArray(e.underusedMcpServers)?e.underusedMcpServers:[],underusedAgentPlugins:Array.isArray(e.underusedAgentPlugins)?e.underusedAgentPlugins:[],estimatedPromptBloat:e.estimatedPromptBloat&&typeof e.estimatedPromptBloat=="object"?e.estimatedPromptBloat:{totalTokens:0,byServer:{}},recommendations:Array.isArray(e.recommendations)?e.recommendations:[]}}function fs(t){if(!t||typeof t!="object")return dt("sanitize-invalid-root","sanitizeStats.invalidRoot"),null;try{let e={today:ge(t.today),last30Days:ge(t.last30Days),month:ge(t.month),lastMonth:ge(t.lastMonth),lastUpdated:typeof t.lastUpdated=="string"?t.lastUpdated:"",backendConfigured:!!t.backendConfigured,locale:typeof t.locale=="string"?t.locale:void 0,currentWorkspacePaths:Array.isArray(t.currentWorkspacePaths)?t.currentWorkspacePaths.filter(r=>typeof r=="string"):void 0,suppressedUnknownTools:Array.isArray(t.suppressedUnknownTools)?t.suppressedUnknownTools.filter(r=>typeof r=="string"):void 0},o=Mo(t.customizationMatrix);o&&(e.customizationMatrix=o),Array.isArray(t.missedPotential)&&(e.missedPotential=t.missedPotential.filter(r=>r&&typeof r=="object"&&typeof r.workspacePath=="string")),Array.isArray(t.todaySessions)&&(e.todaySessions=t.todaySessions.filter(r=>r&&typeof r=="object"&&typeof r.interactions=="number")),Array.isArray(t.insights)&&(e.insights=Wn(t.insights));let n=ms(t.curationAnalysis);return n?(e.curationAnalysis=n,G("sanitizeStats.curation.present",{availableTools:n.availableTools.length,unusedTools:n.unusedTools.length,unusedServers:n.underusedMcpServers.filter(r=>r&&r.usedToolCount===0).length})):dt("sanitize-no-curation","sanitizeStats.curation.missing"),e}catch(e){return dt("sanitize-error","sanitizeStats.error",{error:e instanceof Error?e.message:String(e)}),null}}function O(){let t=document.getElementById("worktree-controls");t&&(t.innerHTML=Yn())}function z(){let t=document.getElementById("worktree-results");t&&(t.innerHTML=Zn())}function wt(){let t=document.getElementById("worktree-progress-area");t&&(t.innerHTML=Jn())}function Fn(){Ve||(Ve=!0,requestAnimationFrame(()=>{Ve=!1,z()}))}function qn(){let t=document.getElementById("worktree-root-input"),e=t?.value.trim();e&&(M.some(o=>o.toLowerCase()===e.toLowerCase())||M.push(e),t&&(t.value=""),O())}function bs(){M.length===0||E||J||(E=!0,D=[],Gt=null,R={root:"",checked:0,total:0,foundCount:0,elapsedMs:0},et=[],O(),z(),f.postMessage({command:"scanWorktrees",rootPaths:M}))}function hs(){if(J||pt||E)return;let t=Xn();t.length!==0&&(pt=!0,z(),f.postMessage({command:"cleanupPushedWorktrees",worktrees:t.map(e=>({path:e.path,branch:e.branch,repoLabel:e.repoLabel}))}))}function ys(t){return t.id==="btn-browse-worktree-root"?(f.postMessage({command:"pickWorktreeRoot"}),!0):t.id==="btn-add-worktree-root"?(qn(),!0):t.id==="btn-scan-worktrees"?(bs(),!0):t.id==="btn-cancel-worktree-scan"?(f.postMessage({command:"cancelWorktreeScan"}),!0):t.id==="btn-cleanup-pushed-worktrees"?(hs(),!0):t.id==="btn-cancel-cleanup"?(f.postMessage({command:"cancelCleanupPushedWorktrees"}),!0):!1}function vs(t){if(t.closest("#btn-toggle-worktree-roots"))return Ht=!Ht,O(),!0;if(t.classList.contains("worktree-remove-root")){let e=Number(t.getAttribute("data-index"));return isNaN(e)||(M.splice(e,1),O()),!0}return!1}function xs(t,e){let o=e.closest(".worktree-reveal-link");if(o){t.preventDefault();let r=decodeURIComponent(o.getAttribute("data-path")||"");return r&&f.postMessage({command:"revealPath",path:r}),!0}let n=e.closest(".worktree-delete-link");if(n){t.preventDefault();let r=decodeURIComponent(n.getAttribute("data-path")||""),s=decodeURIComponent(n.getAttribute("data-branch")||""),i=decodeURIComponent(n.getAttribute("data-repo")||""),a=n.getAttribute("data-pushed")||"?";return r&&f.postMessage({command:"deleteWorktree",path:r,branch:s,repoLabel:i,pushed:a}),!0}return!1}function ks(t){let e=t.closest("[data-wt-sort]");if(!e)return!1;let o=e.getAttribute("data-wt-sort");return o&&(Jt===o?Nt=Nt==="desc"?"asc":"desc":(Jt=o,Nt=o==="repo"?"asc":"desc"),z()),!0}function ws(t){let e=t.closest(".worktree-repo-row");if(!e)return!1;let o=e.getAttribute("data-repo")??"";return he.has(o)?he.delete(o):he.add(o),z(),!0}function Cs(t){return ks(t)?!0:ws(t)}function Ts(t){let e=t.target;e&&(ys(e)||vs(e)||xs(t,e)||Cs(e))}function Ss(){let t=document.getElementById("tab-panel-worktrees");t&&(t.addEventListener("click",Ts),t.addEventListener("keydown",e=>{e.target?.id==="worktree-root-input"&&e.key==="Enter"&&(e.preventDefault(),qn())}))}function $s(t){let e=t??{},o=String(e.pushed??"?"),n=o==="yes"||o==="no"?o:"?";return{path:String(e.path??""),repoLabel:String(e.repoLabel??"Unknown"),branch:String(e.branch??"?"),lastCommit:String(e.lastCommit??"?"),lastCommitDate:e.lastCommitDate?String(e.lastCommitDate):null,pushed:n,files:C(e.files),folders:C(e.folders),bytes:C(e.bytes)}}function As(t){if(!t.folderPath)return;let e=String(t.folderPath);M.some(o=>o.toLowerCase()===e.toLowerCase())||M.push(e),O()}function Es(t){if(E||!Array.isArray(t.roots))return;let e=!1;for(let o of t.roots){if(typeof o!="string")continue;let n=o.trim();n&&(M.some(r=>r.toLowerCase()===n.toLowerCase())||(M.push(n),e=!0))}e&&O()}function Rs(){E=!0,D=[],Gt=null,R={root:"",checked:0,total:0,foundCount:0,elapsedMs:0},O(),z()}function Ms(t){R={...R,root:String(t.root||""),checked:0,total:0,phase:"walking",dirsScanned:0},wt()}function Ps(t){R={...R,root:String(t.root??R.root),phase:"walking",dirsScanned:C(t.dirsScanned),elapsedMs:C(t.elapsedMs)},wt()}function _s(t){R={...R,total:C(t.count),phase:"checking"},wt()}function zs(t){Gt=`Skipped "${t.root}": ${t.reason||"not accessible"}`,O()}function Is(t){R={root:String(t.root??R.root),checked:C(t.checked),total:t.total!==void 0?C(t.total):R.total,foundCount:C(t.foundCount),elapsedMs:C(t.elapsedMs)},wt()}function Ls(t){t.worktree&&(D.push($s(t.worktree)),Fn())}function Bs(t){let e=String(t.path??"");if(!e)return;let o=D.findIndex(n=>n.path===e);o!==-1&&(D.splice(o,1),z())}function Ds(){pt=!1,z()}function Hs(t){pt=!1,J=!0,ao={processed:0,total:C(t.total)},et=[],z()}function Ns(t){ao={processed:C(t.processed),total:C(t.total)};let e=t.status,o=e==="deleted"||e==="skipped"?e:"error";et.push({path:String(t.path??""),branch:String(t.branch??"?"),repoLabel:String(t.repoLabel??""),status:o,reason:typeof t.reason=="string"?t.reason:void 0}),z()}function Us(){J=!1,z()}function Os(){J=!1,pt=!1,z()}function js(t){R={...R,phase:"enriching",enriched:0,enrichTotal:C(t.total),elapsedMs:C(t.elapsedMs)},wt()}function Ws(t){R={...R,phase:"enriching",enriched:C(t.enriched),enrichTotal:C(t.total),elapsedMs:C(t.elapsedMs)},wt()}function Fs(t){let e=String(t.path??"");if(!e)return;let o=D.find(r=>r.path===e);if(!o)return;o.files=C(t.files),o.folders=C(t.folders),o.bytes=C(t.bytes);let n=String(t.pushed??"?");o.pushed=n==="yes"||n==="no"?n:"?",Fn()}function qs(){E=!1,O(),z()}function Ks(){E=!1,O()}var Vs={worktreeRootPicked:As,worktreeRootsDiscovered:Es,worktreeScanStarted:()=>Rs(),worktreeScanRootStarted:Ms,worktreeScanWalkProgress:Ps,worktreeScanRootMarkersFound:_s,worktreeScanRootSkipped:zs,worktreeScanProgress:Is,worktreeFound:Ls,worktreeEnrichStarted:js,worktreeEnrichProgress:Ws,worktreeEnriched:Fs,worktreeDeleted:Bs,worktreeScanComplete:()=>qs(),worktreeScanCancelled:()=>Ks(),cleanupDeclined:()=>Ds(),cleanupStarted:Hs,cleanupWorktreeResult:Ns,cleanupComplete:()=>Us(),cleanupCancelled:()=>Os()};function Gs(t){let e=Vs[t.command];e&&e(t)}function Js(){let t=document.querySelectorAll(".tab-button");t.forEach(e=>{e.addEventListener("click",()=>{let o=e.getAttribute("data-tab");if(!o)return;A=o,t.forEach(r=>r.classList.toggle("active",r.getAttribute("data-tab")===o)),document.querySelectorAll(".tab-panel").forEach(r=>{r.style.display="none"});let n=document.getElementById(`tab-panel-${o}`);n&&(n.style.display="block"),o==="repos"&&!to&&(to=!0,f.postMessage({command:"loadRepoPrStats"})),o==="agent"&&!eo&&(eo=!0,f.postMessage({command:"loadAgentSessions"})),o==="insights"&&io.filter(r=>r.status==="new").forEach(r=>f.postMessage({command:"insightAction",id:r.id,action:"seen"}))})})}function B(t){let e=Number(t);return Number.isFinite(e)&&e>=0?e:0}function so(t){let e=typeof t=="string"?t.trim():"";try{let o=new URL(e);if(o.protocol==="http:"||o.protocol==="https:")return o.toString()}catch{}return"#"}function Ys(t){let e=t&&typeof t=="object"?t:{},o=Array.isArray(e.repos)?e.repos:[];return{authenticated:!!e.authenticated,since:typeof e.since=="string"||typeof e.since=="number"?e.since:Date.now(),repos:o.map(n=>{let r=n&&typeof n=="object"?n:{},s=Array.isArray(r.aiDetails)?r.aiDetails:[];return{repoUrl:so(r.repoUrl),owner:c(typeof r.owner=="string"?r.owner:""),repo:c(typeof r.repo=="string"?r.repo:""),error:typeof r.error=="string"?c(r.error):"",totalPrs:B(r.totalPrs),aiAuthoredPrs:B(r.aiAuthoredPrs),aiReviewRequestedPrs:B(r.aiReviewRequestedPrs),aiDetails:s.map(i=>{let a=i&&typeof i=="object"?i:{},l=["copilot","claude","openai","other-ai"],p=["author","reviewer-requested"],d=l.includes(a.aiType)?a.aiType:"other-ai",u=p.includes(a.role)?a.role:"author";return{number:B(a.number),title:c(typeof a.title=="string"?a.title:""),url:so(a.url),aiType:d,role:u}})}})}}function Xs(t){let e=c(new Date(t.since).toLocaleDateString());if(!t.authenticated)return`
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
 				<strong>\u{1F512} GitHub authentication required</strong><br/>
 				Sign in with GitHub (via the Diagnostics tab) to see AI PR activity across your repositories.
 			</div>`;if(t.repos.length===0)return`
 			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
 				No GitHub repositories detected in your workspace folders.
-			</div>`;let o={copilot:"\u{1F916} Copilot",claude:"\u{1F9E0} Claude",openai:"\u2728 Codex","other-ai":"\u{1F916} AI"},n="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);",s=`${n} text-align: center;`,r=t.repos.map(i=>{let a=`<a href="${c(i.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${c(i.owner)}/${c(i.repo)}</a>`;if(i.error)return`<tr>
+			</div>`;let o={copilot:"\u{1F916} Copilot",claude:"\u{1F9E0} Claude",openai:"\u2728 Codex","other-ai":"\u{1F916} AI"},n="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);",r=`${n} text-align: center;`,s=t.repos.map(i=>{let a=`<a href="${c(i.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${c(i.owner)}/${c(i.repo)}</a>`;if(i.error)return`<tr>
 				<td style="${n} font-family:'Courier New',monospace; font-size:12px;">${a}</td>
 				<td colspan="3" style="${n} color:var(--text-secondary); font-style:italic; font-size:12px;">${c(i.error)}</td>
 			</tr>`;let l="";if(i.aiDetails.length>0){let p=i.aiDetails.map(d=>`<li><a href="${c(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${c(d.title)}</a> \u2014 ${o[d.aiType]??c(String(d.aiType))} (${d.role==="author"?"authored":"review requested"})</li>`).join("");l=`
@@ -1363,9 +1653,9 @@ ${is(e)}
 					<ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${p}</ul>
 				</details>`}return`<tr>
 			<td style="${n} font-family:'Courier New',monospace; font-size:12px;">${a}${l}</td>
-			<td style="${s} font-weight:600;">${i.totalPrs}</td>
-			<td style="${s}">${i.aiAuthoredPrs>0?`<span style="font-weight:600;">${i.aiAuthoredPrs}</span>`:"0"}</td>
-			<td style="${s}">${i.aiReviewRequestedPrs>0?`<span style="font-weight:600;">${i.aiReviewRequestedPrs}</span>`:"0"}</td>
+			<td style="${r} font-weight:600;">${i.totalPrs}</td>
+			<td style="${r}">${i.aiAuthoredPrs>0?`<span style="font-weight:600;">${i.aiAuthoredPrs}</span>`:"0"}</td>
+			<td style="${r}">${i.aiReviewRequestedPrs>0?`<span style="font-weight:600;">${i.aiReviewRequestedPrs}</span>`:"0"}</td>
 		</tr>`}).join("");return`
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
 			Showing PRs created since ${e}.
@@ -1382,54 +1672,54 @@ ${is(e)}
 					</tr>
 				</thead>
 				<tbody>
-					${r}
+					${s}
 				</tbody>
 			</table>
 		</div>
 		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
 			\u2020 Copilot Review Agent requested counts are for open PRs only. GitHub removes reviewer data after a PR is merged or closed.<br/>
 			\u{1F916} Cloud Agent Authored = PR author's GitHub login matches a known cloud agent (e.g. <code>copilot-swe-agent</code>, <code>claude-code-action</code>, <code>openai-code-agent</code>).
-		</div>`}function Cs(t){let e=t&&typeof t=="object"?t:{},o=Array.isArray(e.repos)?e.repos:[];return{authenticated:!!e.authenticated,since:typeof e.since=="string"?c(e.since):new Date(Date.now()-720*60*60*1e3).toISOString(),fetchedAt:typeof e.fetchedAt=="string"?e.fetchedAt:"",totalTasks:_(e.totalTasks),totalSessions:_(e.totalSessions),totalCredits:_(e.totalCredits),repos:o.map(n=>{let s=n&&typeof n=="object"?n:{},r=c(typeof s.owner=="string"?s.owner:""),i=c(typeof s.repo=="string"?s.repo:"");return{owner:r,repo:i,repoUrl:ze(`https://github.com/${r}/${i}`),totalTasks:_(s.totalTasks),totalSessions:_(s.totalSessions),totalCredits:_(s.totalCredits),tasksScanned:_(s.tasksScanned),tasksTotal:_(s.tasksTotal),partial:!!s.partial,error:typeof s.error=="string"?c(s.error):void 0}})}}function nn(t){let e=document.querySelector("#repos-pr-content");e&&(e.innerHTML=`
+		</div>`}function Zs(t){let e=t&&typeof t=="object"?t:{},o=Array.isArray(e.repos)?e.repos:[];return{authenticated:!!e.authenticated,since:typeof e.since=="string"?c(e.since):new Date(Date.now()-720*60*60*1e3).toISOString(),fetchedAt:typeof e.fetchedAt=="string"?e.fetchedAt:"",totalTasks:B(e.totalTasks),totalSessions:B(e.totalSessions),totalCredits:B(e.totalCredits),repos:o.map(n=>{let r=n&&typeof n=="object"?n:{},s=c(typeof r.owner=="string"?r.owner:""),i=c(typeof r.repo=="string"?r.repo:"");return{owner:s,repo:i,repoUrl:so(`https://github.com/${s}/${i}`),totalTasks:B(r.totalTasks),totalSessions:B(r.totalSessions),totalCredits:B(r.totalCredits),tasksScanned:B(r.tasksScanned),tasksTotal:B(r.tasksTotal),partial:!!r.partial,error:typeof r.error=="string"?c(r.error):void 0}})}}function Kn(t){let e=document.querySelector("#repos-pr-content");e&&(e.innerHTML=`
 		<div class="section-title"><span>\u{1F916}</span><span>AI Activity in Repository PRs</span></div>
 		<div class="section-subtitle">
 			PRs from the last 30 days across your known repositories, showing how many were <strong>authored by cloud agents</strong>
 			(i.e. opened by a bot account like <code>copilot-swe-agent</code>, <code>claude-code-action</code>, or <code>openai-code-agent</code>)
 			or had an AI agent requested as a reviewer.
 		</div>
-		${ws(t)}
-	`)}function Ts(t,e,o){return t.repos.map(n=>{let s=`<a href="${n.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${n.owner}/${n.repo}</a>`;if(n.error)return`<tr>
-        <td style="${e} font-family:'Courier New',monospace; font-size:12px;">${s}</td>
+		${Xs(t)}
+	`)}function Qs(t,e,o){return t.repos.map(n=>{let r=`<a href="${n.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${n.owner}/${n.repo}</a>`;if(n.error)return`<tr>
+        <td style="${e} font-family:'Courier New',monospace; font-size:12px;">${r}</td>
         <td colspan="3" style="${e} color:var(--text-secondary); font-style:italic; font-size:12px;">${n.error}</td>
-      </tr>`;let r=n.partial?` <span title="Showing ${n.tasksScanned} of ${n.tasksTotal} tasks \u2014 capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${n.tasksScanned}/${n.tasksTotal} tasks scanned)</span>`:"";return`<tr>
-      <td style="${e} font-family:'Courier New',monospace; font-size:12px;">${s}${r}</td>
+      </tr>`;let s=n.partial?` <span title="Showing ${n.tasksScanned} of ${n.tasksTotal} tasks \u2014 capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${n.tasksScanned}/${n.tasksTotal} tasks scanned)</span>`:"";return`<tr>
+      <td style="${e} font-family:'Courier New',monospace; font-size:12px;">${r}${s}</td>
       <td style="${o} font-weight:600;">${n.totalTasks}</td>
       <td style="${o} font-weight:600;">${n.totalSessions}</td>
       <td style="${o}">${n.totalCredits>0?n.totalCredits.toFixed(1):"\u2014"}</td>
-    </tr>`}).join("")}function Ss(t){if(!t.authenticated)return`
+    </tr>`}).join("")}function ti(t){if(!t.authenticated)return`
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
 				<strong>\u{1F512} GitHub authentication required</strong><br/>
 				Sign in with GitHub (via the Diagnostics tab) to see Copilot cloud agent session data.
 			</div>`;if(t.repos.length===0)return`
 			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
 				No GitHub repositories detected in your workspace folders.
-			</div>`;let e=new Date(t.since).toLocaleDateString(),o="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);",n=`${o} text-align: center;`,s=t.repos.reduce((a,l)=>(l.error||(a.tasks+=l.totalTasks,a.sessions+=l.totalSessions,a.credits+=l.totalCredits),a),{tasks:0,sessions:0,credits:0}),r=t.repos.some(a=>a.partial&&!a.error),i=Ts(t,o,n);return`
+			</div>`;let e=new Date(t.since).toLocaleDateString(),o="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);",n=`${o} text-align: center;`,r=t.repos.reduce((a,l)=>(l.error||(a.tasks+=l.totalTasks,a.sessions+=l.totalSessions,a.credits+=l.totalCredits),a),{tasks:0,sessions:0,credits:0}),s=t.repos.some(a=>a.partial&&!a.error),i=Qs(t,o,n);return`
 		<div style="margin-bottom:12px; display:flex; gap:24px; flex-wrap:wrap;">
 			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
-				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${s.tasks}</div>
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${r.tasks}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Tasks</div>
 			</div>
 			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
-				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${s.sessions}</div>
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${r.sessions}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Sessions</div>
 			</div>
 			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
-				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${s.credits>0?s.credits.toFixed(1):"\u2014"}</div>
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${r.credits>0?r.credits.toFixed(1):"\u2014"}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">AI Credits</div>
 			</div>
 		</div>
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
 			Showing cloud-agent sessions from ${e} to now.
-			${r?"<strong>Note:</strong> Some repos were capped at 50 tasks \u2014 totals may be lower bounds. ":""}
+			${s?"<strong>Note:</strong> Some repos were capped at 50 tasks \u2014 totals may be lower bounds. ":""}
 		</div>
 		<div class="customization-matrix-container">
 			<table class="customization-matrix" style="width:100%; border-collapse:collapse;">
@@ -1447,31 +1737,31 @@ ${is(e)}
 		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
 			\u2139\uFE0F <strong>No double-counting:</strong> These are cloud agent sessions only. CLI/remote sessions and local IDE chat sessions (shown in "My Activity") are excluded.<br/>
 			\u2139\uFE0F <strong>Action minutes</strong> (GitHub Actions compute used by the agent) are not shown here \u2014 they require additional per-branch API calls.
-		</div>`}function sn(t){let e=document.querySelector("#agent-sessions-content");e&&(e.innerHTML=`
+		</div>`}function Vn(t){let e=document.querySelector("#agent-sessions-content");e&&(e.innerHTML=`
 		<div class="section-title"><span>\u{1F916}</span><span>Copilot Cloud Agent Sessions</span></div>
 		<div class="section-subtitle">
 			Cloud agent tasks and sessions from the last 30 days. Each <strong>task</strong> is a user request to the agent;
 			each <strong>session</strong> is an autonomous coding run within that task.
 			<strong>CLI/remote sessions are excluded</strong> \u2014 they are separate from these cloud agent sessions.
 		</div>
-		${Ss(t)}
-	`)}function $s(t){if(!t||!t.workspaces||t.workspaces.length===0)return`
+		${ti(t)}
+	`)}function ei(t){if(!t||!t.workspaces||t.workspaces.length===0)return`
 			<div class="section">
 				<div class="section-title"><span>\u{1F6E0}\uFE0F</span><span>Copilot Customization Files</span></div>
 				<div class="section-subtitle">Showing workspace customization status for active workspaces</div>
 				<div style="color: var(--text-muted); padding:12px;">No workspaces with customization files detected in the last 30 days.</div>
-			</div>`;let e=t.workspaces.map(o=>{let n=o.typeStatuses??{},s=Object.values(n).every(i=>i==="\u274C"),r=(t.customizationTypes??[]).map(i=>{let a=n[i.id]||"\u2753";return`
+			</div>`;let e=t.workspaces.map(o=>{let n=o.typeStatuses??{},r=Object.values(n).every(i=>i==="\u274C"),s=(t.customizationTypes??[]).map(i=>{let a=n[i.id]||"\u2753";return`
 				<td style="position: relative; padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center;">
-					${z(a,a==="\u2705"?"Present and fresh":a==="\u26A0\uFE0F"?"Present but stale":a==="\u274C"?"Missing":"Status unknown")}
+					${H(a,a==="\u2705"?"Present and fresh":a==="\u26A0\uFE0F"?"Present but stale":a==="\u274C"?"Missing":"Status unknown")}
 				</td>`}).join("");return`
 			<tr>
 				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); font-family: 'Courier New', monospace; font-size: 12px;">
-					${c(o.workspaceName)}${s?` <span style="font-family: sans-serif; vertical-align: middle;">${z("\u26A0\uFE0F","No customization files")}</span>`:""}
+					${c(o.workspaceName)}${r?` <span style="font-family: sans-serif; vertical-align: middle;">${H("\u26A0\uFE0F","No customization files")}</span>`:""}
 				</td>
 				<td style="padding: 6px 8px; border-bottom: 1px solid var(--border-subtle); text-align: center; color: var(--link-color); font-weight: 600;">
 					${o.sessionCount}
 				</td>
-				${r}
+				${s}
 			</tr>`}).join("");return`
 		<div style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
 			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">
@@ -1479,7 +1769,7 @@ ${is(e)}
 			</div>
 			<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px; display: flex; align-items: center; gap: 6px; flex-wrap: wrap;">
 				Showing ${t.totalWorkspaces} workspace(s) with Copilot activity in the last 30 days.
-				${t.workspacesWithIssues>0?`<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${z("\u26A0\uFE0F")} ${t.workspacesWithIssues} workspace(s) have no customization files.</span>`:`<span style="display:inline-flex;align-items:center;gap:4px;">${z("\u2705")} All workspaces have up-to-date customizations.</span>`}
+				${t.workspacesWithIssues>0?`<span class="stale-warning" style="display:inline-flex;align-items:center;gap:4px;">${H("\u26A0\uFE0F")} ${t.workspacesWithIssues} workspace(s) have no customization files.</span>`:`<span style="display:inline-flex;align-items:center;gap:4px;">${H("\u2705")} All workspaces have up-to-date customizations.</span>`}
 			</div>
 			<div class="customization-matrix-container">
 				<table class="customization-matrix">
@@ -1506,20 +1796,20 @@ ${is(e)}
 					`).join("")}
 				</div>
 				<div style="margin-top: 8px; display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-					<span style="display:inline-flex;align-items:center;gap:4px;">${z("\u2705")} = Present &amp; Fresh</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${H("\u2705")} = Present &amp; Fresh</span>
 					<span style="color: var(--text-muted);">\u2022</span>
-					<span style="display:inline-flex;align-items:center;gap:4px;">${z("\u26A0\uFE0F")} = Present but Stale</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${H("\u26A0\uFE0F")} = Present but Stale</span>
 					<span style="color: var(--text-muted);">\u2022</span>
-					<span style="display:inline-flex;align-items:center;gap:4px;">${z("\u274C")} = Missing</span>
+					<span style="display:inline-flex;align-items:center;gap:4px;">${H("\u274C")} = Missing</span>
 				</div>
 			</div>
-		</div>`}function As(t){let e=t.last30Days.modelSwitching,o=t.today.modelSwitching;if((e.totalRequests??0)===0&&(o.totalRequests??0)===0)return"";function n(s){let r=s.totalRequests??0;if(r===0)return'<div style="color: var(--text-muted); font-size: 11px;">No data</div>';let a=[{label:"\u{1F49A} Low cost",count:s.lowCostRequests??0,color:"#4ade80"},{label:"\u{1F535} Medium cost",count:s.mediumCostRequests??0,color:"var(--link-color)"},{label:"\u{1F4B8} High cost",count:s.highCostRequests??0,color:"var(--warning-fg)"},{label:"\u2753 Unknown",count:s.unknownRequests??0,color:"var(--text-muted)"}].filter(p=>p.count>0).map(p=>{let d=r>0?Math.round(p.count/r*100):0;return`<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+		</div>`}function oi(t){let e=t.last30Days.modelSwitching,o=t.today.modelSwitching;if((e.totalRequests??0)===0&&(o.totalRequests??0)===0)return"";function n(r){let s=r.totalRequests??0;if(s===0)return'<div style="color: var(--text-muted); font-size: 11px;">No data</div>';let a=[{label:"\u{1F49A} Low cost",count:r.lowCostRequests??0,color:"#4ade80"},{label:"\u{1F535} Medium cost",count:r.mediumCostRequests??0,color:"var(--link-color)"},{label:"\u{1F4B8} High cost",count:r.highCostRequests??0,color:"var(--warning-fg)"},{label:"\u2753 Unknown",count:r.unknownRequests??0,color:"var(--text-muted)"}].filter(p=>p.count>0).map(p=>{let d=s>0?Math.round(p.count/s*100):0;return`<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
 				<span style="width: 90px; font-size: 12px; font-weight: 600; color: ${p.color};">${p.label}</span>
 				<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
 					<div style="width: ${d}%; background: ${p.color}; height: 100%; border-radius: 4px;"></div>
 				</div>
 				<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${g(p.count)} <span style="color: var(--text-secondary); font-weight: 400;">(${d}%)</span></span>
-			</div>`}).join(""),l=(s.mixedCostSessions??0)>0?`<div style="font-size: 11px; color: var(--link-color); margin-top: 6px;">\u{1F500} ${g(s.mixedCostSessions)} mixed-cost session${s.mixedCostSessions!==1?"s":""}</div>`:"";return`${a}<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${g(r)} total requests</div>${l}`}return`
+			</div>`}).join(""),l=(r.mixedCostSessions??0)>0?`<div style="font-size: 11px; color: var(--link-color); margin-top: 6px;">\u{1F500} ${g(r.mixedCostSessions)} mixed-cost session${r.mixedCostSessions!==1?"s":""}</div>`:"";return`${a}<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${g(s)} total requests</div>${l}`}return`
 		<!-- Model Cost Section -->
 		<div class="section">
 			<div class="section-title"><span>\u{1F4B0}</span><span>Model Cost Usage</span></div>
@@ -1538,7 +1828,7 @@ ${is(e)}
 					${n(t.month.modelSwitching)}
 				</div>
 			</div>
-		</div>`}function Es(t){return t.last30Days.thinkingEffortUsage||t.today.thinkingEffortUsage||t.month.thinkingEffortUsage?`
+		</div>`}function ni(t){return t.last30Days.thinkingEffortUsage||t.today.thinkingEffortUsage||t.month.thinkingEffortUsage?`
 		<!-- Thinking Effort Section -->
 		<div class="section">
 			<div class="section-title"><span>\u{1F4A1}</span><span>Thinking Effort (Reasoning)</span></div>
@@ -1546,30 +1836,30 @@ ${is(e)}
 			<div class="three-column">
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Today</h4>
-					${Te(t.today.thinkingEffortUsage)}
+					${Ye(t.today.thinkingEffortUsage)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C6} Last 30 Days</h4>
-					${Te(t.last30Days.thinkingEffortUsage)}
+					${Ye(t.last30Days.thinkingEffortUsage)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Previous Month</h4>
-					${Te(t.month.thinkingEffortUsage)}
+					${Ye(t.month.thinkingEffortUsage)}
 				</div>
 			</div>
-		</div>`:""}function Te(t){let e=["minimal","low","medium","high","max","xhigh"];if(!t||t.sessionCount===0)return'<div style="color: var(--text-muted); font-size: 11px;">No data</div>';let o=Object.values(t.byEffort).reduce((s,r)=>s+r,0);return`
-		${e.filter(s=>t.byEffort[s]>0).concat(Object.keys(t.byEffort).filter(s=>!e.includes(s)&&t.byEffort[s]>0)).map(s=>{let r=t.byEffort[s]||0,i=o>0?Math.round(r/o*100):0;return`<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
-				<span style="width: 56px; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: capitalize;">${c(Yn(s))}</span>
+		</div>`:""}function Ye(t){let e=["minimal","low","medium","high","max","xhigh"];if(!t||t.sessionCount===0)return'<div style="color: var(--text-muted); font-size: 11px;">No data</div>';let o=Object.values(t.byEffort).reduce((r,s)=>r+s,0);return`
+		${e.filter(r=>t.byEffort[r]>0).concat(Object.keys(t.byEffort).filter(r=>!e.includes(r)&&t.byEffort[r]>0)).map(r=>{let s=t.byEffort[r]||0,i=o>0?Math.round(s/o*100):0;return`<div style="display: flex; align-items: center; gap: 8px; margin-bottom: 8px;">
+				<span style="width: 56px; font-size: 12px; font-weight: 600; color: var(--text-primary); text-transform: capitalize;">${c(Vr(r))}</span>
 				<div style="flex: 1; background: var(--bg-secondary); border-radius: 4px; height: 12px; overflow: hidden;">
 					<div style="width: ${i}%; background: var(--link-color); height: 100%; border-radius: 4px;"></div>
 				</div>
-				<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${r} <span style="color: var(--text-secondary); font-weight: 400;">(${i}%)</span></span>
+				<span style="font-size: 12px; font-weight: 600; color: var(--text-primary); min-width: 70px; text-align: right;">${s} <span style="color: var(--text-secondary); font-weight: 400;">(${i}%)</span></span>
 			</div>`}).join("")}
 		<div style="font-size: 11px; color: var(--text-muted); margin-top: 6px;">${t.sessionCount} session${t.sessionCount!==1?"s":""} \xB7 ${t.switchCount} effort switch${t.switchCount!==1?"es":""}</div>
-	`}function Rs(t){return{allToolKeys:[...new Set([...Object.keys(t.today.toolCalls.byTool),...Object.keys(t.last30Days.toolCalls.byTool),...Object.keys(t.month.toolCalls.byTool)])].sort(),allMcpToolKeys:[...new Set([...Object.keys(t.today.mcpTools.byTool),...Object.keys(t.last30Days.mcpTools.byTool),...Object.keys(t.month.mcpTools.byTool)])].sort(),allMcpServerKeys:[...new Set([...Object.keys(t.today.mcpTools.byServer),...Object.keys(t.last30Days.mcpTools.byServer),...Object.keys(t.month.mcpTools.byServer)])].sort(),allStandardModels:[...new Set([...t.today.modelSwitching.standardModels,...t.last30Days.modelSwitching.standardModels,...t.month.modelSwitching.standardModels])].sort(),allHighCostModels:[...new Set([...t.today.modelSwitching.highCostModels,...t.last30Days.modelSwitching.highCostModels,...t.month.modelSwitching.highCostModels])].sort(),allLowCostModels:[...new Set([...t.today.modelSwitching.lowCostModels,...t.last30Days.modelSwitching.lowCostModels,...t.month.modelSwitching.lowCostModels])].sort(),allMediumCostModels:[...new Set([...t.today.modelSwitching.mediumCostModels,...t.last30Days.modelSwitching.mediumCostModels,...t.month.modelSwitching.mediumCostModels])].sort(),allUnknownModels:[...new Set([...t.today.modelSwitching.unknownModels,...t.last30Days.modelSwitching.unknownModels,...t.month.modelSwitching.unknownModels])].sort()}}function Ms(t,e){return`
+	`}function ri(t){return{allToolKeys:[...new Set([...Object.keys(t.today.toolCalls.byTool),...Object.keys(t.last30Days.toolCalls.byTool),...Object.keys(t.month.toolCalls.byTool)])].sort(),allMcpToolKeys:[...new Set([...Object.keys(t.today.mcpTools.byTool),...Object.keys(t.last30Days.mcpTools.byTool),...Object.keys(t.month.mcpTools.byTool)])].sort(),allMcpServerKeys:[...new Set([...Object.keys(t.today.mcpTools.byServer),...Object.keys(t.last30Days.mcpTools.byServer),...Object.keys(t.month.mcpTools.byServer)])].sort(),allStandardModels:[...new Set([...t.today.modelSwitching.standardModels,...t.last30Days.modelSwitching.standardModels,...t.month.modelSwitching.standardModels])].sort(),allHighCostModels:[...new Set([...t.today.modelSwitching.highCostModels,...t.last30Days.modelSwitching.highCostModels,...t.month.modelSwitching.highCostModels])].sort(),allLowCostModels:[...new Set([...t.today.modelSwitching.lowCostModels,...t.last30Days.modelSwitching.lowCostModels,...t.month.modelSwitching.lowCostModels])].sort(),allMediumCostModels:[...new Set([...t.today.modelSwitching.mediumCostModels,...t.last30Days.modelSwitching.mediumCostModels,...t.month.modelSwitching.mediumCostModels])].sort(),allUnknownModels:[...new Set([...t.today.modelSwitching.unknownModels,...t.last30Days.modelSwitching.unknownModels,...t.month.modelSwitching.unknownModels])].sort()}}function si(t,e){return`
 		<div id="tab-panel-health" class="tab-panel"${A!=="health"?' style="display:none"':""}>
 			${t}
-			${as(e)}
+			${rs(e)}
 
 			<!-- Repository Setup Section -->
 			<div class="repo-hygiene-section" style="margin-top: 16px; margin-bottom: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-color); border-radius: 6px;">
@@ -1579,9 +1869,9 @@ ${is(e)}
 				<div style="font-size: 11px; color: var(--text-secondary); margin-bottom: 12px;">
 					Analyze repository hygiene and structure to identify missing configuration files and best practices.
 				</div>
-				${P&&P.workspaces&&P.workspaces.length>0?`
+				${N&&N.workspaces&&N.workspaces.length>0?`
 					<div style="margin-bottom: 12px;">
-						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${P.workspaces.length})</vscode-button>
+						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${N.workspaces.length})</vscode-button>
 					</div>
 					<div id="repo-list-pane-container" class="repo-hygiene-pane">
 						<div class="repo-hygiene-pane-header">\u{1F4C1} Repository List</div>
@@ -1596,19 +1886,19 @@ ${is(e)}
 					<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
 				`}
 			</div>
-		</div>`}function _s(t,e,o){return`
+		</div>`}function ii(t,e,o){return`
 		<!-- MCP Tools Section -->
 		<div class="section">
 			<div class="section-title"><span>\u{1F50C}</span><span>MCP Tools</span></div>
 			<div class="section-subtitle">Model Context Protocol (MCP) server and tool usage</div>
-			${gr(t)}
+			${ea(t)}
 			<div class="three-column">
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Today</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${g(t.today.mcpTools.total)}</div>
 						${o.length>0?`
-							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${N(H(t.today.mcpTools.byServer,o),200)}</div></div>
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${K(V(t.today.mcpTools.byServer,o),200)}</div></div>
 						`:'<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
 					</div>
 				</div>
@@ -1617,7 +1907,7 @@ ${is(e)}
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${g(t.last30Days.mcpTools.total)}</div>
 						${o.length>0?`
-							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${N(H(t.last30Days.mcpTools.byServer,o),200)}</div></div>
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${K(V(t.last30Days.mcpTools.byServer,o),200)}</div></div>
 						`:'<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
 					</div>
 				</div>
@@ -1626,7 +1916,7 @@ ${is(e)}
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total MCP Calls: ${g(t.month.mcpTools.total)}</div>
 						${o.length>0?`
-							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${N(H(t.month.mcpTools.byServer,o),200)}</div></div>
+							<div style="margin-top: 12px;"><strong>By Server:</strong><div style="margin-top: 8px;">${K(V(t.month.mcpTools.byServer,o),200)}</div></div>
 						`:'<div style="color: var(--text-muted); margin-top: 8px;">No MCP tools used yet</div>'}
 					</div>
 				</div>
@@ -1635,26 +1925,26 @@ ${is(e)}
 				<div>
 					${e.length>0?`
 						<div class="list">
-							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${N(H(t.today.mcpTools.byTool,e),10,we)}</div></div>
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${K(V(t.today.mcpTools.byTool,e),10,Ge)}</div></div>
 						</div>
 					`:""}
 				</div>
 				<div>
 					${e.length>0?`
 						<div class="list">
-							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${N(H(t.last30Days.mcpTools.byTool,e),10,we)}</div></div>
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${K(V(t.last30Days.mcpTools.byTool,e),10,Ge)}</div></div>
 						</div>
 					`:""}
 				</div>
 				<div>
 					${e.length>0?`
 						<div class="list">
-							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${N(H(t.month.mcpTools.byTool,e),10,we)}</div></div>
+							<div style="margin-top: 4px;"><strong>By Tool:</strong><div style="margin-top: 8px;">${K(V(t.month.mcpTools.byTool,e),10,Ge)}</div></div>
 						</div>
 					`:""}
 				</div>
 			</div>
-		</div>`}function zs(t,e,o){let n=t.length-e.length,s=e.length>0?"rgba(251,191,36,0.12)":"rgba(74,222,128,0.12)",r=e.length>0?"rgba(251,191,36,0.4)":"rgba(74,222,128,0.4)",i=e.length>0?"#fbbf24":"#4ade80",a=o.totalTokens,l=o.byServer.skill??0,p=o.byServer.builtin??0,d=a-l-p,u=C=>C>=1e3?`~${Math.round(C/1e3)}K`:`~${C}`,h=d+l,k=[];return d>0&&k.push(`${u(d)} MCP`),l>0&&k.push(`${u(l)} skills`),`<div style="display:flex; gap:16px; flex-wrap:wrap; margin:12px 0;">
+		</div>`}function ai(t,e,o){let n=t.length-e.length,r=e.length>0?"rgba(251,191,36,0.12)":"rgba(74,222,128,0.12)",s=e.length>0?"rgba(251,191,36,0.4)":"rgba(74,222,128,0.4)",i=e.length>0?"#fbbf24":"#4ade80",a=o.totalTokens,l=o.byServer.skill??0,p=o.byServer.builtin??0,d=a-l-p,u=T=>T>=1e3?`~${Math.round(T/1e3)}K`:`~${T}`,h=d+l,k=[];return d>0&&k.push(`${u(d)} MCP`),l>0&&k.push(`${u(l)} skills`),`<div style="display:flex; gap:16px; flex-wrap:wrap; margin:12px 0;">
 		<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:10px 16px; min-width:120px; text-align:center;">
 			<div style="font-size:20px; font-weight:700; color:var(--text-primary);">${g(t.length)}</div>
 			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Available</div>
@@ -1663,7 +1953,7 @@ ${is(e)}
 			<div style="font-size:20px; font-weight:700; color:#4ade80;">${g(n)}</div>
 			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Used</div>
 		</div>
-		<div style="background:${s}; border:1px solid ${r}; border-radius:6px; padding:10px 16px; min-width:120px; text-align:center;">
+		<div style="background:${r}; border:1px solid ${s}; border-radius:6px; padding:10px 16px; min-width:120px; text-align:center;">
 			<div style="font-size:20px; font-weight:700; color:${i};">${g(e.length)}</div>
 			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Unused</div>
 		</div>
@@ -1677,15 +1967,15 @@ ${is(e)}
 			<div style="font-size:11px; color:var(--text-primary); opacity:0.75;">Built-in overhead</div>
 			<div style="font-size:10px; color:var(--text-secondary); margin-top:2px;">not actionable</div>
 		</div>`:""}
-	</div>`}function Ps(t){if(t.extensionId)return"Extension";if(!t.configFiles||t.configFiles.length===0)return"Settings";let e=new Set;for(let o of t.configFiles){let n=o.replace(/\\/g,"/");n.includes("/.vscode/")?e.add("Workspace"):n.includes("/.vs/")?e.add("Workspace (VS)"):n.includes("/.cursor/")?e.add("Workspace (Cursor)"):n.endsWith("/.mcp.json")?e.add(n.split("/").slice(-2).join("/")):e.add("Config file")}return[...e].join(", ")}function Is(t,e){return t.configFiles&&t.configFiles.length===1?` <button class="curation-file-btn" data-command="openFile" data-path="${c(t.configFiles[0])}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open ${c(t.configFiles[0])}">open</button>`:t.configFiles&&t.configFiles.length>1?` <button class="curation-file-btn" data-command="openFileFromList" data-paths="${c(JSON.stringify(t.configFiles))}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="${c(e)}">open</button>`:t.extensionId?` <button class="curation-file-btn" data-command="manageExtension" data-extension-id="${c(t.extensionId)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view for ${c(t.extensionId)}">open</button>`:' <button class="curation-file-btn" data-command="searchMcpExtensions" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Browse MCP extensions in the marketplace">open</button>'}function Ls(t){return t.extensionId?`<button class="curation-file-btn" data-command="manageExtension" data-extension-id="${c(t.extensionId)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open the Extensions view for ${c(t.extensionId)} (disable or uninstall to reclaim prompt budget)">Manage Extension</button>`:!t.configFiles||t.configFiles.length===0?'<button class="curation-file-btn" data-command="openToolPicker" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open VS Code tool selection menu">Change Tools</button>':t.configFiles.length===1?`<button class="curation-file-btn" data-command="openFile" data-path="${c(t.configFiles[0])}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open ${c(t.configFiles[0])}">Change Tools</button>`:`<button class="curation-file-btn" data-command="openFileFromList" data-paths="${c(JSON.stringify(t.configFiles))}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Defined in ${t.configFiles.length} config files">Change Tools</button>`}function Bs(t,e){let o=e.byServer[t.server]??0,n=Ps(t),s=t.configFiles?.join(`
-`)??t.extensionId??"",r=Is(t,s),i=Ls(t),a=t.availableToolCount===0;return`<tr class="${t.usedToolCount>0?"mcp-has-usage":""}">
+	</div>`}function li(t){if(t.extensionId)return"Extension";if(!t.configFiles||t.configFiles.length===0)return"Settings";let e=new Set;for(let o of t.configFiles){let n=o.replace(/\\/g,"/");n.includes("/.vscode/")?e.add("Workspace"):n.includes("/.vs/")?e.add("Workspace (VS)"):n.includes("/.cursor/")?e.add("Workspace (Cursor)"):n.endsWith("/.mcp.json")?e.add(n.split("/").slice(-2).join("/")):e.add("Config file")}return[...e].join(", ")}function di(t,e){return t.configFiles&&t.configFiles.length===1?` <button class="curation-file-btn" data-command="openFile" data-path="${c(t.configFiles[0])}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open ${c(t.configFiles[0])}">open</button>`:t.configFiles&&t.configFiles.length>1?` <button class="curation-file-btn" data-command="openFileFromList" data-paths="${c(JSON.stringify(t.configFiles))}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="${c(e)}">open</button>`:t.extensionId?` <button class="curation-file-btn" data-command="manageExtension" data-extension-id="${c(t.extensionId)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view for ${c(t.extensionId)}">open</button>`:' <button class="curation-file-btn" data-command="searchMcpExtensions" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Browse MCP extensions in the marketplace">open</button>'}function ci(t){return t.extensionId?`<button class="curation-file-btn" data-command="manageExtension" data-extension-id="${c(t.extensionId)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open the Extensions view for ${c(t.extensionId)} (disable or uninstall to reclaim prompt budget)">Manage Extension</button>`:!t.configFiles||t.configFiles.length===0?'<button class="curation-file-btn" data-command="openToolPicker" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open VS Code tool selection menu">Change Tools</button>':t.configFiles.length===1?`<button class="curation-file-btn" data-command="openFile" data-path="${c(t.configFiles[0])}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open ${c(t.configFiles[0])}">Change Tools</button>`:`<button class="curation-file-btn" data-command="openFileFromList" data-paths="${c(JSON.stringify(t.configFiles))}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Defined in ${t.configFiles.length} config files">Change Tools</button>`}function pi(t,e){let o=e.byServer[t.server]??0,n=li(t),r=t.configFiles?.join(`
+`)??t.extensionId??"",s=di(t,r),i=ci(t),a=t.availableToolCount===0;return`<tr class="${t.usedToolCount>0?"mcp-has-usage":""}">
 		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${c(t.server)}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;" title="${c(s)}">${c(n)}${r}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;" title="${c(r)}">${c(n)}${s}</td>
 		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${a?'<em style="color:var(--text-secondary)">not connected</em>':t.availableToolCount}</td>
 		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${a?"\u2014":t.usedToolCount}</td>
 		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${o>0?`~${o.toLocaleString()} tokens`:"\u2014"}</td>
 		<td style="padding:5px 8px; font-size:12px;">${i}</td>
-	</tr>`}function Ds(t){let e=[...new Set(t.filter(s=>!s.extensionId).flatMap(s=>s.configFiles??[]))],o=e.find(s=>s.replace(/\\/g,"/").endsWith(".vscode/mcp.json"))??e[0];if(!o)return"<code>.vscode/mcp.json</code>";let n=o.replace(/\\/g,"/").split("/").slice(-3).join("/");return`<button class="curation-file-btn" data-command="openFile" data-path="${c(o)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="${c(o)}">${c(n)}</button>`}function Ns(t,e,o){let n=[...t].sort((l,p)=>{let d=l.usedToolCount===0?0:l.usedToolCount<l.availableToolCount?1:2,u=p.usedToolCount===0?0:p.usedToolCount<p.availableToolCount?1:2;return d!==u?d-u:l.usedToolCount-p.usedToolCount});if(n.length===0)return"";let s=n.map(l=>Bs(l,e)).join(""),r=Ds(n),i=n.filter(l=>l.usedToolCount>0).length,a=n.length-i;return`<details style="margin-top:12px;" open>
+	</tr>`}function ui(t){let e=[...new Set(t.filter(r=>!r.extensionId).flatMap(r=>r.configFiles??[]))],o=e.find(r=>r.replace(/\\/g,"/").endsWith(".vscode/mcp.json"))??e[0];if(!o)return"<code>.vscode/mcp.json</code>";let n=o.replace(/\\/g,"/").split("/").slice(-3).join("/");return`<button class="curation-file-btn" data-command="openFile" data-path="${c(o)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="${c(o)}">${c(n)}</button>`}function gi(t,e,o){let n=[...t].sort((l,p)=>{let d=l.usedToolCount===0?0:l.usedToolCount<l.availableToolCount?1:2,u=p.usedToolCount===0?0:p.usedToolCount<p.availableToolCount?1:2;return d!==u?d-u:l.usedToolCount-p.usedToolCount});if(n.length===0)return"";let r=n.map(l=>pi(l,e)).join(""),s=ui(n),i=n.filter(l=>l.usedToolCount>0).length,a=n.length-i;return`<details style="margin-top:12px;" open>
 		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
 			\u{1F50C} MCP Servers in Last ${o} Days (${n.length})
 		</summary>
@@ -1705,16 +1995,16 @@ ${is(e)}
 					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Est. Overhead</th>
 					<th style="padding:5px 8px; text-align:left; color:var(--text-primary); font-weight:600; font-size:12px;">Action</th>
 				</tr></thead>
-				<tbody>${s}</tbody>
+				<tbody>${r}</tbody>
 			</table>
-			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">\u{1F4A1} Open ${r} to disable file-configured servers, or use <em>Manage Extension</em> to disable or uninstall an MCP-providing extension. (VS Code does not expose per-server picker state to extensions, so servers you disabled in the chat tool picker may still appear here.)</div>
+			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">\u{1F4A1} Open ${s} to disable file-configured servers, or use <em>Manage Extension</em> to disable or uninstall an MCP-providing extension. (VS Code does not expose per-server picker state to extensions, so servers you disabled in the chat tool picker may still appear here.)</div>
 		</div>
-	</details>`}function Hs(t){if(t.length===0)return"";let e=t.map(o=>{let n=o.configFiles?.[0],s=n?`<button class="curation-file-btn" data-command="openFile" data-path="${c(n)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:12px;text-decoration:underline;" title="Open ${c(n)}">View skill</button>`:"\u2014",r="\u2014",i="";o.pluginName?(r=`Plugin: ${o.pluginName}`,i=` <button class="curation-file-btn" data-command="openAgentPlugins" data-plugin-name="${c(o.pluginName)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view filtered to agent plugins">manage</button>`):o.skillPath&&(o.skillPath.startsWith(".github/skills")?r="Workspace (.github)":o.skillPath.startsWith(".claude/skills")?r="Workspace (.claude)":o.skillPath.startsWith(".agents/skills")?r="Workspace (.agents)":r="User (~)");let a=Math.round((o.name.length+o.description.length+10)/4);return`<tr>
+	</details>`}function mi(t){if(t.length===0)return"";let e=t.map(o=>{let n=o.configFiles?.[0],r=n?`<button class="curation-file-btn" data-command="openFile" data-path="${c(n)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:12px;text-decoration:underline;" title="Open ${c(n)}">View skill</button>`:"\u2014",s="\u2014",i="";o.pluginName?(s=`Plugin: ${o.pluginName}`,i=` <button class="curation-file-btn" data-command="openAgentPlugins" data-plugin-name="${c(o.pluginName)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view filtered to agent plugins">manage</button>`):o.skillPath&&(o.skillPath.startsWith(".github/skills")?s="Workspace (.github)":o.skillPath.startsWith(".claude/skills")?s="Workspace (.claude)":o.skillPath.startsWith(".agents/skills")?s="Workspace (.agents)":s="User (~)");let a=Math.round((o.name.length+o.description.length+10)/4);return`<tr>
 		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${c(o.name)}</td>
-		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${c(r)}${i}</td>
+		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${c(s)}${i}</td>
 		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; max-width:320px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${c(o.description)}">${c(o.description)}</td>
 		<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">~${a.toLocaleString()} tokens</td>
-		<td style="padding:5px 8px; font-size:12px; white-space:nowrap;">${s}</td>
+		<td style="padding:5px 8px; font-size:12px; white-space:nowrap;">${r}</td>
 	</tr>`}).join("");return`<details style="margin-top:8px;" open>
 		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
 			\u{1F4DA} Unused Skills (${t.length})
@@ -1732,12 +2022,12 @@ ${is(e)}
 			</table>
 			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">\u{1F4A1} Est. overhead is per agent interaction. For plugin skills, click <em>manage</em> to open the agent plugins view where you can uninstall the plugin. For workspace skills, update the description or remove the SKILL.md.</div>
 		</div>
-	</details>`}function Us(t,e){if(t.length===0)return"";let o=t.map(r=>{let i=`<button class="curation-file-btn" data-command="openAgentPlugins" data-plugin-name="${c(r.pluginName)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view filtered to @agentPlugins ${c(r.pluginName)}">Manage Plugin</button>`;return`<tr class="${r.usedSkillCount===0?"":"plugin-has-usage"}">
-			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${c(r.pluginName)}</td>
-			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${r.availableSkillCount}</td>
-			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${r.usedSkillCount}</td>
+	</details>`}function fi(t,e){if(t.length===0)return"";let o=t.map(s=>{let i=`<button class="curation-file-btn" data-command="openAgentPlugins" data-plugin-name="${c(s.pluginName)}" style="background:none;border:none;padding:0;cursor:pointer;color:var(--link-color);font-size:11px;text-decoration:underline;" title="Open Extensions view filtered to @agentPlugins ${c(s.pluginName)}">Manage Plugin</button>`;return`<tr class="${s.usedSkillCount===0?"":"plugin-has-usage"}">
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${c(s.pluginName)}</td>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${s.availableSkillCount}</td>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px;">${s.usedSkillCount}</td>
 			<td style="padding:5px 8px; font-size:12px;">${i}</td>
-		</tr>`}).join(""),n=t.filter(r=>r.usedSkillCount===0).length,s=t.length-n;return`<details style="margin-top:8px;" open>
+		</tr>`}).join(""),n=t.filter(s=>s.usedSkillCount===0).length,r=t.length-n;return`<details style="margin-top:8px;" open>
 		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
 			\u{1F9E9} Agent Plugins in Last ${e} Days (${t.length})
 		</summary>
@@ -1745,7 +2035,7 @@ ${is(e)}
 		<div style="display:flex; align-items:center; gap:6px; margin:6px 0;">
 			<input type="checkbox" id="plugin-hide-toggle" checked style="margin:0; cursor:pointer; flex-shrink:0;">
 			<label for="plugin-hide-toggle" style="font-size:12px; color:var(--text-primary); cursor:pointer; user-select:none;">Hide plugins with usage</label>
-			<span style="font-size:11px; color:var(--text-secondary);">${n} with no usage \xB7 ${s} with usage</span>
+			<span style="font-size:11px; color:var(--text-secondary);">${n} with no usage \xB7 ${r} with usage</span>
 		</div>
 		<div class="plugin-table-wrap" style="margin-top:8px; overflow-x:auto;">
 			<table style="width:100%; border-collapse:collapse; font-size:12px;">
@@ -1759,13 +2049,13 @@ ${is(e)}
 			</table>
 			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">\u{1F4A1} Click <em>Manage Plugin</em> to open the Extensions view filtered to <code>@agentPlugins</code> where you can uninstall unused plugins to reclaim prompt budget.</div>
 		</div>
-	</details>`}function Os(t,e){if(t.length===0)return"";let o=e.byServer.builtin??0,n=t.map(r=>{let i=Math.round((r.name.length+(r.description?.length??0)+10)/4);return`<tr>
-			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${c(r.name)}</td>
-			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${c(r.description??"")}">${c(r.description??"\u2014")}</td>
+	</details>`}function bi(t,e){if(t.length===0)return"";let o=e.byServer.builtin??0,n=t.map(s=>{let i=Math.round((s.name.length+(s.description?.length??0)+10)/4);return`<tr>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">${c(s.name)}</td>
+			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; max-width:400px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="${c(s.description??"")}">${c(s.description??"\u2014")}</td>
 			<td style="padding:5px 8px; color:var(--text-primary); font-size:12px; white-space:nowrap;">~${i} tokens</td>
-		</tr>`}).join(""),s=r=>r>=1e3?`~${Math.round(r/1e3)}K`:`~${r}`;return`<details style="margin-top:12px;">
+		</tr>`}).join(""),r=s=>s>=1e3?`~${Math.round(s/1e3)}K`:`~${s}`;return`<details style="margin-top:12px;">
 		<summary style="cursor:pointer; font-size:13px; font-weight:600; color:var(--text-primary); padding:6px 0;">
-			\u{1F527} Built-in VS Code Tools (${t.length}) \u2014 ${s(o)} tokens overhead, not actionable
+			\u{1F527} Built-in VS Code Tools (${t.length}) \u2014 ${r(o)} tokens overhead, not actionable
 		</summary>
 		<div style="margin-top:8px; overflow-x:auto;">
 			<table style="width:100%; border-collapse:collapse; font-size:12px;">
@@ -1778,21 +2068,21 @@ ${is(e)}
 			</table>
 			<div style="margin-top:8px; font-size:11px; color:var(--text-secondary);">\u{1F4A1} These tools are provided by VS Code itself and cannot be disabled. They are excluded from the actionable overhead total above.</div>
 		</div>
-	</details>`}function js(t){try{if(!t||t.availableTools.length===0)return tt("render-hidden-empty","buildCurationSectionHtml.hidden",{hasCurationObject:!!t,availableTools:t?.availableTools?.length??0}),"";let{availableTools:e,unusedTools:o,underusedMcpServers:n,underusedAgentPlugins:s,estimatedPromptBloat:r,windowDays:i}=t,a=o.filter(p=>p.source==="skill"),l=e.filter(p=>p.source==="builtin");return U("buildCurationSectionHtml.render",{availableTools:e.length,unusedTools:o.length,unusedSkills:a.length,mcpServers:n.length}),`
+	</details>`}function hi(t){try{if(!t||t.availableTools.length===0)return dt("render-hidden-empty","buildCurationSectionHtml.hidden",{hasCurationObject:!!t,availableTools:t?.availableTools?.length??0}),"";let{availableTools:e,unusedTools:o,underusedMcpServers:n,underusedAgentPlugins:r,estimatedPromptBloat:s,windowDays:i}=t,a=o.filter(p=>p.source==="skill"),l=e.filter(p=>p.source==="builtin");return G("buildCurationSectionHtml.render",{availableTools:e.length,unusedTools:o.length,unusedSkills:a.length,mcpServers:n.length}),`
 			<!-- Tool Curation Section -->
 			<div id="section-tool-curation" class="section">
 				<div class="section-title"><span>\u2702\uFE0F</span><span>Tool Curation</span></div>
 				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Compare available tools against actual usage to reduce prompt overhead (last ${i} days)</div>
-				${zs(e,o,r)}
-				${Ns(n,r,i)}
-				${Us(s,i)}
-				${Os(l,r)}
-				${Hs(a)}
-			</div>`}catch(e){return U("buildCurationSectionHtml.error",{error:e instanceof Error?e.message:String(e)}),`
+				${ai(e,o,s)}
+				${gi(n,s,i)}
+				${fi(r,i)}
+				${bi(l,s)}
+				${mi(a)}
+			</div>`}catch(e){return G("buildCurationSectionHtml.error",{error:e instanceof Error?e.message:String(e)}),`
 			<div id="section-tool-curation" class="section">
 				<div class="section-title"><span>\u2702\uFE0F</span><span>Tool Curation</span></div>
 				<div class="section-subtitle" style="color:var(--text-primary); opacity:0.75;">Tool curation is temporarily unavailable due to a rendering error. Try Refresh.</div>
-			</div>`}}function Fs(){return`
+			</div>`}}function yi(){return`
 		<div id="tab-panel-repos" class="tab-panel"${A!=="repos"?' style="display:none"':""}>
 			<div class="section" id="repos-pr-content">
 				<div class="section-title"><span>\u{1F916}</span><span>AI Activity in Repository PRs</span></div>
@@ -1806,25 +2096,25 @@ ${is(e)}
 				<div class="section-subtitle">Cloud agent tasks and sessions from the last 30 days, fetched from the GitHub API.</div>
 				<div style="margin-top:12px; color: var(--text-secondary); font-size:12px;">Loading\u2026 (sign in with GitHub to see data)</div>
 			</div>
-		</div>`}function Zt(t){let e={tip:"rgba(96,165,250,0.12)",opportunity:"rgba(251,191,36,0.12)",celebration:"rgba(74,222,128,0.12)"},o={tip:"rgba(96,165,250,0.5)",opportunity:"rgba(251,191,36,0.5)",celebration:"rgba(74,222,128,0.5)"},n={tip:"rgba(96,165,250,0.85)",opportunity:"rgba(251,191,36,0.85)",celebration:"rgba(74,222,128,0.85)"},s=e[t.severity]??e.tip,r=o[t.severity]??o.tip,i=n[t.severity]??n.tip,a=t.status==="new",l=t.status==="done",p=t.actionLabel?`<button class="insight-action-btn" data-insight-id="${c(t.id)}" data-action="execute" data-command="${c(t.actionCommand??"")}"
+		</div>`}function ve(t){let e={tip:"rgba(96,165,250,0.12)",opportunity:"rgba(251,191,36,0.12)",celebration:"rgba(74,222,128,0.12)"},o={tip:"rgba(96,165,250,0.5)",opportunity:"rgba(251,191,36,0.5)",celebration:"rgba(74,222,128,0.5)"},n={tip:"rgba(96,165,250,0.85)",opportunity:"rgba(251,191,36,0.85)",celebration:"rgba(74,222,128,0.85)"},r=e[t.severity]??e.tip,s=o[t.severity]??o.tip,i=n[t.severity]??n.tip,a=t.status==="new",l=t.status==="done",p=t.actionLabel?`<button class="insight-action-btn" data-insight-id="${c(t.id)}" data-action="execute" data-command="${c(t.actionCommand??"")}"
 				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer;
-				border:1px solid ${r}; border-radius:5px;
-				background:${s}; color:var(--text-primary);">${c(t.actionLabel)}</button>`:"",d=l?'<span style="font-size:12px; color:var(--text-secondary); opacity:0.5; padding:5px 6px;">\u2713 Done</span>':`<button class="insight-action-btn" data-insight-id="${c(t.id)}" data-action="done"
+				border:1px solid ${s}; border-radius:5px;
+				background:${r}; color:var(--text-primary);">${c(t.actionLabel)}</button>`:"",d=l?'<span style="font-size:12px; color:var(--text-secondary); opacity:0.5; padding:5px 6px;">\u2713 Done</span>':`<button class="insight-action-btn" data-insight-id="${c(t.id)}" data-action="done"
 				title="Mark as done"
 				style="padding:5px 14px; font-size:12px; font-weight:600; cursor:pointer;
-				border:1px solid ${r}; border-radius:5px;
+				border:1px solid ${s}; border-radius:5px;
 				background:${i}; color:#0d1117;">\u2713 Done</button>`,u=l?"":`<button class="insight-action-btn" data-insight-id="${c(t.id)}" data-action="snooze"
 				title="Snooze for 7 days"
 				style="padding:5px 14px; font-size:12px; font-weight:500; cursor:pointer;
-				border:1px solid ${r}; border-radius:5px;
+				border:1px solid ${s}; border-radius:5px;
 				background:transparent; color:var(--text-primary);">\u23F8 Snooze</button>`,h=l?"":`<button class="insight-action-btn" data-insight-id="${c(t.id)}" data-action="dismiss"
 				title="Dismiss permanently"
 				style="padding:4px 8px; font-size:14px; line-height:1; cursor:pointer; border:none; border-radius:4px;
 				background:transparent; color:var(--text-primary); opacity:0.5;">\u2715</button>`;return`
 		<div class="insight-card" data-insight-id="${c(t.id)}"
 			style="margin-bottom:12px; padding:16px 18px; border-radius:8px;
-			background:${s}; border:1px solid ${r};
-			${a?"box-shadow:0 2px 8px "+s+";":""}
+			background:${r}; border:1px solid ${s};
+			${a?"box-shadow:0 2px 8px "+r+";":""}
 			${l?"opacity:0.45;":""}">
 			<div style="display:flex; align-items:flex-start; gap:10px;">
 				<div style="flex:1;">
@@ -1839,18 +2129,18 @@ ${is(e)}
 					${h}
 				</div>
 			</div>
-			<div style="display:flex; gap:8px; margin-top:14px; justify-content:flex-end; border-top:1px solid ${r}; padding-top:10px;">
+			<div style="display:flex; gap:8px; margin-top:14px; justify-content:flex-end; border-top:1px solid ${s}; padding-top:10px;">
 				${d}
 				${u}
 			</div>
-		</div>`}function qs(t){let e=t.filter(i=>i.status!=="dismissed"),o=e.filter(i=>i.status==="new"),n=e.filter(i=>i.status!=="new"&&i.status!=="done"),s=o.length>0?`<div style="margin-bottom:20px;">
+		</div>`}function vi(t){let e=t.filter(i=>i.status!=="dismissed"),o=e.filter(i=>i.status==="new"),n=e.filter(i=>i.status!=="new"&&i.status!=="done"),r=o.length>0?`<div style="margin-bottom:20px;">
 			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">\u2728 For You</div>
-			${o.map(Zt).join("")}
+			${o.map(ve).join("")}
 		</div>`:`<div style="margin-bottom:20px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
 			\u{1F389} No new insights right now \u2014 keep using Copilot and check back later!
-		</div>`,r=n.length>0?`<div>
+		</div>`,s=n.length>0?`<div>
 			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">All Tips</div>
-			${n.map(Zt).join("")}
+			${n.map(ve).join("")}
 		</div>`:"";return`
 		<div id="tab-panel-insights" class="tab-panel"${A!=="insights"?' style="display:none"':""}>
 			<div class="section">
@@ -1859,21 +2149,21 @@ ${is(e)}
 					Personalized tips based on your usage patterns. Tips are data-driven \u2014 they only appear when relevant to how you code with AI.
 				</div>
 				<div id="insights-container" style="margin-top:16px;">
-					${s}
 					${r}
+					${s}
 				</div>
 			</div>
-		</div>`}function Ws(t){let e=document.querySelector('.tab-button[data-tab="insights"]');if(!e)return;let o=t.filter(r=>r.status==="new").length,n=o>0?` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${o}</span>`:"",s='<span class="codicon codicon-lightbulb"></span> Insights';e.innerHTML=s+n}function Ks(t){let e=document.getElementById("insights-container");if(!e)return;Pe=t;let o=t.filter(i=>i.status==="new"),n=t.filter(i=>i.status!=="new"&&i.status!=="dismissed"&&i.status!=="done"),s=o.length>0?`<div style="margin-bottom:20px;">
+		</div>`}function xi(t){let e=document.querySelector('.tab-button[data-tab="insights"]');if(!e)return;let o=t.filter(s=>s.status==="new").length,n=o>0?` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${o}</span>`:"",r='<span class="codicon codicon-lightbulb"></span> Insights';e.innerHTML=r+n}function ki(t){let e=document.getElementById("insights-container");if(!e)return;io=t;let o=t.filter(i=>i.status==="new"),n=t.filter(i=>i.status!=="new"&&i.status!=="dismissed"&&i.status!=="done"),r=o.length>0?`<div style="margin-bottom:20px;">
 			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">\u2728 For You</div>
-			${o.map(Zt).join("")}
+			${o.map(ve).join("")}
 		</div>`:`<div style="margin-bottom:20px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
 			\u{1F389} No new insights right now \u2014 keep using Copilot and check back later!
-		</div>`,r=n.length>0?`<div>
+		</div>`,s=n.length>0?`<div>
 			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">All Tips</div>
-			${n.map(Zt).join("")}
-		</div>`:"";e.innerHTML=s+r,rn(),Ws(t)}function Gs(t){if(t)try{let e=JSON.parse(t);f.postMessage({command:"openFileFromList",paths:e})}catch(e){U("wireCurationButtons.badPathsJson",{error:e instanceof Error?e.message:String(e)})}}function Vs(t){let e=t.getAttribute("data-command");if(e)if(e==="openFile"){let o=t.getAttribute("data-path");o&&f.postMessage({command:"openFile",path:o})}else if(e==="openFileFromList")Gs(t.getAttribute("data-paths"));else if(e==="manageExtension"){let o=t.getAttribute("data-extension-id");o&&f.postMessage({command:"manageExtension",extensionId:o})}else if(e==="openAgentPlugins"){let o=t.getAttribute("data-plugin-name")??"";f.postMessage({command:"openAgentPlugins",pluginName:o})}else f.postMessage({command:e})}function Js(){try{let t=document.getElementById("section-tool-curation");if(!t){tt("wire-no-section","wireCurationButtons.noSection");return}let e=t.querySelectorAll(".curation-file-btn");U("wireCurationButtons.bind",{buttons:e.length}),e.forEach(o=>{o.addEventListener("click",()=>{try{Vs(o)}catch(n){U("wireCurationButtons.clickError",{error:n instanceof Error?n.message:String(n)})}})})}catch(t){U("wireCurationButtons.error",{error:t instanceof Error?t.message:String(t)})}}function rn(){let t=document.getElementById("insights-container");t&&t.querySelectorAll(".insight-action-btn").forEach(e=>{e.addEventListener("click",()=>{let o=e.getAttribute("data-insight-id"),n=e.getAttribute("data-action");if(!(!o||!n))if(n==="execute"){let s=e.getAttribute("data-command");s&&f.postMessage({command:s})}else f.postMessage({command:"insightAction",id:o,action:n})})})}function Ys(t,e,o,n,s,r,i,a,l,p,d,u,h,k){return`
-		<style>${We}</style>
-		<style>${Ke}</style>
+			${n.map(ve).join("")}
+		</div>`:"";e.innerHTML=r+s,Gn(),xi(t)}function wi(t){if(t)try{let e=JSON.parse(t);f.postMessage({command:"openFileFromList",paths:e})}catch(e){G("wireCurationButtons.badPathsJson",{error:e instanceof Error?e.message:String(e)})}}function Ci(t){let e=t.getAttribute("data-command");if(e)if(e==="openFile"){let o=t.getAttribute("data-path");o&&f.postMessage({command:"openFile",path:o})}else if(e==="openFileFromList")wi(t.getAttribute("data-paths"));else if(e==="manageExtension"){let o=t.getAttribute("data-extension-id");o&&f.postMessage({command:"manageExtension",extensionId:o})}else if(e==="openAgentPlugins"){let o=t.getAttribute("data-plugin-name")??"";f.postMessage({command:"openAgentPlugins",pluginName:o})}else f.postMessage({command:e})}function Ti(){try{let t=document.getElementById("section-tool-curation");if(!t){dt("wire-no-section","wireCurationButtons.noSection");return}let e=t.querySelectorAll(".curation-file-btn");G("wireCurationButtons.bind",{buttons:e.length}),e.forEach(o=>{o.addEventListener("click",()=>{try{Ci(o)}catch(n){G("wireCurationButtons.clickError",{error:n instanceof Error?n.message:String(n)})}})})}catch(t){G("wireCurationButtons.error",{error:t instanceof Error?t.message:String(t)})}}function Gn(){let t=document.getElementById("insights-container");t&&t.querySelectorAll(".insight-action-btn").forEach(e=>{e.addEventListener("click",()=>{let o=e.getAttribute("data-insight-id"),n=e.getAttribute("data-action");if(!(!o||!n))if(n==="execute"){let r=e.getAttribute("data-command");r&&f.postMessage({command:r})}else f.postMessage({command:"insightAction",id:o,action:n})})})}function Si(t,e,o,n,r,s,i,a,l,p,d,u,h,k){return`
+		<style>${To}</style>
+		<style>${So}</style>
 		<div class="container">
 			<div class="header">
 				<div class="header-left">
@@ -1881,16 +2171,16 @@ ${is(e)}
 					<span class="header-title">Usage Analysis</span>
 				</div>
 				<div class="button-row">
-				${je("btn-usage",!!t.backendConfigured)}
+				${xo("btn-usage",!!t.backendConfigured)}
 				</div>
 			</div>
 
 			<div class="info-box">
-				<div class="info-box-title info-box-toggle" id="about-info-toggle" role="button" tabindex="0" aria-expanded="${!D}" aria-controls="about-info-body">
+				<div class="info-box-title info-box-toggle" id="about-info-toggle" role="button" tabindex="0" aria-expanded="${!q}" aria-controls="about-info-body">
 					<span>\u{1F4CB} About This Dashboard</span>
-					<span class="info-box-chevron" aria-hidden="true">${D?"\u25B8":"\u25BE"}</span>
+					<span class="info-box-chevron" aria-hidden="true">${q?"\u25B8":"\u25BE"}</span>
 				</div>
-				<div class="info-box-body" id="about-info-body"${D?' style="display:none"':""}>
+				<div class="info-box-body" id="about-info-body"${q?' style="display:none"':""}>
 					This dashboard analyzes your GitHub Copilot usage patterns by examining session log files.
 					It tracks modes (ask/edit/agent), tool usage, context references (#file, @workspace, etc.),
 					and MCP (Model Context Protocol) tools to help you understand how you interact with Copilot.
@@ -1904,37 +2194,132 @@ ${is(e)}
 				<button class="tab-button ${A==="health"?"active":""}" data-tab="health"><span class="codicon codicon-server-environment"></span> Workspace Health</button>
 				<button class="tab-button ${A==="repos"?"active":""}" data-tab="repos"><span class="codicon codicon-git-pull-request"></span> Repository PRs</button>
 				<button class="tab-button ${A==="agent"?"active":""}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
-				<button class="tab-button ${A==="insights"?"active":""}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(t.insights??[]).filter(C=>C.status==="new").length>0?` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(t.insights??[]).filter(C=>C.status==="new").length}</span>`:""}</button>
+				<button class="tab-button ${A==="worktrees"?"active":""}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>
+				<button class="tab-button ${A==="insights"?"active":""}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(t.insights??[]).filter(T=>T.status==="new").length>0?` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(t.insights??[]).filter(T=>T.status==="new").length}</span>`:""}</button>
 			</div>
 
-			${Xs(t)}
-			${or(t,o,n,s,r,i)}
-			${mr(t,a,l,p,d,u,h,k)}
-			${Ms(e,t)}
-			${Fs()}
-			${qs(t.insights??[])}
+			${Ni(t)}
+			${Fi(t,o,n,r,s,i)}
+			${da(t,a,l,p,d,u,h,k)}
+			${si(e,t)}
+			${yi()}
+			${Hi()}
+			${vi(t.insights??[])}
 			<div class="footer">
 				Last updated: ${c(new Date(t.lastUpdated).toLocaleString())} \xB7 Updates every 5 minutes
 			</div>
 		</div>
-`}function Xs(t){Re=t.todaySessions||[];let e=$==="today"?Re:ct[$],o=e?Me(e):`<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for the last ${$} days\u2026</div>`;return`
+`}function $i(){if(M.length===0)return'<div style="color: var(--text-muted); font-size: 12px; margin: 8px 0;">No root folders added yet. Add a folder to scan for worktrees.</div>';let t=M.length>2,e=!t||Ht,o=t?`<button class="worktree-roots-toggle" id="btn-toggle-worktree-roots" aria-expanded="${Ht}"><span class="worktree-caret">${Ht?"\u25BC":"\u25B6"}</span>${M.length} root folders found</button>`:"",n=e?`<div class="worktree-roots-list">${M.map((r,s)=>`<div class="worktree-root-item"><span title="${c(r)}">${c(r)}</span><button class="button secondary worktree-remove-root" data-index="${s}" ${E?"disabled":""}>\u2715</button></div>`).join("")}</div>`:"";return o+n}function Ai(t,e){let o=t.enriched??0,n=t.enrichTotal??0,r=n>0?Math.round(o/n*100):0;return`
+    <div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">\u{1F4E6} Computing sizes &amp; push status\u2026</div>
+      <div>${o} / ${n} worktree${n===1?"":"s"} analyzed (${e}s)</div>
+      <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${r}%;"></div></div>
+    </div>`}function Ei(t,e){let o=t.phase==="walking",n=o?"\u{1F50D} Scanning folder\u2026":"\u23F3 Checking markers\u2026",r=t.dirsScanned??0,s=o?`Exploring for git worktrees \u2014 ${r} folder${r===1?"":"s"} scanned (${e}s)`:`${t.checked} / ${t.total||"?"} .git markers checked \u2014 ${t.foundCount} worktree${t.foundCount===1?"":"s"} found so far (${e}s)`,i=o?100:t.total>0?Math.round(t.checked/t.total*100):0,a=o?"worktree-progress-fill indeterminate":"worktree-progress-fill";return`
+    <div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">${n}</div>
+      <div>Folder: <span style="font-family: var(--vscode-editor-font-family, monospace);">${c(t.root||"\u2026")}</span></div>
+      <div>${s}</div>
+      <div class="worktree-progress-bar"><div class="${a}" style="width: ${i}%;"></div></div>
+    </div>`}function Jn(){if(!E)return"";let t=R,e=(t.elapsedMs/1e3).toFixed(1);return t.phase==="enriching"?Ai(t,e):Ei(t,e)}function Yn(){return`
+    <div class="section">
+      <div class="section-title"><span class="codicon codicon-folder-opened"></span><span>Root Folders</span></div>
+      <div id="worktree-roots-list">${$i()}</div>
+      <div class="folder-input-row" style="margin-top: 8px;">
+        <input
+          type="text"
+          id="worktree-root-input"
+          class="folder-input"
+          placeholder="Paste a root folder path here, e.g. C:\\code\\repos"
+          ${E?"disabled":""}
+        />
+        <button class="button secondary" id="btn-browse-worktree-root" ${E?"disabled":""}>\u{1F4C2} Browse\u2026</button>
+        <button class="button secondary" id="btn-add-worktree-root" ${E?"disabled":""}>\u2795 Add</button>
+      </div>
+      <div style="margin-top: 16px;">
+        <button class="button" id="btn-scan-worktrees" ${E||J||M.length===0?"disabled":""}>\u{1F50D} Scan for Worktrees</button>
+        ${E?'<button class="button secondary" id="btn-cancel-worktree-scan">\u2715 Cancel</button>':""}
+      </div>
+      ${Gt?`<div class="info-box" style="margin-top: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);"><div>\u26A0\uFE0F ${c(Gt)}</div></div>`:""}
+      <div id="worktree-progress-area">${Jn()}</div>
+    </div>`}function Ri(t){let e=new Map;for(let o of t){let n=o.repoLabel||"Unknown";e.has(n)||e.set(n,[]),e.get(n).push(o)}return e}function we(t){return t.bytes<0}function Yt(t){return t.bytes>0?t.bytes:0}function Mi(t){let e=we(t),o=a=>`<span class="worktree-pending">${E?a:"\u2014"}</span>`,n=t.pushed==="yes"?"\u2705":t.pushed==="no"?"\u{1F534}":"\u2753",r=e?o("checking\u2026"):`${n} ${c(t.pushed)}`,s=e?o("\u2026"):c(String(t.files)),i=e?o("computing\u2026"):`<span title="${t.bytes.toLocaleString()} bytes">${Qt(t.bytes)}</span>`;return`<tr>
+    <td title="${c(t.path)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 380px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${c(t.path)}</td>
+    <td>${c(t.branch)}</td>
+    <td>${c(t.lastCommit)}</td>
+    <td>${r}</td>
+    <td>${s}</td>
+    <td>${i}</td>
+    <td>
+      <a href="#" class="worktree-reveal-link" data-path="${encodeURIComponent(t.path)}">Open</a>
+      <a href="#" class="worktree-delete-link" data-path="${encodeURIComponent(t.path)}" data-branch="${encodeURIComponent(t.branch)}" data-repo="${encodeURIComponent(t.repoLabel)}" data-pushed="${c(t.pushed)}" title="Remove via git worktree remove (asks for confirmation)">\u{1F5D1}\uFE0F Delete</a>
+    </td>
+  </tr>`}function Pi(t){return`<div class="table-container">
+    <table class="session-table">
+      <thead><tr><th>Path</th><th>Branch</th><th>Last Commit</th><th>Pushed</th><th>Files</th><th>Size</th><th>Actions</th></tr></thead>
+      <tbody>${[...t].sort((n,r)=>Yt(r)-Yt(n)).map(Mi).join("")}</tbody>
+    </table>
+  </div>`}function _i(t){let e=t.reduce((r,s)=>r+Yt(s),0),o=t.some(we),n=`<span title="${e.toLocaleString()} bytes">${Qt(e)}</span>`;return o?`${n} <span class="worktree-pending">\u2026</span>`:n}function zi(t,e){let o=he.has(t),n=o?"\u25BC":"\u25B6",r=c(t),s=`<tr class="worktree-repo-row${o?" expanded":""}" data-repo="${r}" aria-expanded="${o}">
+    <td><span class="worktree-caret">${n}</span> ${c(t)}</td>
+    <td>${e.length}</td>
+    <td>${_i(e)}</td>
+  </tr>`,i=`<tr class="worktree-repo-details" data-repo="${r}"${o?"":' style="display: none;"'}>
+    <td colspan="3">${Pi(e)}</td>
+  </tr>`;return s+i}function Xe(t){return Jt!==t?"":Nt==="desc"?" \u25BC":" \u25B2"}function Ii(t){return t.reduce((e,o)=>e+Yt(o),0)}function Li(t,e){let o=Nt==="desc"?-1:1;if(Jt==="repo")return o*t[0].localeCompare(e[0]);let n=s=>Jt==="count"?s.length:Ii(s),r=n(t[1])-n(e[1]);return r!==0?o*r:t[0].localeCompare(e[0])}function Xn(){return D.filter(t=>t.pushed==="yes"&&!we(t))}function Bi(){let t=Xn().length,e=J||pt||E||t===0,o=pt?"\u23F3 Waiting\u2026":`\u{1F9F9} Clean Up (${t})`;return`<div class="summary-card worktree-cleanup-card">
+    <div class="summary-label">Pushed Worktrees</div>
+    <div class="worktree-cleanup-card-actions">
+      <button class="button secondary" id="btn-cleanup-pushed-worktrees" ${e?"disabled":""}>${o}</button>
+      ${J?'<button class="button secondary" id="btn-cancel-cleanup">\u2715</button>':""}
+    </div>
+  </div>`}function Pn(){let t=et.filter(o=>o.status!=="deleted");return t.length===0?"":`<div class="worktree-cleanup-log">${t.map(o=>`<div class="worktree-cleanup-log-row">
+      <span>${o.status==="skipped"?"\u23ED\uFE0F":"\u274C"}</span>
+      <span class="worktree-cleanup-log-branch">${c(o.branch)}</span>
+      <span class="worktree-cleanup-log-repo">${c(o.repoLabel)}</span>
+      <span class="worktree-cleanup-log-reason">${c(o.reason||"")}</span>
+    </div>`).join("")}</div>`}function Di(){if(J){let{processed:n,total:r}=ao,s=r>0?Math.round(n/r*100):0;return`<div class="info-box" style="margin-top: 12px;">
+      <div class="info-box-title">\u{1F9F9} Cleaning up pushed worktrees\u2026</div>
+      <div>${n} / ${r} processed</div>
+      <div class="worktree-progress-bar"><div class="worktree-progress-fill" style="width: ${s}%;"></div></div>
+    </div>${Pn()}`}if(et.length===0)return"";let t=et.filter(n=>n.status==="deleted").length,e=et.filter(n=>n.status==="skipped").length,o=et.filter(n=>n.status==="error").length;return`<div class="info-box" style="margin-top: 12px;">
+    <div class="info-box-title">\u{1F9F9} Cleanup finished</div>
+    <div>\u2705 ${t} deleted \xB7 \u23ED\uFE0F ${e} skipped (uncommitted/unpushed) \xB7 ${o>0?`\u274C ${o} error${o===1?"":"s"}`:"0 errors"}</div>
+  </div>${Pn()}`}function Zn(){if(D.length===0)return E?'<div style="padding: 16px; color: var(--text-muted);">Discovering worktrees\u2026</div>':'<div style="padding: 16px; color: var(--text-muted);">No worktrees found yet. Add root folders above and click Scan.</div>';let t=Ri(D),e=D.reduce((l,p)=>l+Yt(p),0),o=D.some(we),n=`${Qt(e)}${o?' <span class="worktree-pending">\u2026</span>':""}`,r=`<div class="summary-cards">
+    <div class="summary-card"><div class="summary-label">\u{1F333} Worktrees</div><div class="summary-value">${D.length}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1F4E6} Repositories</div><div class="summary-value">${t.size}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1F4BE} Total Size</div><div class="summary-value" title="${e.toLocaleString()} bytes">${n}</div></div>
+    ${Bi()}
+  </div>`,i=[...t.entries()].sort(Li).map(([l,p])=>zi(l,p)).join(""),a=`<div class="table-container">
+    <table class="session-table worktree-repo-table">
+      <thead><tr>
+        <th class="sortable" data-wt-sort="repo">Repository${Xe("repo")}</th>
+        <th class="sortable" data-wt-sort="count">Worktrees${Xe("count")}</th>
+        <th class="sortable" data-wt-sort="size">Size${Xe("size")}</th>
+      </tr></thead>
+      <tbody>${i}</tbody>
+    </table>
+  </div>`;return r+Di()+a}function Hi(){return`
+    <div id="tab-panel-worktrees" class="tab-panel"${A!=="worktrees"?' style="display:none"':""}>
+      <div class="info-box">
+        <div class="info-box-title">\u{1F333} Worktree Discovery</div>
+        <div>
+          Scans folders for uncleaned git worktrees and reports disk usage grouped by repository (based on each
+          worktree's git remote). Add one or more root folders below, then click Scan. Results stream in as they're found.
+        </div>
+      </div>
+      <div id="worktree-controls">${Yn()}</div>
+      <div id="worktree-results">${Zn()}</div>
+    </div>`}function Ni(t){Array.isArray(t.todaySessions)&&(oo=t.todaySessions);let e=P==="today"?oo:xt[P],o=e?no(e):`<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${Zt[P]}\u2026</div>`;return`
 		<div id="tab-panel-sessions" class="tab-panel"${A!=="sessions"?' style="display:none"':""}>
 			<div class="section">
 				<div class="section-title" style="display:flex; align-items:center; gap:8px;">
 					<span>\u{1F4CB}</span><span>Recent Sessions</span>
-					<select id="sessions-lookback" style="margin-left:auto; font-size:12px; padding:2px 6px; background:var(--vscode-dropdown-background, var(--bg-secondary)); color:var(--vscode-dropdown-foreground, var(--text-primary)); border:1px solid var(--border-subtle); border-radius:4px;">
-						<option value="today"${$==="today"?" selected":""}>Today</option>
-						<option value="7"${$==="7"?" selected":""}>Last 7 days</option>
-						<option value="30"${$==="30"?" selected":""}>Last 30 days</option>
-					</select>
-					${us()}
+					<span id="sessions-lookback-wrapper" style="margin-left:auto;"></span>
+					${ds()}
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period \u2014 sorted by number of interactions (most active first).</div>
 				<div id="sessions-panel-body" style="margin-top: 12px;">
 					${o}
 				</div>
 			</div>
-		</div>`}function Zs(t){let e=S(t.pctAvailable,1),o=S(100-t.pctAvailable,1),n=Math.min(100-t.pctAvailable,100),s=n>90?"var(--error-color, #f14c4c)":n>75?"var(--warning-color, #cca700)":"var(--accent-color, #4d9cf8)";return`
+		</div>`}function Ui(t){let e=$(t.pctAvailable,1),o=$(100-t.pctAvailable,1),n=Math.min(100-t.pctAvailable,100),r=n>90?"var(--error-color, #f14c4c)":n>75?"var(--warning-color, #cca700)":"var(--accent-color, #4d9cf8)";return`
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub Copilot API (all channels)</div>
 			<div style="display:flex; gap:16px; flex-wrap:wrap; margin-bottom:8px;">
@@ -1955,12 +2340,12 @@ ${is(e)}
 				<span>${o}% used</span><span>${e}% available</span>
 			</div>
 			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
-				<div style="height:100%; width:100%; background:${s}; border-radius:4px; transform-origin:left; transform:scaleX(${S(n/100,4)});"></div>
+				<div style="height:100%; width:100%; background:${r}; border-radius:4px; transform-origin:left; transform:scaleX(${$(n/100,4)});"></div>
 			</div>
 			<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
-				1 AI Credit = $0.01 \xB7 Budget = $${S(t.budgetUsd,2)}/month
+				1 AI Credit = $0.01 \xB7 Budget = $${$(t.budgetUsd,2)}/month
 			</div>
-		</div>`}function Qs(t){let e=Object.values(t).reduce((n,s)=>n+s,0);return`
+		</div>`}function Oi(t){let e=Object.values(t).reduce((n,r)=>n+r,0);return`
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
 			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
@@ -1970,39 +2355,39 @@ ${is(e)}
 						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
 					</tr>
 				</thead>
-				<tbody>${Object.entries(t).sort(([,n],[,s])=>s-n).map(([n,s])=>`
+				<tbody>${Object.entries(t).sort(([,n],[,r])=>r-n).map(([n,r])=>`
 			<tr>
 				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${c(n)}</td>
-				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${S(s,2)}</td>
+				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${$(r,2)}</td>
 			</tr>`).join("")}</tbody>
 				<tfoot>
 					<tr style="border-top:1px solid var(--border-color);">
 						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${S(e,2)}</td>
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${$(e,2)}</td>
 					</tr>
 				</tfoot>
 			</table>
-		</div>`}function tr(t,e,o){if(!t)return`
+		</div>`}function ji(t,e,o){if(!t)return`
 			<div style="font-size:11px; color:var(--text-muted); margin-bottom:8px; line-height:1.5;">
 				\u2139\uFE0F No Copilot API quota data available yet. The API balance appears after the extension fetches your Copilot plan info.
 				The extension only tracks local IDE sessions \u2014 it cannot see web chat, cloud agent, or review agent usage.
-			</div>`;if(e<=0)return"";let n=t.usedAiCredits*.01,s=n-e,r=Math.round(s*100),i=r>0?`<div style="display:flex; justify-content:space-between; padding-top:6px; border-top:1px solid var(--border-subtle); color:var(--text-secondary);"><span>Gap (untracked Copilot usage)</span><span>$${S(s,2)} (${g(r)} credits)</span></div>`:"",a=o>.001?`<div style="display:flex; justify-content:space-between;"><span>Other providers (not in Copilot API)</span><span>$${S(o,2)}</span></div>`:"",l=r>0?'<div style="margin-top:8px; font-size:11px; color:var(--text-muted); line-height:1.5;">\u2139\uFE0F The gap represents Copilot usage the extension cannot track: <strong>github.com/copilot</strong> web chat, <strong>cloud agent</strong> sessions, and <strong>Copilot review agent</strong> \u2014 all counted against your AI Credit budget.</div>':'<div style="margin-top:8px; font-size:11px; color:var(--text-muted);">\u2705 Extension-tracked Copilot usage matches the API \u2014 no significant untracked usage from web chat, cloud agent, or review agent.</div>';return`
+			</div>`;if(e<=0)return"";let n=t.usedAiCredits*.01,r=n-e,s=Math.round(r*100),i=s>0?`<div style="display:flex; justify-content:space-between; padding-top:6px; border-top:1px solid var(--border-subtle); color:var(--text-secondary);"><span>Gap (untracked Copilot usage)</span><span>$${$(r,2)} (${g(s)} credits)</span></div>`:"",a=o>.001?`<div style="display:flex; justify-content:space-between;"><span>Other providers (not in Copilot API)</span><span>$${$(o,2)}</span></div>`:"",l=s>0?'<div style="margin-top:8px; font-size:11px; color:var(--text-muted); line-height:1.5;">\u2139\uFE0F The gap represents Copilot usage the extension cannot track: <strong>github.com/copilot</strong> web chat, <strong>cloud agent</strong> sessions, and <strong>Copilot review agent</strong> \u2014 all counted against your AI Credit budget.</div>':'<div style="margin-top:8px; font-size:11px; color:var(--text-muted);">\u2705 Extension-tracked Copilot usage matches the API \u2014 no significant untracked usage from web chat, cloud agent, or review agent.</div>';return`
 		<div style="background:var(--bg-tertiary); border:1px solid var(--border-subtle); border-radius:6px; padding:12px 14px; margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:8px;">Coverage analysis</div>
 			<div style="display:flex; flex-direction:column; gap:6px; font-size:12px; color:var(--text-primary);">
-				<div style="display:flex; justify-content:space-between;"><span>API total Copilot usage</span><span style="font-weight:600;">$${S(n,2)} (${g(t.usedAiCredits)} credits)</span></div>
-				<div style="display:flex; justify-content:space-between;"><span>Extension tracked (Copilot IDE sessions)</span><span style="font-weight:600;">$${S(e,2)} (${g(Math.round(e*100))} credits)</span></div>
+				<div style="display:flex; justify-content:space-between;"><span>API total Copilot usage</span><span style="font-weight:600;">$${$(n,2)} (${g(t.usedAiCredits)} credits)</span></div>
+				<div style="display:flex; justify-content:space-between;"><span>Extension tracked (Copilot IDE sessions)</span><span style="font-weight:600;">$${$(e,2)} (${g(Math.round(e*100))} credits)</span></div>
 				${i}${a}
 			</div>
 			${l}
-		</div>`}function er(t){let e=t.copilotApiBalance,o=t.monthBillingGroupCosts;if(!e&&(!o||Object.keys(o).length===0))return"";let n=o?.["GitHub Copilot"]??0,r=(o?Object.values(o).reduce((p,d)=>p+d,0):0)-n,i=e?Zs(e):"",a=o&&Object.keys(o).length>0?Qs(o):"",l=tr(e,n,r);return`
+		</div>`}function Wi(t){let e=t.copilotApiBalance,o=t.monthBillingGroupCosts;if(!e&&(!o||Object.keys(o).length===0))return"";let n=o?.["GitHub Copilot"]??0,s=(o?Object.values(o).reduce((p,d)=>p+d,0):0)-n,i=e?Ui(e):"",a=o&&Object.keys(o).length>0?Oi(o):"",l=ji(e,n,s);return`
 		<div class="section">
 			<div class="section-title"><span>\u{1F4B3}</span><span>Copilot Billing Coverage</span></div>
 			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs.</div>
 			${i}
 			${a}
 			${l}
-		</div>`}function or(t,e,o,n,s,r){let i=As(t),a=er(t);return`
+		</div>`}function Fi(t,e,o,n,r,s){let i=oi(t),a=Wi(t);return`
 		<div id="tab-panel-activity" class="tab-panel"${A!=="activity"?' style="display:none"':""}>
 			${n}
 			${a}
@@ -2011,50 +2396,51 @@ ${is(e)}
 				<div class="section-title"><span>\u{1F3AF}</span><span>Interaction Modes</span></div>
 				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
 				<div class="two-column">
-					${Ko(t.today.modeUsage,"\u{1F4C5} Today")}
-					${Ko(t.last30Days.modeUsage,"\u{1F4CA} Last 30 Days")}
+					${An(t.today.modeUsage,"\u{1F4C5} Today")}
+					${An(t.last30Days.modeUsage,"\u{1F4CA} Last 30 Days")}
 				</div>
 			</div>
-			${ur(t,s,r)}
+			${ta(t,r,s)}
 			${e}
 			${i}
+			${sa(t)}
 			${o}
-			${dr(t)}
-		</div>`}var nr=I("__MODEL_PRICING__"),sr=nr?.pricing??{};function an(t){let e=null;for(let o of t){let n=Ve(o,sr);n&&(!e||n.thresholdTokens<e.thresholdTokens)&&(e={...n,model:o})}return e}function rr(t){let e=t*4/1048576,o=Math.round(t/10/1e3);return`\u2248${S(e,1)} MB of code (~${g(o)}K lines)`}function ir(t,e){let o=t/e.thresholdTokens*100,n=Math.min(o,100),s=o>100?"var(--error-color, #f14c4c)":o>=70?"var(--warning-color, #cca700)":"var(--success-color, #89d185)",r=c(Pt(e.model)),i=`above it, input billing goes $${e.defaultInputCostPerMillion.toFixed(2)} \u2192 $${e.longContextInputCostPerMillion.toFixed(2)} per 1M tokens`;return`
+			${Xi(t)}
+		</div>`}var qi=j("__MODEL_PRICING__"),Ki=qi?.pricing??{};function Qn(t){let e=null;for(let o of t){let n=Ao(o,Ki);n&&(!e||n.thresholdTokens<e.thresholdTokens)&&(e={...n,model:o})}return e}function Vi(t){let e=t*4/1048576,o=Math.round(t/10/1e3);return`\u2248${$(e,1)} MB of code (~${g(o)}K lines)`}function Gi(t,e){let o=t/e.thresholdTokens*100,n=Math.min(o,100),r=o>100?"var(--error-color, #f14c4c)":o>=70?"var(--warning-color, #cca700)":"var(--success-color, #89d185)",s=c(St(e.model)),i=`above it, input billing goes $${e.defaultInputCostPerMillion.toFixed(2)} \u2192 $${e.longContextInputCostPerMillion.toFixed(2)} per 1M tokens`;return`
 		<div style="margin-top: 12px;">
 			<div style="display:flex; justify-content:space-between; font-size:12px; color:var(--text-secondary); margin-bottom:4px;">
-				<span>${g(t)} tokens \u2014 ${S(o,0)}% of the ${g(e.thresholdTokens)}-token default tier for ${r}</span>
+				<span>${g(t)} tokens \u2014 ${$(o,0)}% of the ${g(e.thresholdTokens)}-token default tier for ${s}</span>
 				<span>${g(e.thresholdTokens)}</span>
 			</div>
 			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
-				<div style="height:100%; width:${S(n,0)}%; background:${s}; border-radius:4px;"></div>
+				<div style="height:100%; width:${$(n,0)}%; background:${r}; border-radius:4px;"></div>
 			</div>
-			<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Default tier fits ${rr(e.thresholdTokens)}; ${i}.</div>
-		</div>`}function Ue(t,e,o,n){return`
+			<div style="font-size:11px; color:var(--text-muted); margin-top:4px;">Default tier fits ${Vi(e.thresholdTokens)}; ${i}.</div>
+		</div>`}function fo(t,e,o,n){return`
 		<div style="margin-bottom: 10px;">
 			<div style="font-size: 12px; font-weight: 600; color: var(--text-secondary); margin-bottom: 2px;"${n?` title="${n}"`:""}>${t}</div>
 			<div style="font-size: 13px; color: var(--text-primary);">${e}</div>
 			${o?`<div style="font-size: 11px; color: var(--text-secondary); margin-top: 2px; line-height: 1.4;">${o}</div>`:""}
-		</div>`}function ar(t){if(t.maxRequestInputTokens<=0)return"";let e=an(t.maxRequestModels),o=c(t.maxRequestModels.map(s=>Pt(s)).join(", ")||"\u2014"),n=e?`${S(t.maxRequestInputTokens/e.thresholdTokens*100,0)}% of the ${g(e.thresholdTokens)}-token price line \xB7 ${o}`:`${o} \u2014 no long-context surcharge for ${t.maxRequestModels.length>1?"these models":"this model"}`;return Ue("\u{1F4CF} Largest request",`${g(t.maxRequestInputTokens)} input tokens`,n,"The biggest single prompt (input incl. cached tokens) sent to a model in one request during this period")}function lr(t){if((t.maxReachedTokens??0)<=0)return"";let e=t.maxReachedWindowLimit,o=e?`${g(t.maxReachedTokens)} of ${g(e)} (${S(t.maxReachedTokens/e*100,0)}%)`:g(t.maxReachedTokens);return Ue("\u{1FA9F} Fullest CLI window",o,void 0,"The highest context fill recorded for a Copilot CLI session in this period, versus its window limit")}function Se(t){if(!(!!t&&(t.maxRequestInputTokens>0||(t.maxReachedTokens??0)>0||Object.keys(t.tierCounts).length>0)))return'<div style="color: var(--text-muted); font-size: 11px;">No data</div>';let o=Object.entries(t.tierCounts),n=o.reduce((r,[,i])=>r+i,0),s=o.length>0?Ue("\u{1FA9C} Context tiers",o.map(([r,i])=>`${c(r)} \xD7${i}`).join(", "),`${n} Copilot CLI session${n===1?"":"s"} grouped by chosen window size \u2014 "default" is the standard window at normal rates; larger tiers unlock more context at long-context prices`,"Copilot CLI lets you pick a context-window tier per session; the count shows how many sessions used each tier"):"";return ar(t)+lr(t)+s}function dr(t){let e=t.last30Days.contextWindow,o=e&&e.maxRequestInputTokens>0?an(e.maxRequestModels):null,n=e&&o?ir(e.maxRequestInputTokens,o):"";return`
+		</div>`}function Ji(t){if(t.maxRequestInputTokens<=0)return"";let e=Qn(t.maxRequestModels),o=c(t.maxRequestModels.map(r=>St(r)).join(", ")||"\u2014"),n=e?`${$(t.maxRequestInputTokens/e.thresholdTokens*100,0)}% of the ${g(e.thresholdTokens)}-token price line \xB7 ${o}`:`${o} \u2014 no long-context surcharge for ${t.maxRequestModels.length>1?"these models":"this model"}`;return fo("\u{1F4CF} Largest request",`${g(t.maxRequestInputTokens)} input tokens`,n,"The biggest single prompt (input incl. cached tokens) sent to a model in one request during this period")}function Yi(t){if((t.maxReachedTokens??0)<=0)return"";let e=t.maxReachedWindowLimit,o=e?`${g(t.maxReachedTokens)} of ${g(e)} (${$(t.maxReachedTokens/e*100,0)}%)`:g(t.maxReachedTokens);return fo("\u{1FA9F} Fullest CLI window",o,void 0,"The highest context fill recorded for a Copilot CLI session in this period, versus its window limit")}function Ze(t){if(!(!!t&&(t.maxRequestInputTokens>0||(t.maxReachedTokens??0)>0||Object.keys(t.tierCounts).length>0)))return'<div style="color: var(--text-muted); font-size: 11px;">No data</div>';let o=Object.entries(t.tierCounts),n=o.reduce((s,[,i])=>s+i,0),r=o.length>0?fo("\u{1FA9C} Context tiers",o.map(([s,i])=>`${c(s)} \xD7${i}`).join(", "),`${n} Copilot CLI session${n===1?"":"s"} grouped by chosen window size \u2014 "default" is the standard window at normal rates; larger tiers unlock more context at long-context prices`,"Copilot CLI lets you pick a context-window tier per session; the count shows how many sessions used each tier"):"";return Ji(t)+Yi(t)+r}function Xi(t){let e=t.last30Days.contextWindow,o=e&&e.maxRequestInputTokens>0?Qn(e.maxRequestModels):null,n=e&&o?Gi(e.maxRequestInputTokens,o):"";return`
 		<div class="section">
 			<div class="section-title"><span>\u{1FA9F}</span><span>Context Window &amp; Long-Context Pricing</span></div>
 			<div class="section-subtitle">How close your largest requests come to the long-context price line. Models with tiered pricing bill higher input rates once a request exceeds their default-tier threshold.</div>
 			<div class="three-column">
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Today</h4>
-					${Se(t.today.contextWindow)}
+					${Ze(t.today.contextWindow)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C6} Last 30 Days</h4>
-					${Se(e)}
+					${Ze(e)}
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Previous Month</h4>
-					${Se(t.lastMonth.contextWindow)}
+					${Ze(t.lastMonth.contextWindow)}
 				</div>
 			</div>
 			${n}
-		</div>`}function Vt(t,e=""){let o=t>0?"":" ctx-ref-zero";return`<td class="${`ctx-ref-num${e?" "+e:""}${o}`}">${t}</td>`}function Yo(t,e,o){let i=[t,e,o],a=Math.max(...i),l=i.map((u,h)=>{let k=2+h*(56/(i.length-1)),C=a===0?18:2+(1-u/a)*16;return`${k.toFixed(1)},${C.toFixed(1)}`}).join(" "),d=a===0?"var(--text-muted)":o>=e&&e>=t?"var(--link-color)":o<=e&&e<=t?"#f87171":"var(--text-secondary)";return`<td class="ctx-ref-spark"><svg viewBox="0 0 60 20" width="60" height="20" aria-hidden="true"><polyline points="${l}" fill="none" stroke="${d}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${i.map((u,h)=>{let k=2+h*(56/(i.length-1)),C=a===0?18:2+(1-u/a)*16;return`<circle cx="${k.toFixed(1)}" cy="${C.toFixed(1)}" r="2" fill="${d}"/>`}).join("")}</svg></td>`}function cr(t,e){return`
+		</div>`}function me(t,e=""){let o=t>0?"":" ctx-ref-zero";return`<td class="${`ctx-ref-num${e?" "+e:""}${o}`}">${t}</td>`}function _n(t,e,o){let i=[t,e,o],a=Math.max(...i),l=i.map((u,h)=>{let k=2+h*(56/(i.length-1)),T=a===0?18:2+(1-u/a)*16;return`${k.toFixed(1)},${T.toFixed(1)}`}).join(" "),d=a===0?"var(--text-muted)":o>=e&&e>=t?"var(--link-color)":o<=e&&e<=t?"#f87171":"var(--text-secondary)";return`<td class="ctx-ref-spark"><svg viewBox="0 0 60 20" width="60" height="20" aria-hidden="true"><polyline points="${l}" fill="none" stroke="${d}" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"/>${i.map((u,h)=>{let k=2+h*(56/(i.length-1)),T=a===0?18:2+(1-u/a)*16;return`<circle cx="${k.toFixed(1)}" cy="${T.toFixed(1)}" r="2" fill="${d}"/>`}).join("")}</svg></td>`}function Zi(t,e){return`
 		<div class="ctx-ref-table-wrap">
 			<table class="ctx-ref-table">
 				<thead>
@@ -2068,7 +2454,7 @@ ${is(e)}
 					</tr>
 				</thead>
 				<tbody>
-					${t.slice().sort((n,s)=>s.last30-n.last30).map(n=>`<tr${n.title?` title="${c(n.title)}"`:""}><td class="ctx-ref-name">${n.label}</td>${Vt(n.today,n.today>0?"ctx-ref-today-active":"")}${Vt(n.month)}${Vt(n.lastMonth)}${Vt(n.last30)}${Yo(n.lastMonth,n.month,n.today)}</tr>`).join("")}
+					${t.slice().sort((n,r)=>r.last30-n.last30).map(n=>`<tr${n.title?` title="${c(n.title)}"`:""}><td class="ctx-ref-name">${n.label}</td>${me(n.today,n.today>0?"ctx-ref-today-active":"")}${me(n.month)}${me(n.lastMonth)}${me(n.last30)}${_n(n.lastMonth,n.month,n.today)}</tr>`).join("")}
 				</tbody>
 				<tfoot>
 					<tr class="ctx-ref-total">
@@ -2077,22 +2463,22 @@ ${is(e)}
 						<td class="ctx-ref-num">${e.month}</td>
 						<td class="ctx-ref-num">${e.lastMonth}</td>
 						<td class="ctx-ref-num">${e.last30}</td>
-						<td class="ctx-ref-spark">${Yo(e.lastMonth,e.month,e.today).replace(/^<td[^>]*>/,"").replace(/<\/td>$/,"")}</td>
+						<td class="ctx-ref-spark">${_n(e.lastMonth,e.month,e.today).replace(/^<td[^>]*>/,"").replace(/<\/td>$/,"")}</td>
 					</tr>
 				</tfoot>
 			</table>
-		</div>`}function pr(t,e,o){let n=d=>d||0,s=[{label:"\u{1F4C4} #file",get:d=>d.file},{label:"\u2702\uFE0F #selection",get:d=>d.selection},{label:"\u2728 Implicit Selection",title:"Text selected in your editor providing passive context to Copilot",get:d=>d.implicitSelection},{label:"\u{1F524} #symbol",get:d=>d.symbol},{label:"\u{1F5C2}\uFE0F #codebase",get:d=>d.codebase},{label:"\u{1F4C1} @workspace",get:d=>d.workspace},{label:"\u{1F4BB} @terminal",get:d=>d.terminal},{label:"\u{1F527} @vscode",get:d=>d.vscode},{label:"\u2328\uFE0F #terminalLastCommand",title:"Last command run in the terminal",get:d=>n(d.terminalLastCommand)},{label:"\u{1F5B1}\uFE0F #terminalSelection",title:"Selected terminal output",get:d=>n(d.terminalSelection)},{label:"\u{1F4CB} #clipboard",title:"Clipboard contents",get:d=>n(d.clipboard)},{label:"\u{1F4DD} #changes",title:"Uncommitted git changes",get:d=>n(d.changes)},{label:"\u{1F4E4} #outputPanel",title:"Output panel contents",get:d=>n(d.outputPanel)},{label:"\u26A0\uFE0F #problemsPanel",title:"Problems panel contents",get:d=>n(d.problemsPanel)},{label:"\u{1F500} #pr",title:"Pull request context references (#pr / #pullRequest) \u2014 Copilot PR chat understanding, review, and summary",get:d=>n(d.pullRequest)},{label:"\u{1F4F7} Images",title:"Pasted images and vision context detected in session logs",get:d=>n(d.byKind["copilot.image"])},{label:"\u{1F4CB} Prompt Files",title:".github/prompts/ prompt file uses detected in session logs",get:d=>n(d.byKind.promptFile)},{label:"\u{1F4D0} Code Lines",title:"Total lines of code referenced via #file: range selections",get:d=>n(d.codeContextLines)},{label:"\u{1F3AF} Custom Prompts",title:"Custom /command prompt uses detected in session logs",get:d=>n(d.byKind.prompt)},{label:"\u{1F4CB} Copilot Instructions",title:"copilot-instructions.md file references detected in session logs",get:d=>d.copilotInstructions},{label:"\u{1F916} Agents.md",title:"agents.md file references detected in session logs",get:d=>d.agentsMd}],r=t.last30Days.contextReferences,i=t.month.contextReferences,a=t.lastMonth.contextReferences,l=t.today.contextReferences,p=s.map(d=>({label:d.label,title:d.title,last30:d.get(r),month:d.get(i),lastMonth:d.get(a),today:d.get(l)}));return cr(p,{last30:o,month:ut(i),lastMonth:ut(a),today:e})}function ur(t,e,o){let n=Object.keys(t.last30Days.contextReferences.byKind).length>0?`
+		</div>`}function Qi(t,e,o){let n=d=>d||0,r=[{label:"\u{1F4C4} #file",get:d=>d.file},{label:"\u2702\uFE0F #selection",get:d=>d.selection},{label:"\u2728 Implicit Selection",title:"Text selected in your editor providing passive context to Copilot",get:d=>d.implicitSelection},{label:"\u{1F524} #symbol",get:d=>d.symbol},{label:"\u{1F5C2}\uFE0F #codebase",get:d=>d.codebase},{label:"\u{1F4C1} @workspace",get:d=>d.workspace},{label:"\u{1F4BB} @terminal",get:d=>d.terminal},{label:"\u{1F527} @vscode",get:d=>d.vscode},{label:"\u2328\uFE0F #terminalLastCommand",title:"Last command run in the terminal",get:d=>n(d.terminalLastCommand)},{label:"\u{1F5B1}\uFE0F #terminalSelection",title:"Selected terminal output",get:d=>n(d.terminalSelection)},{label:"\u{1F4CB} #clipboard",title:"Clipboard contents",get:d=>n(d.clipboard)},{label:"\u{1F4DD} #changes",title:"Uncommitted git changes",get:d=>n(d.changes)},{label:"\u{1F4E4} #outputPanel",title:"Output panel contents",get:d=>n(d.outputPanel)},{label:"\u26A0\uFE0F #problemsPanel",title:"Problems panel contents",get:d=>n(d.problemsPanel)},{label:"\u{1F500} #pr",title:"Pull request context references (#pr / #pullRequest) \u2014 Copilot PR chat understanding, review, and summary",get:d=>n(d.pullRequest)},{label:"\u{1F4F7} Images",title:"Pasted images and vision context detected in session logs",get:d=>n(d.byKind["copilot.image"])},{label:"\u{1F4CB} Prompt Files",title:".github/prompts/ prompt file uses detected in session logs",get:d=>n(d.byKind.promptFile)},{label:"\u{1F4D0} Code Lines",title:"Total lines of code referenced via #file: range selections",get:d=>n(d.codeContextLines)},{label:"\u{1F3AF} Custom Prompts",title:"Custom /command prompt uses detected in session logs",get:d=>n(d.byKind.prompt)},{label:"\u{1F4CB} Copilot Instructions",title:"copilot-instructions.md file references detected in session logs",get:d=>d.copilotInstructions},{label:"\u{1F916} Agents.md",title:"agents.md file references detected in session logs",get:d=>d.agentsMd}],s=t.last30Days.contextReferences,i=t.month.contextReferences,a=t.lastMonth.contextReferences,l=t.today.contextReferences,p=r.map(d=>({label:d.label,title:d.title,last30:d.get(s),month:d.get(i),lastMonth:d.get(a),today:d.get(l)}));return Zi(p,{last30:o,month:Ct(i),lastMonth:Ct(a),today:e})}function ta(t,e,o){let n=Object.keys(t.last30Days.contextReferences.byKind).length>0?`
 		<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
 			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">\u{1F4CE} Attached Files by Type (Last 30 Days)</div>
 			<div style="font-size: 12px; color: var(--text-primary);">
-				${Object.entries(t.last30Days.contextReferences.byKind).sort(([,r],[,i])=>i-r).slice(0,5).map(([r,i])=>`<div style="margin-bottom: 4px;"><span style="color: var(--link-color);">${c(r)}:</span> ${i}</div>`).join("")}
+				${Object.entries(t.last30Days.contextReferences.byKind).sort(([,s],[,i])=>i-s).slice(0,5).map(([s,i])=>`<div style="margin-bottom: 4px;"><span style="color: var(--link-color);">${c(s)}:</span> ${i}</div>`).join("")}
 			</div>
 		</div>
-	`:"",s=Object.keys(t.last30Days.contextReferences.byPath).length>0?`
+	`:"",r=Object.keys(t.last30Days.contextReferences.byPath).length>0?`
 		<div style="margin-top: 16px; padding: 12px; background: var(--bg-tertiary); border: 1px solid var(--border-subtle); border-radius: 6px;">
 			<div style="font-size: 13px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">\u{1F4C1} Most Referenced Files (Last 30 Days)</div>
 			<div style="font-size: 11px; color: var(--text-primary);">
-				${Object.entries(t.last30Days.contextReferences.byPath).sort(([,r],[,i])=>i-r).slice(0,10).map(([r,i])=>`<div style="margin-bottom: 4px; font-family: 'Courier New', monospace;"><span style="color: var(--link-color);">${i}\xD7</span> ${c(r)}</div>`).join("")}
+				${Object.entries(t.last30Days.contextReferences.byPath).sort(([,s],[,i])=>i-s).slice(0,10).map(([s,i])=>`<div style="margin-bottom: 4px; font-family: 'Courier New', monospace;"><span style="color: var(--link-color);">${i}\xD7</span> ${c(s)}</div>`).join("")}
 			</div>
 		</div>
 	`:"";return`
@@ -2100,20 +2486,41 @@ ${is(e)}
 		<div class="section">
 			<div class="section-title"><span>\u{1F517}</span><span>Context References</span></div>
 			<div class="section-subtitle">How often you reference files, selections, symbols, and workspace context</div>
-			${pr(t,e,o)}
+			${Qi(t,e,o)}
 			${n}
-			${s}
-		</div>`}function gr(t){let e=Qn(t);if(e.length===0)return"";let o=ts(e);return`
+			${r}
+		</div>`}function ea(t){let e=Yr(t);if(e.length===0)return"";let o=Xr(e);return`
 		<div id="unknown-mcp-tools-section" style="margin-bottom: 12px; padding: 10px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
 			<div style="display:flex; flex-wrap:wrap; gap:4px; margin-bottom:10px;">
-				${e.map(s=>{let r=(t.today.toolCalls.byTool[s]||0)+(t.today.mcpTools.byTool[s]||0),i=(t.last30Days.toolCalls.byTool[s]||0)+(t.last30Days.mcpTools.byTool[s]||0),a=(t.month.toolCalls.byTool[s]||0)+(t.month.mcpTools.byTool[s]||0),l=[];r>0&&l.push(`${r} today`),i>r&&l.push(`${i} in the last 30d`),a>i&&l.push(`${a} this month`);let p=l.length>0?`<span style="color:var(--text-muted);"> (${l.join(" | ")})</span>`:"",d=`<button data-suppress-tool="${c(s)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${c(s)}">\u{1F507}</button>`;return`<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${c(s)}${p}${d}</span>`}).join(" ")}
+				${e.map(r=>{let s=(t.today.toolCalls.byTool[r]||0)+(t.today.mcpTools.byTool[r]||0),i=(t.last30Days.toolCalls.byTool[r]||0)+(t.last30Days.mcpTools.byTool[r]||0),a=(t.month.toolCalls.byTool[r]||0)+(t.month.mcpTools.byTool[r]||0),l=[];s>0&&l.push(`${s} today`),i>s&&l.push(`${i} in the last 30d`),a>i&&l.push(`${a} this month`);let p=l.length>0?`<span style="color:var(--text-muted);"> (${l.join(" | ")})</span>`:"",d=`<button data-suppress-tool="${c(r)}" title="Suppress this tool from the unknown list" style="background:none; border:none; cursor:pointer; padding:0 2px; color:var(--text-muted); font-size:11px; line-height:1;" aria-label="Suppress ${c(r)}">\u{1F507}</button>`;return`<span style="display:inline-flex; align-items:center; gap:4px; padding:2px 6px; background:var(--bg-primary); border:1px solid var(--border-color); border-radius:3px; font-family:monospace; font-size:11px;">${c(r)}${p}${d}</span>`}).join(" ")}
 			</div>
 			<a href="${c(o)}" target="_blank" rel="noopener noreferrer" style="display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; background: var(--button-bg); color: var(--button-fg); border-radius: 4px; text-decoration: none; font-size: 12px; font-weight: 500;">
 				<span>\u{1F4DD}</span>
 				<span>Report Unknown Tools</span>
 			</a>
 		</div>
-	`}function mr(t,e,o,n,s,r,i,a){return`
+	`}var oa={today:"today",last30:"last30Days",currentMonth:"month"},zn="last30",tr="last30Days",xe="calls",Kt="desc",er={},bo=!0;function In(t){return t===null?"\u2014":t>=.01?wo(t):`$${t.toFixed(2)}`}function Ln(t){return t===null?"\u2014":Y(t*100)}function Bn(t){return t===null?"\u2014":$(t,2)}var ke=[{sortKey:"model",label:"Model",title:"Model identifier",align:"left",sortValue:t=>t.model,render:t=>c(St(t.model))},{sortKey:"calls",label:"Turns",title:"User-request turns attributed to this model",align:"right",sortValue:t=>t.counters.calls,render:t=>t.counters.calls>0?g(t.counters.calls):"\u2014"},{sortKey:"editTurns",label:"Edit turns",title:"Turns containing at least one file-edit tool call",align:"right",sortValue:t=>t.counters.editTurns,render:t=>t.counters.calls>0?g(t.counters.editTurns):"\u2014"},{sortKey:"oneShotRate",label:"One-shot edit rate",title:"Share of edit turns completed without retries or self-corrections",align:"right",sortValue:t=>t.rates.oneShotRate,render:t=>Ln(t.rates.oneShotRate)},{sortKey:"retryRate",label:"Retries/edit",title:"Average immediate same-file retries per edit turn",align:"right",sortValue:t=>t.rates.retryRate,render:t=>Bn(t.rates.retryRate)},{sortKey:"selfCorrectionRate",label:"Self-corr/edit",title:"Average self-corrections (re-edits after other tool calls) per edit turn",align:"right",sortValue:t=>t.rates.selfCorrectionRate,render:t=>Bn(t.rates.selfCorrectionRate)},{sortKey:"costPerCall",label:"Cost/turn",title:"Average estimated cost per turn (provider rates)",align:"right",sortValue:t=>t.rates.costPerCall,render:t=>In(t.rates.costPerCall)},{sortKey:"costPerEdit",label:"Cost/edit",title:"Average estimated cost per edit turn (provider rates)",align:"right",sortValue:t=>t.rates.costPerEdit,render:t=>In(t.rates.costPerEdit)},{sortKey:"outputTokensPerCall",label:"Out tok/turn",title:"Average output tokens per turn",align:"right",sortValue:t=>t.rates.outputTokensPerCall,render:t=>t.rates.outputTokensPerCall===null?"\u2014":ko(Math.round(t.rates.outputTokensPerCall))},{sortKey:"cacheHitRate",label:"Cache hit",title:"Cache-read share of input tokens",align:"right",sortValue:t=>t.rates.cacheHitRate,render:t=>Ln(t.rates.cacheHitRate)}];function na(t){return xe!==t?"":Kt==="desc"?" \u25BC":" \u25B2"}function ra(t){let e=Object.entries(t).map(([n,r])=>({model:n,counters:r,rates:Eo(r)})),o=ke.find(n=>n.sortKey===xe)??ke[1];return e.sort((n,r)=>{let s=o.sortValue(n),i=o.sortValue(r);if(s===null&&i===null)return 0;if(s===null)return 1;if(i===null)return-1;let a=typeof s=="string"||typeof i=="string"?String(s).localeCompare(String(i)):s-i;return Kt==="desc"?-a:a}),e}function or(){let t=er[tr];if(!t||Object.keys(t).length===0)return'<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No per-model efficiency data recorded for this period yet.</div>';let e=ra(t),o="";if(bo){let s=Ro(t);if(s!==null){let i=e.length;e=e.filter(l=>l.counters.calls>s);let a=i-e.length;a>0&&(o=`<div style="color:var(--text-secondary); font-size:11px; padding:4px 8px 2px;">${a} model${a===1?"":"s"} hidden (\u2264${s} turn${s===1?"":"s"})</div>`)}}let n=e.map(s=>`<tr>${ke.map(a=>`<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${a.align==="right"?"text-align:right;":""}">${a.render(s)}</td>`).join("")}</tr>`).join("");return`
+		<div style="overflow-x:auto;">
+		<table style="width:100%; border-collapse:collapse; min-width:900px;">
+			<thead>
+				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">${ke.map(s=>{let i=s.align==="right"?" text-align:right;":"";return`<th class="sortable" data-eff-sort="${s.sortKey}" title="${s.title}" style="padding:6px 8px; cursor:pointer;${i}">${s.label}${na(s.sortKey)}</th>`}).join("")}</tr>
+			</thead>
+			<tbody>${n}</tbody>
+		</table>
+		</div>
+		${o}`}function sa(t){return er={today:t.today.modelEfficiency,last30Days:t.last30Days.modelEfficiency,month:t.month.modelEfficiency},`
+		<div class="section" id="section-model-efficiency">
+			<div class="section-title"><span>\u{1F3AF}</span><span>Model Efficiency</span></div>
+			<div class="section-subtitle">Compare models on quality and efficiency, not just cost \u2014 one-shot edit rate, retries, self-corrections, per-turn cost, and cache hit rate. Retry/self-correction detection needs structured tool-call data, so some editors show token metrics only.</div>
+			<div id="model-efficiency-controls" style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;"><span id="model-efficiency-period-selector"></span></div>
+			<div style="margin:2px 0 8px 0;">
+				<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;" title="Shows only models above the 25th-percentile turn count (Q1). Uncheck to see all models.">
+					<input type="checkbox" id="eff-filter-low-usage"${bo?" checked":""} style="cursor:pointer;">
+					Hide low-usage models
+				</label>
+			</div>
+			<div id="model-efficiency-table">${or()}</div>
+		</div>`}function ia(){let t=document.getElementById("model-efficiency-period-selector");if(!t)return;t.replaceChildren();let{wrapper:e}=Ce({selected:zn,disabled:["last7","allTime"],disabledTitle:"Not available for model efficiency",label:"",onChange:o=>{let n=oa[o];n&&(zn=o,tr=n,ho())}});t.append(e)}function ho(){let t=document.getElementById("model-efficiency-table");t&&(t.innerHTML=or())}function aa(t){let e=t.getAttribute("data-eff-sort");e&&(xe===e?Kt=Kt==="desc"?"asc":"desc":(xe=e,Kt=e==="model"?"asc":"desc"),ho())}function la(){let t=document.getElementById("section-model-efficiency");t&&(t.addEventListener("click",e=>{let n=e.target.closest("th[data-eff-sort]");n&&aa(n)}),t.addEventListener("change",e=>{let o=e.target;o.id==="eff-filter-low-usage"&&(bo=o.checked,ho())}))}function da(t,e,o,n,r,s,i,a){return`
 		<div id="tab-panel-tools" class="tab-panel"${A!=="tools"?' style="display:none"':""}>
 			<!-- Tool Calls Section -->
 			<div class="section">
@@ -2124,39 +2531,39 @@ ${is(e)}
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Today</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${g(t.today.toolCalls.total)}</div>
-						${N(H(t.today.toolCalls.byTool,e),10)}
+						${K(V(t.today.toolCalls.byTool,e),10)}
 					</div>
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C6} Last 30 Days</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${g(t.last30Days.toolCalls.total)}</div>
-							${N(H(t.last30Days.toolCalls.byTool,e),10)}
+							${K(V(t.last30Days.toolCalls.byTool,e),10)}
 						</div>
 					</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Previous Month</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${g(t.month.toolCalls.total)}</div>
-							${N(H(t.month.toolCalls.byTool,e),10)}
+							${K(V(t.month.toolCalls.byTool,e),10)}
 						</div>
 					</div>
 				</div>
 			</div>
 
-			${_s(t,o,n)}
-			${js(Yt??t.curationAnalysis)}
+			${ii(t,o,n)}
+			${hi(be??t.curationAnalysis)}
 			<!-- Multi-Model Usage Section -->
 			<div class="section">
 				<div class="section-title"><span>\u{1F500}</span><span>Multi-Model Usage</span></div>
 				<div class="section-subtitle">Track model diversity and switching patterns in your conversations</div>
 				<div class="three-column">
-					${Ce("\u{1F4C5} Today",t.today.modelSwitching,r,i,s,a)}
-					${Ce("\u{1F4C6} Last 30 Days",t.last30Days.modelSwitching,r,i,s,a)}
-					${Ce("\u{1F4C5} Previous Month",t.month.modelSwitching,r,i,s,a)}
+					${Je("\u{1F4C5} Today",t.today.modelSwitching,s,i,r,a)}
+					${Je("\u{1F4C6} Last 30 Days",t.last30Days.modelSwitching,s,i,r,a)}
+					${Je("\u{1F4C5} Previous Month",t.month.modelSwitching,s,i,r,a)}
 				</div>
 			</div>
-		</div>`}function ln(t){let e=document.getElementById("root");if(!e)return;let o=t.customizationMatrix??W?.customizationMatrix??null;P=o??null,(!P||P.workspaces.length===0)&&(E=null),Array.isArray(t.currentWorkspacePaths)&&(Xo=t.currentWorkspacePaths),t.curationAnalysis?(Yt=t.curationAnalysis,U("renderLayout.curation.cached",{availableTools:Yt.availableTools.length,unusedTools:Yt.unusedTools.length})):tt("render-no-curation-update","renderLayout.curation.notProvidedInUpdate");let n=$s(o),s=Rs(t),r=ut(t.today.contextReferences),i=ut(t.last30Days.contextReferences),a=Es(t),l=`
+		</div>`}function nr(t){let e=document.getElementById("root");if(!e)return;let o=t.customizationMatrix??U?.customizationMatrix??null;N=o??null,(!N||N.workspaces.length===0)&&(_=null),Array.isArray(t.currentWorkspacePaths)&&(Dn=t.currentWorkspacePaths),t.curationAnalysis?(be=t.curationAnalysis,G("renderLayout.curation.cached",{availableTools:be.availableTools.length,unusedTools:be.unusedTools.length})):dt("render-no-curation-update","renderLayout.curation.notProvidedInUpdate");let n=ei(o),r=ri(t),s=Ct(t.today.contextReferences),i=Ct(t.last30Days.contextReferences),a=ni(t),l=`
 		<!-- Summary Section -->
 		<div class="section">
 			<div class="section-title"><span>\u{1F4C8}</span><span>Sessions Summary</span></div>
@@ -2166,12 +2573,12 @@ ${is(e)}
 				<div class="stat-card"><div class="stat-label">\u{1F4C5} This Month Sessions</div><div class="stat-value">${g(t.month.sessions)}</div></div>
 				<div class="stat-card"><div class="stat-label">\u{1F4C5} Last Month Sessions</div><div class="stat-value">${g(t.lastMonth.sessions)}</div></div>
 			</div>
-		</div>`;e.innerHTML=Ys(t,n,"",a,l,r,i,s.allToolKeys,s.allMcpToolKeys,s.allMcpServerKeys,s.allHighCostModels,s.allLowCostModels,s.allMediumCostModels,s.allUnknownModels),fr(),br(),hr(),Js(),K(),xs(),yr(),Pe=t.insights??[],rn()}function br(){let t=document.getElementById("about-info-toggle"),e=document.getElementById("about-info-body");if(!t||!e)return;let o=t.querySelector(".info-box-chevron"),n=()=>{D=!D,e.style.display=D?"none":"",t.setAttribute("aria-expanded",String(!D)),o&&(o.textContent=D?"\u25B8":"\u25BE"),f.setState({...f.getState()??{},aboutCollapsed:D})};t.addEventListener("click",n),t.addEventListener("keydown",s=>{(s.key==="Enter"||s.key===" ")&&(s.preventDefault(),n())})}function fr(){document.getElementById("btn-refresh")?.addEventListener("click",()=>{f.postMessage({command:"refresh"})}),document.getElementById("btn-details")?.addEventListener("click",()=>{f.postMessage({command:"showDetails"})}),document.getElementById("btn-chart")?.addEventListener("click",()=>{f.postMessage({command:"showChart"})}),document.getElementById("btn-diagnostics")?.addEventListener("click",()=>{f.postMessage({command:"showDiagnostics"})}),document.getElementById("btn-maturity")?.addEventListener("click",()=>{f.postMessage({command:"showMaturity"})}),document.getElementById("btn-dashboard")?.addEventListener("click",()=>{f.postMessage({command:"showDashboard"})}),document.getElementById("btn-environmental")?.addEventListener("click",()=>{f.postMessage({command:"showEnvironmental"})}),qe(f)}function hr(){document.getElementById("btn-analyse-repo")?.addEventListener("click",()=>{let t=document.getElementById("btn-analyse-repo");t&&(t.disabled=!0,t.textContent="Analyzing..."),f.postMessage({command:"analyseRepository"})}),document.getElementById("btn-analyse-all")?.addEventListener("click",()=>{let t=document.getElementById("btn-analyse-all");t&&(t.disabled=!0,t.textContent="Analyzing All..."),_t=!0,et=!0,E=null,K(),f.postMessage({command:"analyseAllRepositories"})}),document.getElementById("repo-list-pane")?.addEventListener("click",t=>{let o=t.target.closest(".btn-repo-action");if(!o)return;let n=o.getAttribute("data-workspace-path"),s=o.getAttribute("data-action");if(!(!n||!s)){if(s==="details"){E=n,et=!1,K();return}s==="analyze"&&(o.disabled=!0,o.textContent="Analyzing...",_t=!1,f.postMessage({command:"analyseRepository",workspacePath:n}))}}),document.getElementById("repo-details-pane")?.addEventListener("click",t=>{t.target.closest("#btn-switch-repository")&&(et=!0,K())})}function yr(){Array.from(document.getElementsByClassName("cf-copy")).forEach(t=>{t.addEventListener("click",e=>{let o=e.currentTarget,n=o.getAttribute("data-path")||"";navigator.clipboard&&n&&navigator.clipboard.writeText(n).then(()=>{o.textContent="Copied",setTimeout(()=>{o.textContent="Copy"},1200)}).catch(()=>{f.postMessage({command:"copyFailed",path:n})})})})}function vr(t){$e(),t.data?.locale&&te(t.data.locale),typeof t.data?.use24HourTime=="boolean"&&(Xt=t.data.use24HourTime);let e=vs(t.data);e?(Le=!1,delete ct[7],delete ct[30],ln(e),en(),K(),At&&nn(At),Et&&sn(Et)):(tt("update-invalid-sanitized","handleUpdateStats.sanitizeReturnedNull"),Zo("Received invalid data from the extension. Try refreshing."))}function dn(t){if(!t)return;let e=document.getElementById("unknown-mcp-tools-section");e&&(e.querySelectorAll("button[data-suppress-tool]").forEach(o=>{o.getAttribute("data-suppress-tool")===t&&o.closest("span")?.remove()}),e.querySelectorAll("button[data-suppress-tool]").length===0&&e.remove())}function xr(){A="tools",document.querySelectorAll(".tab-button").forEach(o=>{o.classList.toggle("active",o.getAttribute("data-tab")==="tools")}),document.querySelectorAll(".tab-panel").forEach(o=>{o.style.display="none"});let t=document.getElementById("tab-panel-tools");t&&(t.style.display="block");let e=document.getElementById("unknown-mcp-tools-section");e&&(e.scrollIntoView({behavior:"smooth",block:"center"}),e.style.transition="box-shadow 0.3s ease",e.style.boxShadow="0 0 0 3px var(--vscode-focusBorder)",setTimeout(()=>{e.style.boxShadow=""},2e3))}function kr(t){At=ks(t),At.authenticated||(Ae=!1),nn(At)}function wr(t){!t||typeof t!="object"||(Et=Cs(t),Et.authenticated||(Ee=!1),sn(Et))}function Cr(t){if(!Array.isArray(t))return;let e=on(t);Ks(e)}function Tr(t){switch(t.command){case"usageLoadingProgress":return Vn(t),!0;case"usageRefreshing":return $e(),$t=0,Ie("Refreshing Usage Analysis"),!0;case"updateStatsError":return $e(),Zo("Failed to calculate usage analysis. Check the Output panel for details."),!0}return!1}function Sr(t){if(!Tr(t))switch(t.command){case"repoAnalysisResults":Or(t.data,t.workspacePath);break;case"repoAnalysisError":jr(t.error,t.workspacePath);break;case"repoAnalysisBatchComplete":Fr();break;case"updateStats":vr(t);break;case"toolSuppressed":dn(t.toolName);break;case"highlightUnknownTools":xr();break;case"repoPrStatsLoaded":kr(t.data);break;case"repoPrStatsProgress":Go("#repos-pr-content","repos-pr-progress","Fetching PRs\u2026",t.done,t.total);break;case"agentSessionsLoaded":wr(t.data);break;case"recentSessionsLoaded":bs(t);break;case"agentSessionsProgress":Go("#agent-sessions-content","agent-sessions-progress","Fetching agent sessions\u2026",t.done,t.total);break;case"updateInsights":Cr(t.insights);break;case"switchTab":$r(t);break}}function $r(t){if(document.querySelector(`.tab-button[data-tab="${String(t.tab)}"]`)?.click(),t.anchor){let o=document.getElementById(String(t.anchor));o&&setTimeout(()=>o.scrollIntoView({behavior:"smooth",block:"start"}),50)}}Ge(t=>{Sr(t)});function Ar(t){return P?.workspaces.find(o=>o.workspacePath===t)?.workspaceName||t}function Er(t){let e=zt.get(t);if(e?.data?.summary){let o=G(e.data.summary.percentage);return`${Math.round(o)}%`}return e?.error?"Error":"\u2014"}function G(t){let e=typeof t=="number"?t:Number(t);return Number.isFinite(e)?e:0}var Rr={"git-repo":"https://docs.github.com/en/get-started/using-git/about-git",gitignore:"https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files","env-example":"https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions",editorconfig:"https://editorconfig.org/",linter:"https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning",formatter:"https://docs.github.com/en/contributing/style-guide-and-content-model/style-guide","type-safety":"https://docs.github.com/en/code-security/code-scanning/reference/code-ql-built-in-queries/javascript-typescript-built-in-queries","commit-messages":"https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits","conventional-commits":"https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets","ci-config":"https://docs.github.com/en/actions/about-github-actions/understanding-github-actions",scripts:"https://docs.github.com/en/actions/tutorials/build-and-test-code/nodejs","task-runner":"https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/add-scripts",devcontainer:"https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration",dockerfile:"https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry","version-pinning":"https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/setting-up-your-nodejs-project-for-codespaces",license:"https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository"},Mr={versionControl:"\u{1F504} Version Control",codeQuality:"\u2728 Code Quality",cicd:"\u{1F680} CI/CD",environment:"\u{1F527} Environment",documentation:"\u{1F4DA} Documentation"};function _r(t){let e=m("div");e.setAttribute("style","display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;");let o=m("div");o.setAttribute("style","font-size: 14px; font-weight: 600; color: var(--text-primary);"),o.textContent="\u{1F4CA} Repository Hygiene Score";let n=m("div");return n.setAttribute("style","font-size: 24px; font-weight: 700; color: var(--link-color);"),n.textContent=`${Math.round(G(t.percentage))}%`,e.append(o,n),e}function zr(t){let e=m("div");e.setAttribute("style","display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;");let o=[{count:t.passedChecks,label:"Passed",cardStyle:"text-align: center; padding: 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;",countStyle:"font-size: 18px; font-weight: 600; color: var(--success-fg);"},{count:t.warningChecks,label:"Warnings",cardStyle:"text-align: center; padding: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px;",countStyle:"font-size: 18px; font-weight: 600; color: var(--warning-fg);"},{count:t.failedChecks,label:"Failed",cardStyle:"text-align: center; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;",countStyle:"font-size: 18px; font-weight: 600; color: #ef4444;"}];for(let n of o){let s=m("div");s.setAttribute("style",n.cardStyle);let r=m("div");r.setAttribute("style",n.countStyle),r.textContent=String(G(n.count));let i=m("div");i.setAttribute("style","font-size: 10px; color: var(--text-secondary);"),i.textContent=n.label,s.append(r,i),e.appendChild(s)}return e}function Pr(t){let e=t?.status==="pass"||t?.status==="warning"?t.status:"fail";return{status:e,emoji:e==="pass"?"\u2705":e==="warning"?"\u26A0\uFE0F":"\u274C",color:e==="pass"?"#22c55e":e==="warning"?"#f59e0b":"#ef4444"}}function Ir(t,e){let o=m("div");o.setAttribute("style","flex: 1;");let n=m("div");n.setAttribute("style",`font-size: 12px; font-weight: 600; color: ${e};`),n.textContent=typeof t?.label=="string"?t.label:"";let s=m("div");if(s.setAttribute("style","font-size: 11px; color: var(--text-secondary); margin-top: 2px;"),s.textContent=typeof t?.detail=="string"?t.detail:"",o.append(n,s),typeof t?.hint=="string"&&t.hint.length>0){let i=m("div");i.setAttribute("style","font-size: 10px; color: var(--link-color); margin-top: 4px; font-style: italic;"),i.textContent=`\u{1F4A1} ${t.hint}`,o.appendChild(i)}let r=Rr[typeof t?.id=="string"?t.id:""];if(r){let i=m("a");i.setAttribute("href",r),i.setAttribute("style","font-size: 10px; color: var(--link-color); margin-top: 4px; display: inline-block;"),i.setAttribute("title","View official documentation"),i.textContent="\u{1F4D6} View documentation",o.appendChild(i)}return o}function Lr(t){let{emoji:e,color:o}=Pr(t),n=m("div");n.setAttribute("style","padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;");let s=m("span");s.setAttribute("style","flex-shrink: 0; padding-top: 1px;"),s.innerHTML=z(e);let r=m("span");return r.setAttribute("style","font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;"),r.textContent=`+${G(t?.weight)}`,n.append(s,Ir(t,o),r),n}function Br(t,e,o){let n=m("div");n.setAttribute("style","margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;");let s=m("div");s.setAttribute("style","padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;");let r=m("span");r.setAttribute("style","font-size: 12px; font-weight: 600; color: var(--text-primary);"),r.textContent=Mr[t]||t;let i=o?.categories?.[t],a=m("span");a.setAttribute("style","font-size: 11px; color: var(--link-color); font-weight: 600;"),a.textContent=`${Math.round(G(i?.percentage))}%`,s.append(r,a),n.appendChild(s);for(let l of e)n.appendChild(Lr(l));return n}function Dr(t){let e=m("div");e.setAttribute("style","margin-top: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;");let o=m("div");o.setAttribute("style","padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color);");let n=m("span");n.setAttribute("style","font-size: 12px; font-weight: 600; color: var(--text-primary);"),n.textContent="\u{1F4A1} Top Recommendations",o.appendChild(n),e.appendChild(o);for(let s of t.slice(0,5)){let r=s?.priority==="high"||s?.priority==="medium"?s.priority:"low",i=r==="high"?"#ef4444":r==="medium"?"#f59e0b":"#60a5fa",a=m("div");a.setAttribute("style","padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px;");let l=m("span");l.setAttribute("style",`font-size: 10px; font-weight: 600; color: ${i}; min-width: 50px;`),l.textContent=String(r).toUpperCase();let p=m("div");p.setAttribute("style","flex: 1;");let d=m("div");d.setAttribute("style","font-size: 11px; color: var(--text-primary);"),d.textContent=typeof s?.action=="string"?s.action:"";let u=m("div");u.setAttribute("style","font-size: 10px; color: var(--text-muted); margin-top: 2px;"),u.textContent=typeof s?.impact=="string"?s.impact:"",p.append(d,u);let h=m("span");h.setAttribute("style","font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;"),h.textContent=`+${G(s?.weight)}`,a.append(l,p,h),e.appendChild(a)}return e}function Nr(t,e){let o=m("div");o.setAttribute("style","margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;");let n=m("div");n.setAttribute("style","font-size: 11px; color: var(--text-secondary); flex: 1;"),n.textContent="Let Copilot help you fix the identified issues in this repository.";let s=document.createElement("vscode-button");return s.setAttribute("style","min-width: 180px;"),s.textContent="\u{1F916} Ask Copilot to Improve",s.addEventListener("click",()=>{let i=`Please help me improve this repository by addressing the following best practice issues:
+		</div>`;e.innerHTML=Si(t,n,"",a,l,s,i,r.allToolKeys,r.allMcpToolKeys,r.allMcpServerKeys,r.allHighCostModels,r.allLowCostModels,r.allMediumCostModels,r.allUnknownModels),pa(),ca(),ua(),Ti(),ot(),Js(),la(),ia(),jn(),Ss(),ga(),io=t.insights??[],Gn()}function ca(){let t=document.getElementById("about-info-toggle"),e=document.getElementById("about-info-body");if(!t||!e)return;let o=t.querySelector(".info-box-chevron"),n=()=>{q=!q,e.style.display=q?"none":"",t.setAttribute("aria-expanded",String(!q)),o&&(o.textContent=q?"\u25B8":"\u25BE"),f.setState({...f.getState()??{},aboutCollapsed:q})};t.addEventListener("click",n),t.addEventListener("keydown",r=>{(r.key==="Enter"||r.key===" ")&&(r.preventDefault(),n())})}function pa(){document.getElementById("btn-refresh")?.addEventListener("click",()=>{f.postMessage({command:"refresh"})}),document.getElementById("btn-details")?.addEventListener("click",()=>{f.postMessage({command:"showDetails"})}),document.getElementById("btn-chart")?.addEventListener("click",()=>{f.postMessage({command:"showChart"})}),document.getElementById("btn-diagnostics")?.addEventListener("click",()=>{f.postMessage({command:"showDiagnostics"})}),document.getElementById("btn-maturity")?.addEventListener("click",()=>{f.postMessage({command:"showMaturity"})}),document.getElementById("btn-dashboard")?.addEventListener("click",()=>{f.postMessage({command:"showDashboard"})}),document.getElementById("btn-environmental")?.addEventListener("click",()=>{f.postMessage({command:"showEnvironmental"})}),Co(f)}function ua(){document.getElementById("btn-analyse-repo")?.addEventListener("click",()=>{let t=document.getElementById("btn-analyse-repo");t&&(t.disabled=!0,t.textContent="Analyzing..."),f.postMessage({command:"analyseRepository"})}),document.getElementById("btn-analyse-all")?.addEventListener("click",()=>{let t=document.getElementById("btn-analyse-all");t&&(t.disabled=!0,t.textContent="Analyzing All..."),Vt=!0,ct=!0,_=null,ot(),f.postMessage({command:"analyseAllRepositories"})}),document.getElementById("repo-list-pane")?.addEventListener("click",t=>{let o=t.target.closest(".btn-repo-action");if(!o)return;let n=o.getAttribute("data-workspace-path"),r=o.getAttribute("data-action");if(!(!n||!r)){if(r==="details"){_=n,ct=!1,ot();return}r==="analyze"&&(o.disabled=!0,o.textContent="Analyzing...",Vt=!1,f.postMessage({command:"analyseRepository",workspacePath:n}))}}),document.getElementById("repo-details-pane")?.addEventListener("click",t=>{t.target.closest("#btn-switch-repository")&&(ct=!0,ot())})}function ga(){Array.from(document.getElementsByClassName("cf-copy")).forEach(t=>{t.addEventListener("click",e=>{let o=e.currentTarget,n=o.getAttribute("data-path")||"";navigator.clipboard&&n&&navigator.clipboard.writeText(n).then(()=>{o.textContent="Copied",setTimeout(()=>{o.textContent="Copy"},1200)}).catch(()=>{f.postMessage({command:"copyFailed",path:n})})})})}function ma(t){Qe(),t.data?.locale&&Te(t.data.locale),typeof t.data?.use24HourTime=="boolean"&&(ye=t.data.use24HourTime);let e=fs(t.data);if(e){co=!1;for(let o of Object.keys(xt))delete xt[o];nr(e),On(),ot(),jt&&Kn(jt),Wt&&Vn(Wt)}else dt("update-invalid-sanitized","handleUpdateStats.sanitizeReturnedNull"),Hn("Received invalid data from the extension. Try refreshing.")}function rr(t){if(!t)return;let e=document.getElementById("unknown-mcp-tools-section");e&&(e.querySelectorAll("button[data-suppress-tool]").forEach(o=>{o.getAttribute("data-suppress-tool")===t&&o.closest("span")?.remove()}),e.querySelectorAll("button[data-suppress-tool]").length===0&&e.remove())}function fa(){A="tools",document.querySelectorAll(".tab-button").forEach(o=>{o.classList.toggle("active",o.getAttribute("data-tab")==="tools")}),document.querySelectorAll(".tab-panel").forEach(o=>{o.style.display="none"});let t=document.getElementById("tab-panel-tools");t&&(t.style.display="block");let e=document.getElementById("unknown-mcp-tools-section");e&&(e.scrollIntoView({behavior:"smooth",block:"center"}),e.style.transition="box-shadow 0.3s ease",e.style.boxShadow="0 0 0 3px var(--vscode-focusBorder)",setTimeout(()=>{e.style.boxShadow=""},2e3))}function ba(t){jt=Ys(t),jt.authenticated||(to=!1),Kn(jt)}function ha(t){!t||typeof t!="object"||(Wt=Zs(t),Wt.authenticated||(eo=!1),Vn(Wt))}function ya(t){if(!Array.isArray(t))return;let e=Wn(t);ki(e)}function va(t){switch(t.command){case"usageLoadingProgress":return qr(t),!0;case"usageRefreshing":return Qe(),Ot=0,lo("Refreshing Usage Analysis"),!0;case"updateStatsError":return Qe(),Hn("Failed to calculate usage analysis. Check the Output panel for details."),!0}return!1}function xa(t){if(!va(t))switch(t.command){case"repoAnalysisResults":Ba(t.data,t.workspacePath);break;case"repoAnalysisError":Da(t.error,t.workspacePath);break;case"repoAnalysisBatchComplete":Ha();break;case"updateStats":ma(t);break;case"toolSuppressed":rr(t.toolName);break;case"highlightUnknownTools":fa();break;case"repoPrStatsLoaded":ba(t.data);break;case"repoPrStatsProgress":En("#repos-pr-content","repos-pr-progress","Fetching PRs\u2026",t.done,t.total);break;case"agentSessionsLoaded":ha(t.data);break;case"recentSessionsLoaded":ps(t);break;case"agentSessionsProgress":En("#agent-sessions-content","agent-sessions-progress","Fetching agent sessions\u2026",t.done,t.total);break;case"updateInsights":ya(t.insights);break;case"switchTab":ka(t);break;default:Gs(t);break}}function ka(t){if(document.querySelector(`.tab-button[data-tab="${String(t.tab)}"]`)?.click(),t.anchor){let o=document.getElementById(String(t.anchor));o&&setTimeout(()=>o.scrollIntoView({behavior:"smooth",block:"start"}),50)}}$o(t=>{xa(t)});function wa(t){return N?.workspaces.find(o=>o.workspacePath===t)?.workspaceName||t}function Ca(t){let e=Xt.get(t);if(e?.data?.summary){let o=nt(e.data.summary.percentage);return`${Math.round(o)}%`}return e?.error?"Error":"\u2014"}function nt(t){let e=typeof t=="number"?t:Number(t);return Number.isFinite(e)?e:0}var Ta={"git-repo":"https://docs.github.com/en/get-started/using-git/about-git",gitignore:"https://docs.github.com/en/get-started/getting-started-with-git/ignoring-files","env-example":"https://docs.github.com/en/actions/security-for-github-actions/security-guides/using-secrets-in-github-actions",editorconfig:"https://editorconfig.org/",linter:"https://docs.github.com/en/code-security/code-scanning/introduction-to-code-scanning/about-code-scanning",formatter:"https://docs.github.com/en/contributing/style-guide-and-content-model/style-guide","type-safety":"https://docs.github.com/en/code-security/code-scanning/reference/code-ql-built-in-queries/javascript-typescript-built-in-queries","commit-messages":"https://docs.github.com/en/pull-requests/committing-changes-to-your-project/creating-and-editing-commits/about-commits","conventional-commits":"https://docs.github.com/en/repositories/configuring-branches-and-merges-in-your-repository/managing-rulesets/available-rules-for-rulesets","ci-config":"https://docs.github.com/en/actions/about-github-actions/understanding-github-actions",scripts:"https://docs.github.com/en/actions/tutorials/build-and-test-code/nodejs","task-runner":"https://docs.github.com/en/actions/how-tos/write-workflows/choose-what-workflows-do/add-scripts",devcontainer:"https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration",dockerfile:"https://docs.github.com/en/packages/working-with-a-github-packages-registry/working-with-the-container-registry","version-pinning":"https://docs.github.com/en/codespaces/setting-up-your-project-for-codespaces/adding-a-dev-container-configuration/setting-up-your-nodejs-project-for-codespaces",license:"https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository"},Sa={versionControl:"\u{1F504} Version Control",codeQuality:"\u2728 Code Quality",cicd:"\u{1F680} CI/CD",environment:"\u{1F527} Environment",documentation:"\u{1F4DA} Documentation"};function $a(t){let e=m("div");e.setAttribute("style","display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px;");let o=m("div");o.setAttribute("style","font-size: 14px; font-weight: 600; color: var(--text-primary);"),o.textContent="\u{1F4CA} Repository Hygiene Score";let n=m("div");return n.setAttribute("style","font-size: 24px; font-weight: 700; color: var(--link-color);"),n.textContent=`${Math.round(nt(t.percentage))}%`,e.append(o,n),e}function Aa(t){let e=m("div");e.setAttribute("style","display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 12px;");let o=[{count:t.passedChecks,label:"Passed",cardStyle:"text-align: center; padding: 8px; background: rgba(34, 197, 94, 0.1); border: 1px solid rgba(34, 197, 94, 0.3); border-radius: 4px;",countStyle:"font-size: 18px; font-weight: 600; color: var(--success-fg);"},{count:t.warningChecks,label:"Warnings",cardStyle:"text-align: center; padding: 8px; background: rgba(245, 158, 11, 0.1); border: 1px solid rgba(245, 158, 11, 0.3); border-radius: 4px;",countStyle:"font-size: 18px; font-weight: 600; color: var(--warning-fg);"},{count:t.failedChecks,label:"Failed",cardStyle:"text-align: center; padding: 8px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 4px;",countStyle:"font-size: 18px; font-weight: 600; color: #ef4444;"}];for(let n of o){let r=m("div");r.setAttribute("style",n.cardStyle);let s=m("div");s.setAttribute("style",n.countStyle),s.textContent=String(nt(n.count));let i=m("div");i.setAttribute("style","font-size: 10px; color: var(--text-secondary);"),i.textContent=n.label,r.append(s,i),e.appendChild(r)}return e}function Ea(t){let e=t?.status==="pass"||t?.status==="warning"?t.status:"fail";return{status:e,emoji:e==="pass"?"\u2705":e==="warning"?"\u26A0\uFE0F":"\u274C",color:e==="pass"?"#22c55e":e==="warning"?"#f59e0b":"#ef4444"}}function Ra(t,e){let o=m("div");o.setAttribute("style","flex: 1;");let n=m("div");n.setAttribute("style",`font-size: 12px; font-weight: 600; color: ${e};`),n.textContent=typeof t?.label=="string"?t.label:"";let r=m("div");if(r.setAttribute("style","font-size: 11px; color: var(--text-secondary); margin-top: 2px;"),r.textContent=typeof t?.detail=="string"?t.detail:"",o.append(n,r),typeof t?.hint=="string"&&t.hint.length>0){let i=m("div");i.setAttribute("style","font-size: 10px; color: var(--link-color); margin-top: 4px; font-style: italic;"),i.textContent=`\u{1F4A1} ${t.hint}`,o.appendChild(i)}let s=Ta[typeof t?.id=="string"?t.id:""];if(s){let i=m("a");i.setAttribute("href",s),i.setAttribute("style","font-size: 10px; color: var(--link-color); margin-top: 4px; display: inline-block;"),i.setAttribute("title","View official documentation"),i.textContent="\u{1F4D6} View documentation",o.appendChild(i)}return o}function Ma(t){let{emoji:e,color:o}=Ea(t),n=m("div");n.setAttribute("style","padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;");let r=m("span");r.setAttribute("style","flex-shrink: 0; padding-top: 1px;"),r.innerHTML=H(e);let s=m("span");return s.setAttribute("style","font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;"),s.textContent=`+${nt(t?.weight)}`,n.append(r,Ra(t,o),s),n}function Pa(t,e,o){let n=m("div");n.setAttribute("style","margin-bottom: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;");let r=m("div");r.setAttribute("style","padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color); display: flex; justify-content: space-between; align-items: center;");let s=m("span");s.setAttribute("style","font-size: 12px; font-weight: 600; color: var(--text-primary);"),s.textContent=Sa[t]||t;let i=o?.categories?.[t],a=m("span");a.setAttribute("style","font-size: 11px; color: var(--link-color); font-weight: 600;"),a.textContent=`${Math.round(nt(i?.percentage))}%`,r.append(s,a),n.appendChild(r);for(let l of e)n.appendChild(Ma(l));return n}function _a(t){let e=m("div");e.setAttribute("style","margin-top: 16px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; overflow: hidden;");let o=m("div");o.setAttribute("style","padding: 8px 12px; background: var(--list-hover-bg); border-bottom: 1px solid var(--border-color);");let n=m("span");n.setAttribute("style","font-size: 12px; font-weight: 600; color: var(--text-primary);"),n.textContent="\u{1F4A1} Top Recommendations",o.appendChild(n),e.appendChild(o);for(let r of t.slice(0,5)){let s=r?.priority==="high"||r?.priority==="medium"?r.priority:"low",i=s==="high"?"#ef4444":s==="medium"?"#f59e0b":"#60a5fa",a=m("div");a.setAttribute("style","padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 8px;");let l=m("span");l.setAttribute("style",`font-size: 10px; font-weight: 600; color: ${i}; min-width: 50px;`),l.textContent=String(s).toUpperCase();let p=m("div");p.setAttribute("style","flex: 1;");let d=m("div");d.setAttribute("style","font-size: 11px; color: var(--text-primary);"),d.textContent=typeof r?.action=="string"?r.action:"";let u=m("div");u.setAttribute("style","font-size: 10px; color: var(--text-muted); margin-top: 2px;"),u.textContent=typeof r?.impact=="string"?r.impact:"",p.append(d,u);let h=m("span");h.setAttribute("style","font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;"),h.textContent=`+${nt(r?.weight)}`,a.append(l,p,h),e.appendChild(a)}return e}function za(t,e){let o=m("div");o.setAttribute("style","margin-top: 16px; padding: 12px; background: rgba(96, 165, 250, 0.07); border: 1px solid rgba(96, 165, 250, 0.3); border-radius: 4px; display: flex; align-items: center; justify-content: space-between; gap: 12px;");let n=m("div");n.setAttribute("style","font-size: 11px; color: var(--text-secondary); flex: 1;"),n.textContent="Let Copilot help you fix the identified issues in this repository.";let r=document.createElement("vscode-button");return r.setAttribute("style","min-width: 180px;"),r.textContent="\u{1F916} Ask Copilot to Improve",r.addEventListener("click",()=>{let i=`Please help me improve this repository by addressing the following best practice issues:
 
 ${t.map(l=>`- ${l.label}: ${l.detail||""}${l.hint?` (${l.hint})`:""}`).join(`
 `)}
 
-For each issue, please provide specific steps or code changes to fix it.`;if(!e||Xo.some(l=>l.toLowerCase()===e.toLowerCase()))f.postMessage({command:"openCopilotChatWithPrompt",prompt:i});else{let l=e.split(/[/\\]/).filter(Boolean).pop()??e;o.replaceChildren(),o.setAttribute("style","margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 4px; display: flex; flex-direction: column; gap: 8px;");let p=m("div");p.setAttribute("style","font-size: 11px; color: var(--warning-fg);"),p.textContent=`\u26A0\uFE0F Open "${l}" in VS Code first, then paste this prompt into Copilot Chat:`;let d=m("pre");d.setAttribute("style","font-size: 10px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; font-family: monospace; margin: 0;"),d.textContent=i;let u=document.createElement("vscode-button");u.setAttribute("appearance","secondary"),u.textContent="\u{1F4CB} Copy prompt",u.addEventListener("click",()=>{navigator.clipboard.writeText(i).then(()=>{u.textContent="\u2705 Copied!",setTimeout(()=>{u.textContent="\u{1F4CB} Copy prompt"},2e3)})}),o.append(p,d,u)}}),o.append(n,s),o}function cn(t,e){let o=t?.summary||{},n=Array.isArray(t?.checks)?t.checks:[],s=Array.isArray(t?.recommendations)?[...t.recommendations]:[],r=m("div");r.appendChild(_r(o)),r.appendChild(zr(o));let i=m("div");i.setAttribute("style","font-size: 11px; color: var(--text-muted); text-align: center; margin-bottom: 16px;"),i.textContent=`Score: ${G(o.totalScore)} / ${G(o.maxScore)} points`,r.appendChild(i);let a={high:1,medium:2,low:3};s.sort((d,u)=>(a[d?.priority]||99)-(a[u?.priority]||99));let l={};for(let d of n){let u=typeof d?.category=="string"&&d.category.length>0?d.category:"other";l[u]||(l[u]=[]),l[u].push(d)}for(let[d,u]of Object.entries(l))r.appendChild(Br(d,u,o));s.length>0&&r.appendChild(Dr(s));let p=n.filter(d=>d?.status==="fail"||d?.status==="warning");return p.length>0&&r.appendChild(Nr(p,e)),r}function Hr(t,e,o){let n={sessions:"width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);",interactions:"width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);",score:"width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);"},s=`
+For each issue, please provide specific steps or code changes to fix it.`;if(!e||Dn.some(l=>l.toLowerCase()===e.toLowerCase()))f.postMessage({command:"openCopilotChatWithPrompt",prompt:i});else{let l=e.split(/[/\\]/).filter(Boolean).pop()??e;o.replaceChildren(),o.setAttribute("style","margin-top: 16px; padding: 12px; background: rgba(251, 191, 36, 0.07); border: 1px solid rgba(251, 191, 36, 0.4); border-radius: 4px; display: flex; flex-direction: column; gap: 8px;");let p=m("div");p.setAttribute("style","font-size: 11px; color: var(--warning-fg);"),p.textContent=`\u26A0\uFE0F Open "${l}" in VS Code first, then paste this prompt into Copilot Chat:`;let d=m("pre");d.setAttribute("style","font-size: 10px; color: var(--text-secondary); background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 4px; padding: 8px; white-space: pre-wrap; word-break: break-word; max-height: 120px; overflow-y: auto; font-family: monospace; margin: 0;"),d.textContent=i;let u=document.createElement("vscode-button");u.setAttribute("appearance","secondary"),u.textContent="\u{1F4CB} Copy prompt",u.addEventListener("click",()=>{navigator.clipboard.writeText(i).then(()=>{u.textContent="\u2705 Copied!",setTimeout(()=>{u.textContent="\u{1F4CB} Copy prompt"},2e3)})}),o.append(p,d,u)}}),o.append(n,r),o}function sr(t,e){let o=t?.summary||{},n=Array.isArray(t?.checks)?t.checks:[],r=Array.isArray(t?.recommendations)?[...t.recommendations]:[],s=m("div");s.appendChild($a(o)),s.appendChild(Aa(o));let i=m("div");i.setAttribute("style","font-size: 11px; color: var(--text-muted); text-align: center; margin-bottom: 16px;"),i.textContent=`Score: ${nt(o.totalScore)} / ${nt(o.maxScore)} points`,s.appendChild(i);let a={high:1,medium:2,low:3};r.sort((d,u)=>(a[d?.priority]||99)-(a[u?.priority]||99));let l={};for(let d of n){let u=typeof d?.category=="string"&&d.category.length>0?d.category:"other";l[u]||(l[u]=[]),l[u].push(d)}for(let[d,u]of Object.entries(l))s.appendChild(Pa(d,u,o));r.length>0&&s.appendChild(_a(r));let p=n.filter(d=>d?.status==="fail"||d?.status==="warning");return p.length>0&&s.appendChild(za(p,e)),s}function Ia(t,e,o){let n={sessions:"width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);",interactions:"width: 80px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);",score:"width: 60px; text-align: right; flex-shrink: 0; font-size: 11px; color: var(--text-primary);"},r=`
 		<div style="padding: 4px 12px; display: flex; align-items: center; gap: 10px; border-bottom: 1px solid var(--border-color); background: var(--bg-secondary);">
 			<div style="flex: 1; min-width: 0; font-size: 10px; font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Repository</div>
 			<div style="${n.sessions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
@@ -2179,21 +2586,21 @@ For each issue, please provide specific steps or code changes to fix it.`;if(!e|
 			<div style="${n.score} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
 			<div style="width: 80px; flex-shrink: 0;"></div>
 		</div>
-	`;t.innerHTML=s+e.map((r,i)=>{let l=!!zt.get(r.workspacePath)?.data?.summary,p=Er(r.workspacePath),d=l?"Details":"Analyze",u=l?"details":"analyze",h=E===r.workspacePath&&o,k=Number(r.sessionCount)||0,C=Number(r.interactionCount)||0;return`
+	`;t.innerHTML=r+e.map((s,i)=>{let l=!!Xt.get(s.workspacePath)?.data?.summary,p=Ca(s.workspacePath),d=l?"Details":"Analyze",u=l?"details":"analyze",h=_===s.workspacePath&&o,k=Number(s.sessionCount)||0,T=Number(s.interactionCount)||0;return`
 			<div class="repo-item" style="padding: 6px 12px; border-bottom: ${i<e.length-1?"1px solid var(--border-subtle)":"none"}; display: flex; align-items: center; gap: 10px;">
 				<div style="flex: 1; min-width: 0;">
-					<div class="repo-name" style="font-size: 12px; font-weight: 600; color: var(--text-primary); font-family: 'Courier New', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${c(r.workspacePath)}">
-						${c(r.workspaceName)}
+					<div class="repo-name" style="font-size: 12px; font-weight: 600; color: var(--text-primary); font-family: 'Courier New', monospace; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="${c(s.workspacePath)}">
+						${c(s.workspaceName)}
 					</div>
 				</div>
 				<div style="${n.sessions}">${k}</div>
-				<div style="${n.interactions}">${C}</div>
+				<div style="${n.interactions}">${T}</div>
 				<div style="${n.score}">${c(p)}</div>
-				<vscode-button class="btn-repo-action" data-action="${u}" data-workspace-path="${c(r.workspacePath)}" ${h?'disabled="true"':""} style="min-width: 80px; flex-shrink: 0;">
+				<vscode-button class="btn-repo-action" data-action="${u}" data-workspace-path="${c(s.workspacePath)}" ${h?'disabled="true"':""} style="min-width: 80px; flex-shrink: 0;">
 					${d}
 				</vscode-button>
 			</div>
-		`}).join("")}function Ur(t,e,o){t.replaceChildren();let n=m("div","repo-details-card");n.setAttribute("style","padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;");let s=m("div","repo-details-card-header");s.setAttribute("style","display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;");let r=m("div");r.setAttribute("style","font-size: 12px; color: var(--text-secondary);"),r.textContent="Repository: ";let i=m("span");i.setAttribute("style","color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;"),i.textContent=o,r.appendChild(i);let a=document.createElement("vscode-button");a.id="btn-switch-repository",a.setAttribute("style","min-width: 120px;"),a.textContent="Switch Repository",s.append(r,a),n.append(s,cn(e.data,E??void 0)),t.appendChild(n)}function K(){let t=document.getElementById("repo-list-pane"),e=document.getElementById("repo-list-pane-container"),o=document.getElementById("repo-details-pane"),n=document.getElementById("repo-details-pane-container");if(!t||!e||!o||!n||!P)return;let s=!!E&&!et,r=s?P.workspaces.filter(l=>l.workspacePath===E):P.workspaces;if(e.classList.remove("repo-hygiene-pane-collapsed"),n.classList.toggle("repo-hygiene-pane-collapsed",!s),Hr(t,r,s),!s||!E){o.replaceChildren();return}let i=Ar(E),a=zt.get(E);if(a?.data){Ur(o,a,i);return}if(a?.error){o.innerHTML=`
+		`}).join("")}function La(t,e,o){t.replaceChildren();let n=m("div","repo-details-card");n.setAttribute("style","padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;");let r=m("div","repo-details-card-header");r.setAttribute("style","display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 10px;");let s=m("div");s.setAttribute("style","font-size: 12px; color: var(--text-secondary);"),s.textContent="Repository: ";let i=m("span");i.setAttribute("style","color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;"),i.textContent=o,s.appendChild(i);let a=document.createElement("vscode-button");a.id="btn-switch-repository",a.setAttribute("style","min-width: 120px;"),a.textContent="Switch Repository",r.append(s,a),n.append(r,sr(e.data,_??void 0)),t.appendChild(n)}function ot(){let t=document.getElementById("repo-list-pane"),e=document.getElementById("repo-list-pane-container"),o=document.getElementById("repo-details-pane"),n=document.getElementById("repo-details-pane-container");if(!t||!e||!o||!n||!N)return;let r=!!_&&!ct,s=r?N.workspaces.filter(l=>l.workspacePath===_):N.workspaces;if(e.classList.remove("repo-hygiene-pane-collapsed"),n.classList.toggle("repo-hygiene-pane-collapsed",!r),Ia(t,s,r),!r||!_){o.replaceChildren();return}let i=wa(_),a=Xt.get(_);if(a?.data){La(o,a,i);return}if(a?.error){o.innerHTML=`
 			<div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px;">
 				<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
 					<div style="font-size: 11px; color: #fca5a5;">Repository: ${c(i)}</div>
@@ -2210,12 +2617,12 @@ For each issue, please provide specific steps or code changes to fix it.`;if(!e|
 			</div>
 			<div style="font-size: 11px; color: var(--text-muted);">No analysis data yet. Click Analyze in the list.</div>
 		</div>
-	`}function Or(t,e){if(e){zt.set(e,{data:t,error:void 0}),_t||(E=e,et=!1),K();return}let o=document.getElementById("btn-analyse-repo");o&&(o.disabled=!1,o.textContent="Analyze Repo for Best Practices");let n=document.getElementById("repo-analysis-results");if(n){n.replaceChildren();let s=m("div","repo-analysis-card");s.setAttribute("style","padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 12px;"),s.appendChild(cn(t,e)),n.appendChild(s)}}function jr(t,e){if(e){zt.set(e,{data:void 0,error:t}),_t||(E=e,et=!1),K();return}let o=document.getElementById("btn-analyse-repo");o&&(o.disabled=!1,o.textContent="Analyze Repo for Best Practices");let n=document.getElementById("repo-analysis-results");n&&(n.innerHTML=`
+	`}function Ba(t,e){if(e){Xt.set(e,{data:t,error:void 0}),Vt||(_=e,ct=!1),ot();return}let o=document.getElementById("btn-analyse-repo");o&&(o.disabled=!1,o.textContent="Analyze Repo for Best Practices");let n=document.getElementById("repo-analysis-results");if(n){n.replaceChildren();let r=m("div","repo-analysis-card");r.setAttribute("style","padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px; margin-bottom: 12px;"),r.appendChild(sr(t,e)),n.appendChild(r)}}function Da(t,e){if(e){Xt.set(e,{data:void 0,error:t}),Vt||(_=e,ct=!1),ot();return}let o=document.getElementById("btn-analyse-repo");o&&(o.disabled=!1,o.textContent="Analyze Repo for Best Practices");let n=document.getElementById("repo-analysis-results");n&&(n.innerHTML=`
 			<div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; margin-bottom: 12px;">
 				<div style="font-size: 12px; font-weight: 600; color: #ef4444; margin-bottom: 4px;">\u274C Analysis Failed</div>
 				<div style="font-size: 11px; color: #fca5a5;">${c(t)}</div>
 			</div>
-		`)}function Fr(){_t=!1,et=!0,E=null,K();let t=document.getElementById("btn-analyse-all");if(t){t.disabled=!1;let o=W?.customizationMatrix?.workspaces?.length||0;t.textContent=`Analyze All Repositories (${o})`}}async function qr(){if(await Promise.resolve().then(()=>(Fo(),jo)),!W){Ie("Loading usage analysis..."),Jt=setTimeout(()=>{let e=document.getElementById("root");if(e&&e.querySelector("#usage-loading-card")){let o=document.createElement("div");o.style.cssText="padding: 32px; text-align: center; font-size: 14px;";let n=document.createElement("div");n.style.cssText="color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;",n.textContent="\u23F3 Taking longer than expected\u2026 Session files may be large or the scan is still in progress.",o.append(n,Be()),e.textContent="",e.append(o)}},3e4);return}te(W.locale),Xt=W.use24HourTime!==!1;let t=W.sessionColumnSettings?.enabledColumns;if(Array.isArray(t)){let e=t.filter(o=>tn.includes(o));pt=new Set(e)}ln(W),en(),document.addEventListener("click",e=>{let n=e.target.getAttribute("data-suppress-tool");n&&(dn(n),f.postMessage({command:"suppressUnknownTool",toolName:n}))})}qr().catch(t=>{console.error("[Usage Analysis] Bootstrap failed:",t);let e=document.getElementById("root");if(e){let o=document.createElement("div");o.style.cssText="padding: 32px; text-align: center; font-size: 14px;";let n=document.createElement("div");n.style.cssText="color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;",n.textContent="Failed to initialize usage analysis. Please try refreshing.",o.append(n,Be()),e.textContent="",e.append(o)}});})();
+		`)}function Ha(){Vt=!1,ct=!0,_=null,ot();let t=document.getElementById("btn-analyse-all");if(t){t.disabled=!1;let o=U?.customizationMatrix?.workspaces?.length||0;t.textContent=`Analyze All Repositories (${o})`}}async function Na(){if(await Promise.resolve().then(()=>(Tn(),Cn)),!U){lo("Loading usage analysis..."),fe=setTimeout(()=>{let e=document.getElementById("root");if(e&&e.querySelector("#usage-loading-card")){let o=document.createElement("div");o.style.cssText="padding: 32px; text-align: center; font-size: 14px;";let n=document.createElement("div");n.style.cssText="color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;",n.textContent="\u23F3 Taking longer than expected\u2026 Session files may be large or the scan is still in progress.",o.append(n,po()),e.textContent="",e.append(o)}},3e4);return}Te(U.locale),ye=U.use24HourTime!==!1;let t=U.sessionColumnSettings?.enabledColumns;if(Array.isArray(t)){let e=t.filter(o=>Un.includes(o));kt=new Set(e)}nr(U),On(),document.addEventListener("click",e=>{let n=e.target.getAttribute("data-suppress-tool");n&&(rr(n),f.postMessage({command:"suppressUnknownTool",toolName:n}))})}Na().catch(t=>{console.error("[Usage Analysis] Bootstrap failed:",t);let e=document.getElementById("root");if(e){let o=document.createElement("div");o.style.cssText="padding: 32px; text-align: center; font-size: 14px;";let n=document.createElement("div");n.style.cssText="color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;",n.textContent="Failed to initialize usage analysis. Please try refreshing.",o.append(n,po()),e.textContent="",e.append(o)}});})();
 /*! Bundled license information:
 
 @lit/reactive-element/css-tag.js:
