@@ -17,7 +17,7 @@ resource "random_string" "storage_suffix" {
 resource "azurerm_storage_account" "this" {
   name                     = "sharing${random_string.storage_suffix.result}"
   resource_group_name      = data.azurerm_resource_group.this.name
-  location                 = var.location
+  location                 = data.azurerm_resource_group.this.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
@@ -35,7 +35,7 @@ resource "azurerm_storage_share" "data" {
 # Container Apps Environment — one per deployment for full isolation.
 resource "azurerm_container_app_environment" "this" {
   name                = "${var.app_name}-env"
-  location            = var.location
+  location            = data.azurerm_resource_group.this.location
   resource_group_name = data.azurerm_resource_group.this.name
   tags                = var.tags
 }
