@@ -387,8 +387,9 @@ jobs:
               # and triggers another 60-minute wait).
               echo "Cert '$EXPECTED_CERT_NAME' found in Azure but not in TF state. Importing..."
               if terraform import 'azurerm_container_app_environment_managed_certificate.this[0]' "$AZURE_CERT_ID"; then
-                # Drop stale custom-domain state so cert_binding re-runs to re-bind.
-                terraform state rm 'azurerm_container_app_custom_domain.this[0]' 2>/dev/null || true
+                # Drop stale cert-binding state so it re-runs to re-bind (hostname
+                # registration is untouched here since we didn't delete the hostname).
+                terraform state rm 'null_resource.cert_binding[0]' 2>/dev/null || true
                 echo "Import done. Terraform will rebind the cert without recreating it."
               else
                 # Import failed; delete the Azure cert so apply doesn't hit "already exists".
@@ -401,7 +402,11 @@ jobs:
                   --name "$ENV_NAME" \
                   --resource-group "$TF_VAR_resource_group_name" \
                   --certificate "$EXPECTED_CERT_NAME" --yes 2>/dev/null || true
-                terraform state rm 'azurerm_container_app_custom_domain.this[0]' 2>/dev/null || true
+                # Hostname was deleted above, so hostname_registration must also be
+                # dropped from state or Terraform will (wrongly) believe it's still
+                # registered and skip re-adding it before the cert create call.
+                terraform state rm 'null_resource.hostname_registration[0]' 2>/dev/null || true
+                terraform state rm 'null_resource.cert_binding[0]' 2>/dev/null || true
                 terraform state rm 'azurerm_container_app_environment_managed_certificate.this[0]' 2>/dev/null || true
                 echo "Cleanup done. Terraform will create cert and domain binding from scratch."
               fi
@@ -428,8 +433,12 @@ jobs:
                   --certificate "$AZURE_CERT_NAME" --yes 2>/dev/null || true
               fi
 
-              # Remove stale TF state entries so Terraform creates fresh resources
-              terraform state rm 'azurerm_container_app_custom_domain.this[0]' 2>/dev/null || true
+              # Remove stale TF state entries so Terraform creates fresh resources.
+              # Hostname was deleted above, so hostname_registration must also be
+              # dropped from state or Terraform will (wrongly) believe it's still
+              # registered and skip re-adding it before the cert create call.
+              terraform state rm 'null_resource.hostname_registration[0]' 2>/dev/null || true
+              terraform state rm 'null_resource.cert_binding[0]' 2>/dev/null || true
               terraform state rm 'azurerm_container_app_environment_managed_certificate.this[0]' 2>/dev/null || true
               echo "Cleanup done. Terraform will create cert and domain binding from scratch."
             fi
