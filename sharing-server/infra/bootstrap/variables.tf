@@ -3,12 +3,6 @@ variable "resource_group_name" {
   type        = string
 }
 
-variable "location" {
-  description = "Azure region (e.g. westeurope)"
-  type        = string
-  default     = "westeurope"
-}
-
 variable "container_name" {
   description = "Blob container name used to store the main Terraform state file"
   type        = string

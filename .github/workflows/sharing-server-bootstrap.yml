@@ -24,10 +24,6 @@ on:
         description: 'Existing Azure resource group to create the state storage account in'
         type: string
         required: true
-      location:
-        description: 'Azure region'
-        type: string
-        default: 'westeurope'
 
 permissions:
   contents: read
@@ -46,7 +42,6 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       ARM_USE_OIDC:        "true"
       TF_VAR_resource_group_name: ${{ inputs.resource_group_name }}
-      TF_VAR_location:            ${{ inputs.location }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
