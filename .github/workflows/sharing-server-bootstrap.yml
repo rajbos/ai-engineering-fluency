@@ -1,15 +1,20 @@
 name: Bootstrap Sharing Server Terraform State
 
-# One-off, manually-triggered workflow. Creates the storage account + blob
-# container that sharing-server-deploy.yml uses as its Terraform remote state
-# backend. Run this once per environment (e.g. after migrating to a new Azure
-# subscription/tenant) before pointing TF_STATE_* variables at it — the main
-# deploy workflow's `terraform init` will fail until this backend exists.
+# One-off, manually-triggered workflow. Creates the resource group + storage
+# account + blob container that sharing-server-deploy.yml uses as its
+# Terraform remote state backend, and that main.tf's resources derive their
+# Azure region from. Run this once per environment (e.g. after migrating to
+# a new Azure subscription/tenant/region) before pointing TF_STATE_*
+# variables at it — the main deploy workflow's `terraform init` will fail
+# until this backend exists.
 #
 # Uses local Terraform state (see sharing-server/infra/bootstrap/main.tf) since
 # it can't depend on the backend it's creating. Re-running this after the
-# storage account already exists will try to create a second one — it isn't
-# idempotent across runs, so only run it when you actually need a new backend.
+# resource group/storage account already exist will fail (or need
+# `terraform import` first) — it isn't idempotent across runs, so only run it
+# when you actually need a new backend. To migrate an environment to a new
+# region: delete the existing resource group in Azure first, then re-run this
+# with the new `location`.
 on:
   workflow_dispatch:
     inputs:
@@ -21,7 +26,11 @@ on:
           - production
         required: true
       resource_group_name:
-        description: 'Existing Azure resource group to create the state storage account in'
+        description: 'Azure resource group to create for this environment (must not already exist)'
+        type: string
+        required: true
+      location:
+        description: 'Azure region to create the resource group in (e.g. francecentral, swedencentral)'
         type: string
         required: true
 
@@ -42,6 +51,7 @@ jobs:
       ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
       ARM_USE_OIDC:        "true"
       TF_VAR_resource_group_name: ${{ inputs.resource_group_name }}
+      TF_VAR_location:            ${{ inputs.location }}
     steps:
       - name: Harden the runner (Audit all outbound calls)
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
@@ -73,6 +83,7 @@ jobs:
             echo "| \`TF_STATE_RESOURCE_GROUP\` | \`$(terraform output -raw resource_group_name)\` |"
             echo "| \`TF_STATE_STORAGE_ACCOUNT\` | \`$(terraform output -raw storage_account_name)\` |"
             echo "| \`TF_STATE_CONTAINER\` | \`$(terraform output -raw container_name)\` |"
+            echo "| _(resource group region)_ | \`$(terraform output -raw location)\` |"
             echo ""
             echo "Set these as environment-scoped variables on the \`${{ inputs.environment }}\` GitHub Environment, then re-run the deploy workflow."
           } >> "$GITHUB_STEP_SUMMARY"
