@@ -219,7 +219,35 @@ resource "null_resource" "hostname_registration" {
   }
 
   provisioner "local-exec" {
-    command = "az containerapp hostname add --name '${azurerm_container_app.this.name}' --resource-group '${var.resource_group_name}' --hostname '${var.custom_domain}' 2>/dev/null || true"
+    # `hostname add` is not synchronously consistent — Azure can return success
+    # before the hostname is actually queryable on the container app, causing the
+    # managed certificate create step (right after) to fail with
+    # RequireCustomHostnameInEnvironment even though registration "succeeded".
+    # Poll until the hostname shows up in the app's ingress config (or time out
+    # loudly) instead of swallowing all errors with `|| true`.
+    command = <<-EOT
+      set -e
+      az containerapp hostname add \
+        --name '${azurerm_container_app.this.name}' \
+        --resource-group '${var.resource_group_name}' \
+        --hostname '${var.custom_domain}'
+
+      for i in $(seq 1 30); do
+        FOUND=$(az containerapp hostname list \
+          --name '${azurerm_container_app.this.name}' \
+          --resource-group '${var.resource_group_name}' \
+          --query "[].name" -o tsv 2>/dev/null | grep -Fx '${var.custom_domain}' || true)
+        if [ -n "$FOUND" ]; then
+          echo "Hostname '${var.custom_domain}' confirmed registered."
+          exit 0
+        fi
+        echo "Waiting for hostname '${var.custom_domain}' to propagate (attempt $i/30)..."
+        sleep 5
+      done
+
+      echo "Hostname '${var.custom_domain}' did not appear on the container app within 150s." >&2
+      exit 1
+    EOT
   }
 
   depends_on = [azurerm_container_app.this]
