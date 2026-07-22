@@ -26,8 +26,15 @@ provider "azurerm" {
   resource_provider_registrations = "none"
 }
 
-data "azurerm_resource_group" "this" {
-  name = var.resource_group_name
+# Terraform manages the resource group itself so the target Azure region is
+# set in exactly one place: this bootstrap config. The main sharing-server
+# config (../main.tf) reads the region back via a data source on this same
+# resource group, so migrating regions is just: delete this resource group
+# (and everything in it) in Azure, change `location` below, re-run this
+# bootstrap, then re-run the main deploy — no other config needs to change.
+resource "azurerm_resource_group" "this" {
+  name     = var.resource_group_name
+  location = var.location
 }
 
 # Storage account names must be globally unique, 3-24 chars, lowercase alphanumeric only.
@@ -42,8 +49,8 @@ resource "random_string" "suffix" {
 
 resource "azurerm_storage_account" "tfstate" {
   name                     = "sharingtfstate${random_string.suffix.result}"
-  resource_group_name      = data.azurerm_resource_group.this.name
-  location                 = data.azurerm_resource_group.this.location
+  resource_group_name      = azurerm_resource_group.this.name
+  location                 = azurerm_resource_group.this.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
