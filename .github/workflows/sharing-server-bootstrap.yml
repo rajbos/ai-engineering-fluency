@@ -1,20 +1,29 @@
 name: Bootstrap Sharing Server Terraform State
 
-# One-off, manually-triggered workflow. Creates the resource group + storage
-# account + blob container that sharing-server-deploy.yml uses as its
-# Terraform remote state backend, and that main.tf's resources derive their
-# Azure region from. Run this once per environment (e.g. after migrating to
-# a new Azure subscription/tenant/region) before pointing TF_STATE_*
-# variables at it — the main deploy workflow's `terraform init` will fail
-# until this backend exists.
+# One-off, manually-triggered workflow. Creates the storage account + blob
+# container that sharing-server-deploy.yml uses as its Terraform remote state
+# backend, inside an EXISTING resource group. Run this once per environment
+# (e.g. after migrating to a new Azure subscription/tenant/region) before
+# pointing TF_STATE_* variables at it — the main deploy workflow's
+# `terraform init` will fail until this backend exists.
+#
+# PREREQUISITE (manual, outside this workflow): the resource group named by
+# `resource_group_name` must already exist in the target region, with this
+# repo's GitHub Actions service principal granted the Contributor role on it.
+# The SP intentionally only has resource-group-scoped permissions, so it
+# cannot create the resource group itself — only someone with broader
+# (subscription-level) access can. To migrate an environment to a new region:
+#   1. az group create -n <rg-name> -l <new-region>
+#   2. az role assignment create --assignee <sp-app-id> --role Contributor \
+#        --scope /subscriptions/<sub-id>/resourceGroups/<rg-name>
+#   3. Re-run this workflow with the new `resource_group_name`/`location`.
+#   4. Update the environment's TF_STATE_* GitHub variables to the new
+#      storage account name output below, then re-run the main deploy.
 #
 # Uses local Terraform state (see sharing-server/infra/bootstrap/main.tf) since
 # it can't depend on the backend it's creating. Re-running this after the
-# resource group/storage account already exist will fail (or need
-# `terraform import` first) — it isn't idempotent across runs, so only run it
-# when you actually need a new backend. To migrate an environment to a new
-# region: delete the existing resource group in Azure first, then re-run this
-# with the new `location`.
+# storage account already exists will try to create a second one — it isn't
+# idempotent across runs, so only run it when you actually need a new backend.
 on:
   workflow_dispatch:
     inputs:
@@ -26,11 +35,11 @@ on:
           - production
         required: true
       resource_group_name:
-        description: 'Azure resource group to create for this environment (must not already exist)'
+        description: 'Existing Azure resource group (created manually beforehand) to create the state storage account in'
         type: string
         required: true
       location:
-        description: 'Azure region to create the resource group in (e.g. francecentral, swedencentral)'
+        description: 'Expected Azure region of the resource group (e.g. francecentral) — validated, not used to create anything'
         type: string
         required: true
 

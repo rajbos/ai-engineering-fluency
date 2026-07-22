@@ -26,15 +26,28 @@ provider "azurerm" {
   resource_provider_registrations = "none"
 }
 
-# Terraform manages the resource group itself so the target Azure region is
-# set in exactly one place: this bootstrap config. The main sharing-server
-# config (../main.tf) reads the region back via a data source on this same
-# resource group, so migrating regions is just: delete this resource group
-# (and everything in it) in Azure, change `location` below, re-run this
-# bootstrap, then re-run the main deploy — no other config needs to change.
-resource "azurerm_resource_group" "this" {
-  name     = var.resource_group_name
-  location = var.location
+# The GitHub Actions service principal only has Contributor scoped to this
+# resource group (RBAC can only be granted once the RG exists), so it can
+# never create the resource group itself — that requires subscription-level
+# permission this SP intentionally does not have. The resource group must be
+# created manually (by someone with broader access) in the target region,
+# with the SP's Contributor role assignment (re-)created on it, BEFORE this
+# bootstrap runs. See the sharing-server-bootstrap.yml workflow comments for
+# the exact steps.
+#
+# This is a data source (not a managed resource) for that reason. `var.location`
+# is only used to validate the RG actually is where you think it is — a
+# postcondition fails loudly on mismatch instead of silently bootstrapping the
+# wrong region.
+data "azurerm_resource_group" "this" {
+  name = var.resource_group_name
+
+  lifecycle {
+    postcondition {
+      condition     = self.location == var.location
+      error_message = "Resource group '${var.resource_group_name}' is in '${self.location}', not the expected '${var.location}'. Create/move the resource group to the expected region first (see sharing-server-bootstrap.yml)."
+    }
+  }
 }
 
 # Storage account names must be globally unique, 3-24 chars, lowercase alphanumeric only.
@@ -49,8 +62,8 @@ resource "random_string" "suffix" {
 
 resource "azurerm_storage_account" "tfstate" {
   name                     = "sharingtfstate${random_string.suffix.result}"
-  resource_group_name      = azurerm_resource_group.this.name
-  location                 = azurerm_resource_group.this.location
+  resource_group_name      = data.azurerm_resource_group.this.name
+  location                 = data.azurerm_resource_group.this.location
   account_tier             = "Standard"
   account_replication_type = "LRS"
   min_tls_version          = "TLS1_2"
