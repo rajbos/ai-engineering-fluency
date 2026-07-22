@@ -1,10 +1,10 @@
 variable "resource_group_name" {
-  description = "Azure resource group to create (or reuse, if it already exists and is imported first) for this environment's resources"
+  description = "Existing Azure resource group for this environment's resources. Must be created manually (outside Terraform) with the GitHub Actions service principal's Contributor role assigned on it — this SP intentionally has no subscription-level permission to create resource groups itself."
   type        = string
 }
 
 variable "location" {
-  description = "Azure region to create the resource group in (e.g. francecentral). All resources deployed by the main sharing-server config derive their region from this resource group's location, so this is the single place a region migration starts from."
+  description = "Expected Azure region of the resource group (e.g. francecentral). Only used to validate the resource group is actually where you think it is — bootstrap fails loudly on mismatch rather than silently deploying to the wrong region. All resources deployed by the main sharing-server config derive their actual region from the resource group itself, so a region migration means: manually create/move the resource group to the new region and RBAC-assign the SP there first, then update this value to match."
   type        = string
 }
 
