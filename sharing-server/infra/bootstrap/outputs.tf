@@ -1,9 +1,9 @@
 output "resource_group_name" {
-  value = azurerm_resource_group.this.name
+  value = data.azurerm_resource_group.this.name
 }
 
 output "location" {
-  value = azurerm_resource_group.this.location
+  value = data.azurerm_resource_group.this.location
 }
 
 output "storage_account_name" {
