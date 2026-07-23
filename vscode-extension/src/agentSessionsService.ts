@@ -1,5 +1,5 @@
 import * as https from 'https';
-import { GITHUB_API_HOSTNAME, buildGitHubApiHeaders } from './githubApiConfig';
+import { getGitHubApiEndpoints, buildGitHubApiHeaders } from './githubApiConfig';
 
 export type AgentSessionSource = 'cloud-agent' | 'cli-remote' | 'unknown';
 
@@ -89,10 +89,11 @@ export function fetchAgentTasksPage(
 		if (archived) { queryParams += '&archived=true'; }
 		if (since) { queryParams += `&since=${encodeURIComponent(since)}`; }
 
+		const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: `/agents/repos/${owner}/${repo}/tasks?${queryParams}`,
+				hostname,
+				path: `${restPathPrefix}/agents/repos/${owner}/${repo}/tasks?${queryParams}`,
 				headers: buildGitHubApiHeaders(token),
 			},
 			(res) => {
@@ -130,10 +131,11 @@ export function fetchAgentTaskDetail(
 	token: string,
 ): Promise<TaskDetailResult> {
 	return new Promise((resolve) => {
+		const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: `/agents/repos/${owner}/${repo}/tasks/${encodeURIComponent(taskId)}`,
+				hostname,
+				path: `${restPathPrefix}/agents/repos/${owner}/${repo}/tasks/${encodeURIComponent(taskId)}`,
 				headers: buildGitHubApiHeaders(token),
 			},
 			(res) => {

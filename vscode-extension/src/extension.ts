@@ -203,6 +203,7 @@ import {
 	type RepoPrStatsResult,
 } from './githubPrService';
 import { fetchAgentSessionsForRepo } from './agentSessionsService';
+import { getConfiguredGitHubEnterpriseUri } from './githubApiConfig';
 
 // --- View regression ---
 import {
@@ -1763,7 +1764,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		const workspacePaths = this._buildWorkspacePaths();
-		const repos = discoverGitHubRepos(workspacePaths);
+		const repos = discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
 		this.analysisPanel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: 0 });
 
 		const results: RepoPrInfo[] = [];
@@ -1838,7 +1839,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		const workspacePaths = this._buildWorkspacePaths();
-		const repos = discoverGitHubRepos(workspacePaths);
+		const repos = discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
 		this.analysisPanel.webview.postMessage({ command: 'agentSessionsProgress', total: repos.length, done: 0 });
 
 		const repoResults = [];

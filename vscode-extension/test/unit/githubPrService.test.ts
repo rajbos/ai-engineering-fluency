@@ -1,6 +1,10 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import { detectAiType, fetchRepoPrs, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
+import * as os from 'node:os';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+import * as childProcess from 'node:child_process';
+import { detectAiType, fetchRepoPrs, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
 
 // ---------------------------------------------------------------------------
 // detectAiType — pure function, no I/O
@@ -322,4 +326,66 @@ test('fetchEnterprisePremiumBudgets: returns empty array when no budgets configu
 	const { budgets, error } = await fetchEnterprisePremiumBudgets('acme-corp', 'rajbos', 'token', mockFetcher);
 	assert.equal(error, undefined);
 	assert.deepEqual(budgets, []);
+});
+
+// ---------------------------------------------------------------------------
+// discoverGitHubRepos — reads real git remotes from temp repos
+// ---------------------------------------------------------------------------
+
+/** Create a temp dir with a git repo whose `origin` remote is `remoteUrl`. */
+function makeGitRepoWithRemote(remoteUrl: string): string {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'discover-gh-repos-'));
+	childProcess.execSync('git init -q', { cwd: dir });
+	childProcess.execSync(`git remote add origin ${remoteUrl}`, { cwd: dir });
+	return dir;
+}
+
+test('discoverGitHubRepos: matches a github.com remote', () => {
+	const dir = makeGitRepoWithRemote('https://github.com/rajbos/ai-engineering-fluency.git');
+	try {
+		const repos = discoverGitHubRepos([dir]);
+		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('discoverGitHubRepos: ignores a non-github.com remote when no enterprise URI is configured', () => {
+	const dir = makeGitRepoWithRemote('https://customer.ghe.com/rajbos/private-repo.git');
+	try {
+		const repos = discoverGitHubRepos([dir]);
+		assert.deepEqual(repos, []);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('discoverGitHubRepos: matches a GHE.com remote when the enterprise URI is configured', () => {
+	const dir = makeGitRepoWithRemote('https://customer.ghe.com/rajbos/private-repo.git');
+	try {
+		const repos = discoverGitHubRepos([dir], 'https://customer.ghe.com');
+		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'private-repo' }]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('discoverGitHubRepos: still matches github.com remotes when an enterprise URI is also configured', () => {
+	const dir = makeGitRepoWithRemote('https://github.com/rajbos/ai-engineering-fluency.git');
+	try {
+		const repos = discoverGitHubRepos([dir], 'https://customer.ghe.com');
+		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('discoverGitHubRepos: matches an on-prem GitHub Enterprise Server remote via SSH form', () => {
+	const dir = makeGitRepoWithRemote('git@github.acme-corp.com:rajbos/internal-tool.git');
+	try {
+		const repos = discoverGitHubRepos([dir], 'https://github.acme-corp.com');
+		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'internal-tool' }]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
 });
