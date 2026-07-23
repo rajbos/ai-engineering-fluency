@@ -8126,6 +8126,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     const sortSettings = this.context.globalState.get('details.sortSettings', {
       editor: { key: 'name', dir: 'asc' },
       model: { key: 'name', dir: 'asc' },
+      excludedProviders: [],
     });
     const dataWithBackend = {
       ...stats,

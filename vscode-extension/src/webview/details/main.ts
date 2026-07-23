@@ -31,6 +31,12 @@ waterUsage: number;
 estimatedCost: number;
 estimatedCostCopilot?: number;
 cachedTokens?: number;
+/**
+ * Estimated cost per billing group (e.g. "GitHub Copilot", "Anthropic", "Google")
+ * for this period in USD. Used to show/filter cost across all providers, not just
+ * GitHub Copilot's UBB billing.
+ */
+billingGroupCosts?: Record<string, number>;
 };
 
 type DetailedStats = {
@@ -51,6 +57,8 @@ sortSettings?: {
 editor?: { key?: string; dir?: string };
 model?: { key?: string; dir?: string };
 modelOtherExpanded?: boolean;
+/** Billing-group (provider) names that the user has unchecked in the cost provider filter. */
+excludedProviders?: string[];
 };
 };
 
@@ -67,6 +75,7 @@ type WebviewMessage =
 editor: { key: TableSortKey; dir: SortDir };
 model: { key: TableSortKey; dir: SortDir };
 modelOtherExpanded: boolean;
+excludedProviders: string[];
 }};
 
 /** Aggregated projection values calculated from last-30-days data. */
@@ -107,6 +116,10 @@ let editorSortDir: SortDir = (_initSort?.editor?.dir as SortDir) ?? 'asc';
 let modelSortKey: TableSortKey = (_initSort?.model?.key as TableSortKey) ?? 'name';
 let modelSortDir: SortDir = (_initSort?.model?.dir as SortDir) ?? 'asc';
 let modelOtherExpanded: boolean = (_initSort?.modelOtherExpanded) ?? false;
+/** Billing-group (provider) names deselected in the "Cost by Provider" filter. Empty = all providers included. */
+let excludedProviders: Set<string> = new Set(_initSort?.excludedProviders ?? []);
+/** Last rendered stats, kept so provider-filter toggles can trigger a full re-render. */
+let lastStats: DetailedStats | null = null;
 
 function calculateProjection(last30DaysValue: number): number {
 // Project annual value based on last 30 days average
@@ -218,14 +231,16 @@ return { thead, updateHeaders };
 
 function render(stats: DetailedStats): void {
 setCompactNumbers(stats.compactNumbers !== false);
+lastStats = stats;
 const root = document.getElementById('root');
 if (!root) { return; }
 
+const allProviders = getAllProviders(stats);
 const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens + stats.last30Days.thinkingTokens));
 const projectedSessions = Math.round(calculateProjection(stats.last30Days.sessions));
 const projectedCo2 = calculateProjection(stats.last30Days.co2);
 const projectedWater = calculateProjection(stats.last30Days.waterUsage);
-const projectedCost = calculateProjection(stats.last30Days.estimatedCost);
+const projectedCost = calculateProjection(totalCostForPeriod(stats.last30Days, allProviders));
 const projectedCostCopilot = calculateProjection(stats.last30Days.estimatedCostCopilot ?? 0);
 const projectedTrees = calculateProjection(stats.last30Days.treesEquivalent);
 
@@ -240,6 +255,11 @@ projectedTrees
 });
 
 wireButtons();
+}
+
+/** Re-renders using the last stats payload — used after the provider filter changes. */
+function rerenderFromLastStats(): void {
+if (lastStats) { render(lastStats); }
 }
 
 function renderShell(
@@ -284,6 +304,11 @@ sections.append(buildSummaryCards(stats));
 }
 
 sections.append(buildMetricsSection(stats, projections));
+
+const providerCostSection = buildCostByProviderSection(stats);
+if (providerCostSection) {
+sections.append(providerCostSection);
+}
 
 const editorSection = buildEditorUsageSection(stats);
 if (editorSection) {
@@ -365,10 +390,15 @@ function buildCard(id: string, label: string, value: string): HTMLElement {
 function buildSummaryCards(stats: DetailedStats): HTMLElement {
 	const cards = el('div', 'cards');
 	cards.id = 'summary-cards';
+	const allProviders = getAllProviders(stats);
+	const costCard = buildCard('card-month-cost', '💰 Est. Cost This Month', formatCost(totalCostForPeriod(stats.month, allProviders)));
+	costCard.title = allProviders.length > 0
+		? `Sum of estimated costs across ${includedProviders(allProviders).length} of ${allProviders.length} selected provider(s). Use the "⚙ Providers" filter in the Cost by Provider section to change which providers are included.`
+		: 'Based on GitHub Copilot AI Credit rates (UBB) — no per-provider breakdown is available yet.';
 	cards.append(
 		buildCard('card-today-tokens', '📅 Tokens Today', totalTokenCell(stats.today)),
 		buildCard('card-30d-tokens', '📈 Tokens Last 30 Days', totalTokenCell(stats.last30Days)),
-		buildCard('card-month-cost', '💰 Est. Cost This Month (UBB)', formatCost(stats.month.estimatedCostCopilot ?? 0)),
+		costCard,
 		buildCard('card-today-sessions', '📂 Sessions Today', formatNumber(stats.today.sessions)),
 	);
 	return cards;
@@ -377,6 +407,7 @@ function buildSummaryCards(stats: DetailedStats): HTMLElement {
 type MetricGroup = { heading: string; rows: MetricRow[] };
 
 function buildMetricsGroups(stats: DetailedStats, projections: Projections): MetricGroup[] {
+	const allProviders = getAllProviders(stats);
 	const tokenRows: MetricRow[] = [
 		{ label: 'Total tokens', labelTooltip: 'All LLM API tokens counted across every call in this period — matches the status bar. When debug logs are available this is the definitive total; otherwise it falls back to per-model attribution or the text-based estimate.', icon: '🟣', color: '#c37bff', today: totalTokenCell(stats.today), last30Days: totalTokenCell(stats.last30Days), month: totalTokenCell(stats.month), lastMonth: totalTokenCell(stats.lastMonth), projected: formatCompact(projections.projectedTokens) },
 		{ label: 'Input tokens', labelTooltip: 'Total prompt tokens sent to the model, including any cache-read tokens (shown separately below).', icon: '⬆️', color: '#c37bff', today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: '—' },
@@ -387,7 +418,8 @@ function buildMetricsGroups(stats: DetailedStats, projections: Projections): Met
 		{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
 	];
 	const costRows: MetricRow[] = [
-		{ label: 'Estimated cost (UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
+		{ label: 'Estimated cost (selected providers)', labelTooltip: 'Sum of estimated cost across the providers selected in the Cost by Provider filter below — GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.', icon: '💵', color: '#7ce38b', today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) },
+		{ label: 'Estimated cost (GitHub Copilot UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
 	];
 	const activityRows: MetricRow[] = [
 		{ label: 'Sessions', icon: '📂', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
@@ -447,6 +479,137 @@ section.append(table);
 return section;
 }
 
+// ---------------------------------------------------------------------------
+// Cost by Provider section
+// ---------------------------------------------------------------------------
+
+type ProviderCostItem = { provider: string; today: number; last30Days: number; month: number; lastMonth: number; projected: number };
+
+function buildProviderCostItem(stats: DetailedStats, provider: string): ProviderCostItem {
+	const today = stats.today.billingGroupCosts?.[provider] || 0;
+	const last30Days = stats.last30Days.billingGroupCosts?.[provider] || 0;
+	const month = stats.month.billingGroupCosts?.[provider] || 0;
+	const lastMonth = stats.lastMonth.billingGroupCosts?.[provider] || 0;
+	return { provider, today, last30Days, month, lastMonth, projected: calculateProjection(last30Days) };
+}
+
+/** Builds a single provider row, greyed out (but still visible) when filtered out via the checkbox menu. */
+function buildProviderCostRow(item: ProviderCostItem, isExcluded: boolean): HTMLTableRowElement {
+	const tr = document.createElement('tr');
+	if (isExcluded) { tr.style.opacity = '0.45'; }
+	const labelTd = document.createElement('td');
+	const labelWrapper = document.createElement('span');
+	labelWrapper.className = 'metric-label';
+	labelWrapper.textContent = `💵 ${item.provider}`;
+	labelTd.append(labelWrapper);
+	tr.append(labelTd,
+		buildValueCell(formatCost(item.today)),
+		buildValueCell(formatCost(item.last30Days)),
+		buildValueCell(formatCost(item.month)),
+		buildValueCell(formatCost(item.lastMonth)),
+		buildValueCell(formatCost(item.projected)));
+	return tr;
+}
+
+/** Builds the bold "Total (selected providers)" footer row summing only the checked providers. */
+function buildProviderCostTotalRow(stats: DetailedStats, allProviders: string[]): HTMLTableRowElement {
+	const providers = includedProviders(allProviders);
+	const tr = document.createElement('tr');
+	tr.style.fontWeight = '700';
+	tr.style.borderTop = '2px solid var(--border-color)';
+	const labelTd = document.createElement('td');
+	const labelWrapper = document.createElement('span');
+	labelWrapper.className = 'metric-label';
+	labelWrapper.textContent = `∑ Total (${providers.length}/${allProviders.length} selected)`;
+	labelTd.append(labelWrapper);
+	tr.append(labelTd,
+		buildValueCell(formatCost(sumBillingGroupCosts(stats.today.billingGroupCosts, providers))),
+		buildValueCell(formatCost(sumBillingGroupCosts(stats.last30Days.billingGroupCosts, providers))),
+		buildValueCell(formatCost(sumBillingGroupCosts(stats.month.billingGroupCosts, providers))),
+		buildValueCell(formatCost(sumBillingGroupCosts(stats.lastMonth.billingGroupCosts, providers))),
+		buildValueCell(formatCost(calculateProjection(sumBillingGroupCosts(stats.last30Days.billingGroupCosts, providers)))));
+	return tr;
+}
+
+/** Builds the "⚙ Providers" filter toggle button + its checkbox dropdown menu. */
+function buildProviderFilterControl(allProviders: string[]): HTMLElement {
+	const wrap = el('div', 'provider-filter-wrap');
+	const toggle = document.createElement('button');
+	toggle.type = 'button';
+	toggle.className = 'provider-filter-toggle';
+	toggle.textContent = '⚙ Providers';
+	const menu = el('div', 'provider-filter-menu');
+	menu.style.display = 'none';
+
+	allProviders.forEach(provider => {
+		const label = el('label', 'provider-filter-item');
+		const checkbox = document.createElement('input');
+		checkbox.type = 'checkbox';
+		checkbox.checked = !excludedProviders.has(provider);
+		checkbox.addEventListener('change', () => {
+			if (checkbox.checked) { excludedProviders.delete(provider); } else { excludedProviders.add(provider); }
+			saveSortSettings();
+			rerenderFromLastStats();
+		});
+		const span = document.createElement('span');
+		span.textContent = provider;
+		label.append(checkbox, span);
+		menu.append(label);
+	});
+
+	toggle.addEventListener('click', (e) => {
+		e.stopPropagation();
+		menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
+	});
+	menu.addEventListener('click', (e) => e.stopPropagation());
+	document.addEventListener('click', () => { menu.style.display = 'none'; });
+
+	wrap.append(toggle, menu);
+	return wrap;
+}
+
+/**
+ * Builds the "Cost by Provider" table showing estimated cost per billing group
+ * (GitHub Copilot, Anthropic, Google, OpenAI, …) for every period, plus a
+ * checkbox filter so specific providers can be excluded from the totals shown
+ * in the summary card and the "Estimated cost (selected providers)" metric row.
+ */
+function buildCostByProviderSection(stats: DetailedStats): HTMLElement | null {
+	const allProviders = getAllProviders(stats);
+	if (allProviders.length === 0) { return null; }
+
+	const section = el('div', 'section');
+	const headerRow = el('div', 'section-header-row');
+	headerRow.append(iconHeading('h3', 'credit-card', 'Cost by Provider'), buildProviderFilterControl(allProviders));
+	section.append(headerRow);
+
+	const table = document.createElement('table');
+	table.className = 'stats-table';
+	const thead = document.createElement('thead');
+	const headRow = document.createElement('tr');
+	const HEADERS = [{ icon: '💵', text: 'Provider' }, { icon: '📅', text: 'Today' }, { icon: '📈', text: 'Last 30 Days' }, { icon: '🗓️', text: 'Current Month' }, { icon: '📆', text: 'Previous Month' }, { icon: '🌍', text: 'Projected Year' }];
+	HEADERS.forEach((h, idx) => {
+		const th = document.createElement('th');
+		th.className = idx === 0 ? '' : 'align-right';
+		const w = el('div', 'period-header');
+		w.textContent = `${h.icon} ${h.text}`;
+		th.append(w);
+		headRow.append(th);
+	});
+	thead.append(headRow);
+	table.append(thead);
+
+	const tbody = document.createElement('tbody');
+	allProviders.forEach(provider => {
+		const item = buildProviderCostItem(stats, provider);
+		tbody.append(buildProviderCostRow(item, excludedProviders.has(provider)));
+	});
+	tbody.append(buildProviderCostTotalRow(stats, allProviders));
+	table.append(tbody);
+	section.append(table);
+	return section;
+}
+
 function getSortIndicator(colKey: TableSortKey, activeKey: TableSortKey, dir: SortDir): string {
 if (colKey !== activeKey) { return ' ↕'; }
 return dir === 'asc' ? ' ↑' : ' ↓';
@@ -458,9 +621,50 @@ command: 'saveSortSettings',
 settings: {
 editor: { key: editorSortKey, dir: editorSortDir },
 model: { key: modelSortKey, dir: modelSortDir },
-modelOtherExpanded
+modelOtherExpanded,
+excludedProviders: Array.from(excludedProviders)
 }
 });
+}
+
+// ---------------------------------------------------------------------------
+// Cost-by-provider helpers
+// ---------------------------------------------------------------------------
+
+/** Returns every billing-group (provider) name seen across all four periods, "GitHub Copilot" first. */
+function getAllProviders(stats: DetailedStats): string[] {
+const set = new Set<string>();
+(['today', 'last30Days', 'month', 'lastMonth'] as const).forEach(period => {
+Object.keys(stats[period].billingGroupCosts ?? {}).forEach(p => set.add(p));
+});
+return Array.from(set).sort((a, b) => {
+if (a === 'GitHub Copilot') { return -1; }
+if (b === 'GitHub Copilot') { return 1; }
+return a.localeCompare(b);
+});
+}
+
+/** Providers currently selected (not filtered out) from the given full provider list. */
+function includedProviders(allProviders: string[]): string[] {
+return allProviders.filter(p => !excludedProviders.has(p));
+}
+
+/** Sums the billing-group costs for the given providers only. */
+function sumBillingGroupCosts(billingGroupCosts: Record<string, number> | undefined, providers: string[]): number {
+if (!billingGroupCosts) { return 0; }
+return providers.reduce((s, p) => s + (billingGroupCosts[p] || 0), 0);
+}
+
+/**
+ * Total estimated cost for a period across the currently selected providers.
+ * Falls back to the legacy Copilot-only estimate when no billing-group breakdown
+ * is available (e.g. stale cached data from an older extension version).
+ */
+function totalCostForPeriod(period: PeriodStats, allProviders: string[]): number {
+if (allProviders.length === 0) {
+return period.estimatedCostCopilot ?? period.estimatedCost ?? 0;
+}
+return sumBillingGroupCosts(period.billingGroupCosts, includedProviders(allProviders));
 }
 
 type EditorItem = {
@@ -848,6 +1052,7 @@ notes.className = 'notes';
 
 const items = [
 'Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what you are billed under Usage Based Billing.',
+'"Estimated cost (selected providers)" and the summary cost card sum estimated spend across all providers (GitHub Copilot, Anthropic, Google, OpenAI, …); use the "⚙ Providers" filter in the Cost by Provider section to include/exclude specific providers.',
 'Estimated CO₂ is based on ~0.2 g CO₂e per 1,000 tokens.',
 'Estimated water usage is based on ~0.3 L per 1,000 tokens.',
 'Tree equivalent represents the fraction of a single mature tree\'s annual CO₂ absorption (~21 kg/year).'
