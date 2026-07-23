@@ -1,6 +1,6 @@
 import * as https from 'https';
 import * as childProcess from 'child_process';
-import { GITHUB_API_HOSTNAME, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3, GITHUB_API_VERSION } from './githubApiConfig';
+import { getGitHubApiEndpoints, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3, GITHUB_API_VERSION } from './githubApiConfig';
 
 export type RepoPrDetail = {
 	number: number;
@@ -76,11 +76,12 @@ export type CopilotPlanResult = { planInfo?: CopilotPlanInfo; statusCode?: numbe
 
 /** Internal low-level fetcher for the copilot_internal/user endpoint. */
 function fetchCopilotPlanInfoPage(token: string): Promise<CopilotPlanResult> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: '/copilot_internal/user',
+				hostname,
+				path: `${restPathPrefix}/copilot_internal/user`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -159,11 +160,12 @@ export type CopilotTokenEndpointResult = { info?: CopilotTokenEndpointInfo; stat
 
 /** Internal low-level fetcher for the copilot_internal/v2/token endpoint. */
 function fetchCopilotTokenEndpointInfoPage(token: string): Promise<CopilotTokenEndpointResult> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: '/copilot_internal/v2/token',
+				hostname,
+				path: `${restPathPrefix}/copilot_internal/v2/token`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -235,11 +237,12 @@ function fetchUserEnterprisesPage(token: string): Promise<UserEnterprisesResult>
 	const query = JSON.stringify({
 		query: '{ viewer { enterprises(first: 10, membershipType: ALL) { nodes { slug name } } } }',
 	});
+	const { hostname, graphQlPath } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: '/graphql',
+				hostname,
+				path: graphQlPath,
 				method: 'POST',
 				headers: {
 					Authorization: `Bearer ${token}`,
@@ -311,11 +314,12 @@ export function fetchEnterprisePremiumBudgets(
 
 function fetchEnterprisePremiumBudgetsPage(enterpriseSlug: string, username: string, token: string): Promise<EnterpriseBudgetResult> {
 	const params = new URLSearchParams({ user: username, budgetTarget: 'premium_req' });
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: `/enterprises/${encodeURIComponent(enterpriseSlug)}/settings/billing/budgets?${params}`,
+				hostname,
+				path: `${restPathPrefix}/enterprises/${encodeURIComponent(enterpriseSlug)}/settings/billing/budgets?${params}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -370,11 +374,12 @@ export function fetchRepoPrsPage(
 	token: string,
 	page: number,
 ): Promise<{ prs: any[]; statusCode?: number; error?: string }> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 	return new Promise((resolve) => {
 		const req = https.request(
 			{
-				hostname: GITHUB_API_HOSTNAME,
-				path: `/repos/${owner}/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc&page=${page}`,
+				hostname,
+				path: `${restPathPrefix}/repos/${owner}/${repo}/pulls?state=all&per_page=100&sort=created&direction=desc&page=${page}`,
 				headers: {
 					Authorization: `Bearer ${token}`,
 					'User-Agent': GITHUB_API_USER_AGENT,
@@ -435,13 +440,28 @@ export async function fetchRepoPrs(
 	return { prs: allPrs };
 }
 
+/** Escape a string for safe embedding inside a regular expression. */
+function escapeRegExp(value: string): string {
+	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
 /**
  * Discover GitHub repos from workspace paths using git remote.
  * Deduplicates by owner/repo so each GitHub repo is only fetched once.
+ *
+ * Always matches github.com remotes; when `enterpriseUri` is configured (the
+ * `github-enterprise.uri` setting), remotes on that host (e.g. a `tenant.ghe.com`
+ * or on-prem GitHub Enterprise Server) are recognized too.
  */
-export function discoverGitHubRepos(workspacePaths: string[]): { owner: string; repo: string }[] {
+export function discoverGitHubRepos(workspacePaths: string[], enterpriseUri?: string): { owner: string; repo: string }[] {
 	const seen = new Set<string>();
 	const repos: { owner: string; repo: string }[] = [];
+	let enterpriseHost: string | undefined;
+	if (enterpriseUri) {
+		try { enterpriseHost = new URL(enterpriseUri).host; } catch { /* ignore invalid URI — fall back to github.com only */ }
+	}
+	const hostAlternation = enterpriseHost ? `github\\.com|${escapeRegExp(enterpriseHost)}` : 'github\\.com';
+	const remotePattern = new RegExp(`(?:${hostAlternation})[:/]([^/]+)\\/([^/\\s]+?)(?:\\.git)?$`, 'i');
 	for (const workspacePath of workspacePaths) {
 		try {
 			const remote = childProcess.execSync('git remote get-url origin', {
@@ -450,8 +470,7 @@ export function discoverGitHubRepos(workspacePaths: string[]): { owner: string; 
 				timeout: 3000,
 				stdio: ['pipe', 'pipe', 'pipe'],
 			}).trim();
-			// Only process github.com remotes
-			const match = remote.match(/github\.com[:/]([^/]+)\/([^/\s]+?)(?:\.git)?$/i);
+			const match = remote.match(remotePattern);
 			if (!match) { continue; }
 			const key = `${match[1]}/${match[2]}`.toLowerCase();
 			if (seen.has(key)) { continue; }

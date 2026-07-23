@@ -7,6 +7,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ### Features
 - Model Efficiency section in Usage Analysis: per-model one-shot edit rate, retry rate, self-correction rate, cost per turn, cost per edit, output tokens per turn, and cache hit rate, with sortable columns and period switcher (#1649)
 - Insight card that flags models with high edit-retry rates and compares them against your best-performing model (#1649)
+- GitHub API requests (PR stats, cloud-agent sessions, Copilot plan info) now honor VS Code's `github-enterprise.uri` setting, so they target a GHE.com or GitHub Enterprise Server host instead of always hitting github.com — matching where the user actually signed in
 
 ### Bug Fixes
 - Claude Code: attribute multi-day session tokens to the day each turn actually occurred instead of collapsing everything onto the session's start day, and discover subagent/workflow transcripts under `<sessionId>/subagents/**` that were previously silently excluded (#1608)
