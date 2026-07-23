@@ -1,6 +1,20 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
-import { deriveGitHubApiEndpoints } from '../../src/githubApiConfig';
+import * as vscode from 'vscode';
+import { deriveGitHubApiEndpoints, getGitHubAuthProviderId } from '../../src/githubApiConfig';
+
+/** Temporarily stub `github-enterprise.uri` for the duration of the callback. */
+function withEnterpriseUri<T>(uri: string | undefined, fn: () => T): T {
+	const original = vscode.workspace.getConfiguration;
+	(vscode.workspace as any).getConfiguration = () => ({
+		get: (key: string) => (key === 'github-enterprise.uri' ? uri : undefined),
+	});
+	try {
+		return fn();
+	} finally {
+		vscode.workspace.getConfiguration = original;
+	}
+}
 
 // ---------------------------------------------------------------------------
 // deriveGitHubApiEndpoints — pure function, no I/O or VS Code dependency
@@ -35,4 +49,32 @@ test('deriveGitHubApiEndpoints: derives api.<tenant> subdomain for GHE.com (data
 test('deriveGitHubApiEndpoints: derives /api/v3 and /api/graphql for on-prem GitHub Enterprise Server', () => {
 	const endpoints = deriveGitHubApiEndpoints('https://github.acme-corp.com');
 	assert.deepEqual(endpoints, { hostname: 'github.acme-corp.com', restPathPrefix: '/api/v3', graphQlPath: '/api/graphql' });
+});
+
+// ---------------------------------------------------------------------------
+// getGitHubAuthProviderId — decides which vscode.authentication provider to use
+// ---------------------------------------------------------------------------
+
+test('getGitHubAuthProviderId: returns "github" when no enterprise URI is configured', () => {
+	withEnterpriseUri(undefined, () => {
+		assert.equal(getGitHubAuthProviderId(), 'github');
+	});
+});
+
+test('getGitHubAuthProviderId: returns "github" for a github.com URI', () => {
+	withEnterpriseUri('https://github.com', () => {
+		assert.equal(getGitHubAuthProviderId(), 'github');
+	});
+});
+
+test('getGitHubAuthProviderId: returns "github-enterprise" for a GHE.com tenant URI', () => {
+	withEnterpriseUri('https://customer.ghe.com', () => {
+		assert.equal(getGitHubAuthProviderId(), 'github-enterprise');
+	});
+});
+
+test('getGitHubAuthProviderId: returns "github-enterprise" for an on-prem GitHub Enterprise Server URI', () => {
+	withEnterpriseUri('https://github.acme-corp.com', () => {
+		assert.equal(getGitHubAuthProviderId(), 'github-enterprise');
+	});
 });
