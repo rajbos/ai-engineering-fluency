@@ -64,12 +64,20 @@ jobs:
         STABLE_VERSION=$(node -p "require('./vscode-extension/package.json').version")
         MAJOR=$(echo "$STABLE_VERSION" | cut -d. -f1)
         MINOR=$(echo "$STABLE_VERSION" | cut -d. -f2)
-        # Patch = YYYYMMDD — unique per day, always higher than any normal patch number
         PATCH_DATE=$(date +%Y%m%d)
-        PRE_RELEASE_VERSION="${MAJOR}.${MINOR}.${PATCH_DATE}"
+
+        # Patch = YYYYMMDD + a 2-digit build counter (01, 02, ...) — unique per day, and unique
+        # per run within a day so a manual re-run (e.g. after merging a fix) doesn't collide with
+        # a version already published today. Always keeping the same digit width (date + 2 digits)
+        # keeps versions strictly increasing both within a day and across days, which the
+        # Marketplace requires.
+        EXISTING_COUNT=$(git tag --list "vscode/nightly/v${MAJOR}.${MINOR}.${PATCH_DATE}*" | wc -l)
+        BUILD_NUM=$((EXISTING_COUNT + 1))
+        BUILD_SUFFIX=$(printf "%02d" "$BUILD_NUM")
+        PRE_RELEASE_VERSION="${MAJOR}.${MINOR}.${PATCH_DATE}${BUILD_SUFFIX}"
         echo "version=$PRE_RELEASE_VERSION" >> "$GITHUB_OUTPUT"
         echo "stable_version=$STABLE_VERSION" >> "$GITHUB_OUTPUT"
-        echo "Pre-release version: $PRE_RELEASE_VERSION (based on stable $STABLE_VERSION)"
+        echo "Pre-release version: $PRE_RELEASE_VERSION (based on stable $STABLE_VERSION, build #$BUILD_NUM today)"
 
     - name: Bump version in package.json (no commit — build only)
       if: steps.check_changes.outputs.has_changes == 'true'
