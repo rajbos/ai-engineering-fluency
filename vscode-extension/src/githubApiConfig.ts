@@ -71,6 +71,17 @@ export function getGitHubApiEndpoints(): GitHubApiEndpoints {
 	return deriveGitHubApiEndpoints(getConfiguredGitHubEnterpriseUri());
 }
 
+/**
+ * The `vscode.authentication` provider ID to use for the current configuration. VS Code ships two
+ * built-in GitHub auth providers: `github` (authenticates against github.com) and
+ * `github-enterprise` (authenticates against the host configured via `github-enterprise.uri`).
+ * This mirrors `getGitHubApiEndpoints()` so the auth provider decision is always consistent with
+ * the API host we end up calling.
+ */
+export function getGitHubAuthProviderId(): string {
+	return getGitHubApiEndpoints().hostname === GITHUB_API_HOSTNAME ? 'github' : 'github-enterprise';
+}
+
 /** User-Agent header value sent with all GitHub API requests. */
 export const GITHUB_API_USER_AGENT = 'copilot-token-tracker';
 

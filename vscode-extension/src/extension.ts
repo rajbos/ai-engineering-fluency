@@ -203,7 +203,7 @@ import {
 	type RepoPrStatsResult,
 } from './githubPrService';
 import { fetchAgentSessionsForRepo } from './agentSessionsService';
-import { getConfiguredGitHubEnterpriseUri } from './githubApiConfig';
+import { getConfiguredGitHubEnterpriseUri, getGitHubAuthProviderId } from './githubApiConfig';
 
 // --- View regression ---
 import {
@@ -1318,9 +1318,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private setupGitHubAuthListener(context: vscode.ExtensionContext): void {
 		context.subscriptions.push(
 			vscode.authentication.onDidChangeSessions(async (e) => {
-				if (e.provider.id !== 'github') { return; }
+				const authProviderId = getGitHubAuthProviderId();
+				if (e.provider.id !== authProviderId) { return; }
 				if (this._githubSignedOutByUser) { return; }
-				const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
+				const session = await vscode.authentication.getSession(authProviderId, ['read:user'], { createIfNone: false });
 				if (session) {
 					this.githubSession = session;
 					await this.context.globalState.update('github.authenticated', true);
@@ -1649,7 +1650,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try {
 			this.log('Attempting GitHub authentication...');
 			const session = await vscode.authentication.getSession(
-				'github',
+				getGitHubAuthProviderId(),
 				['read:user'],
 				{ createIfNone: true }
 			);
@@ -1748,7 +1749,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { createIfNone: false });
 		if (!session) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
@@ -1824,7 +1825,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { createIfNone: false });
 		if (!session) {
 			const result: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
 			this._lastAgentSessionsData = result;
@@ -1899,7 +1900,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 			// Always try silently — never prompt. This picks up sessions from Copilot
 			// or other extensions that already authenticated the user with GitHub.
-			const session = await vscode.authentication.getSession('github', ['read:user'], { createIfNone: false });
+			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { createIfNone: false });
 			if (session) {
 				this.githubSession = session;
 				this.log(`✅ GitHub session found for ${session.account.label}`);
