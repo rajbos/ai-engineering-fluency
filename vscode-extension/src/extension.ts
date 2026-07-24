@@ -2694,7 +2694,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
 		const grams = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} grams`;
 		const liters = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} liters`;
-		tooltip.appendMarkdown(`|  | 📅 Today | 📊 ${secondaryLabel} |\n|---|---|---|\n`);
+		tooltip.appendMarkdown(`|  | 📅 Today | 📊 ${secondaryLabel} |\n|:---|:---|:---|\n`);
 		tooltip.appendMarkdown(`| Tokens : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
 		tooltip.appendMarkdown(`| GitHub Copilot cost : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
 		tooltip.appendMarkdown(`| All providers cost : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
