@@ -160,7 +160,7 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		return exact?.modelUsage ?? {};
 	}
 
-	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
+	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string; repository?: string }> {
 		if (this.store.isCliStoreSession(sessionFile)) {
 			const session = await this.store.readSession(sessionFile);
 			if (!session) { return { title: undefined, firstInteraction: null, lastInteraction: null }; }
@@ -169,6 +169,7 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 				firstInteraction: session.created_at,
 				lastInteraction: session.updated_at,
 				workspacePath: session.cwd ?? undefined,
+				repository: session.repository ?? undefined,
 			};
 		}
 		return { title: undefined, firstInteraction: null, lastInteraction: null };

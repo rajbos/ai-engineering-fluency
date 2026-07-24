@@ -67,6 +67,34 @@ export function normalizeToRepoRoot(p: string): string {
 }
 
 /**
+ * Derive a repository display name from a session's workspace/cwd path.
+ *
+ * Two agent-worktree layouts exist and place the repo folder on opposite sides of
+ * the "copilot-worktrees" marker:
+ *   - Copilot CLI app store:  "<home>/.copilot/copilot-worktrees/<repo>/<worktree>[/...]" -> "<repo>"
+ *     (the repo folder comes *after* the marker)
+ *   - User-repo / Claude:     "<repo>/copilot-worktrees/<name>[/...]"                     -> "<repo>"
+ *     "<repo>/.claude/worktrees/<name>[/...]"                                             -> "<repo>"
+ *     (the repo folder comes *before* the marker; handled by normalizeToRepoRoot)
+ *
+ * Using a plain path.basename() on an app-store worktree path yields the worktree
+ * name (e.g. "rajbos-supreme-carnival") instead of the repository — this helper
+ * returns the repository folder name instead. Falls back to the last path segment.
+ */
+export function getRepoNameFromWorkspacePath(p: string): string {
+	const segments = splitNormalizedPath(p);
+	const lower = segments.map(s => s.toLowerCase());
+	const wtIdx = lower.lastIndexOf('copilot-worktrees');
+	// App-store layout: repo folder is the segment right after the marker, which is
+	// itself nested directly under the ".copilot" store directory.
+	if (wtIdx > 0 && lower[wtIdx - 1] === '.copilot' && wtIdx + 1 < segments.length) {
+		return segments[wtIdx + 1];
+	}
+	const rootSegments = splitNormalizedPath(normalizeToRepoRoot(p));
+	return rootSegments.length > 0 ? rootSegments[rootSegments.length - 1] : path.basename(p);
+}
+
+/**
  * Strip the synthetic leading slash from Windows drive-letter URI paths.
  * Example: "/C:/repo/file.ts" -> "C:/repo/file.ts".
  */

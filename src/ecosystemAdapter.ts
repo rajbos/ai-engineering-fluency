@@ -76,12 +76,15 @@ export interface IEcosystemAdapter {
 	/**
 	 * Extract session metadata.
 	 * workspacePath is the raw cwd / workspace directory path if known by this ecosystem.
+	 * repository is the authoritative repository identifier (e.g. "owner/repo") when the
+	 * ecosystem records it directly, preferred over deriving a name from workspacePath.
 	 */
 	getMeta(sessionFile: string): Promise<{
 		title: string | undefined;
 		firstInteraction: string | null;
 		lastInteraction: string | null;
 		workspacePath?: string;
+		repository?: string;
 	}>;
 
 	/**
