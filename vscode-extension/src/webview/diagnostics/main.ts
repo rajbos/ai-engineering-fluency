@@ -1943,11 +1943,9 @@ function wireNavButtons(): void {
   wireExtensionPointButtons(vscode);
 }
 
-function setupButtonHandlers(): void {
-  document.getElementById("btn-copy")?.addEventListener("click", () => {
-    vscode.postMessage({ command: "copyReport" });
-  });
-
+/** Wires the "Copy Summary Text" button on the Share Card tab. Re-run after
+ * `reRenderShareCard()` replaces the tab's markup, since the button element is recreated. */
+function setupShareSummaryButtonHandler(): void {
   document.getElementById("btn-copy-share-summary")?.addEventListener("click", () => {
     const editorStats = getEditorStats(storedDetailedFiles);
     const editors = Object.keys(editorStats).sort((a, b) => editorStats[b].count - editorStats[a].count);
@@ -1957,6 +1955,20 @@ function setupButtonHandlers(): void {
     const text = buildShareSummaryText(editors, editorStats, totalSessions, totalInteractions, totalTokens);
     vscode.postMessage({ command: "copyText", text });
   });
+}
+
+/** Re-renders the Share Card tab once session files have finished loading, since it is
+ * initially rendered with an empty file list before the async load completes. */
+function reRenderShareCard(): void {
+  replaceTabContent("share", renderShareCardTab(storedDetailedFiles), setupShareSummaryButtonHandler);
+}
+
+function setupButtonHandlers(): void {
+  document.getElementById("btn-copy")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "copyReport" });
+  });
+
+  setupShareSummaryButtonHandler();
 
   document.getElementById("btn-issue")?.addEventListener("click", () => {
     vscode.postMessage({ command: "openIssue" });
@@ -2289,6 +2301,7 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
   triggerModelUsageAnalysis();
 
   reRenderTable();
+  reRenderShareCard();
 }
 
 function handleCacheCleared(): void {
