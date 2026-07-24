@@ -8384,12 +8384,19 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         if (typeof message.key === 'string' && typeof message.value === 'number') { await this.dispatch('setDebugCounter:diagnostics', () => this.diagHandleSetDebugCounter(message.key, message.value)); } break;
       case "setDebugFlag":
         if (typeof message.key === 'string' && typeof message.value === 'boolean') { await this.dispatch('setDebugFlag:diagnostics', () => this.diagHandleSetDebugFlag(message.key, message.value)); } break;
+      case "copyText":
+        if (typeof message.text === 'string') { await this.dispatch('copyText:diagnostics', () => this.diagHandleCopyText(message.text)); } break;
     }
   }
 
   private async diagHandleCopyReport(): Promise<void> {
     await vscode.env.clipboard.writeText(this.lastDiagnosticReport);
     vscode.window.showInformationMessage("Diagnostic report copied to clipboard");
+  }
+
+  private async diagHandleCopyText(text: string): Promise<void> {
+    await vscode.env.clipboard.writeText(text);
+    vscode.window.showInformationMessage("Summary copied to clipboard");
   }
 
   private async diagHandleOpenIssue(): Promise<void> {
