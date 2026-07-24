@@ -691,7 +691,16 @@ function buildShareSummaryText(
 
 /** Renders a screenshot-friendly "Share Card" tab summarizing the detected editors — meant to be
  * shared in social media posts, mirroring the visual style of the startup loading screen. */
-function renderShareCardTab(detailedFiles: SessionFileDetails[]): string {
+function renderShareCardTab(detailedFiles: SessionFileDetails[], isLoadingSessions: boolean = false): string {
+  if (isLoadingSessions) {
+    return `<div id="tab-share" class="tab-content">
+      <div class="info-box">
+        <div class="info-box-title">📸 Share Card</div>
+        <div>A snapshot of your AI coding toolbox — screenshot this card to share your editor mix on social media.</div>
+      </div>
+      <div class="loading-state"><div class="loading-spinner">⏳</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="share-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>
+    </div>`;
+  }
   if (detailedFiles.length === 0) {
     return `<div id="tab-share" class="tab-content">
       <div class="info-box">
@@ -2270,6 +2279,9 @@ function handleSessionFilesLoadProgress(message: DiagMessage): void {
   const sessionSubtext = document.getElementById("session-loading-subtext");
   if (sessionSubtext) { sessionSubtext.textContent = progressText; }
 
+  const shareSubtext = document.getElementById("share-loading-subtext");
+  if (shareSubtext) { shareSubtext.textContent = progressText; }
+
   const modelUsageStatus = document.getElementById("model-usage-status");
   if (modelUsageStatus) {
     modelUsageStatus.textContent = total > 0 ? `⏳ Loading sessions… (${processed}/${total})` : "⏳ Loading sessions…";
@@ -2977,7 +2989,7 @@ ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 <div id="tab-path-analyzer" class="tab-content">
 ${renderFolderAnalyzerTab()}
 </div>
-${renderShareCardTab(detailedFiles)}
+${renderShareCardTab(detailedFiles, isLoading)}
 <div id="tab-model-usage" class="tab-content">
 ${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
