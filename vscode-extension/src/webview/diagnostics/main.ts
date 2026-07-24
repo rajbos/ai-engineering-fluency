@@ -674,6 +674,63 @@ function flagRow(key: string, label: string, value: boolean): string {
     </tr>`;
 }
 
+/** Builds the plain-text version of the share summary, used by the "Copy Summary Text" button. */
+function buildShareSummaryText(
+  editors: string[],
+  editorStats: Record<string, { count: number; interactions: number }>,
+  totalSessions: number,
+  totalInteractions: number,
+  totalTokens: number,
+): string {
+  const editorList = editors
+    .map((editor) => `${getEditorIcon(editor)} ${editor} (${editorStats[editor].count})`)
+    .join(", ");
+  return `My AI Coding Toolbox — ${editors.length} editor${editors.length === 1 ? "" : "s"} detected: ${editorList}. ` +
+    `${totalSessions} sessions, ${totalInteractions} interactions, ${formatTokenCount(totalTokens)} tokens in the last 14 days. #AIEngineeringFluency`;
+}
+
+/** Renders a screenshot-friendly "Share Card" tab summarizing the detected editors — meant to be
+ * shared in social media posts, mirroring the visual style of the startup loading screen. */
+function renderShareCardTab(detailedFiles: SessionFileDetails[]): string {
+  if (detailedFiles.length === 0) {
+    return `<div id="tab-share" class="tab-content">
+      <div class="info-box">
+        <div class="info-box-title">📸 Share Card</div>
+        <div>No session activity found yet. Once you have some AI coding sessions, a shareable summary card will appear here.</div>
+      </div>
+    </div>`;
+  }
+  const editorStats = getEditorStats(detailedFiles);
+  const editors = Object.keys(editorStats).sort((a, b) => editorStats[b].count - editorStats[a].count);
+  const totalSessions = detailedFiles.length;
+  const totalInteractions = detailedFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+  const totalTokens = detailedFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+  const pills = editors
+    .map((editor) => `<div class="share-pill"><span>${getEditorIcon(editor)}</span><span>${escapeHtml(editor)}</span><span class="share-pill-count">${editorStats[editor].count}</span></div>`)
+    .join("");
+  return `<div id="tab-share" class="tab-content">
+    <div class="info-box">
+      <div class="info-box-title">📸 Share Card</div>
+      <div>A snapshot of your AI coding toolbox — screenshot this card to share your editor mix on social media.</div>
+    </div>
+    <div class="share-card">
+      <div class="share-badge">🤖 AI Engineering Fluency</div>
+      <div class="share-title">My AI Coding Toolbox</div>
+      <div class="share-subtitle">Last 14 days · ${editors.length} editor${editors.length === 1 ? "" : "s"} detected</div>
+      <div class="share-pills">${pills}</div>
+      <div class="share-stats">
+        <div class="share-stat"><div class="share-stat-value">${totalSessions}</div><div class="share-stat-label">Sessions</div></div>
+        <div class="share-stat"><div class="share-stat-value">${totalInteractions}</div><div class="share-stat-label">Interactions</div></div>
+        <div class="share-stat"><div class="share-stat-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div><div class="share-stat-label">Tokens</div></div>
+        <div class="share-stat"><div class="share-stat-value">${editors.length}</div><div class="share-stat-label">Editors</div></div>
+      </div>
+    </div>
+    <div class="button-group" style="margin-top: 12px;">
+      <button class="button secondary" id="btn-copy-share-summary"><span>📋</span><span>Copy Summary Text</span></button>
+    </div>
+  </div>`;
+}
+
 function renderDebugTab(counters: GlobalStateCounters | undefined): string {
   const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '' };
   return `
@@ -1891,6 +1948,16 @@ function setupButtonHandlers(): void {
     vscode.postMessage({ command: "copyReport" });
   });
 
+  document.getElementById("btn-copy-share-summary")?.addEventListener("click", () => {
+    const editorStats = getEditorStats(storedDetailedFiles);
+    const editors = Object.keys(editorStats).sort((a, b) => editorStats[b].count - editorStats[a].count);
+    const totalSessions = storedDetailedFiles.length;
+    const totalInteractions = storedDetailedFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+    const totalTokens = storedDetailedFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+    const text = buildShareSummaryText(editors, editorStats, totalSessions, totalInteractions, totalTokens);
+    vscode.postMessage({ command: "copyText", text });
+  });
+
   document.getElementById("btn-issue")?.addEventListener("click", () => {
     vscode.postMessage({ command: "openIssue" });
   });
@@ -2858,6 +2925,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <button class="tab" data-tab="sessions">📁 Session Files (${detailedFiles.length})</button>
 <button class="tab" data-tab="cache">💾 Cache</button>
 <button class="tab" data-tab="path-analyzer">🔬 Path Analyzer</button>
+<button class="tab" data-tab="share">📸 Share Card</button>
 </div>
 
 <div class="tabs leaf-tabs" data-group="research" style="display: none;">
@@ -2876,13 +2944,10 @@ ${data.isDebugMode ? '<button class="tab" data-tab="debug">🐛 Debug</button>' 
 ${buildDiagReportTabHtml(escapedReport)}
 
 <div id="tab-sessions" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">📁 Session File Analysis</div>
-<div>
+<div class="info-box"><div class="info-box-title">📁 Session File Analysis</div><div>
 This tab shows session files with activity in the last 14 days from all detected editors. </br>
 Click on an editor panel to filter, click column headers to sort, and click a file name to open it.
-</div>
-</div>
+</div></div>
 <div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
 </div>
 
@@ -2899,6 +2964,7 @@ ${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ''}
 <div id="tab-path-analyzer" class="tab-content">
 ${renderFolderAnalyzerTab()}
 </div>
+${renderShareCardTab(detailedFiles)}
 <div id="tab-model-usage" class="tab-content">
 ${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
