@@ -50,6 +50,25 @@ def _normalize_separators(value: str) -> str:
     return value.replace(".", "_").replace("-", "_")
 
 
+def _compile_prefix_pattern(prefix: str) -> re.Pattern[str]:
+    """Build a regex that also matches numeric-suffixed collision variants.
+
+    Some hosts append a digit to a server's registered name when there is a
+    naming collision (e.g. two "context7" MCP servers become "context7" and
+    "context73"). Allow optional trailing digits right before the prefix's
+    final separator so those collision variants still canonicalize to the
+    same key as the un-suffixed prefix.
+    """
+    base, sep = prefix[:-1], prefix[-1]
+    return re.compile(f"^{re.escape(base)}\\d*{re.escape(sep)}")
+
+
+_CANONICAL_PREFIX_PATTERNS: list[tuple[re.Pattern[str], str]] = [
+    (_compile_prefix_pattern(prefix), replacement)
+    for prefix, replacement in _CANONICAL_PREFIX_RULES
+]
+
+
 def canonicalize_tool_id(tool_id: str) -> str:
     """Return a canonical form of a tool ID for duplicate comparison.
 
@@ -57,9 +76,10 @@ def canonicalize_tool_id(tool_id: str) -> str:
     whether two tool IDs are likely the same tool under different registrations.
     """
     lowered = tool_id.lower()
-    for prefix, replacement in _CANONICAL_PREFIX_RULES:
-        if lowered.startswith(prefix):
-            action = tool_id[len(prefix):]
+    for pattern, replacement in _CANONICAL_PREFIX_PATTERNS:
+        match = pattern.match(lowered)
+        if match:
+            action = tool_id[match.end():]
             return replacement + _normalize_separators(action)
     return _normalize_separators(tool_id)
 
