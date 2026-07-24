@@ -3245,15 +3245,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private buildCostParts(show: StatusBarDisplaySetting, stats: DetailedStats): string[] {
 		const fmt = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+		const totalCost = (period: PeriodStats) => {
+			const billingTotal = this.sumBillingGroupCosts(period.billingGroupCosts);
+			return billingTotal > 0 || period.billingGroupCosts ? billingTotal : (period.estimatedCostCopilot ?? 0);
+		};
 		const parts: string[] = [];
 		if (show === 'today' || show === 'both' || show === 'todayAndCurrentMonth') {
-			parts.push(fmt(stats.today.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.today)));
 		}
 		if (show === 'last30days' || show === 'both') {
-			parts.push(fmt(stats.last30Days.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.last30Days)));
 		}
 		if (show === 'currentMonth' || show === 'todayAndCurrentMonth') {
-			parts.push(fmt(stats.month.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.month)));
 		}
 		return parts;
 	}
