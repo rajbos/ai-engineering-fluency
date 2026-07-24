@@ -28,7 +28,8 @@ export {
 	normalizePathForComparison,
 	normalizePathForDedup,
 	normalizePathSeparators,
-	normalizeToRepoRoot
+	normalizeToRepoRoot,
+	getRepoNameFromWorkspacePath
 } from './utils/pathUtils';
 
 

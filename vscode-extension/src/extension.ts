@@ -177,6 +177,7 @@ import {
   normalizePath as _normalizePath,
   normalizePathForDedup as _normalizePathForDedup,
   normalizeToRepoRoot as _normalizeToRepoRoot,
+  getRepoNameFromWorkspacePath as _getRepoNameFromWorkspacePath,
 } from '../../src/workspaceHelpers';
 
 // --- Chart building ---
@@ -5248,7 +5249,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.interactions = interactionCount;
 		details.editorRoot = eco.getEditorRoot(sessionFile);
 		details.editorName = getEcosystemDisplayName(eco, sessionFile);
-		if (meta.workspacePath) { details.repository = path.basename(meta.workspacePath); details.workspacePath = meta.workspacePath; }
+		if (meta.workspacePath) {
+			// Prefer the ecosystem's authoritative repository (e.g. Copilot CLI's DB "owner/repo"
+			// column). Only fall back to deriving a name from the path when it's absent, and use a
+			// worktree-aware derivation so app-store worktree paths resolve to the repo folder
+			// instead of the transient worktree name.
+			details.repository = meta.repository || _getRepoNameFromWorkspacePath(meta.workspacePath);
+			details.workspacePath = meta.workspacePath;
+		}
 		await this.updateCacheWithSessionDetails(sessionFile, stat, details, tokenResult, modelUsage);
 		return details;
 	}
