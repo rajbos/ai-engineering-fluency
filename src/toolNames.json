@@ -1135,4 +1135,5 @@
   ,"mcp_github_mcp_s2_add_issue_comment": "GitHub MCP (Remote): Add Issue Comment"
   ,"mcp_github_mcp_s2_issue_read": "GitHub MCP (Remote): Issue Read"
   ,"mcp_github_mcp_s2_issue_write": "GitHub MCP (Remote): Issue Write"
+  ,"str_replace_editor": "Editor Replace"
 }
