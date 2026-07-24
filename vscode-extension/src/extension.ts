@@ -2694,7 +2694,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
 		const grams = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} grams`;
 		const liters = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} liters`;
-		tooltip.appendMarkdown(`|  | 📅 Today | 📊 ${secondaryLabel} |\n|---|---|---|\n`);
+		tooltip.appendMarkdown(`|  | 📅 Today | 📊 ${secondaryLabel} |\n|:---|:---|:---|\n`);
 		tooltip.appendMarkdown(`| Tokens : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
 		tooltip.appendMarkdown(`| GitHub Copilot cost : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
 		tooltip.appendMarkdown(`| All providers cost : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
@@ -3101,6 +3101,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				waterUsage: todayWater, estimatedCost: this.calculateEstimatedCost(todayStats.modelUsage),
 				estimatedCostCopilot: todayCopilotCost,
 				billingGroupCosts: this.computeBillingGroupCosts(todayStats.editorModelUsage, todayCopilotCost),
+				editorModelUsage: todayStats.editorModelUsage,
 				...(todayStats.cachedTokens > 0 ? { cachedTokens: todayStats.cachedTokens } : {})
 			},
 			month: {
@@ -3114,6 +3115,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				waterUsage: monthWater, estimatedCost: this.calculateEstimatedCost(monthStats.modelUsage),
 				estimatedCostCopilot: monthCopilotCost,
 				billingGroupCosts: this.computeBillingGroupCosts(monthStats.editorModelUsage, monthCopilotCost),
+				editorModelUsage: monthStats.editorModelUsage,
 				...(monthStats.cachedTokens > 0 ? { cachedTokens: monthStats.cachedTokens } : {})
 			},
 			lastMonth: {
@@ -3127,6 +3129,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				waterUsage: lastMonthWater, estimatedCost: this.calculateEstimatedCost(lastMonthStats.modelUsage),
 				estimatedCostCopilot: lastMonthCopilotCost,
 				billingGroupCosts: this.computeBillingGroupCosts(lastMonthStats.editorModelUsage, lastMonthCopilotCost),
+				editorModelUsage: lastMonthStats.editorModelUsage,
 				...(lastMonthStats.cachedTokens > 0 ? { cachedTokens: lastMonthStats.cachedTokens } : {})
 			},
 			last30Days: {
@@ -3140,6 +3143,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				waterUsage: last30DaysWater, estimatedCost: this.calculateEstimatedCost(last30DaysStats.modelUsage),
 				estimatedCostCopilot: last30DaysCopilotCost,
 				billingGroupCosts: this.computeBillingGroupCosts(last30DaysStats.editorModelUsage, last30DaysCopilotCost),
+				editorModelUsage: last30DaysStats.editorModelUsage,
 				...(last30DaysStats.cachedTokens > 0 ? { cachedTokens: last30DaysStats.cachedTokens } : {})
 			},
 			lastUpdated: now
@@ -3241,15 +3245,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private buildCostParts(show: StatusBarDisplaySetting, stats: DetailedStats): string[] {
 		const fmt = (v: number) => `$${v.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+		const totalCost = (period: PeriodStats) => {
+			const billingTotal = this.sumBillingGroupCosts(period.billingGroupCosts);
+			return billingTotal > 0 || period.billingGroupCosts ? billingTotal : (period.estimatedCostCopilot ?? 0);
+		};
 		const parts: string[] = [];
 		if (show === 'today' || show === 'both' || show === 'todayAndCurrentMonth') {
-			parts.push(fmt(stats.today.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.today)));
 		}
 		if (show === 'last30days' || show === 'both') {
-			parts.push(fmt(stats.last30Days.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.last30Days)));
 		}
 		if (show === 'currentMonth' || show === 'todayAndCurrentMonth') {
-			parts.push(fmt(stats.month.estimatedCostCopilot ?? 0));
+			parts.push(fmt(totalCost(stats.month)));
 		}
 		return parts;
 	}
@@ -8126,6 +8134,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     const sortSettings = this.context.globalState.get('details.sortSettings', {
       editor: { key: 'name', dir: 'asc' },
       model: { key: 'name', dir: 'asc' },
+      excludedProviders: [],
     });
     const dataWithBackend = {
       ...stats,
