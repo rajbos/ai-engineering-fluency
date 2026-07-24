@@ -10,6 +10,7 @@ import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import type { ModelUsage } from '../shared/types';
+import { getBillingGroup } from '../../../../src/chartDataBuilder';
 
 type EditorUsage = Record<string, { tokens: number; sessions: number }>;
 type TableSortKey = 'name' | 'today' | 'last30Days' | 'month' | 'lastMonth' | 'projected';
@@ -31,6 +32,14 @@ waterUsage: number;
 estimatedCost: number;
 estimatedCostCopilot?: number;
 cachedTokens?: number;
+/**
+ * Estimated cost per billing group (e.g. "GitHub Copilot", "Anthropic", "Google")
+ * for this period in USD. Used to show/filter cost across all providers, not just
+ * GitHub Copilot's UBB billing.
+ */
+billingGroupCosts?: Record<string, number>;
+/** Per-editor model usage breakdown, used to determine which billing group(s) an editor/model belongs to for provider filtering. */
+editorModelUsage?: { [editor: string]: ModelUsage };
 };
 
 type DetailedStats = {
@@ -51,6 +60,8 @@ sortSettings?: {
 editor?: { key?: string; dir?: string };
 model?: { key?: string; dir?: string };
 modelOtherExpanded?: boolean;
+/** Billing-group (provider) names that the user has unchecked in the cost provider filter. */
+excludedProviders?: string[];
 };
 };
 
@@ -67,6 +78,7 @@ type WebviewMessage =
 editor: { key: TableSortKey; dir: SortDir };
 model: { key: TableSortKey; dir: SortDir };
 modelOtherExpanded: boolean;
+excludedProviders: string[];
 }};
 
 /** Aggregated projection values calculated from last-30-days data. */
@@ -107,6 +119,10 @@ let editorSortDir: SortDir = (_initSort?.editor?.dir as SortDir) ?? 'asc';
 let modelSortKey: TableSortKey = (_initSort?.model?.key as TableSortKey) ?? 'name';
 let modelSortDir: SortDir = (_initSort?.model?.dir as SortDir) ?? 'asc';
 let modelOtherExpanded: boolean = (_initSort?.modelOtherExpanded) ?? false;
+/** Billing-group (provider) names deselected in the "Cost by Provider" filter. Empty = all providers included. */
+let excludedProviders: Set<string> = new Set(_initSort?.excludedProviders ?? []);
+/** Last rendered stats, kept so provider-filter toggles can trigger a full re-render. */
+let lastStats: DetailedStats | null = null;
 
 function calculateProjection(last30DaysValue: number): number {
 // Project annual value based on last 30 days average
@@ -218,14 +234,16 @@ return { thead, updateHeaders };
 
 function render(stats: DetailedStats): void {
 setCompactNumbers(stats.compactNumbers !== false);
+lastStats = stats;
 const root = document.getElementById('root');
 if (!root) { return; }
 
+const allProviders = getAllProviders(stats);
 const projectedTokens = Math.round(calculateProjection(stats.last30Days.tokens + stats.last30Days.thinkingTokens));
 const projectedSessions = Math.round(calculateProjection(stats.last30Days.sessions));
 const projectedCo2 = calculateProjection(stats.last30Days.co2);
 const projectedWater = calculateProjection(stats.last30Days.waterUsage);
-const projectedCost = calculateProjection(stats.last30Days.estimatedCost);
+const projectedCost = calculateProjection(totalCostForPeriod(stats.last30Days, allProviders));
 const projectedCostCopilot = calculateProjection(stats.last30Days.estimatedCostCopilot ?? 0);
 const projectedTrees = calculateProjection(stats.last30Days.treesEquivalent);
 
@@ -240,6 +258,11 @@ projectedTrees
 });
 
 wireButtons();
+}
+
+/** Re-renders using the last stats payload — used after the provider filter changes. */
+function rerenderFromLastStats(): void {
+if (lastStats) { render(lastStats); }
 }
 
 function renderShell(
@@ -280,7 +303,10 @@ const isEmptyState = (stats.today.tokens ?? 0) === 0 && (stats.last30Days.tokens
 if (isEmptyState) {
 sections.append(buildEmptyStateSection());
 } else {
-sections.append(buildSummaryCards(stats));
+const providerPanel = buildProviderPanel(stats);
+if (providerPanel) {
+sections.append(providerPanel);
+}
 }
 
 sections.append(buildMetricsSection(stats, projections));
@@ -353,30 +379,10 @@ function buildPlanBadge(stats: DetailedStats): HTMLElement | null {
 	return badge;
 }
 
-/** Creates a single summary card (label above value), matching the chart webview pattern. */
-function buildCard(id: string, label: string, value: string): HTMLElement {
-	const card = el('div', 'card');
-	card.id = id;
-	card.append(el('div', 'card-label', label), el('div', 'card-value', value));
-	return card;
-}
-
-/** Builds the row of hero summary cards shown above the metrics table. */
-function buildSummaryCards(stats: DetailedStats): HTMLElement {
-	const cards = el('div', 'cards');
-	cards.id = 'summary-cards';
-	cards.append(
-		buildCard('card-today-tokens', '📅 Tokens Today', totalTokenCell(stats.today)),
-		buildCard('card-30d-tokens', '📈 Tokens Last 30 Days', totalTokenCell(stats.last30Days)),
-		buildCard('card-month-cost', '💰 Est. Cost This Month (UBB)', formatCost(stats.month.estimatedCostCopilot ?? 0)),
-		buildCard('card-today-sessions', '📂 Sessions Today', formatNumber(stats.today.sessions)),
-	);
-	return cards;
-}
-
 type MetricGroup = { heading: string; rows: MetricRow[] };
 
 function buildMetricsGroups(stats: DetailedStats, projections: Projections): MetricGroup[] {
+	const allProviders = getAllProviders(stats);
 	const tokenRows: MetricRow[] = [
 		{ label: 'Total tokens', labelTooltip: 'All LLM API tokens counted across every call in this period — matches the status bar. When debug logs are available this is the definitive total; otherwise it falls back to per-model attribution or the text-based estimate.', icon: '🟣', color: '#c37bff', today: totalTokenCell(stats.today), last30Days: totalTokenCell(stats.last30Days), month: totalTokenCell(stats.month), lastMonth: totalTokenCell(stats.lastMonth), projected: formatCompact(projections.projectedTokens) },
 		{ label: 'Input tokens', labelTooltip: 'Total prompt tokens sent to the model, including any cache-read tokens (shown separately below).', icon: '⬆️', color: '#c37bff', today: inputTokenCell(stats.today), last30Days: inputTokenCell(stats.last30Days), month: inputTokenCell(stats.month), lastMonth: inputTokenCell(stats.lastMonth), projected: '—' },
@@ -387,7 +393,8 @@ function buildMetricsGroups(stats: DetailedStats, projections: Projections): Met
 		{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
 	];
 	const costRows: MetricRow[] = [
-		{ label: 'Estimated cost (UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
+		{ label: 'Estimated cost (selected providers)', labelTooltip: 'Sum of estimated cost across the providers selected in the Cost by Provider filter below — GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.', icon: '💵', color: '#7ce38b', today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) },
+		{ label: 'Estimated cost (GitHub Copilot UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
 	];
 	const activityRows: MetricRow[] = [
 		{ label: 'Sessions', icon: '📂', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
@@ -408,6 +415,17 @@ function buildGroupHeaderRow(label: string): HTMLTableRowElement {
 	const td = document.createElement('td');
 	td.colSpan = 6;
 	td.textContent = label;
+	tr.append(td);
+	return tr;
+}
+
+/** Builds a single-row, full-width placeholder for tables emptied out by the provider filter. */
+function buildNoDataRow(colSpan: number, message: string): HTMLTableRowElement {
+	const tr = document.createElement('tr');
+	tr.className = 'no-data-row';
+	const td = document.createElement('td');
+	td.colSpan = colSpan;
+	td.textContent = message;
 	tr.append(td);
 	return tr;
 }
@@ -447,6 +465,90 @@ section.append(table);
 return section;
 }
 
+// ---------------------------------------------------------------------------
+// Cost by Provider section
+// ---------------------------------------------------------------------------
+
+/** Emoji shown next to each billing-group/provider name in the provider panel. */
+const PROVIDER_ICONS: Record<string, string> = {
+	'GitHub Copilot': '🐙',
+	'Anthropic': '🅰️',
+	'Google': '🔷',
+	'OpenAI': '🟢',
+	'Mistral AI': '🌬️',
+	'xAI': '✖️',
+	'Microsoft': '🪟',
+	'Alibaba': '🐉',
+	'Other': '❔',
+};
+
+function getProviderIcon(provider: string): string {
+	return PROVIDER_ICONS[provider] ?? '💵';
+}
+
+/** Builds a single clickable provider card; clicking toggles it in/out of `excludedProviders`. */
+function buildProviderCard(stats: DetailedStats, provider: string): HTMLElement {
+	const isExcluded = excludedProviders.has(provider);
+	const card = el('div', `provider-card${isExcluded ? ' provider-card-excluded' : ''}`);
+	card.tabIndex = 0;
+	card.setAttribute('role', 'button');
+	card.setAttribute('aria-pressed', String(!isExcluded));
+	card.title = isExcluded
+		? `${provider} is hidden — click to show it again and include it in the totals below.`
+		: `Click to hide ${provider} — filters it out of the totals and the Editor/Model usage lists below.`;
+
+	card.append(
+		el('div', 'provider-card-label', `${getProviderIcon(provider)} ${provider}`),
+		el('div', 'provider-card-value', formatCost(stats.month.billingGroupCosts?.[provider] || 0)),
+		el('div', 'provider-card-sub', `Today ${formatCost(stats.today.billingGroupCosts?.[provider] || 0)} · 30d ${formatCost(stats.last30Days.billingGroupCosts?.[provider] || 0)}`)
+	);
+
+	const toggle = (): void => {
+		if (excludedProviders.has(provider)) { excludedProviders.delete(provider); } else { excludedProviders.add(provider); }
+		saveSortSettings();
+		rerenderFromLastStats();
+	};
+	card.addEventListener('click', toggle);
+	card.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
+	});
+	return card;
+}
+
+/** Builds the non-interactive "Total (selected)" card summarizing the currently included providers. */
+function buildProviderTotalCard(stats: DetailedStats, allProviders: string[]): HTMLElement {
+	const included = includedProviders(allProviders);
+	const card = el('div', 'provider-card provider-card-total');
+	card.title = `Sum of ${included.length} of ${allProviders.length} selected provider(s).`;
+	card.append(
+		el('div', 'provider-card-label', '∑ Total (selected)'),
+		el('div', 'provider-card-value', formatCost(sumBillingGroupCosts(stats.month.billingGroupCosts, included))),
+		el('div', 'provider-card-sub', `Today ${formatCost(sumBillingGroupCosts(stats.today.billingGroupCosts, included))} · 30d ${formatCost(sumBillingGroupCosts(stats.last30Days.billingGroupCosts, included))}`)
+	);
+	return card;
+}
+
+/**
+ * Builds the "Cost by Provider" panel shown at the top of the page (replacing the old
+ * fixed hero cards). Each provider is a clickable card — clicking toggles it in/out of
+ * `excludedProviders`, which also filters the "Usage by Editor" and "Model Usage" lists
+ * further down the page to just the selected provider(s).
+ */
+function buildProviderPanel(stats: DetailedStats): HTMLElement | null {
+	const allProviders = getAllProviders(stats);
+	if (allProviders.length === 0) { return null; }
+
+	const section = el('div', 'section');
+	section.append(iconHeading('h3', 'credit-card', 'Cost by Provider'));
+	section.append(el('div', 'provider-panel-hint', 'Click a provider to hide/show it — this also filters the Editor & Model usage lists below.'));
+
+	const grid = el('div', 'provider-cards');
+	grid.append(buildProviderTotalCard(stats, allProviders));
+	allProviders.forEach(provider => grid.append(buildProviderCard(stats, provider)));
+	section.append(grid);
+	return section;
+}
+
 function getSortIndicator(colKey: TableSortKey, activeKey: TableSortKey, dir: SortDir): string {
 if (colKey !== activeKey) { return ' ↕'; }
 return dir === 'asc' ? ' ↑' : ' ↓';
@@ -458,9 +560,86 @@ command: 'saveSortSettings',
 settings: {
 editor: { key: editorSortKey, dir: editorSortDir },
 model: { key: modelSortKey, dir: modelSortDir },
-modelOtherExpanded
+modelOtherExpanded,
+excludedProviders: Array.from(excludedProviders)
 }
 });
+}
+
+// ---------------------------------------------------------------------------
+// Cost-by-provider helpers
+// ---------------------------------------------------------------------------
+
+const ALL_PERIODS = ['today', 'last30Days', 'month', 'lastMonth'] as const;
+
+/** Returns every billing-group (provider) name seen across all four periods, "GitHub Copilot" first. */
+function getAllProviders(stats: DetailedStats): string[] {
+const set = new Set<string>();
+ALL_PERIODS.forEach(period => {
+Object.keys(stats[period].billingGroupCosts ?? {}).forEach(p => set.add(p));
+});
+return Array.from(set).sort((a, b) => {
+if (a === 'GitHub Copilot') { return -1; }
+if (b === 'GitHub Copilot') { return 1; }
+return a.localeCompare(b);
+});
+}
+
+/** Providers currently selected (not filtered out) from the given full provider list. */
+function includedProviders(allProviders: string[]): string[] {
+return allProviders.filter(p => !excludedProviders.has(p));
+}
+
+/** Sums the billing-group costs for the given providers only. */
+function sumBillingGroupCosts(billingGroupCosts: Record<string, number> | undefined, providers: string[]): number {
+if (!billingGroupCosts) { return 0; }
+return providers.reduce((s, p) => s + (billingGroupCosts[p] || 0), 0);
+}
+
+/**
+ * Total estimated cost for a period across the currently selected providers.
+ * Falls back to the legacy Copilot-only estimate when no billing-group breakdown
+ * is available (e.g. stale cached data from an older extension version).
+ */
+function totalCostForPeriod(period: PeriodStats, allProviders: string[]): number {
+if (allProviders.length === 0) {
+return period.estimatedCostCopilot ?? period.estimatedCost ?? 0;
+}
+return sumBillingGroupCosts(period.billingGroupCosts, includedProviders(allProviders));
+}
+
+/** Billing group(s) an editor's usage falls into, derived from its per-model breakdown across all periods. */
+function editorBillingGroups(stats: DetailedStats, editor: string): Set<string> {
+	const groups = new Set<string>();
+	ALL_PERIODS.forEach(period => {
+		const modelUsage = stats[period].editorModelUsage?.[editor];
+		if (modelUsage) { Object.keys(modelUsage).forEach(model => groups.add(getBillingGroup(editor, model))); }
+	});
+	return groups;
+}
+
+/** Billing group(s) a model belongs to, derived from every editor that used it across all periods. */
+function modelBillingGroups(stats: DetailedStats, model: string): Set<string> {
+	const groups = new Set<string>();
+	ALL_PERIODS.forEach(period => {
+		const editorModelUsage = stats[period].editorModelUsage;
+		if (!editorModelUsage) { return; }
+		Object.keys(editorModelUsage).forEach(editor => {
+			if (editorModelUsage[editor][model]) { groups.add(getBillingGroup(editor, model)); }
+		});
+	});
+	return groups;
+}
+
+/**
+ * Whether an item (editor or model) should remain visible given the current provider filter.
+ * With nothing excluded, everything is visible. When we have no billing-group data for the
+ * item (e.g. older cached stats), it is never hidden — we only filter what we can attribute.
+ */
+function isVisibleForProviderFilter(groups: Set<string>): boolean {
+	if (excludedProviders.size === 0) { return true; }
+	if (groups.size === 0) { return true; }
+	return Array.from(groups).some(g => !excludedProviders.has(g));
 }
 
 type EditorItem = {
@@ -498,14 +677,14 @@ function buildEditorRow(item: EditorItem, totals: { today: number; last30Days: n
 	return tr;
 }
 
-function buildEditorTbody(stats: DetailedStats, allEditors: string[]): HTMLTableSectionElement {
+function buildEditorTbody(stats: DetailedStats, editors: string[]): HTMLTableSectionElement {
 const totals = {
-	today: Object.values(stats.today.editorUsage).reduce((s, e) => s + e.tokens, 0),
-	last30Days: Object.values(stats.last30Days.editorUsage).reduce((s, e) => s + e.tokens, 0),
-	month: Object.values(stats.month.editorUsage).reduce((s, e) => s + e.tokens, 0),
-	lastMonth: Object.values(stats.lastMonth.editorUsage).reduce((s, e) => s + e.tokens, 0),
+	today: editors.reduce((s, e) => s + (stats.today.editorUsage[e]?.tokens || 0), 0),
+	last30Days: editors.reduce((s, e) => s + (stats.last30Days.editorUsage[e]?.tokens || 0), 0),
+	month: editors.reduce((s, e) => s + (stats.month.editorUsage[e]?.tokens || 0), 0),
+	lastMonth: editors.reduce((s, e) => s + (stats.lastMonth.editorUsage[e]?.tokens || 0), 0),
 };
-const items: EditorItem[] = allEditors.map(editor => {
+const items: EditorItem[] = editors.map(editor => {
 	const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
 	const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
 	const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
@@ -526,6 +705,10 @@ items.sort((a, b) => {
 	return editorSortDir === 'asc' ? cmp : -cmp;
 });
 const tbody = document.createElement('tbody');
+if (items.length === 0) {
+	tbody.append(buildNoDataRow(6, 'No editor usage matches the selected provider filter.'));
+	return tbody;
+}
 items.forEach(item => tbody.append(buildEditorRow(item, totals)));
 return tbody;
 }
@@ -541,6 +724,8 @@ const allEditors = new Set([
 if (allEditors.size === 0) {
 return null;
 }
+
+const visibleEditors = Array.from(allEditors).filter(editor => isVisibleForProviderFilter(editorBillingGroups(stats, editor)));
 
 const section = el('div', 'section');
 const heading = iconHeading('h3', 'device-desktop', 'Usage by Editor');
@@ -569,7 +754,7 @@ editorSortDir = editorSortDir === 'asc' ? 'desc' : 'asc';
 editorSortKey = key;
 editorSortDir = key === 'name' ? 'asc' : 'desc';
 }
-const newTbody = buildEditorTbody(stats, Array.from(allEditors));
+const newTbody = buildEditorTbody(stats, visibleEditors);
 const oldTbody = table.querySelector('tbody');
 if (oldTbody) { table.replaceChild(newTbody, oldTbody); } else { table.append(newTbody); }
 saveSortSettings();
@@ -577,7 +762,7 @@ saveSortSettings();
 );
 
 table.append(thead);
-table.append(buildEditorTbody(stats, Array.from(allEditors)));
+table.append(buildEditorTbody(stats, visibleEditors));
 section.append(table);
 return section;
 }
@@ -721,14 +906,7 @@ if (allModels.size === 0) {
 return null;
 }
 
-// Determine top N models by last30Days usage; the rest go into the "Other" group
-const sortedByLast30Days = Array.from(allModels).sort((a, b) => {
-const aUsage = stats.last30Days.modelUsage[a] || { inputTokens: 0, outputTokens: 0 };
-const bUsage = stats.last30Days.modelUsage[b] || { inputTokens: 0, outputTokens: 0 };
-return (bUsage.inputTokens + bUsage.outputTokens) - (aUsage.inputTokens + aUsage.outputTokens);
-});
-const topModels = sortedByLast30Days.slice(0, TOP_N_MODELS);
-const otherModels = sortedByLast30Days.slice(TOP_N_MODELS);
+const visibleModels = new Set(Array.from(allModels).filter(model => isVisibleForProviderFilter(modelBillingGroups(stats, model))));
 
 const section = el('div', 'section');
 const heading = iconHeading('h3', 'symbol-numeric', 'Model Usage (Tokens)');
@@ -736,6 +914,23 @@ section.append(heading);
 
 const table = document.createElement('table');
 table.className = 'stats-table';
+
+if (visibleModels.size === 0) {
+const tbody = document.createElement('tbody');
+tbody.append(buildNoDataRow(6, 'No model usage matches the selected provider filter.'));
+table.append(tbody);
+section.append(table);
+return section;
+}
+
+// Determine top N models by last30Days usage; the rest go into the "Other" group
+const sortedByLast30Days = Array.from(visibleModels).sort((a, b) => {
+const aUsage = stats.last30Days.modelUsage[a] || { inputTokens: 0, outputTokens: 0 };
+const bUsage = stats.last30Days.modelUsage[b] || { inputTokens: 0, outputTokens: 0 };
+return (bUsage.inputTokens + bUsage.outputTokens) - (aUsage.inputTokens + aUsage.outputTokens);
+});
+const topModels = sortedByLast30Days.slice(0, TOP_N_MODELS);
+const otherModels = sortedByLast30Days.slice(TOP_N_MODELS);
 
 const modelColHeaders: ColHeader[] = [
 { icon: '🧠', text: 'Model', key: 'name' },
@@ -848,6 +1043,7 @@ notes.className = 'notes';
 
 const items = [
 'Cost (UBB) uses GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what you are billed under Usage Based Billing.',
+'"Estimated cost (selected providers)" and the summary cost card sum estimated spend across all providers (GitHub Copilot, Anthropic, Google, OpenAI, …); use the "⚙ Providers" filter in the Cost by Provider section to include/exclude specific providers.',
 'Estimated CO₂ is based on ~0.2 g CO₂e per 1,000 tokens.',
 'Estimated water usage is based on ~0.3 L per 1,000 tokens.',
 'Tree equivalent represents the fraction of a single mature tree\'s annual CO₂ absorption (~21 kg/year).'

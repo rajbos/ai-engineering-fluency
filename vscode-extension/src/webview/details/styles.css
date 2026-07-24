@@ -51,35 +51,72 @@ body {
 	cursor: help;
 }
 
-.cards {
+.provider-panel-hint {
+	color: var(--text-secondary);
+	font-size: 11px;
+	margin: -4px 0 10px;
+}
+
+.provider-cards {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
 	gap: 10px;
 	text-align: center;
 }
 
-.card {
+.provider-card {
 	background: var(--bg-secondary);
 	border: 1px solid var(--border-color);
 	border-radius: 10px;
 	padding: 12px;
 	box-shadow: 0 4px 10px var(--shadow-color);
 	text-align: center;
+	cursor: pointer;
+	transition: background-color 0.1s ease, opacity 0.1s ease;
 }
 
-.card-label {
+.provider-card:hover {
+	background: var(--list-hover-bg);
+}
+
+.provider-card-excluded {
+	opacity: 0.45;
+}
+
+.provider-card-total {
+	cursor: default;
+	border-style: dashed;
+}
+
+.provider-card-total:hover {
+	background: var(--bg-secondary);
+}
+
+.provider-card-label {
 	color: var(--text-secondary);
 	font-size: 11px;
 	margin-bottom: 6px;
 }
 
-.card-value {
+.provider-card-value {
 	color: var(--text-primary);
 	font-size: 18px;
 	font-weight: 700;
 }
 
+.provider-card-sub {
+	color: var(--text-secondary);
+	font-size: 10px;
+	margin-top: 4px;
+}
 
+.no-data-row td {
+	text-align: center;
+	color: var(--text-secondary);
+	font-size: 12px;
+	padding: 14px;
+	font-style: italic;
+}
 
 .sections {
 	display: flex;
