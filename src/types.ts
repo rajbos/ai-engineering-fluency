@@ -135,6 +135,12 @@ export interface PeriodStats {
    * rates for all others.
    */
   billingGroupCosts?: Record<string, number>;
+  /**
+   * Per-editor model usage breakdown for this period — mirrors `DailyTokenStats.editorModelUsage`.
+   * Lets consumers (e.g. the Details webview) determine which billing group(s) an editor or
+   * model belongs to, so the "Usage by Editor"/"Model Usage" lists can be filtered by provider.
+   */
+  editorModelUsage?: { [editor: string]: ModelUsage };
 }
 
 export interface DetailedStats {

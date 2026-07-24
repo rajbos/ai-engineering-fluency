@@ -10,6 +10,7 @@ import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import type { ModelUsage } from '../shared/types';
+import { getBillingGroup } from '../../../../src/chartDataBuilder';
 
 type EditorUsage = Record<string, { tokens: number; sessions: number }>;
 type TableSortKey = 'name' | 'today' | 'last30Days' | 'month' | 'lastMonth' | 'projected';
@@ -37,6 +38,8 @@ cachedTokens?: number;
  * GitHub Copilot's UBB billing.
  */
 billingGroupCosts?: Record<string, number>;
+/** Per-editor model usage breakdown, used to determine which billing group(s) an editor/model belongs to for provider filtering. */
+editorModelUsage?: { [editor: string]: ModelUsage };
 };
 
 type DetailedStats = {
@@ -300,15 +303,13 @@ const isEmptyState = (stats.today.tokens ?? 0) === 0 && (stats.last30Days.tokens
 if (isEmptyState) {
 sections.append(buildEmptyStateSection());
 } else {
-sections.append(buildSummaryCards(stats));
+const providerPanel = buildProviderPanel(stats);
+if (providerPanel) {
+sections.append(providerPanel);
+}
 }
 
 sections.append(buildMetricsSection(stats, projections));
-
-const providerCostSection = buildCostByProviderSection(stats);
-if (providerCostSection) {
-sections.append(providerCostSection);
-}
 
 const editorSection = buildEditorUsageSection(stats);
 if (editorSection) {
@@ -378,32 +379,6 @@ function buildPlanBadge(stats: DetailedStats): HTMLElement | null {
 	return badge;
 }
 
-/** Creates a single summary card (label above value), matching the chart webview pattern. */
-function buildCard(id: string, label: string, value: string): HTMLElement {
-	const card = el('div', 'card');
-	card.id = id;
-	card.append(el('div', 'card-label', label), el('div', 'card-value', value));
-	return card;
-}
-
-/** Builds the row of hero summary cards shown above the metrics table. */
-function buildSummaryCards(stats: DetailedStats): HTMLElement {
-	const cards = el('div', 'cards');
-	cards.id = 'summary-cards';
-	const allProviders = getAllProviders(stats);
-	const costCard = buildCard('card-month-cost', '💰 Est. Cost This Month', formatCost(totalCostForPeriod(stats.month, allProviders)));
-	costCard.title = allProviders.length > 0
-		? `Sum of estimated costs across ${includedProviders(allProviders).length} of ${allProviders.length} selected provider(s). Use the "⚙ Providers" filter in the Cost by Provider section to change which providers are included.`
-		: 'Based on GitHub Copilot AI Credit rates (UBB) — no per-provider breakdown is available yet.';
-	cards.append(
-		buildCard('card-today-tokens', '📅 Tokens Today', totalTokenCell(stats.today)),
-		buildCard('card-30d-tokens', '📈 Tokens Last 30 Days', totalTokenCell(stats.last30Days)),
-		costCard,
-		buildCard('card-today-sessions', '📂 Sessions Today', formatNumber(stats.today.sessions)),
-	);
-	return cards;
-}
-
 type MetricGroup = { heading: string; rows: MetricRow[] };
 
 function buildMetricsGroups(stats: DetailedStats, projections: Projections): MetricGroup[] {
@@ -440,6 +415,17 @@ function buildGroupHeaderRow(label: string): HTMLTableRowElement {
 	const td = document.createElement('td');
 	td.colSpan = 6;
 	td.textContent = label;
+	tr.append(td);
+	return tr;
+}
+
+/** Builds a single-row, full-width placeholder for tables emptied out by the provider filter. */
+function buildNoDataRow(colSpan: number, message: string): HTMLTableRowElement {
+	const tr = document.createElement('tr');
+	tr.className = 'no-data-row';
+	const td = document.createElement('td');
+	td.colSpan = colSpan;
+	td.textContent = message;
 	tr.append(td);
 	return tr;
 }
@@ -483,130 +469,83 @@ return section;
 // Cost by Provider section
 // ---------------------------------------------------------------------------
 
-type ProviderCostItem = { provider: string; today: number; last30Days: number; month: number; lastMonth: number; projected: number };
+/** Emoji shown next to each billing-group/provider name in the provider panel. */
+const PROVIDER_ICONS: Record<string, string> = {
+	'GitHub Copilot': '🐙',
+	'Anthropic': '🅰️',
+	'Google': '🔷',
+	'OpenAI': '🟢',
+	'Mistral AI': '🌬️',
+	'xAI': '✖️',
+	'Microsoft': '🪟',
+	'Alibaba': '🐉',
+	'Other': '❔',
+};
 
-function buildProviderCostItem(stats: DetailedStats, provider: string): ProviderCostItem {
-	const today = stats.today.billingGroupCosts?.[provider] || 0;
-	const last30Days = stats.last30Days.billingGroupCosts?.[provider] || 0;
-	const month = stats.month.billingGroupCosts?.[provider] || 0;
-	const lastMonth = stats.lastMonth.billingGroupCosts?.[provider] || 0;
-	return { provider, today, last30Days, month, lastMonth, projected: calculateProjection(last30Days) };
+function getProviderIcon(provider: string): string {
+	return PROVIDER_ICONS[provider] ?? '💵';
 }
 
-/** Builds a single provider row, greyed out (but still visible) when filtered out via the checkbox menu. */
-function buildProviderCostRow(item: ProviderCostItem, isExcluded: boolean): HTMLTableRowElement {
-	const tr = document.createElement('tr');
-	if (isExcluded) { tr.style.opacity = '0.45'; }
-	const labelTd = document.createElement('td');
-	const labelWrapper = document.createElement('span');
-	labelWrapper.className = 'metric-label';
-	labelWrapper.textContent = `💵 ${item.provider}`;
-	labelTd.append(labelWrapper);
-	tr.append(labelTd,
-		buildValueCell(formatCost(item.today)),
-		buildValueCell(formatCost(item.last30Days)),
-		buildValueCell(formatCost(item.month)),
-		buildValueCell(formatCost(item.lastMonth)),
-		buildValueCell(formatCost(item.projected)));
-	return tr;
-}
+/** Builds a single clickable provider card; clicking toggles it in/out of `excludedProviders`. */
+function buildProviderCard(stats: DetailedStats, provider: string): HTMLElement {
+	const isExcluded = excludedProviders.has(provider);
+	const card = el('div', `provider-card${isExcluded ? ' provider-card-excluded' : ''}`);
+	card.tabIndex = 0;
+	card.setAttribute('role', 'button');
+	card.setAttribute('aria-pressed', String(!isExcluded));
+	card.title = isExcluded
+		? `${provider} is hidden — click to show it again and include it in the totals below.`
+		: `Click to hide ${provider} — filters it out of the totals and the Editor/Model usage lists below.`;
 
-/** Builds the bold "Total (selected providers)" footer row summing only the checked providers. */
-function buildProviderCostTotalRow(stats: DetailedStats, allProviders: string[]): HTMLTableRowElement {
-	const providers = includedProviders(allProviders);
-	const tr = document.createElement('tr');
-	tr.style.fontWeight = '700';
-	tr.style.borderTop = '2px solid var(--border-color)';
-	const labelTd = document.createElement('td');
-	const labelWrapper = document.createElement('span');
-	labelWrapper.className = 'metric-label';
-	labelWrapper.textContent = `∑ Total (${providers.length}/${allProviders.length} selected)`;
-	labelTd.append(labelWrapper);
-	tr.append(labelTd,
-		buildValueCell(formatCost(sumBillingGroupCosts(stats.today.billingGroupCosts, providers))),
-		buildValueCell(formatCost(sumBillingGroupCosts(stats.last30Days.billingGroupCosts, providers))),
-		buildValueCell(formatCost(sumBillingGroupCosts(stats.month.billingGroupCosts, providers))),
-		buildValueCell(formatCost(sumBillingGroupCosts(stats.lastMonth.billingGroupCosts, providers))),
-		buildValueCell(formatCost(calculateProjection(sumBillingGroupCosts(stats.last30Days.billingGroupCosts, providers)))));
-	return tr;
-}
+	card.append(
+		el('div', 'provider-card-label', `${getProviderIcon(provider)} ${provider}`),
+		el('div', 'provider-card-value', formatCost(stats.month.billingGroupCosts?.[provider] || 0)),
+		el('div', 'provider-card-sub', `Today ${formatCost(stats.today.billingGroupCosts?.[provider] || 0)} · 30d ${formatCost(stats.last30Days.billingGroupCosts?.[provider] || 0)}`)
+	);
 
-/** Builds the "⚙ Providers" filter toggle button + its checkbox dropdown menu. */
-function buildProviderFilterControl(allProviders: string[]): HTMLElement {
-	const wrap = el('div', 'provider-filter-wrap');
-	const toggle = document.createElement('button');
-	toggle.type = 'button';
-	toggle.className = 'provider-filter-toggle';
-	toggle.textContent = '⚙ Providers';
-	const menu = el('div', 'provider-filter-menu');
-	menu.style.display = 'none';
-
-	allProviders.forEach(provider => {
-		const label = el('label', 'provider-filter-item');
-		const checkbox = document.createElement('input');
-		checkbox.type = 'checkbox';
-		checkbox.checked = !excludedProviders.has(provider);
-		checkbox.addEventListener('change', () => {
-			if (checkbox.checked) { excludedProviders.delete(provider); } else { excludedProviders.add(provider); }
-			saveSortSettings();
-			rerenderFromLastStats();
-		});
-		const span = document.createElement('span');
-		span.textContent = provider;
-		label.append(checkbox, span);
-		menu.append(label);
+	const toggle = (): void => {
+		if (excludedProviders.has(provider)) { excludedProviders.delete(provider); } else { excludedProviders.add(provider); }
+		saveSortSettings();
+		rerenderFromLastStats();
+	};
+	card.addEventListener('click', toggle);
+	card.addEventListener('keydown', (e) => {
+		if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); toggle(); }
 	});
+	return card;
+}
 
-	toggle.addEventListener('click', (e) => {
-		e.stopPropagation();
-		menu.style.display = menu.style.display === 'none' ? 'block' : 'none';
-	});
-	menu.addEventListener('click', (e) => e.stopPropagation());
-	document.addEventListener('click', () => { menu.style.display = 'none'; });
-
-	wrap.append(toggle, menu);
-	return wrap;
+/** Builds the non-interactive "Total (selected)" card summarizing the currently included providers. */
+function buildProviderTotalCard(stats: DetailedStats, allProviders: string[]): HTMLElement {
+	const included = includedProviders(allProviders);
+	const card = el('div', 'provider-card provider-card-total');
+	card.title = `Sum of ${included.length} of ${allProviders.length} selected provider(s).`;
+	card.append(
+		el('div', 'provider-card-label', '∑ Total (selected)'),
+		el('div', 'provider-card-value', formatCost(sumBillingGroupCosts(stats.month.billingGroupCosts, included))),
+		el('div', 'provider-card-sub', `Today ${formatCost(sumBillingGroupCosts(stats.today.billingGroupCosts, included))} · 30d ${formatCost(sumBillingGroupCosts(stats.last30Days.billingGroupCosts, included))}`)
+	);
+	return card;
 }
 
 /**
- * Builds the "Cost by Provider" table showing estimated cost per billing group
- * (GitHub Copilot, Anthropic, Google, OpenAI, …) for every period, plus a
- * checkbox filter so specific providers can be excluded from the totals shown
- * in the summary card and the "Estimated cost (selected providers)" metric row.
+ * Builds the "Cost by Provider" panel shown at the top of the page (replacing the old
+ * fixed hero cards). Each provider is a clickable card — clicking toggles it in/out of
+ * `excludedProviders`, which also filters the "Usage by Editor" and "Model Usage" lists
+ * further down the page to just the selected provider(s).
  */
-function buildCostByProviderSection(stats: DetailedStats): HTMLElement | null {
+function buildProviderPanel(stats: DetailedStats): HTMLElement | null {
 	const allProviders = getAllProviders(stats);
 	if (allProviders.length === 0) { return null; }
 
 	const section = el('div', 'section');
-	const headerRow = el('div', 'section-header-row');
-	headerRow.append(iconHeading('h3', 'credit-card', 'Cost by Provider'), buildProviderFilterControl(allProviders));
-	section.append(headerRow);
+	section.append(iconHeading('h3', 'credit-card', 'Cost by Provider'));
+	section.append(el('div', 'provider-panel-hint', 'Click a provider to hide/show it — this also filters the Editor & Model usage lists below.'));
 
-	const table = document.createElement('table');
-	table.className = 'stats-table';
-	const thead = document.createElement('thead');
-	const headRow = document.createElement('tr');
-	const HEADERS = [{ icon: '💵', text: 'Provider' }, { icon: '📅', text: 'Today' }, { icon: '📈', text: 'Last 30 Days' }, { icon: '🗓️', text: 'Current Month' }, { icon: '📆', text: 'Previous Month' }, { icon: '🌍', text: 'Projected Year' }];
-	HEADERS.forEach((h, idx) => {
-		const th = document.createElement('th');
-		th.className = idx === 0 ? '' : 'align-right';
-		const w = el('div', 'period-header');
-		w.textContent = `${h.icon} ${h.text}`;
-		th.append(w);
-		headRow.append(th);
-	});
-	thead.append(headRow);
-	table.append(thead);
-
-	const tbody = document.createElement('tbody');
-	allProviders.forEach(provider => {
-		const item = buildProviderCostItem(stats, provider);
-		tbody.append(buildProviderCostRow(item, excludedProviders.has(provider)));
-	});
-	tbody.append(buildProviderCostTotalRow(stats, allProviders));
-	table.append(tbody);
-	section.append(table);
+	const grid = el('div', 'provider-cards');
+	grid.append(buildProviderTotalCard(stats, allProviders));
+	allProviders.forEach(provider => grid.append(buildProviderCard(stats, provider)));
+	section.append(grid);
 	return section;
 }
 
@@ -631,10 +570,12 @@ excludedProviders: Array.from(excludedProviders)
 // Cost-by-provider helpers
 // ---------------------------------------------------------------------------
 
+const ALL_PERIODS = ['today', 'last30Days', 'month', 'lastMonth'] as const;
+
 /** Returns every billing-group (provider) name seen across all four periods, "GitHub Copilot" first. */
 function getAllProviders(stats: DetailedStats): string[] {
 const set = new Set<string>();
-(['today', 'last30Days', 'month', 'lastMonth'] as const).forEach(period => {
+ALL_PERIODS.forEach(period => {
 Object.keys(stats[period].billingGroupCosts ?? {}).forEach(p => set.add(p));
 });
 return Array.from(set).sort((a, b) => {
@@ -665,6 +606,40 @@ if (allProviders.length === 0) {
 return period.estimatedCostCopilot ?? period.estimatedCost ?? 0;
 }
 return sumBillingGroupCosts(period.billingGroupCosts, includedProviders(allProviders));
+}
+
+/** Billing group(s) an editor's usage falls into, derived from its per-model breakdown across all periods. */
+function editorBillingGroups(stats: DetailedStats, editor: string): Set<string> {
+	const groups = new Set<string>();
+	ALL_PERIODS.forEach(period => {
+		const modelUsage = stats[period].editorModelUsage?.[editor];
+		if (modelUsage) { Object.keys(modelUsage).forEach(model => groups.add(getBillingGroup(editor, model))); }
+	});
+	return groups;
+}
+
+/** Billing group(s) a model belongs to, derived from every editor that used it across all periods. */
+function modelBillingGroups(stats: DetailedStats, model: string): Set<string> {
+	const groups = new Set<string>();
+	ALL_PERIODS.forEach(period => {
+		const editorModelUsage = stats[period].editorModelUsage;
+		if (!editorModelUsage) { return; }
+		Object.keys(editorModelUsage).forEach(editor => {
+			if (editorModelUsage[editor][model]) { groups.add(getBillingGroup(editor, model)); }
+		});
+	});
+	return groups;
+}
+
+/**
+ * Whether an item (editor or model) should remain visible given the current provider filter.
+ * With nothing excluded, everything is visible. When we have no billing-group data for the
+ * item (e.g. older cached stats), it is never hidden — we only filter what we can attribute.
+ */
+function isVisibleForProviderFilter(groups: Set<string>): boolean {
+	if (excludedProviders.size === 0) { return true; }
+	if (groups.size === 0) { return true; }
+	return Array.from(groups).some(g => !excludedProviders.has(g));
 }
 
 type EditorItem = {
@@ -702,14 +677,14 @@ function buildEditorRow(item: EditorItem, totals: { today: number; last30Days: n
 	return tr;
 }
 
-function buildEditorTbody(stats: DetailedStats, allEditors: string[]): HTMLTableSectionElement {
+function buildEditorTbody(stats: DetailedStats, editors: string[]): HTMLTableSectionElement {
 const totals = {
-	today: Object.values(stats.today.editorUsage).reduce((s, e) => s + e.tokens, 0),
-	last30Days: Object.values(stats.last30Days.editorUsage).reduce((s, e) => s + e.tokens, 0),
-	month: Object.values(stats.month.editorUsage).reduce((s, e) => s + e.tokens, 0),
-	lastMonth: Object.values(stats.lastMonth.editorUsage).reduce((s, e) => s + e.tokens, 0),
+	today: editors.reduce((s, e) => s + (stats.today.editorUsage[e]?.tokens || 0), 0),
+	last30Days: editors.reduce((s, e) => s + (stats.last30Days.editorUsage[e]?.tokens || 0), 0),
+	month: editors.reduce((s, e) => s + (stats.month.editorUsage[e]?.tokens || 0), 0),
+	lastMonth: editors.reduce((s, e) => s + (stats.lastMonth.editorUsage[e]?.tokens || 0), 0),
 };
-const items: EditorItem[] = allEditors.map(editor => {
+const items: EditorItem[] = editors.map(editor => {
 	const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
 	const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
 	const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
@@ -730,6 +705,10 @@ items.sort((a, b) => {
 	return editorSortDir === 'asc' ? cmp : -cmp;
 });
 const tbody = document.createElement('tbody');
+if (items.length === 0) {
+	tbody.append(buildNoDataRow(6, 'No editor usage matches the selected provider filter.'));
+	return tbody;
+}
 items.forEach(item => tbody.append(buildEditorRow(item, totals)));
 return tbody;
 }
@@ -745,6 +724,8 @@ const allEditors = new Set([
 if (allEditors.size === 0) {
 return null;
 }
+
+const visibleEditors = Array.from(allEditors).filter(editor => isVisibleForProviderFilter(editorBillingGroups(stats, editor)));
 
 const section = el('div', 'section');
 const heading = iconHeading('h3', 'device-desktop', 'Usage by Editor');
@@ -773,7 +754,7 @@ editorSortDir = editorSortDir === 'asc' ? 'desc' : 'asc';
 editorSortKey = key;
 editorSortDir = key === 'name' ? 'asc' : 'desc';
 }
-const newTbody = buildEditorTbody(stats, Array.from(allEditors));
+const newTbody = buildEditorTbody(stats, visibleEditors);
 const oldTbody = table.querySelector('tbody');
 if (oldTbody) { table.replaceChild(newTbody, oldTbody); } else { table.append(newTbody); }
 saveSortSettings();
@@ -781,7 +762,7 @@ saveSortSettings();
 );
 
 table.append(thead);
-table.append(buildEditorTbody(stats, Array.from(allEditors)));
+table.append(buildEditorTbody(stats, visibleEditors));
 section.append(table);
 return section;
 }
@@ -925,14 +906,7 @@ if (allModels.size === 0) {
 return null;
 }
 
-// Determine top N models by last30Days usage; the rest go into the "Other" group
-const sortedByLast30Days = Array.from(allModels).sort((a, b) => {
-const aUsage = stats.last30Days.modelUsage[a] || { inputTokens: 0, outputTokens: 0 };
-const bUsage = stats.last30Days.modelUsage[b] || { inputTokens: 0, outputTokens: 0 };
-return (bUsage.inputTokens + bUsage.outputTokens) - (aUsage.inputTokens + aUsage.outputTokens);
-});
-const topModels = sortedByLast30Days.slice(0, TOP_N_MODELS);
-const otherModels = sortedByLast30Days.slice(TOP_N_MODELS);
+const visibleModels = new Set(Array.from(allModels).filter(model => isVisibleForProviderFilter(modelBillingGroups(stats, model))));
 
 const section = el('div', 'section');
 const heading = iconHeading('h3', 'symbol-numeric', 'Model Usage (Tokens)');
@@ -940,6 +914,23 @@ section.append(heading);
 
 const table = document.createElement('table');
 table.className = 'stats-table';
+
+if (visibleModels.size === 0) {
+const tbody = document.createElement('tbody');
+tbody.append(buildNoDataRow(6, 'No model usage matches the selected provider filter.'));
+table.append(tbody);
+section.append(table);
+return section;
+}
+
+// Determine top N models by last30Days usage; the rest go into the "Other" group
+const sortedByLast30Days = Array.from(visibleModels).sort((a, b) => {
+const aUsage = stats.last30Days.modelUsage[a] || { inputTokens: 0, outputTokens: 0 };
+const bUsage = stats.last30Days.modelUsage[b] || { inputTokens: 0, outputTokens: 0 };
+return (bUsage.inputTokens + bUsage.outputTokens) - (aUsage.inputTokens + aUsage.outputTokens);
+});
+const topModels = sortedByLast30Days.slice(0, TOP_N_MODELS);
+const otherModels = sortedByLast30Days.slice(TOP_N_MODELS);
 
 const modelColHeaders: ColHeader[] = [
 { icon: '🧠', text: 'Model', key: 'name' },

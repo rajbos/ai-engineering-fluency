@@ -3101,6 +3101,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				waterUsage: todayWater, estimatedCost: this.calculateEstimatedCost(todayStats.modelUsage),
 				estimatedCostCopilot: todayCopilotCost,
 				billingGroupCosts: this.computeBillingGroupCosts(todayStats.editorModelUsage, todayCopilotCost),
+				editorModelUsage: todayStats.editorModelUsage,
 				...(todayStats.cachedTokens > 0 ? { cachedTokens: todayStats.cachedTokens } : {})
 			},
 			month: {
@@ -3114,6 +3115,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				waterUsage: monthWater, estimatedCost: this.calculateEstimatedCost(monthStats.modelUsage),
 				estimatedCostCopilot: monthCopilotCost,
 				billingGroupCosts: this.computeBillingGroupCosts(monthStats.editorModelUsage, monthCopilotCost),
+				editorModelUsage: monthStats.editorModelUsage,
 				...(monthStats.cachedTokens > 0 ? { cachedTokens: monthStats.cachedTokens } : {})
 			},
 			lastMonth: {
@@ -3127,6 +3129,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				waterUsage: lastMonthWater, estimatedCost: this.calculateEstimatedCost(lastMonthStats.modelUsage),
 				estimatedCostCopilot: lastMonthCopilotCost,
 				billingGroupCosts: this.computeBillingGroupCosts(lastMonthStats.editorModelUsage, lastMonthCopilotCost),
+				editorModelUsage: lastMonthStats.editorModelUsage,
 				...(lastMonthStats.cachedTokens > 0 ? { cachedTokens: lastMonthStats.cachedTokens } : {})
 			},
 			last30Days: {
@@ -3140,6 +3143,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				waterUsage: last30DaysWater, estimatedCost: this.calculateEstimatedCost(last30DaysStats.modelUsage),
 				estimatedCostCopilot: last30DaysCopilotCost,
 				billingGroupCosts: this.computeBillingGroupCosts(last30DaysStats.editorModelUsage, last30DaysCopilotCost),
+				editorModelUsage: last30DaysStats.editorModelUsage,
 				...(last30DaysStats.cachedTokens > 0 ? { cachedTokens: last30DaysStats.cachedTokens } : {})
 			},
 			lastUpdated: now
