@@ -300,6 +300,7 @@ async function buildPanelHtml(panel: PanelId): Promise<string> {
                     editor: { key: 'name', dir: 'asc' },
                     model: { key: 'name', dir: 'asc' },
                     modelOtherExpanded: false,
+                    editorOtherExpanded: false,
                 },
             } : {}),
         };

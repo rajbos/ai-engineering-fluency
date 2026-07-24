@@ -51,6 +51,7 @@ sortSettings?: {
 editor?: { key?: string; dir?: string };
 model?: { key?: string; dir?: string };
 modelOtherExpanded?: boolean;
+editorOtherExpanded?: boolean;
 };
 };
 
@@ -67,6 +68,7 @@ type WebviewMessage =
 editor: { key: TableSortKey; dir: SortDir };
 model: { key: TableSortKey; dir: SortDir };
 modelOtherExpanded: boolean;
+editorOtherExpanded: boolean;
 }};
 
 /** Aggregated projection values calculated from last-30-days data. */
@@ -107,6 +109,7 @@ let editorSortDir: SortDir = (_initSort?.editor?.dir as SortDir) ?? 'asc';
 let modelSortKey: TableSortKey = (_initSort?.model?.key as TableSortKey) ?? 'name';
 let modelSortDir: SortDir = (_initSort?.model?.dir as SortDir) ?? 'asc';
 let modelOtherExpanded: boolean = (_initSort?.modelOtherExpanded) ?? false;
+let editorOtherExpanded: boolean = (_initSort?.editorOtherExpanded) ?? false;
 
 function calculateProjection(last30DaysValue: number): number {
 // Project annual value based on last 30 days average
@@ -458,7 +461,8 @@ command: 'saveSortSettings',
 settings: {
 editor: { key: editorSortKey, dir: editorSortDir },
 model: { key: modelSortKey, dir: modelSortDir },
-modelOtherExpanded
+modelOtherExpanded,
+editorOtherExpanded
 }
 });
 }
@@ -473,21 +477,51 @@ type EditorItem = {
 	projectedSessions: number;
 };
 
-function buildEditorRow(item: EditorItem, totals: { today: number; last30Days: number; month: number; lastMonth: number }): HTMLTableRowElement {
+function toEditorItem(stats: DetailedStats, editor: string): EditorItem {
+	const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
+	const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
+	const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
+	const lastMonthUsage = stats.lastMonth.editorUsage[editor] || { tokens: 0, sessions: 0 };
+	return { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens: Math.round(calculateProjection(last30DaysUsage.tokens)), projectedSessions: Math.round(calculateProjection(last30DaysUsage.sessions)) };
+}
+
+function sortEditorItems(items: EditorItem[]): void {
+	items.sort((a, b) => {
+		let cmp: number;
+		switch (editorSortKey) {
+			case 'name': cmp = a.editor.localeCompare(b.editor); break;
+			case 'today': cmp = a.todayUsage.tokens - b.todayUsage.tokens; break;
+			case 'last30Days': cmp = a.last30DaysUsage.tokens - b.last30DaysUsage.tokens; break;
+			case 'month': cmp = a.monthUsage.tokens - b.monthUsage.tokens; break;
+			case 'lastMonth': cmp = a.lastMonthUsage.tokens - b.lastMonthUsage.tokens; break;
+			case 'projected': cmp = a.projectedTokens - b.projectedTokens; break;
+			default: cmp = 0;
+		}
+		return editorSortDir === 'asc' ? cmp : -cmp;
+	});
+}
+
+function buildEditorRow(item: EditorItem, totals: { today: number; last30Days: number; month: number; lastMonth: number }, isOtherChild: boolean): HTMLTableRowElement {
 	const { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens, projectedSessions } = item;
 	const todayPct = totals.today > 0 ? (todayUsage.tokens / totals.today) * 100 : 0;
 	const last30Pct = totals.last30Days > 0 ? (last30DaysUsage.tokens / totals.last30Days) * 100 : 0;
 	const monthPct = totals.month > 0 ? (monthUsage.tokens / totals.month) * 100 : 0;
 	const lastMonthPct = totals.lastMonth > 0 ? (lastMonthUsage.tokens / totals.lastMonth) * 100 : 0;
 	const tr = document.createElement('tr');
+	if (isOtherChild) { tr.style.opacity = '0.85'; }
 	if (editor === 'JetBrains') { tr.title = 'JetBrains: only user messages + assistant text are persisted, so token counts here are estimates of those alone. Actual API counts and thinking tokens are not available.'; }
 	if (editor === 'Antigravity') { tr.title = 'Antigravity: token counts are estimated from transcript content. Actual API counts are not stored locally.'; }
 	if (editor === 'Cursor') { tr.title = 'Cursor: token counts reflect the context window size at the last request (contextTokensUsed). Output tokens are not stored locally.'; }
 	const labelTd = document.createElement('td');
 	const labelWrapper = document.createElement('span');
 	labelWrapper.className = 'metric-label';
-	labelWrapper.textContent = `${getEditorIcon(editor)} ${editor}`;
-	if (editor === 'JetBrains' || editor === 'Antigravity' || editor === 'Cursor') { labelWrapper.textContent = `${labelWrapper.textContent} ⓘ`; }
+	if (isOtherChild) {
+		const indentSpan = document.createElement('span');
+		indentSpan.style.cssText = 'display:inline-block;width:12px';
+		labelWrapper.append(indentSpan);
+	}
+	labelWrapper.append(document.createTextNode(`${getEditorIcon(editor)} ${editor}`));
+	if (editor === 'JetBrains' || editor === 'Antigravity' || editor === 'Cursor') { labelWrapper.append(document.createTextNode(' ⓘ')); }
 	labelTd.append(labelWrapper);
 	tr.append(labelTd,
 		buildValueCell(formatCompact(todayUsage.tokens), `${formatPercent(todayPct)} · ${todayUsage.sessions} sessions`),
@@ -498,37 +532,61 @@ function buildEditorRow(item: EditorItem, totals: { today: number; last30Days: n
 	return tr;
 }
 
-function buildEditorTbody(stats: DetailedStats, allEditors: string[]): HTMLTableSectionElement {
+function appendOtherEditors(stats: DetailedStats, otherEditors: string[], totals: { today: number; last30Days: number; month: number; lastMonth: number }, onToggleOther: () => void, tbody: HTMLTableSectionElement): void {
+	const sumUsage = (period: 'today' | 'last30Days' | 'month' | 'lastMonth') =>
+		otherEditors.reduce((acc, e) => {
+			const u = stats[period].editorUsage[e] || { tokens: 0, sessions: 0 };
+			return { tokens: acc.tokens + u.tokens, sessions: acc.sessions + u.sessions };
+		}, { tokens: 0, sessions: 0 });
+	const otherToday = sumUsage('today'); const otherLast30 = sumUsage('last30Days');
+	const otherMonth = sumUsage('month'); const otherLastMonth = sumUsage('lastMonth');
+	const pct = (part: number, total: number) => (total > 0 ? (part / total) * 100 : 0);
+	const otherTr = document.createElement('tr');
+	otherTr.style.cursor = 'pointer'; otherTr.style.background = 'var(--list-hover-bg)';
+	otherTr.title = editorOtherExpanded ? 'Collapse other editors' : 'Expand other editors';
+	const otherLabelWrapper = document.createElement('span'); otherLabelWrapper.className = 'metric-label';
+	const otherNameSpan = document.createElement('span');
+	otherNameSpan.style.cssText = 'color:var(--text-secondary);font-weight:600;';
+	otherNameSpan.textContent = `📦 Other (${otherEditors.length} editor${otherEditors.length !== 1 ? 's' : ''})`;
+	const otherToggleSpan = document.createElement('span');
+	otherToggleSpan.style.cssText = 'font-size:10px;color:var(--text-muted)';
+	otherToggleSpan.textContent = ` ${editorOtherExpanded ? '▲' : '▼'}`;
+	otherLabelWrapper.append(otherNameSpan, otherToggleSpan);
+	const otherLabelTd = document.createElement('td'); otherLabelTd.append(otherLabelWrapper);
+	const mkOtherTd = (usage: { tokens: number; sessions: number }, total: number) => {
+		const td = buildValueCell(formatCompact(usage.tokens));
+		td.append(el('div', 'muted', `${formatPercent(pct(usage.tokens, total))} · ${usage.sessions} sessions`));
+		return td;
+	};
+	otherTr.append(otherLabelTd,
+		mkOtherTd(otherToday, totals.today), mkOtherTd(otherLast30, totals.last30Days),
+		mkOtherTd(otherMonth, totals.month), mkOtherTd(otherLastMonth, totals.lastMonth),
+		buildValueCell(formatCompact(Math.round(calculateProjection(otherLast30.tokens))), `${Math.round(calculateProjection(otherLast30.sessions))} sessions`));
+	otherTr.addEventListener('click', () => { editorOtherExpanded = !editorOtherExpanded; saveSortSettings(); onToggleOther(); });
+	tbody.append(otherTr);
+	if (editorOtherExpanded) {
+		const otherItems = otherEditors.map(e => toEditorItem(stats, e));
+		sortEditorItems(otherItems);
+		otherItems.forEach(item => tbody.append(buildEditorRow(item, totals, true)));
+	}
+}
+
+function buildEditorTbody(stats: DetailedStats, topEditors: string[], otherEditors: string[], onToggleOther: () => void): HTMLTableSectionElement {
 const totals = {
 	today: Object.values(stats.today.editorUsage).reduce((s, e) => s + e.tokens, 0),
 	last30Days: Object.values(stats.last30Days.editorUsage).reduce((s, e) => s + e.tokens, 0),
 	month: Object.values(stats.month.editorUsage).reduce((s, e) => s + e.tokens, 0),
 	lastMonth: Object.values(stats.lastMonth.editorUsage).reduce((s, e) => s + e.tokens, 0),
 };
-const items: EditorItem[] = allEditors.map(editor => {
-	const todayUsage = stats.today.editorUsage[editor] || { tokens: 0, sessions: 0 };
-	const last30DaysUsage = stats.last30Days.editorUsage[editor] || { tokens: 0, sessions: 0 };
-	const monthUsage = stats.month.editorUsage[editor] || { tokens: 0, sessions: 0 };
-	const lastMonthUsage = stats.lastMonth.editorUsage[editor] || { tokens: 0, sessions: 0 };
-	return { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens: Math.round(calculateProjection(last30DaysUsage.tokens)), projectedSessions: Math.round(calculateProjection(last30DaysUsage.sessions)) };
-});
-items.sort((a, b) => {
-	let cmp: number;
-	switch (editorSortKey) {
-		case 'name': cmp = a.editor.localeCompare(b.editor); break;
-		case 'today': cmp = a.todayUsage.tokens - b.todayUsage.tokens; break;
-		case 'last30Days': cmp = a.last30DaysUsage.tokens - b.last30DaysUsage.tokens; break;
-		case 'month': cmp = a.monthUsage.tokens - b.monthUsage.tokens; break;
-		case 'lastMonth': cmp = a.lastMonthUsage.tokens - b.lastMonthUsage.tokens; break;
-		case 'projected': cmp = a.projectedTokens - b.projectedTokens; break;
-		default: cmp = 0;
-	}
-	return editorSortDir === 'asc' ? cmp : -cmp;
-});
+const topItems = topEditors.map(editor => toEditorItem(stats, editor));
+sortEditorItems(topItems);
 const tbody = document.createElement('tbody');
-items.forEach(item => tbody.append(buildEditorRow(item, totals)));
+topItems.forEach(item => tbody.append(buildEditorRow(item, totals, false)));
+if (otherEditors.length > 0) { appendOtherEditors(stats, otherEditors, totals, onToggleOther, tbody); }
 return tbody;
 }
+
+const TOP_N_EDITORS = 5;
 
 function buildEditorUsageSection(stats: DetailedStats): HTMLElement | null {
 const allEditors = new Set([
@@ -541,6 +599,15 @@ const allEditors = new Set([
 if (allEditors.size === 0) {
 return null;
 }
+
+// Determine top N editors by last30Days usage; the rest go into the "Other" group
+const sortedByLast30Days = Array.from(allEditors).sort((a, b) => {
+	const aUsage = stats.last30Days.editorUsage[a] || { tokens: 0, sessions: 0 };
+	const bUsage = stats.last30Days.editorUsage[b] || { tokens: 0, sessions: 0 };
+	return bUsage.tokens - aUsage.tokens;
+});
+const topEditors = sortedByLast30Days.slice(0, TOP_N_EDITORS);
+const otherEditors = sortedByLast30Days.slice(TOP_N_EDITORS);
 
 const section = el('div', 'section');
 const heading = iconHeading('h3', 'device-desktop', 'Usage by Editor');
@@ -558,6 +625,12 @@ const editorColHeaders: ColHeader[] = [
 { icon: '🌍', text: 'Projected Year', key: 'projected' }
 ];
 
+function rebuildTbody(): void {
+	const newTbody = buildEditorTbody(stats, topEditors, otherEditors, rebuildTbody);
+	const oldTbody = table.querySelector('tbody');
+	if (oldTbody) { table.replaceChild(newTbody, oldTbody); } else { table.append(newTbody); }
+}
+
 const { thead } = buildSortableTableHeader(
 editorColHeaders,
 () => editorSortKey,
@@ -569,15 +642,13 @@ editorSortDir = editorSortDir === 'asc' ? 'desc' : 'asc';
 editorSortKey = key;
 editorSortDir = key === 'name' ? 'asc' : 'desc';
 }
-const newTbody = buildEditorTbody(stats, Array.from(allEditors));
-const oldTbody = table.querySelector('tbody');
-if (oldTbody) { table.replaceChild(newTbody, oldTbody); } else { table.append(newTbody); }
+rebuildTbody();
 saveSortSettings();
 }
 );
 
 table.append(thead);
-table.append(buildEditorTbody(stats, Array.from(allEditors)));
+rebuildTbody();
 section.append(table);
 return section;
 }
