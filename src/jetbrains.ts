@@ -407,7 +407,7 @@ function _jbpFinalizeSession(result: JetBrainsParsedSession, state: JbpState): v
 	result.messageIds = [...state.messageIds];
 	
 	if (result.tokens > 0 && result.modelHint !== 'unknown') {
-		result.modelUsage[result.modelHint] = { inputTokens: state.inputTokens, outputTokens: state.outputTokens };
+		result.modelUsage[result.modelHint] = { inputTokens: state.inputTokens, outputTokens: state.outputTokens, sessions: 0 };
 	}
 }
 

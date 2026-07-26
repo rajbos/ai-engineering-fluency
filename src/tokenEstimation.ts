@@ -504,7 +504,7 @@ function _ejtsAccumulateModelMetrics(modelName: string, metrics: ShutdownModelMe
 	state.cliActualTokens += input + output;
 	state.cliCacheReadTokens += cacheRead;
 	if (!state.cliShutdownModelUsage![modelName]) {
-		state.cliShutdownModelUsage![modelName] = { inputTokens: 0, outputTokens: 0 };
+		state.cliShutdownModelUsage![modelName] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 	}
 	state.cliShutdownModelUsage![modelName].inputTokens += input;
 	state.cliShutdownModelUsage![modelName].outputTokens += output;

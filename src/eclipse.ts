@@ -363,7 +363,7 @@ export class EclipseDataAccess {
 			if (turn?.role !== 'user') { continue; }
 			const reply = this.findCopilotReply(turns, i, turn?.turnId);
 			const model: string = turn?.model || reply?.reply?.modelName || 'unknown';
-			if (!usage[model]) { usage[model] = { inputTokens: 0, outputTokens: 0 }; }
+			if (!usage[model]) { usage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 			usage[model].inputTokens += this.estimate(this.userText(turn));
 			usage[model].outputTokens += this.estimate(this.assistantText(reply));
 		}

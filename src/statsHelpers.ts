@@ -50,7 +50,7 @@ export function computeSessionDurationMs(firstInteraction: string | null | undef
  */
 export function addModelUsage(target: ModelUsage, source: ModelUsage): void {
 for (const [model, usage] of Object.entries(source)) {
-if (!target[model]) { target[model] = { inputTokens: 0, outputTokens: 0 }; }
+if (!target[model]) { target[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 target[model].inputTokens += usage.inputTokens;
 target[model].outputTokens += usage.outputTokens;
 if (usage.cachedReadTokens !== undefined) {
@@ -105,13 +105,13 @@ export function reconcileModelUsageToTotal(modelUsage: ModelUsage, targetInputTo
 			inputTokens, outputTokens,
 			...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * inputScale) } : {}),
 			...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * inputScale) } : {}),
-			...(usage.sessions !== undefined ? { sessions: usage.sessions } : {}),
+			...(usage.sessions !== undefined ? { sessions: usage.sessions } : { sessions: 0 }),
 		};
 	}
 	const residualInput = targetInputTokens - scaledInputTotal;
 	const residualOutput = targetOutputTokens - scaledOutputTotal;
 	if (residualInput !== 0 || residualOutput !== 0) {
-		const unknown = result.unknown ?? { inputTokens: 0, outputTokens: 0 };
+		const unknown = result.unknown ?? { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		result.unknown = { ...unknown, inputTokens: unknown.inputTokens + residualInput, outputTokens: unknown.outputTokens + residualOutput };
 	}
 	return result;
@@ -142,7 +142,7 @@ export function reconcileModelUsageToActualTokens(modelUsage: ModelUsage, actual
 	const currentTotal = currentInput + currentOutput;
 	if (currentTotal === 0) {
 		return Object.keys(modelUsage).length === 0
-			? { unknown: { inputTokens: actualTokens, outputTokens: 0 } }
+			? { unknown: { inputTokens: actualTokens, outputTokens: 0, sessions: 0 } }
 			: modelUsage;
 	}
 	if (currentTotal === actualTokens) { return modelUsage; }

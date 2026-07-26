@@ -678,6 +678,7 @@ export class WindsurfDataAccess {
 				inputTokens: usage.inputTokens + usage.cachedTokens,
 				outputTokens,
 				cachedReadTokens: usage.cachedTokens,
+				sessions: 0,
 			},
 		};
 	}

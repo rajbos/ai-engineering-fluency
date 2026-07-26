@@ -401,7 +401,7 @@ export class GeminiCliDataAccess {
 			const tokenData = this.getTokenBreakdown(assistant.tokens);
 
 			if (!modelUsage[model]) {
-				modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+				modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 			}
 
 			modelUsage[model].inputTokens += tokenData.input;

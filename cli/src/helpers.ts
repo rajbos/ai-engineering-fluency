@@ -400,7 +400,7 @@ export async function processSessionFile(filePath: string, verbose = false): Pro
 			if (Object.keys(debugLogTokens.modelBreakdown).length > 0) {
 				fileModelUsage = {};
 				for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-					fileModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+					fileModelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, sessions: 0, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
 				}
 			}
 		}
@@ -655,7 +655,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 				dailyEntry.sessions++;
 				for (const [model, usage] of Object.entries(data.modelUsage)) {
 					if (!dailyEntry.modelUsage[model]) {
-						dailyEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+						dailyEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 					}
 					dailyEntry.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
 					dailyEntry.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
@@ -675,7 +675,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 				if (!dailyEntry.editorModelUsage) { dailyEntry.editorModelUsage = {}; }
 				if (!dailyEntry.editorModelUsage[editor]) { dailyEntry.editorModelUsage[editor] = {}; }
 				for (const [model, usage] of Object.entries(data.modelUsage)) {
-					if (!dailyEntry.editorModelUsage[editor][model]) { dailyEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0 }; }
+					if (!dailyEntry.editorModelUsage[editor][model]) { dailyEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 					dailyEntry.editorModelUsage[editor][model].inputTokens += Math.round(usage.inputTokens * fraction);
 					dailyEntry.editorModelUsage[editor][model].outputTokens += Math.round(usage.outputTokens * fraction);
 				}
@@ -690,7 +690,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 			allEntry.sessions++;
 			for (const [model, usage] of Object.entries(data.modelUsage)) {
 				if (!allEntry.modelUsage[model]) {
-					allEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+					allEntry.modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 				}
 				allEntry.modelUsage[model].inputTokens += Math.round(usage.inputTokens * fraction);
 				allEntry.modelUsage[model].outputTokens += Math.round(usage.outputTokens * fraction);
@@ -710,7 +710,7 @@ export async function calculateDailyStats(sessionFiles: string[], verbose = fals
 			if (!allEntry.editorModelUsage) { allEntry.editorModelUsage = {}; }
 			if (!allEntry.editorModelUsage[editor]) { allEntry.editorModelUsage[editor] = {}; }
 			for (const [model, usage] of Object.entries(data.modelUsage)) {
-				if (!allEntry.editorModelUsage[editor][model]) { allEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0 }; }
+				if (!allEntry.editorModelUsage[editor][model]) { allEntry.editorModelUsage[editor][model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 				allEntry.editorModelUsage[editor][model].inputTokens += Math.round(usage.inputTokens * fraction);
 				allEntry.editorModelUsage[editor][model].outputTokens += Math.round(usage.outputTokens * fraction);
 			}

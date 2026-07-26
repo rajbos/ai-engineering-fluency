@@ -340,7 +340,7 @@ export class CrushDataAccess {
 		const assistantMsgs = messages.filter(m => m.role === 'assistant' && m.model);
 		if (assistantMsgs.length === 0) {
 			// No model info; attribute all to 'unknown'
-			modelUsage['unknown'] = { inputTokens: totalPrompt, outputTokens: totalCompletion };
+			modelUsage['unknown'] = { inputTokens: totalPrompt, outputTokens: totalCompletion, sessions: 0 };
 			return modelUsage;
 		}
 
@@ -355,7 +355,8 @@ export class CrushDataAccess {
 			const fraction = count / totalMsgs;
 			modelUsage[model] = {
 				inputTokens: Math.round(totalPrompt * fraction),
-				outputTokens: Math.round(totalCompletion * fraction)
+				outputTokens: Math.round(totalCompletion * fraction),
+				sessions: 0,
 			};
 		}
 		return modelUsage;
@@ -390,13 +391,14 @@ export class CrushDataAccess {
 		const interactions = messages.filter(m => m.role === 'user').length;
 		// Annotate each model entry with an interaction count proportional to its token share
 		const totalTokens = prompt + completion;
-		const modelUsageWithInteractions: { [key: string]: { inputTokens: number; outputTokens: number; interactions?: number } } = {};
+		const modelUsageWithInteractions: { [key: string]: { inputTokens: number; outputTokens: number; sessions: number; interactions?: number } } = {};
 		for (const [model, usage] of Object.entries(modelUsage)) {
 			const modelTotal = usage.inputTokens + usage.outputTokens;
 			const fraction = totalTokens > 0 ? modelTotal / totalTokens : 0;
 			modelUsageWithInteractions[model] = {
 				inputTokens: usage.inputTokens,
 				outputTokens: usage.outputTokens,
+				sessions: usage.sessions,
 				interactions: Math.round(interactions * fraction),
 			};
 		}

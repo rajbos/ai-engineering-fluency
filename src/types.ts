@@ -40,7 +40,7 @@ export interface ModelUsage {
     cacheCreation1hTokens?: number;
     thinkingTokens?: number;
     /** Number of sessions that used this model in the aggregated period. */
-    sessions?: number;
+    sessions: number;
   };
 }
 

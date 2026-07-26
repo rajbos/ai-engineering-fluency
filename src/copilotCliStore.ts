@@ -513,7 +513,7 @@ export class CopilotCliStoreAccess {
 
 	/** Merge a single usage event into the per-model accumulator (cache fields only when > 0). */
 	private addUsageEventToModelUsage(modelUsage: ModelUsage, event: UsageEventRow): void {
-		if (!modelUsage[event.model]) { modelUsage[event.model] = { inputTokens: 0, outputTokens: 0 }; }
+		if (!modelUsage[event.model]) { modelUsage[event.model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 		const usage = modelUsage[event.model];
 		usage.inputTokens += event.inputTokens;
 		usage.outputTokens += event.outputTokens;

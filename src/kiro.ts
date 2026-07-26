@@ -377,7 +377,7 @@ export class KiroDataAccess {
 		const records = await this.readExecutionRecordsForSession(sessionFilePath);
 		if (records.length > 0) {
 			const model = await this.getSessionModelTitle(sessionFilePath);
-			const usage: ModelUsage = { [model]: { inputTokens: 0, outputTokens: 0 } };
+			const usage: ModelUsage = { [model]: { inputTokens: 0, outputTokens: 0, sessions: 0 } };
 			for (const record of records) {
 				usage[model].inputTokens += record.inputTokens;
 				usage[model].outputTokens += record.outputTokens;
@@ -410,7 +410,7 @@ export class KiroDataAccess {
 			for (const log of item.promptLogs) {
 				const model: string = (log.modelTitle as string) || (log.completionOptions?.model as string) || 'unknown';
 				if (!modelUsage[model]) {
-					modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+					modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 				}
 				modelUsage[model].inputTokens += this.estimateTokens((log.prompt as string) || '');
 				modelUsage[model].outputTokens += this.estimateTokens((log.completion as string) || '');

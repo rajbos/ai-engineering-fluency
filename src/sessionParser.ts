@@ -179,7 +179,7 @@ export class TokenAccumulator {
 
     addInput(model: string, text: string): void {
         const m = this.ensureModel(model);
-        if (!this.modelUsage[m]) { this.modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
+        if (!this.modelUsage[m]) { this.modelUsage[m] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
         const t = this.estimateTokens(text, m);
         this.modelUsage[m].inputTokens += t;
         this.totalInputTokens += t;
@@ -187,7 +187,7 @@ export class TokenAccumulator {
 
     addOutput(model: string, text: string): void {
         const m = this.ensureModel(model);
-        if (!this.modelUsage[m]) { this.modelUsage[m] = { inputTokens: 0, outputTokens: 0 }; }
+        if (!this.modelUsage[m]) { this.modelUsage[m] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
         const t = this.estimateTokens(text, m);
         this.modelUsage[m].outputTokens += t;
         this.totalOutputTokens += t;

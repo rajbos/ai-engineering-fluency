@@ -122,7 +122,7 @@ export interface CodexRolloutSummary {
 
 /** Sums per-model input/output deltas across cumulative snapshots (reset-safe). */
 export interface CodexTokenTotals {
-	perModel: { [model: string]: { inputTokens: number; outputTokens: number } };
+	perModel: { [model: string]: { inputTokens: number; outputTokens: number; sessions: number } };
 	totalTokens: number;
 	thinkingTokens: number;
 }
@@ -678,7 +678,7 @@ export class CodexCliDataAccess {
 			const dOutput = prev ? Math.max(0, snap.output - prev.output) : snap.output;
 			const dReasoning = prev ? Math.max(0, snap.reasoning - prev.reasoning) : snap.reasoning;
 			if (dInput > 0 || dOutput > 0) {
-				const entry = perModel[snap.model] ?? (perModel[snap.model] = { inputTokens: 0, outputTokens: 0 });
+				const entry = perModel[snap.model] ?? (perModel[snap.model] = { inputTokens: 0, outputTokens: 0, sessions: 0 });
 				entry.inputTokens += dInput;
 				entry.outputTokens += dOutput;
 			}
@@ -741,7 +741,7 @@ export class CodexCliDataAccess {
 			const model = thread?.model || 'unknown';
 			// Only a single total is stored; agent sessions are heavily input-dominated,
 			// so the total is attributed to inputTokens (conservative for cost estimates).
-			return { [model]: { inputTokens: tokens, outputTokens: 0 } };
+			return { [model]: { inputTokens: tokens, outputTokens: 0, sessions: 0 } };
 		}
 		const summary = await this.getRolloutSummary(sessionFile);
 		const totals = this.computeTokenTotals(summary);
@@ -749,7 +749,7 @@ export class CodexCliDataAccess {
 		const est = this.estimateRolloutTokens(summary);
 		if (est.input + est.output + est.thinking === 0) { return {}; }
 		const model = summary.models[summary.models.length - 1] || 'unknown';
-		return { [model]: { inputTokens: est.input, outputTokens: est.output + est.thinking } };
+		return { [model]: { inputTokens: est.input, outputTokens: est.output + est.thinking, sessions: 0 } };
 	}
 
 	/** Session metadata (title, first/last interaction, workspace path). */

@@ -325,7 +325,7 @@ function _cifjlProcessEvent(event: any): number {
 function _scdlBuildFromBreakdown(modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }>): ModelUsage {
 	const modelUsage: ModelUsage = {};
 	for (const [model, bd] of Object.entries(modelBreakdown)) {
-		modelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+		modelUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, sessions: 0, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
 	}
 	return modelUsage;
 }
@@ -341,7 +341,7 @@ function _scdlDistributeToDays(
 		const fraction = dayRollup.interactions / totalDayInteractions;
 		const dayModelUsage: ModelUsage = {};
 		for (const [model, usage] of Object.entries(supplementModelUsage)) {
-			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}) };
+			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), sessions: 0, ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}) };
 		}
 		result[dayKey] = { ...dayRollup, modelUsage: dayModelUsage };
 	}
@@ -3418,15 +3418,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		entry.repositoryUsage[repository].sessions += 1;
 		addModelUsage(entry.modelUsage, modelUsage);
 		for (const model of Object.keys(modelUsage)) {
-			if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
-			entry.modelUsage[model].sessions += 1;
+			entry.modelUsage[model]!.sessions += 1;
 		}
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
 		for (const model of Object.keys(modelUsage)) {
-			if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
-			entry.editorModelUsage[editorType][model].sessions += 1;
+			entry.editorModelUsage[editorType][model]!.sessions += 1;
 		}
 		if (taskCategory) {
 			if (!entry.taskCategoryUsage) { entry.taskCategoryUsage = {}; }
@@ -4889,7 +4887,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private scaledModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
 		const dayModelUsage: ModelUsage = {};
 		for (const [model, usage] of Object.entries(modelUsage)) {
-			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}), ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}) };
+			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}), ...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}), sessions: 0 };
 		}
 		return dayModelUsage;
 	}
@@ -4937,7 +4935,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!debugLogTokens || debugLogTokens.inputTokens + debugLogTokens.outputTokens === 0) { return modelUsage; }
 		const breakdownUsage: ModelUsage = {};
 		for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
-			breakdownUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}) };
+			breakdownUsage[model] = { inputTokens: bd.inputTokens, outputTokens: bd.outputTokens, ...(bd.cachedTokens > 0 ? { cachedReadTokens: bd.cachedTokens } : {}), sessions: 0 };
 		}
 		// Reconcile against the debug log's own totals even when the breakdown is
 		// missing or partial (e.g. some requests lack a `model` attribute), so
@@ -7872,7 +7870,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     personalData.totalInteractions += ids.interactions;
     personalData.devices.add(ids.machineId);
     personalData.workspaces.add(ids.workspaceId);
-    addModelUsage(personalData.modelUsage, { [ids.model]: { inputTokens: ids.inputTokens, outputTokens: ids.outputTokens } });
+    addModelUsage(personalData.modelUsage, { [ids.model]: { inputTokens: ids.inputTokens, outputTokens: ids.outputTokens, sessions: 0 } });
   }
 
   private updateTeamData(entity: any, ids: any, teamMemberKey: string, userMap: Map<string, any>, userFluencyMap: Map<string, any>): void {
@@ -8607,7 +8605,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 
   /** Merge one file's per-model usage entries into the running aggregate. */
   private static mergeModelUsageEntry(aggregated: ModelUsage, model: string, usage: ModelUsage[string]): void {
-    if (!aggregated[model]) { aggregated[model] = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 }; }
+    if (!aggregated[model]) { aggregated[model] = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0, sessions: 0 }; }
     const agg = aggregated[model];
     agg.inputTokens += usage.inputTokens || 0;
     agg.outputTokens += usage.outputTokens || 0;

@@ -537,7 +537,7 @@ export class OpenCodeDataAccess {
 			const turnTokens = turnCumTotal - prevTotal;
 			if (turnTokens <= 0) { prevTotal = turnCumTotal; continue; }
 			const model = turnAssistantMsgs[0].modelID || turnAssistantMsgs[0].model?.modelID || 'unknown';
-			if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+			if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 			const turnOutput = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.output || 0) + (m.tokens?.reasoning || 0), 0);
 			modelUsage[model].inputTokens += Math.max(0, turnTokens - turnOutput);
 			modelUsage[model].outputTokens += turnOutput;
