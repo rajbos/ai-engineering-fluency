@@ -16,6 +16,7 @@ import { getLongContextInfo } from '../../../../src/tokenEstimation';
 import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '../../../../src/modelEfficiency';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
+import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -88,19 +89,6 @@ type EvaluatedInsight = {
 	actionCommand?: string;
 	status: InsightStatus;
 	allowToast?: boolean;
-};
-
-type CopilotApiBalance = {
-	/** Monthly budget in USD (entitlement / 100). */
-	budgetUsd: number;
-	/** Monthly budget in AI Credits (budgetUsd * 100). */
-	budgetAiCredits: number;
-	/** Remaining AI Credits from the API quota snapshot. */
-	remainingAiCredits: number;
-	/** AI Credits consumed across all channels (IDE, web, cloud agent, review agent). */
-	usedAiCredits: number;
-	/** Percentage of budget still available. */
-	pctAvailable: number;
 };
 
 type UsageAnalysisStats = {
@@ -1475,6 +1463,12 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 		} else {
 			traceCurationOnce('sanitize-no-curation', 'sanitizeStats.curation.missing');
 		}
+
+		// Pass through the Copilot API quota balance and current-month billing costs.
+		// Without this, periodic updateStats refreshes rebuild the stats object without
+		// these fields, so the "Copilot Billing Coverage" section disappears after the
+		// first refresh even though the extension still has the data.
+		applyBillingFields(sanitized, raw);
 
 		return sanitized;
 	} catch (error) {
