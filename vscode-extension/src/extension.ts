@@ -1949,7 +1949,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// (via captureQuotaEntitlement). The status bar tooltip flyout is only rebuilt
 		// during token refreshes, so refresh it now so the freshly-fetched budget shows
 		// up immediately after sign-in instead of only on the next 5-minute refresh.
+		if (this.lastDetailedStats) {
 		this.refreshBudgetDependentUi();
+	}
 	}
 
 	/** Rebuilds the status bar tooltip flyout (and its background color) from the last
