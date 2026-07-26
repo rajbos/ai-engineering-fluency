@@ -521,7 +521,7 @@ export class DevinCliDataAccess {
 		const session = await this.readSession(virtualPath);
 		const model = session?.model || 'unknown';
 		const nodes = await this.getMessageNodes(virtualPath);
-		const usage: ModelUsage = { [model]: { inputTokens: 0, outputTokens: 0 } };
+		const usage: ModelUsage = { [model]: { inputTokens: 0, outputTokens: 0, sessions: 0 } };
 		for (const node of nodes) {
 			const parsed = this.parseChatMessage(node.chat_message);
 			const est = this.estimateTokens(parsed.text);

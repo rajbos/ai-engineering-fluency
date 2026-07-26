@@ -300,7 +300,7 @@ export class KiroCliDataAccess {
 		const { inputTokens, outputTokens } = await this.estimateSessionTokens(sessionFilePath);
 		if (inputTokens === 0 && outputTokens === 0) { return {}; }
 		const model = meta?.modelId || 'unknown';
-		return { [model]: { inputTokens, outputTokens } };
+		return { [model]: { inputTokens, outputTokens, sessions: 0 } };
 	}
 
 	/**

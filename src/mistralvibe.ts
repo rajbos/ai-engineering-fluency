@@ -162,7 +162,7 @@ return {};
 }
 const model: string = meta.config?.active_model || 'devstral';
 return {
-[model]: { inputTokens: promptTokens, outputTokens: completionTokens }
+[model]: { inputTokens: promptTokens, outputTokens: completionTokens, sessions: 0 }
 };
 }
 

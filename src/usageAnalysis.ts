@@ -2347,7 +2347,7 @@ function accumulateSubAgentTokenUsage(
 		const subAgent = extractSubAgentData(responseItem);
 		if (subAgent) {
 			const saModel = subAgent.modelName || baseModel;
-			if (!modelUsage[saModel]) { modelUsage[saModel] = { inputTokens: 0, outputTokens: 0 }; }
+			if (!modelUsage[saModel]) { modelUsage[saModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 			if (subAgent.prompt) { modelUsage[saModel].inputTokens += estimateTokensFromText(subAgent.prompt, saModel, tokenEstimators); }
 			if (subAgent.result) { modelUsage[saModel].outputTokens += estimateTokensFromText(subAgent.result, saModel, tokenEstimators); }
 		}
@@ -2368,7 +2368,7 @@ type GmusJsonlState = {
 type CliShutdownMetricsEntry = { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } };
 
 function _gmusApplyMetricEntry(modelName: string, usage: NonNullable<CliShutdownMetricsEntry['usage']>, dest: ModelUsage): void {
-	if (!dest[modelName]) { dest[modelName] = { inputTokens: 0, outputTokens: 0 }; }
+	if (!dest[modelName]) { dest[modelName] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	dest[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
 	dest[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
 	const cacheRead = typeof usage.cacheReadTokens === 'number' ? usage.cacheReadTokens : 0;
@@ -2465,7 +2465,7 @@ function _gmusProcessJsonlLine(event: any, state: GmusJsonlState, modelUsage: Mo
 	}
 	_gmusUpdateDefaultModelFromEvent(event, state);
 	const model = event.data?.model || event.model || state.defaultModel;
-	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!state.isDeltaBased) { _gmusProcessCliEventLine(event, model, state, modelUsage, deps); }
 }
 
@@ -2510,7 +2510,7 @@ function _gmusProcessDeltaRequest(request: SessionRequestRaw, defaultModel: stri
 	} else if (request.result?.details) {
 		requestModel = getModelFromRequest(request, deps.modelPricing);
 	}
-	if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0 }; }
+	if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!tryExtractExactTokenUsage(request, requestModel, modelUsage)) {
 		_gmusEstimateDeltaRequestTokens(request, requestModel, modelUsage, deps);
 	}
@@ -2537,7 +2537,7 @@ function _gmusDeltaFallbackExtraction(lines: string[], state: GmusJsonlState, mo
 		if (request.result?.usage || (typeof request.result?.promptTokens === 'number') || (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number')) { continue; }
 		let requestModel = state.defaultModel;
 		if (request.modelId) { requestModel = request.modelId.replace(/^copilot\//, ''); }
-		if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0 }; }
+		if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 		modelUsage[requestModel].inputTokens += extracted.promptTokens;
 		modelUsage[requestModel].outputTokens += extracted.outputTokens;
 	}
@@ -2550,7 +2550,7 @@ function _gmusBuildEstimatedCliUsage(state: GmusJsonlState, modelUsage: ModelUsa
 	const estimatedUsage: ModelUsage = {};
 	for (const [m, realOutput] of Object.entries(state.cliRealOutputByModel!)) {
 		const accumulatedInput = modelUsage[m]?.inputTokens ?? 0;
-		estimatedUsage[m] = { inputTokens: Math.round(accumulatedInput * contextFactor), outputTokens: realOutput };
+		estimatedUsage[m] = { inputTokens: Math.round(accumulatedInput * contextFactor), outputTokens: realOutput, sessions: 0 };
 	}
 	return estimatedUsage;
 }
@@ -2583,7 +2583,7 @@ function _gmusProcessJsonRequestEstimate(request: SessionRequestRaw, model: stri
 /** Process a single JSON-format session request, accumulating its token usage. */
 function _gmusProcessJsonRequest(request: SessionRequestRaw, modelUsage: ModelUsage, deps: GmusDeps): void {
 	const model = getModelFromRequest(request, deps.modelPricing);
-	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!tryExtractExactTokenUsage(request, model, modelUsage)) { _gmusProcessJsonRequestEstimate(request, model, modelUsage, deps); }
 	if (request.response && Array.isArray(request.response)) {
 		accumulateSubAgentTokenUsage(request.response as ResponseItemRaw[], model, modelUsage, deps.tokenEstimators);

@@ -94,84 +94,83 @@ assert.strictEqual(computeSessionDurationMs('2026-07-11T10:12:00.000Z', '2026-07
 
 test('addModelUsage: adds a new model to an empty target', () => {
 const target: ModelUsage = {};
-const source: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const source: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 addModelUsage(target, source);
-assert.deepEqual(target['gpt-4'], { inputTokens: 100, outputTokens: 50 });
+assert.deepEqual(target['gpt-4'], { inputTokens: 100, outputTokens: 50, sessions: 0});
 });
 
 test('addModelUsage: accumulates tokens for an existing model', () => {
-const target: ModelUsage = { 'gpt-4': { inputTokens: 200, outputTokens: 100 } };
-const source: ModelUsage = { 'gpt-4': { inputTokens: 50, outputTokens: 25 } };
+const target: ModelUsage = { 'gpt-4': { inputTokens: 200, outputTokens: 100, sessions: 0} };
+const source: ModelUsage = { 'gpt-4': { inputTokens: 50, outputTokens: 25, sessions: 0} };
 addModelUsage(target, source);
-assert.deepEqual(target['gpt-4'], { inputTokens: 250, outputTokens: 125 });
+assert.deepEqual(target['gpt-4'], { inputTokens: 250, outputTokens: 125, sessions: 0});
 });
 
 test('addModelUsage: merges multiple models at once', () => {
-const target: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const target: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 const source: ModelUsage = {
-'gpt-4': { inputTokens: 10, outputTokens: 5 },
-'claude-3-5-sonnet': { inputTokens: 200, outputTokens: 100 },
+'gpt-4': { inputTokens: 10, outputTokens: 5, sessions: 0},
+'claude-3-5-sonnet': { inputTokens: 200, outputTokens: 100, sessions: 0},
 };
 addModelUsage(target, source);
-assert.deepEqual(target['gpt-4'], { inputTokens: 110, outputTokens: 55 });
-assert.deepEqual(target['claude-3-5-sonnet'], { inputTokens: 200, outputTokens: 100 });
+assert.deepEqual(target['gpt-4'], { inputTokens: 110, outputTokens: 55, sessions: 0});
+assert.deepEqual(target['claude-3-5-sonnet'], { inputTokens: 200, outputTokens: 100, sessions: 0});
 });
 
 test('addModelUsage: merges cachedReadTokens from source to empty target', () => {
 const target: ModelUsage = {};
-const source: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 150, cachedReadTokens: 80 } };
+const source: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 150, cachedReadTokens: 80, sessions: 0} };
 addModelUsage(target, source);
 assert.equal(target['claude-3-5-sonnet'].cachedReadTokens, 80);
 });
 
 test('addModelUsage: accumulates cachedReadTokens when both have the field', () => {
-const target: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 150, cachedReadTokens: 40 } };
-const source: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 50, cachedReadTokens: 20 } };
+const target: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 150, cachedReadTokens: 40, sessions: 0} };
+const source: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 50, cachedReadTokens: 20, sessions: 0} };
 addModelUsage(target, source);
 assert.equal(target['claude-3-5-sonnet'].cachedReadTokens, 60);
 });
 
 test('addModelUsage: merges cacheCreationTokens', () => {
-const target: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 150 } };
-const source: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 50, cacheCreationTokens: 30 } };
+const target: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 150, sessions: 0} };
+const source: ModelUsage = { 'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 50, cacheCreationTokens: 30, sessions: 0} };
 addModelUsage(target, source);
 assert.equal(target['claude-3-5-sonnet'].cacheCreationTokens, 30);
 });
 
 test('addModelUsage: accumulates both cache fields together', () => {
 const target: ModelUsage = {
-'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 150, cachedReadTokens: 20, cacheCreationTokens: 10 }
+'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 150, cachedReadTokens: 20, cacheCreationTokens: 10, sessions: 0}
 };
 const source: ModelUsage = {
-'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 50, cachedReadTokens: 5, cacheCreationTokens: 3 }
+'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 50, cachedReadTokens: 5, cacheCreationTokens: 3, sessions: 0}
 };
 addModelUsage(target, source);
 assert.deepEqual(target['claude-3-5-sonnet'], {
 inputTokens: 400,
 outputTokens: 200,
 cachedReadTokens: 25,
-cacheCreationTokens: 13,
-});
+cacheCreationTokens: 13, sessions: 0,});
 });
 
 test('addModelUsage: does not add undefined cache fields to target', () => {
 const target: ModelUsage = {};
-const source: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const source: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 addModelUsage(target, source);
 assert.equal(target['gpt-4'].cachedReadTokens, undefined);
 assert.equal(target['gpt-4'].cacheCreationTokens, undefined);
 });
 
 test('addModelUsage: source with empty object is a no-op', () => {
-const target: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const target: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 addModelUsage(target, {});
-assert.deepEqual(target, { 'gpt-4': { inputTokens: 100, outputTokens: 50 } });
+assert.deepEqual(target, { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} });
 });
 
 // ── reconcileModelUsageToTotal ──────────────────────────────────────────────
 
 test('reconcileModelUsageToTotal: returns modelUsage unchanged when target totals are zero', () => {
-const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 const result = reconcileModelUsageToTotal(modelUsage, 0, 0);
 assert.deepEqual(result, modelUsage);
 });
@@ -179,49 +178,48 @@ assert.deepEqual(result, modelUsage);
 test('reconcileModelUsageToTotal: no-op when the breakdown already matches the target (regression for the Input > Total bug)', () => {
 // The bug this guards: Input/Output tokens (from modelUsage) must never exceed
 // Total tokens (the debug-log/actualTokens total) in the details webview table.
-const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 const result = reconcileModelUsageToTotal(modelUsage, 100, 50);
-assert.deepEqual(result, { 'gpt-4': { inputTokens: 100, outputTokens: 50 } });
+assert.deepEqual(result, { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} });
 });
 
 test('reconcileModelUsageToTotal: scales a single model proportionally down to the target total', () => {
 // Stale pre-debug-log estimate overcounted input tokens (111 vs the debug log's
 // authoritative 90) — this is the exact shape of the reported "Input > Total" bug.
-const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 111, outputTokens: 40 } };
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 111, outputTokens: 40, sessions: 0} };
 const result = reconcileModelUsageToTotal(modelUsage, 90, 30);
-assert.deepEqual(result, { 'gpt-4': { inputTokens: 90, outputTokens: 30 } });
+assert.deepEqual(result, { 'gpt-4': { inputTokens: 90, outputTokens: 30, sessions: 0} });
 });
 
 test('reconcileModelUsageToTotal: preserves relative shares across multiple models', () => {
 const modelUsage: ModelUsage = {
-'gpt-4': { inputTokens: 300, outputTokens: 100 },
-'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 100 },
+'gpt-4': { inputTokens: 300, outputTokens: 100, sessions: 0},
+'claude-3-5-sonnet': { inputTokens: 100, outputTokens: 100, sessions: 0},
 };
 // Target is double the current total (400 input / 200 output).
 const result = reconcileModelUsageToTotal(modelUsage, 800, 400);
-assert.deepEqual(result['gpt-4'], { inputTokens: 600, outputTokens: 200 });
-assert.deepEqual(result['claude-3-5-sonnet'], { inputTokens: 200, outputTokens: 200 });
+assert.deepEqual(result['gpt-4'], { inputTokens: 600, outputTokens: 200, sessions: 0});
+assert.deepEqual(result['claude-3-5-sonnet'], { inputTokens: 200, outputTokens: 200, sessions: 0});
 });
 
 test('reconcileModelUsageToTotal: scales cachedReadTokens and cacheCreationTokens using the input scale factor', () => {
 const modelUsage: ModelUsage = {
-'claude-3-5-sonnet': { inputTokens: 200, outputTokens: 50, cachedReadTokens: 80, cacheCreationTokens: 20 },
+'claude-3-5-sonnet': { inputTokens: 200, outputTokens: 50, cachedReadTokens: 80, cacheCreationTokens: 20, sessions: 0},
 };
 const result = reconcileModelUsageToTotal(modelUsage, 100, 50);
 assert.deepEqual(result['claude-3-5-sonnet'], {
-inputTokens: 100, outputTokens: 50, cachedReadTokens: 40, cacheCreationTokens: 10,
-});
+inputTokens: 100, outputTokens: 50, cachedReadTokens: 40, cacheCreationTokens: 10, sessions: 0,});
 });
 
 test('reconcileModelUsageToTotal: attributes the whole target to an "unknown" bucket when modelUsage has no usable breakdown', () => {
 const result = reconcileModelUsageToTotal({}, 100, 50);
-assert.deepEqual(result, { unknown: { inputTokens: 100, outputTokens: 50 } });
+assert.deepEqual(result, { unknown: { inputTokens: 100, outputTokens: 50, sessions: 0} });
 });
 
 test('reconcileModelUsageToTotal: sum of reconciled models always equals the target totals (no silent drift)', () => {
 const modelUsage: ModelUsage = {
-'gpt-4': { inputTokens: 37, outputTokens: 11 },
-'claude-3-5-sonnet': { inputTokens: 53, outputTokens: 29 },
+'gpt-4': { inputTokens: 37, outputTokens: 11, sessions: 0},
+'claude-3-5-sonnet': { inputTokens: 53, outputTokens: 29, sessions: 0},
 };
 const result = reconcileModelUsageToTotal(modelUsage, 1000, 333);
 const totalInput = Object.values(result).reduce((s, u) => s + u.inputTokens, 0);
@@ -233,25 +231,25 @@ assert.strictEqual(totalOutput, 333);
 // ── reconcileModelUsageToActualTokens ─────────────────────────────────────────
 
 test('reconcileModelUsageToActualTokens: no-op when the breakdown already sums to the actual total', () => {
-const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 70, outputTokens: 30 } };
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 70, outputTokens: 30, sessions: 0} };
 const result = reconcileModelUsageToActualTokens(modelUsage, 100);
-assert.deepEqual(result, { 'gpt-4': { inputTokens: 70, outputTokens: 30 } });
+assert.deepEqual(result, { 'gpt-4': { inputTokens: 70, outputTokens: 30, sessions: 0} });
 });
 
 test('reconcileModelUsageToActualTokens: scales input down while preserving real output counts', () => {
 // Event-based CLI sessions can estimate total input from accumulated message content
 // while the session total is derived from real output via an input:output ratio. When
 // user content is large and model output is small, the breakdown input can exceed total.
-const modelUsage: ModelUsage = { 'gpt-4o': { inputTokens: 1000, outputTokens: 100 } };
+const modelUsage: ModelUsage = { 'gpt-4o': { inputTokens: 1000, outputTokens: 100, sessions: 0} };
 const result = reconcileModelUsageToActualTokens(modelUsage, 300);
 // Output stays authoritative (100), input shrinks to fit the 300 total.
-assert.deepEqual(result['gpt-4o'], { inputTokens: 200, outputTokens: 100 });
+assert.deepEqual(result['gpt-4o'], { inputTokens: 200, outputTokens: 100, sessions: 0});
 const total = Object.values(result).reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
 assert.strictEqual(total, 300);
 });
 
 test('reconcileModelUsageToActualTokens: proportional fallback when output already exceeds the actual total', () => {
-const modelUsage: ModelUsage = { 'o1': { inputTokens: 50, outputTokens: 200 } };
+const modelUsage: ModelUsage = { 'o1': { inputTokens: 50, outputTokens: 200, sessions: 0} };
 const result = reconcileModelUsageToActualTokens(modelUsage, 100);
 const total = Object.values(result).reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
 assert.strictEqual(total, 100);
@@ -261,25 +259,25 @@ assert.ok(result['o1'].inputTokens <= 100);
 
 test('reconcileModelUsageToActualTokens: distributes across multiple models preserving output shares', () => {
 const modelUsage: ModelUsage = {
-'gpt-4': { inputTokens: 500, outputTokens: 80 },
-'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 20 },
+'gpt-4': { inputTokens: 500, outputTokens: 80, sessions: 0},
+'claude-3-5-sonnet': { inputTokens: 300, outputTokens: 20, sessions: 0},
 };
 const result = reconcileModelUsageToActualTokens(modelUsage, 250);
-assert.deepEqual(result['gpt-4'], { inputTokens: 94, outputTokens: 80 });
-assert.deepEqual(result['claude-3-5-sonnet'], { inputTokens: 56, outputTokens: 20 });
+assert.deepEqual(result['gpt-4'], { inputTokens: 94, outputTokens: 80, sessions: 0});
+assert.deepEqual(result['claude-3-5-sonnet'], { inputTokens: 56, outputTokens: 20, sessions: 0});
 const total = Object.values(result).reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
 assert.strictEqual(total, 250);
 });
 
 test('reconcileModelUsageToActualTokens: no-op when actualTokens is zero or negative', () => {
-const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50 } };
+const modelUsage: ModelUsage = { 'gpt-4': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 assert.deepEqual(reconcileModelUsageToActualTokens(modelUsage, 0), modelUsage);
 assert.deepEqual(reconcileModelUsageToActualTokens(modelUsage, -1), modelUsage);
 });
 
 test('reconcileModelUsageToActualTokens: creates unknown bucket for empty modelUsage', () => {
 const result = reconcileModelUsageToActualTokens({}, 100);
-assert.deepEqual(result, { unknown: { inputTokens: 100, outputTokens: 0 } });
+assert.deepEqual(result, { unknown: { inputTokens: 100, outputTokens: 0, sessions: 0} });
 });
 
 // ── addEditorUsage ────────────────────────────────────────────────────────────
@@ -982,7 +980,7 @@ assert.equal(result.todayStats.tokens, 180, 'no cacheReadTokens → actualTokens
 
 test('modelUsageNoExact: Copilot-surface session without exact billing is included', () => {
 const ranges = makeRanges('2025-03-15');
-const usage: ModelUsage = { 'gpt-4.1': { inputTokens: 100, outputTokens: 50 } };
+const usage: ModelUsage = { 'gpt-4.1': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 const input: SessionAggregateInput = {
 editorType: 'VS Code',
 mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
@@ -990,7 +988,7 @@ lastInteraction: '2025-03-15T10:00:00.000Z',
 sessionData: makeSession({ modelUsage: usage, interactions: 1 }),
 };
 const result = aggregatePeriodStats([input], ranges);
-assert.deepEqual(result.monthStats.modelUsageNoExact['gpt-4.1'], { inputTokens: 100, outputTokens: 50 });
+assert.deepEqual(result.monthStats.modelUsageNoExact['gpt-4.1'], { inputTokens: 100, outputTokens: 50, sessions: 0});
 assert.equal(result.monthStats.exactCopilotCostDollars, 0);
 });
 
@@ -999,7 +997,7 @@ test('modelUsageNoExact: non-Copilot session does not leak into the Copilot cost
 // modelUsageNoExact and were priced at Copilot AI-Credit rates, inflating the
 // "GitHub Copilot" monthly spend far beyond actual Copilot usage.
 const ranges = makeRanges('2025-03-15');
-const usage: ModelUsage = { 'claude-fable-5': { inputTokens: 1_000_000, outputTokens: 500_000 } };
+const usage: ModelUsage = { 'claude-fable-5': { inputTokens: 1_000_000, outputTokens: 500_000, sessions: 0} };
 const input: SessionAggregateInput = {
 editorType: 'Claude Code',
 mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
@@ -1010,13 +1008,13 @@ const result = aggregatePeriodStats([input], ranges);
 assert.deepEqual(result.monthStats.modelUsageNoExact, {}, 'Claude Code usage must not feed the Copilot estimate');
 assert.deepEqual(result.todayStats.modelUsageNoExact, {});
 assert.deepEqual(result.last30DaysStats.modelUsageNoExact, {});
-assert.deepEqual(result.monthStats.modelUsage['claude-fable-5'], { inputTokens: 1_000_000, outputTokens: 500_000 }, 'still counted in overall model usage');
+assert.deepEqual(result.monthStats.modelUsage['claude-fable-5'], { inputTokens: 1_000_000, outputTokens: 500_000, sessions: 0}, 'still counted in overall model usage');
 assert.equal(result.monthStats.editorModelUsage['Claude Code']['claude-fable-5'].inputTokens, 1_000_000, 'still attributed to its billing group via editorModelUsage');
 });
 
 test('modelUsageNoExact: Copilot-surface session with exact nanoAiu billing uses the exact cost instead', () => {
 const ranges = makeRanges('2025-03-15');
-const usage: ModelUsage = { 'gpt-4.1': { inputTokens: 100, outputTokens: 50 } };
+const usage: ModelUsage = { 'gpt-4.1': { inputTokens: 100, outputTokens: 50, sessions: 0} };
 const input: SessionAggregateInput = {
 editorType: 'VS Code',
 mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
@@ -1030,7 +1028,7 @@ assert.deepEqual(result.monthStats.modelUsageNoExact, {}, 'exact-billed sessions
 
 test('modelUsageNoExact: rollup path – non-Copilot rollup days are excluded, Copilot days included', () => {
 const ranges = makeRanges('2025-03-15');
-const usage: ModelUsage = { 'gemini-2.5-pro': { inputTokens: 300, outputTokens: 100 } };
+const usage: ModelUsage = { 'gemini-2.5-pro': { inputTokens: 300, outputTokens: 100, sessions: 0} };
 const input: SessionAggregateInput = {
 editorType: 'Gemini CLI',
 mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
@@ -1042,7 +1040,7 @@ dailyRollups: {
 };
 const result = aggregatePeriodStats([input], ranges);
 assert.deepEqual(result.monthStats.modelUsageNoExact, {}, 'Gemini CLI rollup must not feed the Copilot estimate');
-assert.deepEqual(result.monthStats.modelUsage['gemini-2.5-pro'], { inputTokens: 300, outputTokens: 100 });
+assert.deepEqual(result.monthStats.modelUsage['gemini-2.5-pro'], { inputTokens: 300, outputTokens: 100, sessions: 0});
 });
 
 // ── per-model / per-provider session counts ───────────────────────────────────
@@ -1050,8 +1048,8 @@ assert.deepEqual(result.monthStats.modelUsage['gemini-2.5-pro'], { inputTokens: 
 test('aggregatePeriodStats: fallback path increments per-model and per-editor-model session counts', () => {
 const ranges = makeRanges('2025-03-15');
 const usage: ModelUsage = {
-'gpt-4o': { inputTokens: 400, outputTokens: 100 },
-'claude-3-5-sonnet': { inputTokens: 200, outputTokens: 100 },
+'gpt-4o': { inputTokens: 400, outputTokens: 100, sessions: 0},
+'claude-3-5-sonnet': { inputTokens: 200, outputTokens: 100, sessions: 0},
 };
 const input: SessionAggregateInput = {
 editorType: 'VS Code',
@@ -1070,7 +1068,7 @@ assert.equal(day.editorUsage['VS Code']?.sessions, 1);
 
 test('aggregatePeriodStats: rollup path increments per-model and per-editor-model session counts', () => {
 const ranges = makeRanges('2025-03-15');
-const usage: ModelUsage = { 'gpt-4o': { inputTokens: 300, outputTokens: 100 } };
+const usage: ModelUsage = { 'gpt-4o': { inputTokens: 300, outputTokens: 100, sessions: 0} };
 const input: SessionAggregateInput = {
 editorType: 'VS Code',
 mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),

@@ -369,7 +369,7 @@ export class CursorDataAccess {
 		if (contextTokens === 0) { return {}; }
 		const model = data.modelConfig?.modelName || 'unknown';
 		return {
-			[model]: { inputTokens: contextTokens, outputTokens: 0 }
+			[model]: { inputTokens: contextTokens, outputTokens: 0, sessions: 0 }
 		};
 	}
 

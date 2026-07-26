@@ -98,7 +98,7 @@ function accumulateOtelChatSpanUsage(index: Map<string, CopilotCliOtelSessionUsa
 		index.set(sessionId, { modelUsage: {}, actualTokens: 0, cacheReadTokens: 0, nanoAiu: 0 });
 	}
 	const entry = index.get(sessionId)!;
-	if (!entry.modelUsage[usage.model]) { entry.modelUsage[usage.model] = { inputTokens: 0, outputTokens: 0 }; }
+	if (!entry.modelUsage[usage.model]) { entry.modelUsage[usage.model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	const modelEntry = entry.modelUsage[usage.model];
 
 	// gen_ai.usage.input_tokens is already the total (uncached + cache creation + cache read),

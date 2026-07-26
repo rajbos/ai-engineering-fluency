@@ -292,7 +292,7 @@ export class ClineDataAccess {
 
 	private addRequestToModelUsage(usage: ModelUsage, model: string, inputTokens: number, outputTokens: number, cacheReads: number, cacheWrites: number): void {
 		if (!usage[model]) {
-			usage[model] = { inputTokens: 0, outputTokens: 0 };
+			usage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		}
 		usage[model].inputTokens += inputTokens;
 		usage[model].outputTokens += outputTokens;
