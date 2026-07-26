@@ -2,7 +2,7 @@
 import { navButtonsHtml } from "../shared/buttonConfig";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import { escapeHtml, formatFileSize, getTimeSince, getEditorIcon } from "../shared/formatUtils";
-import { createPeriodSelector, type Period } from "../shared/periodSelector";
+import { createPeriodSelector, PERIOD_LABELS, type Period } from "../shared/periodSelector";
 import { createViewStateManager } from "../shared/viewState";
 // CSS imported as text via esbuild
 import themeStyles from "../shared/theme.css";
@@ -179,6 +179,7 @@ type DiagnosticsViewState = {
   activeTab?: string;
   activeSubtab?: string;
   otelDeltaPeriod?: OtelDeltaPeriod;
+  shareCardPeriod?: Period;
 };
 
 type FolderFileResult = {
@@ -203,10 +204,15 @@ const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,
   activeSubtab: undefined,
   otelDeltaPeriod: "all",
+  shareCardPeriod: "last14",
 });
 
 let currentOtelComparison: CopilotCliOtelComparison | null | undefined;
 let currentOtelDeltaPeriod: OtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
+
+// Periods offered by the Share Card's period selector, in display order.
+const SHARE_CARD_PERIOD_ORDER: Period[] = ["last7", "last14", "last30", "last90", "allTime"];
+let currentShareCardPeriod: Period = diagState.restore().shareCardPeriod ?? "last14";
 
 // Sorting and filtering state
 let currentSortColumn: "lastInteraction" | "size" | "tokens" | "interactions" | "contextRefs" = "lastInteraction";
@@ -674,6 +680,28 @@ function flagRow(key: string, label: string, value: boolean): string {
     </tr>`;
 }
 
+/** Rolling lookback (in days) for each period the Share Card period selector offers. Periods absent from
+ * this map (e.g. "allTime") are treated as "no filtering". */
+const SHARE_CARD_PERIOD_DAYS: Partial<Record<Period, number>> = { last7: 7, last14: 14, last30: 30, last90: 90 };
+
+/** Returns the sessions from `detailedFiles` whose last interaction falls within `period` (allTime = no filtering). */
+function filterFilesByShareCardPeriod(detailedFiles: SessionFileDetails[], period: Period, now: Date = new Date()): SessionFileDetails[] {
+  const days = SHARE_CARD_PERIOD_DAYS[period];
+  if (days === undefined) { return detailedFiles; } // allTime (or any unmapped period): no filtering
+  const cutoff = new Date(now);
+  cutoff.setDate(cutoff.getDate() - days);
+  return detailedFiles.filter((sf) => {
+    if (!sf.lastInteraction) { return false; }
+    const activity = new Date(sf.lastInteraction);
+    return !Number.isNaN(activity.getTime()) && activity >= cutoff && activity <= now;
+  });
+}
+
+/** Lowercase, human-readable phrase describing a Share Card period, for use mid-sentence. */
+function shareCardPeriodPhrase(period: Period): string {
+  return period === "allTime" ? "of all time" : `in the ${PERIOD_LABELS[period].toLowerCase()}`;
+}
+
 /** Builds the plain-text version of the share summary, used by the "Copy Summary Text" button. */
 function buildShareSummaryText(
   editors: string[],
@@ -681,12 +709,13 @@ function buildShareSummaryText(
   totalSessions: number,
   totalInteractions: number,
   totalTokens: number,
+  period: Period,
 ): string {
   const editorList = editors
     .map((editor) => `${getEditorIcon(editor)} ${editor} (${editorStats[editor].count})`)
     .join(", ");
   return `My AI Coding Toolbox — ${editors.length} editor${editors.length === 1 ? "" : "s"} detected: ${editorList}. ` +
-    `${totalSessions} sessions, ${totalInteractions} interactions, ${formatTokenCount(totalTokens)} tokens in the last 14 days. #AIEngineeringFluency`;
+    `${totalSessions} sessions, ${totalInteractions} interactions, ${formatTokenCount(totalTokens)} tokens ${shareCardPeriodPhrase(period)}. #AIEngineeringFluency`;
 }
 
 /** Renders a screenshot-friendly "Share Card" tab summarizing the detected editors — meant to be
@@ -709,23 +738,32 @@ function renderShareCardTab(detailedFiles: SessionFileDetails[], isLoadingSessio
       </div>
     </div>`;
   }
-  const editorStats = getEditorStats(detailedFiles);
+  const period = currentShareCardPeriod;
+  const filteredFiles = filterFilesByShareCardPeriod(detailedFiles, period);
+  const editorStats = getEditorStats(filteredFiles);
   const editors = Object.keys(editorStats).sort((a, b) => editorStats[b].count - editorStats[a].count);
-  const totalSessions = detailedFiles.length;
-  const totalInteractions = detailedFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
-  const totalTokens = detailedFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+  const totalSessions = filteredFiles.length;
+  const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+  const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
   const pills = editors
     .map((editor) => `<div class="share-pill"><span>${getEditorIcon(editor)}</span><span>${escapeHtml(editor)}</span><span class="share-pill-count">${editorStats[editor].count}</span></div>`)
     .join("");
+  const emptyPeriodNotice = totalSessions === 0
+    ? `<div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">No session activity in this period. Try a wider range.</div>`
+    : "";
   return `<div id="tab-share" class="tab-content">
     <div class="info-box">
       <div class="info-box-title">📸 Share Card</div>
       <div>A snapshot of your AI coding toolbox — screenshot this card to share your editor mix on social media.</div>
     </div>
+    <div class="share-card-controls" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 12px; color: var(--text-muted);">Period:</span>
+      <span id="share-card-period-selector"></span>
+    </div>
     <div class="share-card">
       <div class="share-badge">🤖 AI Engineering Fluency</div>
       <div class="share-title">My AI Coding Toolbox</div>
-      <div class="share-subtitle">Last 14 days · ${editors.length} editor${editors.length === 1 ? "" : "s"} detected</div>
+      <div class="share-subtitle">${escapeHtml(PERIOD_LABELS[period])} · ${editors.length} editor${editors.length === 1 ? "" : "s"} detected</div>
       <div class="share-pills">${pills}</div>
       <div class="share-stats">
         <div class="share-stat"><div class="share-stat-value">${totalSessions}</div><div class="share-stat-label">Sessions</div></div>
@@ -734,8 +772,14 @@ function renderShareCardTab(detailedFiles: SessionFileDetails[], isLoadingSessio
         <div class="share-stat"><div class="share-stat-value">${editors.length}</div><div class="share-stat-label">Editors</div></div>
       </div>
     </div>
+    ${emptyPeriodNotice}
     <div class="button-group" style="margin-top: 12px;">
       <button class="button secondary" id="btn-copy-share-summary"><span>📋</span><span>Copy Summary Text</span></button>
+    </div>
+    <div class="share-buttons" style="margin-top: 12px;">
+      <button id="btn-share-card-linkedin" class="share-btn share-btn-linkedin"><span class="share-btn-icon">💼</span><span>Share on LinkedIn</span></button>
+      <button id="btn-share-card-bluesky" class="share-btn share-btn-bluesky"><span class="share-btn-icon">🦋</span><span>Share on Bluesky</span></button>
+      <button id="btn-share-card-mastodon" class="share-btn share-btn-mastodon"><span class="share-btn-icon">🐘</span><span>Share on Mastodon</span></button>
     </div>
   </div>`;
 }
@@ -1952,18 +1996,55 @@ function wireNavButtons(): void {
   wireExtensionPointButtons(vscode);
 }
 
-/** Wires the "Copy Summary Text" button on the Share Card tab. Re-run after
- * `reRenderShareCard()` replaces the tab's markup, since the button element is recreated. */
-function setupShareSummaryButtonHandler(): void {
-  document.getElementById("btn-copy-share-summary")?.addEventListener("click", () => {
-    const editorStats = getEditorStats(storedDetailedFiles);
-    const editors = Object.keys(editorStats).sort((a, b) => editorStats[b].count - editorStats[a].count);
-    const totalSessions = storedDetailedFiles.length;
-    const totalInteractions = storedDetailedFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
-    const totalTokens = storedDetailedFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
-    const text = buildShareSummaryText(editors, editorStats, totalSessions, totalInteractions, totalTokens);
-    vscode.postMessage({ command: "copyText", text });
+/** Renders the Share Card's period dropdown into its placeholder span, reusing the shared period-selector
+ * component for visual/state consistency with the other period selectors in this webview (e.g. Model Usage). */
+function renderShareCardPeriodSelector(): void {
+  const wrapper = document.getElementById("share-card-period-selector");
+  if (!wrapper) { return; }
+  wrapper.replaceChildren();
+  const { select } = createPeriodSelector({
+    id: "share-card-period-select",
+    selected: currentShareCardPeriod,
+    periods: SHARE_CARD_PERIOD_ORDER,
+    label: "",
+    onChange: (value) => {
+      currentShareCardPeriod = value as Period;
+      diagState.patch({ shareCardPeriod: currentShareCardPeriod });
+      reRenderShareCard();
+    },
   });
+  wrapper.append(select);
+}
+
+/** Builds the current Share Card's plain-text summary from live filtered session data, for both
+ * the "Copy Summary Text" button and the social share buttons. */
+function buildCurrentShareSummaryText(): string {
+  const filteredFiles = filterFilesByShareCardPeriod(storedDetailedFiles, currentShareCardPeriod);
+  const editorStats = getEditorStats(filteredFiles);
+  const editors = Object.keys(editorStats).sort((a, b) => editorStats[b].count - editorStats[a].count);
+  const totalSessions = filteredFiles.length;
+  const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+  const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+  return buildShareSummaryText(editors, editorStats, totalSessions, totalInteractions, totalTokens, currentShareCardPeriod);
+}
+
+/** Wires the "Copy Summary Text" button, social share buttons, and period selector on the Share
+ * Card tab. Re-run after `reRenderShareCard()` replaces the tab's markup, since these elements are recreated. */
+function setupShareSummaryButtonHandler(): void {
+  renderShareCardPeriodSelector();
+  document.getElementById("btn-copy-share-summary")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "copyText", text: buildCurrentShareSummaryText() });
+  });
+  const socialPlatforms: Array<{ id: string; platform: "linkedin" | "bluesky" | "mastodon" }> = [
+    { id: "btn-share-card-linkedin", platform: "linkedin" },
+    { id: "btn-share-card-bluesky", platform: "bluesky" },
+    { id: "btn-share-card-mastodon", platform: "mastodon" },
+  ];
+  for (const { id, platform } of socialPlatforms) {
+    document.getElementById(id)?.addEventListener("click", () => {
+      vscode.postMessage({ command: "shareCardToSocial", platform, text: buildCurrentShareSummaryText() });
+    });
+  }
 }
 
 /** Re-renders the Share Card tab once session files have finished loading, since it is
