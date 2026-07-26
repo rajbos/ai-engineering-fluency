@@ -547,6 +547,29 @@ body {
 	background: var(--list-hover-bg);
 }
 
+/* Candidate/scanned paths table: force long paths to wrap within the
+   panel instead of growing the table wider than its container. */
+.candidate-paths-table .session-table {
+	table-layout: fixed;
+}
+
+.candidate-paths-table .session-table th:first-child,
+.candidate-paths-table .session-table td:first-child {
+	width: 60px;
+}
+
+.candidate-paths-table .session-table th:nth-child(2),
+.candidate-paths-table .session-table td:nth-child(2) {
+	width: 140px;
+}
+
+.candidate-paths-table .session-table th:last-child,
+.candidate-paths-table .session-table td:last-child {
+	word-break: break-all;
+	overflow-wrap: anywhere;
+	white-space: normal;
+}
+
 .editor-badge {
 	background: var(--list-active-bg);
 	padding: 2px 6px;
