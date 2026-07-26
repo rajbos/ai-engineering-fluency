@@ -143,3 +143,8 @@ updates:
     directory: /cli
     schedule:
       interval: daily
+
+  - package-ecosystem: npm
+    directory: /desktop
+    schedule:
+      interval: daily
