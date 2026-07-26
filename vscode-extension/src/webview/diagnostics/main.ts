@@ -503,7 +503,7 @@ function getEditorStats(files: SessionFileDetails[]): {
 } {
   const stats: { [key: string]: { count: number; interactions: number } } = {};
   for (const sf of files) {
-    const editor = sf.editorSource || "Unknown";
+    const editor = sf.editorName || sf.editorSource || "Unknown";
     if (!stats[editor]) {
       stats[editor] = { count: 0, interactions: 0 };
     }
@@ -533,7 +533,7 @@ function getUnattributedTokens(sf: SessionFileDetails): number {
 }
 
 function applySessionFilters(detailedFiles: SessionFileDetails[]): FilteredSessionResult {
-  let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => sf.editorSource === currentEditorFilter) : detailedFiles;
+  let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => (sf.editorName || sf.editorSource) === currentEditorFilter) : detailedFiles;
   if (currentContextRefFilter) {
     filteredFiles = filteredFiles.filter((sf) => { const value = sf.contextReferences[currentContextRefFilter!]; return typeof value === "number" && value > 0; });
   }
