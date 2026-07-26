@@ -1412,6 +1412,39 @@ function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null 
 	};
 }
 
+function _sanitizeCopilotApiBalance(raw: any): CopilotApiBalance | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	const num = (v: unknown): number => (typeof v === 'number' && Number.isFinite(v) ? v : 0);
+	return {
+		budgetUsd: num(raw.budgetUsd),
+		budgetAiCredits: num(raw.budgetAiCredits),
+		remainingAiCredits: num(raw.remainingAiCredits),
+		usedAiCredits: num(raw.usedAiCredits),
+		pctAvailable: num(raw.pctAvailable),
+	};
+}
+
+function _sanitizeBillingGroupCosts(raw: any): Record<string, number> | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	const result: Record<string, number> = {};
+	for (const [key, value] of Object.entries(raw)) {
+		if (typeof value === 'number' && Number.isFinite(value)) {
+			result[key] = value;
+		}
+	}
+	return result;
+}
+
+/** Copies the optional billing-related fields onto a freshly sanitized stats object.
+ *  Kept separate from sanitizeStats so periodic updateStats refreshes preserve the
+ *  Copilot Billing Coverage data without inflating sanitizeStats' complexity. */
+function _applyBillingFields(sanitized: UsageAnalysisStats, raw: any): void {
+	const apiBalance = _sanitizeCopilotApiBalance(raw.copilotApiBalance);
+	if (apiBalance) { sanitized.copilotApiBalance = apiBalance; }
+	const billingCosts = _sanitizeBillingGroupCosts(raw.monthBillingGroupCosts);
+	if (billingCosts) { sanitized.monthBillingGroupCosts = billingCosts; }
+}
+
 function sanitizeStats(raw: any): UsageAnalysisStats | null {
 	if (!raw || typeof raw !== 'object') {
 		traceCurationOnce('sanitize-invalid-root', 'sanitizeStats.invalidRoot');
@@ -1475,6 +1508,12 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 		} else {
 			traceCurationOnce('sanitize-no-curation', 'sanitizeStats.curation.missing');
 		}
+
+		// Pass through the Copilot API quota balance and current-month billing costs.
+		// Without this, periodic updateStats refreshes rebuild the stats object without
+		// these fields, so the "Copilot Billing Coverage" section disappears after the
+		// first refresh even though the extension still has the data.
+		_applyBillingFields(sanitized, raw);
 
 		return sanitized;
 	} catch (error) {
