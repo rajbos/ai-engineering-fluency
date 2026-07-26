@@ -570,6 +570,47 @@ body {
 	white-space: normal;
 }
 
+.candidate-paths-table .session-table td:nth-child(2) .editor-badge {
+	white-space: normal;
+	word-break: break-word;
+}
+
+/* Main Session Folders table: same treatment as the candidate paths table
+   so long folder paths wrap instead of forcing the table (and page) wider
+   than the panel. */
+.session-folders-table .session-table {
+	table-layout: fixed;
+}
+
+.session-folders-table .session-table th:first-child,
+.session-folders-table .session-table td:first-child {
+	word-break: break-all;
+	overflow-wrap: anywhere;
+	white-space: normal;
+}
+
+.session-folders-table .session-table th:nth-child(2),
+.session-folders-table .session-table td:nth-child(2) {
+	width: 150px;
+}
+
+.session-folders-table .session-table td:nth-child(2) .editor-badge {
+	white-space: normal;
+	word-break: break-word;
+}
+
+.session-folders-table .session-table th:nth-child(3),
+.session-folders-table .session-table td:nth-child(3) {
+	width: 110px;
+}
+
+.session-folders-table .session-table th:last-child,
+.session-folders-table .session-table td:last-child {
+	width: 150px;
+	white-space: normal;
+	overflow-wrap: anywhere;
+}
+
 .editor-badge {
 	background: var(--list-active-bg);
 	padding: 2px 6px;
