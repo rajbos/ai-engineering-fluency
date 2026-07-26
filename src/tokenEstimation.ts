@@ -1121,18 +1121,17 @@ export function applyDelta(state: unknown, delta: unknown): unknown {
 }
 
 export function getModelTier(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): 'standard' | 'premium' | 'unknown' {
-	// Determine tier based on multiplier: 0 = standard, >0 = premium
-	// Look up from modelPricing.json
+	// Look up the explicit `tier` field from modelPricing.json.
 	const pricingInfo = modelPricing[modelId];
-	if (pricingInfo && typeof pricingInfo.multiplier === 'number') {
-		return pricingInfo.multiplier === 0 ? 'standard' : 'premium';
+	if (pricingInfo?.tier) {
+		return pricingInfo.tier;
 	}
 
 	// Fallback: try to match partial model names
 	for (const [key, value] of Object.entries(modelPricing)) {
 		if (modelId.includes(key) || key.includes(modelId)) {
-			if (typeof value.multiplier === 'number') {
-				return value.multiplier === 0 ? 'standard' : 'premium';
+			if (value.tier) {
+				return value.tier;
 			}
 		}
 	}
@@ -1191,15 +1190,11 @@ export function getLongContextInfo(modelId: string, modelPricing: { [key: string
 }
 
 function _costBucketFromPricing(pricing: ModelPricing): 'low' | 'medium' | 'high' | 'unknown' {
-	const costPerM = pricing.copilotPricing?.inputCostPerMillion ?? null;
+	// Prefer the Copilot AI-Credit rate; fall back to the direct provider/API rate.
+	const costPerM = pricing.copilotPricing?.inputCostPerMillion ?? pricing.inputCostPerMillion ?? null;
 	if (costPerM !== null) {
 		if (costPerM < 2) { return 'low'; }
 		if (costPerM < 5) { return 'medium'; }
-		return 'high';
-	}
-	if (typeof pricing.multiplier === 'number') {
-		if (pricing.multiplier === 0) { return 'low'; }
-		if (pricing.multiplier <= 1) { return 'medium'; }
 		return 'high';
 	}
 	return 'unknown';

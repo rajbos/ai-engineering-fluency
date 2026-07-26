@@ -92,6 +92,35 @@ function shouldExclude(filePath) {
 }
 
 /**
+ * Removed fields that must never reappear in specific JSON files, keyed by
+ * file path relative to the repo root. Guards against regressions where a
+ * deprecated field gets reintroduced (e.g. by a manual edit or a stale
+ * data-sync script).
+ */
+const FORBIDDEN_FIELDS = {
+  'src/modelPricing.json': ['multiplier'],
+};
+
+/**
+ * Recursively scan an object for forbidden field names, returning the JSON
+ * paths where they were found (e.g. "pricing.gpt-5.multiplier").
+ */
+function findForbiddenFields(value, forbiddenNames, currentPath = '') {
+  const hits = [];
+  if (value === null || typeof value !== 'object') {
+    return hits;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = currentPath ? `${currentPath}.${key}` : key;
+    if (forbiddenNames.includes(key)) {
+      hits.push(childPath);
+    }
+    hits.push(...findForbiddenFields(child, forbiddenNames, childPath));
+  }
+  return hits;
+}
+
+/**
  * Validate a single JSON file
  */
 function validateJsonFile(filePath, isJsonc = false) {
@@ -99,12 +128,18 @@ function validateJsonFile(filePath, isJsonc = false) {
     const content = fs.readFileSync(filePath, 'utf8');
     
     // Use JSONC parser for JSONC files, standard JSON.parse for others
-    if (isJsonc) {
-      parseJsonc(content);
-    } else {
-      JSON.parse(content);
+    const parsed = isJsonc ? parseJsonc(content) : JSON.parse(content);
+
+    // Check for fields that must not reappear in this file (if any are configured).
+    const relativeFilePath = path.relative(path.resolve(__dirname, '..'), filePath).replace(/\\/g, '/');
+    const forbiddenNames = FORBIDDEN_FIELDS[relativeFilePath];
+    if (forbiddenNames) {
+      const hits = findForbiddenFields(parsed, forbiddenNames);
+      if (hits.length > 0) {
+        throw new Error(`Forbidden field(s) found: ${hits.join(', ')}`);
+      }
     }
-    
+
     return { valid: true, file: filePath };
   } catch (error) {
     return {

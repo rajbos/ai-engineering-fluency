@@ -71,7 +71,6 @@ export interface ModelPricing {
   cacheCreation1hCostPerMillion?: number; // cost per million cache-creation tokens, 1-hour TTL (e.g. 6.0 for Claude Sonnet 4)
   category?: string;
   tier?: "standard" | "premium" | "unknown";
-  multiplier?: number;
   displayNames?: string[];
   /**
    * GitHub Copilot AI-Credit per-token pricing (1 credit = $0.01).

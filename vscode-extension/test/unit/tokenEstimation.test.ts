@@ -223,13 +223,13 @@ test('isUuidPointerFile: returns false for non-UUID content', () => {
 
 // ── getModelTier ────────────────────────────────────────────────────────
 
-test('getModelTier: returns standard for multiplier 0', () => {
-        const pricing = { 'gpt-4o-mini': { inputCostPerMillion: 0.15, outputCostPerMillion: 0.6, multiplier: 0 } };
+test('getModelTier: returns standard for tier "standard"', () => {
+        const pricing = { 'gpt-4o-mini': { inputCostPerMillion: 0.15, outputCostPerMillion: 0.6, tier: 'standard' as const } };
         assert.equal(getModelTier('gpt-4o-mini', pricing), 'standard');
 });
 
-test('getModelTier: returns premium for multiplier > 0', () => {
-        const pricing = { 'claude-sonnet-4.5': { inputCostPerMillion: 3, outputCostPerMillion: 15, multiplier: 1 } };
+test('getModelTier: returns premium for tier "premium"', () => {
+        const pricing = { 'claude-sonnet-4.5': { inputCostPerMillion: 3, outputCostPerMillion: 15, tier: 'premium' as const } };
         assert.equal(getModelTier('claude-sonnet-4.5', pricing), 'premium');
 });
 
@@ -238,7 +238,7 @@ test('getModelTier: returns unknown for model not in pricing', () => {
 });
 
 test('getModelTier: falls back to partial match', () => {
-        const pricing = { 'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10, multiplier: 1 } };
+        const pricing = { 'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10, tier: 'premium' as const } };
         assert.equal(getModelTier('gpt-4o-2024-08-06', pricing), 'premium');
 });
 
@@ -1641,17 +1641,17 @@ test('calculateEstimatedCost: no cacheCreation1hTokens behaves exactly as before
 // ── getModelTier: additional edge cases ─────────────────────────────────────
 
 test('getModelTier: partial match where modelId includes key', () => {
-        const pricing = { 'claude': { inputCostPerMillion: 3, outputCostPerMillion: 15, multiplier: 1 } };
+        const pricing = { 'claude': { inputCostPerMillion: 3, outputCostPerMillion: 15, tier: 'premium' as const } };
         assert.equal(getModelTier('claude-sonnet-4.5', pricing), 'premium');
 });
 
 test('getModelTier: partial match where key includes modelId', () => {
-        const pricing = { 'claude-sonnet': { inputCostPerMillion: 3, outputCostPerMillion: 15, multiplier: 0 } };
+        const pricing = { 'claude-sonnet': { inputCostPerMillion: 3, outputCostPerMillion: 15, tier: 'standard' as const } };
         assert.equal(getModelTier('claude', pricing), 'standard');
 });
 
-test('getModelTier: multiplier 0 returns standard (exact match)', () => {
-        const pricing = { 'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10, multiplier: 0 } };
+test('getModelTier: tier "standard" returns standard (exact match)', () => {
+        const pricing = { 'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10, tier: 'standard' as const } };
         assert.equal(getModelTier('gpt-4o', pricing), 'standard');
 });
 
