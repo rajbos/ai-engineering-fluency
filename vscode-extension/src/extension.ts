@@ -7080,10 +7080,8 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			searchMcpExtensions: () => this.dispatch('searchMcpExtensions', () => vscode.commands.executeCommand('workbench.extensions.search', '@tag:mcp')),
 			shareToIssue: () => this.dispatch('shareToIssue', () => this.maturityHandleShareToIssue()),
 			resetDismissedTips: () => this.dispatch('resetDismissedTips', async () => { await this.resetDismissedFluencyTips(); await this.refreshMaturityPanel(); }),
-			shareToLinkedIn: () => this.dispatch('shareToLinkedIn', () => this.shareToSocialMedia('linkedin')),
-			shareToBluesky: () => this.dispatch('shareToBluesky', () => this.shareToSocialMedia('bluesky')),
-			shareToMastodon: () => this.dispatch('shareToMastodon', () => this.shareToSocialMedia('mastodon')),
 			downloadChartImage: () => this.dispatch('downloadChartImage', () => this.downloadChartImage()),
+			shareToSocialFailed: async () => { vscode.window.showErrorMessage('Failed to generate share card image.'); },
 		};
 		if (simpleCommands[message.command]) { await simpleCommands[message.command](); return; }
 		await this.handleMaturityConditionalMessage(message);
@@ -7092,11 +7090,18 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	private async handleMaturityConditionalMessage(message: any): Promise<void> {
 		switch (message.command) {
 			case 'dismissTips': if (message.category) { await this.dispatch('dismissTips', async () => { await this.dismissFluencyTips(message.category); await this.refreshMaturityPanel(); }); } break;
+			case 'installHook': if (message.hookId) { await this.maturityHandleInstallHook(message.hookId); } break;
+			case 'uninstallHook': if (message.hookId) { await this.maturityHandleUninstallHook(message.hookId); } break;
+			default: await this.handleMaturityExportCommand(message); break;
+		}
+	}
+
+	private async handleMaturityExportCommand(message: any): Promise<void> {
+		switch (message.command) {
 			case 'saveChartImage': if (message.data) { await this.dispatch('saveChartImage', () => this.saveChartImageData(message.data)); } break;
 			case 'exportPdf': if (message.data) { await this.dispatch('exportPdf', () => this.exportFluencyScorePdf(message.data)); } break;
 			case 'exportPptx': if (message.data) { await this.dispatch('exportPptx', () => this.exportFluencyScorePptx(message.data)); } break;
-			case 'installHook': if (message.hookId) { await this.maturityHandleInstallHook(message.hookId); } break;
-			case 'uninstallHook': if (message.hookId) { await this.maturityHandleUninstallHook(message.hookId); } break;
+			case 'shareToSocial': if (message.dataUrl && isSharePlatform(message.platform)) { await this.dispatch('shareToSocial', () => this.maturityHandleShareToSocial(message.platform, message.dataUrl)); } break;
 		}
 	}
 
@@ -7171,35 +7176,8 @@ private async resetDismissedFluencyTips(): Promise<void> {
 }
 
 /**
- * Share Copilot Fluency Score to social media platforms
- */
-private async shareToSocialMedia(platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
-	const scores = await this.calculateMaturityScores();
-	const marketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency';
-	const hashtag = '#CopilotFluencyScore';
-	
-	// Build share text with stats
-	const categoryScores = scores.categories.map(c => `${c.icon} ${c.category}: Stage ${c.stage}`).join('\n');
-	
-	const shareText = `🎯 My AI Engineering Fluency Score
-
-Overall: ${scores.overallLabel}
-
-${categoryScores}
-
-Track your Copilot usage and level up your AI-assisted development skills!
-
-Get the extension: ${marketplaceUrl}
-
-${hashtag}`;
-
-	await this.shareTextToSocialPlatform(shareText, platform);
-	this.log(`Shared fluency score to ${platform}`);
-}
-
-/**
  * Copies `shareText` to the clipboard and opens the given social platform's compose/share page
- * in the browser, so the user can paste it in. Shared by the Fluency Score and Share Card views.
+ * in the browser, so the user can paste it in. Used by the diagnostics Share Card view.
  */
 private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
     const marketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency';
@@ -7259,6 +7237,60 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
         break;
       }
     }
+  }
+
+  /**
+   * Saves the generated share-card image to a temp file, copies the caption to the clipboard,
+   * and opens the chosen social platform so the user can paste and attach the image.
+   */
+  private async maturityHandleShareToSocial(platform: 'linkedin' | 'bluesky' | 'mastodon', dataUrl: string): Promise<void> {
+    const base64Match = dataUrl.match(/^data:image\/png;base64,(.+)$/);
+    if (!base64Match) {
+      void vscode.window.showErrorMessage('Failed to process share card image.');
+      return;
+    }
+
+    let platformUrl: string;
+    const marketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency';
+    switch (platform) {
+      case 'linkedin':
+        platformUrl = `https://www.linkedin.com/sharing/share-offsite/?url=${encodeURIComponent(marketplaceUrl)}`;
+        break;
+      case 'bluesky':
+        platformUrl = 'https://bsky.app/intent/compose';
+        break;
+      case 'mastodon': {
+        const instance = await vscode.window.showInputBox({
+          prompt: 'Enter your Mastodon instance (e.g., mastodon.social)',
+          placeHolder: 'mastodon.social',
+          value: 'mastodon.social',
+        });
+        if (!instance) { return; }
+        platformUrl = `https://${instance}/share`;
+        break;
+      }
+      default:
+        platformUrl = marketplaceUrl;
+    }
+
+    const fileName = `ai-engineering-fluency-share-${Date.now()}.png`;
+    const filePath = path.join(os.tmpdir(), fileName);
+    const uri = vscode.Uri.file(filePath);
+    const buffer = Buffer.from(base64Match[1], 'base64');
+    await vscode.workspace.fs.writeFile(uri, buffer);
+
+    const shareText = 'I am tracking my AI usage through this great tracker: AI Engineering Fluency! Track your usage as well #AIEngineeringFluency';
+    await vscode.env.clipboard.writeText(shareText);
+    await vscode.env.openExternal(vscode.Uri.parse(platformUrl));
+
+    const selection = await vscode.window.showInformationMessage(
+      'Share card image saved and caption copied to clipboard.',
+      'Open Image',
+    );
+    if (selection === 'Open Image') {
+      void vscode.env.openExternal(uri);
+    }
+    this.log(`Shared fluency score card to ${platform}`);
   }
 
   /**

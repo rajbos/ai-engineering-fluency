@@ -527,6 +527,42 @@ async function handleScreenshotExport(command: 'exportPdf' | 'exportPptx'): Prom
   vscode.postMessage({ command, data: images });
 }
 
+async function handleShareToSocial(platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
+  const data = initialData;
+  if (!data) { return; }
+
+  const html2canvasModule = await import('html2canvas');
+  const html2canvas = (html2canvasModule.default ?? html2canvasModule) as unknown as (element: HTMLElement, options?: Record<string, unknown>) => Promise<HTMLCanvasElement>;
+
+  const card = document.createElement('div');
+  card.style.cssText = 'position:absolute;left:-9999px;top:0;width:1200px;height:630px;background:#1b1b1e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;';
+
+  const stageColors = ['#93c5fd', '#a78bfa', '#3b82f6', '#22d3ee'];
+  const stageColor = stageColors[data.overallStage - 1] || '#58a6ff';
+
+  card.innerHTML = `
+    <div style="text-align:center;color:#fff;padding:48px;">
+      <div style="font-size:28px;margin-bottom:12px;">🎯 AI Engineering Fluency Score</div>
+      <div style="font-size:14px;color:#b8b8c8;margin-bottom:32px;text-transform:uppercase;letter-spacing:2px;">Overall AI Engineering Fluency</div>
+      <div style="font-size:56px;font-weight:800;color:${stageColor};margin-bottom:12px;">${escapeHtml(data.overallLabel)}</div>
+      <div style="font-size:20px;color:#b8b8c8;margin-bottom:40px;">${escapeHtml(STAGE_DESCRIPTIONS[data.overallStage] || '')}</div>
+      <div style="font-size:22px;font-weight:700;color:#58a6ff;margin-bottom:8px;">#AIEngineeringFluency</div>
+      <div style="font-size:14px;color:#7a7a8a;">Track your AI usage with AI Engineering Fluency</div>
+    </div>
+  `;
+
+  document.body.appendChild(card);
+  try {
+    const canvas = await html2canvas(card, { backgroundColor: '#1b1b1e', scale: 2, useCORS: true, width: 1200, height: 630 });
+    const dataUrl = canvas.toDataURL('image/png');
+    vscode.postMessage({ command: 'shareToSocial', platform, dataUrl });
+  } catch {
+    vscode.postMessage({ command: 'shareToSocialFailed', platform });
+  } finally {
+    document.body.removeChild(card);
+  }
+}
+
 function wireMaturityNavButtons(): void {
   document.getElementById('btn-refresh')?.addEventListener('click', () => { vscode.postMessage({ command: 'refresh' }); });
   document.getElementById('btn-level-viewer-inline')?.addEventListener('click', () => { vscode.postMessage({ command: 'showFluencyLevelViewer' }); });
@@ -558,9 +594,9 @@ function wireMaturityActionButtons(): void {
     });
   });
   document.getElementById('btn-reset-tips')?.addEventListener('click', () => { vscode.postMessage({ command: 'resetDismissedTips' }); });
-  document.getElementById('btn-share-linkedin')?.addEventListener('click', () => { vscode.postMessage({ command: 'shareToLinkedIn' }); });
-  document.getElementById('btn-share-bluesky')?.addEventListener('click', () => { vscode.postMessage({ command: 'shareToBluesky' }); });
-  document.getElementById('btn-share-mastodon')?.addEventListener('click', () => { vscode.postMessage({ command: 'shareToMastodon' }); });
+  document.getElementById('btn-share-linkedin')?.addEventListener('click', () => { void handleShareToSocial('linkedin'); });
+  document.getElementById('btn-share-bluesky')?.addEventListener('click', () => { void handleShareToSocial('bluesky'); });
+  document.getElementById('btn-share-mastodon')?.addEventListener('click', () => { void handleShareToSocial('mastodon'); });
 }
 
 function wireExportHandlers(): void {
