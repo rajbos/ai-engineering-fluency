@@ -1944,6 +1944,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (isOrgPlan) {
 			await this.loadAndLogEnterpriseInfo();
 		}
+
+		// The plan info above may have populated a new Copilot plan quota / budget
+		// (via captureQuotaEntitlement). The status bar tooltip flyout is only rebuilt
+		// during token refreshes, so refresh it now so the freshly-fetched budget shows
+		// up immediately after sign-in instead of only on the next 5-minute refresh.
+		this.refreshBudgetDependentUi();
+	}
+
+	/** Rebuilds the status bar tooltip flyout (and its background color) from the last
+	 *  computed stats so a budget change — e.g. picked up from the Copilot plan quota
+	 *  right after GitHub sign-in — is reflected without waiting for the next refresh.
+	 *  No-op until the first stats computation has produced a tooltip to update. */
+	private refreshBudgetDependentUi(): void {
+		const stats = this.lastDetailedStats;
+		if (!stats) { return; }
+		this.updateStatusBarBackgroundColor(stats);
+		this.statusBarItem.tooltip = this.buildTooltipMarkdown(stats);
 	}
 
 	private logCopilotPlanResult(planResult: { planInfo?: any; statusCode?: number; error?: string }): boolean {
