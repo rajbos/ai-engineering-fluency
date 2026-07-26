@@ -280,6 +280,11 @@ export function tooltipSecondaryPeriod(
 
 // ── extension.ts module-level helpers ────────────────────────────────────────
 
+/** Type guard for the social platforms supported by `shareTextToSocialPlatform`. */
+function isSharePlatform(value: unknown): value is 'linkedin' | 'bluesky' | 'mastodon' {
+	return value === 'linkedin' || value === 'bluesky' || value === 'mastodon';
+}
+
 /**
  * Groups per-editor model usage into billing groups (e.g. "GitHub Copilot", "Anthropic").
  * Extracted as a module-level function to keep `computeBillingGroupCosts` complexity low.
@@ -7189,6 +7194,16 @@ Get the extension: ${marketplaceUrl}
 
 ${hashtag}`;
 
+	await this.shareTextToSocialPlatform(shareText, platform);
+	this.log(`Shared fluency score to ${platform}`);
+}
+
+/**
+ * Copies `shareText` to the clipboard and opens the given social platform's compose/share page
+ * in the browser, so the user can paste it in. Shared by the Fluency Score and Share Card views.
+ */
+private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
+    const marketplaceUrl = 'https://marketplace.visualstudio.com/items?itemName=RobBos.ai-engineering-fluency';
     switch (platform) {
       case "linkedin": {
         // LinkedIn share URL - opens in browser for user to add their own commentary
@@ -7245,8 +7260,6 @@ ${hashtag}`;
         break;
       }
     }
-
-    this.log(`Shared fluency score to ${platform}`);
   }
 
   /**
@@ -8415,6 +8428,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         if (typeof message.key === 'string' && typeof message.value === 'boolean') { await this.dispatch('setDebugFlag:diagnostics', () => this.diagHandleSetDebugFlag(message.key, message.value)); } break;
       case "copyText":
         if (typeof message.text === 'string') { await this.dispatch('copyText:diagnostics', () => this.diagHandleCopyText(message.text)); } break;
+      case "shareCardToSocial":
+        if (typeof message.text === 'string' && isSharePlatform(message.platform)) {
+          await this.dispatch('shareCardToSocial:diagnostics', () => this.diagHandleShareCardToSocial(message.text, message.platform));
+        }
+        break;
     }
   }
 
@@ -8426,6 +8444,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   private async diagHandleCopyText(text: string): Promise<void> {
     await vscode.env.clipboard.writeText(text);
     vscode.window.showInformationMessage("Summary copied to clipboard");
+  }
+
+  private async diagHandleShareCardToSocial(text: string, platform: 'linkedin' | 'bluesky' | 'mastodon'): Promise<void> {
+    await this.shareTextToSocialPlatform(text, platform);
+    this.log(`Shared Share Card to ${platform}`);
   }
 
   private async diagHandleOpenIssue(): Promise<void> {

@@ -1,13 +1,15 @@
 import { el } from './domUtils';
 
 /** Time-window periods supported by the shared period selector. */
-export type Period = 'today' | 'last7' | 'last30' | 'currentMonth' | 'lastMonth' | 'thisWeek' | 'allTime';
+export type Period = 'today' | 'last7' | 'last14' | 'last30' | 'last90' | 'currentMonth' | 'lastMonth' | 'thisWeek' | 'allTime';
 
 /** Human-readable labels for each period, matching the Chart time-window dropdown. */
 export const PERIOD_LABELS: Record<Period, string> = {
 	today: 'Today',
 	last7: 'Last 7 days',
+	last14: 'Last 14 days',
 	last30: 'Last 30 days',
+	last90: 'Last 90 days',
 	currentMonth: 'Current month',
 	lastMonth: 'Previous month',
 	thisWeek: 'This week',
