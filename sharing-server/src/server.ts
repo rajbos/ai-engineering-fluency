@@ -1,11 +1,27 @@
 import { serve } from '@hono/node-server';
 import { Hono } from 'hono';
+import fs from 'node:fs';
+import path from 'node:path';
 import { api } from './routes/api.js';
 import { dashboard } from './routes/dashboard.js';
 import { getDb, closeDb, restoreFromBackup, backupToAzureFiles, syncAdminLogins } from './db.js';
 import { BACKUP_INTERVAL_MS } from './config.js';
 
 const app = new Hono();
+
+// Serve the product icon used by the dashboard header. The icon is copied into
+// dist/images/ at build time so the bundled server remains self-contained.
+const iconPath = path.join(__dirname, 'images', 'icon.png');
+app.get('/icon.png', (c) => {
+	if (!fs.existsSync(iconPath)) {
+		return c.body('Icon not found', 404, { 'Content-Type': 'text/plain' });
+	}
+	const icon = fs.readFileSync(iconPath);
+	return c.body(icon, 200, {
+		'Content-Type': 'image/png',
+		'Cache-Control': 'public, max-age=86400',
+	});
+});
 
 // Health check — no auth required
 app.get('/health', (c) => c.json({

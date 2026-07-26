@@ -296,7 +296,8 @@ function layout(title: string, body: string): string {
   /* ── Header ── */
   .header { background: #161b22; border-bottom: 1px solid #30363d; padding: 12px 24px;
     display: flex; align-items: center; gap: 12px; }
-  .header h1 { margin: 0; font-size: 1.1rem; color: #58a6ff; }
+  .header h1 { margin: 0; font-size: 1.1rem; color: #58a6ff; display: flex; align-items: center; gap: 8px; }
+  .header-icon { height: 32px; width: auto; display: block; }
   .header .spacer { flex: 1; }
   .header a { color: #8b949e; text-decoration: none; font-size: 0.875rem; }
   .header a:hover { color: #e6edf3; }
@@ -453,7 +454,7 @@ function loginPage(): string {
   </p>` : '';
 
 	return layout('Sign In', `
-<div class="header"><h1>🤖 AI Engineering Fluency Sharing</h1></div>
+<div class="header"><h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"> Sharing</h1></div>
 <div class="content" style="text-align:center; margin-top: 80px; align-items:center">
   <h2 style="color:#e6edf3">Sign in to view your usage dashboard</h2>
   <p style="color:#8b949e">Your data is linked to your GitHub account. No account creation needed.</p>
@@ -1002,7 +1003,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
 
 	return layout(`${user.github_login}'s Dashboard`, `
 <div class="header">
-  <h1>🤖 AI Engineering Fluency</h1>
+  <h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"></h1>
   <span class="spacer"></span>
   ${fluencyBadgeHtml}
   ${isAdmin ? `<a href="/admin" style="margin-left:8px;color:#e3b341">Admin Dashboard</a><span style="margin-left:8px;color:#e6edf3;font-size:0.875rem;font-weight:600">My Dashboard</span>` : ''}
@@ -1370,7 +1371,7 @@ function adminDashboardPage(
 
 	return layout('Admin Dashboard', `
 <div class="header">
-  <h1>🤖 AI Engineering Fluency</h1>
+  <h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"></h1>
   <span class="spacer"></span>
   <span style="color:#e6edf3;font-size:0.875rem;font-weight:600">Admin Dashboard</span>
   <a href="/dashboard" style="margin-left:8px">My Dashboard</a>
@@ -1393,7 +1394,7 @@ var ADMIN_CHART_DATA = ${safeJson(chartData)};
 
 function errorPage(message: string): string {
 	return layout('Error', `
-<div class="header"><h1>🤖 AI Engineering Fluency Sharing</h1></div>
+<div class="header"><h1><img src="/icon.png" class="header-icon" alt="AI Engineering Fluency"> Sharing</h1></div>
 <div class="content" style="text-align:center; margin-top:80px; align-items:center">
   <h2 style="color:#e6edf3">Something went wrong</h2>
   <p style="color:#8b949e">${h(message)}</p>
