@@ -933,13 +933,7 @@ function renderBackendStoragePanel(
     return `
       <div class="info-box">
         <div class="info-box-title">☁️ Backend Storage</div>
-        <div>Backend storage information is not available. This may be a temporary issue.</div>
-        <div class="button-group" style="margin-top: 12px;">
-          <button class="button" id="btn-configure-backend">
-            <span>🔧</span>
-            <span>Configure Backend</span>
-          </button>
-        </div>
+        <div>⏳ Loading backend storage status...</div>
       </div>
     `;
   }
@@ -2492,6 +2486,8 @@ function setupMessageHandlers(): void {
     const message = event.data as DiagMessage;
     if (message.command === "diagnosticDataLoaded") {
       handleDiagnosticDataLoaded(message);
+    } else if (message.command === "backendStorageInfoLoaded") {
+      handleBackendStorageSection(message);
     } else if (message.command === "githubAuthUpdated") {
       handleGithubAuthUpdated(message);
     } else if (message.command === "diagnosticDataError") {

@@ -9425,6 +9425,31 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   /**
+   * Computes Backend Storage + GitHub Auth status and posts it to the webview immediately.
+   * These are cheap relative to the stats/usage-analysis/report pipeline, so sending them early
+   * lets the Settings > Backend Storage tab populate right away instead of showing a "not
+   * available" placeholder for the several seconds the rest of diagnostics load takes.
+   * Returns the computed values so the caller can reuse them in the final diagnosticDataLoaded message.
+   */
+  private async sendBackendStorageInfoEarly(
+    panel: vscode.WebviewPanel,
+  ): Promise<{ backendStorageInfo: any; githubAuthStatus: { authenticated: boolean; username?: string } }> {
+    const backendStorageInfo = await this.getBackendStorageInfo();
+    this.log(
+      `Backend storage info retrieved: azure.enabled=${backendStorageInfo.azure?.enabled}, azure.configured=${backendStorageInfo.azure?.isConfigured}, teamServer.enabled=${backendStorageInfo.teamServer?.enabled}, teamServer.configured=${backendStorageInfo.teamServer?.isConfigured}`,
+    );
+    const githubAuthStatus = this.getGitHubAuthStatus();
+    if (this.isPanelOpen(panel)) {
+      panel.webview.postMessage({
+        command: "backendStorageInfoLoaded",
+        backendStorageInfo,
+        githubAuth: githubAuthStatus,
+      });
+    }
+    return { backendStorageInfo, githubAuthStatus };
+  }
+
+  /**
    * Load all diagnostic data in the background and update the webview progressively.
    */
   private async loadDiagnosticDataInBackground(
@@ -9436,6 +9461,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       if (this._sessionRestorePromise) {
         await this._sessionRestorePromise;
       }
+
+      const { backendStorageInfo, githubAuthStatus } = await this.sendBackendStorageInfoEarly(panel);
 
       if (!this.lastDetailedStats) {
         this.log(
@@ -9458,12 +9485,6 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       const sessionFileData = await this.getSessionFilePreviewData(sessionFiles);
       const sessionFolders = this.buildSessionFolderData(sessionFiles);
       const candidatePaths = this.sessionDiscovery.getDiagnosticCandidatePaths();
-      const backendStorageInfo = await this.getBackendStorageInfo();
-      this.log(
-        `Backend storage info retrieved: azure.enabled=${backendStorageInfo.azure?.enabled}, azure.configured=${backendStorageInfo.azure?.isConfigured}, teamServer.enabled=${backendStorageInfo.teamServer?.enabled}, teamServer.configured=${backendStorageInfo.teamServer?.isConfigured}`,
-      );
-
-      const githubAuthStatus = this.getGitHubAuthStatus();
       const otelComparison = await this.tryComputeCopilotCliOtelComparison(sessionFiles);
 
       if (!this.isPanelOpen(panel)) {

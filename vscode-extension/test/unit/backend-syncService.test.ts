@@ -1224,6 +1224,36 @@ test('syncToBackendStore tracks Azure and Team Server "last sync" independently 
 	fs.rmSync(lockDir, { recursive: true, force: true });
 });
 
+test('uploadFluencyScoreToSharingServer updates the Team Server lastSync marker on success', async () => {
+	const globalState = new Map<string, unknown>();
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+	} as unknown as vscode.ExtensionContext;
+	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const svc = new SyncService(
+		makeDeps({
+			context: mockContext,
+			getGithubToken: () => 'fake-token',
+		}),
+		{} as any,
+		{} as any,
+		undefined,
+		BackendUtility,
+		sharingServerSvc as any,
+	);
+	await svc.uploadFluencyScoreToSharingServer({
+		sharingServerEnabled: true,
+		sharingServerEndpointUrl: 'https://test-sharing-server/',
+	} as any, { overallStage: 'exploring' });
+	assert.ok(
+		globalState.get('backend.sharingServerLastSyncAt'),
+		'A successful fluency-score upload is a real Team Server sync and must update its own lastSync marker'
+	);
+});
+
 // ── Sync lock management ─────────────────────────────────────────────────
 
 test('acquireSyncLock succeeds when no context is provided', async () => {
