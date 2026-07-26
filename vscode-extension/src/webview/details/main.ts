@@ -539,7 +539,9 @@ function buildProviderTotalCard(stats: DetailedStats, allProviders: string[]): H
  */
 function buildProviderPanel(stats: DetailedStats): HTMLElement | null {
 	const allProviders = getAllProviders(stats);
-	if (allProviders.length === 0) { return null; }
+	// With zero or one provider the panel adds no value (nothing to compare or
+	// filter), so hide it entirely.
+	if (allProviders.length <= 1) { return null; }
 
 	const section = el('div', 'section');
 	section.append(iconHeading('h3', 'credit-card', 'Cost by Provider'));
