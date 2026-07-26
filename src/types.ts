@@ -18,8 +18,14 @@ export interface TokenUsageStats {
   lastUpdated: Date;
 }
 
+/**
+ * A model identifier string as returned by the AI provider (e.g. "gpt-4o", "claude-sonnet-4-5").
+ * May be "unknown" when the model could not be determined from the session data.
+ */
+export type ModelId = string;
+
 export interface ModelUsage {
-  [modelName: string]: {
+  [modelName: ModelId]: {
     inputTokens: number;    // total input tokens (uncached + cached reads + cache creation)
     outputTokens: number;
     cachedReadTokens?: number;     // portion of inputTokens that were cache reads (billed at reduced rate)
@@ -32,6 +38,7 @@ export interface ModelUsage {
      * the standard `cacheCreationCostPerMillion` (5-minute) rate.
      */
     cacheCreation1hTokens?: number;
+    thinkingTokens?: number;
     /** Number of sessions that used this model in the aggregated period. */
     sessions?: number;
   };
