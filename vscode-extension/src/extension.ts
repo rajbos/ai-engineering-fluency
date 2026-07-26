@@ -9880,13 +9880,17 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     const settings = this.backend?.getSettings();
     const azureSettings = this.extractAzureStorageSettings(settings, config);
     const teamSettings = this.extractTeamServerSettings(settings, azureSettings.sharingProfile);
-    const lastSyncAt = this.context.globalState.get<number>("backend.lastSyncAt");
-    const lastSyncTime = lastSyncAt ? new Date(lastSyncAt).toISOString() : null;
+    // Azure Storage and the Team Server sync independently of each other, so each tracks its
+    // own "last successful sync" timestamp rather than sharing a single value.
+    const azureLastSyncAt = this.context.globalState.get<number>("backend.azureLastSyncAt");
+    const azureLastSyncTime = azureLastSyncAt ? new Date(azureLastSyncAt).toISOString() : null;
+    const teamLastSyncAt = this.context.globalState.get<number>("backend.sharingServerLastSyncAt");
+    const teamLastSyncTime = teamLastSyncAt ? new Date(teamLastSyncAt).toISOString() : null;
     const sessionFiles = await this.sessionDiscovery.getCopilotSessionFiles();
     const workspaceIds = this.extractWorkspaceIdsFromFiles(sessionFiles);
     return {
-      azure: { ...azureSettings, isConfigured: settings ? this.backend!.isConfigured(settings) : false, lastSyncTime: azureSettings.enabled ? lastSyncTime : null, deviceCount: workspaceIds.size, sessionCount: sessionFiles.length, recordCount: null },
-      teamServer: { ...teamSettings, isConfigured: teamSettings.enabled && !!teamSettings.endpointUrl, lastSyncTime: teamSettings.enabled ? lastSyncTime : null, sessionCount: sessionFiles.length },
+      azure: { ...azureSettings, isConfigured: settings ? this.backend!.isConfigured(settings) : false, lastSyncTime: azureSettings.enabled ? azureLastSyncTime : null, deviceCount: workspaceIds.size, sessionCount: sessionFiles.length, recordCount: null },
+      teamServer: { ...teamSettings, isConfigured: teamSettings.enabled && !!teamSettings.endpointUrl, lastSyncTime: teamSettings.enabled ? teamLastSyncTime : null, sessionCount: sessionFiles.length },
     };
   }
 
