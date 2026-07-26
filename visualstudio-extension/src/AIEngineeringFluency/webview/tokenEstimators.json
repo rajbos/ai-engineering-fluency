@@ -81,6 +81,11 @@
     "claude-fable-5": 0.24,
     "claude-sonnet-5": 0.24,
     "claude-opus-4.8-(fast-mode)-(preview)": 0.24,
-    "kimi-k2.7-code": 0.25
+    "kimi-k2.7-code": 0.25,
+    "gpt-5.6-luna": 0.25,
+    "gpt-5.6-sol": 0.25,
+    "gpt-5.6-terra": 0.25,
+    "gemini-3.6-flash": 0.25,
+    "claude-opus-5": 0.24
   }
 }

@@ -1,9 +1,908 @@
-"use strict";(()=>{var on=Object.defineProperty;var g=(e,t,o)=>()=>{if(o)throw o[0];try{return e&&(t=e(e=0)),t}catch(n){throw o=[n],n}};var nn=(e,t)=>{for(var o in t)on(e,o,{get:t[o],enumerable:!0})};var kt,Ct,qt,Pe,ot,$t,R,Ne,jt,Gt=g(()=>{kt=globalThis,Ct=kt.ShadowRoot&&(kt.ShadyCSS===void 0||kt.ShadyCSS.nativeShadow)&&"adoptedStyleSheets"in Document.prototype&&"replace"in CSSStyleSheet.prototype,qt=Symbol(),Pe=new WeakMap,ot=class{constructor(t,o,n){if(this._$cssResult$=!0,n!==qt)throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");this.cssText=t,this.t=o}get styleSheet(){let t=this.o,o=this.t;if(Ct&&t===void 0){let n=o!==void 0&&o.length===1;n&&(t=Pe.get(o)),t===void 0&&((this.o=t=new CSSStyleSheet).replaceSync(this.cssText),n&&Pe.set(o,t))}return t}toString(){return this.cssText}},$t=e=>new ot(typeof e=="string"?e:e+"",void 0,qt),R=(e,...t)=>{let o=e.length===1?e[0]:t.reduce((n,s,i)=>n+(r=>{if(r._$cssResult$===!0)return r.cssText;if(typeof r=="number")return r;throw Error("Value passed to 'css' function must be a 'css' function result: "+r+". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.")})(s)+e[i+1],e[0]);return new ot(o,e,qt)},Ne=(e,t)=>{if(Ct)e.adoptedStyleSheets=t.map(o=>o instanceof CSSStyleSheet?o:o.styleSheet);else for(let o of t){let n=document.createElement("style"),s=kt.litNonce;s!==void 0&&n.setAttribute("nonce",s),n.textContent=o.cssText,e.appendChild(n)}},jt=Ct?e=>e:e=>e instanceof CSSStyleSheet?(t=>{let o="";for(let n of t.cssRules)o+=n.cssText;return $t(o)})(e):e});var mn,gn,hn,vn,fn,yn,L,He,xn,Sn,nt,st,wt,Oe,T,it=g(()=>{Gt();Gt();({is:mn,defineProperty:gn,getOwnPropertyDescriptor:hn,getOwnPropertyNames:vn,getOwnPropertySymbols:fn,getPrototypeOf:yn}=Object),L=globalThis,He=L.trustedTypes,xn=He?He.emptyScript:"",Sn=L.reactiveElementPolyfillSupport,nt=(e,t)=>e,st={toAttribute(e,t){switch(t){case Boolean:e=e?xn:null;break;case Object:case Array:e=e==null?e:JSON.stringify(e)}return e},fromAttribute(e,t){let o=e;switch(t){case Boolean:o=e!==null;break;case Number:o=e===null?null:Number(e);break;case Object:case Array:try{o=JSON.parse(e)}catch{o=null}}return o}},wt=(e,t)=>!mn(e,t),Oe={attribute:!0,type:String,converter:st,reflect:!1,useDefault:!1,hasChanged:wt};Symbol.metadata??(Symbol.metadata=Symbol("metadata")),L.litPropertyMetadata??(L.litPropertyMetadata=new WeakMap);T=class extends HTMLElement{static addInitializer(t){this._$Ei(),(this.l??(this.l=[])).push(t)}static get observedAttributes(){return this.finalize(),this._$Eh&&[...this._$Eh.keys()]}static createProperty(t,o=Oe){if(o.state&&(o.attribute=!1),this._$Ei(),this.prototype.hasOwnProperty(t)&&((o=Object.create(o)).wrapped=!0),this.elementProperties.set(t,o),!o.noAccessor){let n=Symbol(),s=this.getPropertyDescriptor(t,n,o);s!==void 0&&gn(this.prototype,t,s)}}static getPropertyDescriptor(t,o,n){let{get:s,set:i}=hn(this.prototype,t)??{get(){return this[o]},set(r){this[o]=r}};return{get:s,set(r){let a=s?.call(this);i?.call(this,r),this.requestUpdate(t,a,n)},configurable:!0,enumerable:!0}}static getPropertyOptions(t){return this.elementProperties.get(t)??Oe}static _$Ei(){if(this.hasOwnProperty(nt("elementProperties")))return;let t=yn(this);t.finalize(),t.l!==void 0&&(this.l=[...t.l]),this.elementProperties=new Map(t.elementProperties)}static finalize(){if(this.hasOwnProperty(nt("finalized")))return;if(this.finalized=!0,this._$Ei(),this.hasOwnProperty(nt("properties"))){let o=this.properties,n=[...vn(o),...fn(o)];for(let s of n)this.createProperty(s,o[s])}let t=this[Symbol.metadata];if(t!==null){let o=litPropertyMetadata.get(t);if(o!==void 0)for(let[n,s]of o)this.elementProperties.set(n,s)}this._$Eh=new Map;for(let[o,n]of this.elementProperties){let s=this._$Eu(o,n);s!==void 0&&this._$Eh.set(s,o)}this.elementStyles=this.finalizeStyles(this.styles)}static finalizeStyles(t){let o=[];if(Array.isArray(t)){let n=new Set(t.flat(1/0).reverse());for(let s of n)o.unshift(jt(s))}else t!==void 0&&o.push(jt(t));return o}static _$Eu(t,o){let n=o.attribute;return n===!1?void 0:typeof n=="string"?n:typeof t=="string"?t.toLowerCase():void 0}constructor(){super(),this._$Ep=void 0,this.isUpdatePending=!1,this.hasUpdated=!1,this._$Em=null,this._$Ev()}_$Ev(){this._$ES=new Promise(t=>this.enableUpdating=t),this._$AL=new Map,this._$E_(),this.requestUpdate(),this.constructor.l?.forEach(t=>t(this))}addController(t){(this._$EO??(this._$EO=new Set)).add(t),this.renderRoot!==void 0&&this.isConnected&&t.hostConnected?.()}removeController(t){this._$EO?.delete(t)}_$E_(){let t=new Map,o=this.constructor.elementProperties;for(let n of o.keys())this.hasOwnProperty(n)&&(t.set(n,this[n]),delete this[n]);t.size>0&&(this._$Ep=t)}createRenderRoot(){let t=this.shadowRoot??this.attachShadow(this.constructor.shadowRootOptions);return Ne(t,this.constructor.elementStyles),t}connectedCallback(){this.renderRoot??(this.renderRoot=this.createRenderRoot()),this.enableUpdating(!0),this._$EO?.forEach(t=>t.hostConnected?.())}enableUpdating(t){}disconnectedCallback(){this._$EO?.forEach(t=>t.hostDisconnected?.())}attributeChangedCallback(t,o,n){this._$AK(t,n)}_$ET(t,o){let n=this.constructor.elementProperties.get(t),s=this.constructor._$Eu(t,n);if(s!==void 0&&n.reflect===!0){let i=(n.converter?.toAttribute!==void 0?n.converter:st).toAttribute(o,n.type);this._$Em=t,i==null?this.removeAttribute(s):this.setAttribute(s,i),this._$Em=null}}_$AK(t,o){let n=this.constructor,s=n._$Eh.get(t);if(s!==void 0&&this._$Em!==s){let i=n.getPropertyOptions(s),r=typeof i.converter=="function"?{fromAttribute:i.converter}:i.converter?.fromAttribute!==void 0?i.converter:st;this._$Em=s;let a=r.fromAttribute(o,i.type);this[s]=a??this._$Ej?.get(s)??a,this._$Em=null}}requestUpdate(t,o,n,s=!1,i){if(t!==void 0){let r=this.constructor;if(s===!1&&(i=this[t]),n??(n=r.getPropertyOptions(t)),!((n.hasChanged??wt)(i,o)||n.useDefault&&n.reflect&&i===this._$Ej?.get(t)&&!this.hasAttribute(r._$Eu(t,n))))return;this.C(t,o,n)}this.isUpdatePending===!1&&(this._$ES=this._$EP())}C(t,o,{useDefault:n,reflect:s,wrapped:i},r){n&&!(this._$Ej??(this._$Ej=new Map)).has(t)&&(this._$Ej.set(t,r??o??this[t]),i!==!0||r!==void 0)||(this._$AL.has(t)||(this.hasUpdated||n||(o=void 0),this._$AL.set(t,o)),s===!0&&this._$Em!==t&&(this._$Eq??(this._$Eq=new Set)).add(t))}async _$EP(){this.isUpdatePending=!0;try{await this._$ES}catch(o){Promise.reject(o)}let t=this.scheduleUpdate();return t!=null&&await t,!this.isUpdatePending}scheduleUpdate(){return this.performUpdate()}performUpdate(){if(!this.isUpdatePending)return;if(!this.hasUpdated){if(this.renderRoot??(this.renderRoot=this.createRenderRoot()),this._$Ep){for(let[s,i]of this._$Ep)this[s]=i;this._$Ep=void 0}let n=this.constructor.elementProperties;if(n.size>0)for(let[s,i]of n){let{wrapped:r}=i,a=this[s];r!==!0||this._$AL.has(s)||a===void 0||this.C(s,void 0,i,a)}}let t=!1,o=this._$AL;try{t=this.shouldUpdate(o),t?(this.willUpdate(o),this._$EO?.forEach(n=>n.hostUpdate?.()),this.update(o)):this._$EM()}catch(n){throw t=!1,this._$EM(),n}t&&this._$AE(o)}willUpdate(t){}_$AE(t){this._$EO?.forEach(o=>o.hostUpdated?.()),this.hasUpdated||(this.hasUpdated=!0,this.firstUpdated(t)),this.updated(t)}_$EM(){this._$AL=new Map,this.isUpdatePending=!1}get updateComplete(){return this.getUpdateComplete()}getUpdateComplete(){return this._$ES}shouldUpdate(t){return!0}update(t){this._$Eq&&(this._$Eq=this._$Eq.forEach(o=>this._$ET(o,this[o]))),this._$EM()}updated(t){}firstUpdated(t){}};T.elementStyles=[],T.shadowRootOptions={mode:"open"},T[nt("elementProperties")]=new Map,T[nt("finalized")]=new Map,Sn?.({ReactiveElement:T}),(L.reactiveElementVersions??(L.reactiveElementVersions=[])).push("2.1.2")});function Je(e,t){if(!Xt(e)||!e.hasOwnProperty("raw"))throw Error("invalid template strings array");return ze!==void 0?ze.createHTML(t):t}function F(e,t,o=e,n){if(t===$)return t;let s=n!==void 0?o._$Co?.[n]:o._$Cl,i=dt(t)?void 0:t._$litDirective$;return s?.constructor!==i&&(s?._$AO?.(!1),i===void 0?s=void 0:(s=new i(e),s._$AT(e,o,n)),n!==void 0?(o._$Co??(o._$Co=[]))[n]=s:o._$Cl=s),s!==void 0&&(t=F(e,s._$AS(e,t.values),s,n)),t}var at,Fe,Et,ze,We,_,Ze,kn,H,lt,dt,Xt,Cn,Vt,rt,Ue,qe,P,je,Ge,Ke,Qt,A,Fi,zi,$,y,Ve,N,$n,ct,Wt,ut,z,Zt,Kt,Jt,Yt,wn,Ye,U=g(()=>{at=globalThis,Fe=e=>e,Et=at.trustedTypes,ze=Et?Et.createPolicy("lit-html",{createHTML:e=>e}):void 0,We="$lit$",_=`lit$${Math.random().toFixed(9).slice(2)}$`,Ze="?"+_,kn=`<${Ze}>`,H=document,lt=()=>H.createComment(""),dt=e=>e===null||typeof e!="object"&&typeof e!="function",Xt=Array.isArray,Cn=e=>Xt(e)||typeof e?.[Symbol.iterator]=="function",Vt=`[ 	
-\f\r]`,rt=/<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g,Ue=/-->/g,qe=/>/g,P=RegExp(`>|${Vt}(?:([^\\s"'>=/]+)(${Vt}*=${Vt}*(?:[^ 	
-\f\r"'\`<>=]|("|')|))|$)`,"g"),je=/'/g,Ge=/"/g,Ke=/^(?:script|style|textarea|title)$/i,Qt=e=>(t,...o)=>({_$litType$:e,strings:t,values:o}),A=Qt(1),Fi=Qt(2),zi=Qt(3),$=Symbol.for("lit-noChange"),y=Symbol.for("lit-nothing"),Ve=new WeakMap,N=H.createTreeWalker(H,129);$n=(e,t)=>{let o=e.length-1,n=[],s,i=t===2?"<svg>":t===3?"<math>":"",r=rt;for(let a=0;a<o;a++){let l=e[a],u,p,c=-1,b=0;for(;b<l.length&&(r.lastIndex=b,p=r.exec(l),p!==null);)b=r.lastIndex,r===rt?p[1]==="!--"?r=Ue:p[1]!==void 0?r=qe:p[2]!==void 0?(Ke.test(p[2])&&(s=RegExp("</"+p[2],"g")),r=P):p[3]!==void 0&&(r=P):r===P?p[0]===">"?(r=s??rt,c=-1):p[1]===void 0?c=-2:(c=r.lastIndex-p[2].length,u=p[1],r=p[3]===void 0?P:p[3]==='"'?Ge:je):r===Ge||r===je?r=P:r===Ue||r===qe?r=rt:(r=P,s=void 0);let h=r===P&&e[a+1].startsWith("/>")?" ":"";i+=r===rt?l+kn:c>=0?(n.push(u),l.slice(0,c)+We+l.slice(c)+_+h):l+_+(c===-2?a:h)}return[Je(e,i+(e[o]||"<?>")+(t===2?"</svg>":t===3?"</math>":"")),n]},ct=class e{constructor({strings:t,_$litType$:o},n){let s;this.parts=[];let i=0,r=0,a=t.length-1,l=this.parts,[u,p]=$n(t,o);if(this.el=e.createElement(u,n),N.currentNode=this.el.content,o===2||o===3){let c=this.el.content.firstChild;c.replaceWith(...c.childNodes)}for(;(s=N.nextNode())!==null&&l.length<a;){if(s.nodeType===1){if(s.hasAttributes())for(let c of s.getAttributeNames())if(c.endsWith(We)){let b=p[r++],h=s.getAttribute(c).split(_),x=/([.?@])?(.*)/.exec(b);l.push({type:1,index:i,name:x[2],strings:h,ctor:x[1]==="."?Zt:x[1]==="?"?Kt:x[1]==="@"?Jt:z}),s.removeAttribute(c)}else c.startsWith(_)&&(l.push({type:6,index:i}),s.removeAttribute(c));if(Ke.test(s.tagName)){let c=s.textContent.split(_),b=c.length-1;if(b>0){s.textContent=Et?Et.emptyScript:"";for(let h=0;h<b;h++)s.append(c[h],lt()),N.nextNode(),l.push({type:2,index:++i});s.append(c[b],lt())}}}else if(s.nodeType===8)if(s.data===Ze)l.push({type:2,index:i});else{let c=-1;for(;(c=s.data.indexOf(_,c+1))!==-1;)l.push({type:7,index:i}),c+=_.length-1}i++}}static createElement(t,o){let n=H.createElement("template");return n.innerHTML=t,n}};Wt=class{constructor(t,o){this._$AV=[],this._$AN=void 0,this._$AD=t,this._$AM=o}get parentNode(){return this._$AM.parentNode}get _$AU(){return this._$AM._$AU}u(t){let{el:{content:o},parts:n}=this._$AD,s=(t?.creationScope??H).importNode(o,!0);N.currentNode=s;let i=N.nextNode(),r=0,a=0,l=n[0];for(;l!==void 0;){if(r===l.index){let u;l.type===2?u=new ut(i,i.nextSibling,this,t):l.type===1?u=new l.ctor(i,l.name,l.strings,this,t):l.type===6&&(u=new Yt(i,this,t)),this._$AV.push(u),l=n[++a]}r!==l?.index&&(i=N.nextNode(),r++)}return N.currentNode=H,s}p(t){let o=0;for(let n of this._$AV)n!==void 0&&(n.strings!==void 0?(n._$AI(t,n,o),o+=n.strings.length-2):n._$AI(t[o])),o++}},ut=class e{get _$AU(){return this._$AM?._$AU??this._$Cv}constructor(t,o,n,s){this.type=2,this._$AH=y,this._$AN=void 0,this._$AA=t,this._$AB=o,this._$AM=n,this.options=s,this._$Cv=s?.isConnected??!0}get parentNode(){let t=this._$AA.parentNode,o=this._$AM;return o!==void 0&&t?.nodeType===11&&(t=o.parentNode),t}get startNode(){return this._$AA}get endNode(){return this._$AB}_$AI(t,o=this){t=F(this,t,o),dt(t)?t===y||t==null||t===""?(this._$AH!==y&&this._$AR(),this._$AH=y):t!==this._$AH&&t!==$&&this._(t):t._$litType$!==void 0?this.$(t):t.nodeType!==void 0?this.T(t):Cn(t)?this.k(t):this._(t)}O(t){return this._$AA.parentNode.insertBefore(t,this._$AB)}T(t){this._$AH!==t&&(this._$AR(),this._$AH=this.O(t))}_(t){this._$AH!==y&&dt(this._$AH)?this._$AA.nextSibling.data=t:this.T(H.createTextNode(t)),this._$AH=t}$(t){let{values:o,_$litType$:n}=t,s=typeof n=="number"?this._$AC(t):(n.el===void 0&&(n.el=ct.createElement(Je(n.h,n.h[0]),this.options)),n);if(this._$AH?._$AD===s)this._$AH.p(o);else{let i=new Wt(s,this),r=i.u(this.options);i.p(o),this.T(r),this._$AH=i}}_$AC(t){let o=Ve.get(t.strings);return o===void 0&&Ve.set(t.strings,o=new ct(t)),o}k(t){Xt(this._$AH)||(this._$AH=[],this._$AR());let o=this._$AH,n,s=0;for(let i of t)s===o.length?o.push(n=new e(this.O(lt()),this.O(lt()),this,this.options)):n=o[s],n._$AI(i),s++;s<o.length&&(this._$AR(n&&n._$AB.nextSibling,s),o.length=s)}_$AR(t=this._$AA.nextSibling,o){for(this._$AP?.(!1,!0,o);t!==this._$AB;){let n=Fe(t).nextSibling;Fe(t).remove(),t=n}}setConnected(t){this._$AM===void 0&&(this._$Cv=t,this._$AP?.(t))}},z=class{get tagName(){return this.element.tagName}get _$AU(){return this._$AM._$AU}constructor(t,o,n,s,i){this.type=1,this._$AH=y,this._$AN=void 0,this.element=t,this.name=o,this._$AM=s,this.options=i,n.length>2||n[0]!==""||n[1]!==""?(this._$AH=Array(n.length-1).fill(new String),this.strings=n):this._$AH=y}_$AI(t,o=this,n,s){let i=this.strings,r=!1;if(i===void 0)t=F(this,t,o,0),r=!dt(t)||t!==this._$AH&&t!==$,r&&(this._$AH=t);else{let a=t,l,u;for(t=i[0],l=0;l<i.length-1;l++)u=F(this,a[n+l],o,l),u===$&&(u=this._$AH[l]),r||(r=!dt(u)||u!==this._$AH[l]),u===y?t=y:t!==y&&(t+=(u??"")+i[l+1]),this._$AH[l]=u}r&&!s&&this.j(t)}j(t){t===y?this.element.removeAttribute(this.name):this.element.setAttribute(this.name,t??"")}},Zt=class extends z{constructor(){super(...arguments),this.type=3}j(t){this.element[this.name]=t===y?void 0:t}},Kt=class extends z{constructor(){super(...arguments),this.type=4}j(t){this.element.toggleAttribute(this.name,!!t&&t!==y)}},Jt=class extends z{constructor(t,o,n,s,i){super(t,o,n,s,i),this.type=5}_$AI(t,o=this){if((t=F(this,t,o,0)??y)===$)return;let n=this._$AH,s=t===y&&n!==y||t.capture!==n.capture||t.once!==n.once||t.passive!==n.passive,i=t!==y&&(n===y||s);s&&this.element.removeEventListener(this.name,this,n),i&&this.element.addEventListener(this.name,this,t),this._$AH=t}handleEvent(t){typeof this._$AH=="function"?this._$AH.call(this.options?.host??this.element,t):this._$AH.handleEvent(t)}},Yt=class{constructor(t,o,n){this.element=t,this.type=6,this._$AN=void 0,this._$AM=o,this.options=n}get _$AU(){return this._$AM._$AU}_$AI(t){F(this,t)}},wn=at.litHtmlPolyfillSupport;wn?.(ct,ut),(at.litHtmlVersions??(at.litHtmlVersions=[])).push("3.3.3");Ye=(e,t,o)=>{let n=o?.renderBefore??t,s=n._$litPart$;if(s===void 0){let i=o?.renderBefore??null;n._$litPart$=s=new ut(t.insertBefore(lt(),i),i,void 0,o??{})}return s._$AI(e),s}});var pt,D,En,Xe=g(()=>{it();it();U();U();pt=globalThis,D=class extends T{constructor(){super(...arguments),this.renderOptions={host:this},this._$Do=void 0}createRenderRoot(){var o;let t=super.createRenderRoot();return(o=this.renderOptions).renderBefore??(o.renderBefore=t.firstChild),t}update(t){let o=this.render();this.hasUpdated||(this.renderOptions.isConnected=this.isConnected),super.update(t),this._$Do=Ye(o,this.renderRoot,this.renderOptions)}connectedCallback(){super.connectedCallback(),this._$Do?.setConnected(!0)}disconnectedCallback(){super.disconnectedCallback(),this._$Do?.setConnected(!1)}render(){return $}};D._$litElement$=!0,D.finalized=!0,pt.litElementHydrateSupport?.({LitElement:D});En=pt.litElementPolyfillSupport;En?.({LitElement:D});(pt.litElementVersions??(pt.litElementVersions=[])).push("4.2.2")});var Qe=g(()=>{});var B=g(()=>{it();U();Xe();Qe()});var to=g(()=>{});function v(e){return(t,o)=>typeof o=="object"?An(e,t,o):((n,s,i)=>{let r=s.hasOwnProperty(i);return s.constructor.createProperty(i,n),r?Object.getOwnPropertyDescriptor(s,i):void 0})(e,t,o)}var Tn,An,te=g(()=>{it();Tn={attribute:!0,type:String,converter:st,reflect:!1,hasChanged:wt},An=(e=Tn,t,o)=>{let{kind:n,metadata:s}=o,i=globalThis.litPropertyMetadata.get(s);if(i===void 0&&globalThis.litPropertyMetadata.set(s,i=new Map),n==="setter"&&((e=Object.create(e)).wrapped=!0),i.set(o.name,e),n==="accessor"){let{name:r}=o;return{set(a){let l=t.get.call(this);t.set.call(this,a),this.requestUpdate(r,l,e,!0,a)},init(a){return a!==void 0&&this.C(r,void 0,e,a),a}}}if(n==="setter"){let{name:r}=o;return function(a){let l=this[r];t.call(this,a),this.requestUpdate(r,l,e,!0,a)}}throw Error("Unsupported decorator location: "+n)}});function ee(e){return v({...e,state:!0,attribute:!1})}var eo=g(()=>{te();});var oo=g(()=>{});var q=g(()=>{});var no=g(()=>{q();});var so=g(()=>{q();});var io=g(()=>{q();});var ro=g(()=>{q();});var ao=g(()=>{q();});var oe=g(()=>{to();te();eo();oo();no();so();io();ro();ao()});var At,It,j,ne=g(()=>{At={ATTRIBUTE:1,CHILD:2,PROPERTY:3,BOOLEAN_ATTRIBUTE:4,EVENT:5,ELEMENT:6},It=e=>(...t)=>({_$litDirective$:e,values:t}),j=class{constructor(t){}get _$AU(){return this._$AM._$AU}_$AT(t,o,n){this._$Ct=t,this._$AM=o,this._$Ci=n}_$AS(t,o){return this.update(t,o)}update(t,o){return this.render(...o)}}});var Mt,lo=g(()=>{U();ne();Mt=It(class extends j{constructor(e){if(super(e),e.type!==At.ATTRIBUTE||e.name!=="class"||e.strings?.length>2)throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.")}render(e){return" "+Object.keys(e).filter(t=>e[t]).join(" ")+" "}update(e,[t]){if(this.st===void 0){this.st=new Set,e.strings!==void 0&&(this.nt=new Set(e.strings.join(" ").split(/\s/).filter(n=>n!=="")));for(let n in t)t[n]&&!this.nt?.has(n)&&this.st.add(n);return this.render(t)}let o=e.element.classList;for(let n of this.st)n in t||(o.remove(n),this.st.delete(n));for(let n in t){let s=!!t[n];s===this.st.has(n)||this.nt?.has(n)||(s?(o.add(n),this.st.add(n)):(o.remove(n),this.st.delete(n)))}return $}})});var se=g(()=>{lo()});var Lt,co,uo,G,_t,ie=g(()=>{B();Lt="2.5.1",co="__vscodeElements_disableRegistryWarning__",uo=(e,t)=>{console.warn(t?`[VSCode Elements] ${e}
-%o`:`${e}
-%o`,t)},G=class extends D{get version(){return Lt}warn(t){uo(t,this)}},_t=e=>t=>{if(!customElements.get(e)){customElements.define(e,t);return}if(co in window)return;let s=document.createElement(e)?.version,i="";s?s!==Lt?(i+="is already registered by a different version of VSCode Elements. ",i+=`This version is "${Lt}", while the other one is "${s}".`):i+=`is already registered by the same version of VSCode Elements (${Lt}).`:i+="is already registered by an unknown custom element handler class.",uo(`The custom element "${e}" ${i}
-To suppress this warning, set window.${co} to true`)}});var V,po=g(()=>{U();V=e=>e??y});var re=g(()=>{po()});var bo=g(()=>{ne()});var ae,mo,go=g(()=>{B();bo();ae=class extends j{constructor(t){if(super(t),this._prevProperties={},t.type!==At.PROPERTY||t.name!=="style")throw new Error("The `stylePropertyMap` directive must be used in the `style` property")}update(t,[o]){return Object.entries(o).forEach(([n,s])=>{this._prevProperties[n]!==s&&(n.startsWith("--")?t.element.style.setProperty(n,s):t.element.style[n]=s,this._prevProperties[n]=s)}),$}render(t){return $}},mo=It(ae)});var Dt,le=g(()=>{B();Dt=R`
+"use strict";
+(() => {
+  var __defProp = Object.defineProperty;
+  var __getOwnPropNames = Object.getOwnPropertyNames;
+  var __esm = (fn, res, err) => function __init() {
+    if (err) throw err[0];
+    try {
+      return fn && (res = (0, fn[__getOwnPropNames(fn)[0]])(fn = 0)), res;
+    } catch (e7) {
+      throw err = [e7], e7;
+    }
+  };
+  var __export = (target, all) => {
+    for (var name in all)
+      __defProp(target, name, { get: all[name], enumerable: true });
+  };
+
+  // node_modules/@lit/reactive-element/css-tag.js
+  var t, e, s, o, n, r, i, S, c;
+  var init_css_tag = __esm({
+    "node_modules/@lit/reactive-element/css-tag.js"() {
+      t = globalThis;
+      e = t.ShadowRoot && (void 0 === t.ShadyCSS || t.ShadyCSS.nativeShadow) && "adoptedStyleSheets" in Document.prototype && "replace" in CSSStyleSheet.prototype;
+      s = /* @__PURE__ */ Symbol();
+      o = /* @__PURE__ */ new WeakMap();
+      n = class {
+        constructor(t4, e7, o7) {
+          if (this._$cssResult$ = true, o7 !== s) throw Error("CSSResult is not constructable. Use `unsafeCSS` or `css` instead.");
+          this.cssText = t4, this.t = e7;
+        }
+        get styleSheet() {
+          let t4 = this.o;
+          const s4 = this.t;
+          if (e && void 0 === t4) {
+            const e7 = void 0 !== s4 && 1 === s4.length;
+            e7 && (t4 = o.get(s4)), void 0 === t4 && ((this.o = t4 = new CSSStyleSheet()).replaceSync(this.cssText), e7 && o.set(s4, t4));
+          }
+          return t4;
+        }
+        toString() {
+          return this.cssText;
+        }
+      };
+      r = (t4) => new n("string" == typeof t4 ? t4 : t4 + "", void 0, s);
+      i = (t4, ...e7) => {
+        const o7 = 1 === t4.length ? t4[0] : e7.reduce((e8, s4, o8) => e8 + ((t5) => {
+          if (true === t5._$cssResult$) return t5.cssText;
+          if ("number" == typeof t5) return t5;
+          throw Error("Value passed to 'css' function must be a 'css' function result: " + t5 + ". Use 'unsafeCSS' to pass non-literal values, but take care to ensure page security.");
+        })(s4) + t4[o8 + 1], t4[0]);
+        return new n(o7, t4, s);
+      };
+      S = (s4, o7) => {
+        if (e) s4.adoptedStyleSheets = o7.map((t4) => t4 instanceof CSSStyleSheet ? t4 : t4.styleSheet);
+        else for (const e7 of o7) {
+          const o8 = document.createElement("style"), n5 = t.litNonce;
+          void 0 !== n5 && o8.setAttribute("nonce", n5), o8.textContent = e7.cssText, s4.appendChild(o8);
+        }
+      };
+      c = e ? (t4) => t4 : (t4) => t4 instanceof CSSStyleSheet ? ((t5) => {
+        let e7 = "";
+        for (const s4 of t5.cssRules) e7 += s4.cssText;
+        return r(e7);
+      })(t4) : t4;
+    }
+  });
+
+  // node_modules/@lit/reactive-element/reactive-element.js
+  var i2, e2, h, r2, o2, n2, a, c2, l, p, d, u, f, b, y;
+  var init_reactive_element = __esm({
+    "node_modules/@lit/reactive-element/reactive-element.js"() {
+      init_css_tag();
+      init_css_tag();
+      ({ is: i2, defineProperty: e2, getOwnPropertyDescriptor: h, getOwnPropertyNames: r2, getOwnPropertySymbols: o2, getPrototypeOf: n2 } = Object);
+      a = globalThis;
+      c2 = a.trustedTypes;
+      l = c2 ? c2.emptyScript : "";
+      p = a.reactiveElementPolyfillSupport;
+      d = (t4, s4) => t4;
+      u = { toAttribute(t4, s4) {
+        switch (s4) {
+          case Boolean:
+            t4 = t4 ? l : null;
+            break;
+          case Object:
+          case Array:
+            t4 = null == t4 ? t4 : JSON.stringify(t4);
+        }
+        return t4;
+      }, fromAttribute(t4, s4) {
+        let i6 = t4;
+        switch (s4) {
+          case Boolean:
+            i6 = null !== t4;
+            break;
+          case Number:
+            i6 = null === t4 ? null : Number(t4);
+            break;
+          case Object:
+          case Array:
+            try {
+              i6 = JSON.parse(t4);
+            } catch (t5) {
+              i6 = null;
+            }
+        }
+        return i6;
+      } };
+      f = (t4, s4) => !i2(t4, s4);
+      b = { attribute: true, type: String, converter: u, reflect: false, useDefault: false, hasChanged: f };
+      Symbol.metadata ?? (Symbol.metadata = /* @__PURE__ */ Symbol("metadata")), a.litPropertyMetadata ?? (a.litPropertyMetadata = /* @__PURE__ */ new WeakMap());
+      y = class extends HTMLElement {
+        static addInitializer(t4) {
+          this._$Ei(), (this.l ?? (this.l = [])).push(t4);
+        }
+        static get observedAttributes() {
+          return this.finalize(), this._$Eh && [...this._$Eh.keys()];
+        }
+        static createProperty(t4, s4 = b) {
+          if (s4.state && (s4.attribute = false), this._$Ei(), this.prototype.hasOwnProperty(t4) && ((s4 = Object.create(s4)).wrapped = true), this.elementProperties.set(t4, s4), !s4.noAccessor) {
+            const i6 = /* @__PURE__ */ Symbol(), h3 = this.getPropertyDescriptor(t4, i6, s4);
+            void 0 !== h3 && e2(this.prototype, t4, h3);
+          }
+        }
+        static getPropertyDescriptor(t4, s4, i6) {
+          const { get: e7, set: r6 } = h(this.prototype, t4) ?? { get() {
+            return this[s4];
+          }, set(t5) {
+            this[s4] = t5;
+          } };
+          return { get: e7, set(s5) {
+            const h3 = e7?.call(this);
+            r6?.call(this, s5), this.requestUpdate(t4, h3, i6);
+          }, configurable: true, enumerable: true };
+        }
+        static getPropertyOptions(t4) {
+          return this.elementProperties.get(t4) ?? b;
+        }
+        static _$Ei() {
+          if (this.hasOwnProperty(d("elementProperties"))) return;
+          const t4 = n2(this);
+          t4.finalize(), void 0 !== t4.l && (this.l = [...t4.l]), this.elementProperties = new Map(t4.elementProperties);
+        }
+        static finalize() {
+          if (this.hasOwnProperty(d("finalized"))) return;
+          if (this.finalized = true, this._$Ei(), this.hasOwnProperty(d("properties"))) {
+            const t5 = this.properties, s4 = [...r2(t5), ...o2(t5)];
+            for (const i6 of s4) this.createProperty(i6, t5[i6]);
+          }
+          const t4 = this[Symbol.metadata];
+          if (null !== t4) {
+            const s4 = litPropertyMetadata.get(t4);
+            if (void 0 !== s4) for (const [t5, i6] of s4) this.elementProperties.set(t5, i6);
+          }
+          this._$Eh = /* @__PURE__ */ new Map();
+          for (const [t5, s4] of this.elementProperties) {
+            const i6 = this._$Eu(t5, s4);
+            void 0 !== i6 && this._$Eh.set(i6, t5);
+          }
+          this.elementStyles = this.finalizeStyles(this.styles);
+        }
+        static finalizeStyles(s4) {
+          const i6 = [];
+          if (Array.isArray(s4)) {
+            const e7 = new Set(s4.flat(1 / 0).reverse());
+            for (const s5 of e7) i6.unshift(c(s5));
+          } else void 0 !== s4 && i6.push(c(s4));
+          return i6;
+        }
+        static _$Eu(t4, s4) {
+          const i6 = s4.attribute;
+          return false === i6 ? void 0 : "string" == typeof i6 ? i6 : "string" == typeof t4 ? t4.toLowerCase() : void 0;
+        }
+        constructor() {
+          super(), this._$Ep = void 0, this.isUpdatePending = false, this.hasUpdated = false, this._$Em = null, this._$Ev();
+        }
+        _$Ev() {
+          this._$ES = new Promise((t4) => this.enableUpdating = t4), this._$AL = /* @__PURE__ */ new Map(), this._$E_(), this.requestUpdate(), this.constructor.l?.forEach((t4) => t4(this));
+        }
+        addController(t4) {
+          (this._$EO ?? (this._$EO = /* @__PURE__ */ new Set())).add(t4), void 0 !== this.renderRoot && this.isConnected && t4.hostConnected?.();
+        }
+        removeController(t4) {
+          this._$EO?.delete(t4);
+        }
+        _$E_() {
+          const t4 = /* @__PURE__ */ new Map(), s4 = this.constructor.elementProperties;
+          for (const i6 of s4.keys()) this.hasOwnProperty(i6) && (t4.set(i6, this[i6]), delete this[i6]);
+          t4.size > 0 && (this._$Ep = t4);
+        }
+        createRenderRoot() {
+          const t4 = this.shadowRoot ?? this.attachShadow(this.constructor.shadowRootOptions);
+          return S(t4, this.constructor.elementStyles), t4;
+        }
+        connectedCallback() {
+          this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this.enableUpdating(true), this._$EO?.forEach((t4) => t4.hostConnected?.());
+        }
+        enableUpdating(t4) {
+        }
+        disconnectedCallback() {
+          this._$EO?.forEach((t4) => t4.hostDisconnected?.());
+        }
+        attributeChangedCallback(t4, s4, i6) {
+          this._$AK(t4, i6);
+        }
+        _$ET(t4, s4) {
+          const i6 = this.constructor.elementProperties.get(t4), e7 = this.constructor._$Eu(t4, i6);
+          if (void 0 !== e7 && true === i6.reflect) {
+            const h3 = (void 0 !== i6.converter?.toAttribute ? i6.converter : u).toAttribute(s4, i6.type);
+            this._$Em = t4, null == h3 ? this.removeAttribute(e7) : this.setAttribute(e7, h3), this._$Em = null;
+          }
+        }
+        _$AK(t4, s4) {
+          const i6 = this.constructor, e7 = i6._$Eh.get(t4);
+          if (void 0 !== e7 && this._$Em !== e7) {
+            const t5 = i6.getPropertyOptions(e7), h3 = "function" == typeof t5.converter ? { fromAttribute: t5.converter } : void 0 !== t5.converter?.fromAttribute ? t5.converter : u;
+            this._$Em = e7;
+            const r6 = h3.fromAttribute(s4, t5.type);
+            this[e7] = r6 ?? this._$Ej?.get(e7) ?? r6, this._$Em = null;
+          }
+        }
+        requestUpdate(t4, s4, i6, e7 = false, h3) {
+          if (void 0 !== t4) {
+            const r6 = this.constructor;
+            if (false === e7 && (h3 = this[t4]), i6 ?? (i6 = r6.getPropertyOptions(t4)), !((i6.hasChanged ?? f)(h3, s4) || i6.useDefault && i6.reflect && h3 === this._$Ej?.get(t4) && !this.hasAttribute(r6._$Eu(t4, i6)))) return;
+            this.C(t4, s4, i6);
+          }
+          false === this.isUpdatePending && (this._$ES = this._$EP());
+        }
+        C(t4, s4, { useDefault: i6, reflect: e7, wrapped: h3 }, r6) {
+          i6 && !(this._$Ej ?? (this._$Ej = /* @__PURE__ */ new Map())).has(t4) && (this._$Ej.set(t4, r6 ?? s4 ?? this[t4]), true !== h3 || void 0 !== r6) || (this._$AL.has(t4) || (this.hasUpdated || i6 || (s4 = void 0), this._$AL.set(t4, s4)), true === e7 && this._$Em !== t4 && (this._$Eq ?? (this._$Eq = /* @__PURE__ */ new Set())).add(t4));
+        }
+        async _$EP() {
+          this.isUpdatePending = true;
+          try {
+            await this._$ES;
+          } catch (t5) {
+            Promise.reject(t5);
+          }
+          const t4 = this.scheduleUpdate();
+          return null != t4 && await t4, !this.isUpdatePending;
+        }
+        scheduleUpdate() {
+          return this.performUpdate();
+        }
+        performUpdate() {
+          if (!this.isUpdatePending) return;
+          if (!this.hasUpdated) {
+            if (this.renderRoot ?? (this.renderRoot = this.createRenderRoot()), this._$Ep) {
+              for (const [t6, s5] of this._$Ep) this[t6] = s5;
+              this._$Ep = void 0;
+            }
+            const t5 = this.constructor.elementProperties;
+            if (t5.size > 0) for (const [s5, i6] of t5) {
+              const { wrapped: t6 } = i6, e7 = this[s5];
+              true !== t6 || this._$AL.has(s5) || void 0 === e7 || this.C(s5, void 0, i6, e7);
+            }
+          }
+          let t4 = false;
+          const s4 = this._$AL;
+          try {
+            t4 = this.shouldUpdate(s4), t4 ? (this.willUpdate(s4), this._$EO?.forEach((t5) => t5.hostUpdate?.()), this.update(s4)) : this._$EM();
+          } catch (s5) {
+            throw t4 = false, this._$EM(), s5;
+          }
+          t4 && this._$AE(s4);
+        }
+        willUpdate(t4) {
+        }
+        _$AE(t4) {
+          this._$EO?.forEach((t5) => t5.hostUpdated?.()), this.hasUpdated || (this.hasUpdated = true, this.firstUpdated(t4)), this.updated(t4);
+        }
+        _$EM() {
+          this._$AL = /* @__PURE__ */ new Map(), this.isUpdatePending = false;
+        }
+        get updateComplete() {
+          return this.getUpdateComplete();
+        }
+        getUpdateComplete() {
+          return this._$ES;
+        }
+        shouldUpdate(t4) {
+          return true;
+        }
+        update(t4) {
+          this._$Eq && (this._$Eq = this._$Eq.forEach((t5) => this._$ET(t5, this[t5]))), this._$EM();
+        }
+        updated(t4) {
+        }
+        firstUpdated(t4) {
+        }
+      };
+      y.elementStyles = [], y.shadowRootOptions = { mode: "open" }, y[d("elementProperties")] = /* @__PURE__ */ new Map(), y[d("finalized")] = /* @__PURE__ */ new Map(), p?.({ ReactiveElement: y }), (a.reactiveElementVersions ?? (a.reactiveElementVersions = [])).push("2.1.2");
+    }
+  });
+
+  // node_modules/lit-html/lit-html.js
+  function V(t4, i6) {
+    if (!u2(t4) || !t4.hasOwnProperty("raw")) throw Error("invalid template strings array");
+    return void 0 !== e3 ? e3.createHTML(i6) : i6;
+  }
+  function M(t4, i6, s4 = t4, e7) {
+    if (i6 === E) return i6;
+    let h3 = void 0 !== e7 ? s4._$Co?.[e7] : s4._$Cl;
+    const o7 = a2(i6) ? void 0 : i6._$litDirective$;
+    return h3?.constructor !== o7 && (h3?._$AO?.(false), void 0 === o7 ? h3 = void 0 : (h3 = new o7(t4), h3._$AT(t4, s4, e7)), void 0 !== e7 ? (s4._$Co ?? (s4._$Co = []))[e7] = h3 : s4._$Cl = h3), void 0 !== h3 && (i6 = M(t4, h3._$AS(t4, i6.values), h3, e7)), i6;
+  }
+  var t2, i3, s2, e3, h2, o3, n3, r3, l2, c3, a2, u2, d2, f2, v, _, m, p2, g, $, y2, x, b2, w, T, E, A, C, P, N, S2, R, k, H, I, L, z, Z, B, D;
+  var init_lit_html = __esm({
+    "node_modules/lit-html/lit-html.js"() {
+      t2 = globalThis;
+      i3 = (t4) => t4;
+      s2 = t2.trustedTypes;
+      e3 = s2 ? s2.createPolicy("lit-html", { createHTML: (t4) => t4 }) : void 0;
+      h2 = "$lit$";
+      o3 = `lit$${Math.random().toFixed(9).slice(2)}$`;
+      n3 = "?" + o3;
+      r3 = `<${n3}>`;
+      l2 = document;
+      c3 = () => l2.createComment("");
+      a2 = (t4) => null === t4 || "object" != typeof t4 && "function" != typeof t4;
+      u2 = Array.isArray;
+      d2 = (t4) => u2(t4) || "function" == typeof t4?.[Symbol.iterator];
+      f2 = "[ 	\n\f\r]";
+      v = /<(?:(!--|\/[^a-zA-Z])|(\/?[a-zA-Z][^>\s]*)|(\/?$))/g;
+      _ = /-->/g;
+      m = />/g;
+      p2 = RegExp(`>|${f2}(?:([^\\s"'>=/]+)(${f2}*=${f2}*(?:[^ 	
+\f\r"'\`<>=]|("|')|))|$)`, "g");
+      g = /'/g;
+      $ = /"/g;
+      y2 = /^(?:script|style|textarea|title)$/i;
+      x = (t4) => (i6, ...s4) => ({ _$litType$: t4, strings: i6, values: s4 });
+      b2 = x(1);
+      w = x(2);
+      T = x(3);
+      E = /* @__PURE__ */ Symbol.for("lit-noChange");
+      A = /* @__PURE__ */ Symbol.for("lit-nothing");
+      C = /* @__PURE__ */ new WeakMap();
+      P = l2.createTreeWalker(l2, 129);
+      N = (t4, i6) => {
+        const s4 = t4.length - 1, e7 = [];
+        let n5, l3 = 2 === i6 ? "<svg>" : 3 === i6 ? "<math>" : "", c4 = v;
+        for (let i7 = 0; i7 < s4; i7++) {
+          const s5 = t4[i7];
+          let a3, u3, d3 = -1, f3 = 0;
+          for (; f3 < s5.length && (c4.lastIndex = f3, u3 = c4.exec(s5), null !== u3); ) f3 = c4.lastIndex, c4 === v ? "!--" === u3[1] ? c4 = _ : void 0 !== u3[1] ? c4 = m : void 0 !== u3[2] ? (y2.test(u3[2]) && (n5 = RegExp("</" + u3[2], "g")), c4 = p2) : void 0 !== u3[3] && (c4 = p2) : c4 === p2 ? ">" === u3[0] ? (c4 = n5 ?? v, d3 = -1) : void 0 === u3[1] ? d3 = -2 : (d3 = c4.lastIndex - u3[2].length, a3 = u3[1], c4 = void 0 === u3[3] ? p2 : '"' === u3[3] ? $ : g) : c4 === $ || c4 === g ? c4 = p2 : c4 === _ || c4 === m ? c4 = v : (c4 = p2, n5 = void 0);
+          const x2 = c4 === p2 && t4[i7 + 1].startsWith("/>") ? " " : "";
+          l3 += c4 === v ? s5 + r3 : d3 >= 0 ? (e7.push(a3), s5.slice(0, d3) + h2 + s5.slice(d3) + o3 + x2) : s5 + o3 + (-2 === d3 ? i7 : x2);
+        }
+        return [V(t4, l3 + (t4[s4] || "<?>") + (2 === i6 ? "</svg>" : 3 === i6 ? "</math>" : "")), e7];
+      };
+      S2 = class _S {
+        constructor({ strings: t4, _$litType$: i6 }, e7) {
+          let r6;
+          this.parts = [];
+          let l3 = 0, a3 = 0;
+          const u3 = t4.length - 1, d3 = this.parts, [f3, v2] = N(t4, i6);
+          if (this.el = _S.createElement(f3, e7), P.currentNode = this.el.content, 2 === i6 || 3 === i6) {
+            const t5 = this.el.content.firstChild;
+            t5.replaceWith(...t5.childNodes);
+          }
+          for (; null !== (r6 = P.nextNode()) && d3.length < u3; ) {
+            if (1 === r6.nodeType) {
+              if (r6.hasAttributes()) for (const t5 of r6.getAttributeNames()) if (t5.endsWith(h2)) {
+                const i7 = v2[a3++], s4 = r6.getAttribute(t5).split(o3), e8 = /([.?@])?(.*)/.exec(i7);
+                d3.push({ type: 1, index: l3, name: e8[2], strings: s4, ctor: "." === e8[1] ? I : "?" === e8[1] ? L : "@" === e8[1] ? z : H }), r6.removeAttribute(t5);
+              } else t5.startsWith(o3) && (d3.push({ type: 6, index: l3 }), r6.removeAttribute(t5));
+              if (y2.test(r6.tagName)) {
+                const t5 = r6.textContent.split(o3), i7 = t5.length - 1;
+                if (i7 > 0) {
+                  r6.textContent = s2 ? s2.emptyScript : "";
+                  for (let s4 = 0; s4 < i7; s4++) r6.append(t5[s4], c3()), P.nextNode(), d3.push({ type: 2, index: ++l3 });
+                  r6.append(t5[i7], c3());
+                }
+              }
+            } else if (8 === r6.nodeType) if (r6.data === n3) d3.push({ type: 2, index: l3 });
+            else {
+              let t5 = -1;
+              for (; -1 !== (t5 = r6.data.indexOf(o3, t5 + 1)); ) d3.push({ type: 7, index: l3 }), t5 += o3.length - 1;
+            }
+            l3++;
+          }
+        }
+        static createElement(t4, i6) {
+          const s4 = l2.createElement("template");
+          return s4.innerHTML = t4, s4;
+        }
+      };
+      R = class {
+        constructor(t4, i6) {
+          this._$AV = [], this._$AN = void 0, this._$AD = t4, this._$AM = i6;
+        }
+        get parentNode() {
+          return this._$AM.parentNode;
+        }
+        get _$AU() {
+          return this._$AM._$AU;
+        }
+        u(t4) {
+          const { el: { content: i6 }, parts: s4 } = this._$AD, e7 = (t4?.creationScope ?? l2).importNode(i6, true);
+          P.currentNode = e7;
+          let h3 = P.nextNode(), o7 = 0, n5 = 0, r6 = s4[0];
+          for (; void 0 !== r6; ) {
+            if (o7 === r6.index) {
+              let i7;
+              2 === r6.type ? i7 = new k(h3, h3.nextSibling, this, t4) : 1 === r6.type ? i7 = new r6.ctor(h3, r6.name, r6.strings, this, t4) : 6 === r6.type && (i7 = new Z(h3, this, t4)), this._$AV.push(i7), r6 = s4[++n5];
+            }
+            o7 !== r6?.index && (h3 = P.nextNode(), o7++);
+          }
+          return P.currentNode = l2, e7;
+        }
+        p(t4) {
+          let i6 = 0;
+          for (const s4 of this._$AV) void 0 !== s4 && (void 0 !== s4.strings ? (s4._$AI(t4, s4, i6), i6 += s4.strings.length - 2) : s4._$AI(t4[i6])), i6++;
+        }
+      };
+      k = class _k {
+        get _$AU() {
+          return this._$AM?._$AU ?? this._$Cv;
+        }
+        constructor(t4, i6, s4, e7) {
+          this.type = 2, this._$AH = A, this._$AN = void 0, this._$AA = t4, this._$AB = i6, this._$AM = s4, this.options = e7, this._$Cv = e7?.isConnected ?? true;
+        }
+        get parentNode() {
+          let t4 = this._$AA.parentNode;
+          const i6 = this._$AM;
+          return void 0 !== i6 && 11 === t4?.nodeType && (t4 = i6.parentNode), t4;
+        }
+        get startNode() {
+          return this._$AA;
+        }
+        get endNode() {
+          return this._$AB;
+        }
+        _$AI(t4, i6 = this) {
+          t4 = M(this, t4, i6), a2(t4) ? t4 === A || null == t4 || "" === t4 ? (this._$AH !== A && this._$AR(), this._$AH = A) : t4 !== this._$AH && t4 !== E && this._(t4) : void 0 !== t4._$litType$ ? this.$(t4) : void 0 !== t4.nodeType ? this.T(t4) : d2(t4) ? this.k(t4) : this._(t4);
+        }
+        O(t4) {
+          return this._$AA.parentNode.insertBefore(t4, this._$AB);
+        }
+        T(t4) {
+          this._$AH !== t4 && (this._$AR(), this._$AH = this.O(t4));
+        }
+        _(t4) {
+          this._$AH !== A && a2(this._$AH) ? this._$AA.nextSibling.data = t4 : this.T(l2.createTextNode(t4)), this._$AH = t4;
+        }
+        $(t4) {
+          const { values: i6, _$litType$: s4 } = t4, e7 = "number" == typeof s4 ? this._$AC(t4) : (void 0 === s4.el && (s4.el = S2.createElement(V(s4.h, s4.h[0]), this.options)), s4);
+          if (this._$AH?._$AD === e7) this._$AH.p(i6);
+          else {
+            const t5 = new R(e7, this), s5 = t5.u(this.options);
+            t5.p(i6), this.T(s5), this._$AH = t5;
+          }
+        }
+        _$AC(t4) {
+          let i6 = C.get(t4.strings);
+          return void 0 === i6 && C.set(t4.strings, i6 = new S2(t4)), i6;
+        }
+        k(t4) {
+          u2(this._$AH) || (this._$AH = [], this._$AR());
+          const i6 = this._$AH;
+          let s4, e7 = 0;
+          for (const h3 of t4) e7 === i6.length ? i6.push(s4 = new _k(this.O(c3()), this.O(c3()), this, this.options)) : s4 = i6[e7], s4._$AI(h3), e7++;
+          e7 < i6.length && (this._$AR(s4 && s4._$AB.nextSibling, e7), i6.length = e7);
+        }
+        _$AR(t4 = this._$AA.nextSibling, s4) {
+          for (this._$AP?.(false, true, s4); t4 !== this._$AB; ) {
+            const s5 = i3(t4).nextSibling;
+            i3(t4).remove(), t4 = s5;
+          }
+        }
+        setConnected(t4) {
+          void 0 === this._$AM && (this._$Cv = t4, this._$AP?.(t4));
+        }
+      };
+      H = class {
+        get tagName() {
+          return this.element.tagName;
+        }
+        get _$AU() {
+          return this._$AM._$AU;
+        }
+        constructor(t4, i6, s4, e7, h3) {
+          this.type = 1, this._$AH = A, this._$AN = void 0, this.element = t4, this.name = i6, this._$AM = e7, this.options = h3, s4.length > 2 || "" !== s4[0] || "" !== s4[1] ? (this._$AH = Array(s4.length - 1).fill(new String()), this.strings = s4) : this._$AH = A;
+        }
+        _$AI(t4, i6 = this, s4, e7) {
+          const h3 = this.strings;
+          let o7 = false;
+          if (void 0 === h3) t4 = M(this, t4, i6, 0), o7 = !a2(t4) || t4 !== this._$AH && t4 !== E, o7 && (this._$AH = t4);
+          else {
+            const e8 = t4;
+            let n5, r6;
+            for (t4 = h3[0], n5 = 0; n5 < h3.length - 1; n5++) r6 = M(this, e8[s4 + n5], i6, n5), r6 === E && (r6 = this._$AH[n5]), o7 || (o7 = !a2(r6) || r6 !== this._$AH[n5]), r6 === A ? t4 = A : t4 !== A && (t4 += (r6 ?? "") + h3[n5 + 1]), this._$AH[n5] = r6;
+          }
+          o7 && !e7 && this.j(t4);
+        }
+        j(t4) {
+          t4 === A ? this.element.removeAttribute(this.name) : this.element.setAttribute(this.name, t4 ?? "");
+        }
+      };
+      I = class extends H {
+        constructor() {
+          super(...arguments), this.type = 3;
+        }
+        j(t4) {
+          this.element[this.name] = t4 === A ? void 0 : t4;
+        }
+      };
+      L = class extends H {
+        constructor() {
+          super(...arguments), this.type = 4;
+        }
+        j(t4) {
+          this.element.toggleAttribute(this.name, !!t4 && t4 !== A);
+        }
+      };
+      z = class extends H {
+        constructor(t4, i6, s4, e7, h3) {
+          super(t4, i6, s4, e7, h3), this.type = 5;
+        }
+        _$AI(t4, i6 = this) {
+          if ((t4 = M(this, t4, i6, 0) ?? A) === E) return;
+          const s4 = this._$AH, e7 = t4 === A && s4 !== A || t4.capture !== s4.capture || t4.once !== s4.once || t4.passive !== s4.passive, h3 = t4 !== A && (s4 === A || e7);
+          e7 && this.element.removeEventListener(this.name, this, s4), h3 && this.element.addEventListener(this.name, this, t4), this._$AH = t4;
+        }
+        handleEvent(t4) {
+          "function" == typeof this._$AH ? this._$AH.call(this.options?.host ?? this.element, t4) : this._$AH.handleEvent(t4);
+        }
+      };
+      Z = class {
+        constructor(t4, i6, s4) {
+          this.element = t4, this.type = 6, this._$AN = void 0, this._$AM = i6, this.options = s4;
+        }
+        get _$AU() {
+          return this._$AM._$AU;
+        }
+        _$AI(t4) {
+          M(this, t4);
+        }
+      };
+      B = t2.litHtmlPolyfillSupport;
+      B?.(S2, k), (t2.litHtmlVersions ?? (t2.litHtmlVersions = [])).push("3.3.3");
+      D = (t4, i6, s4) => {
+        const e7 = s4?.renderBefore ?? i6;
+        let h3 = e7._$litPart$;
+        if (void 0 === h3) {
+          const t5 = s4?.renderBefore ?? null;
+          e7._$litPart$ = h3 = new k(i6.insertBefore(c3(), t5), t5, void 0, s4 ?? {});
+        }
+        return h3._$AI(t4), h3;
+      };
+    }
+  });
+
+  // node_modules/lit-element/lit-element.js
+  var s3, i4, o4;
+  var init_lit_element = __esm({
+    "node_modules/lit-element/lit-element.js"() {
+      init_reactive_element();
+      init_reactive_element();
+      init_lit_html();
+      init_lit_html();
+      s3 = globalThis;
+      i4 = class extends y {
+        constructor() {
+          super(...arguments), this.renderOptions = { host: this }, this._$Do = void 0;
+        }
+        createRenderRoot() {
+          var _a;
+          const t4 = super.createRenderRoot();
+          return (_a = this.renderOptions).renderBefore ?? (_a.renderBefore = t4.firstChild), t4;
+        }
+        update(t4) {
+          const r6 = this.render();
+          this.hasUpdated || (this.renderOptions.isConnected = this.isConnected), super.update(t4), this._$Do = D(r6, this.renderRoot, this.renderOptions);
+        }
+        connectedCallback() {
+          super.connectedCallback(), this._$Do?.setConnected(true);
+        }
+        disconnectedCallback() {
+          super.disconnectedCallback(), this._$Do?.setConnected(false);
+        }
+        render() {
+          return E;
+        }
+      };
+      i4._$litElement$ = true, i4["finalized"] = true, s3.litElementHydrateSupport?.({ LitElement: i4 });
+      o4 = s3.litElementPolyfillSupport;
+      o4?.({ LitElement: i4 });
+      (s3.litElementVersions ?? (s3.litElementVersions = [])).push("4.2.2");
+    }
+  });
+
+  // node_modules/lit-html/is-server.js
+  var init_is_server = __esm({
+    "node_modules/lit-html/is-server.js"() {
+    }
+  });
+
+  // node_modules/lit/index.js
+  var init_lit = __esm({
+    "node_modules/lit/index.js"() {
+      init_reactive_element();
+      init_lit_html();
+      init_lit_element();
+      init_is_server();
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/custom-element.js
+  var init_custom_element = __esm({
+    "node_modules/@lit/reactive-element/decorators/custom-element.js"() {
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/property.js
+  function n4(t4) {
+    return (e7, o7) => "object" == typeof o7 ? r4(t4, e7, o7) : ((t5, e8, o8) => {
+      const r6 = e8.hasOwnProperty(o8);
+      return e8.constructor.createProperty(o8, t5), r6 ? Object.getOwnPropertyDescriptor(e8, o8) : void 0;
+    })(t4, e7, o7);
+  }
+  var o5, r4;
+  var init_property = __esm({
+    "node_modules/@lit/reactive-element/decorators/property.js"() {
+      init_reactive_element();
+      o5 = { attribute: true, type: String, converter: u, reflect: false, hasChanged: f };
+      r4 = (t4 = o5, e7, r6) => {
+        const { kind: n5, metadata: i6 } = r6;
+        let s4 = globalThis.litPropertyMetadata.get(i6);
+        if (void 0 === s4 && globalThis.litPropertyMetadata.set(i6, s4 = /* @__PURE__ */ new Map()), "setter" === n5 && ((t4 = Object.create(t4)).wrapped = true), s4.set(r6.name, t4), "accessor" === n5) {
+          const { name: o7 } = r6;
+          return { set(r7) {
+            const n6 = e7.get.call(this);
+            e7.set.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
+          }, init(e8) {
+            return void 0 !== e8 && this.C(o7, void 0, t4, e8), e8;
+          } };
+        }
+        if ("setter" === n5) {
+          const { name: o7 } = r6;
+          return function(r7) {
+            const n6 = this[o7];
+            e7.call(this, r7), this.requestUpdate(o7, n6, t4, true, r7);
+          };
+        }
+        throw Error("Unsupported decorator location: " + n5);
+      };
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/state.js
+  function r5(r6) {
+    return n4({ ...r6, state: true, attribute: false });
+  }
+  var init_state = __esm({
+    "node_modules/@lit/reactive-element/decorators/state.js"() {
+      init_property();
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/event-options.js
+  var init_event_options = __esm({
+    "node_modules/@lit/reactive-element/decorators/event-options.js"() {
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/base.js
+  var init_base = __esm({
+    "node_modules/@lit/reactive-element/decorators/base.js"() {
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/query.js
+  var init_query = __esm({
+    "node_modules/@lit/reactive-element/decorators/query.js"() {
+      init_base();
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/query-all.js
+  var init_query_all = __esm({
+    "node_modules/@lit/reactive-element/decorators/query-all.js"() {
+      init_base();
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/query-async.js
+  var init_query_async = __esm({
+    "node_modules/@lit/reactive-element/decorators/query-async.js"() {
+      init_base();
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/query-assigned-elements.js
+  var init_query_assigned_elements = __esm({
+    "node_modules/@lit/reactive-element/decorators/query-assigned-elements.js"() {
+      init_base();
+    }
+  });
+
+  // node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js
+  var init_query_assigned_nodes = __esm({
+    "node_modules/@lit/reactive-element/decorators/query-assigned-nodes.js"() {
+      init_base();
+    }
+  });
+
+  // node_modules/lit/decorators.js
+  var init_decorators = __esm({
+    "node_modules/lit/decorators.js"() {
+      init_custom_element();
+      init_property();
+      init_state();
+      init_event_options();
+      init_query();
+      init_query_all();
+      init_query_async();
+      init_query_assigned_elements();
+      init_query_assigned_nodes();
+    }
+  });
+
+  // node_modules/lit-html/directive.js
+  var t3, e5, i5;
+  var init_directive = __esm({
+    "node_modules/lit-html/directive.js"() {
+      t3 = { ATTRIBUTE: 1, CHILD: 2, PROPERTY: 3, BOOLEAN_ATTRIBUTE: 4, EVENT: 5, ELEMENT: 6 };
+      e5 = (t4) => (...e7) => ({ _$litDirective$: t4, values: e7 });
+      i5 = class {
+        constructor(t4) {
+        }
+        get _$AU() {
+          return this._$AM._$AU;
+        }
+        _$AT(t4, e7, i6) {
+          this._$Ct = t4, this._$AM = e7, this._$Ci = i6;
+        }
+        _$AS(t4, e7) {
+          return this.update(t4, e7);
+        }
+        update(t4, e7) {
+          return this.render(...e7);
+        }
+      };
+    }
+  });
+
+  // node_modules/lit-html/directives/class-map.js
+  var e6;
+  var init_class_map = __esm({
+    "node_modules/lit-html/directives/class-map.js"() {
+      init_lit_html();
+      init_directive();
+      e6 = e5(class extends i5 {
+        constructor(t4) {
+          if (super(t4), t4.type !== t3.ATTRIBUTE || "class" !== t4.name || t4.strings?.length > 2) throw Error("`classMap()` can only be used in the `class` attribute and must be the only part in the attribute.");
+        }
+        render(t4) {
+          return " " + Object.keys(t4).filter((s4) => t4[s4]).join(" ") + " ";
+        }
+        update(s4, [i6]) {
+          if (void 0 === this.st) {
+            this.st = /* @__PURE__ */ new Set(), void 0 !== s4.strings && (this.nt = new Set(s4.strings.join(" ").split(/\s/).filter((t4) => "" !== t4)));
+            for (const t4 in i6) i6[t4] && !this.nt?.has(t4) && this.st.add(t4);
+            return this.render(i6);
+          }
+          const r6 = s4.element.classList;
+          for (const t4 of this.st) t4 in i6 || (r6.remove(t4), this.st.delete(t4));
+          for (const t4 in i6) {
+            const s5 = !!i6[t4];
+            s5 === this.st.has(t4) || this.nt?.has(t4) || (s5 ? (r6.add(t4), this.st.add(t4)) : (r6.remove(t4), this.st.delete(t4)));
+          }
+          return E;
+        }
+      });
+    }
+  });
+
+  // node_modules/lit/directives/class-map.js
+  var init_class_map2 = __esm({
+    "node_modules/lit/directives/class-map.js"() {
+      init_class_map();
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/includes/VscElement.js
+  var VERSION, CONFIG_KEY, warn, VscElement, customElement;
+  var init_VscElement = __esm({
+    "node_modules/@vscode-elements/elements/dist/includes/VscElement.js"() {
+      init_lit();
+      VERSION = "2.5.1";
+      CONFIG_KEY = "__vscodeElements_disableRegistryWarning__";
+      warn = (message, componentInstance) => {
+        const prefix = "[VSCode Elements] ";
+        if (componentInstance) {
+          console.warn(`${prefix}${message}
+%o`, componentInstance);
+        } else {
+          console.warn(`${message}
+%o`, componentInstance);
+        }
+      };
+      VscElement = class extends i4 {
+        /** VSCode Elements version */
+        get version() {
+          return VERSION;
+        }
+        warn(message) {
+          warn(message, this);
+        }
+      };
+      customElement = (tagName) => {
+        return (classOrTarget) => {
+          const customElementClass = customElements.get(tagName);
+          if (!customElementClass) {
+            customElements.define(tagName, classOrTarget);
+            return;
+          }
+          if (CONFIG_KEY in window) {
+            return;
+          }
+          const el2 = document.createElement(tagName);
+          const anotherVersion = el2?.version;
+          let message = "";
+          if (!anotherVersion) {
+            message += "is already registered by an unknown custom element handler class.";
+          } else if (anotherVersion !== VERSION) {
+            message += "is already registered by a different version of VSCode Elements. ";
+            message += `This version is "${VERSION}", while the other one is "${anotherVersion}".`;
+          } else {
+            message += `is already registered by the same version of VSCode Elements (${VERSION}).`;
+          }
+          warn(`The custom element "${tagName}" ${message}
+To suppress this warning, set window.${CONFIG_KEY} to true`);
+        };
+      };
+    }
+  });
+
+  // node_modules/lit-html/directives/if-defined.js
+  var o6;
+  var init_if_defined = __esm({
+    "node_modules/lit-html/directives/if-defined.js"() {
+      init_lit_html();
+      o6 = (o7) => o7 ?? A;
+    }
+  });
+
+  // node_modules/lit/directives/if-defined.js
+  var init_if_defined2 = __esm({
+    "node_modules/lit/directives/if-defined.js"() {
+      init_if_defined();
+    }
+  });
+
+  // node_modules/lit/directive.js
+  var init_directive2 = __esm({
+    "node_modules/lit/directive.js"() {
+      init_directive();
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/includes/style-property-map.js
+  var StylePropertyMap, stylePropertyMap;
+  var init_style_property_map = __esm({
+    "node_modules/@vscode-elements/elements/dist/includes/style-property-map.js"() {
+      init_lit();
+      init_directive2();
+      StylePropertyMap = class extends i5 {
+        constructor(partInfo) {
+          super(partInfo);
+          this._prevProperties = {};
+          if (partInfo.type !== t3.PROPERTY || partInfo.name !== "style") {
+            throw new Error("The `stylePropertyMap` directive must be used in the `style` property");
+          }
+        }
+        update(part, [styleProps]) {
+          Object.entries(styleProps).forEach(([key, val]) => {
+            if (this._prevProperties[key] !== val) {
+              if (key.startsWith("--")) {
+                part.element.style.setProperty(key, val);
+              } else {
+                part.element.style[key] = val;
+              }
+              this._prevProperties[key] = val;
+            }
+          });
+          return E;
+        }
+        render(_styleProps) {
+          return E;
+        }
+      };
+      stylePropertyMap = e5(StylePropertyMap);
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/includes/default.styles.js
+  var default_styles_default;
+  var init_default_styles = __esm({
+    "node_modules/@vscode-elements/elements/dist/includes/default.styles.js"() {
+      init_lit();
+      default_styles_default = i`
   :host([hidden]) {
     display: none;
   }
@@ -14,7 +913,19 @@ To suppress this warning, set window.${co} to true`)}});var V,po=g(()=>{U();V=e=
     opacity: 0.4;
     pointer-events: none;
   }
-`});var In,ho,vo=g(()=>{B();le();In=[Dt,R`
+`;
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js
+  var styles, vscode_icon_styles_default;
+  var init_vscode_icon_styles = __esm({
+    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.styles.js"() {
+      init_lit();
+      init_default_styles();
+      styles = [
+        default_styles_default,
+        i`
     :host {
       color: var(--vscode-icon-foreground, #cccccc);
       display: inline-block;
@@ -74,25 +985,168 @@ To suppress this warning, set window.${co} to true`)}});var V,po=g(()=>{U();V=e=
       animation-timing-function: linear;
       animation-iteration-count: infinite;
     }
-  `],ho=In});var O,bt,w,fo=g(()=>{B();oe();se();re();ie();go();vo();O=function(e,t,o,n){var s=arguments.length,i=s<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,r;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")i=Reflect.decorate(e,t,o,n);else for(var a=e.length-1;a>=0;a--)(r=e[a])&&(i=(s<3?r(i):s>3?r(t,o,i):r(t,o))||i);return s>3&&i&&Object.defineProperty(t,o,i),i},w=bt=class extends G{constructor(){super(...arguments),this.label="",this.name="",this.size=16,this.spin=!1,this.spinDuration=1.5,this.actionIcon=!1,this._onButtonClick=t=>{this.dispatchEvent(new CustomEvent("vsc-click",{detail:{originalEvent:t}}))}}connectedCallback(){super.connectedCallback();let{href:t,nonce:o}=this._getStylesheetConfig();bt.stylesheetHref=t,bt.nonce=o}_getStylesheetConfig(){if(typeof document>"u")return{nonce:void 0,href:void 0};let t=document.getElementById("vscode-codicon-stylesheet"),o=t?.getAttribute("href")||void 0,n=t?.nonce||void 0;if(!t){let s='To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';s+="See https://vscode-elements.github.io/components/icon/ for more details.",this.warn(s)}return{nonce:n,href:o}}render(){let{stylesheetHref:t,nonce:o}=bt,n=A`<span
-      class=${Mt({codicon:!0,["codicon-"+this.name]:!0,spin:this.spin})}
-      .style=${mo({animationDuration:String(this.spinDuration)+"s",fontSize:this.size+"px",height:this.size+"px",width:this.size+"px"})}
-    ></span>`,s=this.actionIcon?A` <button
+  `
+      ];
+      vscode_icon_styles_default = styles;
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js
+  var __decorate, VscodeIcon_1, VscodeIcon;
+  var init_vscode_icon = __esm({
+    "node_modules/@vscode-elements/elements/dist/vscode-icon/vscode-icon.js"() {
+      init_lit();
+      init_decorators();
+      init_class_map2();
+      init_if_defined2();
+      init_VscElement();
+      init_style_property_map();
+      init_vscode_icon_styles();
+      __decorate = function(decorators, target, key, desc) {
+        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
+        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
+        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
+        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
+      };
+      VscodeIcon = VscodeIcon_1 = class VscodeIcon2 extends VscElement {
+        constructor() {
+          super(...arguments);
+          this.label = "";
+          this.name = "";
+          this.size = 16;
+          this.spin = false;
+          this.spinDuration = 1.5;
+          this.actionIcon = false;
+          this._onButtonClick = (ev) => {
+            this.dispatchEvent(new CustomEvent("vsc-click", { detail: { originalEvent: ev } }));
+          };
+        }
+        connectedCallback() {
+          super.connectedCallback();
+          const { href, nonce } = this._getStylesheetConfig();
+          VscodeIcon_1.stylesheetHref = href;
+          VscodeIcon_1.nonce = nonce;
+        }
+        /**
+         * For using web fonts in web components, the font stylesheet must be included
+         * twice: on the page and in the web component. This function looks for the
+         * font stylesheet on the page and returns the stylesheet URL and the nonce
+         * id.
+         */
+        _getStylesheetConfig() {
+          if (typeof document === "undefined") {
+            return { nonce: void 0, href: void 0 };
+          }
+          const linkElement = document.getElementById("vscode-codicon-stylesheet");
+          const href = linkElement?.getAttribute("href") || void 0;
+          const nonce = linkElement?.nonce || void 0;
+          if (!linkElement) {
+            let msg = 'To use the Icon component, the codicons.css file must be included in the page with the id "vscode-codicon-stylesheet"! ';
+            msg += "See https://vscode-elements.github.io/components/icon/ for more details.";
+            this.warn(msg);
+          }
+          return { nonce, href };
+        }
+        render() {
+          const { stylesheetHref, nonce } = VscodeIcon_1;
+          const content = b2`<span
+      class=${e6({
+            codicon: true,
+            ["codicon-" + this.name]: true,
+            spin: this.spin
+          })}
+      .style=${stylePropertyMap({
+            animationDuration: String(this.spinDuration) + "s",
+            fontSize: this.size + "px",
+            height: this.size + "px",
+            width: this.size + "px"
+          })}
+    ></span>`;
+          const wrapped = this.actionIcon ? b2` <button
           class="button"
           @click=${this._onButtonClick}
           aria-label=${this.label}
         >
-          ${n}
-        </button>`:A` <span class="icon" aria-hidden="true" role="presentation"
-          >${n}</span
-        >`;return A`
+          ${content}
+        </button>` : b2` <span class="icon" aria-hidden="true" role="presentation"
+          >${content}</span
+        >`;
+          return b2`
       <link
         rel="stylesheet"
-        href=${V(t)}
-        nonce=${V(o)}
+        href=${o6(stylesheetHref)}
+        nonce=${o6(nonce)}
       />
-      ${s}
-    `}};w.styles=ho;w.stylesheetHref="";w.nonce="";O([v()],w.prototype,"label",void 0);O([v({type:String})],w.prototype,"name",void 0);O([v({type:Number})],w.prototype,"size",void 0);O([v({type:Boolean,reflect:!0})],w.prototype,"spin",void 0);O([v({type:Number,attribute:"spin-duration"})],w.prototype,"spinDuration",void 0);O([v({type:Boolean,reflect:!0,attribute:"action-icon"})],w.prototype,"actionIcon",void 0);w=bt=O([_t("vscode-icon")],w)});var yo=g(()=>{fo()});function xo(){return navigator.userAgent.indexOf("Linux")>-1?'system-ui, "Ubuntu", "Droid Sans", sans-serif':navigator.userAgent.indexOf("Mac")>-1?"-apple-system, BlinkMacSystemFont, sans-serif":navigator.userAgent.indexOf("Windows")>-1?'"Segoe WPC", "Segoe UI", sans-serif':"sans-serif"}var So=g(()=>{});var Mn,Ln,ko,Co=g(()=>{B();le();So();Mn=$t(xo()),Ln=[Dt,R`
+      ${wrapped}
+    `;
+        }
+      };
+      VscodeIcon.styles = vscode_icon_styles_default;
+      VscodeIcon.stylesheetHref = "";
+      VscodeIcon.nonce = "";
+      __decorate([
+        n4()
+      ], VscodeIcon.prototype, "label", void 0);
+      __decorate([
+        n4({ type: String })
+      ], VscodeIcon.prototype, "name", void 0);
+      __decorate([
+        n4({ type: Number })
+      ], VscodeIcon.prototype, "size", void 0);
+      __decorate([
+        n4({ type: Boolean, reflect: true })
+      ], VscodeIcon.prototype, "spin", void 0);
+      __decorate([
+        n4({ type: Number, attribute: "spin-duration" })
+      ], VscodeIcon.prototype, "spinDuration", void 0);
+      __decorate([
+        n4({ type: Boolean, reflect: true, attribute: "action-icon" })
+      ], VscodeIcon.prototype, "actionIcon", void 0);
+      VscodeIcon = VscodeIcon_1 = __decorate([
+        customElement("vscode-icon")
+      ], VscodeIcon);
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/vscode-icon/index.js
+  var init_vscode_icon2 = __esm({
+    "node_modules/@vscode-elements/elements/dist/vscode-icon/index.js"() {
+      init_vscode_icon();
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/includes/helpers.js
+  function getDefaultFontStack() {
+    if (navigator.userAgent.indexOf("Linux") > -1) {
+      return 'system-ui, "Ubuntu", "Droid Sans", sans-serif';
+    } else if (navigator.userAgent.indexOf("Mac") > -1) {
+      return "-apple-system, BlinkMacSystemFont, sans-serif";
+    } else if (navigator.userAgent.indexOf("Windows") > -1) {
+      return '"Segoe WPC", "Segoe UI", sans-serif';
+    } else {
+      return "sans-serif";
+    }
+  }
+  var DEFAULT_LINE_HEIGHT, DEFAULT_FONT_SIZE, INPUT_LINE_HEIGHT_RATIO;
+  var init_helpers = __esm({
+    "node_modules/@vscode-elements/elements/dist/includes/helpers.js"() {
+      DEFAULT_LINE_HEIGHT = 16;
+      DEFAULT_FONT_SIZE = 13;
+      INPUT_LINE_HEIGHT_RATIO = DEFAULT_LINE_HEIGHT / DEFAULT_FONT_SIZE;
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js
+  var defaultFontStack, styles2, vscode_button_styles_default;
+  var init_vscode_button_styles = __esm({
+    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.styles.js"() {
+      init_lit();
+      init_default_styles();
+      init_helpers();
+      defaultFontStack = r(getDefaultFontStack());
+      styles2 = [
+        default_styles_default,
+        i`
     :host {
       cursor: pointer;
       display: inline-block;
@@ -120,7 +1174,7 @@ To suppress this warning, set window.${co} to true`)}});var V,po=g(()=>{U();V=e=
       box-sizing: border-box;
       color: var(--vscode-button-foreground, #ffffff);
       display: flex;
-      font-family: var(--vscode-font-family, ${Mn});
+      font-family: var(--vscode-font-family, ${defaultFontStack});
       font-size: var(--vscode-font-size, 13px);
       font-weight: var(--vscode-font-weight, normal);
       height: 100%;
@@ -276,30 +1330,573 @@ To suppress this warning, set window.${co} to true`)}});var V,po=g(()=>{U();V=e=
     :host([icon]) .icon-after {
       margin-left: 3px;
     }
-  `],ko=Ln});var S,f,$o=g(()=>{B();oe();se();ie();yo();Co();re();S=function(e,t,o,n){var s=arguments.length,i=s<3?t:n===null?n=Object.getOwnPropertyDescriptor(t,o):n,r;if(typeof Reflect=="object"&&typeof Reflect.decorate=="function")i=Reflect.decorate(e,t,o,n);else for(var a=e.length-1;a>=0;a--)(r=e[a])&&(i=(s<3?r(i):s>3?r(t,o,i):r(t,o))||i);return s>3&&i&&Object.defineProperty(t,o,i),i},f=class extends G{get form(){return this._internals.form}constructor(){super(),this.autofocus=!1,this.tabIndex=0,this.secondary=!1,this.block=!1,this.role="button",this.disabled=!1,this.icon="",this.iconSpin=!1,this.iconAfter="",this.iconAfterSpin=!1,this.focused=!1,this.name=void 0,this.iconOnly=!1,this.type="button",this.value="",this._prevTabindex=0,this._hasContentBefore=!1,this._hasContentAfter=!1,this._handleFocus=()=>{this.focused=!0},this._handleBlur=()=>{this.focused=!1},this.addEventListener("keydown",this._handleKeyDown.bind(this)),this.addEventListener("click",this._handleClick.bind(this)),this._internals=this.attachInternals()}connectedCallback(){super.connectedCallback(),this.autofocus&&(this.tabIndex<0&&(this.tabIndex=0),this.updateComplete.then(()=>{this.focus(),this.requestUpdate()})),this.addEventListener("focus",this._handleFocus),this.addEventListener("blur",this._handleBlur)}disconnectedCallback(){super.disconnectedCallback(),this.removeEventListener("focus",this._handleFocus),this.removeEventListener("blur",this._handleBlur)}update(t){super.update(t),t.has("value")&&this._internals.setFormValue(this.value),t.has("disabled")&&(this.disabled?(this._prevTabindex=this.tabIndex,this.tabIndex=-1):this.tabIndex=this._prevTabindex)}_executeAction(){this.type==="submit"&&this._internals.form&&this._internals.form.requestSubmit(),this.type==="reset"&&this._internals.form&&this._internals.form.reset()}_handleKeyDown(t){if((t.key==="Enter"||t.key===" ")&&!this.hasAttribute("disabled")){let o=new MouseEvent("click",{bubbles:!0,cancelable:!0});o.synthetic=!0,this.dispatchEvent(o),this._executeAction()}}_handleClick(t){t.synthetic||this.hasAttribute("disabled")||this._executeAction()}_handleSlotChange(t){let o=t.target;o.name==="content-before"&&(this._hasContentBefore=o.assignedElements().length>0),o.name==="content-after"&&(this._hasContentAfter=o.assignedElements().length>0)}render(){let t=this.icon!=="",o=this.iconAfter!=="",n={base:!0,"icon-only":this.iconOnly,"has-content-before":this._hasContentBefore,"has-content-after":this._hasContentAfter},s=t?A`<vscode-icon
+  `
+      ];
+      vscode_button_styles_default = styles2;
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js
+  var __decorate2, VscodeButton;
+  var init_vscode_button = __esm({
+    "node_modules/@vscode-elements/elements/dist/vscode-button/vscode-button.js"() {
+      init_lit();
+      init_decorators();
+      init_class_map2();
+      init_VscElement();
+      init_vscode_icon2();
+      init_vscode_button_styles();
+      init_if_defined2();
+      __decorate2 = function(decorators, target, key, desc) {
+        var c4 = arguments.length, r6 = c4 < 3 ? target : desc === null ? desc = Object.getOwnPropertyDescriptor(target, key) : desc, d3;
+        if (typeof Reflect === "object" && typeof Reflect.decorate === "function") r6 = Reflect.decorate(decorators, target, key, desc);
+        else for (var i6 = decorators.length - 1; i6 >= 0; i6--) if (d3 = decorators[i6]) r6 = (c4 < 3 ? d3(r6) : c4 > 3 ? d3(target, key, r6) : d3(target, key)) || r6;
+        return c4 > 3 && r6 && Object.defineProperty(target, key, r6), r6;
+      };
+      VscodeButton = class VscodeButton2 extends VscElement {
+        get form() {
+          return this._internals.form;
+        }
+        constructor() {
+          super();
+          this.autofocus = false;
+          this.tabIndex = 0;
+          this.secondary = false;
+          this.block = false;
+          this.role = "button";
+          this.disabled = false;
+          this.icon = "";
+          this.iconSpin = false;
+          this.iconAfter = "";
+          this.iconAfterSpin = false;
+          this.focused = false;
+          this.name = void 0;
+          this.iconOnly = false;
+          this.type = "button";
+          this.value = "";
+          this._prevTabindex = 0;
+          this._hasContentBefore = false;
+          this._hasContentAfter = false;
+          this._handleFocus = () => {
+            this.focused = true;
+          };
+          this._handleBlur = () => {
+            this.focused = false;
+          };
+          this.addEventListener("keydown", this._handleKeyDown.bind(this));
+          this.addEventListener("click", this._handleClick.bind(this));
+          this._internals = this.attachInternals();
+        }
+        connectedCallback() {
+          super.connectedCallback();
+          if (this.autofocus) {
+            if (this.tabIndex < 0) {
+              this.tabIndex = 0;
+            }
+            this.updateComplete.then(() => {
+              this.focus();
+              this.requestUpdate();
+            });
+          }
+          this.addEventListener("focus", this._handleFocus);
+          this.addEventListener("blur", this._handleBlur);
+        }
+        disconnectedCallback() {
+          super.disconnectedCallback();
+          this.removeEventListener("focus", this._handleFocus);
+          this.removeEventListener("blur", this._handleBlur);
+        }
+        update(changedProperties) {
+          super.update(changedProperties);
+          if (changedProperties.has("value")) {
+            this._internals.setFormValue(this.value);
+          }
+          if (changedProperties.has("disabled")) {
+            if (this.disabled) {
+              this._prevTabindex = this.tabIndex;
+              this.tabIndex = -1;
+            } else {
+              this.tabIndex = this._prevTabindex;
+            }
+          }
+        }
+        _executeAction() {
+          if (this.type === "submit" && this._internals.form) {
+            this._internals.form.requestSubmit();
+          }
+          if (this.type === "reset" && this._internals.form) {
+            this._internals.form.reset();
+          }
+        }
+        _handleKeyDown(event) {
+          if ((event.key === "Enter" || event.key === " ") && !this.hasAttribute("disabled")) {
+            const syntheticClick = new MouseEvent("click", {
+              bubbles: true,
+              cancelable: true
+            });
+            syntheticClick.synthetic = true;
+            this.dispatchEvent(syntheticClick);
+            this._executeAction();
+          }
+        }
+        _handleClick(event) {
+          if (event.synthetic) {
+            return;
+          }
+          if (!this.hasAttribute("disabled")) {
+            this._executeAction();
+          }
+        }
+        _handleSlotChange(ev) {
+          const slot = ev.target;
+          if (slot.name === "content-before") {
+            this._hasContentBefore = slot.assignedElements().length > 0;
+          }
+          if (slot.name === "content-after") {
+            this._hasContentAfter = slot.assignedElements().length > 0;
+          }
+        }
+        render() {
+          const hasIcon = this.icon !== "";
+          const hasIconAfter = this.iconAfter !== "";
+          const baseClasses = {
+            base: true,
+            "icon-only": this.iconOnly,
+            "has-content-before": this._hasContentBefore,
+            "has-content-after": this._hasContentAfter
+          };
+          const iconElem = hasIcon ? b2`<vscode-icon
           name=${this.icon}
           ?spin=${this.iconSpin}
-          spin-duration=${V(this.iconSpinDuration)}
+          spin-duration=${o6(this.iconSpinDuration)}
           class="icon"
-        ></vscode-icon>`:y,i=o?A`<vscode-icon
+        ></vscode-icon>` : A;
+          const iconAfterElem = hasIconAfter ? b2`<vscode-icon
           name=${this.iconAfter}
           ?spin=${this.iconAfterSpin}
-          spin-duration=${V(this.iconAfterSpinDuration)}
+          spin-duration=${o6(this.iconAfterSpinDuration)}
           class="icon-after"
-        ></vscode-icon>`:y;return A`
+        ></vscode-icon>` : A;
+          return b2`
       <div
-        class=${Mt(n)}
+        class=${e6(baseClasses)}
         part="base"
         @slotchange=${this._handleSlotChange}
       >
         <slot name="content-before"></slot>
-        ${s}
+        ${iconElem}
         <slot></slot>
-        ${i}
+        ${iconAfterElem}
         <slot name="content-after"></slot>
       </div>
-    `}};f.styles=ko;f.formAssociated=!0;S([v({type:Boolean,reflect:!0})],f.prototype,"autofocus",void 0);S([v({type:Number,reflect:!0})],f.prototype,"tabIndex",void 0);S([v({type:Boolean,reflect:!0})],f.prototype,"secondary",void 0);S([v({type:Boolean,reflect:!0})],f.prototype,"block",void 0);S([v({reflect:!0})],f.prototype,"role",void 0);S([v({type:Boolean,reflect:!0})],f.prototype,"disabled",void 0);S([v()],f.prototype,"icon",void 0);S([v({type:Boolean,reflect:!0,attribute:"icon-spin"})],f.prototype,"iconSpin",void 0);S([v({type:Number,reflect:!0,attribute:"icon-spin-duration"})],f.prototype,"iconSpinDuration",void 0);S([v({attribute:"icon-after"})],f.prototype,"iconAfter",void 0);S([v({type:Boolean,reflect:!0,attribute:"icon-after-spin"})],f.prototype,"iconAfterSpin",void 0);S([v({type:Number,reflect:!0,attribute:"icon-after-spin-duration"})],f.prototype,"iconAfterSpinDuration",void 0);S([v({type:Boolean,reflect:!0})],f.prototype,"focused",void 0);S([v({type:String,reflect:!0})],f.prototype,"name",void 0);S([v({type:Boolean,reflect:!0,attribute:"icon-only"})],f.prototype,"iconOnly",void 0);S([v({reflect:!0})],f.prototype,"type",void 0);S([v()],f.prototype,"value",void 0);S([ee()],f.prototype,"_hasContentBefore",void 0);S([ee()],f.prototype,"_hasContentAfter",void 0);f=S([_t("vscode-button")],f)});var wo={};nn(wo,{VscodeButton:()=>f});var Eo=g(()=>{$o()});var we={"btn-refresh":{id:"btn-refresh",label:"Refresh",icon:"refresh",appearance:"primary"},"btn-details":{id:"btn-details",label:"Details",icon:"robot",iconColor:"#c37bff",appearance:"secondary"},"btn-chart":{id:"btn-chart",label:"Chart",icon:"graph-line",iconColor:"#60a5fa",appearance:"secondary"},"btn-usage":{id:"btn-usage",label:"Usage Analysis",icon:"graph",iconColor:"#22d3ee",appearance:"secondary"},"btn-diagnostics":{id:"btn-diagnostics",label:"Diagnostics",icon:"search",iconColor:"#fb7185",appearance:"secondary"},"btn-maturity":{id:"btn-maturity",label:"Fluency Score",icon:"target",iconColor:"#fbbf24",appearance:"secondary"},"btn-dashboard":{id:"btn-dashboard",label:"Team Dashboard",icon:"organization",iconColor:"#818cf8",appearance:"secondary"},"btn-level-viewer":{id:"btn-level-viewer",label:"Level Viewer",icon:"list-tree",iconColor:"#94a3b8",appearance:"secondary"},"btn-environmental":{id:"btn-environmental",label:"Environmental Impact",icon:"globe",iconColor:"#4ade80",appearance:"secondary"}};var sn=["btn-refresh","btn-details","btn-chart","btn-usage","btn-maturity","btn-environmental","btn-diagnostics","btn-dashboard"];function rn(e,t){return sn.filter(o=>o!=="btn-dashboard"||t).map(o=>({...we[o],active:o===e}))}function an(e){let t=typeof e=="string"?we[e]:e;if(t.hidden)return"";let o=t.appearance?` appearance="${t.appearance}"`:"",n=t.active?' class="nav-active" disabled aria-current="page"':"",s=t.iconColor?` style="--icon-accent:${t.iconColor}"`:"",i=t.icon?`<span class="codicon codicon-${t.icon} nav-icon"${s}></span>`:"";return`<vscode-button id="${t.id}"${o}${n}>${i}${t.label}</vscode-button>`}function Ee(e,t){return rn(e,t).map(o=>an(o)).join(`
-`)}function Te(e){let t=window.__EXTENSION_POINT_BUTTONS__??[];if(t.length===0)return;let o=document.querySelector(".button-row");if(o)for(let n of t){let s=document.createElement("vscode-button");s.id=`ext-point-${n.id}`,s.textContent=n.label,s.addEventListener("click",()=>{e.postMessage({command:"extensionPointAction",buttonId:n.id})}),o.append(s)}}var Ae={Antigravity:"\u{1F680}","Claude Code":"\u{1F7E0}","Claude Code CLI":"\u{1F7E0}","Claude Desktop":"\u{1F7E0}","Claude Desktop Cowork":"\u{1F7E0}",Cline:"\u{1F916}","Codex CLI":"\u{1F300}",Continue:"\u25B6\uFE0F","Copilot CLI":"\u{1F916}","Copilot CLI (App)":"\u{1F916}",Crush:"\u{1F9BE}",Cursor:"\u{1F5B1}\uFE0F",Devin:"\u{1F9E0}","Devin CLI":"\u{1F9E0}",Eclipse:"\u{1F311}","Gemini CLI":"\u{1F48E}",JetBrains:"\u{1F9E9}",Kiro:"\u{1F47B}","Kiro CLI":"\u{1F47B}","Mistral Vibe":"\u{1F525}","MS Scout (Copilot CLI)":"\u{1F52D}",OpenCode:"\u{1F7E2}",Pi:"\u03C0",Unknown:"\u2753","Visual Studio":"\u{1FA9F}","VS Code":"\u{1F499}","VS Code Exploration":"\u{1F9EA}","VS Code Insiders":"\u{1F49A}","VS Code Server":"\u2601\uFE0F","VS Code Server (Insiders)":"\u2601\uFE0F",VSCodium:"\u{1F537}",Windsurf:"\u{1F3C4}"};function Ie(e){return Ae[e]??"\u{1F4DD}"}function yt(e){let t=globalThis.window;return t?t[e]:void 0}var ln=yt("__TOKEN_ESTIMATORS__"),Ti=ln?.estimators??{};function M(e){return Ie(e)}function d(e){return e.replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;").replace(/"/g,"&quot;").replace(/'/g,"&#039;")}function zt(e){let t=Number(e);if(!Number.isFinite(t)||t<0)return"N/A";if(t<1024)return`${t} B`;let o=["KB","MB","GB","TB","PB"],n=t/1024,s=0;for(;n>=1024&&s<o.length-1;)n/=1024,s++;let i=s===0?1:2;return`${n.toFixed(i)} ${o[s]}`}function xt(e){try{let t=Date.now(),o=new Date(e).getTime(),n=t-o;if(n<0)return"Just now";let s=Math.floor(n/1e3),i=Math.floor(s/60),r=Math.floor(i/60),a=Math.floor(r/24);return a>0?`${a} day${a!==1?"s":""} ago`:r>0?`${r} hour${r!==1?"s":""} ago`:i>0?`${i} minute${i!==1?"s":""} ago`:`${s} second${s!==1?"s":""} ago`}catch{return"Unknown"}}function Ut(e,t,o){let n=document.createElement(e);return t&&(n.className=t),o!==void 0&&(n.textContent=o),n}var dn={today:"Today",last7:"Last 7 days",last30:"Last 30 days",currentMonth:"Current month",lastMonth:"Previous month",thisWeek:"This week",allTime:"All time"},cn=["today","last7","last30","currentMonth","allTime"];function Me(e,t,o){t===o&&(e.selected=!0)}function Le(e){let t=Ut("div","period-selector");t.style.display="inline-flex",t.style.alignItems="center",t.style.gap="4px";let o=e.label??"Time window:";if(o){let r=Ut("span","period-selector-label",o);r.style.fontSize="11px",r.style.color="var(--vscode-descriptionForeground, var(--text-secondary, #9ca3af))",t.append(r)}let n=document.createElement("select");n.className="period-selector-select",e.id&&(n.id=e.id),n.style.background="var(--vscode-dropdown-background, var(--button-secondary-bg, #2d2d2d))",n.style.color="var(--vscode-dropdown-foreground, var(--text-primary, #cccccc))",n.style.border="1px solid var(--border-subtle, #555555)",n.style.borderRadius="4px",n.style.padding="4px 8px",n.style.fontSize="13px",n.style.cursor="pointer",n.style.minHeight="24px";let s=new Set(e.disabled??[]),i=e.periods??cn;for(let r of i){let a=document.createElement("option");a.value=r,a.textContent=dn[r],Me(a,r,e.selected),s.has(r)&&(a.disabled=!0,e.disabledTitle&&(a.title=e.disabledTitle)),n.append(a)}for(let r of e.extraOptions??[]){let a=document.createElement("option");a.value=r.value,a.textContent=r.label,r.title&&(a.title=r.title),Me(a,r.value,e.selected),r.disabled&&(a.disabled=!0),n.append(a)}return n.addEventListener("change",()=>{e.onChange(n.value)}),t.append(n),{wrapper:t,select:n}}function _e(e,t){return{restore(){let o=e.getState();return{...t,...o??{}}},save(o){e.setState(o)},patch(o){let n=e.getState()??{...t},s={...t,...n,...o};return e.setState(s),s}}}var De=`/**
+    `;
+        }
+      };
+      VscodeButton.styles = vscode_button_styles_default;
+      VscodeButton.formAssociated = true;
+      __decorate2([
+        n4({ type: Boolean, reflect: true })
+      ], VscodeButton.prototype, "autofocus", void 0);
+      __decorate2([
+        n4({ type: Number, reflect: true })
+      ], VscodeButton.prototype, "tabIndex", void 0);
+      __decorate2([
+        n4({ type: Boolean, reflect: true })
+      ], VscodeButton.prototype, "secondary", void 0);
+      __decorate2([
+        n4({ type: Boolean, reflect: true })
+      ], VscodeButton.prototype, "block", void 0);
+      __decorate2([
+        n4({ reflect: true })
+      ], VscodeButton.prototype, "role", void 0);
+      __decorate2([
+        n4({ type: Boolean, reflect: true })
+      ], VscodeButton.prototype, "disabled", void 0);
+      __decorate2([
+        n4()
+      ], VscodeButton.prototype, "icon", void 0);
+      __decorate2([
+        n4({ type: Boolean, reflect: true, attribute: "icon-spin" })
+      ], VscodeButton.prototype, "iconSpin", void 0);
+      __decorate2([
+        n4({ type: Number, reflect: true, attribute: "icon-spin-duration" })
+      ], VscodeButton.prototype, "iconSpinDuration", void 0);
+      __decorate2([
+        n4({ attribute: "icon-after" })
+      ], VscodeButton.prototype, "iconAfter", void 0);
+      __decorate2([
+        n4({ type: Boolean, reflect: true, attribute: "icon-after-spin" })
+      ], VscodeButton.prototype, "iconAfterSpin", void 0);
+      __decorate2([
+        n4({
+          type: Number,
+          reflect: true,
+          attribute: "icon-after-spin-duration"
+        })
+      ], VscodeButton.prototype, "iconAfterSpinDuration", void 0);
+      __decorate2([
+        n4({ type: Boolean, reflect: true })
+      ], VscodeButton.prototype, "focused", void 0);
+      __decorate2([
+        n4({ type: String, reflect: true })
+      ], VscodeButton.prototype, "name", void 0);
+      __decorate2([
+        n4({ type: Boolean, reflect: true, attribute: "icon-only" })
+      ], VscodeButton.prototype, "iconOnly", void 0);
+      __decorate2([
+        n4({ reflect: true })
+      ], VscodeButton.prototype, "type", void 0);
+      __decorate2([
+        n4()
+      ], VscodeButton.prototype, "value", void 0);
+      __decorate2([
+        r5()
+      ], VscodeButton.prototype, "_hasContentBefore", void 0);
+      __decorate2([
+        r5()
+      ], VscodeButton.prototype, "_hasContentAfter", void 0);
+      VscodeButton = __decorate2([
+        customElement("vscode-button")
+      ], VscodeButton);
+    }
+  });
+
+  // node_modules/@vscode-elements/elements/dist/vscode-button/index.js
+  var vscode_button_exports = {};
+  __export(vscode_button_exports, {
+    VscodeButton: () => VscodeButton
+  });
+  var init_vscode_button2 = __esm({
+    "node_modules/@vscode-elements/elements/dist/vscode-button/index.js"() {
+      init_vscode_button();
+    }
+  });
+
+  // src/webview/shared/buttonConfig.ts
+  var BUTTONS = {
+    "btn-refresh": {
+      id: "btn-refresh",
+      label: "Refresh",
+      icon: "refresh",
+      appearance: "primary"
+    },
+    "btn-details": {
+      id: "btn-details",
+      label: "Details",
+      icon: "robot",
+      iconColor: "#c37bff",
+      appearance: "secondary"
+    },
+    "btn-chart": {
+      id: "btn-chart",
+      label: "Chart",
+      icon: "graph-line",
+      iconColor: "#60a5fa",
+      appearance: "secondary"
+    },
+    "btn-usage": {
+      id: "btn-usage",
+      label: "Usage Analysis",
+      icon: "graph",
+      iconColor: "#22d3ee",
+      appearance: "secondary"
+    },
+    "btn-diagnostics": {
+      id: "btn-diagnostics",
+      label: "Diagnostics",
+      icon: "search",
+      iconColor: "#fb7185",
+      appearance: "secondary"
+    },
+    "btn-maturity": {
+      id: "btn-maturity",
+      label: "Fluency Score",
+      icon: "target",
+      iconColor: "#fbbf24",
+      appearance: "secondary"
+    },
+    "btn-dashboard": {
+      id: "btn-dashboard",
+      label: "Team Dashboard",
+      icon: "organization",
+      iconColor: "#818cf8",
+      appearance: "secondary"
+    },
+    "btn-level-viewer": {
+      id: "btn-level-viewer",
+      label: "Level Viewer",
+      icon: "list-tree",
+      iconColor: "#94a3b8",
+      appearance: "secondary"
+    },
+    "btn-environmental": {
+      id: "btn-environmental",
+      label: "Environmental Impact",
+      icon: "globe",
+      iconColor: "#4ade80",
+      appearance: "secondary"
+    }
+  };
+  var NAV_ORDER = [
+    "btn-refresh",
+    "btn-details",
+    "btn-chart",
+    "btn-usage",
+    "btn-maturity",
+    "btn-environmental",
+    "btn-diagnostics",
+    "btn-dashboard"
+  ];
+  function getNavButtons(activeView, backendConfigured) {
+    return NAV_ORDER.filter((id) => id !== "btn-dashboard" || backendConfigured).map((id) => ({ ...BUTTONS[id], active: id === activeView }));
+  }
+  function buttonHtml(idOrConfig) {
+    const config = typeof idOrConfig === "string" ? BUTTONS[idOrConfig] : idOrConfig;
+    if (config.hidden) {
+      return "";
+    }
+    const appearance = config.appearance ? ` appearance="${config.appearance}"` : "";
+    const active = config.active ? ' class="nav-active" disabled aria-current="page"' : "";
+    const iconStyle = config.iconColor ? ` style="--icon-accent:${config.iconColor}"` : "";
+    const icon = config.icon ? `<span class="codicon codicon-${config.icon} nav-icon"${iconStyle}></span>` : "";
+    return `<vscode-button id="${config.id}"${appearance}${active}>${icon}${config.label}</vscode-button>`;
+  }
+  function navButtonsHtml(activeView, backendConfigured) {
+    return getNavButtons(activeView, backendConfigured).map((config) => buttonHtml(config)).join("\n");
+  }
+
+  // src/webview/shared/extensionPoints.ts
+  function wireExtensionPointButtons(vscodeApi) {
+    const buttons = window.__EXTENSION_POINT_BUTTONS__ ?? [];
+    if (buttons.length === 0) {
+      return;
+    }
+    const buttonRow = document.querySelector(".button-row");
+    if (!buttonRow) {
+      return;
+    }
+    for (const btn of buttons) {
+      const el2 = document.createElement("vscode-button");
+      el2.id = `ext-point-${btn.id}`;
+      el2.textContent = btn.label;
+      el2.addEventListener("click", () => {
+        vscodeApi.postMessage({ command: "extensionPointAction", buttonId: btn.id });
+      });
+      buttonRow.append(el2);
+    }
+  }
+
+  // src/editorIcons.ts
+  var EDITOR_ICON_MAP = {
+    "Antigravity": "\u{1F680}",
+    "Claude Code": "\u{1F7E0}",
+    "Claude Code CLI": "\u{1F7E0}",
+    "Claude Desktop": "\u{1F7E0}",
+    "Claude Desktop Cowork": "\u{1F7E0}",
+    "Cline": "\u{1F916}",
+    "Codex CLI": "\u{1F300}",
+    "Continue": "\u25B6\uFE0F",
+    "Copilot CLI": "\u{1F916}",
+    "Copilot CLI (App)": "\u{1F916}",
+    "Crush": "\u{1F9BE}",
+    "Cursor": "\u{1F5B1}\uFE0F",
+    "Devin": "\u{1F9E0}",
+    "Devin CLI": "\u{1F9E0}",
+    "Eclipse": "\u{1F311}",
+    "Gemini CLI": "\u{1F48E}",
+    "Hermes": "\u{1FABD}",
+    "JetBrains": "\u{1F9E9}",
+    "Kiro": "\u{1F47B}",
+    "Kiro CLI": "\u{1F47B}",
+    "Mistral Vibe": "\u{1F525}",
+    "MS Scout (Copilot CLI)": "\u{1F52D}",
+    "OpenCode": "\u{1F7E2}",
+    "Pi": "\u03C0",
+    "Unknown": "\u2753",
+    "Visual Studio": "\u{1FA9F}",
+    "VS Code": "\u{1F499}",
+    "VS Code Exploration": "\u{1F9EA}",
+    "VS Code Insiders": "\u{1F49A}",
+    "VS Code Server": "\u2601\uFE0F",
+    "VS Code Server (Insiders)": "\u2601\uFE0F",
+    "VSCodium": "\u{1F537}",
+    "Windsurf": "\u{1F3C4}"
+  };
+  function getEditorIconByName(editor) {
+    return EDITOR_ICON_MAP[editor] ?? "\u{1F4DD}";
+  }
+
+  // ../src/webview/shared/dataLoader.ts
+  function getWindowData(key) {
+    const win = globalThis.window;
+    return win ? win[key] : void 0;
+  }
+
+  // src/webview/shared/formatUtils.ts
+  var _estimatorsData = getWindowData("__TOKEN_ESTIMATORS__");
+  var tokenEstimators = _estimatorsData?.estimators ?? {};
+  function getEditorIcon(editor) {
+    return getEditorIconByName(editor);
+  }
+  function escapeHtml(text) {
+    return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+  function formatFileSize(bytes) {
+    const numericBytes = Number(bytes);
+    if (!Number.isFinite(numericBytes) || numericBytes < 0) {
+      return "N/A";
+    }
+    if (numericBytes < 1024) {
+      return `${numericBytes} B`;
+    }
+    const units = ["KB", "MB", "GB", "TB", "PB"];
+    let value = numericBytes / 1024;
+    let unitIndex = 0;
+    while (value >= 1024 && unitIndex < units.length - 1) {
+      value /= 1024;
+      unitIndex++;
+    }
+    const decimals = unitIndex === 0 ? 1 : 2;
+    return `${value.toFixed(decimals)} ${units[unitIndex]}`;
+  }
+  function getTimeSince(isoString) {
+    try {
+      const now = Date.now();
+      const then = new Date(isoString).getTime();
+      const diffMs = now - then;
+      if (diffMs < 0) {
+        return "Just now";
+      }
+      const seconds = Math.floor(diffMs / 1e3);
+      const minutes = Math.floor(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+      if (days > 0) {
+        return `${days} day${days !== 1 ? "s" : ""} ago`;
+      }
+      if (hours > 0) {
+        return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
+      }
+      if (minutes > 0) {
+        return `${minutes} minute${minutes !== 1 ? "s" : ""} ago`;
+      }
+      return `${seconds} second${seconds !== 1 ? "s" : ""} ago`;
+    } catch {
+      return "Unknown";
+    }
+  }
+
+  // src/webview/shared/domUtils.ts
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) {
+      node.className = className;
+    }
+    if (text !== void 0) {
+      node.textContent = text;
+    }
+    return node;
+  }
+
+  // src/webview/shared/periodSelector.ts
+  var PERIOD_LABELS = {
+    today: "Today",
+    last7: "Last 7 days",
+    last14: "Last 14 days",
+    last30: "Last 30 days",
+    last90: "Last 90 days",
+    currentMonth: "Current month",
+    lastMonth: "Previous month",
+    thisWeek: "This week",
+    allTime: "All time"
+  };
+  var CANONICAL_PERIODS = ["today", "last7", "last30", "currentMonth", "allTime"];
+  function setOptionSelected(option, value, selected) {
+    if (value === selected) {
+      option.selected = true;
+    }
+  }
+  function createPeriodSelector(options) {
+    const wrapper = el("div", "period-selector");
+    wrapper.style.display = "inline-flex";
+    wrapper.style.alignItems = "center";
+    wrapper.style.gap = "4px";
+    const labelText = options.label ?? "Time window:";
+    if (labelText) {
+      const label = el("span", "period-selector-label", labelText);
+      label.style.fontSize = "11px";
+      label.style.color = "var(--vscode-descriptionForeground, var(--text-secondary, #9ca3af))";
+      wrapper.append(label);
+    }
+    const select = document.createElement("select");
+    select.className = "period-selector-select";
+    if (options.id) {
+      select.id = options.id;
+    }
+    select.style.background = "var(--vscode-dropdown-background, var(--button-secondary-bg, #2d2d2d))";
+    select.style.color = "var(--vscode-dropdown-foreground, var(--text-primary, #cccccc))";
+    select.style.border = "1px solid var(--border-subtle, #555555)";
+    select.style.borderRadius = "4px";
+    select.style.padding = "4px 8px";
+    select.style.fontSize = "13px";
+    select.style.cursor = "pointer";
+    select.style.minHeight = "24px";
+    const disabledSet = new Set(options.disabled ?? []);
+    const periods = options.periods ?? CANONICAL_PERIODS;
+    for (const period of periods) {
+      const option = document.createElement("option");
+      option.value = period;
+      option.textContent = PERIOD_LABELS[period];
+      setOptionSelected(option, period, options.selected);
+      if (disabledSet.has(period)) {
+        option.disabled = true;
+        if (options.disabledTitle) {
+          option.title = options.disabledTitle;
+        }
+      }
+      select.append(option);
+    }
+    for (const extra of options.extraOptions ?? []) {
+      const option = document.createElement("option");
+      option.value = extra.value;
+      option.textContent = extra.label;
+      if (extra.title) {
+        option.title = extra.title;
+      }
+      setOptionSelected(option, extra.value, options.selected);
+      if (extra.disabled) {
+        option.disabled = true;
+      }
+      select.append(option);
+    }
+    select.addEventListener("change", () => {
+      options.onChange(select.value);
+    });
+    wrapper.append(select);
+    return { wrapper, select };
+  }
+
+  // src/webview/shared/viewState.ts
+  function createViewStateManager(vscode2, defaults) {
+    return {
+      restore() {
+        const saved = vscode2.getState();
+        return { ...defaults, ...saved ?? {} };
+      },
+      save(state) {
+        vscode2.setState(state);
+      },
+      patch(partial) {
+        const current = vscode2.getState() ?? { ...defaults };
+        const next = { ...defaults, ...current, ...partial };
+        vscode2.setState(next);
+        return next;
+      }
+    };
+  }
+
+  // src/webview/shared/theme.css
+  var theme_default = `/**
  * Shared theme variables for all webview panels
  * Uses VS Code theme tokens for automatic light/dark theme support.
  *
@@ -629,7 +2226,10 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
 	text-shadow: 2px 2px 0 var(--vscode-panel-border);
 	white-space: nowrap;
 }
-`;var Be=`* {
+`;
+
+  // src/webview/diagnostics/styles.css
+  var styles_default = `* {
 	margin: 0;
 	padding: 0;
 	box-sizing: border-box;
@@ -921,6 +2521,165 @@ body {
 	margin-top: 6px;
 }
 
+/* Share Card tab \u2014 a screenshot-friendly summary of detected editors */
+.share-card {
+	background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-secondary));
+	border: 1px solid var(--border-color);
+	border-radius: 16px;
+	padding: 24px 28px;
+	max-width: 640px;
+	box-shadow: 0 8px 32px var(--shadow-color);
+}
+
+.share-badge {
+	font-size: 11px;
+	font-weight: 700;
+	letter-spacing: 0.12em;
+	text-transform: uppercase;
+	color: var(--link-color);
+	margin-bottom: 6px;
+}
+
+.share-title {
+	font-size: 22px;
+	font-weight: 700;
+	color: var(--text-primary);
+	margin-bottom: 4px;
+}
+
+.share-subtitle {
+	font-size: 12px;
+	color: var(--text-muted);
+	margin-bottom: 18px;
+}
+
+.share-pills {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 18px;
+}
+
+.share-pill {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	padding: 6px 12px;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 20px;
+	font-size: 13px;
+	color: var(--text-primary);
+}
+
+.share-pill-count {
+	font-weight: 700;
+	color: var(--link-color);
+}
+
+.share-stats {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(110px, 1fr));
+	gap: 10px;
+}
+
+.share-stat {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	padding: 10px;
+	text-align: center;
+}
+
+.share-stat-value {
+	font-size: 18px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.share-stat-label {
+	font-size: 10px;
+	color: var(--text-muted);
+	text-transform: uppercase;
+	letter-spacing: 0.06em;
+	margin-top: 2px;
+}
+
+/* Share Card social share buttons \u2014 mirrors the Fluency Score share-section styling */
+.share-buttons {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+	gap: 10px;
+}
+
+.share-btn {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 8px;
+	padding: 10px 14px;
+	border-radius: 6px;
+	font-size: 13px;
+	font-weight: 600;
+	cursor: pointer;
+	transition: all 0.2s ease;
+	border: 1px solid;
+	background: var(--button-secondary-bg);
+}
+
+.share-btn-icon {
+	font-size: 16px;
+	flex-shrink: 0;
+}
+
+.share-btn:active {
+	transform: translateY(0);
+}
+
+.share-btn-linkedin {
+	color: #0a66c2;
+	border-color: rgba(10, 102, 194, 0.5);
+}
+
+.share-btn-linkedin:hover {
+	background: rgba(10, 102, 194, 0.12);
+	border-color: #0a66c2;
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(10, 102, 194, 0.25);
+}
+
+.share-btn-bluesky {
+	color: #1285fe;
+	border-color: rgba(18, 133, 254, 0.5);
+}
+
+.share-btn-bluesky:hover {
+	background: rgba(18, 133, 254, 0.12);
+	border-color: #1285fe;
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(18, 133, 254, 0.25);
+}
+
+.share-btn-mastodon {
+	color: #6364ff;
+	border-color: rgba(99, 100, 255, 0.5);
+}
+
+.share-btn-mastodon:hover {
+	background: rgba(99, 100, 255, 0.12);
+	border-color: #6364ff;
+	transform: translateY(-2px);
+	box-shadow: 0 4px 12px rgba(99, 100, 255, 0.25);
+}
+
+/* Light theme overrides for share button text colors */
+body[data-vscode-theme-kind="vscode-light"] .share-btn-linkedin,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .share-btn-linkedin { color: #0a66c2; }
+body[data-vscode-theme-kind="vscode-light"] .share-btn-bluesky,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .share-btn-bluesky { color: #0369a1; }
+body[data-vscode-theme-kind="vscode-light"] .share-btn-mastodon,
+body[data-vscode-theme-kind="vscode-high-contrast-light"] .share-btn-mastodon { color: #4f46e5; }
+
 .otel-delta-positive {
 	color: var(--success-fg);
 }
@@ -1092,6 +2851,70 @@ body {
 
 .session-table tr:hover {
 	background: var(--list-hover-bg);
+}
+
+/* Candidate/scanned paths table: force long paths to wrap within the
+   panel instead of growing the table wider than its container. */
+.candidate-paths-table .session-table {
+	table-layout: fixed;
+}
+
+.candidate-paths-table .session-table th:first-child,
+.candidate-paths-table .session-table td:first-child {
+	width: 60px;
+}
+
+.candidate-paths-table .session-table th:nth-child(2),
+.candidate-paths-table .session-table td:nth-child(2) {
+	width: 140px;
+}
+
+.candidate-paths-table .session-table th:last-child,
+.candidate-paths-table .session-table td:last-child {
+	word-break: break-all;
+	overflow-wrap: anywhere;
+	white-space: normal;
+}
+
+.candidate-paths-table .session-table td:nth-child(2) .editor-badge {
+	white-space: normal;
+	word-break: break-word;
+}
+
+/* Main Session Folders table: same treatment as the candidate paths table
+   so long folder paths wrap instead of forcing the table (and page) wider
+   than the panel. */
+.session-folders-table .session-table {
+	table-layout: fixed;
+}
+
+.session-folders-table .session-table th:first-child,
+.session-folders-table .session-table td:first-child {
+	word-break: break-all;
+	overflow-wrap: anywhere;
+	white-space: normal;
+}
+
+.session-folders-table .session-table th:nth-child(2),
+.session-folders-table .session-table td:nth-child(2) {
+	width: 150px;
+}
+
+.session-folders-table .session-table td:nth-child(2) .editor-badge {
+	white-space: normal;
+	word-break: break-word;
+}
+
+.session-folders-table .session-table th:nth-child(3),
+.session-folders-table .session-table td:nth-child(3) {
+	width: 110px;
+}
+
+.session-folders-table .session-table th:last-child,
+.session-folders-table .session-table td:last-child {
+	width: 150px;
+	white-space: normal;
+	overflow-wrap: anywhere;
 }
 
 .editor-badge {
@@ -1483,46 +3306,596 @@ border: 1px solid #1f6feb;
 	to { transform: rotate(360deg); }
 }
 
-`;function St(e){return e.file+e.selection+e.implicitSelection+e.symbol+e.codebase+e.workspace+e.terminal+e.vscode+e.copilotInstructions+e.agentsMd+(e.terminalLastCommand||0)+(e.terminalSelection||0)+(e.clipboard||0)+(e.changes||0)+(e.outputPanel||0)+(e.problemsPanel||0)+(e.pullRequest||0)}var bn=[{key:"file",full:"#file",abbr:"#file"},{key:"selection",full:"#selection",abbr:"#sel"},{key:"implicitSelection",full:"implicit",abbr:"impl"},{key:"symbol",full:"#symbol",abbr:"#sym"},{key:"codebase",full:"#codebase",abbr:"#cb"},{key:"workspace",full:"@workspace",abbr:"@ws"},{key:"terminal",full:"@terminal",abbr:"@term"},{key:"vscode",full:"@vscode",abbr:"@vsc"},{key:"terminalLastCommand",full:"#terminalLastCommand",abbr:"#termLC"},{key:"terminalSelection",full:"#terminalSelection",abbr:"#termSel"},{key:"clipboard",full:"#clipboard",abbr:"#clip"},{key:"changes",full:"#changes",abbr:"#chg"},{key:"outputPanel",full:"#outputPanel",abbr:"#out"},{key:"problemsPanel",full:"#problemsPanel",abbr:"#prob"},{key:"pullRequest",full:"#pr",abbr:"#pr"},{key:"copilotInstructions",full:"\u{1F4CB} instructions",abbr:"\u{1F4CB} inst"},{key:"agentsMd",full:"\u{1F916} agents",abbr:"\u{1F916} ag"}];function Re(e,t=!1){let o=[];for(let n of bn){let s=e[n.key]||0;if(s>0){let i=t?n.abbr:n.full;o.push(`${i}: ${s}`)}}return o.length>0?o.join(", "):"None"}var _n="Loading...",Dn=/Session File Locations \(first 20\):[\s\S]*?(?=\n\s*\n|={70})/,Bn=`\u23F3 Loading diagnostic data...
+`;
+
+  // src/webview/shared/contextRefUtils.ts
+  function getTotalContextRefs(refs) {
+    return refs.file + refs.selection + refs.implicitSelection + refs.symbol + refs.codebase + refs.workspace + refs.terminal + refs.vscode + refs.copilotInstructions + refs.agentsMd + (refs.terminalLastCommand || 0) + (refs.terminalSelection || 0) + (refs.clipboard || 0) + (refs.changes || 0) + (refs.outputPanel || 0) + (refs.problemsPanel || 0) + (refs.pullRequest || 0);
+  }
+  var REF_LABELS = [
+    { key: "file", full: "#file", abbr: "#file" },
+    { key: "selection", full: "#selection", abbr: "#sel" },
+    { key: "implicitSelection", full: "implicit", abbr: "impl" },
+    { key: "symbol", full: "#symbol", abbr: "#sym" },
+    { key: "codebase", full: "#codebase", abbr: "#cb" },
+    { key: "workspace", full: "@workspace", abbr: "@ws" },
+    { key: "terminal", full: "@terminal", abbr: "@term" },
+    { key: "vscode", full: "@vscode", abbr: "@vsc" },
+    { key: "terminalLastCommand", full: "#terminalLastCommand", abbr: "#termLC" },
+    { key: "terminalSelection", full: "#terminalSelection", abbr: "#termSel" },
+    { key: "clipboard", full: "#clipboard", abbr: "#clip" },
+    { key: "changes", full: "#changes", abbr: "#chg" },
+    { key: "outputPanel", full: "#outputPanel", abbr: "#out" },
+    { key: "problemsPanel", full: "#problemsPanel", abbr: "#prob" },
+    { key: "pullRequest", full: "#pr", abbr: "#pr" },
+    { key: "copilotInstructions", full: "\u{1F4CB} instructions", abbr: "\u{1F4CB} inst" },
+    { key: "agentsMd", full: "\u{1F916} agents", abbr: "\u{1F916} ag" }
+  ];
+  function getContextRefsSummary(refs, abbreviated = false) {
+    const parts = [];
+    for (const entry of REF_LABELS) {
+      const count = refs[entry.key] || 0;
+      if (count > 0) {
+        const label = abbreviated ? entry.abbr : entry.full;
+        parts.push(`${label}: ${count}`);
+      }
+    }
+    return parts.length > 0 ? parts.join(", ") : "None";
+  }
+
+  // src/webview/diagnostics/main.ts
+  var LOADING_PLACEHOLDER = "Loading...";
+  var SESSION_FILES_SECTION_REGEX = /Session File Locations \(first 20\):[\s\S]*?(?=\n\s*\n|={70})/;
+  var LOADING_MESSAGE = `\u23F3 Loading diagnostic data...
 
 This may take a few moments depending on the number of session files.
-The view will automatically update when data is ready.`,m=acquireVsCodeApi(),To=yt("__INITIAL_DIAGNOSTICS__"),I=_e(m,{activeTab:void 0,activeSubtab:void 0,otelDeltaPeriod:"all"}),ue,Rt=I.restore().otelDeltaPeriod??"all",Z="lastInteraction",K="desc",Q=null,J=null,gt=!0,pe=!1,Pt="avg",Y="desc",de,ht=[],tt=!0,vt,X,Nt="all";function Po(e){return e.replace(Dn,"")}function ft(e){if(!e)return"N/A";try{return d(new Date(e).toLocaleString())}catch{return d(e)}}function Ao(e){if(e==null)return"0";let t=Number(e);return Number.isFinite(t)?Math.floor(t).toString():"0"}function C(e){let t=Number(e??0);return!Number.isFinite(t)||t===0?"0":t>=1e9?`${(t/1e9).toFixed(1)}B`:t>=1e6?`${(t/1e6).toFixed(1)}M`:t>=1e3?`${(t/1e3).toFixed(1)}K`:Math.floor(t).toString()}function Rn(e,t){let o=document.createElement("tr");e.exists||(o.style.opacity="0.5");let n=document.createElement("td");n.textContent=e.exists?"\u2705":"\u274C",n.style.textAlign="center";let s=document.createElement("td"),i=document.createElement("span");i.className=Ot(e.source),i.textContent=`${M(e.source)} ${e.source}`,s.appendChild(i);let r=document.createElement("td");r.setAttribute("title",e.path),r.style.fontFamily="var(--vscode-editor-font-family, monospace)",r.style.fontSize="12px",r.textContent=e.path,o.append(n,s,r),t.appendChild(o)}function Pn(e,t){let o=e.some(l=>l.exists),n=document.createElement("tr");o||(n.style.opacity="0.5");let s=document.createElement("td");s.textContent=o?"\u2705":"\u274C",s.style.textAlign="center";let i=document.createElement("td"),r=document.createElement("span");r.className=Ot("Crush"),r.textContent=`${M("Crush")} Crush`,i.appendChild(r);let a=document.createElement("td");a.style.fontFamily="var(--vscode-editor-font-family, monospace)",a.style.fontSize="12px",a.style.lineHeight="1.6";for(let l of e){let u=document.createElement("div");u.style.opacity=l.exists?"1":"0.5",u.title=l.path,u.textContent=`${l.exists?"\u2705":"\u274C"} ${l.path}`,a.appendChild(u)}n.append(s,i,a),t.appendChild(n)}function Nn(e){let t=document.createElement("div");t.className="candidate-paths-table";let o=document.createElement("h4");o.textContent="Scanned Paths (all candidate locations):",t.appendChild(o);let n=document.createElement("p");n.style.cssText="color: #999; font-size: 12px; margin: 4px 0 8px 0;",n.textContent="These are all the paths the extension checks for session files. Paths marked with \u2705 exist on this system.",t.appendChild(n);let s=document.createElement("table");s.className="session-table",t.appendChild(s);let i=document.createElement("thead"),r=document.createElement("tr");for(let c of["Status","Source","Path"]){let b=document.createElement("th");b.textContent=c,r.appendChild(b)}i.appendChild(r),s.appendChild(i);let a=document.createElement("tbody");s.appendChild(a);let l=[...e].sort((c,b)=>c.exists!==b.exists?c.exists?-1:1:c.source.localeCompare(b.source)),u=l.filter(c=>c.source.toLowerCase().includes("crush")),p=l.filter(c=>!c.source.toLowerCase().includes("crush"));for(let c of p)Rn(c,a);return u.length>0&&Pn(u,a),t}function Hn(e){let t=e.split(/[/\\]/);return t[t.length-1]}function On(e){if(!e)return"";let t=e.replace(/\.git$/,"");if(t.includes("@")&&t.includes(":")){let n=t.lastIndexOf(":"),s=t.lastIndexOf("@");if(n>s)return t.substring(n+1)}try{if(t.includes("://")){let n=new URL(t),s=n.pathname.split("/").filter(i=>i);return s.length>=2?`${s[s.length-2]}/${s[s.length-1]}`:n.pathname.replace(/^\//,"")}}catch{}let o=t.split("/").filter(n=>n);return o.length>=2?`${o[o.length-2]}/${o[o.length-1]}`:t}function Ot(e){let t=e.toLowerCase();return t.includes("ms scout")||t.includes("microsoft scout")?"editor-badge editor-badge-ms-scout":t.includes("visual studio")?"editor-badge editor-badge-vs":t.includes("jetbrains")?"editor-badge editor-badge-jetbrains":t.includes("mistral")?"editor-badge editor-badge-mistral-vibe":t.includes("antigravity")?"editor-badge editor-badge-antigravity":t.includes("gemini")?"editor-badge editor-badge-gemini-cli":t.includes("crush")?"editor-badge editor-badge-crush":t.includes("cursor")?"editor-badge editor-badge-cursor":t==="pi"?"editor-badge editor-badge-pi":"editor-badge"}function Io(e,t){switch(t){case"size":return e.size||0;case"tokens":return e.tokens||0;case"interactions":return e.interactions||0;case"contextRefs":return St(e.contextReferences);default:return 0}}function Fn(e,t){if(Z==="lastInteraction"){let s=e.lastInteraction,i=t.lastInteraction;if(!s&&!i)return 0;if(!s)return 1;if(!i)return-1;let r=new Date(s).getTime(),a=new Date(i).getTime();return K==="desc"?a-r:r-a}let o=Io(e,Z),n=Io(t,Z);return o===0&&n===0?0:K==="desc"?n-o:o-n}function zn(e,t){let o=new Set,n=[];for(let s of e)if(!o.has(s.file)){n.push(s),o.add(s.file);for(let i of s.childInfo??[]){if(!i.sessionFile)continue;let r=t.get(i.sessionFile);r&&!o.has(r.file)&&(n.push(r),o.add(r.file))}}return n}function Un(e){let t=[...e].sort(Fn),o=new Map;for(let n of t)o.set(n.file,n);return zn(t,o)}function mt(e){return Z!==e?"":K==="desc"?" \u25BC":" \u25B2"}function be(e){let t={};for(let o of e){let n=o.editorSource||"Unknown";t[n]||(t[n]={count:0,interactions:0}),t[n].count++,t[n].interactions+=o.interactions}return t}function qn(e){return e==null?"":d(String(e))}function me(e){let t=e.tokens||0;if(t===0||!e.modelUsage)return 0;let o=Object.values(e.modelUsage).reduce((n,s)=>n+s.inputTokens+s.outputTokens,0);return o>0?Math.max(0,t-o):0}function jn(e){let t=Q?e.filter(n=>n.editorSource===Q):e;J&&(t=t.filter(n=>{let s=n.contextReferences[J];return typeof s=="number"&&s>0})),pe&&(t=t.filter(n=>me(n)>1e3));let o=t.filter(n=>n.interactions===0).length;return gt&&o===t.length&&t.length>0&&(gt=!1),gt&&(t=t.filter(n=>n.interactions>0)),{filteredFiles:t,zeroInteractionCount:o}}function Gn(e){return e.reduce((t,o)=>{let n=o.contextReferences;return t.file+=n.file,t.symbol+=n.symbol,t.selection+=n.selection,t.implicitSelection+=n.implicitSelection,t.codebase+=n.codebase,t.workspace+=n.workspace,t.terminal+=n.terminal,t.vscode+=n.vscode,t.copilotInstructions+=n.copilotInstructions,t.agentsMd+=n.agentsMd,t},{file:0,symbol:0,selection:0,implicitSelection:0,codebase:0,workspace:0,terminal:0,vscode:0,copilotInstructions:0,agentsMd:0})}function Vn(e,t,o){return`<div class="editor-filter-panels">
-    <div class="editor-panel ${Q===null?"active":""}" data-editor=""><div class="editor-panel-icon">\u{1F310}</div><div class="editor-panel-name">All Editors</div><div class="editor-panel-stats">${e.length} sessions</div></div>
-    ${o.map(n=>`<div class="editor-panel ${Q===n?"active":""}" data-editor="${d(n)}"><div class="editor-panel-icon">${M(n)}</div><div class="editor-panel-name">${d(n)}</div><div class="editor-panel-stats">${t[n].count} sessions \xB7 ${t[n].interactions} interactions</div></div>`).join("")}
-  </div>`}function Wn(e,t,o,n,s,i,r){let a=(p,c,b)=>i[p]>0?`<div class="context-ref-filter ${J===p?"active":""}" data-ref-type="${p}">${c} ${b} ${i[p]}</div>`:"",l=t.filter(p=>me(p)>1e3).length,u=l>0?`<label class="empty-sessions-toggle" title="Sessions where some debug-log tokens cannot be assigned to a specific model \u2014 may indicate incomplete model attribution in the debug log"><input type="checkbox" id="show-only-unattributed" ${pe?"checked":""}>\u26A0\uFE0F Show only sessions with unattributed tokens<span class="hidden-count">(${l} session${l===1?"":"s"})</span></label>`:"";return`<div class="summary-cards">
-    <div class="summary-card"><div class="summary-label">\u{1F4C1} ${Q?"Filtered":"Total"} Sessions</div><div class="summary-value">${e.length}</div></div>
-    <div class="summary-card"><div class="summary-label">\u{1F4AC} Interactions</div><div class="summary-value">${o}</div></div>
-    <div class="summary-card"><div class="summary-label">\u{1FA99} Tokens</div><div class="summary-value" title="${n.toLocaleString()} tokens">${C(n)}</div></div>
-    <div class="summary-card"><div class="summary-label">\u{1F517} Context References</div><div class="summary-value">${qn(s)}</div><div class="summary-sub">${s===0?"None":""}${a("file","","#file")}${a("symbol","","#sym")}${a("implicitSelection","","implicit")}${a("copilotInstructions","\u{1F4CB}","instructions")}${a("agentsMd","\u{1F916}","agents")}${a("workspace","","@workspace")}${a("vscode","","@vscode")}</div></div>
+The view will automatically update when data is ready.`;
+  var vscode = acquireVsCodeApi();
+  var initialData = getWindowData("__INITIAL_DIAGNOSTICS__");
+  var diagState = createViewStateManager(vscode, {
+    activeTab: void 0,
+    activeSubtab: void 0,
+    otelDeltaPeriod: "all",
+    shareCardPeriod: "last14"
+  });
+  var currentOtelComparison;
+  var currentOtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
+  var SHARE_CARD_PERIOD_ORDER = ["last7", "last14", "last30", "last90", "allTime"];
+  var currentShareCardPeriod = diagState.restore().shareCardPeriod ?? "last14";
+  var currentSortColumn = "lastInteraction";
+  var currentSortDirection = "desc";
+  var currentEditorFilter = null;
+  var currentContextRefFilter = null;
+  var hideEmptySessions = true;
+  var showOnlyUnattributed = false;
+  var toolSortColumn = "avg";
+  var toolSortDir = "desc";
+  var storedToolFamilies;
+  var storedDetailedFiles = [];
+  var isLoading = true;
+  var currentBackendInfo;
+  var currentGithubAuth;
+  var currentModelUsageTimeRange = "all";
+  function removeSessionFilesSection(reportText) {
+    return reportText.replace(SESSION_FILES_SECTION_REGEX, "");
+  }
+  function formatDate(isoString) {
+    if (!isoString) {
+      return "N/A";
+    }
+    try {
+      return escapeHtml(new Date(isoString).toLocaleString());
+    } catch {
+      return escapeHtml(isoString);
+    }
+  }
+  function sanitizeNumber(value) {
+    if (value === void 0 || value === null) {
+      return "0";
+    }
+    const n5 = Number(value);
+    if (!Number.isFinite(n5)) {
+      return "0";
+    }
+    return Math.floor(n5).toString();
+  }
+  function formatTokenCount(value) {
+    const n5 = Number(value ?? 0);
+    if (!Number.isFinite(n5) || n5 === 0) {
+      return "0";
+    }
+    if (n5 >= 1e9) {
+      return `${(n5 / 1e9).toFixed(1)}B`;
+    }
+    if (n5 >= 1e6) {
+      return `${(n5 / 1e6).toFixed(1)}M`;
+    }
+    if (n5 >= 1e3) {
+      return `${(n5 / 1e3).toFixed(1)}K`;
+    }
+    return Math.floor(n5).toString();
+  }
+  function buildCandidatePathRow(cp, tbody) {
+    const row = document.createElement("tr");
+    if (!cp.exists) {
+      row.style.opacity = "0.5";
+    }
+    const statusCell = document.createElement("td");
+    statusCell.textContent = cp.exists ? "\u2705" : "\u274C";
+    statusCell.style.textAlign = "center";
+    const sourceCell = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = getEditorBadgeClass(cp.source);
+    badge.textContent = `${getEditorIcon(cp.source)} ${cp.source}`;
+    sourceCell.appendChild(badge);
+    const pathCell = document.createElement("td");
+    pathCell.setAttribute("title", cp.path);
+    pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
+    pathCell.style.fontSize = "12px";
+    pathCell.textContent = cp.path;
+    row.append(statusCell, sourceCell, pathCell);
+    tbody.appendChild(row);
+  }
+  function buildCrushGroupRow(crushEntries, tbody) {
+    const anyExist = crushEntries.some((cp) => cp.exists);
+    const row = document.createElement("tr");
+    if (!anyExist) {
+      row.style.opacity = "0.5";
+    }
+    const statusCell = document.createElement("td");
+    statusCell.textContent = anyExist ? "\u2705" : "\u274C";
+    statusCell.style.textAlign = "center";
+    const sourceCell = document.createElement("td");
+    const badge = document.createElement("span");
+    badge.className = getEditorBadgeClass("Crush");
+    badge.textContent = `${getEditorIcon("Crush")} Crush`;
+    sourceCell.appendChild(badge);
+    const pathCell = document.createElement("td");
+    pathCell.style.fontFamily = "var(--vscode-editor-font-family, monospace)";
+    pathCell.style.fontSize = "12px";
+    pathCell.style.lineHeight = "1.6";
+    for (const cp of crushEntries) {
+      const line = document.createElement("div");
+      line.style.opacity = cp.exists ? "1" : "0.5";
+      line.title = cp.path;
+      line.textContent = `${cp.exists ? "\u2705" : "\u274C"} ${cp.path}`;
+      pathCell.appendChild(line);
+    }
+    row.append(statusCell, sourceCell, pathCell);
+    tbody.appendChild(row);
+  }
+  function buildCandidatePathsElement(candidatePaths) {
+    const container = document.createElement("div");
+    container.className = "candidate-paths-table";
+    const heading = document.createElement("h4");
+    heading.textContent = "Scanned Paths (all candidate locations):";
+    container.appendChild(heading);
+    const description = document.createElement("p");
+    description.style.cssText = "color: #999; font-size: 12px; margin: 4px 0 8px 0;";
+    description.textContent = "These are all the paths the extension checks for session files. Paths marked with \u2705 exist on this system.";
+    container.appendChild(description);
+    const tableContainer = document.createElement("div");
+    tableContainer.className = "table-container";
+    container.appendChild(tableContainer);
+    const table = document.createElement("table");
+    table.className = "session-table";
+    tableContainer.appendChild(table);
+    const thead = document.createElement("thead");
+    const headerRow = document.createElement("tr");
+    for (const text of ["Status", "Source", "Path"]) {
+      const th = document.createElement("th");
+      th.textContent = text;
+      headerRow.appendChild(th);
+    }
+    thead.appendChild(headerRow);
+    table.appendChild(thead);
+    const tbody = document.createElement("tbody");
+    table.appendChild(tbody);
+    const sorted = [...candidatePaths].sort((a3, b3) => a3.exists !== b3.exists ? a3.exists ? -1 : 1 : a3.source.localeCompare(b3.source));
+    const crushEntries = sorted.filter((cp) => cp.source.toLowerCase().includes("crush"));
+    const otherEntries = sorted.filter((cp) => !cp.source.toLowerCase().includes("crush"));
+    for (const cp of otherEntries) {
+      buildCandidatePathRow(cp, tbody);
+    }
+    if (crushEntries.length > 0) {
+      buildCrushGroupRow(crushEntries, tbody);
+    }
+    return container;
+  }
+  function getFileName(filePath) {
+    const parts = filePath.split(/[/\\]/);
+    return parts[parts.length - 1];
+  }
+  function getRepoDisplayName(repoUrl) {
+    if (!repoUrl) {
+      return "";
+    }
+    let url = repoUrl.replace(/\.git$/, "");
+    if (url.includes("@") && url.includes(":")) {
+      const colonIndex = url.lastIndexOf(":");
+      const atIndex = url.lastIndexOf("@");
+      if (colonIndex > atIndex) {
+        return url.substring(colonIndex + 1);
+      }
+    }
+    try {
+      if (url.includes("://")) {
+        const urlObj = new URL(url);
+        const pathParts = urlObj.pathname.split("/").filter((p3) => p3);
+        if (pathParts.length >= 2) {
+          return `${pathParts[pathParts.length - 2]}/${pathParts[pathParts.length - 1]}`;
+        }
+        return urlObj.pathname.replace(/^\//, "");
+      }
+    } catch {
+    }
+    const parts = url.split("/").filter((p3) => p3);
+    if (parts.length >= 2) {
+      return `${parts[parts.length - 2]}/${parts[parts.length - 1]}`;
+    }
+    return url;
+  }
+  function getEditorBadgeClass(editor) {
+    const lower = editor.toLowerCase();
+    if (lower.includes("ms scout") || lower.includes("microsoft scout")) {
+      return "editor-badge editor-badge-ms-scout";
+    }
+    if (lower.includes("visual studio")) {
+      return "editor-badge editor-badge-vs";
+    }
+    if (lower.includes("jetbrains")) {
+      return "editor-badge editor-badge-jetbrains";
+    }
+    if (lower.includes("mistral")) {
+      return "editor-badge editor-badge-mistral-vibe";
+    }
+    if (lower.includes("antigravity")) {
+      return "editor-badge editor-badge-antigravity";
+    }
+    if (lower.includes("gemini")) {
+      return "editor-badge editor-badge-gemini-cli";
+    }
+    if (lower.includes("crush")) {
+      return "editor-badge editor-badge-crush";
+    }
+    if (lower.includes("cursor")) {
+      return "editor-badge editor-badge-cursor";
+    }
+    if (lower === "pi") {
+      return "editor-badge editor-badge-pi";
+    }
+    return "editor-badge";
+  }
+  function getSortValue(file, column) {
+    switch (column) {
+      case "size":
+        return file.size || 0;
+      case "tokens":
+        return file.tokens || 0;
+      case "interactions":
+        return file.interactions || 0;
+      case "contextRefs":
+        return getTotalContextRefs(file.contextReferences);
+      default:
+        return 0;
+    }
+  }
+  function compareSessionFiles(a3, b3) {
+    if (currentSortColumn === "lastInteraction") {
+      const aVal = a3.lastInteraction;
+      const bVal = b3.lastInteraction;
+      if (!aVal && !bVal) {
+        return 0;
+      }
+      if (!aVal) {
+        return 1;
+      }
+      if (!bVal) {
+        return -1;
+      }
+      const aNum2 = new Date(aVal).getTime();
+      const bNum2 = new Date(bVal).getTime();
+      return currentSortDirection === "desc" ? bNum2 - aNum2 : aNum2 - bNum2;
+    }
+    const aNum = getSortValue(a3, currentSortColumn);
+    const bNum = getSortValue(b3, currentSortColumn);
+    if (aNum === 0 && bNum === 0) {
+      return 0;
+    }
+    return currentSortDirection === "desc" ? bNum - aNum : aNum - bNum;
+  }
+  function groupChildrenAfterParents(sorted, byFile) {
+    const placed = /* @__PURE__ */ new Set();
+    const result = [];
+    for (const f3 of sorted) {
+      if (placed.has(f3.file)) {
+        continue;
+      }
+      result.push(f3);
+      placed.add(f3.file);
+      for (const childRef of f3.childInfo ?? []) {
+        if (!childRef.sessionFile) {
+          continue;
+        }
+        const childDetails = byFile.get(childRef.sessionFile);
+        if (childDetails && !placed.has(childDetails.file)) {
+          result.push(childDetails);
+          placed.add(childDetails.file);
+        }
+      }
+    }
+    return result;
+  }
+  function sortSessionFiles(files) {
+    const sorted = [...files].sort(compareSessionFiles);
+    const byFile = /* @__PURE__ */ new Map();
+    for (const f3 of sorted) {
+      byFile.set(f3.file, f3);
+    }
+    return groupChildrenAfterParents(sorted, byFile);
+  }
+  function getSortIndicator(column) {
+    if (currentSortColumn !== column) {
+      return "";
+    }
+    return currentSortDirection === "desc" ? " \u25BC" : " \u25B2";
+  }
+  function getEditorStats(files) {
+    const stats = {};
+    for (const sf of files) {
+      const editor = sf.editorName || sf.editorSource || "Unknown";
+      if (!stats[editor]) {
+        stats[editor] = { count: 0, interactions: 0 };
+      }
+      stats[editor].count++;
+      stats[editor].interactions += sf.interactions;
+    }
+    return stats;
+  }
+  function safeText(value) {
+    if (value === null || value === void 0) {
+      return "";
+    }
+    return escapeHtml(String(value));
+  }
+  function getUnattributedTokens(sf) {
+    const tokens = sf.tokens || 0;
+    if (tokens === 0 || !sf.modelUsage) {
+      return 0;
+    }
+    const attributed = Object.values(sf.modelUsage).reduce((s4, m2) => s4 + m2.inputTokens + m2.outputTokens, 0);
+    return attributed > 0 ? Math.max(0, tokens - attributed) : 0;
+  }
+  function applySessionFilters(detailedFiles) {
+    let filteredFiles = currentEditorFilter ? detailedFiles.filter((sf) => (sf.editorName || sf.editorSource) === currentEditorFilter) : detailedFiles;
+    if (currentContextRefFilter) {
+      filteredFiles = filteredFiles.filter((sf) => {
+        const value = sf.contextReferences[currentContextRefFilter];
+        return typeof value === "number" && value > 0;
+      });
+    }
+    if (showOnlyUnattributed) {
+      filteredFiles = filteredFiles.filter((sf) => getUnattributedTokens(sf) > 1e3);
+    }
+    const zeroInteractionCount = filteredFiles.filter((sf) => sf.interactions === 0).length;
+    if (hideEmptySessions && zeroInteractionCount === filteredFiles.length && filteredFiles.length > 0) {
+      hideEmptySessions = false;
+    }
+    if (hideEmptySessions) {
+      filteredFiles = filteredFiles.filter((sf) => sf.interactions > 0);
+    }
+    return { filteredFiles, zeroInteractionCount };
+  }
+  function aggregateContextRefs(filteredFiles) {
+    return filteredFiles.reduce((agg, sf) => {
+      const r6 = sf.contextReferences;
+      agg.file += r6.file;
+      agg.symbol += r6.symbol;
+      agg.selection += r6.selection;
+      agg.implicitSelection += r6.implicitSelection;
+      agg.codebase += r6.codebase;
+      agg.workspace += r6.workspace;
+      agg.terminal += r6.terminal;
+      agg.vscode += r6.vscode;
+      agg.copilotInstructions += r6.copilotInstructions;
+      agg.agentsMd += r6.agentsMd;
+      return agg;
+    }, { file: 0, symbol: 0, selection: 0, implicitSelection: 0, codebase: 0, workspace: 0, terminal: 0, vscode: 0, copilotInstructions: 0, agentsMd: 0 });
+  }
+  function buildEditorPanelsHtml(detailedFiles, editorStats, editors) {
+    return `<div class="editor-filter-panels">
+    <div class="editor-panel ${currentEditorFilter === null ? "active" : ""}" data-editor=""><div class="editor-panel-icon">\u{1F310}</div><div class="editor-panel-name">All Editors</div><div class="editor-panel-stats">${detailedFiles.length} sessions</div></div>
+    ${editors.map((editor) => `<div class="editor-panel ${currentEditorFilter === editor ? "active" : ""}" data-editor="${escapeHtml(editor)}"><div class="editor-panel-icon">${getEditorIcon(editor)}</div><div class="editor-panel-name">${escapeHtml(editor)}</div><div class="editor-panel-stats">${editorStats[editor].count} sessions \xB7 ${editorStats[editor].interactions} interactions</div></div>`).join("")}
+  </div>`;
+  }
+  function buildSessionSummaryCardsHtml(filteredFiles, allFiles, totalInteractions, totalTokens, totalContextRefs, agg, zeroInteractionCount) {
+    const mkRef = (key, icon, label) => agg[key] > 0 ? `<div class="context-ref-filter ${currentContextRefFilter === key ? "active" : ""}" data-ref-type="${key}">${icon} ${label} ${agg[key]}</div>` : "";
+    const unattributedCount = allFiles.filter((sf) => getUnattributedTokens(sf) > 1e3).length;
+    const unattributedCheckbox = unattributedCount > 0 ? `<label class="empty-sessions-toggle" title="Sessions where some debug-log tokens cannot be assigned to a specific model \u2014 may indicate incomplete model attribution in the debug log"><input type="checkbox" id="show-only-unattributed" ${showOnlyUnattributed ? "checked" : ""}>\u26A0\uFE0F Show only sessions with unattributed tokens<span class="hidden-count">(${unattributedCount} session${unattributedCount === 1 ? "" : "s"})</span></label>` : "";
+    return `<div class="summary-cards">
+    <div class="summary-card"><div class="summary-label">\u{1F4C1} ${currentEditorFilter ? "Filtered" : "Total"} Sessions</div><div class="summary-value">${filteredFiles.length}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1F4AC} Interactions</div><div class="summary-value">${totalInteractions}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1FA99} Tokens</div><div class="summary-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div></div>
+    <div class="summary-card"><div class="summary-label">\u{1F517} Context References</div><div class="summary-value">${safeText(totalContextRefs)}</div><div class="summary-sub">${totalContextRefs === 0 ? "None" : ""}${mkRef("file", "", "#file")}${mkRef("symbol", "", "#sym")}${mkRef("implicitSelection", "", "implicit")}${mkRef("copilotInstructions", "\u{1F4CB}", "instructions")}${mkRef("agentsMd", "\u{1F916}", "agents")}${mkRef("workspace", "", "@workspace")}${mkRef("vscode", "", "@vscode")}</div></div>
     <div class="summary-card"><div class="summary-label">\u{1F4C5} Time Range</div><div class="summary-value">Last 14 days</div></div>
   </div>
-  <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${gt?"checked":""}>Hide sessions with 0 interactions${r>0?`<span class="hidden-count">(${r} hidden)</span>`:""}</label>${u}</div>`}function Zn(e){let t="";if(e.parentInfo){let o=d(e.parentInfo.name.length>30?e.parentInfo.name.substring(0,30)+"\u2026":e.parentInfo.name),n=e.parentInfo.sessionFile?` href="#" class="session-hierarchy-badge hierarchy-parent session-file-link" data-file="${encodeURIComponent(e.parentInfo.sessionFile)}"`:' class="session-hierarchy-badge hierarchy-parent"';t+=`<a${n} title="Parent session: ${d(e.parentInfo.name)}">\u2191 Parent: ${o}</a>`}if(e.totalChildCount&&e.totalChildCount>0){let o=e.totalChildCount,n=o===1?"1 child session":`${o} child sessions`;t+=`<span class="session-hierarchy-badge hierarchy-children" title="${n}">\u2193 ${o} ${o===1?"Child":"Children"}</span>`}return t?`<div class="session-hierarchy-badges">${t}</div>`:""}function Kn(e){let t=me(e);if(t<=1e3)return"";let o=Math.round(t/(e.tokens||1)*100);return` <span title="\u26A0\uFE0F ${t.toLocaleString()} tokens (~${o}%) not attributed to any model \u2014 debug log events without a model field" style="color:#f59e0b; cursor:help; font-size:0.9em;">\u26A0\uFE0F</span>`}function Jn(e){let t=e.map((o,n)=>{let s=o.editorName||o.editorSource,i=!!o.parentInfo,r=o.title?`<a href="#" class="session-file-link" data-file="${encodeURIComponent(o.file)}" title="${d(o.title)}">${d(o.title.length>40?o.title.substring(0,40)+"...":o.title)}</a>`:`<a href="#" class="session-file-link empty-session-link" data-file="${encodeURIComponent(o.file)}" title="Empty session">(Empty session)</a>`,a=i?`<span class="child-title-indent">${r}</span>`:r,l=Zn(o),u=o.repository?d(On(o.repository)):o.file.includes("session-store.db")?'<span style="color: #888; font-style: italic;">No workspace</span>':'<span style="color: #666;">\u2014</span>',p=o.repository?d(o.repository):o.file.includes("session-store.db")?"Chat session \u2014 no workspace connected":"No repository detected",c=(o.editorName||o.editorSource||"Unknown")==="Unknown";return`<tr${i?' class="child-session-row"':""}><td>${n+1}</td><td><span class="${Ot(s)}" title="${d(o.editorSource)}">${M(s)} ${d(s)}</span></td><td class="session-title" title="${o.title?d(o.title):"Empty session"}">${l}${a}</td><td class="repository-cell" title="${p}">${u}</td><td>${zt(o.size)}</td><td title="${Number(o.tokens||0).toLocaleString()} tokens">${C(o.tokens)}${Kn(o)}</td><td>${Ao(o.interactions)}</td><td title="${d(Re(o.contextReferences))}">${Ao(St(o.contextReferences))}</td><td>${ft(o.lastInteraction)}</td><td><a href="#" class="view-formatted-link" data-file="${encodeURIComponent(o.file)}" title="View formatted JSONL file">\u{1F4C4} View</a>${c?` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(o.file)}" title="Report this unknown path so we can add editor support">\u{1F4E2} Report</a>`:""}</td></tr>`}).join("");return`<div class="table-container"><table class="session-table"><thead><tr><th>#</th><th>Editor</th><th>Title</th><th>Repository</th><th class="sortable" data-sort="size">Size${mt("size")}</th><th class="sortable" data-sort="tokens">Tokens${mt("tokens")}</th><th class="sortable" data-sort="interactions">Interactions${mt("interactions")}</th><th class="sortable" data-sort="contextRefs">Context Refs${mt("contextRefs")}</th><th class="sortable" data-sort="lastInteraction">Last Interaction${mt("lastInteraction")}</th><th>Actions</th></tr></thead><tbody>${t}</tbody></table></div>`}function No(e,t=!1){if(t)return'<div class="loading-state"><div class="loading-spinner">\u23F3</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="session-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>';if(e.length===0)return'<p style="color: #999;">No session files with activity in the last 14 days.</p>';let o=be(e),n=Object.keys(o).sort(),{filteredFiles:s,zeroInteractionCount:i}=jn(e),r=s.reduce((c,b)=>c+Number(b.interactions||0),0),a=s.reduce((c,b)=>c+Number(b.tokens||0),0),l=s.reduce((c,b)=>c+St(b.contextReferences),0),u=Gn(s),p=Un(s);return`${Vn(e,o,n)}${Wn(s,e,r,a,l,u,i)}${Jn(p)}`}function Mo(e,t,o){return`
+  <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? "checked" : ""}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ""}</label>${unattributedCheckbox}</div>`;
+  }
+  function buildHierarchyBadgesHtml(sf) {
+    let html = "";
+    if (sf.parentInfo) {
+      const parentTitle = escapeHtml(sf.parentInfo.name.length > 30 ? sf.parentInfo.name.substring(0, 30) + "\u2026" : sf.parentInfo.name);
+      const linkAttr = sf.parentInfo.sessionFile ? ` href="#" class="session-hierarchy-badge hierarchy-parent session-file-link" data-file="${encodeURIComponent(sf.parentInfo.sessionFile)}"` : ` class="session-hierarchy-badge hierarchy-parent"`;
+      html += `<a${linkAttr} title="Parent session: ${escapeHtml(sf.parentInfo.name)}">\u2191 Parent: ${parentTitle}</a>`;
+    }
+    if (sf.totalChildCount && sf.totalChildCount > 0) {
+      const count = sf.totalChildCount;
+      const label = count === 1 ? "1 child session" : `${count} child sessions`;
+      html += `<span class="session-hierarchy-badge hierarchy-children" title="${label}">\u2193 ${count} ${count === 1 ? "Child" : "Children"}</span>`;
+    }
+    return html ? `<div class="session-hierarchy-badges">${html}</div>` : "";
+  }
+  function buildUnattributedBadge(sf) {
+    const unattributed = getUnattributedTokens(sf);
+    if (unattributed <= 1e3) {
+      return "";
+    }
+    const pct = Math.round(unattributed / (sf.tokens || 1) * 100);
+    return ` <span title="\u26A0\uFE0F ${unattributed.toLocaleString()} tokens (~${pct}%) not attributed to any model \u2014 debug log events without a model field" style="color:#f59e0b; cursor:help; font-size:0.9em;">\u26A0\uFE0F</span>`;
+  }
+  function buildSessionTableHtml(sortedFiles) {
+    const rows = sortedFiles.map((sf, idx) => {
+      const editorLabel = sf.editorName || sf.editorSource;
+      const isChild = !!sf.parentInfo;
+      const rawTitleHtml = sf.title ? `<a href="#" class="session-file-link" data-file="${encodeURIComponent(sf.file)}" title="${escapeHtml(sf.title)}">${escapeHtml(sf.title.length > 40 ? sf.title.substring(0, 40) + "..." : sf.title)}</a>` : `<a href="#" class="session-file-link empty-session-link" data-file="${encodeURIComponent(sf.file)}" title="Empty session">(Empty session)</a>`;
+      const titleHtml = isChild ? `<span class="child-title-indent">${rawTitleHtml}</span>` : rawTitleHtml;
+      const hierarchyBadges = buildHierarchyBadgesHtml(sf);
+      const repoLabel = sf.repository ? escapeHtml(getRepoDisplayName(sf.repository)) : sf.file.includes("session-store.db") ? '<span style="color: #888; font-style: italic;">No workspace</span>' : '<span style="color: #666;">\u2014</span>';
+      const repoTitle = sf.repository ? escapeHtml(sf.repository) : sf.file.includes("session-store.db") ? "Chat session \u2014 no workspace connected" : "No repository detected";
+      const isUnknownEditor = (sf.editorName || sf.editorSource || "Unknown") === "Unknown";
+      const rowClass = isChild ? ' class="child-session-row"' : "";
+      return `<tr${rowClass}><td>${idx + 1}</td><td><span class="${getEditorBadgeClass(editorLabel)}" title="${escapeHtml(sf.editorSource)}">${getEditorIcon(editorLabel)} ${escapeHtml(editorLabel)}</span></td><td class="session-title" title="${sf.title ? escapeHtml(sf.title) : "Empty session"}">${hierarchyBadges}${titleHtml}</td><td class="repository-cell" title="${repoTitle}">${repoLabel}</td><td>${formatFileSize(sf.size)}</td><td title="${Number(sf.tokens || 0).toLocaleString()} tokens">${formatTokenCount(sf.tokens)}${buildUnattributedBadge(sf)}</td><td>${sanitizeNumber(sf.interactions)}</td><td title="${escapeHtml(getContextRefsSummary(sf.contextReferences))}">${sanitizeNumber(getTotalContextRefs(sf.contextReferences))}</td><td>${formatDate(sf.lastInteraction)}</td><td><a href="#" class="view-formatted-link" data-file="${encodeURIComponent(sf.file)}" title="View formatted JSONL file">\u{1F4C4} View</a>${isUnknownEditor ? ` <a href="#" class="report-editor-link" data-path="${encodeURIComponent(sf.file)}" title="Report this unknown path so we can add editor support">\u{1F4E2} Report</a>` : ""}</td></tr>`;
+    }).join("");
+    return `<div class="table-container"><table class="session-table"><thead><tr><th>#</th><th>Editor</th><th>Title</th><th>Repository</th><th class="sortable" data-sort="size">Size${getSortIndicator("size")}</th><th class="sortable" data-sort="tokens">Tokens${getSortIndicator("tokens")}</th><th class="sortable" data-sort="interactions">Interactions${getSortIndicator("interactions")}</th><th class="sortable" data-sort="contextRefs">Context Refs${getSortIndicator("contextRefs")}</th><th class="sortable" data-sort="lastInteraction">Last Interaction${getSortIndicator("lastInteraction")}</th><th>Actions</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  }
+  function renderSessionTable(detailedFiles, isLoading2 = false) {
+    if (isLoading2) {
+      return `<div class="loading-state"><div class="loading-spinner">\u23F3</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="session-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>`;
+    }
+    if (detailedFiles.length === 0) {
+      return '<p style="color: #999;">No session files with activity in the last 14 days.</p>';
+    }
+    const editorStats = getEditorStats(detailedFiles);
+    const editors = Object.keys(editorStats).sort();
+    const { filteredFiles, zeroInteractionCount } = applySessionFilters(detailedFiles);
+    const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+    const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+    const totalContextRefs = filteredFiles.reduce((sum, sf) => sum + getTotalContextRefs(sf.contextReferences), 0);
+    const agg = aggregateContextRefs(filteredFiles);
+    const sortedFiles = sortSessionFiles(filteredFiles);
+    return `${buildEditorPanelsHtml(detailedFiles, editorStats, editors)}${buildSessionSummaryCardsHtml(filteredFiles, detailedFiles, totalInteractions, totalTokens, totalContextRefs, agg, zeroInteractionCount)}${buildSessionTableHtml(sortedFiles)}`;
+  }
+  function counterRow(key, label, value) {
+    return `
     <tr>
-      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${d(t)}</td>
+      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${escapeHtml(label)}</td>
       <td style="padding: 6px 8px 6px 0;">
-        <input type="number" class="debug-counter-input" data-key="${d(e)}" value="${o}" min="0" step="1"
+        <input type="number" class="debug-counter-input" data-key="${escapeHtml(key)}" value="${value}" min="0" step="1"
           style="width:70px; background: var(--vscode-input-background); color: var(--vscode-input-foreground); border: 1px solid var(--vscode-input-border); padding: 2px 6px; font-family: var(--vscode-editor-font-family, monospace);" />
       </td>
       <td style="padding: 6px 0;">
-        <button class="button secondary debug-counter-set" data-key="${d(e)}" style="padding: 2px 10px; font-size: 12px;">Set</button>
+        <button class="button secondary debug-counter-set" data-key="${escapeHtml(key)}" style="padding: 2px 10px; font-size: 12px;">Set</button>
       </td>
-    </tr>`}function Yn(e,t,o){let n=o?`\u2705 ${d(o)}`:"\u274C (not set)";return`
+    </tr>`;
+  }
+  function stringRow(key, label, value) {
+    const display = value ? `\u2705 ${escapeHtml(value)}` : "\u274C (not set)";
+    return `
     <tr>
-      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${d(t)}</td>
+      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${escapeHtml(label)}</td>
       <td style="padding: 6px 8px 6px 0;" colspan="2">
-        <span style="font-family: var(--vscode-editor-font-family, monospace);">${n}</span>
+        <span style="font-family: var(--vscode-editor-font-family, monospace);">${display}</span>
       </td>
-    </tr>`}function Xn(e,t,o){return`
+    </tr>`;
+  }
+  function flagRow(key, label, value) {
+    return `
     <tr>
-      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${d(t)}</td>
+      <td style="padding: 6px 12px 6px 0; color: var(--vscode-descriptionForeground); white-space: nowrap;">${escapeHtml(label)}</td>
       <td style="padding: 6px 8px 6px 0;">
-        <input type="checkbox" class="debug-flag-input" data-key="${d(e)}" ${o?"checked":""} />
-        <span style="margin-left:6px; font-family: var(--vscode-editor-font-family, monospace);">${o?"\u2705 true":"\u274C false"}</span>
+        <input type="checkbox" class="debug-flag-input" data-key="${escapeHtml(key)}" ${value ? "checked" : ""} />
+        <span style="margin-left:6px; font-family: var(--vscode-editor-font-family, monospace);">${value ? "\u2705 true" : "\u274C false"}</span>
       </td>
       <td style="padding: 6px 0;">
-        <button class="button secondary debug-flag-set" data-key="${d(e)}" style="padding: 2px 10px; font-size: 12px;">Set</button>
+        <button class="button secondary debug-flag-set" data-key="${escapeHtml(key)}" style="padding: 2px 10px; font-size: 12px;">Set</button>
       </td>
-    </tr>`}function Qn(e){let t=e??{openCount:0,unknownMcpOpenCount:0,fluencyBannerDismissed:!1,unknownMcpDismissedVersion:""};return`
+    </tr>`;
+  }
+  var SHARE_CARD_PERIOD_DAYS = { last7: 7, last14: 14, last30: 30, last90: 90 };
+  function filterFilesByShareCardPeriod(detailedFiles, period, now = /* @__PURE__ */ new Date()) {
+    const days = SHARE_CARD_PERIOD_DAYS[period];
+    if (days === void 0) {
+      return detailedFiles;
+    }
+    const cutoff = new Date(now);
+    cutoff.setDate(cutoff.getDate() - days);
+    return detailedFiles.filter((sf) => {
+      if (!sf.lastInteraction) {
+        return false;
+      }
+      const activity = new Date(sf.lastInteraction);
+      return !Number.isNaN(activity.getTime()) && activity >= cutoff && activity <= now;
+    });
+  }
+  function shareCardPeriodPhrase(period) {
+    return period === "allTime" ? "of all time" : `in the ${PERIOD_LABELS[period].toLowerCase()}`;
+  }
+  function buildShareSummaryText(editors, editorStats, totalSessions, totalInteractions, totalTokens, period) {
+    const editorList = editors.map((editor) => `${getEditorIcon(editor)} ${editor} (${editorStats[editor].count})`).join(", ");
+    return `My AI Coding Toolbox \u2014 ${editors.length} editor${editors.length === 1 ? "" : "s"} detected: ${editorList}. ${totalSessions} sessions, ${totalInteractions} interactions, ${formatTokenCount(totalTokens)} tokens ${shareCardPeriodPhrase(period)}. #AIEngineeringFluency`;
+  }
+  function renderShareCardTab(detailedFiles, isLoadingSessions = false) {
+    if (isLoadingSessions) {
+      return `<div id="tab-share" class="tab-content">
+      <div class="info-box">
+        <div class="info-box-title">\u{1F4F8} Share Card</div>
+        <div>A snapshot of your AI coding toolbox \u2014 screenshot this card to share your editor mix on social media.</div>
+      </div>
+      <div class="loading-state"><div class="loading-spinner">\u23F3</div><div class="loading-text">Loading session files...</div><div class="loading-subtext" id="share-loading-subtext">Analyzing up to 500 files from the last 14 days</div></div>
+    </div>`;
+    }
+    if (detailedFiles.length === 0) {
+      return `<div id="tab-share" class="tab-content">
+      <div class="info-box">
+        <div class="info-box-title">\u{1F4F8} Share Card</div>
+        <div>No session activity found yet. Once you have some AI coding sessions, a shareable summary card will appear here.</div>
+      </div>
+    </div>`;
+    }
+    const period = currentShareCardPeriod;
+    const filteredFiles = filterFilesByShareCardPeriod(detailedFiles, period);
+    const editorStats = getEditorStats(filteredFiles);
+    const editors = Object.keys(editorStats).sort((a3, b3) => editorStats[b3].count - editorStats[a3].count);
+    const totalSessions = filteredFiles.length;
+    const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+    const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+    const pills = editors.map((editor) => `<div class="share-pill"><span>${getEditorIcon(editor)}</span><span>${escapeHtml(editor)}</span><span class="share-pill-count">${editorStats[editor].count}</span></div>`).join("");
+    const emptyPeriodNotice = totalSessions === 0 ? `<div style="margin-top: 8px; font-size: 12px; color: var(--text-muted);">No session activity in this period. Try a wider range.</div>` : "";
+    return `<div id="tab-share" class="tab-content">
+    <div class="info-box">
+      <div class="info-box-title">\u{1F4F8} Share Card</div>
+      <div>A snapshot of your AI coding toolbox \u2014 screenshot this card to share your editor mix on social media.</div>
+    </div>
+    <div class="share-card-controls" style="margin-bottom: 12px; display: flex; align-items: center; gap: 8px;">
+      <span style="font-size: 12px; color: var(--text-muted);">Period:</span>
+      <span id="share-card-period-selector"></span>
+    </div>
+    <div class="share-card">
+      <div class="share-badge">\u{1F916} AI Engineering Fluency</div>
+      <div class="share-title">My AI Coding Toolbox</div>
+      <div class="share-subtitle">${escapeHtml(PERIOD_LABELS[period])} \xB7 ${editors.length} editor${editors.length === 1 ? "" : "s"} detected</div>
+      <div class="share-pills">${pills}</div>
+      <div class="share-stats">
+        <div class="share-stat"><div class="share-stat-value">${totalSessions}</div><div class="share-stat-label">Sessions</div></div>
+        <div class="share-stat"><div class="share-stat-value">${totalInteractions}</div><div class="share-stat-label">Interactions</div></div>
+        <div class="share-stat"><div class="share-stat-value" title="${totalTokens.toLocaleString()} tokens">${formatTokenCount(totalTokens)}</div><div class="share-stat-label">Tokens</div></div>
+        <div class="share-stat"><div class="share-stat-value">${editors.length}</div><div class="share-stat-label">Editors</div></div>
+      </div>
+    </div>
+    ${emptyPeriodNotice}
+    <div class="button-group" style="margin-top: 12px;">
+      <button class="button secondary" id="btn-copy-share-summary"><span>\u{1F4CB}</span><span>Copy Summary Text</span></button>
+    </div>
+    <div class="share-buttons" style="margin-top: 12px;">
+      <button id="btn-share-card-linkedin" class="share-btn share-btn-linkedin"><span class="share-btn-icon">\u{1F4BC}</span><span>Share on LinkedIn</span></button>
+      <button id="btn-share-card-bluesky" class="share-btn share-btn-bluesky"><span class="share-btn-icon">\u{1F98B}</span><span>Share on Bluesky</span></button>
+      <button id="btn-share-card-mastodon" class="share-btn share-btn-mastodon"><span class="share-btn-icon">\u{1F418}</span><span>Share on Mastodon</span></button>
+    </div>
+  </div>`;
+  }
+  function renderDebugTab(counters) {
+    const c4 = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: "" };
+    return `
     <div id="tab-debug" class="tab-content">
       <div class="info-box">
         <div class="info-box-title">\u{1F41B} Debug \u2014 Global State Counters</div>
@@ -1531,19 +3904,27 @@ The view will automatically update when data is ready.`,m=acquireVsCodeApi(),To=
       <div class="cache-details">
         <h4>Notification Counters</h4>
         <table><tbody>
-          ${Mo("extension.openCount","extension.openCount (fluency banner threshold: 5)",t.openCount)}
-          ${Mo("extension.unknownMcpOpenCount","extension.unknownMcpOpenCount (unknown MCP threshold: 8)",t.unknownMcpOpenCount)}
+          ${counterRow("extension.openCount", "extension.openCount (fluency banner threshold: 5)", c4.openCount)}
+          ${counterRow("extension.unknownMcpOpenCount", "extension.unknownMcpOpenCount (unknown MCP threshold: 8)", c4.unknownMcpOpenCount)}
         </tbody></table>
         <h4 style="margin-top:16px;">Dismissed Flags</h4>
         <table><tbody>
-          ${Xn("news.fluencyScoreBanner.v1.dismissed","news.fluencyScoreBanner.v1.dismissed",t.fluencyBannerDismissed)}
-          ${Yn("news.unknownMcpTools.dismissedVersion","news.unknownMcpTools.dismissedVersion",t.unknownMcpDismissedVersion)}
+          ${flagRow("news.fluencyScoreBanner.v1.dismissed", "news.fluencyScoreBanner.v1.dismissed", c4.fluencyBannerDismissed)}
+          ${stringRow("news.unknownMcpTools.dismissedVersion", "news.unknownMcpTools.dismissedVersion", c4.unknownMcpDismissedVersion)}
         </tbody></table>
         <div style="margin-top: 16px;">
           <button class="button secondary" id="btn-reset-debug-counters"><span>\u{1F504}</span><span>Reset All Counters &amp; Dismissed Flags</span></button>
         </div>
       </div>
-    </div>`}function ge(e){let t=e?.authenticated||!1,o=e?.username||"",n=t?"#2d6a4f":"#666";return`
+    </div>`;
+  }
+  function renderGitHubAuthPanel(githubAuth) {
+    const authenticated = githubAuth?.authenticated || false;
+    const username = githubAuth?.username || "";
+    const statusColor = authenticated ? "#2d6a4f" : "#666";
+    const statusIcon = authenticated ? "\u2705" : "\u26AA";
+    const statusText = authenticated ? "Authenticated" : "Not Authenticated";
+    return `
 <div class="info-box">
   <div class="info-box-title">\u{1F511} GitHub Authentication</div>
   <div>
@@ -1552,19 +3933,19 @@ The view will automatically update when data is ready.`,m=acquireVsCodeApi(),To=
 </div>
 
 <div class="summary-cards">
-  <div class="summary-card" style="border-left: 4px solid ${n};">
-    <div class="summary-label">${t?"\u2705":"\u26AA"} Status</div>
-    <div class="summary-value" style="font-size: 16px; color: ${n};">${t?"Authenticated":"Not Authenticated"}</div>
+  <div class="summary-card" style="border-left: 4px solid ${statusColor};">
+    <div class="summary-label">${statusIcon} Status</div>
+    <div class="summary-value" style="font-size: 16px; color: ${statusColor};">${statusText}</div>
   </div>
-  ${t?`
+  ${authenticated ? `
   <div class="summary-card">
     <div class="summary-label">\u{1F464} Logged in as</div>
-    <div class="summary-value" style="font-size: 16px;">${d(o)}</div>
+    <div class="summary-value" style="font-size: 16px;">${escapeHtml(username)}</div>
   </div>
-  `:""}
+  ` : ""}
 </div>
 
-${t?`
+${authenticated ? `
   <div style="margin-top: 24px;">
     <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
       You are currently authenticated with GitHub. This enables future features such as:
@@ -1575,7 +3956,7 @@ ${t?`
       <li>Advanced analytics and insights</li>
     </ul>
   </div>
-`:`
+` : `
   <div style="margin-top: 24px;">
     <p style="color: #999; font-size: 12px; margin-bottom: 16px;">
       Sign in with your GitHub account to unlock future features. This uses VS Code's built-in authentication.
@@ -1584,48 +3965,82 @@ ${t?`
 `}
 
 <div class="button-group">
-  ${t?`
+  ${authenticated ? `
     <button class="button secondary" id="btn-sign-out-github">
       <span>\u{1F50C}</span>
       <span>Disconnect GitHub</span>
     </button>
-  `:`
+  ` : `
     <button class="button" id="btn-authenticate-github">
       <span>\u{1F511}</span>
       <span>Authenticate with GitHub</span>
     </button>
   `}
 </div>
-  `}function Ho(e,t){return e?{color:"#2d6a4f",icon:"\u2705",text:"Configured & Enabled"}:t?{color:"#d97706",icon:"\u26A0\uFE0F",text:"Enabled but Not Configured"}:{color:"#666",icon:"\u26AA",text:"Disabled"}}function ts(e){return e.isConfigured?`<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4CA} Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Storage Account</td><td>${d(e.storageAccount)}</td></tr><tr><td style="font-weight: 600;">Subscription ID</td><td>${d(e.subscriptionId)}</td></tr><tr><td style="font-weight: 600;">Resource Group</td><td>${d(e.resourceGroup)}</td></tr><tr><td style="font-weight: 600;">Aggregation Table</td><td>${d(e.aggTable)}</td></tr><tr><td style="font-weight: 600;">Events Table</td><td>${d(e.eventsTable)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4C8} Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">\u{1F4BB} Unique Devices</div><div class="summary-value">${d(String(e.deviceCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Based on workspace IDs</div></div><div class="summary-card"><div class="summary-label">\u{1F4C1} Total Sessions</div><div class="summary-value">${d(String(e.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">\u2601\uFE0F Cloud Records</div><div class="summary-value">${e.recordCount!==null?d(String(e.recordCount)):"\u2014"}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Azure Storage records</div></div><div class="summary-card"><div class="summary-label">\u{1F504} Sync Status</div><div class="summary-value" style="font-size: 14px;">${e.lastSyncTime?ft(e.lastSyncTime):"Never"}</div></div></div></div>`:'<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F680} Get Started with Azure Storage</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">To enable cloud synchronization, configure an Azure Storage account via the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Azure subscription with Storage Account access</li><li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li><li>VS Code signed in with your Azure account (for Entra ID auth)</li></ul></div>'}function es(e){let{color:t,icon:o,text:n}=Ho(e.isConfigured,e.enabled);return`<div class="info-box"><div class="info-box-title">\u2601\uFE0F Azure Storage Backend</div><div>Sync your token usage data to Azure Storage Tables for team-wide reporting and multi-device access.</div></div>
-    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${t};"><div class="summary-label">${o} Status</div><div class="summary-value" style="font-size: 16px; color: ${t};">${n}</div></div><div class="summary-card"><div class="summary-label">\u{1F510} Auth Mode</div><div class="summary-value" style="font-size: 16px;">${e.authMode==="entraId"?"Entra ID":"Shared Key"}</div></div><div class="summary-card"><div class="summary-label">\u{1F465} Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${d(e.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">\u{1F552} Last Sync</div><div class="summary-value" style="font-size: 14px;">${e.lastSyncTime?xt(e.lastSyncTime):"Never"}</div></div></div>
-    ${ts(e)}
-    <div class="button-group"><button class="button" id="btn-configure-backend"><span>${e.isConfigured?"\u2699\uFE0F":"\u{1F527}"}</span><span>${e.isConfigured?"Manage Backend":"Configure Backend"}</span></button></div>`}function os(e,t){let o=t?"#d97706":e?.authenticated?"#2d6a4f":"#666",n=t?"\u26A0\uFE0F":e?.authenticated?"\u2705":"\u26AA",s=t?"Not Authenticated":e?.authenticated?d(e.username||"Authenticated"):"Not Authenticated";return`<div class="summary-card" style="border-left: 4px solid ${o};"><div class="summary-label">${n} GitHub Auth</div><div class="summary-value" style="font-size: 14px; color: ${o};">${s}</div></div>`}function ns(e){return e.isConfigured?`<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4CA} Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Server URL</td><td>${d(e.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4C8} Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">\u{1F4C1} Total Sessions</div><div class="summary-value">${d(String(e.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">\u{1F504} Last Sync</div><div class="summary-value" style="font-size: 14px;">${e.lastSyncTime?ft(e.lastSyncTime):"Never"}</div></div></div></div>`:`<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F680} Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`}function ss(e,t){let{color:o,icon:n,text:s}=Ho(e.isConfigured,e.enabled),i=e.isConfigured&&!t?.authenticated;return`<div class="info-box"><div class="info-box-title">\u{1F5A5}\uFE0F Team Server Backend</div><div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div></div>
-    ${i?'<button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub"><span style="font-size: 18px; flex-shrink: 0;">\u26A0\uFE0F</span><div style="flex: 1;"><div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div><div style="color: #d4a017; font-size: 12px;">Team server sync will not run until you sign in to GitHub. <strong style="color: #fbbf24;">Click here to sign in.</strong></div></div><span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">\u2192</span></button>':""}
-    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${o};"><div class="summary-label">${n} Status</div><div class="summary-value" style="font-size: 16px; color: ${o};">${s}</div></div>${os(t,i)}<div class="summary-card"><div class="summary-label">\u{1F465} Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${d(e.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">\u{1F552} Last Sync</div><div class="summary-value" style="font-size: 14px;">${e.lastSyncTime?xt(e.lastSyncTime):"Never"}</div></div></div>
-    ${ns(e)}
-    <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${e.isConfigured?"\u2699\uFE0F":"\u{1F527}"}</span><span>${e.isConfigured?"Manage Backend":"Configure Backend"}</span></button></div>`}function he(e,t){return e?`
+  `;
+  }
+  function getBackendStatus(isConfigured, enabled) {
+    return isConfigured ? { color: "#2d6a4f", icon: "\u2705", text: "Configured & Enabled" } : enabled ? { color: "#d97706", icon: "\u26A0\uFE0F", text: "Enabled but Not Configured" } : { color: "#666", icon: "\u26AA", text: "Disabled" };
+  }
+  function renderAzureDetailsSection(azureInfo) {
+    if (!azureInfo.isConfigured) {
+      return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F680} Get Started with Azure Storage</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">To enable cloud synchronization, configure an Azure Storage account via the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Azure subscription with Storage Account access</li><li>Appropriate permissions (Storage Table Data Contributor or Storage Account Key)</li><li>VS Code signed in with your Azure account (for Entra ID auth)</li></ul></div>`;
+    }
+    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4CA} Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Storage Account</td><td>${escapeHtml(azureInfo.storageAccount)}</td></tr><tr><td style="font-weight: 600;">Subscription ID</td><td>${escapeHtml(azureInfo.subscriptionId)}</td></tr><tr><td style="font-weight: 600;">Resource Group</td><td>${escapeHtml(azureInfo.resourceGroup)}</td></tr><tr><td style="font-weight: 600;">Aggregation Table</td><td>${escapeHtml(azureInfo.aggTable)}</td></tr><tr><td style="font-weight: 600;">Events Table</td><td>${escapeHtml(azureInfo.eventsTable)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4C8} Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">\u{1F4BB} Unique Devices</div><div class="summary-value">${escapeHtml(String(azureInfo.deviceCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Based on workspace IDs</div></div><div class="summary-card"><div class="summary-label">\u{1F4C1} Total Sessions</div><div class="summary-value">${escapeHtml(String(azureInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">\u2601\uFE0F Cloud Records</div><div class="summary-value">${azureInfo.recordCount !== null ? escapeHtml(String(azureInfo.recordCount)) : "\u2014"}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Azure Storage records</div></div><div class="summary-card"><div class="summary-label">\u{1F504} Sync Status</div><div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? formatDate(azureInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
+  }
+  function renderAzureStoragePanel(azureInfo) {
+    const { color, icon, text } = getBackendStatus(azureInfo.isConfigured, azureInfo.enabled);
+    return `<div class="info-box"><div class="info-box-title">\u2601\uFE0F Azure Storage Backend</div><div>Sync your token usage data to Azure Storage Tables for team-wide reporting and multi-device access.</div></div>
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div><div class="summary-card"><div class="summary-label">\u{1F510} Auth Mode</div><div class="summary-value" style="font-size: 16px;">${azureInfo.authMode === "entraId" ? "Entra ID" : "Shared Key"}</div></div><div class="summary-card"><div class="summary-label">\u{1F465} Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(azureInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">\u{1F552} Last Sync</div><div class="summary-value" style="font-size: 14px;">${azureInfo.lastSyncTime ? getTimeSince(azureInfo.lastSyncTime) : "Never"}</div></div></div>
+    ${renderAzureDetailsSection(azureInfo)}
+    <div class="button-group"><button class="button" id="btn-configure-backend"><span>${azureInfo.isConfigured ? "\u2699\uFE0F" : "\u{1F527}"}</span><span>${azureInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
+  }
+  function renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated) {
+    const authColor = githubNotAuthenticated ? "#d97706" : githubAuth?.authenticated ? "#2d6a4f" : "#666";
+    const authIcon = githubNotAuthenticated ? "\u26A0\uFE0F" : githubAuth?.authenticated ? "\u2705" : "\u26AA";
+    const authValue = githubNotAuthenticated ? "Not Authenticated" : githubAuth?.authenticated ? escapeHtml(githubAuth.username || "Authenticated") : "Not Authenticated";
+    return `<div class="summary-card" style="border-left: 4px solid ${authColor};"><div class="summary-label">${authIcon} GitHub Auth</div><div class="summary-value" style="font-size: 14px; color: ${authColor};">${authValue}</div></div>`;
+  }
+  function renderTeamServerDetailsSection(teamInfo) {
+    if (!teamInfo.isConfigured) {
+      return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F680} Get Started with Team Server</h4><p style="color: #999; font-size: 12px; margin-bottom: 16px;">Deploy the sharing server and configure its URL in the Backend configuration panel.</p><ul style="margin: 8px 0 16px 20px; color: #999; font-size: 12px;"><li>Deploy the sharing server (see the <code>sharing-server/</code> folder in the repository)</li><li>Enter the server's base URL in the Backend configuration panel</li><li>Data syncs automatically every 5 minutes once configured</li></ul></div>`;
+    }
+    return `<div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4CA} Configuration Details</h4><table class="session-table"><tbody><tr><td style="font-weight: 600; width: 200px;">Server URL</td><td>${escapeHtml(teamInfo.endpointUrl)}</td></tr></tbody></table></div><div style="margin-top: 24px;"><h4 style="color: #fff; font-size: 14px; margin-bottom: 12px;">\u{1F4C8} Local Session Statistics</h4><div class="summary-cards"><div class="summary-card"><div class="summary-label">\u{1F4C1} Total Sessions</div><div class="summary-value">${escapeHtml(String(teamInfo.sessionCount))}</div><div style="font-size: 11px; color: #999; margin-top: 4px;">Local session files</div></div><div class="summary-card"><div class="summary-label">\u{1F504} Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? formatDate(teamInfo.lastSyncTime) : "Never"}</div></div></div></div>`;
+  }
+  function renderTeamServerPanel(teamInfo, githubAuth) {
+    const { color, icon, text } = getBackendStatus(teamInfo.isConfigured, teamInfo.enabled);
+    const githubNotAuthenticated = teamInfo.isConfigured && !githubAuth?.authenticated;
+    const authWarning = githubNotAuthenticated ? `<button id="btn-team-server-auth-warning" style="width: 100%; margin-bottom: 16px; padding: 12px 16px; background: rgba(217, 119, 6, 0.15); border: 1px solid #d97706; border-radius: 6px; display: flex; gap: 10px; align-items: center; cursor: pointer; text-align: left;" title="Click to sign in to GitHub"><span style="font-size: 18px; flex-shrink: 0;">\u26A0\uFE0F</span><div style="flex: 1;"><div style="color: #fbbf24; font-weight: 600; font-size: 13px; margin-bottom: 4px;">GitHub Authentication Required</div><div style="color: #d4a017; font-size: 12px;">Team server sync will not run until you sign in to GitHub. <strong style="color: #fbbf24;">Click here to sign in.</strong></div></div><span style="color: #fbbf24; font-size: 18px; flex-shrink: 0;">\u2192</span></button>` : "";
+    return `<div class="info-box"><div class="info-box-title">\u{1F5A5}\uFE0F Team Server Backend</div><div>Sync your token usage data to a self-hosted team server for team-wide reporting.</div></div>
+    ${authWarning}
+    <div class="summary-cards"><div class="summary-card" style="border-left: 4px solid ${color};"><div class="summary-label">${icon} Status</div><div class="summary-value" style="font-size: 16px; color: ${color};">${text}</div></div>${renderTeamServerGithubAuthCard(githubAuth, githubNotAuthenticated)}<div class="summary-card"><div class="summary-label">\u{1F465} Sharing Profile</div><div class="summary-value" style="font-size: 14px;">${escapeHtml(teamInfo.sharingProfile)}</div></div><div class="summary-card"><div class="summary-label">\u{1F552} Last Sync</div><div class="summary-value" style="font-size: 14px;">${teamInfo.lastSyncTime ? getTimeSince(teamInfo.lastSyncTime) : "Never"}</div></div></div>
+    ${renderTeamServerDetailsSection(teamInfo)}
+    <div class="button-group"><button class="button" id="btn-configure-backend-team"><span>${teamInfo.isConfigured ? "\u2699\uFE0F" : "\u{1F527}"}</span><span>${teamInfo.isConfigured ? "Manage Backend" : "Configure Backend"}</span></button></div>`;
+  }
+  function renderBackendStoragePanel(backendInfo, githubAuth) {
+    if (!backendInfo) {
+      return `
+      <div class="info-box">
+        <div class="info-box-title">\u2601\uFE0F Backend Storage</div>
+        <div>\u23F3 Loading backend storage status...</div>
+      </div>
+    `;
+    }
+    return `
     <div class="subtab-bar">
       <button class="subtab active" data-subtab="backend-azure">\u2601\uFE0F Azure Storage</button>
       <button class="subtab" data-subtab="backend-teamserver">\u{1F5A5}\uFE0F Team Server</button>
     </div>
     <div id="subtab-backend-azure" class="subtab-content active">
-      ${es(e.azure)}
+      ${renderAzureStoragePanel(backendInfo.azure)}
     </div>
     <div id="subtab-backend-teamserver" class="subtab-content">
-      ${ss(e.teamServer,t)}
+      ${renderTeamServerPanel(backendInfo.teamServer, githubAuth)}
     </div>
-  `:`
-      <div class="info-box">
-        <div class="info-box-title">\u2601\uFE0F Backend Storage</div>
-        <div>Backend storage information is not available. This may be a temporary issue.</div>
-        <div class="button-group" style="margin-top: 12px;">
-          <button class="button" id="btn-configure-backend">
-            <span>\u{1F527}</span>
-            <span>Configure Backend</span>
-          </button>
-        </div>
-      </div>
-    `}function is(){return`
+  `;
+  }
+  function renderFolderAnalyzerTab() {
+    return `
     <div class="info-box">
       <div class="info-box-title">\u{1F52C} Path Analyzer</div>
       <div>
@@ -1667,50 +4082,73 @@ ${t?`
       </div>
     </div>
     <div id="folder-analysis-results"></div>
-  `}function rs(e,t,o){let n=e.interactions>0||e.tokens>0,s=e.file.startsWith(o)?e.file.slice(o.length).replace(/^[/\\]/,""):Hn(e.file),i=Number(e.interactions),r=i>0?`<strong>${d(String(i))}</strong>`:'<span style="color: var(--text-muted);">0</span>',a=Number(e.tokens),l=a>0?`<strong title="${d(String(a.toLocaleString()))} tokens">${d(String(C(a)))}</strong>`:'<span style="color: var(--text-muted);">0</span>';return`
-    <tr style="${n?"":"opacity: 0.45;"}">
-      <td>${t+1}</td>
-      <td title="${d(e.file)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${d(s)}</td>
-      <td>${d(String(zt(e.size)))}</td>
-      <td>${r}</td>
-      <td>${l}</td>
-      <td>${ft(e.modified)}</td>
-    </tr>`}function as(e,t,o,n,s){let i=e.filter(b=>b.interactions>0||b.tokens>0),r=e.reduce((b,h)=>b+Number(h.interactions),0),a=e.reduce((b,h)=>b+Number(h.tokens),0),l=[...e].sort((b,h)=>{let x=b.interactions*1e3+b.tokens;return h.interactions*1e3+h.tokens-x}),u=n?`<div class="info-box" style="margin-bottom: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);">
+  `;
+  }
+  function buildFolderFileTableRow(f3, idx, folderPath) {
+    const hasData = f3.interactions > 0 || f3.tokens > 0;
+    const rel = f3.file.startsWith(folderPath) ? f3.file.slice(folderPath.length).replace(/^[/\\]/, "") : getFileName(f3.file);
+    const safeInteractions = Number(f3.interactions);
+    const interactionsCell = safeInteractions > 0 ? `<strong>${escapeHtml(String(safeInteractions))}</strong>` : `<span style="color: var(--text-muted);">0</span>`;
+    const safeTokens = Number(f3.tokens);
+    const tokensCell = safeTokens > 0 ? `<strong title="${escapeHtml(String(safeTokens.toLocaleString()))} tokens">${escapeHtml(String(formatTokenCount(safeTokens)))}</strong>` : `<span style="color: var(--text-muted);">0</span>`;
+    return `
+    <tr style="${hasData ? "" : "opacity: 0.45;"}">
+      <td>${idx + 1}</td>
+      <td title="${escapeHtml(f3.file)}" style="font-family: var(--vscode-editor-font-family, monospace); font-size: 11px; max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">${escapeHtml(rel)}</td>
+      <td>${escapeHtml(String(formatFileSize(f3.size)))}</td>
+      <td>${interactionsCell}</td>
+      <td>${tokensCell}</td>
+      <td>${formatDate(f3.modified)}</td>
+    </tr>`;
+  }
+  function renderFolderAnalysisResults(files, totalScanned, parseErrors, truncated, folderPath) {
+    const sessionFiles = files.filter((f3) => f3.interactions > 0 || f3.tokens > 0);
+    const totalInteractions = files.reduce((sum, f3) => sum + Number(f3.interactions), 0);
+    const totalTokens = files.reduce((sum, f3) => sum + Number(f3.tokens), 0);
+    const sorted = [...files].sort((a3, b3) => {
+      const aScore = a3.interactions * 1e3 + a3.tokens;
+      const bScore = b3.interactions * 1e3 + b3.tokens;
+      return bScore - aScore;
+    });
+    const truncatedWarning = truncated ? `<div class="info-box" style="margin-bottom: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);">
         <div>\u26A0\uFE0F Scan limit reached (500 files). Results may be incomplete. Try a more specific subfolder.</div>
-      </div>`:"",p=`
+      </div>` : "";
+    const emptyState = `
     <div style="padding: 32px; text-align: center; color: var(--text-muted);">
       <div style="font-size: 36px; margin-bottom: 12px;">\u{1F4ED}</div>
       <div style="font-size: 14px;">No matching files found in this folder.</div>
       <div style="font-size: 12px; margin-top: 8px;">Try a different folder path or tool type.</div>
-    </div>`,c=l.map((b,h)=>rs(b,h,s)).join("");return`
+    </div>`;
+    const tableRows = sorted.map((f3, idx) => buildFolderFileTableRow(f3, idx, folderPath)).join("");
+    return `
     <div class="section" style="margin-top: 0;">
       <div class="section-title"><span class="codicon codicon-graph"></span><span>Analysis Results</span></div>
-      ${u}
+      ${truncatedWarning}
       <div class="summary-cards">
         <div class="summary-card">
           <div class="summary-label">\u{1F4C4} Files Scanned</div>
-          <div class="summary-value">${d(String(t))}${n?"+":""}</div>
+          <div class="summary-value">${escapeHtml(String(totalScanned))}${truncated ? "+" : ""}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">\u2705 With Sessions</div>
-          <div class="summary-value">${i.length}</div>
-          <div style="font-size: 11px; color: var(--text-muted);">${e.length-i.length} empty / unknown</div>
+          <div class="summary-value">${sessionFiles.length}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${files.length - sessionFiles.length} empty / unknown</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">\u{1F4AC} Interactions</div>
-          <div class="summary-value">${d(String(r))}</div>
+          <div class="summary-value">${escapeHtml(String(totalInteractions))}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">\u{1FA99} Tokens</div>
-          <div class="summary-value" title="${d(String(a.toLocaleString()))} tokens">${d(String(C(a)))}</div>
+          <div class="summary-value" title="${escapeHtml(String(totalTokens.toLocaleString()))} tokens">${escapeHtml(String(formatTokenCount(totalTokens)))}</div>
         </div>
-        ${o>0?`
+        ${parseErrors > 0 ? `
         <div class="summary-card" style="border-left: 3px solid #d97706;">
           <div class="summary-label">\u26A0\uFE0F Unreadable</div>
-          <div class="summary-value" style="color: #d97706;">${d(String(o))}</div>
-        </div>`:""}
+          <div class="summary-value" style="color: #d97706;">${escapeHtml(String(parseErrors))}</div>
+        </div>` : ""}
       </div>
-      ${e.length===0?p:`
+      ${files.length === 0 ? emptyState : `
         <div class="table-container" style="margin-top: 12px; max-height: 420px;">
           <table class="session-table">
             <thead>
@@ -1723,10 +4161,33 @@ ${t?`
                 <th>Last Modified</th>
               </tr>
             </thead>
-            <tbody>${c}</tbody>
+            <tbody>${tableRows}</tbody>
           </table>
         </div>`}
-    </div>`}var ls=["allTime","lastMonth","currentMonth","thisWeek","today"],ds={today:"today",thisWeek:"week",currentMonth:"month",lastMonth:"lastMonth",allTime:"all",yesterday:"yesterday"},cs={today:"today",week:"thisWeek",month:"currentMonth",lastMonth:"lastMonth",all:"allTime",yesterday:"yesterday"};function us(e,t=!1){let o=be(e),n=Object.keys(o).sort().map(i=>`<option value="${d(i)}">${d(M(i))} ${d(i)} (${o[i].count})</option>`).join("");return`
+    </div>`;
+  }
+  var MODEL_USAGE_PERIOD_ORDER = ["allTime", "lastMonth", "currentMonth", "thisWeek", "today"];
+  var MODEL_USAGE_PERIOD_TO_TIME_RANGE = {
+    today: "today",
+    thisWeek: "week",
+    currentMonth: "month",
+    lastMonth: "lastMonth",
+    allTime: "all",
+    yesterday: "yesterday"
+  };
+  var MODEL_USAGE_TIME_RANGE_TO_PERIOD = {
+    today: "today",
+    week: "thisWeek",
+    month: "currentMonth",
+    lastMonth: "lastMonth",
+    all: "allTime",
+    yesterday: "yesterday"
+  };
+  function renderModelUsageTab(detailedFiles, isLoadingSessions = false) {
+    const editorStats = getEditorStats(detailedFiles);
+    const editorOptions = Object.keys(editorStats).sort().map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`).join("");
+    const statusText = isLoadingSessions ? "\u23F3 Loading sessions\u2026" : "";
+    return `
     <div class="info-box">
       <div class="info-box-title">\u{1F9EE} Model Usage Breakdown</div>
       <div>
@@ -1739,28 +4200,63 @@ ${t?`
     <div class="section">
       <div class="section-title">\u{1F3AF} Select Editor &amp; Time Range</div>
       <div class="folder-input-row">
-        <select id="model-usage-editor-select" class="tool-type-select" ${t?"disabled":""}>
+        <select id="model-usage-editor-select" class="tool-type-select" ${isLoadingSessions ? "disabled" : ""}>
           <option value="all">\u{1F310} All Editors</option>
-          ${n}
+          ${editorOptions}
         </select>
         <span id="model-usage-time-selector"></span>
-        <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${d(t?"\u23F3 Loading sessions\u2026":"")}</span>
+        <span id="model-usage-status" style="font-size: 12px; color: var(--text-muted);">${escapeHtml(statusText)}</span>
       </div>
     </div>
     <div id="model-usage-results"></div>
-  `}function ve(e=!1){let t=document.getElementById("model-usage-time-selector");if(!t)return;t.replaceChildren();let o=cs[Nt]??"allTime",{select:n}=Le({id:"model-usage-time-select",selected:o,periods:ls,extraOptions:[{value:"yesterday",label:"Yesterday"}],label:"",onChange:s=>{let i=ds[s];i&&(Nt=i,Ft())}});n.disabled=e,t.append(n)}function ps(e,t){return`
+  `;
+  }
+  function renderModelUsageTimeSelector(disabled = false) {
+    const wrapper = document.getElementById("model-usage-time-selector");
+    if (!wrapper) {
+      return;
+    }
+    wrapper.replaceChildren();
+    const selectedPeriod = MODEL_USAGE_TIME_RANGE_TO_PERIOD[currentModelUsageTimeRange] ?? "allTime";
+    const { select } = createPeriodSelector({
+      id: "model-usage-time-select",
+      selected: selectedPeriod,
+      periods: MODEL_USAGE_PERIOD_ORDER,
+      extraOptions: [{ value: "yesterday", label: "Yesterday" }],
+      label: "",
+      onChange: (value) => {
+        const timeRange = MODEL_USAGE_PERIOD_TO_TIME_RANGE[value];
+        if (!timeRange) {
+          return;
+        }
+        currentModelUsageTimeRange = timeRange;
+        triggerModelUsageAnalysis();
+      }
+    });
+    select.disabled = disabled;
+    wrapper.append(select);
+  }
+  function buildModelUsageTableRow(row, showCache1h) {
+    return `
     <tr>
-      <td>${d(e.model)}</td>
-      <td title="${e.sessionCount} session(s)">${e.sessionCount.toLocaleString()}</td>
-      <td title="${e.inputTokens.toLocaleString()} tokens">${C(e.inputTokens)}</td>
-      <td title="${e.outputTokens.toLocaleString()} tokens">${C(e.outputTokens)}</td>
-      <td title="${e.cacheCreationTokens.toLocaleString()} tokens">${C(e.cacheCreationTokens)}</td>
-      ${t?`<td title="${e.cacheCreation1hTokens.toLocaleString()} tokens">${C(e.cacheCreation1hTokens)}</td>`:""}
-      <td title="${e.cachedReadTokens.toLocaleString()} tokens">${C(e.cachedReadTokens)}</td>
-      <td>$${e.estimatedCost.toFixed(2)}</td>
-    </tr>`}function Lo(e,t){let o=e-t;return o<=0?"":`
+      <td>${escapeHtml(row.model)}</td>
+      <td title="${row.sessionCount} session(s)">${row.sessionCount.toLocaleString()}</td>
+      <td title="${row.inputTokens.toLocaleString()} tokens">${formatTokenCount(row.inputTokens)}</td>
+      <td title="${row.outputTokens.toLocaleString()} tokens">${formatTokenCount(row.outputTokens)}</td>
+      <td title="${row.cacheCreationTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreationTokens)}</td>
+      ${showCache1h ? `<td title="${row.cacheCreation1hTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreation1hTokens)}</td>` : ""}
+      <td title="${row.cachedReadTokens.toLocaleString()} tokens">${formatTokenCount(row.cachedReadTokens)}</td>
+      <td>$${row.estimatedCost.toFixed(2)}</td>
+    </tr>`;
+  }
+  function buildModelUsageExplanation(fileCount, filesWithUsage) {
+    const missing = fileCount - filesWithUsage;
+    if (missing <= 0) {
+      return "";
+    }
+    return `
     <div class="info-box" style="margin-top: 12px;">
-      <div class="info-box-title">\u2139\uFE0F ${o} session(s) have no per-model data</div>
+      <div class="info-box-title">\u2139\uFE0F ${missing} session(s) have no per-model data</div>
       <div>
         This is often expected, not a bug. Common causes: chat-only sessions stored in a
         database with no model/token columns (e.g. Copilot CLI's session-store.db), older
@@ -1768,30 +4264,48 @@ ${t?`
         attribution, or sessions that never made a model-backed request (e.g. empty/aborted
         chats).
       </div>
-    </div>`}var bs={all:"All Time",lastMonth:"Last Month",month:"Current Month",week:"This Week",today:"Today",yesterday:"Yesterday"};function ms(e,t,o,n,s,i=!0,r="all"){let a=e==="all"?"All Editors":e,l=bs[r]||"All Time",u=r==="all"?a:`${a} \u2014 ${l}`;if(n.length===0)return`
+    </div>`;
+  }
+  var TIME_RANGE_LABELS = {
+    all: "All Time",
+    lastMonth: "Last Month",
+    month: "Current Month",
+    week: "This Week",
+    today: "Today",
+    yesterday: "Yesterday"
+  };
+  function renderModelUsageResults(editor, fileCount, filesWithUsage, rows, totalCost, supportsCache1h = true, timeRange = "all") {
+    const editorLabel = editor === "all" ? "All Editors" : editor;
+    const timeLabel = TIME_RANGE_LABELS[timeRange] || "All Time";
+    const scopeLabel = timeRange === "all" ? editorLabel : `${editorLabel} \u2014 ${timeLabel}`;
+    if (rows.length === 0) {
+      return `
       <div class="section" style="margin-top: 0;">
         <div style="padding: 32px; text-align: center; color: var(--text-muted);">
           <div style="font-size: 36px; margin-bottom: 12px;">\u{1F4ED}</div>
-          <div style="font-size: 14px;">No per-model usage data found for ${d(u)}.</div>
-          <div style="font-size: 12px; margin-top: 8px;">${t} session file(s) matched, ${o} had model attribution data.</div>
+          <div style="font-size: 14px;">No per-model usage data found for ${escapeHtml(scopeLabel)}.</div>
+          <div style="font-size: 12px; margin-top: 8px;">${fileCount} session file(s) matched, ${filesWithUsage} had model attribution data.</div>
         </div>
       </div>
-      ${Lo(t,o)}`;let p=n.map(c=>ps(c,i)).join("");return`
+      ${buildModelUsageExplanation(fileCount, filesWithUsage)}`;
+    }
+    const tableRows = rows.map((r6) => buildModelUsageTableRow(r6, supportsCache1h)).join("");
+    return `
     <div class="section" style="margin-top: 0;">
-      <div class="section-title">\u{1F4CA} Results \u2014 ${d(u)}</div>
+      <div class="section-title">\u{1F4CA} Results \u2014 ${escapeHtml(scopeLabel)}</div>
       <div class="summary-cards">
         <div class="summary-card">
           <div class="summary-label">\u{1F4C4} Session Files</div>
-          <div class="summary-value">${t}</div>
-          <div style="font-size: 11px; color: var(--text-muted);">${o} with model data</div>
+          <div class="summary-value">${fileCount}</div>
+          <div style="font-size: 11px; color: var(--text-muted);">${filesWithUsage} with model data</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">\u{1F9E9} Models</div>
-          <div class="summary-value">${n.length}</div>
+          <div class="summary-value">${rows.length}</div>
         </div>
         <div class="summary-card">
           <div class="summary-label">\u{1F4B0} Est. Total Cost</div>
-          <div class="summary-value">$${s.toFixed(2)}</div>
+          <div class="summary-value">$${totalCost.toFixed(2)}</div>
         </div>
       </div>
       <div class="table-container" style="margin-top: 12px; max-height: 420px;">
@@ -1803,35 +4317,1160 @@ ${t?`
               <th>Input</th>
               <th>Output</th>
               <th>Cache Create</th>
-              ${i?"<th>Cache Create (1h)</th>":""}
+              ${supportsCache1h ? "<th>Cache Create (1h)</th>" : ""}
               <th>Cache Read</th>
               <th>Est. Cost</th>
             </tr>
           </thead>
-          <tbody>${p}</tbody>
+          <tbody>${tableRows}</tbody>
         </table>
       </div>
-      ${Lo(t,o)}
-    </div>`}function Oo(e){let t=[],o=new Map;for(let n of e||[]){let s=String(n.dir||"").replace(/\\/g,"/"),i=s.match(/^(.*\/\.copilot\/jb)\/[^/]+\/?$/);if(i){let r=i[1],a=o.get(r);if(a)a.count+=n.count;else{let l=s.length-r.length,u=n.dir.slice(0,n.dir.length-l);o.set(r,{dir:u,count:n.count,editorName:n.editorName||"JetBrains"})}}else t.push(n)}for(let n of o.values())t.push(n);return t}function gs(){let e=window;return e.process?.env?.HOME||e.process?.env?.USERPROFILE||""}function hs(e,t){let o=e.dir;t&&o.startsWith(t)&&(o=o.replace(t,"~"));let n=e.editorName||"Unknown",s=document.createElement("tr"),i=document.createElement("td");i.setAttribute("title",e.dir),i.textContent=o,s.appendChild(i);let r=document.createElement("td"),a=document.createElement("span");a.className=Ot(n),a.textContent=`${M(n)} ${n}`,r.appendChild(a),s.appendChild(r);let l=document.createElement("td");l.textContent=String(e.count),s.appendChild(l);let u=document.createElement("td"),p=document.createElement("a");if(p.href="#",p.className="reveal-link",p.setAttribute("data-path",encodeURIComponent(e.dir)),p.textContent="Open directory",u.appendChild(p),n==="Unknown"){let c=document.createElement("a");c.href="#",c.className="report-editor-link",c.setAttribute("data-path",encodeURIComponent(e.dir)),c.setAttribute("title","Report this unknown path so we can add editor support"),c.textContent="\u{1F4E2} Report",u.appendChild(document.createTextNode(" ")),u.appendChild(c)}return s.appendChild(u),s}function Fo(e){let t=[...e].sort((h,x)=>x.count-h.count),o=t.reduce((h,x)=>h+x.count,0),n=gs(),s=document.createElement("div");s.className="session-folders-table";let i=document.createElement("h4");i.textContent="Main Session Folders (by editor root):",s.appendChild(i);let r=document.createElement("table");r.className="session-table",s.appendChild(r);let a=document.createElement("thead");r.appendChild(a);let l=document.createElement("tr");a.appendChild(l);for(let h of["Folder","Editor","# of Sessions","Open"]){let x=document.createElement("th");x.textContent=h,l.appendChild(x)}let u=document.createElement("tbody");r.appendChild(u);for(let h of t)u.appendChild(hs(h,n));let p=document.createElement("tr");p.style.borderTop="2px solid #5a5a5a",p.style.fontWeight="600",p.style.background="rgba(255, 255, 255, 0.05)";let c=document.createElement("td");c.setAttribute("colspan","2"),c.style.textAlign="right",c.style.paddingRight="16px",c.textContent="Total:",p.appendChild(c);let b=document.createElement("td");return b.textContent=String(o),p.appendChild(b),p.appendChild(document.createElement("td")),u.appendChild(p),s}function zo(){document.querySelectorAll(".open-storage-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-path")||"");o&&m.postMessage({command:"revealPath",path:o})})})}function fe(){document.getElementById("btn-authenticate-github")?.addEventListener("click",()=>{m.postMessage({command:"authenticateGitHub"})}),document.getElementById("btn-sign-out-github")?.addEventListener("click",()=>{m.postMessage({command:"signOutGitHub"})})}function ye(e){let t=document.querySelector(`.subtab[data-subtab="${e}"]`),o=document.getElementById(`subtab-${e}`);if(t&&o){let n=t.closest(".subtab-bar");return n&&n.querySelectorAll(".subtab").forEach(s=>s.classList.remove("active")),document.querySelectorAll(".subtab-content").forEach(s=>s.classList.remove("active")),t.classList.add("active"),o.classList.add("active"),!0}return!1}function Ht(e){let t=document.querySelector(`.tab[data-tab="${e}"]`),o=document.getElementById(`tab-${e}`);return t&&o?(document.querySelectorAll(".tab").forEach(n=>n.classList.remove("active")),document.querySelectorAll(".tab-content").forEach(n=>n.classList.remove("active")),t.classList.add("active"),o.classList.add("active"),!0):!1}var Uo={diagnostics:["report","sessions","cache","path-analyzer"],research:["model-usage","tool-analysis","otel-delta"],settings:["display","backend","github","debug"]};function vs(e){for(let[t,o]of Object.entries(Uo))if(o.includes(e))return t;return"diagnostics"}function fs(e){return Uo[e]?.find(t=>document.querySelector(`.tab[data-tab="${t}"]`))}function qo(e){let t=document.querySelector(`.group-tab[data-group="${e}"]`),o=document.querySelector(`.leaf-tabs[data-group="${e}"]`);return!t||!o?!1:(document.querySelectorAll(".group-tab").forEach(n=>n.classList.remove("active")),document.querySelectorAll(".leaf-tabs").forEach(n=>{n.style.display="none"}),t.classList.add("active"),o.style.display="flex",!0)}function ys(){document.querySelectorAll(".group-tab").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-group");if(!t||!qo(t))return;if(!document.querySelector(`.leaf-tabs[data-group="${t}"] .tab.active`)){let n=fs(t);n&&Ht(n)&&I.patch({activeTab:n})}})})}function jo(){document.querySelectorAll(".sortable").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-sort");t&&(Z===t?K=K==="desc"?"asc":"desc":(Z=t,K="desc"),et())})})}function Go(){document.querySelectorAll(".editor-panel").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-editor");Q=t===""?null:t,et()})})}function Vo(){document.querySelectorAll(".context-ref-filter").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-ref-type");J===t?J=null:J=t,et()})})}function Wo(){let e=document.getElementById("show-only-unattributed");e&&e.addEventListener("change",()=>{pe=e.checked,et()})}function Zo(){let e=document.getElementById("hide-empty-sessions");e&&e.addEventListener("change",()=>{gt=e.checked,et()})}function xe(){document.getElementById("btn-configure-backend")?.addEventListener("click",()=>{m.postMessage({command:"configureBackend"})}),document.getElementById("btn-configure-backend-team")?.addEventListener("click",()=>{I.patch({activeTab:"backend",activeSubtab:"backend-teamserver"}),m.postMessage({command:"configureTeamServer"})}),document.getElementById("btn-team-server-auth-warning")?.addEventListener("click",()=>{m.postMessage({command:"authenticateGitHub"})}),document.getElementById("btn-open-settings")?.addEventListener("click",()=>{m.postMessage({command:"openSettings"})}),document.getElementById("btn-open-display-settings")?.addEventListener("click",()=>{m.postMessage({command:"openDisplaySettings"})})}function xs(){document.getElementById("select-show-tokens")?.addEventListener("change",e=>{let t=e.target.value;m.postMessage({command:"updateDisplaySetting",key:"display.statusBar.showTokens",value:t})}),document.getElementById("select-show-cost")?.addEventListener("change",e=>{let t=e.target.value;m.postMessage({command:"updateDisplaySetting",key:"display.statusBar.showCost",value:t})}),document.getElementById("input-monthly-budget")?.addEventListener("change",e=>{let t=e.target,o=parseFloat(t.value),n=isNaN(o)?0:Math.min(99999,Math.max(0,Math.round(o*100)/100));t.value=n.toString(),m.postMessage({command:"updateDisplaySetting",key:"display.statusBar.monthlyBudget",value:n})})}function Se(){document.querySelectorAll(".subtab").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-subtab");if(!t)return;let o=e.closest(".subtab-bar");o&&o.querySelectorAll(".subtab").forEach(n=>n.classList.remove("active")),document.querySelectorAll(".subtab-content").forEach(n=>n.classList.remove("active")),e.classList.add("active"),document.getElementById(`subtab-${t}`)?.classList.add("active"),I.patch({activeSubtab:t})})})}function et(){let e=document.getElementById("session-table-container");e&&(e.innerHTML=No(ht,tt),tt||(jo(),Go(),Vo(),Zo(),Wo(),Ko()))}function Ss(){document.querySelectorAll(".tool-analysis-table").forEach(e=>{let t=e.getAttribute("data-rows");if(!t)return;let o=JSON.parse(decodeURIComponent(t)),n=e.getAttribute("data-baseline"),s=n?parseFloat(n):NaN,i=e.querySelector("tbody");i&&(i.innerHTML=Ce(o,s));let r=e.querySelector("thead");r&&(r.innerHTML=$e())}),ke()}function ke(){document.querySelectorAll(".tool-sortable").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-sort");t&&(Pt===t?Y=Y==="desc"?"asc":"desc":(Pt=t,Y=t==="tool"?"asc":"desc"),Ss())})}),document.getElementById("btn-open-tool-families-settings")?.addEventListener("click",()=>{m.postMessage({command:"openToolFamiliesSettings"})})}function Ko(){document.querySelectorAll(".session-file-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-file")||"");m.postMessage({command:"openSessionFile",file:o})})}),document.querySelectorAll(".view-formatted-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-file")||"");m.postMessage({command:"openFormattedJsonlFile",file:o})})}),document.querySelectorAll(".reveal-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-path")||"");m.postMessage({command:"revealPath",path:o})})}),document.querySelectorAll(".report-editor-link").forEach(e=>{e.addEventListener("click",t=>{t.preventDefault();let o=decodeURIComponent(e.getAttribute("data-path")||"");m.postMessage({command:"reportNewEditorPath",path:o})})})}function ce(){let e=document.getElementById("tab-cache");if(e){let t=e.querySelectorAll(".summary-card");if(t.length>=4){let o=t[0]?.querySelector(".summary-value");o&&(o.textContent="0");let n=t[1]?.querySelector(".summary-value");n&&(n.textContent="0 MB");let s=t[2]?.querySelector(".summary-value");s&&(s.textContent="Never");let i=t[3]?.querySelector(".summary-value");i&&(i.textContent="N/A")}}}function ks(){document.getElementById("btn-browse-folder")?.addEventListener("click",()=>{m.postMessage({command:"pickFolder"})}),document.getElementById("btn-analyze-folder")?.addEventListener("click",()=>{let e=document.getElementById("folder-path-input"),t=document.getElementById("tool-type-select"),o=e?.value.trim()??"";if(!o){e&&(e.style.borderColor="#d97706",e.focus());return}e&&(e.style.borderColor="");let n=document.getElementById("btn-analyze-folder");n&&(n.disabled=!0,n.innerHTML="<span>\u23F3</span><span>Analyzing\u2026</span>");let s=document.getElementById("folder-analysis-results");s&&(s.innerHTML=`
+      ${buildModelUsageExplanation(fileCount, filesWithUsage)}
+    </div>`;
+  }
+  function groupSessionFolders(raw) {
+    const result = [];
+    const jbBuckets = /* @__PURE__ */ new Map();
+    for (const sf of raw || []) {
+      const norm = String(sf.dir || "").replace(/\\/g, "/");
+      const m2 = norm.match(/^(.*\/\.copilot\/jb)\/[^/]+\/?$/);
+      if (m2) {
+        const parent = m2[1];
+        const existing = jbBuckets.get(parent);
+        if (existing) {
+          existing.count += sf.count;
+        } else {
+          const tail = norm.length - parent.length;
+          const parentNative = sf.dir.slice(0, sf.dir.length - tail);
+          jbBuckets.set(parent, { dir: parentNative, count: sf.count, editorName: sf.editorName || "JetBrains" });
+        }
+      } else {
+        result.push(sf);
+      }
+    }
+    for (const bucket of jbBuckets.values()) {
+      result.push(bucket);
+    }
+    return result;
+  }
+  function getHomeDirectory() {
+    const win = window;
+    return win.process?.env?.HOME || win.process?.env?.USERPROFILE || "";
+  }
+  function buildSessionFolderRow(sf, home) {
+    let display = sf.dir;
+    if (home && display.startsWith(home)) {
+      display = display.replace(home, "~");
+    }
+    const editorName = sf.editorName || "Unknown";
+    const row = document.createElement("tr");
+    const folderCell = document.createElement("td");
+    folderCell.setAttribute("title", sf.dir);
+    folderCell.textContent = display;
+    row.appendChild(folderCell);
+    const editorCell = document.createElement("td");
+    const editorBadge = document.createElement("span");
+    editorBadge.className = getEditorBadgeClass(editorName);
+    editorBadge.textContent = `${getEditorIcon(editorName)} ${editorName}`;
+    editorCell.appendChild(editorBadge);
+    row.appendChild(editorCell);
+    const countCell = document.createElement("td");
+    countCell.textContent = String(sf.count);
+    row.appendChild(countCell);
+    const openCell = document.createElement("td");
+    const openLink = document.createElement("a");
+    openLink.href = "#";
+    openLink.className = "reveal-link";
+    openLink.setAttribute("data-path", encodeURIComponent(sf.dir));
+    openLink.textContent = "Open directory";
+    openCell.appendChild(openLink);
+    if (editorName === "Unknown") {
+      const reportLink = document.createElement("a");
+      reportLink.href = "#";
+      reportLink.className = "report-editor-link";
+      reportLink.setAttribute("data-path", encodeURIComponent(sf.dir));
+      reportLink.setAttribute("title", "Report this unknown path so we can add editor support");
+      reportLink.textContent = "\u{1F4E2} Report";
+      openCell.appendChild(document.createTextNode(" "));
+      openCell.appendChild(reportLink);
+    }
+    row.appendChild(openCell);
+    return row;
+  }
+  function buildSessionFoldersElement(folders) {
+    const sorted = [...folders].sort((a3, b3) => b3.count - a3.count);
+    const totalSessions = sorted.reduce((sum, sf) => sum + sf.count, 0);
+    const home = getHomeDirectory();
+    const container = document.createElement("div");
+    container.className = "session-folders-table";
+    const heading = document.createElement("h4");
+    heading.textContent = "Main Session Folders (by editor root):";
+    container.appendChild(heading);
+    const tableContainer = document.createElement("div");
+    tableContainer.className = "table-container";
+    container.appendChild(tableContainer);
+    const table = document.createElement("table");
+    table.className = "session-table";
+    tableContainer.appendChild(table);
+    const thead = document.createElement("thead");
+    table.appendChild(thead);
+    const headerRow = document.createElement("tr");
+    thead.appendChild(headerRow);
+    for (const text of ["Folder", "Editor", "# of Sessions", "Open"]) {
+      const th = document.createElement("th");
+      th.textContent = text;
+      headerRow.appendChild(th);
+    }
+    const tbody = document.createElement("tbody");
+    table.appendChild(tbody);
+    for (const sf of sorted) {
+      tbody.appendChild(buildSessionFolderRow(sf, home));
+    }
+    const totalRow = document.createElement("tr");
+    totalRow.style.borderTop = "2px solid #5a5a5a";
+    totalRow.style.fontWeight = "600";
+    totalRow.style.background = "rgba(255, 255, 255, 0.05)";
+    const totalLabelCell = document.createElement("td");
+    totalLabelCell.setAttribute("colspan", "2");
+    totalLabelCell.style.textAlign = "right";
+    totalLabelCell.style.paddingRight = "16px";
+    totalLabelCell.textContent = "Total:";
+    totalRow.appendChild(totalLabelCell);
+    const totalCountCell = document.createElement("td");
+    totalCountCell.textContent = String(totalSessions);
+    totalRow.appendChild(totalCountCell);
+    totalRow.appendChild(document.createElement("td"));
+    tbody.appendChild(totalRow);
+    return container;
+  }
+  function setupStorageLinkHandlers() {
+    document.querySelectorAll(".open-storage-link").forEach((link) => {
+      link.addEventListener("click", (e7) => {
+        e7.preventDefault();
+        const path = decodeURIComponent(
+          link.getAttribute("data-path") || ""
+        );
+        if (path) {
+          vscode.postMessage({ command: "revealPath", path });
+        }
+      });
+    });
+  }
+  function setupGitHubAuthHandlers() {
+    document.getElementById("btn-authenticate-github")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "authenticateGitHub" });
+    });
+    document.getElementById("btn-sign-out-github")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "signOutGitHub" });
+    });
+  }
+  function activateSubtab(subtabId) {
+    const subtabEl = document.querySelector(`.subtab[data-subtab="${subtabId}"]`);
+    const contentEl = document.getElementById(`subtab-${subtabId}`);
+    if (subtabEl && contentEl) {
+      const subtabBar = subtabEl.closest(".subtab-bar");
+      if (subtabBar) {
+        subtabBar.querySelectorAll(".subtab").forEach((s4) => s4.classList.remove("active"));
+      }
+      document.querySelectorAll(".subtab-content").forEach((c4) => c4.classList.remove("active"));
+      subtabEl.classList.add("active");
+      contentEl.classList.add("active");
+      return true;
+    }
+    return false;
+  }
+  function activateTab(tabId) {
+    const tabButton = document.querySelector(`.tab[data-tab="${tabId}"]`);
+    const tabContent = document.getElementById(`tab-${tabId}`);
+    if (tabButton && tabContent) {
+      document.querySelectorAll(".tab").forEach((t4) => t4.classList.remove("active"));
+      document.querySelectorAll(".tab-content").forEach((c4) => c4.classList.remove("active"));
+      tabButton.classList.add("active");
+      tabContent.classList.add("active");
+      return true;
+    }
+    return false;
+  }
+  var TAB_GROUPS = {
+    diagnostics: ["report", "sessions", "cache", "path-analyzer"],
+    research: ["model-usage", "tool-analysis", "otel-delta"],
+    settings: ["display", "backend", "github", "debug"]
+  };
+  function groupOfTab(tabId) {
+    for (const [group, tabs] of Object.entries(TAB_GROUPS)) {
+      if (tabs.includes(tabId)) {
+        return group;
+      }
+    }
+    return "diagnostics";
+  }
+  function firstAvailableTabInGroup(groupId) {
+    return TAB_GROUPS[groupId]?.find((id) => document.querySelector(`.tab[data-tab="${id}"]`));
+  }
+  function activateGroup(groupId) {
+    const groupButton = document.querySelector(`.group-tab[data-group="${groupId}"]`);
+    const leafBar = document.querySelector(`.leaf-tabs[data-group="${groupId}"]`);
+    if (!groupButton || !leafBar) {
+      return false;
+    }
+    document.querySelectorAll(".group-tab").forEach((b3) => b3.classList.remove("active"));
+    document.querySelectorAll(".leaf-tabs").forEach((b3) => {
+      b3.style.display = "none";
+    });
+    groupButton.classList.add("active");
+    leafBar.style.display = "flex";
+    return true;
+  }
+  function setupGroupHandlers() {
+    document.querySelectorAll(".group-tab").forEach((button) => {
+      button.addEventListener("click", () => {
+        const groupId = button.getAttribute("data-group");
+        if (!groupId || !activateGroup(groupId)) {
+          return;
+        }
+        const activeTabInGroup = document.querySelector(`.leaf-tabs[data-group="${groupId}"] .tab.active`);
+        if (!activeTabInGroup) {
+          const nextTab = firstAvailableTabInGroup(groupId);
+          if (nextTab && activateTab(nextTab)) {
+            diagState.patch({ activeTab: nextTab });
+          }
+        }
+      });
+    });
+  }
+  function setupSortHandlers() {
+    document.querySelectorAll(".sortable").forEach((header) => {
+      header.addEventListener("click", () => {
+        const sortColumn = header.getAttribute(
+          "data-sort"
+        );
+        if (sortColumn) {
+          if (currentSortColumn === sortColumn) {
+            currentSortDirection = currentSortDirection === "desc" ? "asc" : "desc";
+          } else {
+            currentSortColumn = sortColumn;
+            currentSortDirection = "desc";
+          }
+          reRenderTable();
+        }
+      });
+    });
+  }
+  function setupEditorFilterHandlers() {
+    document.querySelectorAll(".editor-panel").forEach((panel) => {
+      panel.addEventListener("click", () => {
+        const editor = panel.getAttribute("data-editor");
+        currentEditorFilter = editor === "" ? null : editor;
+        reRenderTable();
+      });
+    });
+  }
+  function setupContextRefFilterHandlers() {
+    document.querySelectorAll(".context-ref-filter").forEach((filter) => {
+      filter.addEventListener("click", () => {
+        const refType = filter.getAttribute(
+          "data-ref-type"
+        );
+        if (currentContextRefFilter === refType) {
+          currentContextRefFilter = null;
+        } else {
+          currentContextRefFilter = refType;
+        }
+        reRenderTable();
+      });
+    });
+  }
+  function setupUnattributedFilterHandler() {
+    const checkbox = document.getElementById("show-only-unattributed");
+    if (checkbox) {
+      checkbox.addEventListener("change", () => {
+        showOnlyUnattributed = checkbox.checked;
+        reRenderTable();
+      });
+    }
+  }
+  function setupZeroInteractionFilterHandler() {
+    const checkbox = document.getElementById("hide-empty-sessions");
+    if (checkbox) {
+      checkbox.addEventListener("change", () => {
+        hideEmptySessions = checkbox.checked;
+        reRenderTable();
+      });
+    }
+  }
+  function setupBackendButtonHandlers() {
+    document.getElementById("btn-configure-backend")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "configureBackend" });
+    });
+    document.getElementById("btn-configure-backend-team")?.addEventListener("click", () => {
+      diagState.patch({ activeTab: "backend", activeSubtab: "backend-teamserver" });
+      vscode.postMessage({ command: "configureTeamServer" });
+    });
+    document.getElementById("btn-team-server-auth-warning")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "authenticateGitHub" });
+    });
+    document.getElementById("btn-open-settings")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "openSettings" });
+    });
+    document.getElementById("btn-open-display-settings")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "openDisplaySettings" });
+    });
+  }
+  function setupDisplaySettingHandlers() {
+    document.getElementById("select-show-tokens")?.addEventListener("change", (e7) => {
+      const value = e7.target.value;
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showTokens", value });
+    });
+    document.getElementById("select-show-cost")?.addEventListener("change", (e7) => {
+      const value = e7.target.value;
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.showCost", value });
+    });
+    document.getElementById("input-monthly-budget")?.addEventListener("change", (e7) => {
+      const input = e7.target;
+      const raw = parseFloat(input.value);
+      const value = isNaN(raw) ? 0 : Math.min(99999, Math.max(0, Math.round(raw * 100) / 100));
+      input.value = value.toString();
+      vscode.postMessage({ command: "updateDisplaySetting", key: "display.statusBar.monthlyBudget", value });
+    });
+  }
+  function setupSubtabHandlers() {
+    document.querySelectorAll(".subtab").forEach((subtab) => {
+      subtab.addEventListener("click", () => {
+        const subtabId = subtab.getAttribute("data-subtab");
+        if (!subtabId) {
+          return;
+        }
+        const subtabBar = subtab.closest(".subtab-bar");
+        if (subtabBar) {
+          subtabBar.querySelectorAll(".subtab").forEach((s4) => s4.classList.remove("active"));
+        }
+        document.querySelectorAll(".subtab-content").forEach((c4) => c4.classList.remove("active"));
+        subtab.classList.add("active");
+        document.getElementById(`subtab-${subtabId}`)?.classList.add("active");
+        diagState.patch({ activeSubtab: subtabId });
+      });
+    });
+  }
+  function reRenderTable() {
+    const container = document.getElementById("session-table-container");
+    if (container) {
+      container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
+      if (!isLoading) {
+        setupSortHandlers();
+        setupEditorFilterHandlers();
+        setupContextRefFilterHandlers();
+        setupZeroInteractionFilterHandler();
+        setupUnattributedFilterHandler();
+        setupFileLinks();
+      }
+    }
+  }
+  function reRenderToolAnalysisTable() {
+    document.querySelectorAll(".tool-analysis-table").forEach((table) => {
+      const encoded = table.getAttribute("data-rows");
+      if (!encoded) {
+        return;
+      }
+      const rows = JSON.parse(decodeURIComponent(encoded));
+      const baselineRaw = table.getAttribute("data-baseline");
+      const baseline = baselineRaw ? parseFloat(baselineRaw) : NaN;
+      const tbody = table.querySelector("tbody");
+      if (tbody) {
+        tbody.innerHTML = renderToolAnalysisRows(rows, baseline);
+      }
+      const thead = table.querySelector("thead");
+      if (thead) {
+        thead.innerHTML = toolAnalysisTheadHtml();
+      }
+    });
+    setupToolAnalysisSortHandlers();
+  }
+  function setupToolAnalysisSortHandlers() {
+    document.querySelectorAll(".tool-sortable").forEach((header) => {
+      header.addEventListener("click", () => {
+        const col = header.getAttribute("data-sort");
+        if (!col) {
+          return;
+        }
+        if (toolSortColumn === col) {
+          toolSortDir = toolSortDir === "desc" ? "asc" : "desc";
+        } else {
+          toolSortColumn = col;
+          toolSortDir = col === "tool" ? "asc" : "desc";
+        }
+        reRenderToolAnalysisTable();
+      });
+    });
+    document.getElementById("btn-open-tool-families-settings")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "openToolFamiliesSettings" });
+    });
+  }
+  function setupFileLinks() {
+    document.querySelectorAll(".session-file-link").forEach((link) => {
+      link.addEventListener("click", (e7) => {
+        e7.preventDefault();
+        const file = decodeURIComponent(
+          link.getAttribute("data-file") || ""
+        );
+        vscode.postMessage({ command: "openSessionFile", file });
+      });
+    });
+    document.querySelectorAll(".view-formatted-link").forEach((link) => {
+      link.addEventListener("click", (e7) => {
+        e7.preventDefault();
+        const file = decodeURIComponent(
+          link.getAttribute("data-file") || ""
+        );
+        vscode.postMessage({ command: "openFormattedJsonlFile", file });
+      });
+    });
+    document.querySelectorAll(".reveal-link").forEach((link) => {
+      link.addEventListener("click", (e7) => {
+        e7.preventDefault();
+        const path = decodeURIComponent(
+          link.getAttribute("data-path") || ""
+        );
+        vscode.postMessage({ command: "revealPath", path });
+      });
+    });
+    document.querySelectorAll(".report-editor-link").forEach((link) => {
+      link.addEventListener("click", (e7) => {
+        e7.preventDefault();
+        const path = decodeURIComponent(
+          link.getAttribute("data-path") || ""
+        );
+        vscode.postMessage({ command: "reportNewEditorPath", path });
+      });
+    });
+  }
+  function updateCacheNumbers() {
+    const cacheTabContent = document.getElementById("tab-cache");
+    if (cacheTabContent) {
+      const summaryCards = cacheTabContent.querySelectorAll(".summary-card");
+      if (summaryCards.length >= 4) {
+        const entriesValue = summaryCards[0]?.querySelector(".summary-value");
+        if (entriesValue) {
+          entriesValue.textContent = "0";
+        }
+        const sizeValue = summaryCards[1]?.querySelector(".summary-value");
+        if (sizeValue) {
+          sizeValue.textContent = "0 MB";
+        }
+        const lastUpdatedValue = summaryCards[2]?.querySelector(".summary-value");
+        if (lastUpdatedValue) {
+          lastUpdatedValue.textContent = "Never";
+        }
+        const ageValue = summaryCards[3]?.querySelector(".summary-value");
+        if (ageValue) {
+          ageValue.textContent = "N/A";
+        }
+      }
+    }
+  }
+  function setupFolderAnalyzerHandlers() {
+    document.getElementById("btn-browse-folder")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "pickFolder" });
+    });
+    document.getElementById("btn-analyze-folder")?.addEventListener("click", () => {
+      const input = document.getElementById("folder-path-input");
+      const select = document.getElementById("tool-type-select");
+      const folderPath = input?.value.trim() ?? "";
+      if (!folderPath) {
+        if (input) {
+          input.style.borderColor = "#d97706";
+          input.focus();
+        }
+        return;
+      }
+      if (input) {
+        input.style.borderColor = "";
+      }
+      const btn = document.getElementById("btn-analyze-folder");
+      if (btn) {
+        btn.disabled = true;
+        btn.innerHTML = "<span>\u23F3</span><span>Analyzing\u2026</span>";
+      }
+      const resultsDiv = document.getElementById("folder-analysis-results");
+      if (resultsDiv) {
+        resultsDiv.innerHTML = `
           <div class="analyzer-loading">
             <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
             <span>Scanning files\u2026</span>
-          </div>`),m.postMessage({command:"analyzeFolder",folderPath:o,toolType:t?.value??"auto"})})}function Ft(){let e=document.getElementById("model-usage-editor-select");if(!e||e.disabled)return;let t=e.value||"all",o=Nt||"all",n=document.getElementById("model-usage-results");n&&(n.innerHTML=`
+          </div>`;
+      }
+      vscode.postMessage({
+        command: "analyzeFolder",
+        folderPath,
+        toolType: select?.value ?? "auto"
+      });
+    });
+  }
+  function triggerModelUsageAnalysis() {
+    const select = document.getElementById("model-usage-editor-select");
+    if (!select || select.disabled) {
+      return;
+    }
+    const editor = select.value || "all";
+    const timeRange = currentModelUsageTimeRange || "all";
+    const resultsDiv = document.getElementById("model-usage-results");
+    if (resultsDiv) {
+      resultsDiv.innerHTML = `
         <div class="analyzer-loading">
           <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
           <span>Aggregating model usage\u2026</span>
-        </div>`),m.postMessage({command:"analyzeModelUsage",editor:t,timeRange:o})}function Cs(){document.getElementById("model-usage-editor-select")?.addEventListener("change",()=>{Ft()})}function $s(e){let t=document.getElementById("model-usage-results");if(t){if(typeof e.timeRange=="string"&&e.timeRange&&(Nt=e.timeRange,ve(!1)),e.stillLoading){t.innerHTML=`
+        </div>`;
+    }
+    vscode.postMessage({ command: "analyzeModelUsage", editor, timeRange });
+  }
+  function setupModelUsageHandlers() {
+    document.getElementById("model-usage-editor-select")?.addEventListener("change", () => {
+      triggerModelUsageAnalysis();
+    });
+  }
+  function handleModelUsageResult(message) {
+    const resultsDiv = document.getElementById("model-usage-results");
+    if (!resultsDiv) {
+      return;
+    }
+    if (typeof message.timeRange === "string" && message.timeRange) {
+      currentModelUsageTimeRange = message.timeRange;
+      renderModelUsageTimeSelector(false);
+    }
+    if (message.stillLoading) {
+      resultsDiv.innerHTML = `
       <div class="info-box" style="margin-top: 12px;">
         <div class="info-box-title">\u23F3 Still loading session files</div>
         <div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>
-      </div>`;return}t.innerHTML=ms(String(e.editor||"all"),Number(e.fileCount||0),Number(e.filesWithUsage||0),e.rows||[],Number(e.totalCost||0),e.supportsCache1h!==!1,String(e.timeRange||"all"))}}function ws(){document.querySelectorAll(".tab").forEach(e=>{e.addEventListener("click",()=>{let t=e.getAttribute("data-tab");if(t&&Ht(t)&&(I.patch({activeTab:t}),t==="model-usage")){let o=document.getElementById("model-usage-results");o&&!o.innerHTML.trim()&&Ft()}})})}function Es(e){e.style.background="#d97706",e.innerHTML="<span>\u23F3</span><span>Clearing...</span>",e instanceof HTMLButtonElement&&(e.disabled=!0),ce(),m.postMessage({command:"clearCache"})}function Ts(e){let t=e.getAttribute("data-key"),n=e.closest("tr")?.querySelector(".debug-counter-input");if(t&&n){let s=parseInt(n.value,10);isNaN(s)||m.postMessage({command:"setDebugCounter",key:t,value:s})}}function As(e){let t=e.getAttribute("data-key"),n=e.closest("tr")?.querySelector(".debug-flag-input");t&&n&&m.postMessage({command:"setDebugFlag",key:t,value:n.checked})}function Is(e){let t=e.target;t&&((t.id==="btn-clear-cache"||t.id==="btn-clear-cache-tab")&&Es(t),(t.id==="btn-reset-insights"||t.id==="btn-reset-insights-tab")&&m.postMessage({command:"resetInsightsState"}),t.id==="btn-reset-debug-counters"&&m.postMessage({command:"resetDebugCounters"}),t.id==="btn-reset-discovered-editors"&&m.postMessage({command:"resetDiscoveredEditors"}),t.classList.contains("debug-counter-set")&&Ts(t),t.classList.contains("debug-flag-set")&&As(t))}function Ms(){document.getElementById("btn-refresh")?.addEventListener("click",()=>m.postMessage({command:"refresh"})),document.getElementById("btn-chart")?.addEventListener("click",()=>m.postMessage({command:"showChart"})),document.getElementById("btn-usage")?.addEventListener("click",()=>m.postMessage({command:"showUsageAnalysis"})),document.getElementById("btn-details")?.addEventListener("click",()=>m.postMessage({command:"showDetails"})),document.getElementById("btn-diagnostics")?.addEventListener("click",()=>m.postMessage({command:"showDiagnostics"})),document.getElementById("btn-maturity")?.addEventListener("click",()=>m.postMessage({command:"showMaturity"})),document.getElementById("btn-dashboard")?.addEventListener("click",()=>m.postMessage({command:"showDashboard"})),document.getElementById("btn-environmental")?.addEventListener("click",()=>m.postMessage({command:"showEnvironmental"})),Te(m)}function Ls(){document.getElementById("btn-copy")?.addEventListener("click",()=>{m.postMessage({command:"copyReport"})}),document.getElementById("btn-issue")?.addEventListener("click",()=>{m.postMessage({command:"openIssue"})}),document.getElementById("btn-clear-cache")?.addEventListener("click",()=>{let e=document.getElementById("btn-clear-cache");e&&(e.style.background="#d97706",e.innerHTML="<span>\u23F3</span><span>Clearing...</span>",e.disabled=!0),ce(),m.postMessage({command:"clearCache"})}),document.getElementById("btn-clear-cache-tab")?.addEventListener("click",()=>{let e=document.getElementById("btn-clear-cache-tab");e&&(e.style.background="#d97706",e.innerHTML="<span>\u23F3</span><span>Clearing...</span>",e.disabled=!0),ce(),m.postMessage({command:"clearCache"})}),document.addEventListener("click",Is),Ms()}function _s(e){if(!e.report)return;let t=document.getElementById("tab-report");if(!t)return;let o=Po(e.report),n=t.querySelector(".report-content");n&&(n.textContent=o)}function Ds(e){if(!e.backendStorageInfo){console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");return}vt=e.backendStorageInfo,e.githubAuth!==void 0&&(X=e.githubAuth);let t=document.getElementById("tab-backend");if(!t)return;let n=t.querySelector(".subtab.active")?.getAttribute("data-subtab")??I.restore().activeSubtab;t.innerHTML=he(vt,X),xe(),Se(),n&&(ye(n),I.patch({activeSubtab:n}))}function Bs(e){if(!e.sessionFolders||e.sessionFolders.length===0)return;let t=document.getElementById("tab-report");if(!t)return;let o=Oo(e.sessionFolders),n=Fo(o),s=t.querySelector(".session-folders-table");if(s)s.replaceWith(n);else{let i=t.querySelector(".report-content");i?i.insertAdjacentElement("afterend",n):t.appendChild(n)}zo()}function Rs(e){if(!e.candidatePaths||e.candidatePaths.length===0)return;let t=document.getElementById("tab-report");if(!t)return;t.querySelector(".candidate-paths-table")?.remove();let o=Nn(e.candidatePaths),n=t.querySelector(".session-folders-table");if(n)n.insertAdjacentElement("afterend",o);else{let s=t.querySelector(".report-content");s?s.insertAdjacentElement("afterend",o):t.appendChild(o)}}function Jo(e,t,o){let n=document.getElementById(`tab-${e}`);if(!n)return;let s=n.classList.contains("active"),i=document.createElement("div");i.innerHTML=t;let r=i.firstElementChild;r&&(s&&r.classList.add("active"),n.replaceWith(r),o?.())}function Ps(e){if(e.githubAuth===void 0)return;let t=document.getElementById("tab-github");t&&(t.innerHTML=ge(e.githubAuth),fe())}function Ns(e){if(e.toolFamilies&&(de=e.toolFamilies),e.toolCallStats===void 0)return;let t=Qo(e.toolCallStats,de);Jo("tool-analysis",t,ke)}function Yo(){Jo("otel-delta",en(ue,Rt),Xo)}function Xo(){let e=document.getElementById("otel-delta-period");e&&e.addEventListener("change",()=>{Rt=e.value,I.patch({otelDeltaPeriod:Rt}),Yo()})}function Hs(e){e.otelComparison!==void 0&&(ue=e.otelComparison,Yo())}function Os(e){_s(e),Ds(e),Bs(e),Rs(e),Ps(e),Ns(e),Hs(e)}function Fs(e){X=e.githubAuth;let t=document.getElementById("tab-github");t&&(t.innerHTML=ge(X),fe());let o=document.getElementById("tab-backend");if(o&&vt){let s=o.querySelector(".subtab.active")?.getAttribute("data-subtab");o.innerHTML=he(vt,X),xe(),Se(),s&&ye(s)}}function zs(e){console.error("Error loading diagnostic data:",e.error);let t=document.getElementById("root");if(t){let o=document.createElement("div");o.style.cssText="color: #ff6b6b; padding: 20px; text-align: center;",o.innerHTML=`
+      </div>`;
+      return;
+    }
+    resultsDiv.innerHTML = renderModelUsageResults(
+      String(message.editor || "all"),
+      Number(message.fileCount || 0),
+      Number(message.filesWithUsage || 0),
+      message.rows || [],
+      Number(message.totalCost || 0),
+      message.supportsCache1h !== false,
+      String(message.timeRange || "all")
+    );
+  }
+  function setupTabHandlers() {
+    document.querySelectorAll(".tab").forEach((tab) => {
+      tab.addEventListener("click", () => {
+        const tabId = tab.getAttribute("data-tab");
+        if (tabId && activateTab(tabId)) {
+          diagState.patch({ activeTab: tabId });
+          if (tabId === "model-usage") {
+            const resultsDiv = document.getElementById("model-usage-results");
+            if (resultsDiv && !resultsDiv.innerHTML.trim()) {
+              triggerModelUsageAnalysis();
+            }
+          }
+        }
+      });
+    });
+  }
+  function handleClearCacheClick(target) {
+    target.style.background = "#d97706";
+    target.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
+    if (target instanceof HTMLButtonElement) {
+      target.disabled = true;
+    }
+    updateCacheNumbers();
+    vscode.postMessage({ command: "clearCache" });
+  }
+  function handleDebugCounterSetClick(target) {
+    const key = target.getAttribute("data-key");
+    const row = target.closest("tr");
+    const input = row?.querySelector(".debug-counter-input");
+    if (key && input) {
+      const value = parseInt(input.value, 10);
+      if (!isNaN(value)) {
+        vscode.postMessage({ command: "setDebugCounter", key, value });
+      }
+    }
+  }
+  function handleDebugFlagSetClick(target) {
+    const key = target.getAttribute("data-key");
+    const row = target.closest("tr");
+    const input = row?.querySelector(".debug-flag-input");
+    if (key && input) {
+      vscode.postMessage({ command: "setDebugFlag", key, value: input.checked });
+    }
+  }
+  function handleGlobalClickEvent(event) {
+    const target = event.target;
+    if (!target) {
+      return;
+    }
+    if (target.id === "btn-clear-cache" || target.id === "btn-clear-cache-tab") {
+      handleClearCacheClick(target);
+    }
+    if (target.id === "btn-reset-insights" || target.id === "btn-reset-insights-tab") {
+      vscode.postMessage({ command: "resetInsightsState" });
+    }
+    if (target.id === "btn-reset-debug-counters") {
+      vscode.postMessage({ command: "resetDebugCounters" });
+    }
+    if (target.id === "btn-reset-discovered-editors") {
+      vscode.postMessage({ command: "resetDiscoveredEditors" });
+    }
+    if (target.classList.contains("debug-counter-set")) {
+      handleDebugCounterSetClick(target);
+    }
+    if (target.classList.contains("debug-flag-set")) {
+      handleDebugFlagSetClick(target);
+    }
+  }
+  function wireNavButtons() {
+    document.getElementById("btn-refresh")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "refresh" })
+    );
+    document.getElementById("btn-chart")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "showChart" })
+    );
+    document.getElementById("btn-usage")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "showUsageAnalysis" })
+    );
+    document.getElementById("btn-details")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "showDetails" })
+    );
+    document.getElementById("btn-diagnostics")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "showDiagnostics" })
+    );
+    document.getElementById("btn-maturity")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "showMaturity" })
+    );
+    document.getElementById("btn-dashboard")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "showDashboard" })
+    );
+    document.getElementById("btn-environmental")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "showEnvironmental" })
+    );
+    wireExtensionPointButtons(vscode);
+  }
+  function renderShareCardPeriodSelector() {
+    const wrapper = document.getElementById("share-card-period-selector");
+    if (!wrapper) {
+      return;
+    }
+    wrapper.replaceChildren();
+    const { select } = createPeriodSelector({
+      id: "share-card-period-select",
+      selected: currentShareCardPeriod,
+      periods: SHARE_CARD_PERIOD_ORDER,
+      label: "",
+      onChange: (value) => {
+        currentShareCardPeriod = value;
+        diagState.patch({ shareCardPeriod: currentShareCardPeriod });
+        reRenderShareCard();
+      }
+    });
+    wrapper.append(select);
+  }
+  function buildCurrentShareSummaryText() {
+    const filteredFiles = filterFilesByShareCardPeriod(storedDetailedFiles, currentShareCardPeriod);
+    const editorStats = getEditorStats(filteredFiles);
+    const editors = Object.keys(editorStats).sort((a3, b3) => editorStats[b3].count - editorStats[a3].count);
+    const totalSessions = filteredFiles.length;
+    const totalInteractions = filteredFiles.reduce((sum, sf) => sum + Number(sf.interactions || 0), 0);
+    const totalTokens = filteredFiles.reduce((sum, sf) => sum + Number(sf.tokens || 0), 0);
+    return buildShareSummaryText(editors, editorStats, totalSessions, totalInteractions, totalTokens, currentShareCardPeriod);
+  }
+  function setupShareSummaryButtonHandler() {
+    renderShareCardPeriodSelector();
+    document.getElementById("btn-copy-share-summary")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "copyText", text: buildCurrentShareSummaryText() });
+    });
+    const socialPlatforms = [
+      { id: "btn-share-card-linkedin", platform: "linkedin" },
+      { id: "btn-share-card-bluesky", platform: "bluesky" },
+      { id: "btn-share-card-mastodon", platform: "mastodon" }
+    ];
+    for (const { id, platform } of socialPlatforms) {
+      document.getElementById(id)?.addEventListener("click", () => {
+        vscode.postMessage({ command: "shareCardToSocial", platform, text: buildCurrentShareSummaryText() });
+      });
+    }
+  }
+  function reRenderShareCard() {
+    replaceTabContent("share", renderShareCardTab(storedDetailedFiles), setupShareSummaryButtonHandler);
+  }
+  function setupButtonHandlers() {
+    document.getElementById("btn-copy")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "copyReport" });
+    });
+    setupShareSummaryButtonHandler();
+    document.getElementById("btn-issue")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "openIssue" });
+    });
+    document.getElementById("btn-clear-cache")?.addEventListener("click", () => {
+      const btn = document.getElementById(
+        "btn-clear-cache"
+      );
+      if (btn) {
+        btn.style.background = "#d97706";
+        btn.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
+        btn.disabled = true;
+      }
+      updateCacheNumbers();
+      vscode.postMessage({ command: "clearCache" });
+    });
+    document.getElementById("btn-clear-cache-tab")?.addEventListener("click", () => {
+      const btn = document.getElementById(
+        "btn-clear-cache-tab"
+      );
+      if (btn) {
+        btn.style.background = "#d97706";
+        btn.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
+        btn.disabled = true;
+      }
+      updateCacheNumbers();
+      vscode.postMessage({ command: "clearCache" });
+    });
+    document.addEventListener("click", handleGlobalClickEvent);
+    wireNavButtons();
+  }
+  function handleDiagnosticReport(message) {
+    if (!message.report) {
+      return;
+    }
+    const reportTabContent = document.getElementById("tab-report");
+    if (!reportTabContent) {
+      return;
+    }
+    const processedReport = removeSessionFilesSection(message.report);
+    const reportPre = reportTabContent.querySelector(".report-content");
+    if (reportPre) {
+      reportPre.textContent = processedReport;
+    }
+  }
+  function handleBackendStorageSection(message) {
+    if (!message.backendStorageInfo) {
+      console.warn("diagnosticDataLoaded received but backendStorageInfo is missing or undefined");
+      return;
+    }
+    currentBackendInfo = message.backendStorageInfo;
+    if (message.githubAuth !== void 0) {
+      currentGithubAuth = message.githubAuth;
+    }
+    const backendTabContent = document.getElementById("tab-backend");
+    if (!backendTabContent) {
+      return;
+    }
+    const activeSubtabEl = backendTabContent.querySelector(".subtab.active");
+    const previousSubtab = activeSubtabEl?.getAttribute("data-subtab") ?? diagState.restore().activeSubtab;
+    backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+    setupBackendButtonHandlers();
+    setupSubtabHandlers();
+    if (previousSubtab) {
+      activateSubtab(previousSubtab);
+      diagState.patch({ activeSubtab: previousSubtab });
+    }
+  }
+  function handleSessionFoldersSection(message) {
+    if (!message.sessionFolders || message.sessionFolders.length === 0) {
+      return;
+    }
+    const reportTabContent = document.getElementById("tab-report");
+    if (!reportTabContent) {
+      return;
+    }
+    const grouped = groupSessionFolders(message.sessionFolders);
+    const foldersEl = buildSessionFoldersElement(grouped);
+    const existing = reportTabContent.querySelector(".session-folders-table");
+    if (existing) {
+      existing.replaceWith(foldersEl);
+    } else {
+      const reportContent = reportTabContent.querySelector(".report-content");
+      if (reportContent) {
+        reportContent.insertAdjacentElement("afterend", foldersEl);
+      } else {
+        reportTabContent.appendChild(foldersEl);
+      }
+    }
+    setupStorageLinkHandlers();
+  }
+  function handleCandidatePathsSection(message) {
+    if (!message.candidatePaths || message.candidatePaths.length === 0) {
+      return;
+    }
+    const reportTabContent = document.getElementById("tab-report");
+    if (!reportTabContent) {
+      return;
+    }
+    reportTabContent.querySelector(".candidate-paths-table")?.remove();
+    const candidateEl = buildCandidatePathsElement(message.candidatePaths);
+    const foldersTable = reportTabContent.querySelector(".session-folders-table");
+    if (foldersTable) {
+      foldersTable.insertAdjacentElement("afterend", candidateEl);
+    } else {
+      const reportContent = reportTabContent.querySelector(".report-content");
+      if (reportContent) {
+        reportContent.insertAdjacentElement("afterend", candidateEl);
+      } else {
+        reportTabContent.appendChild(candidateEl);
+      }
+    }
+  }
+  function replaceTabContent(tabId, newContent, onReplaced) {
+    const tabContent = document.getElementById(`tab-${tabId}`);
+    if (!tabContent) {
+      return;
+    }
+    const wasActive = tabContent.classList.contains("active");
+    const temp = document.createElement("div");
+    temp.innerHTML = newContent;
+    const newTab = temp.firstElementChild;
+    if (!newTab) {
+      return;
+    }
+    if (wasActive) {
+      newTab.classList.add("active");
+    }
+    tabContent.replaceWith(newTab);
+    onReplaced?.();
+  }
+  function handleGithubAuthSection(message) {
+    if (message.githubAuth === void 0) {
+      return;
+    }
+    const githubTabContent = document.getElementById("tab-github");
+    if (githubTabContent) {
+      githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
+      setupGitHubAuthHandlers();
+    }
+  }
+  function handleToolAnalysisSection(message) {
+    if (message.toolFamilies) {
+      storedToolFamilies = message.toolFamilies;
+    }
+    if (message.toolCallStats === void 0) {
+      return;
+    }
+    const newContent = renderToolAnalysisTab(message.toolCallStats, storedToolFamilies);
+    replaceTabContent("tool-analysis", newContent, setupToolAnalysisSortHandlers);
+  }
+  function rerenderOtelDeltaTab() {
+    replaceTabContent("otel-delta", renderOtelDeltaTab(currentOtelComparison, currentOtelDeltaPeriod), setupOtelDeltaPeriodHandler);
+  }
+  function setupOtelDeltaPeriodHandler() {
+    const select = document.getElementById("otel-delta-period");
+    if (!select) {
+      return;
+    }
+    select.addEventListener("change", () => {
+      currentOtelDeltaPeriod = select.value;
+      diagState.patch({ otelDeltaPeriod: currentOtelDeltaPeriod });
+      rerenderOtelDeltaTab();
+    });
+  }
+  function handleOtelComparisonSection(message) {
+    if (message.otelComparison === void 0) {
+      return;
+    }
+    currentOtelComparison = message.otelComparison;
+    rerenderOtelDeltaTab();
+  }
+  function handleDiagnosticDataLoaded(message) {
+    handleDiagnosticReport(message);
+    handleBackendStorageSection(message);
+    handleSessionFoldersSection(message);
+    handleCandidatePathsSection(message);
+    handleGithubAuthSection(message);
+    handleToolAnalysisSection(message);
+    handleOtelComparisonSection(message);
+  }
+  function handleGithubAuthUpdated(message) {
+    currentGithubAuth = message.githubAuth;
+    const githubTabContent = document.getElementById("tab-github");
+    if (githubTabContent) {
+      githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
+      setupGitHubAuthHandlers();
+    }
+    const backendTabContent = document.getElementById("tab-backend");
+    if (backendTabContent && currentBackendInfo) {
+      const activeSubtabEl = backendTabContent.querySelector(".subtab.active");
+      const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
+      backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+      setupBackendButtonHandlers();
+      setupSubtabHandlers();
+      if (previousSubtab) {
+        activateSubtab(previousSubtab);
+      }
+    }
+  }
+  function handleDiagnosticDataError(message) {
+    console.error("Error loading diagnostic data:", message.error);
+    const rootEl = document.getElementById("root");
+    if (rootEl) {
+      const errorDiv = document.createElement("div");
+      errorDiv.style.cssText = "color: #ff6b6b; padding: 20px; text-align: center;";
+      errorDiv.innerHTML = `
 <h3><span class="codicon codicon-warning"></span> Error Loading Diagnostic Data</h3>
-<p>${d(e.error||"Unknown error")}</p>
-`,t.insertBefore(o,t.firstChild)}}function _o(e){return!e||typeof e!="object"?{}:Object.fromEntries(Object.entries(e).map(([t,o])=>[t,Number(o??0)||0]))}function k(e){return Number(e??0)||0}function W(e){return e==null?void 0:String(e)}function Do(e){return e==null?null:String(e)}function Us(e){return{file:k(e.file),symbol:k(e.symbol),selection:k(e.selection),implicitSelection:k(e.implicitSelection),codebase:k(e.codebase),workspace:k(e.workspace),terminal:k(e.terminal),vscode:k(e.vscode),terminalLastCommand:k(e.terminalLastCommand),terminalSelection:k(e.terminalSelection),clipboard:k(e.clipboard),changes:k(e.changes),outputPanel:k(e.outputPanel),problemsPanel:k(e.problemsPanel),pullRequest:k(e.pullRequest),byKind:_o(e.byKind),copilotInstructions:k(e.copilotInstructions),agentsMd:k(e.agentsMd),byPath:_o(e.byPath)}}function qs(e){if(Array.isArray(e.childInfo))return e.childInfo.filter(t=>!!t&&typeof t=="object").map(t=>({uuid:String(t.uuid??""),name:String(t.name??""),sessionFile:W(t.sessionFile)}))}function js(e){if(!e.parentInfo||typeof e.parentInfo!="object")return;let t=e.parentInfo;return{uuid:String(t.uuid??""),name:String(t.name??""),sessionFile:W(t.sessionFile)}}function Gs(e){let t=e??{},o=t.contextReferences??{};return{file:String(t.file??t.sessionFile??""),editorSource:String(t.editorSource??""),editorRoot:W(t.editorRoot),editorName:W(t.editorName),title:W(t.title),repository:W(t.repository),size:k(t.size),modified:String(t.modified??""),tokens:k(t.tokens),interactions:k(t.interactions),firstInteraction:Do(t.firstInteraction),lastInteraction:Do(t.lastInteraction),contextReferences:Us(o),parentInfo:js(t),childInfo:qs(t),totalChildCount:t.totalChildCount===null||t.totalChildCount===void 0?void 0:Number(t.totalChildCount)}}function Vs(e){return Array.isArray(e)?e.map(Gs):[]}function Ws(e){let t=Number(e.processed||0),o=Number(e.total||0),n=o>0?`Analyzing files\u2026 (${t} / ${o})`:"Analyzing files\u2026",s=document.getElementById("session-loading-subtext");s&&(s.textContent=n);let i=document.getElementById("model-usage-status");i&&(i.textContent=o>0?`\u23F3 Loading sessions\u2026 (${t}/${o})`:"\u23F3 Loading sessions\u2026")}function Zs(e){ht=Vs(e.detailedSessionFiles),tt=!1;let t=document.querySelector('.tab[data-tab="sessions"]');t&&(t.textContent=`\u{1F4C1} Session Files (${ht.length})`);let o=document.getElementById("model-usage-editor-select");if(o){let s=be(ht),i=Object.keys(s).sort().map(r=>`<option value="${d(r)}">${d(M(r))} ${d(r)} (${s[r].count})</option>`).join("");o.innerHTML=`<option value="all">\u{1F310} All Editors</option>${i}`,o.disabled=!1}ve(!1);let n=document.getElementById("model-usage-status");n&&(n.textContent=""),Ft(),et()}function Ks(){let e=document.getElementById("btn-clear-cache"),t=document.getElementById("btn-clear-cache-tab");e&&(e.style.background="#2d6a4f",e.innerHTML="<span>\u2705</span><span>Cache Cleared</span>",e.disabled=!1),t&&(t.style.background="#2d6a4f",t.innerHTML="<span>\u2705</span><span>Cache Cleared</span>",t.disabled=!1),setTimeout(()=>{e&&(e.style.background="",e.innerHTML="<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>"),t&&(t.style.background="",t.innerHTML="<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>")},2e3)}function Js(e,t){if(t.length<4)return;let o=t[0]?.querySelector(".summary-value");o&&(o.textContent=String(e.size));let n=t[1]?.querySelector(".summary-value");n&&(n.textContent=`${e.sizeInMB.toFixed(2)} MB`);let s=t[2]?.querySelector(".summary-value");s&&(s.textContent=new Date(e.lastUpdated).toLocaleString());let i=t[3]?.querySelector(".summary-value");i&&(i.textContent="0 seconds ago")}function Ys(e){if(!e.cacheInfo)return;let t=document.getElementById("tab-cache");t&&Js(e.cacheInfo,t.querySelectorAll(".summary-card"))}function Xs(e){let t=document.getElementById("folder-path-input");t&&e.folderPath&&(t.value=e.folderPath,t.style.borderColor="")}function Qs(e){let t=document.getElementById("btn-analyze-folder");t&&(t.disabled=!1,t.innerHTML="<span>\u{1F50D}</span><span>Analyze</span>");let o=document.getElementById("folder-analysis-results");o&&(e.error?o.innerHTML=`
+<p>${escapeHtml(message.error || "Unknown error")}</p>
+`;
+      rootEl.insertBefore(errorDiv, rootEl.firstChild);
+    }
+  }
+  function sanitizeNumericRecord(input) {
+    if (!input || typeof input !== "object") {
+      return {};
+    }
+    return Object.fromEntries(
+      Object.entries(input).map(([key, value]) => [key, Number(value ?? 0) || 0])
+    );
+  }
+  function numField(v2) {
+    return Number(v2 ?? 0) || 0;
+  }
+  function optStr(v2) {
+    return v2 === null || v2 === void 0 ? void 0 : String(v2);
+  }
+  function nullStr(v2) {
+    return v2 === null || v2 === void 0 ? null : String(v2);
+  }
+  function sanitizeContextReferences(contextRefs) {
+    return {
+      file: numField(contextRefs.file),
+      symbol: numField(contextRefs.symbol),
+      selection: numField(contextRefs.selection),
+      implicitSelection: numField(contextRefs.implicitSelection),
+      codebase: numField(contextRefs.codebase),
+      workspace: numField(contextRefs.workspace),
+      terminal: numField(contextRefs.terminal),
+      vscode: numField(contextRefs.vscode),
+      terminalLastCommand: numField(contextRefs.terminalLastCommand),
+      terminalSelection: numField(contextRefs.terminalSelection),
+      clipboard: numField(contextRefs.clipboard),
+      changes: numField(contextRefs.changes),
+      outputPanel: numField(contextRefs.outputPanel),
+      problemsPanel: numField(contextRefs.problemsPanel),
+      pullRequest: numField(contextRefs.pullRequest),
+      byKind: sanitizeNumericRecord(contextRefs.byKind),
+      copilotInstructions: numField(contextRefs.copilotInstructions),
+      agentsMd: numField(contextRefs.agentsMd),
+      byPath: sanitizeNumericRecord(contextRefs.byPath)
+    };
+  }
+  function sanitizeChildInfo(sf) {
+    if (!Array.isArray(sf.childInfo)) {
+      return void 0;
+    }
+    return sf.childInfo.filter((child) => !!child && typeof child === "object").map((child) => ({
+      uuid: String(child.uuid ?? ""),
+      name: String(child.name ?? ""),
+      sessionFile: optStr(child.sessionFile)
+    }));
+  }
+  function sanitizeParentInfo(sf) {
+    if (!sf.parentInfo || typeof sf.parentInfo !== "object") {
+      return void 0;
+    }
+    const p3 = sf.parentInfo;
+    return {
+      uuid: String(p3.uuid ?? ""),
+      name: String(p3.name ?? ""),
+      sessionFile: optStr(p3.sessionFile)
+    };
+  }
+  function sanitizeSessionFileItem(item) {
+    const sf = item ?? {};
+    const contextRefs = sf.contextReferences ?? {};
+    return {
+      file: String(sf.file ?? sf.sessionFile ?? ""),
+      editorSource: String(sf.editorSource ?? ""),
+      editorRoot: optStr(sf.editorRoot),
+      editorName: optStr(sf.editorName),
+      title: optStr(sf.title),
+      repository: optStr(sf.repository),
+      size: numField(sf.size),
+      modified: String(sf.modified ?? ""),
+      tokens: numField(sf.tokens),
+      interactions: numField(sf.interactions),
+      firstInteraction: nullStr(sf.firstInteraction),
+      lastInteraction: nullStr(sf.lastInteraction),
+      contextReferences: sanitizeContextReferences(contextRefs),
+      parentInfo: sanitizeParentInfo(sf),
+      childInfo: sanitizeChildInfo(sf),
+      totalChildCount: sf.totalChildCount === null || sf.totalChildCount === void 0 ? void 0 : Number(sf.totalChildCount)
+    };
+  }
+  function sanitizeDetailedSessionFiles(input) {
+    if (!Array.isArray(input)) {
+      return [];
+    }
+    return input.map(sanitizeSessionFileItem);
+  }
+  function handleSessionFilesLoadProgress(message) {
+    const processed = Number(message.processed || 0);
+    const total = Number(message.total || 0);
+    const progressText = total > 0 ? `Analyzing files\u2026 (${processed} / ${total})` : "Analyzing files\u2026";
+    const sessionSubtext = document.getElementById("session-loading-subtext");
+    if (sessionSubtext) {
+      sessionSubtext.textContent = progressText;
+    }
+    const shareSubtext = document.getElementById("share-loading-subtext");
+    if (shareSubtext) {
+      shareSubtext.textContent = progressText;
+    }
+    const modelUsageStatus = document.getElementById("model-usage-status");
+    if (modelUsageStatus) {
+      modelUsageStatus.textContent = total > 0 ? `\u23F3 Loading sessions\u2026 (${processed}/${total})` : "\u23F3 Loading sessions\u2026";
+    }
+  }
+  function handleSessionFilesLoaded(message) {
+    storedDetailedFiles = sanitizeDetailedSessionFiles(message.detailedSessionFiles);
+    isLoading = false;
+    const sessionsTab = document.querySelector('.tab[data-tab="sessions"]');
+    if (sessionsTab) {
+      sessionsTab.textContent = `\u{1F4C1} Session Files (${storedDetailedFiles.length})`;
+    }
+    const modelUsageSelect = document.getElementById("model-usage-editor-select");
+    if (modelUsageSelect) {
+      const editorStats = getEditorStats(storedDetailedFiles);
+      const editorOptions = Object.keys(editorStats).sort().map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`).join("");
+      modelUsageSelect.innerHTML = `<option value="all">\u{1F310} All Editors</option>${editorOptions}`;
+      modelUsageSelect.disabled = false;
+    }
+    renderModelUsageTimeSelector(false);
+    const modelUsageStatus = document.getElementById("model-usage-status");
+    if (modelUsageStatus) {
+      modelUsageStatus.textContent = "";
+    }
+    triggerModelUsageAnalysis();
+    reRenderTable();
+    reRenderShareCard();
+  }
+  function handleCacheCleared() {
+    const btnReport = document.getElementById(
+      "btn-clear-cache"
+    );
+    const btnTab = document.getElementById(
+      "btn-clear-cache-tab"
+    );
+    if (btnReport) {
+      btnReport.style.background = "#2d6a4f";
+      btnReport.innerHTML = "<span>\u2705</span><span>Cache Cleared</span>";
+      btnReport.disabled = false;
+    }
+    if (btnTab) {
+      btnTab.style.background = "#2d6a4f";
+      btnTab.innerHTML = "<span>\u2705</span><span>Cache Cleared</span>";
+      btnTab.disabled = false;
+    }
+    setTimeout(() => {
+      if (btnReport) {
+        btnReport.style.background = "";
+        btnReport.innerHTML = "<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>";
+      }
+      if (btnTab) {
+        btnTab.style.background = "";
+        btnTab.innerHTML = "<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>";
+      }
+    }, 2e3);
+  }
+  function updateCacheSummaryCards(cacheInfo, summaryCards) {
+    if (summaryCards.length < 4) {
+      return;
+    }
+    const entriesValue = summaryCards[0]?.querySelector(".summary-value");
+    if (entriesValue) {
+      entriesValue.textContent = String(cacheInfo.size);
+    }
+    const sizeValue = summaryCards[1]?.querySelector(".summary-value");
+    if (sizeValue) {
+      sizeValue.textContent = `${cacheInfo.sizeInMB.toFixed(2)} MB`;
+    }
+    const lastUpdatedValue = summaryCards[2]?.querySelector(".summary-value");
+    if (lastUpdatedValue) {
+      lastUpdatedValue.textContent = new Date(cacheInfo.lastUpdated).toLocaleString();
+    }
+    const ageValue = summaryCards[3]?.querySelector(".summary-value");
+    if (ageValue) {
+      ageValue.textContent = "0 seconds ago";
+    }
+  }
+  function handleCacheRefreshed(message) {
+    if (!message.cacheInfo) {
+      return;
+    }
+    const cacheTabContent = document.getElementById("tab-cache");
+    if (!cacheTabContent) {
+      return;
+    }
+    updateCacheSummaryCards(message.cacheInfo, cacheTabContent.querySelectorAll(".summary-card"));
+  }
+  function handleFolderPicked(message) {
+    const input = document.getElementById("folder-path-input");
+    if (input && message.folderPath) {
+      input.value = message.folderPath;
+      input.style.borderColor = "";
+    }
+  }
+  function handleFolderAnalysisResult(message) {
+    const btn = document.getElementById("btn-analyze-folder");
+    if (btn) {
+      btn.disabled = false;
+      btn.innerHTML = "<span>\u{1F50D}</span><span>Analyze</span>";
+    }
+    const resultsDiv = document.getElementById("folder-analysis-results");
+    if (resultsDiv) {
+      if (message.error) {
+        resultsDiv.innerHTML = `
         <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
           <div class="info-box-title">\u26A0\uFE0F Analysis Error</div>
-          <div>${d(e.error)}</div>
-        </div>`:o.innerHTML=as(e.files||[],e.totalScanned||0,e.parseErrors||0,e.truncated||!1,d(String(e.folderPath||""))))}function ti(){window.addEventListener("message",e=>{let t=e.data;t.command==="diagnosticDataLoaded"?Os(t):t.command==="githubAuthUpdated"?Fs(t):t.command==="diagnosticDataError"?zs(t):t.command==="sessionFilesLoaded"&&t.detailedSessionFiles?Zs(t):t.command==="sessionFilesLoadProgress"?Ws(t):t.command==="cacheCleared"?Ks():t.command==="cacheRefreshed"?Ys(t):t.command==="folderPicked"?Xs(t):t.command==="folderAnalysisResult"?Qs(t):t.command==="modelUsageResult"&&$s(t)})}function ei(e){return`
+          <div>${escapeHtml(message.error)}</div>
+        </div>`;
+      } else {
+        resultsDiv.innerHTML = renderFolderAnalysisResults(
+          message.files || [],
+          message.totalScanned || 0,
+          message.parseErrors || 0,
+          message.truncated || false,
+          escapeHtml(String(message.folderPath || ""))
+        );
+      }
+    }
+  }
+  function setupMessageHandlers() {
+    window.addEventListener("message", (event) => {
+      const message = event.data;
+      if (message.command === "diagnosticDataLoaded") {
+        handleDiagnosticDataLoaded(message);
+      } else if (message.command === "backendStorageInfoLoaded") {
+        handleBackendStorageSection(message);
+      } else if (message.command === "githubAuthUpdated") {
+        handleGithubAuthUpdated(message);
+      } else if (message.command === "diagnosticDataError") {
+        handleDiagnosticDataError(message);
+      } else if (message.command === "sessionFilesLoaded" && message.detailedSessionFiles) {
+        handleSessionFilesLoaded(message);
+      } else if (message.command === "sessionFilesLoadProgress") {
+        handleSessionFilesLoadProgress(message);
+      } else if (message.command === "cacheCleared") {
+        handleCacheCleared();
+      } else if (message.command === "cacheRefreshed") {
+        handleCacheRefreshed(message);
+      } else if (message.command === "folderPicked") {
+        handleFolderPicked(message);
+      } else if (message.command === "folderAnalysisResult") {
+        handleFolderAnalysisResult(message);
+      } else if (message.command === "modelUsageResult") {
+        handleModelUsageResult(message);
+      }
+    });
+  }
+  function renderDiagCacheTabHtml(data) {
+    return `
 <div id="tab-cache" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u{1F4BE} Cache Information</div>
@@ -1844,26 +5483,26 @@ Cache is stored in VS Code's global state and persists across sessions.
 <div class="summary-cards">
 <div class="summary-card">
 <div class="summary-label">\u{1F4E6} Cache Entries</div>
-<div class="summary-value">${e.cacheInfo?.size||0}</div>
+<div class="summary-value">${data.cacheInfo?.size || 0}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u{1F4BE} Cache Size</div>
-<div class="summary-value">${e.cacheInfo?.sizeInMB?e.cacheInfo.sizeInMB.toFixed(2)+" MB":"N/A"}</div>
+<div class="summary-value">${data.cacheInfo?.sizeInMB ? data.cacheInfo.sizeInMB.toFixed(2) + " MB" : "N/A"}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u{1F552} Last Updated</div>
-<div class="summary-value" style="font-size: 14px;">${e.cacheInfo?.lastUpdated?ft(e.cacheInfo.lastUpdated):"Never"}</div>
+<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? formatDate(data.cacheInfo.lastUpdated) : "Never"}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u23F1\uFE0F Cache Age</div>
-<div class="summary-value" style="font-size: 14px;">${e.cacheInfo?.lastUpdated?xt(e.cacheInfo.lastUpdated):"N/A"}</div>
+<div class="summary-value" style="font-size: 14px;">${data.cacheInfo?.lastUpdated ? getTimeSince(data.cacheInfo.lastUpdated) : "N/A"}</div>
 </div>
 </div>
 <div class="cache-location">
 <h4>Storage Location</h4>
 <div class="location-box">
-<code>${d(e.cacheInfo?.location||"VS Code Global State")}</code>
-${e.cacheInfo?.storagePath?` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(e.cacheInfo.storagePath)}">Open storage location</a>`:""}
+<code>${escapeHtml(data.cacheInfo?.location || "VS Code Global State")}</code>
+${data.cacheInfo?.storagePath ? ` <a href="#" class="open-storage-link" data-path="${encodeURIComponent(data.cacheInfo.storagePath)}">Open storage location</a>` : ""}
 </div>
 <p style="color: #999; font-size: 12px; margin-top: 8px;">
 Cache is stored in VS Code's global state (extension storage) and includes:
@@ -1888,12 +5527,22 @@ This can help resolve issues with stale or incorrect data.
 </div>
 </div>
 </div>
-</div>`}function E(e,t){return e===t?"selected":""}function oi(e){return`<div class="backend-card">
+</div>`;
+  }
+  function sel(current, value) {
+    return current === value ? "selected" : "";
+  }
+  function renderQuotaCardHtml(data) {
+    const quotaContent = data.quotaEntitlements ? `<p>
+${data.quotaEntitlements.premium_interactions ? `<strong>Premium Interactions:</strong> $${data.quotaEntitlements.premium_interactions.toFixed(2)}/month<br/>` : ""}${data.quotaEntitlements.completions ? `<strong>Completions:</strong> $${data.quotaEntitlements.completions.toFixed(2)}/month<br/>` : ""}
+    </p>` : `<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>`;
+    return `<div class="backend-card">
 <h4>\u{1F4CA} API Quota Information</h4>
-${e.quotaEntitlements?`<p>
-${e.quotaEntitlements.premium_interactions?`<strong>Premium Interactions:</strong> $${e.quotaEntitlements.premium_interactions.toFixed(2)}/month<br/>`:""}${e.quotaEntitlements.completions?`<strong>Completions:</strong> $${e.quotaEntitlements.completions.toFixed(2)}/month<br/>`:""}
-    </p>`:'<p class="hint">No quota information available from the API yet. Sign out and back in to refresh.</p>'}
-</div>`}function ni(){return`<div class="backend-card">
+${quotaContent}
+</div>`;
+  }
+  function renderEditorDiscoveryCardHtml() {
+    return `<div class="backend-card">
 <h4>\u{1F195} Editor Discovery Notifications</h4>
 <p>
 The extension remembers which editors it has already seen so each editor triggers a discovery notification only once.
@@ -1905,7 +5554,13 @@ Use this reset to clear that memory and start tracking from scratch.
 <span>Reset Discovered Editors</span>
 </button>
 </div>
-</div>`}function si(e){let t=e.displaySettings?.showTokens??"both",o=e.displaySettings?.showCost??"none",n=Math.round((e.displaySettings?.monthlyBudget??0)*100)/100;return`
+</div>`;
+  }
+  function renderDiagDisplayTabHtml(data) {
+    const showTokens = data.displaySettings?.showTokens ?? "both";
+    const showCost = data.displaySettings?.showCost ?? "none";
+    const monthlyBudget = Math.round((data.displaySettings?.monthlyBudget ?? 0) * 100) / 100;
+    return `
 <div id="tab-display" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u2699\uFE0F Display Settings</div>
@@ -1920,23 +5575,23 @@ Choose what to show in the VS Code status bar toolbar. You can show token counts
 <div style="display: flex; align-items: center; gap: 12px;">
   <label style="min-width: 175px; font-size: 13px;">\u{1F522} Token counts:</label>
   <select id="select-show-tokens" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
-    <option value="none" ${E(t,"none")}>None</option>
-    <option value="today" ${E(t,"today")}>Today only</option>
-    <option value="last30days" ${E(t,"last30days")}>Last 30 days only</option>
-    <option value="currentMonth" ${E(t,"currentMonth")}>Current calendar month only</option>
-    <option value="both" ${E(t,"both")}>Today + last 30 days (default)</option>
-    <option value="todayAndCurrentMonth" ${E(t,"todayAndCurrentMonth")}>Today + current calendar month</option>
+    <option value="none" ${sel(showTokens, "none")}>None</option>
+    <option value="today" ${sel(showTokens, "today")}>Today only</option>
+    <option value="last30days" ${sel(showTokens, "last30days")}>Last 30 days only</option>
+    <option value="currentMonth" ${sel(showTokens, "currentMonth")}>Current calendar month only</option>
+    <option value="both" ${sel(showTokens, "both")}>Today + last 30 days (default)</option>
+    <option value="todayAndCurrentMonth" ${sel(showTokens, "todayAndCurrentMonth")}>Today + current calendar month</option>
   </select>
 </div>
 <div style="display: flex; align-items: center; gap: 12px;">
   <label style="min-width: 175px; font-size: 13px;">\u{1F4B0} Estimated cost (USD):</label>
   <select id="select-show-cost" class="settings-select" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px;">
-    <option value="none" ${E(o,"none")}>None (hidden)</option>
-    <option value="today" ${E(o,"today")}>Today only</option>
-    <option value="last30days" ${E(o,"last30days")}>Last 30 days only</option>
-    <option value="currentMonth" ${E(o,"currentMonth")}>Current calendar month only</option>
-    <option value="both" ${E(o,"both")}>Today + last 30 days</option>
-    <option value="todayAndCurrentMonth" ${E(o,"todayAndCurrentMonth")}>Today + current calendar month</option>
+    <option value="none" ${sel(showCost, "none")}>None (hidden)</option>
+    <option value="today" ${sel(showCost, "today")}>Today only</option>
+    <option value="last30days" ${sel(showCost, "last30days")}>Last 30 days only</option>
+    <option value="currentMonth" ${sel(showCost, "currentMonth")}>Current calendar month only</option>
+    <option value="both" ${sel(showCost, "both")}>Today + last 30 days</option>
+    <option value="todayAndCurrentMonth" ${sel(showCost, "todayAndCurrentMonth")}>Today + current calendar month</option>
   </select>
 </div>
 </div>
@@ -1949,13 +5604,13 @@ Set a monthly AI spend budget in USD to get visual alerts on the status bar. The
 </p>
 <div style="display: flex; align-items: center; gap: 12px;">
   <label style="min-width: 175px; font-size: 13px;">\u{1F4B5} Monthly budget (USD):</label>
-  <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${n}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
+  <input id="input-monthly-budget" type="number" min="0" max="99999" step="0.01" value="${monthlyBudget}" style="background: #2d2d2d; color: #ccc; border: 1px solid #555; border-radius: 4px; padding: 4px 8px; font-size: 13px; width: 100px;" />
 </div>
 <p class="hint">Budget coloring uses the current calendar month's estimated cost. Set to 0 to disable.</p>
-${e.quotaEntitlements&&e.quotaEntitlements.premium_interactions?`<p class="hint" style="color: #90ee90;"><strong>\u2139\uFE0F API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${e.quotaEntitlements.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>`:""}
+${data.quotaEntitlements && data.quotaEntitlements.premium_interactions ? `<p class="hint" style="color: #90ee90;"><strong>\u2139\uFE0F API-driven budget:</strong> Your premium_interactions quota entitlement is <strong>$${data.quotaEntitlements.premium_interactions.toFixed(2)}</strong>/month. If the budget above is 0 or empty, this API value will be used as your effective budget.</p>` : ""}
 </div>
-${oi(e)}
-${ni()}
+${renderQuotaCardHtml(data)}
+${renderEditorDiscoveryCardHtml()}
 <div class="backend-card">
 <h4>\u{1F522} Number Formatting</h4>
 <p>
@@ -1969,95 +5624,300 @@ for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,2
 </button>
 </div>
 </div>
-</div>`}function Bt(e){return Pt!==e?' <span class="sort-hint">\u2195</span>':Y==="desc"?" \u25BC":" \u25B2"}function ii(e){let t=e.reduce((n,s)=>n+s.calls,0),o=e.reduce((n,s)=>n+s.totalTokens,0);return t>0?o/t:NaN}function ri(e){return[...e].sort((t,o)=>{let n,s;switch(Pt){case"tool":n=t.tool.toLowerCase(),s=o.tool.toLowerCase();break;case"calls":n=t.calls,s=o.calls;break;case"total":n=t.totalTokens,s=o.totalTokens;break;default:n=t.calls>0?t.totalTokens/t.calls:0,s=o.calls>0?o.totalTokens/o.calls:0;break}return n<s?Y==="desc"?1:-1:n>s?Y==="desc"?-1:1:0})}function ai(e,t){let o=e.calls>0?Math.round(e.totalTokens/e.calls):0,n='<td class="tool-ratio">\u2014</td>';if(!e.isBuiltIn&&!isNaN(t)&&t>0&&e.calls>0){let i=e.totalTokens/e.calls/t,r=Number(Math.round(i*100))||0;n=`<td class="tool-ratio ${i<.85?"ratio-better":i>1.15?"ratio-worse":"ratio-neutral"}" title="${r}% of built-in average">${r}%</td>`}else e.isBuiltIn&&(n='<td class="tool-ratio tool-builtin-label">baseline</td>');let s=e.isBuiltIn?' <span class="tool-type-badge built-in">built-in</span>':' <span class="tool-type-badge alternative">alt</span>';return`<tr><td>${d(e.tool)}${s}</td><td>${d(String(e.calls))}</td><td>${C(e.totalTokens)}</td><td>${C(o)}</td>${n}</tr>`}function Ce(e,t=NaN){return ri(e).map(o=>ai(o,t)).join("")}function $e(){return`<tr>
-<th class="tool-sortable" data-sort="tool">Tool${Bt("tool")}</th>
-<th class="tool-sortable" data-sort="calls">Calls${Bt("calls")}</th>
-<th class="tool-sortable" data-sort="total">Total Output Tokens${Bt("total")}</th>
-<th class="tool-sortable" data-sort="avg">Avg Tokens / Call${Bt("avg")}</th>
+</div>`;
+  }
+  function getToolSortIndicator(col) {
+    if (toolSortColumn !== col) {
+      return ' <span class="sort-hint">\u2195</span>';
+    }
+    return toolSortDir === "desc" ? " \u25BC" : " \u25B2";
+  }
+  function pooledAvg(rows) {
+    const totalCalls = rows.reduce((s4, r6) => s4 + r6.calls, 0);
+    const totalTokens = rows.reduce((s4, r6) => s4 + r6.totalTokens, 0);
+    return totalCalls > 0 ? totalTokens / totalCalls : NaN;
+  }
+  function sortToolRows(rows) {
+    return [...rows].sort((a3, b3) => {
+      let aVal, bVal;
+      switch (toolSortColumn) {
+        case "tool":
+          aVal = a3.tool.toLowerCase();
+          bVal = b3.tool.toLowerCase();
+          break;
+        case "calls":
+          aVal = a3.calls;
+          bVal = b3.calls;
+          break;
+        case "total":
+          aVal = a3.totalTokens;
+          bVal = b3.totalTokens;
+          break;
+        case "avg":
+        default:
+          aVal = a3.calls > 0 ? a3.totalTokens / a3.calls : 0;
+          bVal = b3.calls > 0 ? b3.totalTokens / b3.calls : 0;
+          break;
+      }
+      if (aVal < bVal) {
+        return toolSortDir === "desc" ? 1 : -1;
+      }
+      if (aVal > bVal) {
+        return toolSortDir === "desc" ? -1 : 1;
+      }
+      return 0;
+    });
+  }
+  function renderToolRow(r6, builtInBaseline) {
+    const avg = r6.calls > 0 ? Math.round(r6.totalTokens / r6.calls) : 0;
+    let ratioHtml = '<td class="tool-ratio">\u2014</td>';
+    if (!r6.isBuiltIn && !isNaN(builtInBaseline) && builtInBaseline > 0 && r6.calls > 0) {
+      const ratio = r6.totalTokens / r6.calls / builtInBaseline;
+      const pct = Number(Math.round(ratio * 100)) || 0;
+      const cls = ratio < 0.85 ? "ratio-better" : ratio > 1.15 ? "ratio-worse" : "ratio-neutral";
+      ratioHtml = `<td class="tool-ratio ${cls}" title="${pct}% of built-in average">${pct}%</td>`;
+    } else if (r6.isBuiltIn) {
+      ratioHtml = '<td class="tool-ratio tool-builtin-label">baseline</td>';
+    }
+    const badge = r6.isBuiltIn ? ' <span class="tool-type-badge built-in">built-in</span>' : ' <span class="tool-type-badge alternative">alt</span>';
+    return `<tr><td>${escapeHtml(r6.tool)}${badge}</td><td>${escapeHtml(String(r6.calls))}</td><td>${formatTokenCount(r6.totalTokens)}</td><td>${formatTokenCount(avg)}</td>${ratioHtml}</tr>`;
+  }
+  function renderToolAnalysisRows(rows, builtInBaseline = NaN) {
+    return sortToolRows(rows).map((r6) => renderToolRow(r6, builtInBaseline)).join("");
+  }
+  function toolAnalysisTheadHtml() {
+    return `<tr>
+<th class="tool-sortable" data-sort="tool">Tool${getToolSortIndicator("tool")}</th>
+<th class="tool-sortable" data-sort="calls">Calls${getToolSortIndicator("calls")}</th>
+<th class="tool-sortable" data-sort="total">Total Output Tokens${getToolSortIndicator("total")}</th>
+<th class="tool-sortable" data-sort="avg">Avg Tokens / Call${getToolSortIndicator("avg")}</th>
 <th>vs Built-in</th>
-</tr>`}function li(e,t,o,n){let s=(b,h)=>b.filter(x=>t[x]!==void 0&&(o[x]||0)>0&&!n.has(x)).map(x=>(n.add(x),{tool:x,totalTokens:t[x],calls:o[x]||0,isBuiltIn:h})),i=s(e.builtIn,!0),r=s(e.alternatives,!1),a=[...i,...r];if(a.length===0)return{html:"",rows:[]};let l=ii(i),u=encodeURIComponent(JSON.stringify(a)),p=e.description?` <span class="hint">${d(e.description)}</span>`:"";return{html:`
+</tr>`;
+  }
+  function renderToolFamilySection(family, outputTokensByTool, byTool, assignedTools) {
+    const buildRows = (names, isBuiltIn) => names.filter((t4) => outputTokensByTool[t4] !== void 0 && (byTool[t4] || 0) > 0 && !assignedTools.has(t4)).map((t4) => {
+      assignedTools.add(t4);
+      return { tool: t4, totalTokens: outputTokensByTool[t4], calls: byTool[t4] || 0, isBuiltIn };
+    });
+    const builtInRows = buildRows(family.builtIn, true);
+    const altRows = buildRows(family.alternatives, false);
+    const allRows = [...builtInRows, ...altRows];
+    if (allRows.length === 0) {
+      return { html: "", rows: [] };
+    }
+    const baseline = pooledAvg(builtInRows);
+    const encodedRows = encodeURIComponent(JSON.stringify(allRows));
+    const desc = family.description ? ` <span class="hint">${escapeHtml(family.description)}</span>` : "";
+    const html = `
 <div class="tool-family-section">
-<h4 class="tool-family-heading">${d(e.name)}${p}</h4>
-<table class="session-table tool-analysis-table" data-rows="${u}" data-baseline="${isNaN(l)?"":String(l)}">
-<thead>${$e()}</thead>
-<tbody>${Ce(a,l)}</tbody>
+<h4 class="tool-family-heading">${escapeHtml(family.name)}${desc}</h4>
+<table class="session-table tool-analysis-table" data-rows="${encodedRows}" data-baseline="${isNaN(baseline) ? "" : String(baseline)}">
+<thead>${toolAnalysisTheadHtml()}</thead>
+<tbody>${renderToolAnalysisRows(allRows, baseline)}</tbody>
 </table>
-</div>`,rows:a}}function Qo(e,t){if(!e||!e.outputTokensByTool||Object.keys(e.outputTokensByTool).length===0)return`<div id="tab-tool-analysis" class="tab-content">
+</div>`;
+    return { html, rows: allRows };
+  }
+  function renderToolAnalysisTab(toolCallStats, families) {
+    if (!toolCallStats || !toolCallStats.outputTokensByTool || Object.keys(toolCallStats.outputTokensByTool).length === 0) {
+      return `<div id="tab-tool-analysis" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u{1F527} Tool Output Token Analysis</div>
 <div>Track how many tokens each tool produces as output over the last 30 days. Data is collected as you use the extension \u2014 no output token data has been recorded yet.</div>
 </div>
-</div>`;let o=e.outputTokensByTool,n=e.byTool,s=new Set,i="";if(t&&t.length>0)for(let a of t){let{html:l}=li(a,o,n,s);i+=l}let r=Object.entries(o).filter(([a])=>!s.has(a)&&(n[a]||0)>0).map(([a,l])=>({tool:a,totalTokens:l,calls:n[a]||0,isBuiltIn:!1}));if(r.length>0){let a=encodeURIComponent(JSON.stringify(r));i+=`
+</div>`;
+    }
+    const outputTokensByTool = toolCallStats.outputTokensByTool;
+    const byTool = toolCallStats.byTool;
+    const assignedTools = /* @__PURE__ */ new Set();
+    let sectionsHtml = "";
+    if (families && families.length > 0) {
+      for (const family of families) {
+        const { html } = renderToolFamilySection(family, outputTokensByTool, byTool, assignedTools);
+        sectionsHtml += html;
+      }
+    }
+    const otherRows = Object.entries(outputTokensByTool).filter(([t4]) => !assignedTools.has(t4) && (byTool[t4] || 0) > 0).map(([t4, tokens]) => ({ tool: t4, totalTokens: tokens, calls: byTool[t4] || 0, isBuiltIn: false }));
+    if (otherRows.length > 0) {
+      const encodedOther = encodeURIComponent(JSON.stringify(otherRows));
+      sectionsHtml += `
 <div class="tool-family-section">
 <h4 class="tool-family-heading">Other Tools</h4>
-<table class="session-table tool-analysis-table" data-rows="${a}" data-baseline="">
-<thead>${$e()}</thead>
-<tbody>${Ce(r,NaN)}</tbody>
+<table class="session-table tool-analysis-table" data-rows="${encodedOther}" data-baseline="">
+<thead>${toolAnalysisTheadHtml()}</thead>
+<tbody>${renderToolAnalysisRows(otherRows, NaN)}</tbody>
 </table>
-</div>`}return`<div id="tab-tool-analysis" class="tab-content">
+</div>`;
+    }
+    return `<div id="tab-tool-analysis" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u{1F527} Tool Output Token Analysis</div>
 <div>Tokens produced by each tool's output over the last 30 days. Tools are grouped by family. <strong>vs Built-in</strong> shows how an alternative compares to the pooled baseline \u2014 green is more token-efficient. Click column headers to sort within each group. <button class="inline-link" id="btn-open-tool-families-settings">Configure tool families \u2197</button></div>
 </div>
-${i}
-</div>`}function di(e){return e&&e.otelSessionsIndexed>0?"":`<div class="info-box">
+${sectionsHtml}
+</div>`;
+  }
+  function renderOtelDeltaSetupNotice(comparison) {
+    if (comparison && comparison.otelSessionsIndexed > 0) {
+      return "";
+    }
+    const dirStatus = comparison?.otelDirExists ? `The export directory exists but no session data has been indexed from it yet (${Number(comparison.otelFileCount)} file(s) found).` : `No <code>~/.copilot/otel</code> directory was found \u2014 the export isn't enabled yet.`;
+    return `<div class="info-box">
 <div class="info-box-title">\u{1F4E1} Copilot CLI OpenTelemetry Export Not Detected</div>
 <div>
-${e?.otelDirExists?`The export directory exists but no session data has been indexed from it yet (${Number(e.otelFileCount)} file(s) found).`:"No <code>~/.copilot/otel</code> directory was found \u2014 the export isn't enabled yet."} Enabling it lets this extension read <strong>exact</strong> token counts (input, output, cache) straight from Copilot CLI instead of estimating them from ratios.<br/><br/>
+${dirStatus} Enabling it lets this extension read <strong>exact</strong> token counts (input, output, cache) straight from Copilot CLI instead of estimating them from ratios.<br/><br/>
 Set these three environment variables before starting a Copilot CLI session, then run a session and reopen this tab:
 <pre style="margin-top:8px;">COPILOT_OTEL_ENABLED=true
 COPILOT_OTEL_EXPORTER_TYPE=file
 COPILOT_OTEL_FILE_EXPORTER_PATH=~/.copilot/otel/copilot-otel.jsonl</pre>
 See <code>docs/COPILOT-CLI-OTEL-EXPORT.md</code> in the repo for full setup steps (Windows/PowerShell and Unix shells) and how to verify it's working.
 </div>
-</div>`}function tn(e){let t=Number(e)||0;if(t===0)return{text:"0",cssClass:""};let o=t>0?"+":"-",n=t>0?"otel-delta-positive":"otel-delta-negative";return{text:`${o}${C(Math.abs(t))}`,cssClass:n}}function Bo(e){return new Date(e.getFullYear(),e.getMonth(),e.getDate())}function ci(e,t,o){if(t==="all")return!0;if(!e)return!1;let n=new Date(e);if(Number.isNaN(n.getTime()))return!1;let s=Bo(o),i=Bo(n);if(t==="today")return i.getTime()===s.getTime();if(t==="yesterday"){let r=new Date(s);return r.setDate(r.getDate()-1),i.getTime()===r.getTime()}if(t==="week"){let r=new Date(s);return r.setDate(r.getDate()-6),n>=r&&n<=o}return n.getFullYear()===o.getFullYear()&&n.getMonth()===o.getMonth()&&n<=o}function ui(e,t){if(t==="all")return e;let o=new Date,n=e.sessions.filter(r=>ci(r.lastActivity,t,o)),s=n.reduce((r,a)=>r+a.baselineTokens,0),i=n.reduce((r,a)=>r+a.otelTokens,0);return{...e,sessions:n,sessionsMatched:n.length,totalBaselineTokens:s,totalOtelTokens:i,deltaTokens:i-s}}var Ro={all:"All Time",today:"Today",yesterday:"Yesterday",week:"This Week",month:"This Month"};function pi(e){return`<div class="otel-delta-period-row">
+</div>`;
+  }
+  function formatTokenDelta(rawDelta) {
+    const delta = Number(rawDelta) || 0;
+    if (delta === 0) {
+      return { text: "0", cssClass: "" };
+    }
+    const sign = delta > 0 ? "+" : "-";
+    const cssClass = delta > 0 ? "otel-delta-positive" : "otel-delta-negative";
+    return { text: `${sign}${formatTokenCount(Math.abs(delta))}`, cssClass };
+  }
+  function startOfLocalDay(d3) {
+    return new Date(d3.getFullYear(), d3.getMonth(), d3.getDate());
+  }
+  function otelSessionMatchesPeriod(lastActivity, period, now) {
+    if (period === "all") {
+      return true;
+    }
+    if (!lastActivity) {
+      return false;
+    }
+    const activity = new Date(lastActivity);
+    if (Number.isNaN(activity.getTime())) {
+      return false;
+    }
+    const today = startOfLocalDay(now);
+    const activityDay = startOfLocalDay(activity);
+    if (period === "today") {
+      return activityDay.getTime() === today.getTime();
+    }
+    if (period === "yesterday") {
+      const yesterday = new Date(today);
+      yesterday.setDate(yesterday.getDate() - 1);
+      return activityDay.getTime() === yesterday.getTime();
+    }
+    if (period === "week") {
+      const weekStart = new Date(today);
+      weekStart.setDate(weekStart.getDate() - 6);
+      return activity >= weekStart && activity <= now;
+    }
+    return activity.getFullYear() === now.getFullYear() && activity.getMonth() === now.getMonth() && activity <= now;
+  }
+  function filterOtelComparisonByPeriod(comparison, period) {
+    if (period === "all") {
+      return comparison;
+    }
+    const now = /* @__PURE__ */ new Date();
+    const sessions = comparison.sessions.filter((s4) => otelSessionMatchesPeriod(s4.lastActivity, period, now));
+    const totalBaselineTokens = sessions.reduce((sum, s4) => sum + s4.baselineTokens, 0);
+    const totalOtelTokens = sessions.reduce((sum, s4) => sum + s4.otelTokens, 0);
+    return {
+      ...comparison,
+      sessions,
+      sessionsMatched: sessions.length,
+      totalBaselineTokens,
+      totalOtelTokens,
+      deltaTokens: totalOtelTokens - totalBaselineTokens
+    };
+  }
+  var OTEL_DELTA_PERIOD_LABELS = {
+    all: "All Time",
+    today: "Today",
+    yesterday: "Yesterday",
+    week: "This Week",
+    month: "This Month"
+  };
+  function renderOtelDeltaPeriodSelector(period) {
+    const options = Object.keys(OTEL_DELTA_PERIOD_LABELS).map((p3) => `<option value="${p3}"${p3 === period ? " selected" : ""}>${OTEL_DELTA_PERIOD_LABELS[p3]}</option>`).join("");
+    return `<div class="otel-delta-period-row">
 <label for="otel-delta-period">Show:</label>
-<select id="otel-delta-period" class="otel-delta-period-select">${Object.keys(Ro).map(o=>`<option value="${o}"${o===e?" selected":""}>${Ro[o]}</option>`).join("")}</select>
-</div>`}function bi(e){let t=tn(e.deltaTokens),o=Number(e.sessionsMatched)||0,n=Number(e.totalBaselineTokens)||0,s=Number(e.totalOtelTokens)||0,i=Number(e.deltaTokens)||0;return`<div class="summary-cards">
+<select id="otel-delta-period" class="otel-delta-period-select">${options}</select>
+</div>`;
+  }
+  function renderOtelDeltaSummaryCards(comparison) {
+    const delta = formatTokenDelta(comparison.deltaTokens);
+    const sessionsMatched = Number(comparison.sessionsMatched) || 0;
+    const totalBaselineTokens = Number(comparison.totalBaselineTokens) || 0;
+    const totalOtelTokens = Number(comparison.totalOtelTokens) || 0;
+    const deltaTokens = Number(comparison.deltaTokens) || 0;
+    return `<div class="summary-cards">
 <div class="summary-card">
 <div class="summary-label">\u{1F4E1} Sessions With OTel Data</div>
-<div class="summary-value">${o.toLocaleString()}</div>
+<div class="summary-value">${sessionsMatched.toLocaleString()}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u{1F4CA} Previous Estimate (Total)</div>
-<div class="summary-value" title="${n.toLocaleString()} tokens">${C(n)}</div>
+<div class="summary-value" title="${totalBaselineTokens.toLocaleString()} tokens">${formatTokenCount(totalBaselineTokens)}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u{1F3AF} OTel Exact (Total)</div>
-<div class="summary-value" title="${s.toLocaleString()} tokens">${C(s)}</div>
+<div class="summary-value" title="${totalOtelTokens.toLocaleString()} tokens">${formatTokenCount(totalOtelTokens)}</div>
 </div>
 <div class="summary-card">
 <div class="summary-label">\u0394 Delta</div>
-<div class="summary-value ${t.cssClass}" title="${i.toLocaleString()} tokens">${t.text}</div>
+<div class="summary-value ${delta.cssClass}" title="${deltaTokens.toLocaleString()} tokens">${delta.text}</div>
 </div>
-</div>`}function mi(e){return e.map(t=>{let o=tn(t.delta),n=d(String(t.sessionId??"").slice(0,8)),s=d((Array.isArray(t.models)?t.models:[]).map(a=>String(a)).join(", ")||"\u2014"),i=Number(t.baselineTokens)||0,r=Number(t.otelTokens)||0;return`<tr>
-<td title="${d(String(t.sessionId??""))}"><code>${n}</code></td>
-<td>${s}</td>
-<td title="${i.toLocaleString()} tokens">${C(i)}</td>
-<td title="${r.toLocaleString()} tokens">${C(r)}</td>
-<td class="${o.cssClass}" title="${(Number(t.delta)||0).toLocaleString()} tokens">${o.text}</td>
-</tr>`}).join("")}function en(e,t=Rt){let o=di(e);if(!e||e.sessionsMatched===0)return`<div id="tab-otel-delta" class="tab-content">
+</div>`;
+  }
+  function renderOtelDeltaSessionRows(sessions) {
+    return sessions.map((s4) => {
+      const delta = formatTokenDelta(s4.delta);
+      const shortId = escapeHtml(String(s4.sessionId ?? "").slice(0, 8));
+      const models = escapeHtml((Array.isArray(s4.models) ? s4.models : []).map((m2) => String(m2)).join(", ") || "\u2014");
+      const baselineTokens = Number(s4.baselineTokens) || 0;
+      const otelTokens = Number(s4.otelTokens) || 0;
+      return `<tr>
+<td title="${escapeHtml(String(s4.sessionId ?? ""))}"><code>${shortId}</code></td>
+<td>${models}</td>
+<td title="${baselineTokens.toLocaleString()} tokens">${formatTokenCount(baselineTokens)}</td>
+<td title="${otelTokens.toLocaleString()} tokens">${formatTokenCount(otelTokens)}</td>
+<td class="${delta.cssClass}" title="${(Number(s4.delta) || 0).toLocaleString()} tokens">${delta.text}</td>
+</tr>`;
+    }).join("");
+  }
+  function renderOtelDeltaTab(comparison, period = currentOtelDeltaPeriod) {
+    const setupNotice = renderOtelDeltaSetupNotice(comparison);
+    if (!comparison || comparison.sessionsMatched === 0) {
+      return `<div id="tab-otel-delta" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u{1F4E1} OTel vs. Estimated Token Counts</div>
 <div>Compares the token counts this extension estimates for Copilot CLI sessions against exact counts read from Copilot CLI's OpenTelemetry export, when available.</div>
 </div>
-${o}
-</div>`;let n=ui(e,t),s=n.sessions.length>0?`<table class="session-table">
+${setupNotice}
+</div>`;
+    }
+    const filtered = filterOtelComparisonByPeriod(comparison, period);
+    const tableOrEmpty = filtered.sessions.length > 0 ? `<table class="session-table">
 <thead><tr><th>Session</th><th>Model(s)</th><th>Previous Estimate</th><th>OTel Exact</th><th>Delta</th></tr></thead>
-<tbody>${mi(n.sessions)}</tbody>
-</table>`:'<div class="info-box">No Copilot CLI sessions with OTel data in this period. Try a wider range.</div>';return`<div id="tab-otel-delta" class="tab-content">
+<tbody>${renderOtelDeltaSessionRows(filtered.sessions)}</tbody>
+</table>` : `<div class="info-box">No Copilot CLI sessions with OTel data in this period. Try a wider range.</div>`;
+    return `<div id="tab-otel-delta" class="tab-content">
 <div class="info-box">
 <div class="info-box-title">\u{1F4E1} OTel vs. Estimated Token Counts</div>
 <div>
 Compares the token counts this extension would normally estimate for each Copilot CLI session against the exact counts read from Copilot CLI's OpenTelemetry file export. A positive delta means OTel revealed usage the estimate missed entirely (e.g. chat-only sessions, which previously reported 0 tokens); near-zero deltas mean the estimate already had exact numbers from a session.shutdown event.<br/>
-Checked ${(Number(e.sessionsChecked)||0).toLocaleString()} Copilot CLI session(s) found locally; ${(Number(e.otelSessionsIndexed)||0).toLocaleString()} session(s) are present in the OTel export.
+Checked ${(Number(comparison.sessionsChecked) || 0).toLocaleString()} Copilot CLI session(s) found locally; ${(Number(comparison.otelSessionsIndexed) || 0).toLocaleString()} session(s) are present in the OTel export.
 </div>
 </div>
-${o}
-${pi(t)}
-${bi(n)}
-${s}
-</div>`}function gi(e){return`<div id="tab-report" class="tab-content active">
+${setupNotice}
+${renderOtelDeltaPeriodSelector(period)}
+${renderOtelDeltaSummaryCards(filtered)}
+${tableOrEmpty}
+</div>`;
+  }
+  function buildDiagReportTabHtml(escapedReport) {
+    return `<div id="tab-report" class="tab-content active">
 <div class="info-box">
 <div class="info-box-title">\u{1F4CB} About This Report</div>
 <div>
@@ -2072,10 +5932,13 @@ code or conversation content. You can safely share this report when reporting is
 <button class="button secondary" id="btn-clear-cache"><span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span></button>
 <button class="button secondary" id="btn-reset-insights"><span>\u{1F4A1}</span><span>Reset Insights Dismissals</span></button>
 </div>
-<div class="report-content">${e}</div>
-</div>`}function hi(e,t,o){return`
-<style>${De}</style>
-<style>${Be}</style>
+<div class="report-content">${escapedReport}</div>
+</div>`;
+  }
+  function buildDiagRootHtml(data, detailedFiles, escapedReport) {
+    return `
+<style>${theme_default}</style>
+<style>${styles_default}</style>
 <div class="container">
 <div class="header">
 <div class="header-left">
@@ -2083,7 +5946,7 @@ code or conversation content. You can safely share this report when reporting is
 <span class="header-title">Diagnostic Report</span>
 </div>
 <div class="button-row">
-${Ee("btn-diagnostics",!!e?.backendConfigured)}
+${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 </div>
 </div>
 
@@ -2095,9 +5958,10 @@ ${Ee("btn-diagnostics",!!e?.backendConfigured)}
 
 <div class="tabs leaf-tabs" data-group="diagnostics" style="display: flex;">
 <button class="tab active" data-tab="report">\u{1F4CB} Report</button>
-<button class="tab" data-tab="sessions">\u{1F4C1} Session Files (${t.length})</button>
+<button class="tab" data-tab="sessions">\u{1F4C1} Session Files (${detailedFiles.length})</button>
 <button class="tab" data-tab="cache">\u{1F4BE} Cache</button>
 <button class="tab" data-tab="path-analyzer">\u{1F52C} Path Analyzer</button>
+<button class="tab" data-tab="share">\u{1F4F8} Share Card</button>
 </div>
 
 <div class="tabs leaf-tabs" data-group="research" style="display: none;">
@@ -2110,42 +5974,111 @@ ${Ee("btn-diagnostics",!!e?.backendConfigured)}
 <button class="tab" data-tab="display">\u2699\uFE0F Display</button>
 <button class="tab" data-tab="backend">\u2601\uFE0F Backend Storage</button>
 <button class="tab" data-tab="github">\u{1F511} GitHub Auth</button>
-${e.isDebugMode?'<button class="tab" data-tab="debug">\u{1F41B} Debug</button>':""}
+${data.isDebugMode ? '<button class="tab" data-tab="debug">\u{1F41B} Debug</button>' : ""}
 </div>
 
-${gi(o)}
+${buildDiagReportTabHtml(escapedReport)}
 
 <div id="tab-sessions" class="tab-content">
-<div class="info-box">
-<div class="info-box-title">\u{1F4C1} Session File Analysis</div>
-<div>
+<div class="info-box"><div class="info-box-title">\u{1F4C1} Session File Analysis</div><div>
 This tab shows session files with activity in the last 14 days from all detected editors. </br>
 Click on an editor panel to filter, click column headers to sort, and click a file name to open it.
-</div>
-</div>
-<div id="session-table-container">${No(t,t.length===0)}</div>
+</div></div>
+<div id="session-table-container">${renderSessionTable(detailedFiles, detailedFiles.length === 0)}</div>
 </div>
 
-${ei(e)}
+${renderDiagCacheTabHtml(data)}
 <div id="tab-backend" class="tab-content">
-${he(e.backendStorageInfo,e.githubAuth)}
+${renderBackendStoragePanel(data.backendStorageInfo, data.githubAuth)}
 </div>
 
 <div id="tab-github" class="tab-content">
-${ge(e.githubAuth)}
+${renderGitHubAuthPanel(data.githubAuth)}
 </div>
-${si(e)}
-${e.isDebugMode?Qn(e.globalStateCounters):""}
+${renderDiagDisplayTabHtml(data)}
+${data.isDebugMode ? renderDebugTab(data.globalStateCounters) : ""}
 <div id="tab-path-analyzer" class="tab-content">
-${is()}
+${renderFolderAnalyzerTab()}
 </div>
+${renderShareCardTab(detailedFiles, isLoading)}
 <div id="tab-model-usage" class="tab-content">
-${us(t,tt)}
+${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
-${Qo(e.toolCallStats,e.toolFamilies)}
-${en(e.otelComparison)}
+${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+${renderOtelDeltaTab(data.otelComparison)}
 </div>
-`}function vi(e){let t=document.getElementById("root");if(!t)return;let o=e.detailedSessionFiles||[];ht=o,tt=o.length===0,vt=e.backendStorageInfo,X=e.githubAuth,ue=e.otelComparison,e.toolFamilies&&(de=e.toolFamilies);let s=e.report===_n?Bn.trim():Po(d(e.report));t.innerHTML=hi(e,o,s);let i=Oo(e.sessionFolders||[]);if(i.length>0){let u=document.getElementById("tab-report")?.querySelector(".report-content");u&&u.insertAdjacentElement("afterend",Fo(i))}ti(),ws(),ys(),jo(),Go(),Vo(),Zo(),Wo(),xe(),Se(),Ko(),zo(),fe(),ks(),Cs(),ve(tt),Ls(),xs(),ke(),Xo();let r=I.restore(),a="report";r?.activeTab&&Ht(r.activeTab)?a=r.activeTab:Ht("report"),qo(vs(a)),r?.activeSubtab&&ye(r.activeSubtab)}async function fi(){if(await Promise.resolve().then(()=>(Eo(),wo)),!To){let e=document.getElementById("root");e&&(e.textContent="No data available.");return}vi(To)}fi();})();
+`;
+  }
+  function renderLayout(data) {
+    const root = document.getElementById("root");
+    if (!root) {
+      return;
+    }
+    const detailedFiles = data.detailedSessionFiles || [];
+    storedDetailedFiles = detailedFiles;
+    isLoading = detailedFiles.length === 0;
+    currentBackendInfo = data.backendStorageInfo;
+    currentGithubAuth = data.githubAuth;
+    currentOtelComparison = data.otelComparison;
+    if (data.toolFamilies) {
+      storedToolFamilies = data.toolFamilies;
+    }
+    const reportIsLoading = data.report === LOADING_PLACEHOLDER;
+    const escapedReport = reportIsLoading ? LOADING_MESSAGE.trim() : removeSessionFilesSection(escapeHtml(data.report));
+    root.innerHTML = buildDiagRootHtml(data, detailedFiles, escapedReport);
+    const sessionFolders = groupSessionFolders(data.sessionFolders || []);
+    if (sessionFolders.length > 0) {
+      const reportTab = document.getElementById("tab-report");
+      const reportContent = reportTab?.querySelector(".report-content");
+      if (reportContent) {
+        reportContent.insertAdjacentElement("afterend", buildSessionFoldersElement(sessionFolders));
+      }
+    }
+    setupMessageHandlers();
+    setupTabHandlers();
+    setupGroupHandlers();
+    setupSortHandlers();
+    setupEditorFilterHandlers();
+    setupContextRefFilterHandlers();
+    setupZeroInteractionFilterHandler();
+    setupUnattributedFilterHandler();
+    setupBackendButtonHandlers();
+    setupSubtabHandlers();
+    setupFileLinks();
+    setupStorageLinkHandlers();
+    setupGitHubAuthHandlers();
+    setupFolderAnalyzerHandlers();
+    setupModelUsageHandlers();
+    renderModelUsageTimeSelector(isLoading);
+    setupButtonHandlers();
+    setupDisplaySettingHandlers();
+    setupToolAnalysisSortHandlers();
+    setupOtelDeltaPeriodHandler();
+    const savedState = diagState.restore();
+    let restoredTab = "report";
+    if (savedState?.activeTab && activateTab(savedState.activeTab)) {
+      restoredTab = savedState.activeTab;
+    } else {
+      activateTab("report");
+    }
+    activateGroup(groupOfTab(restoredTab));
+    if (savedState?.activeSubtab) {
+      activateSubtab(savedState.activeSubtab);
+    }
+  }
+  async function bootstrap() {
+    await Promise.resolve().then(() => (init_vscode_button2(), vscode_button_exports));
+    if (!initialData) {
+      const root = document.getElementById("root");
+      if (root) {
+        root.textContent = "No data available.";
+      }
+      return;
+    }
+    renderLayout(initialData);
+  }
+  void bootstrap();
+})();
 /*! Bundled license information:
 
 @lit/reactive-element/css-tag.js:
@@ -2196,3 +6129,4 @@ lit-html/directives/if-defined.js:
    * SPDX-License-Identifier: BSD-3-Clause
    *)
 */
+//# sourceMappingURL=diagnostics.js.map

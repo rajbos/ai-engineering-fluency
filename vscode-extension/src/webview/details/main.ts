@@ -704,6 +704,29 @@ function sortEditorItems(items: EditorItem[]): void {
 	});
 }
 
+/** Sort editors by the currently selected column for the purpose of deciding which ones are "top N".
+ *  Unlike the table sort, this is always descending for numeric columns (so the largest values are
+ *  shown individually) and ascending for the name column, regardless of the user's sort direction. */
+function sortEditorsBySignificance(stats: DetailedStats, editors: string[]): string[] {
+	return [...editors].sort((a, b) => {
+		if (editorSortKey === 'name') {
+			return a.localeCompare(b);
+		}
+		const aItem = toEditorItem(stats, a);
+		const bItem = toEditorItem(stats, b);
+		let cmp: number;
+		switch (editorSortKey) {
+			case 'today': cmp = aItem.todayUsage.tokens - bItem.todayUsage.tokens; break;
+			case 'last30Days': cmp = aItem.last30DaysUsage.tokens - bItem.last30DaysUsage.tokens; break;
+			case 'month': cmp = aItem.monthUsage.tokens - bItem.monthUsage.tokens; break;
+			case 'lastMonth': cmp = aItem.lastMonthUsage.tokens - bItem.lastMonthUsage.tokens; break;
+			case 'projected': cmp = aItem.projectedTokens - bItem.projectedTokens; break;
+			default: cmp = 0;
+		}
+		return -cmp || a.localeCompare(b);
+	});
+}
+
 function buildEditorRow(item: EditorItem, totals: { today: number; last30Days: number; month: number; lastMonth: number }, isOtherChild: boolean): HTMLTableRowElement {
 	const { editor, todayUsage, last30DaysUsage, monthUsage, lastMonthUsage, projectedTokens, projectedSessions } = item;
 	const todayPct = totals.today > 0 ? (todayUsage.tokens / totals.today) * 100 : 0;
@@ -768,8 +791,8 @@ function appendOtherEditors(item: EditorItem, totals: { today: number; last30Day
 	}
 }
 
-function buildEditorTbody(stats: DetailedStats, topEditors: string[], otherEditors: string[], onToggleOther: () => void): HTMLTableSectionElement {
-const editors = [...topEditors, ...otherEditors];
+function buildEditorTbody(stats: DetailedStats, visibleEditors: string[], onToggleOther: () => void): HTMLTableSectionElement {
+const editors = visibleEditors;
 const totals = {
 	today: editors.reduce((s, e) => s + (stats.today.editorUsage[e]?.tokens || 0), 0),
 	last30Days: editors.reduce((s, e) => s + (stats.last30Days.editorUsage[e]?.tokens || 0), 0),
@@ -781,8 +804,11 @@ if (editors.length === 0) {
 	tbody.append(buildNoDataRow(6, 'No editor usage matches the selected provider filter.'));
 	return tbody;
 }
-// Sort the top editors together with the aggregated "Other" group so the group row
-// lands in its correct sorted position instead of always trailing the list.
+// Split into the top N editors for the currently selected column and an aggregated "Other" group,
+// then sort those rows according to the user's sort direction.
+const sortedBySignificance = sortEditorsBySignificance(stats, editors);
+const topEditors = sortedBySignificance.slice(0, TOP_N_EDITORS);
+const otherEditors = sortedBySignificance.slice(TOP_N_EDITORS);
 const items: EditorItem[] = topEditors.map(editor => toEditorItem(stats, editor));
 if (otherEditors.length > 0) { items.push(toOtherEditorItem(stats, otherEditors)); }
 sortEditorItems(items);
@@ -812,15 +838,6 @@ return null;
 
 const visibleEditors = Array.from(allEditors).filter(editor => isVisibleForProviderFilter(editorBillingGroups(stats, editor)));
 
-// Determine top N editors by last30Days usage; the rest go into the "Other" group
-const sortedByLast30Days = visibleEditors.sort((a, b) => {
-	const aUsage = stats.last30Days.editorUsage[a] || { tokens: 0, sessions: 0 };
-	const bUsage = stats.last30Days.editorUsage[b] || { tokens: 0, sessions: 0 };
-	return bUsage.tokens - aUsage.tokens;
-});
-const topEditors = sortedByLast30Days.slice(0, TOP_N_EDITORS);
-const otherEditors = sortedByLast30Days.slice(TOP_N_EDITORS);
-
 const section = el('div', 'section');
 const heading = iconHeading('h3', 'device-desktop', 'Usage by Editor');
 section.append(heading);
@@ -838,7 +855,7 @@ const editorColHeaders: ColHeader[] = [
 ];
 
 function rebuildTbody(): void {
-	const newTbody = buildEditorTbody(stats, topEditors, otherEditors, rebuildTbody);
+	const newTbody = buildEditorTbody(stats, visibleEditors, rebuildTbody);
 	const oldTbody = table.querySelector('tbody');
 	if (oldTbody) { table.replaceChild(newTbody, oldTbody); } else { table.append(newTbody); }
 }
@@ -952,6 +969,29 @@ function sortModelItems(items: ModelItem[]): void {
 	});
 }
 
+/** Sort models by the currently selected column for the purpose of deciding which ones are "top N".
+ *  Unlike the table sort, this is always descending for numeric columns (so the largest values are
+ *  shown individually) and ascending for the name column, regardless of the user's sort direction. */
+function sortModelsBySignificance(stats: DetailedStats, models: string[]): string[] {
+	return [...models].sort((a, b) => {
+		if (modelSortKey === 'name') {
+			return a.localeCompare(b);
+		}
+		const aItem = toModelItem(stats, a);
+		const bItem = toModelItem(stats, b);
+		let cmp: number;
+		switch (modelSortKey) {
+			case 'today': cmp = aItem.todayTotal - bItem.todayTotal; break;
+			case 'last30Days': cmp = aItem.last30DaysTotal - bItem.last30DaysTotal; break;
+			case 'month': cmp = aItem.monthTotal - bItem.monthTotal; break;
+			case 'lastMonth': cmp = aItem.lastMonthTotal - bItem.lastMonthTotal; break;
+			case 'projected': cmp = aItem.projected - bItem.projected; break;
+			default: cmp = 0;
+		}
+		return -cmp || a.localeCompare(b);
+	});
+}
+
 function buildModelRowEl(item: ModelItem, isOtherChild: boolean): HTMLTableRowElement {
 	const tr = document.createElement('tr');
 	if (isOtherChild) { tr.style.opacity = '0.85'; }
@@ -1012,9 +1052,12 @@ function appendOtherModels(item: ModelItem, onToggleOther: () => void, tbody: HT
 	}
 }
 
-function buildModelTbody(stats: DetailedStats, topModels: string[], otherModels: string[], onToggleOther: () => void): HTMLTableSectionElement {
-	// Sort the top models together with the aggregated "Other" group so the group row
-	// lands in its correct sorted position instead of always trailing the list.
+function buildModelTbody(stats: DetailedStats, visibleModels: string[], onToggleOther: () => void): HTMLTableSectionElement {
+	// Split into the top N models for the currently selected column and an aggregated "Other" group,
+	// then sort those rows according to the user's sort direction.
+	const sortedBySignificance = sortModelsBySignificance(stats, visibleModels);
+	const topModels = sortedBySignificance.slice(0, TOP_N_MODELS);
+	const otherModels = sortedBySignificance.slice(TOP_N_MODELS);
 	const items: ModelItem[] = topModels.map(m => toModelItem(stats, m));
 	if (otherModels.length > 0) { items.push(toOtherModelItem(stats, otherModels)); }
 	sortModelItems(items);
@@ -1058,15 +1101,6 @@ section.append(table);
 return section;
 }
 
-// Determine top N models by last30Days usage; the rest go into the "Other" group
-const sortedByLast30Days = Array.from(visibleModels).sort((a, b) => {
-const aUsage = stats.last30Days.modelUsage[a] || { inputTokens: 0, outputTokens: 0 };
-const bUsage = stats.last30Days.modelUsage[b] || { inputTokens: 0, outputTokens: 0 };
-return (bUsage.inputTokens + bUsage.outputTokens) - (aUsage.inputTokens + aUsage.outputTokens);
-});
-const topModels = sortedByLast30Days.slice(0, TOP_N_MODELS);
-const otherModels = sortedByLast30Days.slice(TOP_N_MODELS);
-
 const modelColHeaders: ColHeader[] = [
 { icon: '🧠', text: 'Model', key: 'name' },
 { icon: '📅', text: 'Today', key: 'today' },
@@ -1077,7 +1111,7 @@ const modelColHeaders: ColHeader[] = [
 ];
 
 function rebuildTbody(): void {
-const newTbody = buildModelTbody(stats, topModels, otherModels, rebuildTbody);
+const newTbody = buildModelTbody(stats, Array.from(visibleModels), rebuildTbody);
 const oldTbody = table.querySelector('tbody');
 if (oldTbody) { table.replaceChild(newTbody, oldTbody); } else { table.append(newTbody); }
 }
