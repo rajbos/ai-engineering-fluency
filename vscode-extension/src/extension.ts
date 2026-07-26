@@ -1322,7 +1322,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const authProviderId = getGitHubAuthProviderId();
 				if (e.provider.id !== authProviderId) { return; }
 				if (this._githubSignedOutByUser) { return; }
-				const session = await vscode.authentication.getSession(authProviderId, ['read:user'], { createIfNone: false });
+				const session = await vscode.authentication.getSession(authProviderId, ['read:user'], { silent: true });
 				if (session) {
 					this.githubSession = session;
 					await this.context.globalState.update('github.authenticated', true);
@@ -1750,7 +1750,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { createIfNone: false });
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 		if (!session) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
@@ -1826,7 +1826,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 
-		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { createIfNone: false });
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 		if (!session) {
 			const result: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
 			this._lastAgentSessionsData = result;
@@ -1899,9 +1899,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 				return;
 			}
 
-			// Always try silently — never prompt. This picks up sessions from Copilot
-			// or other extensions that already authenticated the user with GitHub.
-			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { createIfNone: false });
+			// Always try silently — never prompt (silent: true suppresses the Accounts-menu
+			// sign-in badge). This picks up sessions from Copilot or other extensions that
+			// already authenticated the user with GitHub, without nagging users who never
+			// intend to sign in here.
+			const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 			if (session) {
 				this.githubSession = session;
 				this.log(`✅ GitHub session found for ${session.account.label}`);
@@ -1944,6 +1946,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (isOrgPlan) {
 			await this.loadAndLogEnterpriseInfo();
 		}
+
+		// The plan info above may have populated a new Copilot plan quota / budget
+		// (via captureQuotaEntitlement). The status bar tooltip flyout is only rebuilt
+		// during token refreshes, so refresh it now so the freshly-fetched budget shows
+		// up immediately after sign-in instead of only on the next 5-minute refresh.
+		this.refreshBudgetDependentUi();
+	}
+
+	/** Rebuilds the status bar tooltip flyout (and its background color) from the last
+	 *  computed stats so a budget change — e.g. picked up from the Copilot plan quota
+	 *  right after GitHub sign-in — is reflected without waiting for the next refresh.
+	 *  No-op until the first stats computation has produced a tooltip to update. */
+	private refreshBudgetDependentUi(): void {
+		const stats = this.lastDetailedStats;
+		if (!stats) { return; }
+		this.updateStatusBarBackgroundColor(stats);
+		this.statusBarItem.tooltip = this.buildTooltipMarkdown(stats);
 	}
 
 	private logCopilotPlanResult(planResult: { planInfo?: any; statusCode?: number; error?: string }): boolean {
