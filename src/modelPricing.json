@@ -1186,7 +1186,6 @@
       "outputCostPerMillion": 25.0,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "Claude Opus 5"
       ],
