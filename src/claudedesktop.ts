@@ -58,7 +58,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { normalizeClaudeModelId } from './claudecode';
-import type { ModelUsage } from './types';
+import type { ModelUsage, ModelId } from './types';
 import { normalizePathForComparison, normalizePath } from './workspaceHelpers';
 
 /** Package name for the Claude Desktop Windows Store app. */
@@ -276,7 +276,7 @@ export class ClaudeDesktopCoworkDataAccess {
 		return true;
 	}
 
-	private applyCoworkTokenCounts(entry: ModelUsage[string], usage: any): void {
+	private applyCoworkTokenCounts(entry: ModelUsage[ModelId], usage: any): void {
 		const { inputTokens, outputTokens, cacheCreation, cachedRead, cacheCreation1h } = this.computeCoworkTokenCounts(usage);
 		entry.inputTokens += inputTokens;
 		entry.outputTokens += outputTokens;

@@ -21,6 +21,7 @@ import * as loadingHtml from './loadingHtml';
 import type {
   TokenUsageStats,
   ModelUsage,
+  ModelId,
   ModelPricing,
   EditorUsage,
   RepositoryUsage,
@@ -8606,7 +8607,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   /** Merge one file's per-model usage entries into the running aggregate. */
-  private static mergeModelUsageEntry(aggregated: ModelUsage, model: string, usage: ModelUsage[string]): void {
+  private static mergeModelUsageEntry(aggregated: ModelUsage, model: string, usage: ModelUsage[ModelId]): void {
     if (!aggregated[model]) { aggregated[model] = { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0, cacheCreation1hTokens: 0 }; }
     const agg = aggregated[model];
     agg.inputTokens += usage.inputTokens || 0;
