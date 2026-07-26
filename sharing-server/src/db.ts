@@ -238,6 +238,16 @@ function getAdminLoginsFromEnv(): string[] {
 }
 
 /**
+ * Returns true if `login` (case-insensitive) is listed in ADMIN_GITHUB_LOGINS.
+ * Unlike is_admin on the users table, this can be checked before a user row
+ * exists — e.g. to decide whether to show extra diagnostics to an admin who
+ * is being rejected during login (such as an org-membership check failure).
+ */
+export function isConfiguredAdminLogin(login: string): boolean {
+	return getAdminLoginsFromEnv().includes(login.toLowerCase());
+}
+
+/**
  * Sync admin status for all existing users based on ADMIN_GITHUB_LOGINS.
  * When the env var is set and non-empty, it is authoritative: users in the list
  * get is_admin=1, all others get is_admin=0. When unset or empty, no changes are made.
