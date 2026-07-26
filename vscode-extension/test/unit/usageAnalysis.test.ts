@@ -110,8 +110,8 @@ function makeMockDeps(overrides: Partial<{
         ecosystems,
         tokenEstimators: { 'gpt-4o': 0.25, 'claude-sonnet-4.5': 0.25 },
         modelPricing: {
-            'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10, tier: 'standard', category: 'Standard', multiplier: 0 },
-            'claude-sonnet-4.5': { inputCostPerMillion: 3, outputCostPerMillion: 15, tier: 'premium', category: 'Premium', multiplier: 1 },
+            'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10, tier: 'standard', category: 'Standard' },
+            'claude-sonnet-4.5': { inputCostPerMillion: 3, outputCostPerMillion: 15, tier: 'premium', category: 'Premium' },
         } as any,
         toolNameMap: {},
     };
@@ -974,6 +974,13 @@ test('calculateModelSwitching: two models from different tiers sets hasMixedTier
         ]
     });
     const deps = makeMockDeps();
+    // Override with distinct cost tiers so the low/medium cost-bucket split is meaningful:
+    // gpt-4o priced under $2/M (low bucket), claude-sonnet-4.5 priced $2-5/M (medium bucket).
+    deps.modelPricing = {
+        ...deps.modelPricing,
+        'gpt-4o': { ...deps.modelPricing['gpt-4o'], inputCostPerMillion: 1.5 },
+        'claude-sonnet-4.5': { ...deps.modelPricing['claude-sonnet-4.5'], inputCostPerMillion: 3 },
+    };
     const analysis = emptyAnalysis();
     await calculateModelSwitching(deps, FAKE_JSON_PATH, analysis, content);
     assert.equal(analysis.modelSwitching.modelCount, 2);
