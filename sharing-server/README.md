@@ -1,6 +1,6 @@
-# Copilot Token Usage — Sharing Server
+# AI Engineering Fluency — Sharing Server
 
-A self-hosted API server + web dashboard that makes sharing Copilot token usage data
+A self-hosted API server + web dashboard that makes sharing AI Engineering Fluency data
 across a team dramatically easier. No Azure account required — anyone with Docker can
 host it in minutes.
 
@@ -27,7 +27,7 @@ no new consent required.
 
 1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**
 2. Fill in:
-   - **Application name**: `Copilot Token Tracker`
+   - **Application name**: `AI Engineering Fluency`
    - **Homepage URL**: `https://your-server.example.com`
    - **Authorization callback URL**: `https://your-server.example.com/auth/github/callback`
 3. Copy the **Client ID** and generate a **Client Secret**
@@ -83,7 +83,7 @@ In VS Code settings (JSON):
 }
 ```
 
-Or search for **Copilot Token Tracker: Backend** in the Settings UI and fill in the fields.
+Or search for **AI Engineering Fluency: Backend** in the Settings UI and fill in the fields.
 
 That's it. The extension will start uploading data automatically. No authentication
 prompt — it reuses your existing GitHub session.
