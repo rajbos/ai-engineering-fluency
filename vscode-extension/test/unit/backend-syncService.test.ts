@@ -927,6 +927,8 @@ test('syncToBackendStore skips when credentials are not available', async () => 
 		enabled: true,
 		sharingProfile: 'soloFull',
 		shareWorkspaceMachineNames: false,
+		subscriptionId: 'sub1',
+		resourceGroup: 'rg1',
 		storageAccount: 'sa1',
 		aggTable: 'usageAgg',
 		datasetId: 'ds1',
@@ -984,6 +986,8 @@ test('syncToBackendStore completes full sync flow with mocked services', async (
 			enabled: true,
 			sharingProfile: 'soloFull',
 			shareWorkspaceMachineNames: false,
+			subscriptionId: 'sub1',
+			resourceGroup: 'rg1',
 			storageAccount: 'sa1',
 			aggTable: 'usageAgg',
 			datasetId: 'ds1',
@@ -1041,6 +1045,8 @@ test('syncToBackendStore logs warning when upsertEntitiesBatch has errors', asyn
 			enabled: true,
 			sharingProfile: 'soloFull',
 			shareWorkspaceMachineNames: false,
+			subscriptionId: 'sub1',
+			resourceGroup: 'rg1',
 			storageAccount: 'sa1',
 			aggTable: 'usageAgg',
 			datasetId: 'ds1',
@@ -1079,6 +1085,8 @@ test('syncToBackendStore handles ensureTableExists or validateAccess failure gra
 		enabled: true,
 		sharingProfile: 'soloFull',
 		shareWorkspaceMachineNames: false,
+		subscriptionId: 'sub1',
+		resourceGroup: 'rg1',
 		storageAccount: 'sa1',
 		aggTable: 'usageAgg',
 		datasetId: 'ds1',
@@ -1148,6 +1156,72 @@ test('syncToBackendStore still attempts sharing server sync when Azure sync fail
 		logs.some(m => m.includes('Sharing server upload: skipping')),
 		`Expected sharing server sync attempt even after Azure failure. Logs: ${logs.join('\n')}`
 	);
+});
+
+test('syncToBackendStore tracks Azure and Team Server "last sync" independently — a successful sharing-server sync updates only its own timestamp when Azure fails', async () => {
+	const globalState = new Map<string, unknown>();
+	const lockDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sync-lock-test-'));
+	const mockContext = {
+		globalState: {
+			get: (key: string) => globalState.get(key),
+			update: async (key: string, value: unknown) => { globalState.set(key, value); },
+		},
+		globalStorageUri: { fsPath: lockDir },
+	} as unknown as vscode.ExtensionContext;
+	const sharingServerSvc = { uploadRollups: async () => {}, uploadFluencyScore: async () => {} };
+	const svc = new SyncService(
+		makeDeps({
+			context: mockContext,
+			getGithubToken: () => 'fake-token',
+			getCopilotSessionFiles: async () => [],
+		}),
+		{
+			getBackendDataPlaneCredentials: async () => ({
+				tableCredential: {},
+				blobCredential: {},
+				secretsToRedact: [],
+			}),
+			getBackendSecretsToRedactForError: async () => [],
+		} as any,
+		{
+			ensureTableExists: async () => { throw new Error('Azure connection failed'); },
+			validateAccess: async () => {},
+			createTableClient: () => ({}),
+			upsertEntitiesBatch: async () => ({ successCount: 0, errors: [] }),
+		} as any,
+		undefined,
+		BackendUtility,
+		sharingServerSvc as any,
+	);
+	await svc.syncToBackendStore(true, {
+		enabled: true,
+		backend: 'storageTables',
+		sharingProfile: 'teamAnonymized',
+		shareWorkspaceMachineNames: false,
+		storageAccount: 'sa1',
+		subscriptionId: 'sub1',
+		resourceGroup: 'rg1',
+		aggTable: 'usageAgg',
+		eventsTable: 'usageEvents',
+		lookbackDays: 7,
+		sharingServerEnabled: true,
+		sharingServerEndpointUrl: 'https://test-sharing-server/',
+		shareWithTeam: false,
+		userIdentityMode: 'pseudonymous',
+		userId: '',
+		userIdMode: 'alias',
+		datasetId: 'default',
+		shareConsentAt: '',
+		includeMachineBreakdown: false,
+		blobUploadEnabled: false,
+		blobContainerName: '',
+		blobUploadFrequencyHours: 24,
+		blobCompressFiles: true,
+		authMode: 'entraId',
+	} as any, true);
+	assert.ok(globalState.get('backend.sharingServerLastSyncAt'), 'Team Server sync succeeded and should update its own lastSync marker');
+	assert.equal(globalState.get('backend.azureLastSyncAt'), undefined, 'Azure sync failed and must NOT update the Azure-specific lastSync marker');
+	fs.rmSync(lockDir, { recursive: true, force: true });
 });
 
 // ── Sync lock management ─────────────────────────────────────────────────
