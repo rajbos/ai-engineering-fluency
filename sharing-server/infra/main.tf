@@ -225,12 +225,25 @@ resource "null_resource" "hostname_registration" {
     # RequireCustomHostnameInEnvironment even though registration "succeeded".
     # Poll until the hostname shows up in the app's ingress config (or time out
     # loudly) instead of swallowing all errors with `|| true`.
+    #
+    # `replace_triggered_by` re-runs this on every container app update, on the
+    # assumption that ACA strips custom hostnames on update — but that isn't
+    # always true, so `add` must tolerate the hostname already being present
+    # instead of failing with "'{standardized_hostname}' already exists".
     command = <<-EOT
       set -e
-      az containerapp hostname add \
+      ALREADY_REGISTERED=$(az containerapp hostname list \
         --name '${azurerm_container_app.this.name}' \
         --resource-group '${var.resource_group_name}' \
-        --hostname '${var.custom_domain}'
+        --query "[].name" -o tsv 2>/dev/null | grep -Fx '${var.custom_domain}' || true)
+      if [ -z "$ALREADY_REGISTERED" ]; then
+        az containerapp hostname add \
+          --name '${azurerm_container_app.this.name}' \
+          --resource-group '${var.resource_group_name}' \
+          --hostname '${var.custom_domain}'
+      else
+        echo "Hostname '${var.custom_domain}' is already registered; skipping add."
+      fi
 
       for i in $(seq 1 30); do
         FOUND=$(az containerapp hostname list \

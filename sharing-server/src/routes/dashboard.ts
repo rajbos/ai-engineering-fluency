@@ -8,7 +8,7 @@ import {
 } from '../session.js';
 import {
 	getUserById, getUserByGithubId, getUploadsForUser, upsertUser,
-	getAdminUserSummaries, getAdminDailyTotals,
+	getAdminUserSummaries, getAdminDailyTotals, isConfiguredAdminLogin,
 	type UploadRow, type UserRow, type UserUsageSummary, type AdminDailyRow,
 } from '../db.js';
 import { OAUTH_STATE_MAX_AGE_SECONDS } from '../config.js';
@@ -116,6 +116,7 @@ dashboard.get('/auth/github/callback', async (c) => {
 	if (allowedOrg) {
 		// Prefer a server-side PAT (already SSO-authorized) so the user's OAuth token
 		// doesn't need read:org or SAML SSO authorization.
+		const usingServerToken = Boolean(process.env.GITHUB_ORG_CHECK_TOKEN);
 		const checkToken = process.env.GITHUB_ORG_CHECK_TOKEN || accessToken;
 		try {
 			const memberRes = await fetch(`https://api.github.com/orgs/${allowedOrg}/members/${userData.login}`, {
@@ -127,9 +128,27 @@ dashboard.get('/auth/github/callback', async (c) => {
 				signal: AbortSignal.timeout(10_000),
 			});
 			if (memberRes.status !== 204) {
-				return c.html(errorPage(`Access denied: you are not a member of the "${allowedOrg}" organization.`), 403);
+				// Distinguish "genuinely not a member" (404) from "the check itself is
+				// broken" (401/403 — typically an expired/invalid GITHUB_ORG_CHECK_TOKEN,
+				// or a user token lacking read:org/SSO authorization when no server PAT
+				// is configured). Both cases otherwise look identical to the end user.
+				const brokenCheck = memberRes.status === 401 || memberRes.status === 403;
+				console.error(
+					`[auth/callback] Org membership check for '${userData.login}' in '${allowedOrg}' returned ` +
+					`${memberRes.status} (using ${usingServerToken ? 'GITHUB_ORG_CHECK_TOKEN' : "the user's own token"}).` +
+					(brokenCheck ? ` Likely cause: ${usingServerToken ? 'GITHUB_ORG_CHECK_TOKEN is invalid/expired — rotate it' : "the user's token lacks read:org scope or SSO authorization"}.` : ''),
+				);
+				let adminDetail = '';
+				if (isConfiguredAdminLogin(userData.login)) {
+					adminDetail = brokenCheck
+						? ` (Admin diagnostic: the membership check itself failed with HTTP ${memberRes.status} — ` +
+						  `${usingServerToken ? 'GITHUB_ORG_CHECK_TOKEN is likely invalid or expired. Rotate it.' : "your token likely lacks read:org scope or SSO authorization for this org."})`
+						: ` (Admin diagnostic: the membership check returned HTTP ${memberRes.status} — not a member, per GitHub.)`;
+				}
+				return c.html(errorPage(`Access denied: you are not a member of the "${allowedOrg}" organization.${adminDetail}`), 403);
 			}
-		} catch {
+		} catch (err) {
+			console.error(`[auth/callback] Org membership check for '${userData.login}' in '${allowedOrg}' failed with a network/timeout error:`, err);
 			return c.html(errorPage('Unable to verify organization membership. Please try again.'), 502);
 		}
 	}
