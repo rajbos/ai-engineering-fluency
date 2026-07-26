@@ -287,7 +287,7 @@ function layout(title: string, body: string): string {
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>${h(title)} — Copilot Token Tracker</title>
+<title>${h(title)} — AI Engineering Fluency</title>
 <style>
   *, *::before, *::after { box-sizing: border-box; }
   body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
@@ -453,7 +453,7 @@ function loginPage(): string {
   </p>` : '';
 
 	return layout('Sign In', `
-<div class="header"><h1>🤖 Copilot Token Tracker Sharing</h1></div>
+<div class="header"><h1>🤖 AI Engineering Fluency Sharing</h1></div>
 <div class="content" style="text-align:center; margin-top: 80px; align-items:center">
   <h2 style="color:#e6edf3">Sign in to view your usage dashboard</h2>
   <p style="color:#8b949e">Your data is linked to your GitHub account. No account creation needed.</p>
@@ -1002,7 +1002,7 @@ function dashboardPage(user: UserRow, uploads: UploadRow[], isAdmin: boolean): s
 
 	return layout(`${user.github_login}'s Dashboard`, `
 <div class="header">
-  <h1>🤖 Copilot Token Tracker</h1>
+  <h1>🤖 AI Engineering Fluency</h1>
   <span class="spacer"></span>
   ${fluencyBadgeHtml}
   ${isAdmin ? `<a href="/admin" style="margin-left:8px;color:#e3b341">Admin Dashboard</a><span style="margin-left:8px;color:#e6edf3;font-size:0.875rem;font-weight:600">My Dashboard</span>` : ''}
@@ -1370,7 +1370,7 @@ function adminDashboardPage(
 
 	return layout('Admin Dashboard', `
 <div class="header">
-  <h1>🤖 Copilot Token Tracker</h1>
+  <h1>🤖 AI Engineering Fluency</h1>
   <span class="spacer"></span>
   <span style="color:#e6edf3;font-size:0.875rem;font-weight:600">Admin Dashboard</span>
   <a href="/dashboard" style="margin-left:8px">My Dashboard</a>
@@ -1393,7 +1393,7 @@ var ADMIN_CHART_DATA = ${safeJson(chartData)};
 
 function errorPage(message: string): string {
 	return layout('Error', `
-<div class="header"><h1>🤖 Copilot Token Tracker Sharing</h1></div>
+<div class="header"><h1>🤖 AI Engineering Fluency Sharing</h1></div>
 <div class="content" style="text-align:center; margin-top:80px; align-items:center">
   <h2 style="color:#e6edf3">Something went wrong</h2>
   <p style="color:#8b949e">${h(message)}</p>

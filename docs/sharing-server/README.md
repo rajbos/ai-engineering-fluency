@@ -49,7 +49,7 @@ grouped by editor or model.
 
 1. Go to **GitHub → Settings → Developer settings → OAuth Apps → New OAuth App**
 2. Fill in:
-   - **Application name**: `Copilot Token Tracker` (or any name you like)
+   - **Application name**: `AI Engineering Fluency` (or any name you like)
    - **Homepage URL**: `https://your-server.example.com`
    - **Authorization callback URL**: `https://your-server.example.com/auth/github/callback`
 3. Copy the **Client ID** and generate a **Client Secret**

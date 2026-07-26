@@ -1,7 +1,7 @@
 {
   "name": "@rajbos/copilot-sharing-server",
   "version": "0.1.0",
-  "description": "Self-hosted sharing server for GitHub Copilot Token Tracker — accepts daily usage uploads from VS Code via GitHub OAuth tokens",
+  "description": "Self-hosted sharing server for AI Engineering Fluency — accepts daily usage uploads from VS Code via GitHub OAuth tokens",
   "license": "MIT",
   "author": "RobBos",
   "repository": {
