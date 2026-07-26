@@ -476,6 +476,10 @@ function detectToolEditorFromRootPath(lower: string): string | undefined {
 	// marker must be checked before the generic VS Code family matches.
 	if (lower.includes('saoudrizwan.claude-dev')) { return 'Cline'; }
 	if (lower.includes('opencode')) { return 'OpenCode'; }
+	// Hermes Agent's root is <HERMES_HOME> (Windows: %LOCALAPPDATA%/hermes, else ~/.hermes).
+	// 'hermes' doesn't collide with 'copilot'/'code'/'cursor', but checked here alongside
+	// the other CLI-tool root markers for consistency.
+	if (lower.includes('hermes')) { return 'Hermes'; }
 	// OpenAI Codex CLI home (~/.codex). The dot-prefix keeps this from colliding with
 	// the generic 'code' substring checks further down ('.codex' never matches '/code/'
 	// or endsWith('code')), but it must still run before isVSCodeRoot for clarity.
@@ -1072,6 +1076,11 @@ export function detectClaudeCodeEditorVariant(filePath: string): string {
  */
 function detectCliAgentStoreFromPath(lowerPath: string): string | undefined {
 	if (lowerPath.includes('/.crush/crush.db#')) { return 'Crush'; }
+	// Hermes Agent's virtual path scheme is <HERMES_HOME>/state.db#<session_id>. HERMES_HOME
+	// itself never contains 'code'/'copilot'/'cursor' (Windows: %LOCALAPPDATA%/hermes, else
+	// ~/.hermes), but the check is placed here alongside the other DB-backed CLI adapters for
+	// consistency and to keep it ahead of any future generic substring matches.
+	if (lowerPath.includes('hermes/state.db#')) { return 'Hermes'; }
 	// Devin CLI virtual paths: <...>/devin/cli/sessions.db#<id>. Checked here (not merely
 	// the generic 'devin' substring match in detectIDEEditorSource) so it always wins over
 	// the desktop app's devin:// scheme / Windsurf family checks, which are handled earlier
