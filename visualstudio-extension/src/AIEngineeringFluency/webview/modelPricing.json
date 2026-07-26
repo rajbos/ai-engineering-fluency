@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-07-01",
+    "lastUpdated": "2026-07-26",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -70,7 +70,6 @@
       "outputCostPerMillion": 10.0,
       "category": "GPT-5 models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5"
       ]
@@ -80,7 +79,6 @@
       "outputCostPerMillion": 10.0,
       "category": "GPT-5 models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5 Codex (Preview)"
       ]
@@ -90,7 +88,6 @@
       "outputCostPerMillion": 2.0,
       "category": "GPT-5 models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-5 Mini"
       ],
@@ -100,14 +97,14 @@
         "outputCostPerMillion": 2.0,
         "releaseStatus": "GA",
         "category": "Lightweight"
-      }
+      },
+      "cachedInputCostPerMillion": 0.025
     },
     "gpt-5.1": {
       "inputCostPerMillion": 1.25,
       "outputCostPerMillion": 10.0,
       "category": "GPT-5 models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5.1"
       ]
@@ -117,7 +114,6 @@
       "outputCostPerMillion": 10.0,
       "category": "GPT-5 models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5.1 Codex"
       ]
@@ -127,7 +123,6 @@
       "outputCostPerMillion": 14.0,
       "category": "GPT-5 models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5.1 Codex Max"
       ]
@@ -137,7 +132,6 @@
       "outputCostPerMillion": 2.0,
       "category": "GPT-5 models",
       "tier": "premium",
-      "multiplier": 0.33,
       "displayNames": [
         "GPT-5.1 Codex Mini (Preview)"
       ]
@@ -147,7 +141,6 @@
       "outputCostPerMillion": 14.0,
       "category": "GPT-5 models",
       "tier": "standard",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5.2"
       ],
@@ -164,7 +157,6 @@
       "outputCostPerMillion": 14.0,
       "category": "GPT-5 models",
       "tier": "standard",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5.2 Codex"
       ],
@@ -181,7 +173,6 @@
       "outputCostPerMillion": 168.0,
       "category": "GPT-5 models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5.2 Pro"
       ]
@@ -191,7 +182,6 @@
       "outputCostPerMillion": 14.0,
       "category": "GPT-5 models",
       "tier": "standard",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5.3 Codex"
       ],
@@ -201,7 +191,8 @@
         "outputCostPerMillion": 14.0,
         "releaseStatus": "GA",
         "category": "Powerful"
-      }
+      },
+      "cachedInputCostPerMillion": 0.175
     },
     "gpt-5.4": {
       "inputCostPerMillion": 2.5,
@@ -209,7 +200,6 @@
       "outputCostPerMillion": 15.0,
       "category": "GPT-5 models",
       "tier": "standard",
-      "multiplier": 1,
       "displayNames": [
         "GPT-5.4"
       ],
@@ -227,7 +217,6 @@
       "outputCostPerMillion": 4.5,
       "category": "GPT-5 models",
       "tier": "standard",
-      "multiplier": 0.33,
       "displayNames": [
         "GPT-5.4 mini"
       ],
@@ -245,7 +234,6 @@
       "outputCostPerMillion": 1.25,
       "category": "GPT-5 models",
       "tier": "standard",
-      "multiplier": 0.25,
       "displayNames": [
         "GPT-5.4 nano"
       ],
@@ -262,7 +250,6 @@
       "outputCostPerMillion": 12.0,
       "category": "GPT-4 models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "GPT-4"
       ]
@@ -273,7 +260,6 @@
       "outputCostPerMillion": 8.0,
       "category": "GPT-4 models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-4.1"
       ],
@@ -291,7 +277,6 @@
       "outputCostPerMillion": 1.6,
       "category": "GPT-4 models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-4.1 Mini"
       ]
@@ -302,7 +287,6 @@
       "outputCostPerMillion": 0.4,
       "category": "GPT-4 models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-4.1 Nano"
       ]
@@ -313,7 +297,6 @@
       "cachedInputCostPerMillion": 1.25,
       "category": "GPT-4 models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-4o"
       ]
@@ -324,7 +307,6 @@
       "cachedInputCostPerMillion": 0.075,
       "category": "GPT-4 models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-4o-mini",
         "GPT-4o Mini"
@@ -336,7 +318,6 @@
       "cachedInputCostPerMillion": 0.075,
       "category": "GPT-4 models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-4o-mini (2024-07-18)"
       ]
@@ -346,7 +327,6 @@
       "outputCostPerMillion": 30.0,
       "category": "GPT-4 models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-4 Turbo"
       ]
@@ -356,9 +336,9 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Claude Sonnet 3.5"
       ]
@@ -368,9 +348,9 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Claude Sonnet 3.7"
       ]
@@ -380,9 +360,9 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "Claude Sonnet 4"
       ],
@@ -400,9 +380,9 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 1,
       "displayNames": [
         "Claude Sonnet 4.5"
       ],
@@ -420,9 +400,9 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 1.0,
       "displayNames": [
         "Claude Sonnet 4.6"
       ],
@@ -440,9 +420,9 @@
       "outputCostPerMillion": 15.0,
       "cachedInputCostPerMillion": 0.3,
       "cacheCreationCostPerMillion": 3.75,
+      "cacheCreation1hCostPerMillion": 6,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 1.0,
       "displayNames": [
         "Claude Sonnet 4.6 (alternate format)"
       ],
@@ -460,9 +440,9 @@
       "outputCostPerMillion": 1.25,
       "cachedInputCostPerMillion": 0.025,
       "cacheCreationCostPerMillion": 0.3125,
+      "cacheCreation1hCostPerMillion": 0.5,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "Claude Haiku"
       ]
@@ -472,9 +452,9 @@
       "outputCostPerMillion": 5.0,
       "cachedInputCostPerMillion": 0.1,
       "cacheCreationCostPerMillion": 1.25,
+      "cacheCreation1hCostPerMillion": 2,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 0.33,
       "displayNames": [
         "Claude Haiku 4.5"
       ],
@@ -492,9 +472,9 @@
       "outputCostPerMillion": 5.0,
       "cachedInputCostPerMillion": 0.1,
       "cacheCreationCostPerMillion": 1.25,
+      "cacheCreation1hCostPerMillion": 2,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 0.33,
       "displayNames": [
         "Claude Haiku 4.5 (2025-10-01)"
       ],
@@ -512,9 +492,9 @@
       "outputCostPerMillion": 75.0,
       "cachedInputCostPerMillion": 1.5,
       "cacheCreationCostPerMillion": 18.75,
+      "cacheCreation1hCostPerMillion": 30,
       "category": "Claude models (Anthropic)",
       "tier": "premium",
-      "multiplier": 10,
       "displayNames": [
         "Claude Opus 4.1"
       ]
@@ -524,9 +504,9 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 3,
       "displayNames": [
         "Claude Opus 4.5"
       ],
@@ -544,9 +524,9 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 3,
       "displayNames": [
         "Claude Opus 4.6"
       ],
@@ -564,9 +544,9 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 15.0,
       "displayNames": [
         "Claude Opus 4.7"
       ],
@@ -584,9 +564,9 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 30,
       "displayNames": [
         "Claude Opus 4.6 (Fast Mode Preview)"
       ],
@@ -604,9 +584,9 @@
       "outputCostPerMillion": 25.0,
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10,
       "category": "Claude models (Anthropic)",
       "tier": "premium",
-      "multiplier": 30,
       "displayNames": [
         "Claude Opus 4.6 (Fast)"
       ],
@@ -624,7 +604,6 @@
       "outputCostPerMillion": 4.4,
       "category": "OpenAI reasoning models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "o3-mini"
       ]
@@ -634,7 +613,6 @@
       "outputCostPerMillion": 4.4,
       "category": "OpenAI reasoning models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "o4-mini"
       ]
@@ -644,7 +622,6 @@
       "outputCostPerMillion": 60.0,
       "category": "OpenAI reasoning models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "o1-preview"
       ]
@@ -654,7 +631,6 @@
       "outputCostPerMillion": 12.0,
       "category": "OpenAI reasoning models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "o1-mini"
       ]
@@ -664,7 +640,6 @@
       "outputCostPerMillion": 1.5,
       "category": "Legacy models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "GPT-3.5-Turbo",
         "GPT-3.5 Turbo"
@@ -675,7 +650,6 @@
       "outputCostPerMillion": 10.0,
       "category": "Google Gemini models",
       "tier": "standard",
-      "multiplier": 1,
       "displayNames": [
         "Gemini 2.5 Pro"
       ],
@@ -685,14 +659,14 @@
         "outputCostPerMillion": 10.0,
         "releaseStatus": "GA",
         "category": "Powerful"
-      }
+      },
+      "cachedInputCostPerMillion": 0.125
     },
     "gemini-2.5-flash": {
       "inputCostPerMillion": 0.3,
       "outputCostPerMillion": 2.5,
       "category": "Google Gemini models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Gemini 2.5 Flash"
       ]
@@ -702,7 +676,6 @@
       "outputCostPerMillion": 0.4,
       "category": "Google Gemini models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Gemini 2.5 Flash Lite"
       ]
@@ -712,7 +685,6 @@
       "outputCostPerMillion": 0.4,
       "category": "Google Gemini models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "Gemini 2.0 Flash"
       ]
@@ -722,7 +694,6 @@
       "outputCostPerMillion": 0.3,
       "category": "Google Gemini models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "Gemini 2.0 Flash Lite"
       ]
@@ -732,7 +703,6 @@
       "outputCostPerMillion": 3.0,
       "category": "Google Gemini models",
       "tier": "standard",
-      "multiplier": 0.33,
       "displayNames": [
         "Gemini 3 Flash"
       ],
@@ -742,14 +712,14 @@
         "outputCostPerMillion": 3.0,
         "releaseStatus": "Public preview",
         "category": "Lightweight"
-      }
+      },
+      "cachedInputCostPerMillion": 0.05
     },
     "gemini-3-pro": {
       "inputCostPerMillion": 2.0,
       "outputCostPerMillion": 12.0,
       "category": "Google Gemini models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "Gemini 3 Pro"
       ]
@@ -759,7 +729,6 @@
       "outputCostPerMillion": 12.0,
       "category": "Google Gemini models",
       "tier": "premium",
-      "multiplier": 1,
       "displayNames": [
         "Gemini 3 Pro (Preview)"
       ]
@@ -769,7 +738,6 @@
       "outputCostPerMillion": 12.0,
       "category": "Google Gemini models",
       "tier": "standard",
-      "multiplier": 1,
       "displayNames": [
         "Gemini 3.1 Pro",
         "Gemini 3.1 Pro (Preview)"
@@ -780,14 +748,14 @@
         "outputCostPerMillion": 12.0,
         "releaseStatus": "Public preview",
         "category": "Powerful"
-      }
+      },
+      "cachedInputCostPerMillion": 0.2
     },
     "gemini-3.1-flash-lite": {
       "inputCostPerMillion": 0.25,
       "outputCostPerMillion": 1.5,
       "category": "Google Gemini models",
       "tier": "unknown",
-      "multiplier": 0.33,
       "displayNames": [
         "Gemini 3.1 Flash Lite"
       ]
@@ -797,7 +765,6 @@
       "outputCostPerMillion": 1.5,
       "category": "xAI Grok models",
       "tier": "premium",
-      "multiplier": 0.25,
       "displayNames": [
         "Grok Code Fast 1"
       ],
@@ -814,7 +781,6 @@
       "outputCostPerMillion": 2.0,
       "category": "GitHub Copilot fine-tuned models",
       "tier": "standard",
-      "multiplier": 0,
       "displayNames": [
         "Raptor Mini"
       ],
@@ -824,14 +790,14 @@
         "outputCostPerMillion": 2.0,
         "releaseStatus": "GA",
         "category": "Versatile"
-      }
+      },
+      "cachedInputCostPerMillion": 0.025
     },
     "goldeneye": {
       "inputCostPerMillion": 0.0,
       "outputCostPerMillion": 0.0,
       "category": "GitHub Copilot fine-tuned models",
       "tier": "standard",
-      "multiplier": 0,
       "copilotPricing": {
         "inputCostPerMillion": 1.25,
         "cachedInputCostPerMillion": 0.125,
@@ -841,21 +807,20 @@
       }
     },
     "gpt-5.5": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 5.0,
+      "outputCostPerMillion": 30.0,
       "category": "GPT-5 models",
       "tier": "standard",
-      "multiplier": 7.5,
       "displayNames": [
         "GPT-5.5"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.5
     },
     "mistral-large-latest": {
       "inputCostPerMillion": 0.5,
       "outputCostPerMillion": 1.5,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Large 3"
       ]
@@ -865,7 +830,6 @@
       "outputCostPerMillion": 1.5,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Large 3 (2512)"
       ]
@@ -875,7 +839,6 @@
       "outputCostPerMillion": 6.0,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Large 2.1"
       ]
@@ -885,7 +848,6 @@
       "outputCostPerMillion": 5.0,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Magistral Medium"
       ]
@@ -895,7 +857,6 @@
       "outputCostPerMillion": 7.5,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Medium 3.5"
       ]
@@ -905,7 +866,6 @@
       "outputCostPerMillion": 7.5,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Medium 3.5"
       ]
@@ -915,7 +875,6 @@
       "outputCostPerMillion": 7.5,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Medium 3.5"
       ]
@@ -925,7 +884,6 @@
       "outputCostPerMillion": 2.0,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Medium 3.1"
       ]
@@ -935,7 +893,6 @@
       "outputCostPerMillion": 0.3,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Small 3.1"
       ]
@@ -945,7 +902,6 @@
       "outputCostPerMillion": 0.2,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Small 3.2"
       ]
@@ -955,7 +911,6 @@
       "outputCostPerMillion": 0.6,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Small 4"
       ]
@@ -965,7 +920,6 @@
       "outputCostPerMillion": 0.9,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Codestral"
       ]
@@ -975,7 +929,6 @@
       "outputCostPerMillion": 0.9,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Codestral (2501)"
       ]
@@ -985,7 +938,6 @@
       "outputCostPerMillion": 0.03,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Mistral Nemo"
       ]
@@ -995,7 +947,6 @@
       "outputCostPerMillion": 0.04,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Ministral 3B"
       ]
@@ -1005,7 +956,6 @@
       "outputCostPerMillion": 0.1,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Ministral 8B"
       ]
@@ -1015,7 +965,6 @@
       "outputCostPerMillion": 1.5,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Magistral Small"
       ]
@@ -1025,7 +974,6 @@
       "outputCostPerMillion": 2.0,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Devstral Medium"
       ]
@@ -1035,37 +983,37 @@
       "outputCostPerMillion": 6.0,
       "category": "Mistral models",
       "tier": "unknown",
-      "multiplier": 1,
       "displayNames": [
         "Pixtral Large"
       ]
     },
     "gemini-3.5-flash": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 1.5,
+      "outputCostPerMillion": 9.0,
       "category": "Google Gemini models",
       "tier": "standard",
-      "multiplier": 14.0,
       "displayNames": [
         "Gemini 3.5 Flash"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.15
     },
     "claude-opus-4.8": {
       "inputCostPerMillion": 5.0,
       "outputCostPerMillion": 25.0,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 15.0,
       "displayNames": [
         "Claude Opus 4.8"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.5,
+      "cacheCreationCostPerMillion": 6.25,
+      "cacheCreation1hCostPerMillion": 10
     },
     "qwen2.5": {
       "inputCostPerMillion": 0.0,
       "outputCostPerMillion": 0.0,
       "category": " models",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "Qwen2.5"
       ]
@@ -1075,30 +1023,31 @@
       "outputCostPerMillion": 0.0,
       "category": " models",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "MAI-Code-1-Flash[^mai-code-1-flash]"
       ]
     },
     "mai-code-1-flash": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 0.75,
+      "outputCostPerMillion": 4.5,
       "category": " models",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "MAI-Code-1-Flash"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.075
     },
     "claude-fable-5": {
       "inputCostPerMillion": 10.0,
       "outputCostPerMillion": 50.0,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "Claude Fable 5"
-      ]
+      ],
+      "cachedInputCostPerMillion": 1.0,
+      "cacheCreationCostPerMillion": 12.5,
+      "cacheCreation1hCostPerMillion": 20
     },
     "deepseek-v4-flash": {
       "inputCostPerMillion": 0.14,
@@ -1106,7 +1055,6 @@
       "cachedInputCostPerMillion": 0.0028,
       "category": "DeepSeek models",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "DeepSeek V4 Flash"
       ]
@@ -1116,40 +1064,133 @@
       "outputCostPerMillion": 0.0,
       "category": "DeepSeek models",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "DeepSeek V4 Flash (free)"
       ]
     },
     "claude-sonnet-5": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 10.0,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "Claude Sonnet 5"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.2,
+      "cacheCreationCostPerMillion": 2.5,
+      "cacheCreation1hCostPerMillion": 4
     },
     "claude-opus-4.8-(fast-mode)-(preview)": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 10.0,
+      "outputCostPerMillion": 50.0,
       "category": "Claude models (Anthropic)",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "Claude Opus 4.8 (fast mode) (preview)"
-      ]
+      ],
+      "cachedInputCostPerMillion": 1.0,
+      "cacheCreationCostPerMillion": 12.5,
+      "cacheCreation1hCostPerMillion": 20
     },
     "kimi-k2.7-code": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
+      "inputCostPerMillion": 0.95,
+      "outputCostPerMillion": 4.0,
       "category": "Moonshot AI models",
       "tier": "standard",
-      "multiplier": 0.0,
       "displayNames": [
         "Kimi-K2.7-Code"
-      ]
+      ],
+      "cachedInputCostPerMillion": 0.19
+    },
+    "gpt-5.6-luna": {
+      "inputCostPerMillion": 1.0,
+      "outputCostPerMillion": 6.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-5.6 Luna"
+      ],
+      "cachedInputCostPerMillion": 0.1,
+      "copilotPricing": {
+        "inputCostPerMillion": 1.0,
+        "cachedInputCostPerMillion": 0.1,
+        "outputCostPerMillion": 6.0,
+        "releaseStatus": "GA",
+        "category": "Lightweight",
+        "longContext": {
+          "inputCostPerMillion": 2.0,
+          "cachedInputCostPerMillion": 0.2,
+          "outputCostPerMillion": 9.0,
+          "threshold": "> 200K"
+        }
+      }
+    },
+    "gpt-5.6-sol": {
+      "inputCostPerMillion": 5.0,
+      "outputCostPerMillion": 30.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-5.6 Sol"
+      ],
+      "cachedInputCostPerMillion": 0.5,
+      "copilotPricing": {
+        "inputCostPerMillion": 5.0,
+        "cachedInputCostPerMillion": 0.5,
+        "outputCostPerMillion": 30.0,
+        "releaseStatus": "GA",
+        "category": "Powerful",
+        "longContext": {
+          "inputCostPerMillion": 10.0,
+          "cachedInputCostPerMillion": 1.0,
+          "outputCostPerMillion": 45.0,
+          "threshold": "> 272K"
+        }
+      }
+    },
+    "gpt-5.6-terra": {
+      "inputCostPerMillion": 2.5,
+      "outputCostPerMillion": 15.0,
+      "category": "GPT-5 models",
+      "tier": "standard",
+      "displayNames": [
+        "GPT-5.6 Terra"
+      ],
+      "cachedInputCostPerMillion": 0.25,
+      "copilotPricing": {
+        "inputCostPerMillion": 2.5,
+        "cachedInputCostPerMillion": 0.25,
+        "outputCostPerMillion": 15.0,
+        "releaseStatus": "GA",
+        "category": "Versatile",
+        "longContext": {
+          "inputCostPerMillion": 5.0,
+          "cachedInputCostPerMillion": 0.5,
+          "outputCostPerMillion": 22.5,
+          "threshold": "> 272K"
+        }
+      }
+    },
+    "gemini-3.6-flash": {
+      "inputCostPerMillion": 1.5,
+      "outputCostPerMillion": 7.5,
+      "category": "Google Gemini models",
+      "tier": "standard",
+      "displayNames": [
+        "Gemini 3.6 Flash"
+      ],
+      "cachedInputCostPerMillion": 0.15
+    },
+    "claude-opus-5": {
+      "inputCostPerMillion": 5.0,
+      "outputCostPerMillion": 25.0,
+      "category": "Claude models (Anthropic)",
+      "tier": "standard",
+      "displayNames": [
+        "Claude Opus 5"
+      ],
+      "cachedInputCostPerMillion": 0.5,
+      "cacheCreationCostPerMillion": 6.25
     }
   }
 }
