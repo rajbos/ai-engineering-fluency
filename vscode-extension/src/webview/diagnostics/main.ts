@@ -334,9 +334,12 @@ function buildCandidatePathsElement(
   description.style.cssText = "color: #999; font-size: 12px; margin: 4px 0 8px 0;";
   description.textContent = "These are all the paths the extension checks for session files. Paths marked with ✅ exist on this system.";
   container.appendChild(description);
+  const tableContainer = document.createElement("div");
+  tableContainer.className = "table-container";
+  container.appendChild(tableContainer);
   const table = document.createElement("table");
   table.className = "session-table";
-  container.appendChild(table);
+  tableContainer.appendChild(table);
   const thead = document.createElement("thead");
   const headerRow = document.createElement("tr");
   for (const text of ["Status", "Source", "Path"]) {
@@ -1371,9 +1374,13 @@ function buildSessionFoldersElement(folders: SessionFolder[]): HTMLElement {
   heading.textContent = "Main Session Folders (by editor root):";
   container.appendChild(heading);
 
+  const tableContainer = document.createElement("div");
+  tableContainer.className = "table-container";
+  container.appendChild(tableContainer);
+
   const table = document.createElement("table");
   table.className = "session-table";
-  container.appendChild(table);
+  tableContainer.appendChild(table);
 
   const thead = document.createElement("thead");
   table.appendChild(thead);
