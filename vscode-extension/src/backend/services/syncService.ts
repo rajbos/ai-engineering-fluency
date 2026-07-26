@@ -1636,6 +1636,7 @@ return true;
 			this.deps.logger.log,
 			this.deps.logger.warn,
 		);
+		await this.tryUpdateSharingServerLastSyncAt();
 	}
 
 	/**
