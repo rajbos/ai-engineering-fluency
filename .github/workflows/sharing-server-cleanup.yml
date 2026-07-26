@@ -16,6 +16,13 @@ on:
 permissions:
   contents: read
 
+# One cleanup per branch at a time — a branch can only be deleted once, but
+# repeated manual dispatches for the same branch should supersede each other
+# rather than stack up in the queue.
+concurrency:
+  group: sharing-server-cleanup-${{ github.event_name == 'delete' && github.event.ref || github.event.inputs.branch }}
+  cancel-in-progress: true
+
 jobs:
   cleanup:
     name: Destroy test environment
