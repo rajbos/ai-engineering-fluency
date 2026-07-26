@@ -7,7 +7,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
-import type { ModelUsage } from './types';
+import type { ModelUsage, ModelId } from './types';
 import { normalizePathForComparison } from './workspaceHelpers';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace.
@@ -23,7 +23,7 @@ export interface UriLike {
 
 type OpenCodeDbCache = { db: SqlDatabase; mtimeMs: number; size: number; path: string; walMtimeMs: number };
 type OpenCodeModelUsageWithInteractions = {
-	[modelName: string]: ModelUsage[string] & { interactions?: number };
+	[modelName: ModelId]: ModelUsage[ModelId] & { interactions?: number };
 };
 
 export class OpenCodeDataAccess {

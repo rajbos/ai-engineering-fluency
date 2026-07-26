@@ -177,6 +177,7 @@ test('getGeminiCliModelUsage: aggregates normalized models and cached reads', as
 			inputTokens: 180,
 			outputTokens: 40,
 			cachedReadTokens: 60,
+			thinkingTokens: 8,
 		});
 	} finally {
 		cleanupSessionFile(sessionFile);

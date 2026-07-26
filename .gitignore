@@ -55,3 +55,7 @@ jetbrains-plugin/.gradle/
 **/*.tfplan
 crash.log
 crash.*.log
+
+# Graphify output
+graphify-out/cost.json
+graphify-out/cache/
