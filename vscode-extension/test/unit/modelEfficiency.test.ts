@@ -207,8 +207,8 @@ test('applyModelUsageToEfficiency: folds tokens and estimated cost into counters
         'gpt-4o': { ...createEmptyModelEfficiencyCounters(), calls: 4 },
     };
     applyModelUsageToEfficiency(eff, {
-        'gpt-4o': { inputTokens: 1_000_000, outputTokens: 100_000 },
-        'claude-sonnet-4.5': { inputTokens: 500_000, outputTokens: 50_000, cachedReadTokens: 400_000 },
+        'gpt-4o': { inputTokens: 1_000_000, outputTokens: 100_000, sessions: 0},
+        'claude-sonnet-4.5': { inputTokens: 500_000, outputTokens: 50_000, cachedReadTokens: 400_000, sessions: 0},
     }, PRICING);
 
     assert.equal(eff['gpt-4o'].inputTokens, 1_000_000);

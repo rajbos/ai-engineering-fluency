@@ -371,7 +371,7 @@ export class ClaudeCodeDataAccess {
 		usage: any
 	): void {
 		if (!modelUsage[model]) {
-			modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+			modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		}
 
 		const { cacheCreation, cacheCreation1h, cachedRead } = this.extractCacheTokenBreakdown(usage);

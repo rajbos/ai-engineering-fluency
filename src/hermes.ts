@@ -430,6 +430,7 @@ export class HermesDataAccess {
 			outputTokens: session.output_tokens || 0,
 			cachedReadTokens: session.cache_read_tokens || 0,
 			cacheCreationTokens: session.cache_write_tokens || 0,
+			sessions: 1,
 		};
 		return usage;
 	}

@@ -206,7 +206,7 @@ const inputTokens = typeof usage.input === 'number' ? usage.input : 0;
 const outputTokens = typeof usage.output === 'number' ? usage.output : 0;
 if (inputTokens + outputTokens === 0) { return; }
 const model: string = msg.model || 'unknown';
-if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 modelUsage[model].inputTokens += inputTokens;
 modelUsage[model].outputTokens += outputTokens;
 this.accumulateCacheTokens(usage, modelUsage[model]);
@@ -277,15 +277,16 @@ return { tokens, interactions, modelUsage: modelUsageWithInteractions, timestamp
 private buildModelUsageWithInteractions(
 modelUsage: ModelUsage,
 interactions: number
-): { [key: string]: { inputTokens: number; outputTokens: number; interactions?: number } } {
+): { [key: string]: { inputTokens: number; outputTokens: number; sessions: number; interactions?: number } } {
 const totalUsageTokens = Object.values(modelUsage).reduce((sum, u) => sum + u.inputTokens + u.outputTokens, 0);
-const result: { [key: string]: { inputTokens: number; outputTokens: number; interactions?: number } } = {};
+const result: { [key: string]: { inputTokens: number; outputTokens: number; sessions: number; interactions?: number } } = {};
 for (const [model, usage] of Object.entries(modelUsage)) {
 const modelTotal = usage.inputTokens + usage.outputTokens;
 const fraction = totalUsageTokens > 0 ? modelTotal / totalUsageTokens : 0;
 result[model] = {
 inputTokens: usage.inputTokens,
 outputTokens: usage.outputTokens,
+sessions: usage.sessions,
 interactions: Math.round(interactions * fraction),
 };
 }

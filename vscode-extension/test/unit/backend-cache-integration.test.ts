@@ -57,8 +57,7 @@ test('Backend cache integration: uses cached data when available', async () => {
 				modelUsage: {
 					'gpt-4o': {
 						inputTokens: 'hello'.length,
-						outputTokens: 'world'.length
-					}
+						outputTokens: 'world'.length, sessions: 0}
 				},
 				mtime
 			};
@@ -174,8 +173,8 @@ test('Backend cache integration: validates cached data and rejects invalid struc
 		{ modelUsage: {}, interactions: -1 }, // negative interactions
 		{ modelUsage: {}, interactions: NaN }, // NaN interactions
 		{ modelUsage: {}, interactions: Infinity }, // Infinity interactions
-		{ modelUsage: { 'gpt-4o': { inputTokens: -1, outputTokens: 5 } }, interactions: 1 }, // negative tokens
-		{ modelUsage: { 'gpt-4o': { inputTokens: NaN, outputTokens: 5 } }, interactions: 1 }, // NaN tokens
+		{ modelUsage: { 'gpt-4o': { inputTokens: -1, outputTokens: 5, sessions: 0} }, interactions: 1 }, // negative tokens
+		{ modelUsage: { 'gpt-4o': { inputTokens: NaN, outputTokens: 5, sessions: 0} }, interactions: 1 }, // NaN tokens
 		// Note: { modelUsage: { 'gpt-4o': null } } is silently skipped (not null/missing usage objects)
 		// as they simply mean the model wasn't used in this cache entry
 		{ modelUsage: { 'gpt-4o': 'invalid' }, interactions: 1 } // string usage object triggers .inputTokens check
@@ -257,9 +256,9 @@ test('Backend cache integration: counts interactions only once for multi-model f
 				tokens: 100,
 				interactions: 5, // Total interactions in file
 				modelUsage: {
-					'claude-3-5-sonnet': { inputTokens: 10, outputTokens: 5 },
-					'gpt-4o': { inputTokens: 30, outputTokens: 20 },
-					'gpt-4o-mini': { inputTokens: 25, outputTokens: 15 }
+					'claude-3-5-sonnet': { inputTokens: 10, outputTokens: 5, sessions: 0},
+					'gpt-4o': { inputTokens: 30, outputTokens: 20, sessions: 0},
+					'gpt-4o-mini': { inputTokens: 25, outputTokens: 15, sessions: 0}
 				},
 				mtime: now
 			};

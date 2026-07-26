@@ -299,7 +299,7 @@ function aggregateBillingGroupSessions(entry: DailyTokenStats): Record<string, n
 	for (const [editor, modelUsage] of Object.entries(editorModelUsage)) {
 		for (const [modelId, usage] of Object.entries(modelUsage)) {
 			const group = getBillingGroup(editor, modelId);
-			result[group] = (result[group] ?? 0) + (usage.sessions ?? 0);
+			result[group] = (result[group] ?? 0) + usage.sessions;
 		}
 	}
 	return result;

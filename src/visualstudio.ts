@@ -443,6 +443,7 @@ for (const [model, texts] of Object.entries(modelTexts)) {
 modelUsage[model] = {
 inputTokens: estimator(texts.input, model),
 outputTokens: estimator(texts.output, model),
+sessions: 0,
 };
 }
 return modelUsage;

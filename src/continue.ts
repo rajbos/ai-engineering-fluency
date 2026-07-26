@@ -138,7 +138,7 @@ export class ContinueDataAccess {
 			for (const log of item.promptLogs) {
 				const model: string = (log.modelTitle as string) || (session.chatModelTitle as string) || 'unknown';
 				if (!modelUsage[model]) {
-					modelUsage[model] = { inputTokens: 0, outputTokens: 0 };
+					modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 				}
 				modelUsage[model].inputTokens += this.estimateTokens((log.prompt as string) || '');
 				modelUsage[model].outputTokens += this.estimateTokens((log.completion as string) || '');

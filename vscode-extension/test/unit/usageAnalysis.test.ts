@@ -86,7 +86,7 @@ function emptyPeriod(): UsageAnalysisPeriod {
 // Minimal mock deps factory for file-based async functions
 function makeMockDeps(overrides: Partial<{
     openCodeIsMatch: boolean;
-    openCodeModelUsage: () => Promise<Record<string, { inputTokens: number; outputTokens: number }>>;
+    openCodeModelUsage: () => Promise<Record<string, { inputTokens: number; outputTokens: number, sessions: 0}>>;
 }> = {}): UsageAnalysisDeps {
     // Build a minimal ecosystem adapter for openCode if needed
     const ecosystems: any[] = [];
@@ -171,7 +171,7 @@ test('mergeUsageAnalysis: leaves period.modelEfficiency absent when analysis has
 test('mergeModelEfficiencyTokens: folds per-session model usage tokens and cost into the period', () => {
     const period = emptyPeriod();
     mergeModelEfficiencyTokens(period, {
-        'gpt-4o': { inputTokens: 1_000_000, outputTokens: 100_000, cachedReadTokens: 250_000 },
+        'gpt-4o': { inputTokens: 1_000_000, outputTokens: 100_000, cachedReadTokens: 250_000, sessions: 0},
     }, { 'gpt-4o': { inputCostPerMillion: 2.5, outputCostPerMillion: 10 } } as any);
 
     const c = period.modelEfficiency?.['gpt-4o'];
@@ -799,7 +799,7 @@ test('getModelUsageFromSession: delegates to openCode adapter for openCode sessi
         openCodeIsMatch: true,
         openCodeModelUsage: async () => {
             called = true;
-            return { 'gpt-4o': { inputTokens: 99, outputTokens: 11 } };
+            return { 'gpt-4o': { inputTokens: 99, outputTokens: 11, sessions: 0} };
         },
     });
     const result = await getModelUsageFromSession(deps, '/opencode/session.db', '');
@@ -849,7 +849,7 @@ test('getModelUsageFromSession: CLI session without cache fields leaves cachedRe
             shutdownType: 'routine',
             modelMetrics: {
                 'claude-sonnet-4.6': {
-                    usage: { inputTokens: 100000, outputTokens: 2000 },
+                    usage: { inputTokens: 100000, outputTokens: 2000, sessions: 0},
                     // no cacheReadTokens / cacheWriteTokens
                 },
             },

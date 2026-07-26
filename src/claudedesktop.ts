@@ -263,7 +263,7 @@ export class ClaudeDesktopCoworkDataAccess {
 		if (!usage) { return; }
 		if (!this.shouldCountCoworkRequest(event, seenRequestIds)) { return; }
 		const model = normalizeClaudeModelId(event.message?.model || 'unknown');
-		if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0 }; }
+		if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 		this.applyCoworkTokenCounts(modelUsage[model], usage);
 	}
 
