@@ -59,6 +59,9 @@ target[model].cachedReadTokens = (target[model].cachedReadTokens ?? 0) + usage.c
 if (usage.cacheCreationTokens !== undefined) {
 target[model].cacheCreationTokens = (target[model].cacheCreationTokens ?? 0) + usage.cacheCreationTokens;
 }
+if (usage.thinkingTokens !== undefined) {
+target[model].thinkingTokens = (target[model].thinkingTokens ?? 0) + usage.thinkingTokens;
+}
 if (usage.sessions !== undefined) {
 target[model].sessions = (target[model].sessions ?? 0) + usage.sessions;
 }

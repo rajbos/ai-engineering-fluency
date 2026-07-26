@@ -409,6 +409,9 @@ export class GeminiCliDataAccess {
 			if (tokenData.cached > 0) {
 				modelUsage[model].cachedReadTokens = (modelUsage[model].cachedReadTokens ?? 0) + tokenData.cached;
 			}
+			if (tokenData.thinking > 0) {
+				modelUsage[model].thinkingTokens = (modelUsage[model].thinkingTokens ?? 0) + tokenData.thinking;
+			}
 		}
 
 		return modelUsage;
