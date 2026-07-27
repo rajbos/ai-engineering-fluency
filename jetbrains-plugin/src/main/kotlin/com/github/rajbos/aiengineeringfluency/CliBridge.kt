@@ -1,9 +1,8 @@
 package com.github.rajbos.aiengineeringfluency
 
-import com.intellij.ide.plugins.PluginManagerCore
+import com.intellij.ide.plugins.PluginManager
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.diagnostic.Logger
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.util.io.createDirectories
 import com.intellij.util.system.OS
 import java.io.IOException
@@ -174,7 +173,7 @@ object CliBridge {
 
     /** Plugin version string, used to version the extraction directory so upgrades don't reuse stale binaries. */
     private val pluginVersion: String by lazy {
-        PluginManagerCore.getPlugin(PluginId.getId("com.github.rajbos.ai-engineering-fluency"))
+        PluginManager.getPluginByClass(CliBridge::class.java)
             ?.version
             ?: "unknown"
     }
