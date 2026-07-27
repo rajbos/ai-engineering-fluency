@@ -113,6 +113,33 @@ export function escapeHtml(text: string): string {
 }
 
 /**
+ * Runs a section-html builder and isolates failures so one broken section can never blank
+ * out an entire page render. If `builder` throws, the error is logged (via `onError`, e.g.
+ * `console.error`) and a small inline error card is returned in its place instead of letting
+ * the exception propagate up through the surrounding template literal (which would otherwise
+ * abort the whole `root.innerHTML` assignment and leave every other section stuck on stale or
+ * blank content).
+ */
+export function safeSectionHtml(
+	label: string,
+	builder: () => string,
+	onError: (message: string) => void = (m) => console.error(m),
+): string {
+	try {
+		return builder();
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		onError(`[usage-webview] Section "${label}" failed to render: ${message}`);
+		return `<div class="section" style="border-color: rgba(239, 68, 68, 0.3);">
+			<div class="section-title"><span>⚠️</span><span>${escapeHtml(label)}</span></div>
+			<div style="color: var(--text-secondary); font-size: 12px; padding: 8px 0;">
+				This section couldn't be displayed due to an unexpected error. Other sections are unaffected — try refreshing the dashboard.
+			</div>
+		</div>`;
+	}
+}
+
+/**
  * Formats a byte count as a human-readable file size string.
  */
 export function formatFileSize(bytes: number): string {

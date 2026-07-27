@@ -13,6 +13,7 @@ import {
 	formatDurationShort,
 	formatFileSize,
 	escapeHtml,
+	safeSectionHtml,
 	markdownToHtml,
 	STAGE_LABELS,
 	STAGE_DESCRIPTIONS
@@ -156,6 +157,57 @@ test('escapeHtml: neutralises a script injection attempt', () => {
 	const result = escapeHtml('<script>alert("xss")</script>');
 	assert.ok(!result.includes('<script'));
 	assert.equal(result, '&lt;script&gt;alert(&quot;xss&quot;)&lt;/script&gt;');
+});
+
+// ── safeSectionHtml ───────────────────────────────────────────────────────
+
+test('safeSectionHtml: returns the builder output when it succeeds', () => {
+	const result = safeSectionHtml('My Section', () => '<div>ok</div>');
+	assert.equal(result, '<div>ok</div>');
+});
+
+test('safeSectionHtml: catches a thrown error and renders a fallback card instead', () => {
+	const errors: string[] = [];
+	const result = safeSectionHtml('Model Efficiency', () => {
+		throw new Error('boom');
+	}, (m) => errors.push(m));
+
+	assert.ok(result.includes('Model Efficiency'));
+	assert.ok(result.includes("couldn't be displayed"));
+	assert.equal(errors.length, 1);
+	assert.ok(errors[0].includes('Model Efficiency'));
+	assert.ok(errors[0].includes('boom'));
+});
+
+test('safeSectionHtml: handles non-Error throws (e.g. a thrown string)', () => {
+	const errors: string[] = [];
+	const result = safeSectionHtml('Weird Section', () => {
+		// eslint-disable-next-line @typescript-eslint/no-throw-literal
+		throw 'not an Error instance';
+	}, (m) => errors.push(m));
+
+	assert.ok(result.includes('Weird Section'));
+	assert.ok(errors[0].includes('not an Error instance'));
+});
+
+test('safeSectionHtml: escapes the label in the fallback card to avoid HTML injection', () => {
+	const result = safeSectionHtml('<img src=x onerror=alert(1)>', () => {
+		throw new Error('boom');
+	}, () => { /* noop */ });
+
+	assert.ok(!result.includes('<img src=x'));
+	assert.ok(result.includes('&lt;img'));
+});
+
+test('safeSectionHtml: one failing section does not affect independently built sections', () => {
+	const sectionA = safeSectionHtml('Section A', () => '<div>a-ok</div>', () => { /* noop */ });
+	const sectionB = safeSectionHtml('Section B', () => { throw new Error('section B broke'); }, () => { /* noop */ });
+	const sectionC = safeSectionHtml('Section C', () => '<div>c-ok</div>', () => { /* noop */ });
+
+	const page = `${sectionA}${sectionB}${sectionC}`;
+	assert.ok(page.includes('a-ok'));
+	assert.ok(page.includes('c-ok'));
+	assert.ok(page.includes('Section B'));
 });
 
 // ── markdownToHtml ──────────────────────────────────────────────────────

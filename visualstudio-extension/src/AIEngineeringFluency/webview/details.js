@@ -2637,7 +2637,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     card.append(
       el("div", "provider-card-label", `${getProviderIcon(provider)} ${provider}`),
       el("div", "provider-card-value", formatCost(stats.month.billingGroupCosts?.[provider] || 0)),
-      el("div", "provider-card-sub", `Today ${formatCost(stats.today.billingGroupCosts?.[provider] || 0)} \xB7 30d ${formatCost(stats.last30Days.billingGroupCosts?.[provider] || 0)}`)
+      el("div", "provider-card-sub", "Cost this month")
     );
     const toggle = () => {
       if (excludedProviders.has(provider)) {
@@ -2664,7 +2664,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     card.append(
       el("div", "provider-card-label", "\u2211 Total (selected)"),
       el("div", "provider-card-value", formatCost(sumBillingGroupCosts(stats.month.billingGroupCosts, included))),
-      el("div", "provider-card-sub", `Today ${formatCost(sumBillingGroupCosts(stats.today.billingGroupCosts, included))} \xB7 30d ${formatCost(sumBillingGroupCosts(stats.last30Days.billingGroupCosts, included))}`)
+      el("div", "provider-card-sub", "Cost this month")
     );
     return card;
   }

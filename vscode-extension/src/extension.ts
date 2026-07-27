@@ -188,7 +188,7 @@ import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceFor
 import { classifySessionTask, buildClassificationInputFromUsageAnalysis, type TaskCategory } from '../../src/taskClassification';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -331,24 +331,6 @@ function _scdlBuildFromBreakdown(modelBreakdown: Record<string, { inputTokens: n
 	return modelUsage;
 }
 
-function _scdlDistributeToDays(
-	dailyRollups: Record<string, DailyRollupEntry>,
-	supplementModelUsage: ModelUsage
-): Record<string, DailyRollupEntry> | undefined {
-	const totalDayInteractions = Object.values(dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
-	if (totalDayInteractions <= 0) { return undefined; }
-	const result: Record<string, DailyRollupEntry> = {};
-	for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
-		const fraction = dayRollup.interactions / totalDayInteractions;
-		const dayModelUsage: ModelUsage = {};
-		for (const [model, usage] of Object.entries(supplementModelUsage)) {
-			dayModelUsage[model] = { inputTokens: Math.round(usage.inputTokens * fraction), outputTokens: Math.round(usage.outputTokens * fraction), sessions: 0, ...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}) };
-		}
-		result[dayKey] = { ...dayRollup, modelUsage: dayModelUsage };
-	}
-	return result;
-}
-
 /** One Copilot CLI session where OTel export data was found, for the diagnostics "OTel Delta" tab. */
 interface CopilotCliOtelComparisonSession {
 	file: string;
@@ -394,7 +376,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 61; // Reconcile modelUsage to actualTokens for event-based sessions without debug logs
+	private static readonly CACHE_VERSION = 62; // Re-sync dailyRollup actualTokens when debug-log modelUsage is distributed to days; fix ?? skipping reconciliation
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -3204,6 +3186,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.use24HourTime', true);
 	}
 
+	private getHideAutomaticToolCallsSetting(): boolean {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.hideAutomaticToolCalls', true);
+	}
+
 	private getStatusBarShowTokensSetting(): StatusBarDisplaySetting {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency.display.statusBar').get<StatusBarDisplaySetting>('showTokens', 'both');
 	}
@@ -3320,6 +3306,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		if (this.chartPanel && (this.lastFullDailyStats || this.lastDailyStats)) {
 			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, this.lastFullDailyStats ?? this.lastDailyStats!);
+		}
+		if (this.analysisPanel && this.lastUsageAnalysisStats) {
+			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(this.lastUsageAnalysisStats) });
 		}
 	}
 
@@ -4630,11 +4619,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// these independently (e.g. event-based CLI sessions derive actualTokens from real
 		// output via a ratio, while modelUsage derives input from accumulated message content),
 		// which can make Input+Output exceed Total in the details view.
-		const reconciledModelUsage = reconcileModelUsageToActualTokens(modelUsage, tokenResult.actualTokens ?? tokenResult.tokens);
+		// `||` (not `??`): actualTokens is 0 — never undefined — when no exact usage exists,
+		// so `??` would target 0 and silently skip reconciliation for estimated sessions.
+		const reconciledModelUsage = reconcileModelUsageToActualTokens(modelUsage, tokenResult.actualTokens || tokenResult.tokens);
 
-		const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, reconciledModelUsage, interactions);
+		const { dailyRollups } = this.computeDailyRollups(sessionMeta, tokenResult, reconciledModelUsage, interactions);
 		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
-		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, reconciledModelUsage, dailyRollups, totalInteractions);
+		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, reconciledModelUsage, dailyRollups);
 
 		await this.applyWindsurfBreakdown(sessionFilePath, resolvedModelUsage, dailyRollups, usageAnalysis);
 
@@ -4781,8 +4772,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// partial (e.g. some requests lack a `model` attribute), so Input+Output
 		// never drifts from Total — see reconcileModelUsageToTotal for why.
 		const supplementModelUsage = reconcileModelUsageToTotal(breakdownUsage, debugLogTokens.inputTokens, debugLogTokens.outputTokens);
+		// Redistribute to days via the shared helper, which also re-syncs each day's
+		// actualTokens to the debug-log-sized usage — see distributeModelUsageToDays.
 		const supplementDailyRollups = cached.dailyRollups
-			? (_scdlDistributeToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups)
+			? (distributeModelUsageToDays(cached.dailyRollups, supplementModelUsage) ?? cached.dailyRollups)
 			: cached.dailyRollups;
 		const supplemented: SessionFileCache = {
 			...cached, modelUsage: supplementModelUsage, dailyRollups: supplementDailyRollups,
@@ -4897,8 +4890,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tokenResult: { tokens: number; actualTokens?: number; cacheReadTokens?: number },
 		debugLogTokens: { inputTokens: number; outputTokens: number; cachedTokens?: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined,
 		modelUsage: ModelUsage,
-		dailyRollups: { [utcDayKey: string]: DailyRollupEntry },
-		totalInteractions: number
+		dailyRollups: { [utcDayKey: string]: DailyRollupEntry }
 	): { resolvedActualTokens: number | undefined; finalCacheReadTokens: number | undefined; resolvedModelUsage: ModelUsage } {
 		const resolvedActualTokens = (debugLogTokens && (debugLogTokens.inputTokens + debugLogTokens.outputTokens) > 0)
 			? debugLogTokens.inputTokens + debugLogTokens.outputTokens
@@ -4911,7 +4903,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		this.backfillDailyRollupCacheTokens(dailyRollups, finalCacheReadTokens);
 
-		const resolvedModelUsage = this.applyDebugLogModelBreakdown(modelUsage, debugLogTokens, dailyRollups, totalInteractions);
+		const resolvedModelUsage = this.applyDebugLogModelBreakdown(modelUsage, debugLogTokens, dailyRollups);
 		return { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage };
 	}
 
@@ -4932,7 +4924,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
-	private applyDebugLogModelBreakdown(modelUsage: ModelUsage, debugLogTokens: { inputTokens: number; outputTokens: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined, dailyRollups: { [utcDayKey: string]: DailyRollupEntry }, totalInteractions: number): ModelUsage {
+	private applyDebugLogModelBreakdown(modelUsage: ModelUsage, debugLogTokens: { inputTokens: number; outputTokens: number; modelBreakdown: Record<string, { inputTokens: number; outputTokens: number; cachedTokens: number }> } | null | undefined, dailyRollups: { [utcDayKey: string]: DailyRollupEntry }): ModelUsage {
 		if (!debugLogTokens || debugLogTokens.inputTokens + debugLogTokens.outputTokens === 0) { return modelUsage; }
 		const breakdownUsage: ModelUsage = {};
 		for (const [model, bd] of Object.entries(debugLogTokens.modelBreakdown)) {
@@ -4946,9 +4938,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 			debugLogTokens.inputTokens,
 			debugLogTokens.outputTokens,
 		);
-		for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
-			const fraction = totalInteractions > 0 ? dayRollup.interactions / totalInteractions : 1;
-			dailyRollups[dayKey].modelUsage = this.scaledModelUsage(resolvedModelUsage, fraction);
+		// Redistribute to days AND re-sync each day's actualTokens — the rollups were
+		// built from the (smaller) session-file estimate, and period stats derive
+		// "Total tokens" from rollup actualTokens but "Input/Output" from rollup
+		// modelUsage. Leaving the old day totals in place makes Input exceed Total.
+		const redistributed = distributeModelUsageToDays(dailyRollups, resolvedModelUsage);
+		if (redistributed) {
+			for (const [dayKey, dayRollup] of Object.entries(redistributed)) {
+				dailyRollups[dayKey] = dayRollup;
+			}
 		}
 		return resolvedModelUsage;
 	}
@@ -6444,6 +6442,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
+			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
 		};
 	}
 
@@ -10170,6 +10169,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       suppressedUnknownTools,
       todaySessions: stats.todaySessions || [],
       use24HourTime: this.getUse24HourTimeSetting(),
+      hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
       sessionColumnSettings,

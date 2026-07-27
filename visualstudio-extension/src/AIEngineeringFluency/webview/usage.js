@@ -2946,10 +2946,11 @@ ${_renderMultiModelMixedCostSessions(switching)}
         </div>
     `;
   }
-  function renderToolsTable(byTool, limit = 10, nameResolver = lookupToolName) {
-    const sortedTools = Object.entries(byTool).sort(([, a3], [, b3]) => b3 - a3).slice(0, limit);
+  function renderToolsTable(byTool, limit = 10, nameResolver = lookupToolName, applyAutoFilter = false) {
+    const entries = applyAutoFilter && hideAutomaticToolCalls ? Object.entries(byTool).filter(([tool]) => !AUTOMATIC_TOOL_SET_WV.has(tool.toLowerCase())) : Object.entries(byTool);
+    const sortedTools = entries.sort(([, a3], [, b3]) => b3 - a3).slice(0, limit);
     if (sortedTools.length === 0) {
-      return '<div style="color: var(--text-muted);">No tools used yet</div>';
+      return applyAutoFilter && hideAutomaticToolCalls ? '<div style="color: var(--text-muted);">No purposeful tools used yet (automatic tool calls are hidden)</div>' : '<div style="color: var(--text-muted);">No tools used yet</div>';
     }
     const rows = sortedTools.map(([tool, count], idx) => {
       const friendly = escapeHtml(nameResolver(tool));
@@ -3015,6 +3016,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   var sessionSortDirection = "desc";
   var cachedTodaySessions = [];
   var use24HourTime = true;
+  var hideAutomaticToolCalls = true;
   var sessionsLookback = "today";
   var latestTodaySessions = [];
   var recentSessionsCache = {};
@@ -5857,27 +5859,27 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			<!-- Tool Calls Section -->
 			<div class="section">
 				<div class="section-title"><span>\u{1F527}</span><span>Tool Usage</span></div>
-				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions</div>
+				<div class="section-subtitle">Functions and tools invoked by Copilot during interactions${hideAutomaticToolCalls ? ' (automatic tool calls hidden \u2014 disable "Hide Automatic Tool Calls" in settings to show them)' : ""}</div>
 				<div class="three-column">
 					<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Today</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.today.toolCalls.total)}</div>
-						${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10)}
+						${renderToolsTable(unionFill(stats.today.toolCalls.byTool, allToolKeys), 10, lookupToolName, true)}
 					</div>
 				</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C6} Last 30 Days</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.last30Days.toolCalls.total)}</div>
-							${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10)}
+							${renderToolsTable(unionFill(stats.last30Days.toolCalls.byTool, allToolKeys), 10, lookupToolName, true)}
 						</div>
 					</div>
 				<div>
 					<h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">\u{1F4C5} Previous Month</h4>
 					<div class="list">
 						<div style="font-size: 14px; font-weight: 600; color: var(--text-primary); margin-bottom: 8px;">Total Tool Calls: ${formatNumber(stats.month.toolCalls.total)}</div>
-							${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10)}
+							${renderToolsTable(unionFill(stats.month.toolCalls.byTool, allToolKeys), 10, lookupToolName, true)}
 						</div>
 					</div>
 				</div>
@@ -6091,6 +6093,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
     if (typeof message.data?.use24HourTime === "boolean") {
       use24HourTime = message.data.use24HourTime;
+    }
+    if (typeof message.data?.hideAutomaticToolCalls === "boolean") {
+      hideAutomaticToolCalls = message.data.hideAutomaticToolCalls;
     }
     const sanitized = sanitizeStats(message.data);
     if (sanitized) {
@@ -6702,6 +6707,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
     }
     setFormatLocale(initialData.locale);
     use24HourTime = initialData.use24HourTime !== false;
+    hideAutomaticToolCalls = initialData.hideAutomaticToolCalls !== false;
     const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
     if (Array.isArray(savedColumns)) {
       const valid = savedColumns.filter((c4) => ALL_SESSION_COLUMN_IDS.includes(c4));

@@ -10,6 +10,8 @@ computeSessionTotalTokens,
 computeSessionDurationMs,
 reconcileModelUsageToTotal,
 reconcileModelUsageToActualTokens,
+distributeModelUsageToDays,
+sumModelUsageTokens,
 type SessionAggregateInput,
 type UtcDateRanges,
 } from '../../../src/statsHelpers';
@@ -1083,4 +1085,92 @@ const day = result.dailyStatsMap.get('2025-03-15')!;
 assert.equal(day.modelUsage['gpt-4o']?.sessions, 1);
 assert.equal(day.editorModelUsage!['VS Code']['gpt-4o']?.sessions, 1);
 assert.equal(day.editorUsage['VS Code']?.sessions, 1);
+});
+
+// ── distributeModelUsageToDays ───────────────────────────────────────────────
+
+test('distributeModelUsageToDays: distributes usage by interaction weight and re-syncs day actualTokens', () => {
+	const rollups = {
+		'2025-03-14': { tokens: 500, actualTokens: 0, thinkingTokens: 0, interactions: 3, modelUsage: {} },
+		'2025-03-15': { tokens: 500, actualTokens: 0, thinkingTokens: 0, interactions: 1, modelUsage: {} },
+	};
+	const sessionUsage: ModelUsage = { 'gpt-4o': { inputTokens: 8000, outputTokens: 2000, cachedReadTokens: 4000, sessions: 0 } };
+	const result = distributeModelUsageToDays(rollups, sessionUsage)!;
+	assert.ok(result, 'returns distributed rollups');
+	assert.equal(result['2025-03-14'].modelUsage['gpt-4o'].inputTokens, 6000, '3/4 of input');
+	assert.equal(result['2025-03-15'].modelUsage['gpt-4o'].inputTokens, 2000, '1/4 of input');
+	assert.equal(result['2025-03-14'].modelUsage['gpt-4o'].cachedReadTokens, 3000, 'cache reads distributed too');
+	// The invariant this helper exists for: each day's actualTokens equals that
+	// day's distributed input+output, so period Total >= period Input.
+	assert.equal(result['2025-03-14'].actualTokens, 7500);
+	assert.equal(result['2025-03-15'].actualTokens, 2500);
+});
+
+test('distributeModelUsageToDays: returns undefined when rollups have no interactions', () => {
+	const rollups = {
+		'2025-03-15': { tokens: 100, actualTokens: 0, thinkingTokens: 0, interactions: 0, modelUsage: {} },
+	};
+	assert.equal(distributeModelUsageToDays(rollups, { 'gpt-4o': { inputTokens: 10, outputTokens: 5, sessions: 0 } }), undefined);
+});
+
+test('sumModelUsageTokens: sums input+output across models, ignoring cache fields', () => {
+	assert.equal(sumModelUsageTokens({
+		'a': { inputTokens: 100, outputTokens: 20, cachedReadTokens: 90, sessions: 0 },
+		'b': { inputTokens: 50, outputTokens: 5, sessions: 0 },
+	}), 175);
+});
+
+// ── Regression: Input tokens must never exceed Total tokens per period ───────
+// Shaped on real data from a machine where the details view showed
+// "Input tokens" > "Total tokens" on every period: a VS Code Chat session
+// whose file-based estimate was ~1.04M tokens but whose Copilot Chat debug
+// log recorded ~18.5M exact API tokens. The debug-log path replaced the
+// per-day modelUsage with the (much larger) debug totals but left the day
+// rollup's tokens/actualTokens at the old estimate, so aggregated Input
+// (from modelUsage) exceeded aggregated Total (from rollup tokens).
+test('aggregatePeriodStats: debug-log-sized modelUsage cannot exceed period total after distributeModelUsageToDays (regression)', () => {
+	const ranges = makeRanges('2025-03-15');
+	// Day rollups as originally built from the session-file estimate.
+	const rollups = {
+		'2025-03-14': { tokens: 542265, actualTokens: 0, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+		'2025-03-15': { tokens: 500000, actualTokens: 0, thinkingTokens: 0, interactions: 2, modelUsage: {} },
+	};
+	// Debug-log exact totals (real session 354a5617: in=18,387,960 out=135,055).
+	const debugUsage: ModelUsage = { 'gpt-4.1': { inputTokens: 18387960, outputTokens: 135055, cachedReadTokens: 17691909, sessions: 0 } };
+	const distributed = distributeModelUsageToDays(rollups, debugUsage)!;
+	const input: SessionAggregateInput = {
+		editorType: 'VS Code',
+		mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+		sessionData: makeSession({ dailyRollups: distributed }),
+	};
+	const result = aggregatePeriodStats([input], ranges);
+	for (const [name, period] of [['last30Days', result.last30DaysStats], ['month', result.monthStats]] as const) {
+		const inputTokens = Object.values(period.modelUsage).reduce((s, u) => s + u.inputTokens, 0);
+		const outputTokens = Object.values(period.modelUsage).reduce((s, u) => s + u.outputTokens, 0);
+		assert.ok(inputTokens + outputTokens <= period.tokens + period.thinkingTokens,
+			`${name}: Input+Output (${inputTokens + outputTokens}) must not exceed Total (${period.tokens + period.thinkingTokens})`);
+		assert.ok(inputTokens > 18000000, `${name}: input reflects debug-log totals`);
+	}
+});
+
+// Documents the pre-fix behaviour: distributing debug-log modelUsage WITHOUT
+// re-syncing day actualTokens reproduces the "Input > Total" bug in aggregation.
+test('aggregatePeriodStats: stale rollup tokens with debug-log modelUsage reproduces Input > Total (bug shape)', () => {
+	const ranges = makeRanges('2025-03-15');
+	const buggyRollups = {
+		'2025-03-15': {
+			tokens: 1042265, actualTokens: 0, thinkingTokens: 0, interactions: 4,
+			// Debug-log-sized usage pasted onto a day whose token counts were never updated.
+			modelUsage: { 'gpt-4.1': { inputTokens: 18387960, outputTokens: 135055, sessions: 0 } },
+		},
+	};
+	const input: SessionAggregateInput = {
+		editorType: 'VS Code',
+		mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+		sessionData: makeSession({ dailyRollups: buggyRollups }),
+	};
+	const result = aggregatePeriodStats([input], ranges);
+	const inputTokens = Object.values(result.last30DaysStats.modelUsage).reduce((s, u) => s + u.inputTokens, 0);
+	assert.ok(inputTokens > result.last30DaysStats.tokens,
+		'unsynced rollups make Input exceed Total — this is why distributeModelUsageToDays must re-sync actualTokens');
 });
