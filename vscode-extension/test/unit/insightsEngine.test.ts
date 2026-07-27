@@ -475,3 +475,52 @@ test('model-edit-retries: action opens the usage analysis view', () => {
 	const insight = results.find(i => i.id === RETRIES_ID);
 	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.showUsageAnalysis');
 });
+
+// ---------------------------------------------------------------------------
+// multi-agent-orchestration / subagent-delegation insight tests
+// ---------------------------------------------------------------------------
+
+const MULTI_AGENT_ID = 'multi-agent-orchestration';
+const SUBAGENT_DELEGATION_ID = 'subagent-delegation';
+
+test('multi-agent-orchestration: fires when multiAgentParentSessions >= 3', () => {
+	const ctx = makeCtx();
+	(ctx.last30Days as UsageAnalysisPeriod & { multiAgentParentSessions?: number }).multiAgentParentSessions = 3;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MULTI_AGENT_ID);
+	assert.ok(insight, 'should fire at 3 multi-agent parent sessions');
+	assert.ok(insight!.body.includes('3'));
+});
+
+test('multi-agent-orchestration: does NOT fire below threshold', () => {
+	const ctx = makeCtx();
+	(ctx.last30Days as UsageAnalysisPeriod & { multiAgentParentSessions?: number }).multiAgentParentSessions = 2;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MULTI_AGENT_ID), undefined);
+});
+
+test('subagent-delegation: fires when delegationSessions >= 5 and no multi-agent hierarchy signal', () => {
+	const ctx = makeCtx();
+	(ctx.last30Days as UsageAnalysisPeriod & { delegationSessions?: number }).delegationSessions = 5;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === SUBAGENT_DELEGATION_ID);
+	assert.ok(insight, 'should fire at 5 delegation sessions');
+	assert.ok(insight!.body.includes('5'));
+});
+
+test('subagent-delegation: does NOT fire below threshold', () => {
+	const ctx = makeCtx();
+	(ctx.last30Days as UsageAnalysisPeriod & { delegationSessions?: number }).delegationSessions = 4;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === SUBAGENT_DELEGATION_ID), undefined);
+});
+
+test('subagent-delegation: does NOT fire when multi-agent-orchestration already covers the signal', () => {
+	const ctx = makeCtx();
+	const period = ctx.last30Days as UsageAnalysisPeriod & { delegationSessions?: number; multiAgentParentSessions?: number };
+	period.delegationSessions = 5;
+	period.multiAgentParentSessions = 3;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === SUBAGENT_DELEGATION_ID), undefined, 'should defer to the richer multi-agent-orchestration insight');
+	assert.ok(results.find(i => i.id === MULTI_AGENT_ID), 'multi-agent-orchestration should still fire');
+});

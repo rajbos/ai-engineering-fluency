@@ -32,12 +32,19 @@ type CategoryScore = {
 	tips: string[];      // suggestions to reach next stage
 };
 
+type AgenticTrendPoint = {
+	date: string;
+	multiAgentParentSessions: number;
+	delegationSessions: number;
+};
+
 type MaturityData = {
 	overallStage: number;
 	overallLabel: string;
 	categories: CategoryScore[];
 	period: UsageAnalysisPeriod;
 	lastUpdated: string;
+	agenticTrend?: AgenticTrendPoint[];
 	dismissedTips?: string[];
 	isDebugMode?: boolean;
 	fluencyLevels?: CategoryLevelData[];
@@ -153,6 +160,47 @@ function stageColor(stage: number): string {
 		case 4: return '#22d3ee';
 		default: return '#666';
 	}
+}
+
+// ── Multi-Agent Usage sparkline ────────────────────────────────────────
+
+/** Renders a small inline SVG sparkline of daily multi-agent-parent + delegation sessions, for the Agentic category card. */
+function renderAgenticSparkline(trend: AgenticTrendPoint[] | undefined): string {
+	if (!trend || trend.length === 0) { return ''; }
+	const totalSessions = trend.reduce((sum, p) => sum + p.multiAgentParentSessions + p.delegationSessions, 0);
+	if (totalSessions === 0) { return ''; }
+
+	const width = 260, height = 46, padding = 4;
+	const maxVal = Math.max(1, ...trend.map(p => p.multiAgentParentSessions + p.delegationSessions));
+	const n = trend.length;
+	const stepX = n > 1 ? (width - padding * 2) / (n - 1) : 0;
+	const toY = (v: number) => height - padding - (v / maxVal) * (height - padding * 2);
+
+	const linePoints = (values: number[]) =>
+		values.map((v, i) => `${(padding + i * stepX).toFixed(1)},${toY(v).toFixed(1)}`).join(' ');
+
+	const totalPoints = linePoints(trend.map(p => p.multiAgentParentSessions + p.delegationSessions));
+	const parentPoints = linePoints(trend.map(p => p.multiAgentParentSessions));
+
+	const first = escapeHtml(trend[0].date);
+	const last = escapeHtml(trend[n - 1].date);
+
+	return `
+    <div class="agentic-sparkline" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2a30;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-size: 11px; font-weight: 600; color: #999;">📈 Multi-Agent Usage (last ${n} days)</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" xmlns="http://www.w3.org/2000/svg">
+        <polyline points="${totalPoints}" fill="none" stroke="#22d3ee" stroke-width="2" />
+        <polyline points="${parentPoints}" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="3,2" />
+      </svg>
+      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #666;">
+        <span>${first}</span>
+        <span style="color:#22d3ee;">— total</span>
+        <span style="color:#a78bfa;">┄ multi-agent parents</span>
+        <span>${last}</span>
+      </div>
+    </div>`;
 }
 
 
@@ -335,6 +383,7 @@ function buildCategoryCard(
   ` : '';
 
   const hookButton = buildHookReminderButton(cat.category, cat.tips.length, data.installedHooks ?? []);
+  const sparklineHtml = cat.category === 'Agentic' ? renderAgenticSparkline(data.agenticTrend) : '';
 
   return `
     <div class="category-card">
@@ -347,6 +396,7 @@ function buildCategoryCard(
         <div class="category-progress-fill" style="width: ${progressPct}%; background: ${color};"></div>
       </div>
       <ul class="evidence-list">${evidenceHtml || '<li class="evidence-item"><span class="evidence-icon">-</span><span>No significant activity detected</span></li>'}</ul>
+      ${sparklineHtml}
       ${!tipsAreDismissed && cat.tips.length > 0 ? `
         <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2a30;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">

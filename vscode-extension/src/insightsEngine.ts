@@ -979,6 +979,22 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		allowToast: true,
 	},
 
+	// ── Sub-agent delegation (tool-call based, no hierarchy data required) ────
+	{
+		id: 'subagent-delegation',
+		category: 'agentic',
+		severity: 'celebration',
+		title: '🧩 You\'re delegating work to sub-agents!',
+		buildBody: (ctx) => {
+			const n = ctx.last30Days.delegationSessions!;
+			return `You've delegated work to sub-agents/Task tools in ${n} sessions over the last 30 days. ` +
+				`Breaking work into focused delegated tasks is a strong AI-engineering habit — it keeps each agent's context tight and lets you parallelize independent pieces of work.`;
+		},
+		appliesTo: (ctx) => (ctx.last30Days.delegationSessions ?? 0) >= 5 && (ctx.last30Days.multiAgentParentSessions ?? 0) < 3,
+		weight: 32,
+		allowToast: true,
+	},
+
 	// ── Edit scope ───────────────────────────────────────────────────────────
 	{
 		id: 'single-file-edits-only',
