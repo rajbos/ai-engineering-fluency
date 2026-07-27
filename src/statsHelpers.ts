@@ -158,6 +158,57 @@ export function reconcileModelUsageToActualTokens(modelUsage: ModelUsage, actual
 	return reconcileModelUsageToTotal(modelUsage, inputTarget, outputTarget);
 }
 
+/** Sum of input + output tokens across all models in a usage map. */
+export function sumModelUsageTokens(modelUsage: ModelUsage): number {
+	return Object.values(modelUsage).reduce((s, u) => s + u.inputTokens + u.outputTokens, 0);
+}
+
+/** Scale every token field of a usage map by `fraction` (used for per-day distribution). */
+function scaleModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
+	const scaled: ModelUsage = {};
+	for (const [model, usage] of Object.entries(modelUsage)) {
+		scaled[model] = {
+			inputTokens: Math.round(usage.inputTokens * fraction),
+			outputTokens: Math.round(usage.outputTokens * fraction),
+			...(usage.cachedReadTokens !== undefined ? { cachedReadTokens: Math.round(usage.cachedReadTokens * fraction) } : {}),
+			...(usage.cacheCreationTokens !== undefined ? { cacheCreationTokens: Math.round(usage.cacheCreationTokens * fraction) } : {}),
+			sessions: 0,
+		};
+	}
+	return scaled;
+}
+
+/**
+ * Distributes a session-level model usage breakdown across the session's daily
+ * rollups, weighted by each day's interaction count, and re-syncs each day's
+ * `actualTokens` to that day's distributed input+output total.
+ *
+ * Re-syncing `actualTokens` is the critical part: period stats derive "Total
+ * tokens" from each rollup's `actualTokens`/`tokens` but "Input/Output tokens"
+ * from the rollup's `modelUsage`. When a debug log upgrades the per-model
+ * breakdown to (much larger) exact API totals, leaving the rollup's token
+ * counts at their old session-file estimate makes Input exceed Total in every
+ * period view. Setting `actualTokens` from the same distributed usage keeps
+ * the two sources consistent by construction.
+ *
+ * Returns undefined when the rollups have no interactions to weight by
+ * (callers should keep their existing rollups in that case).
+ */
+export function distributeModelUsageToDays(
+	dailyRollups: Record<string, DailyRollupEntry>,
+	sessionModelUsage: ModelUsage,
+): Record<string, DailyRollupEntry> | undefined {
+	const totalInteractions = Object.values(dailyRollups).reduce((s, dr) => s + dr.interactions, 0);
+	if (totalInteractions <= 0) { return undefined; }
+	const result: Record<string, DailyRollupEntry> = {};
+	for (const [dayKey, dayRollup] of Object.entries(dailyRollups)) {
+		const fraction = dayRollup.interactions / totalInteractions;
+		const dayModelUsage = scaleModelUsage(sessionModelUsage, fraction);
+		result[dayKey] = { ...dayRollup, modelUsage: dayModelUsage, actualTokens: sumModelUsageTokens(dayModelUsage) };
+	}
+	return result;
+}
+
 /**
  * Merges `source` language usage into `target` (in-place).
  */
