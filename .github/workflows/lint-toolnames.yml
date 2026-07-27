@@ -42,6 +42,11 @@ jobs:
 
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Full history is required so BASE_SHA (the PR/push base commit)
+          # is actually present locally for the `git show` diff below;
+          # the default shallow depth=1 checkout only fetches the head commit.
+          fetch-depth: 0
 
       - name: Check for duplicate-like entries
         id: check
