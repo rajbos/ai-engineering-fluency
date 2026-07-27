@@ -194,14 +194,22 @@ function Build-VisualStudio {
 
     switch ($Target) {
         'build'   {
-            # Restore SDK-style test project (needs dotnet restore, not nuget restore)
+            # Restore SDK-style projects (needs dotnet restore, not nuget restore)
             dotnet restore "$PSScriptRoot/visualstudio-extension/src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj"
-            & $msbuild $sln /p:Configuration=Release /t:Build   /v:minimal
+            dotnet restore "$PSScriptRoot/visualstudio-extension/src/AIEngineeringFluencyRunner/AIEngineeringFluencyRunner.csproj"
+            & $msbuild $sln /p:Configuration=Release /t:Build /v:minimal
+            if ($LASTEXITCODE -ne 0) { throw "MSBuild build failed" }
         }
-        'package' { & $msbuild $sln /p:Configuration=Release /t:Rebuild /v:minimal }
-        'test'    {
-            # 1. Restore SDK-style test project first, then build the full solution with MSBuild
+        'package' {
             dotnet restore "$PSScriptRoot/visualstudio-extension/src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj"
+            dotnet restore "$PSScriptRoot/visualstudio-extension/src/AIEngineeringFluencyRunner/AIEngineeringFluencyRunner.csproj"
+            & $msbuild $sln /p:Configuration=Release /t:Rebuild /v:minimal
+            if ($LASTEXITCODE -ne 0) { throw "MSBuild rebuild failed" }
+        }
+        'test'    {
+            # 1. Restore SDK-style projects first, then build the full solution with MSBuild
+            dotnet restore "$PSScriptRoot/visualstudio-extension/src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj"
+            dotnet restore "$PSScriptRoot/visualstudio-extension/src/AIEngineeringFluencyRunner/AIEngineeringFluencyRunner.csproj"
             & $msbuild $sln /p:Configuration=Release /t:Build /v:minimal
             if ($LASTEXITCODE -ne 0) { throw "MSBuild failed before running tests" }
 
@@ -219,7 +227,7 @@ function Build-VisualStudio {
             }
             finally { Pop-Location }
         }
-        'clean'   { & $msbuild $sln /p:Configuration=Release /t:Clean   /v:minimal }
+        'clean'   { & $msbuild $sln /p:Configuration=Release /t:Clean /v:minimal }
     }
     Write-Ok "visualstudio-extension done."
 }
