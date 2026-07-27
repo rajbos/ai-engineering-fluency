@@ -1158,6 +1158,6 @@
   ,"Grace": "Grace"
   ,"ReportFindings": "Report Findings"
   ,"__slash__compact": "Compact"
-  ,"mcp__ccd_session_mgmt__get_session": "Session Management: Get Session"
-  ,"mcp__ccd_session_mgmt__list_events": "Session Management: List Events"
+  ,"mcp__ccd_session_mgmt__get_session": "Session Management MCP: Get Session"
+  ,"mcp__ccd_session_mgmt__list_events": "Session Management MCP: List Events"
 }
