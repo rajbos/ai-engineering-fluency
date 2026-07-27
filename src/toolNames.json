@@ -1146,7 +1146,7 @@
   ,"mcp_io_github_git_list_issue_fields": "GitHub MCP (Local): List Issue Fields"
   ,"mcp_io_github_git_request_copilot_review": "GitHub MCP (Local): Request Copilot Review"
   ,"mcp_mcpsamples_aw_search_instructions": "MCPSamples: Search Instructions"
-  ,"actions-marketplace_resolveActionVersions": "Actions Marketplace Resolve Action Versions"
+  ,"actions-marketplace_resolveActionVersions": "Actions Marketplace MCP: Resolve Action Versions"
   ,"execute_code": "Execute Code"
   ,"mcp__Claude_Browser__javascript_tool": "Claude Browser: JavaScript Tool"
   ,"mcp__Claude_Browser__resize_window": "Claude Browser: Resize Window"
