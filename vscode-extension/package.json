@@ -169,6 +169,11 @@
           "default": true,
           "description": "Show times in 24-hour format (e.g. 14:30). When disabled, 12-hour AM/PM format is used (e.g. 2:30 PM)."
         },
+        "aiEngineeringFluency.display.hideAutomaticToolCalls": {
+          "type": "boolean",
+          "default": true,
+          "description": "In the Tool Usage view, hide tools marked \"auto\" (tools Copilot calls automatically, e.g. file reads and searches) so purposeful/intentional tool calls stand out. Disable to show automatic tool calls again."
+        },
         "aiEngineeringFluency.display.statusBar.showTokens": {
           "type": "string",
           "enum": [

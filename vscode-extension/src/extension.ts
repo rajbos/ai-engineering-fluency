@@ -3186,6 +3186,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.use24HourTime', true);
 	}
 
+	private getHideAutomaticToolCallsSetting(): boolean {
+		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.hideAutomaticToolCalls', true);
+	}
+
 	private getStatusBarShowTokensSetting(): StatusBarDisplaySetting {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency.display.statusBar').get<StatusBarDisplaySetting>('showTokens', 'both');
 	}
@@ -3302,6 +3306,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		if (this.chartPanel && (this.lastFullDailyStats || this.lastDailyStats)) {
 			this.chartPanel.webview.html = this.getChartHtml(this.chartPanel.webview, this.lastFullDailyStats ?? this.lastDailyStats!);
+		}
+		if (this.analysisPanel && this.lastUsageAnalysisStats) {
+			void this.analysisPanel.webview.postMessage({ command: 'updateStats', data: this._buildAnalysisUpdateData(this.lastUsageAnalysisStats) });
 		}
 	}
 
@@ -6435,6 +6442,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
+			hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
 		};
 	}
 
@@ -10161,6 +10169,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       suppressedUnknownTools,
       todaySessions: stats.todaySessions || [],
       use24HourTime: this.getUse24HourTimeSetting(),
+      hideAutomaticToolCalls: this.getHideAutomaticToolCallsSetting(),
       insights: this.buildCurrentInsights(stats),
       curationAnalysis: stats.curationAnalysis ?? null,
       sessionColumnSettings,
