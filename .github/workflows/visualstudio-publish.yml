@@ -1,0 +1,302 @@
+name: Visual Studio Extension - Publish
+
+# Release workflow for the Visual Studio extension.
+#
+# Tag convention: vs/v<version>  (e.g. vs/v1.2.0)
+# The version in visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest
+# MUST match the pushed tag.
+#
+# Required secret:
+#   VSCE_PAT (or VS_MARKETPLACE_PAT) — Azure DevOps PAT with Marketplace (Publish) scope.
+#   The same PAT is used for both the VS Code and Visual Studio Marketplaces.
+
+on:
+  push:
+    tags:
+      - 'vs/v*'
+  workflow_dispatch:
+    inputs:
+      publish_marketplace:
+        description: 'Publish to Visual Studio Marketplace after building'
+        required: false
+        default: true
+        type: boolean
+      dry_run:
+        description: 'Dry run: build the VSIX but do not publish or create a release'
+        required: false
+        default: false
+        type: boolean
+
+permissions:
+  contents: read
+
+jobs:
+  publish:
+    name: Build and Publish Visual Studio Extension
+    # Windows required: Node.js SEA (bundle-exe.ps1) and MSBuild/VSSDK are Windows-only
+    runs-on: windows-latest
+    permissions:
+      contents: write  # needed to create GitHub release on tag push
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Read local version from VSIX manifest
+        id: version
+        shell: pwsh
+        env:
+          GIT_REF: ${{ github.ref }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          $manifestPath = "visualstudio-extension/src/AIEngineeringFluency/source.extension.vsixmanifest"
+          [xml]$manifest = Get-Content $manifestPath
+          $localVersion = $manifest.PackageManifest.Metadata.Identity.Version
+          $extensionId  = $manifest.PackageManifest.Metadata.Identity.Id
+          Write-Host "Local version : $localVersion"
+          Write-Host "Extension Id  : $extensionId"
+          echo "local_version=$localVersion" >> $env:GITHUB_OUTPUT
+          echo "extension_id=$extensionId" >> $env:GITHUB_OUTPUT
+
+          if ($env:EVENT_NAME -eq 'push' -and $env:GIT_REF -like 'refs/tags/vs/v*') {
+            $tagVersion = $env:GIT_REF -replace '^refs/tags/vs/v',''
+            echo "is_tag=true" >> $env:GITHUB_OUTPUT
+            echo "tag_version=$tagVersion" >> $env:GITHUB_OUTPUT
+            if ($localVersion -ne $tagVersion) {
+              Write-Error "❌ Version mismatch! Manifest: $localVersion, tag: $tagVersion"
+              exit 1
+            }
+            Write-Host "✅ Version check passed: $localVersion"
+          } else {
+            echo "is_tag=false" >> $env:GITHUB_OUTPUT
+            echo "tag_version=$localVersion" >> $env:GITHUB_OUTPUT
+          }
+
+      # ── Install dependencies ────────────────────────────────────────────────
+
+      - name: Install vscode-extension dependencies
+        run: npm ci
+        working-directory: vscode-extension
+
+      - name: Install CLI dependencies
+        run: npm ci
+        working-directory: cli
+
+      # ── Build CLI (production bundle + Windows .exe) ───────────────────────
+
+      - name: Build CLI (production bundle)
+        working-directory: cli
+        run: npm run build:production
+
+      - name: Bundle CLI as single executable
+        working-directory: cli
+        shell: pwsh
+        run: |
+          & pwsh -NoProfile -File bundle-exe.ps1 -SkipBuild
+          if ($LASTEXITCODE -ne 0) { throw "bundle-exe.ps1 failed" }
+
+      - name: Copy CLI exe + wasm to cli-bundle/
+        shell: pwsh
+        run: |
+          $vsCliDir = "visualstudio-extension\src\AIEngineeringFluency\cli-bundle"
+          New-Item -ItemType Directory -Path $vsCliDir -Force | Out-Null
+          Copy-Item "cli\dist\copilot-token-tracker.exe" "$vsCliDir\copilot-token-tracker.exe" -Force
+          Copy-Item "cli\dist\sql-wasm.wasm"             "$vsCliDir\sql-wasm.wasm"             -Force
+          Write-Host "✅ Copied cli-bundle assets"
+
+      # ── Build webview bundles ──────────────────────────────────────────────
+
+      - name: Build VS Code extension webview bundles
+        working-directory: vscode-extension
+        run: npm run package
+
+      - name: Copy webview bundles to VS extension project
+        shell: pwsh
+        run: |
+          $src = "vscode-extension\dist\webview"
+          $dst = "visualstudio-extension\src\AIEngineeringFluency\webview"
+          if (Test-Path $dst) { Remove-Item $dst -Recurse -Force }
+          Copy-Item $src $dst -Recurse -Force
+          Write-Host "✅ Copied webview bundles"
+
+      # ── Build Visual Studio extension (MSBuild / VSSDK) ───────────────────
+
+      - name: Add MSBuild to PATH
+        uses: microsoft/setup-msbuild@30375c66a4eea26614e0d39710365f22f8b0af57 # v3
+
+      - name: Restore NuGet packages
+        working-directory: visualstudio-extension
+        run: nuget restore AIEngineeringFluency.sln
+
+      - name: Restore SDK-style projects
+        working-directory: visualstudio-extension
+        run: |
+          dotnet restore src/AIEngineeringFluency.Tests/AIEngineeringFluency.Tests.csproj
+          dotnet restore src/AIEngineeringFluencyRunner/AIEngineeringFluencyRunner.csproj
+
+      - name: Build solution (Release)
+        working-directory: visualstudio-extension
+        run: msbuild AIEngineeringFluency.sln /p:Configuration=Release /t:Build /v:minimal
+
+      # ── Collect the produced .vsix ─────────────────────────────────────────
+
+      - name: Find .vsix artifact
+        id: vsix
+        shell: pwsh
+        run: |
+          $vsix = Get-ChildItem -Path "visualstudio-extension" -Filter "*.vsix" -Recurse |
+                  Sort-Object LastWriteTime -Descending |
+                  Select-Object -First 1
+          if (-not $vsix) { throw "No .vsix file produced" }
+          $sizeMB = [math]::Round($vsix.Length / 1MB, 1)
+          Write-Host "✅ VSIX: $($vsix.FullName) ($sizeMB MB)"
+          echo "vsix_path=$($vsix.FullName)" >> $env:GITHUB_OUTPUT
+          echo "vsix_name=$($vsix.Name)"     >> $env:GITHUB_OUTPUT
+
+      - name: Upload .vsix as workflow artifact
+        if: steps.vsix.outputs.vsix_path != ''
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: visualstudio-vsix-${{ steps.version.outputs.local_version }}
+          path: ${{ steps.vsix.outputs.vsix_path }}
+          retention-days: 30
+
+      # ── Create GitHub release (tag push only) ──────────────────────────────
+
+      - name: Generate release notes
+        if: ${{ steps.version.outputs.is_tag == 'true' && inputs.dry_run != true }}
+        id: release_notes
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "vs/v${{ steps.version.outputs.local_version }}"
+          Write-Host "Generating release notes for $tag ..."
+          $notes = gh api repos/${{ github.repository }}/releases/generate-notes `
+            -f tag_name="$tag" `
+            --jq '.body' 2>$null
+          if ($LASTEXITCODE -eq 0 -and $notes) {
+            $notes | Out-File -FilePath /tmp/release_notes.md -Encoding utf8
+            Write-Host "✅ Generated release notes from merged PRs"
+          } else {
+            "Visual Studio Extension v${{ steps.version.outputs.local_version }}" | Out-File -FilePath /tmp/release_notes.md -Encoding utf8
+            Write-Host "⚠️ Could not auto-generate notes, using fallback"
+          }
+
+      - name: Create GitHub release
+        if: ${{ steps.version.outputs.is_tag == 'true' && inputs.dry_run != true }}
+        shell: pwsh
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          $tag = "vs/v${{ steps.version.outputs.local_version }}"
+          $vsix = "${{ steps.vsix.outputs.vsix_path }}"
+          Write-Host "Creating release $tag with $vsix ..."
+          gh release create "$tag" `
+            --title "Visual Studio Extension v${{ steps.version.outputs.local_version }}" `
+            --notes-file /tmp/release_notes.md `
+            "$vsix"
+          Write-Host "✅ GitHub release created: $tag"
+
+      # ── (Optional) Publish to VS Marketplace ──────────────────────────────
+
+      - name: Check Visual Studio Marketplace version
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_marketplace == true
+        id: vs_version_check
+        shell: pwsh
+        run: |
+          $localVersion = "${{ steps.version.outputs.local_version }}"
+          $extensionId = "${{ steps.version.outputs.extension_id }}"
+          Write-Host "Local version : $localVersion"
+          Write-Host "Extension Id  : $extensionId"
+
+          $body = @{
+              filters = @(@{ criteria = @(@{ filterType = 7; value = "RobBos.$extensionId" }) })
+              flags   = 512
+          } | ConvertTo-Json -Depth 10
+
+          try {
+            $r = Invoke-RestMethod -Method Post `
+              -Uri "https://marketplace.visualstudio.com/_apis/public/gallery/extensionquery?api-version=3.0-preview.1" `
+              -Headers @{ "Content-Type" = "application/json"; "Accept" = "application/json;api-version=3.0-preview.1" } `
+              -Body $body
+            $ext = $r.results[0].extensions[0]
+            if (-not $ext -or -not $ext.versions) {
+              Write-Host "⚠️  Extension not found on VS Marketplace — proceeding with first publish."
+              exit 0
+            }
+            $marketplaceVersion = $ext.versions[0].version
+            if (-not $marketplaceVersion) {
+              Write-Host "⚠️  Extension not found on VS Marketplace — proceeding with first publish."
+              exit 0
+            }
+            Write-Host "Marketplace version: $marketplaceVersion"
+            if ($localVersion -eq $marketplaceVersion) {
+              Write-Error "❌ Version $localVersion is already published on the Visual Studio Marketplace. Bump the version before publishing."
+              exit 1
+            }
+            Write-Host "✅ Version check passed: $localVersion is newer than marketplace $marketplaceVersion"
+          } catch {
+            Write-Error "❌ Could not query VS Marketplace — aborting to prevent duplicate publish. Error: $_"
+            exit 1
+          }
+
+      - name: Publish to Visual Studio Marketplace
+        if: github.event_name == 'workflow_dispatch' && inputs.publish_marketplace == true && inputs.dry_run != true
+        shell: pwsh
+        env:
+          VS_MARKETPLACE_PAT: ${{ secrets.VSCE_PAT }}
+        run: |
+          if (-not $env:VS_MARKETPLACE_PAT) {
+            Write-Error "❌ VS_MARKETPLACE_PAT secret (VSCE_PAT) is not configured."
+            exit 1
+          }
+          $vsixPublisher = Get-ChildItem "C:\Program Files\Microsoft Visual Studio" `
+            -Recurse -Filter "VsixPublisher.exe" -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+          if (-not $vsixPublisher) {
+            Write-Error "❌ VsixPublisher.exe not found on this runner."
+            exit 1
+          }
+          Write-Host "Found: $($vsixPublisher.FullName)"
+          $vsix = "${{ steps.vsix.outputs.vsix_path }}"
+          $manifest = "visualstudio-extension/publish-manifest.json"
+          Write-Host "Publishing $vsix to Visual Studio Marketplace..."
+          & $vsixPublisher.FullName publish -payload $vsix -publishManifest $manifest -personalAccessToken $env:VS_MARKETPLACE_PAT
+          if ($LASTEXITCODE -ne 0) { throw "Marketplace publish failed" }
+          Write-Host "✅ Published to Visual Studio Marketplace"
+
+      # ── Summary ────────────────────────────────────────────────────────────
+
+      - name: Build summary
+        if: always()
+        shell: pwsh
+        run: |
+          $vsixName = "${{ steps.vsix.outputs.vsix_name }}"
+          $version = "${{ steps.version.outputs.local_version }}"
+          $isTag = "${{ steps.version.outputs.is_tag }}"
+          $dryRun = "${{ inputs.dry_run }}"
+          if ($vsixName) {
+            @"
+          ## ✅ Visual Studio Extension Built Successfully
+
+          | Item | Value |
+          |------|-------|
+          | VSIX | ``$vsixName`` |
+          | Version | ``$version`` |
+          | Tag push | ``$isTag`` |
+          | Dry run | ``$dryRun`` |
+          "@ >> $env:GITHUB_STEP_SUMMARY
+          } else {
+            "## ❌ Build failed — no .vsix produced" >> $env:GITHUB_STEP_SUMMARY
+          }
