@@ -3,7 +3,7 @@ import { el } from '../shared/domUtils';
 import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
@@ -3116,13 +3116,13 @@ function buildUsageRootHtml(
 				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
 			</div>
 
-			${buildSessionsTabPanelHtml(stats)}
-			${buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs)}
-			${buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels)}
-			${buildHealthTabPanelHtml(customizationHtml, stats)}
-			${buildReposAndAgentTabPanelsHtml()}
-			${buildWorktreesTabPanelHtml()}
-			${buildInsightsTabPanelHtml(stats.insights ?? [])}
+			${safeSectionHtml('Recent Sessions', () => buildSessionsTabPanelHtml(stats))}
+			${safeSectionHtml('My Activity', () => buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs))}
+			${safeSectionHtml('Tools & Integrations', () => buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels))}
+			${safeSectionHtml('Workspace Health', () => buildHealthTabPanelHtml(customizationHtml, stats))}
+			${safeSectionHtml('Repository PRs & Cloud Agent', () => buildReposAndAgentTabPanelsHtml())}
+			${safeSectionHtml('Worktrees', () => buildWorktreesTabPanelHtml())}
+			${safeSectionHtml('Insights', () => buildInsightsTabPanelHtml(stats.insights ?? []))}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes
 			</div>
@@ -3574,13 +3574,12 @@ function buildActivityTabPanelHtml(
 	todayTotalRefs: number,
 	last30DaysTotalRefs: number,
 ): string {
-	const modelCostHtml = buildModelCostSectionHtml(stats);
-	const billingComparisonHtml = buildBillingComparisonSectionHtml(stats);
-	return `
-		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
-			${sessionsSummaryHtml}
-			${billingComparisonHtml}
-			<!-- Mode Usage Section -->
+	// Each section is built through safeSectionHtml so a bug in one section (e.g. a data
+	// shape it doesn't expect) renders an inline error card for that section only, instead of
+	// throwing out of this template literal and blanking the entire Activity tab.
+	const modelCostHtml = safeSectionHtml('Model Cost', () => buildModelCostSectionHtml(stats));
+	const billingComparisonHtml = safeSectionHtml('Copilot Billing Coverage', () => buildBillingComparisonSectionHtml(stats));
+	const modeUsageHtml = safeSectionHtml('Interaction Modes', () => `
 			<div class="section">
 				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
 				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
@@ -3588,13 +3587,22 @@ function buildActivityTabPanelHtml(
 					${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
 					${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}
 				</div>
-			</div>
-			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			</div>`);
+	const contextRefsHtml = safeSectionHtml('Context References', () => buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs));
+	const modelEfficiencyHtml = safeSectionHtml('Model Efficiency', () => buildModelEfficiencySectionHtml(stats));
+	const contextWindowHtml = safeSectionHtml('Context Window', () => buildContextWindowSectionHtml(stats));
+	return `
+		<div id="tab-panel-activity" class="tab-panel"${activeTab !== 'activity' ? ' style="display:none"' : ''}>
+			${sessionsSummaryHtml}
+			${billingComparisonHtml}
+			<!-- Mode Usage Section -->
+			${modeUsageHtml}
+			${contextRefsHtml}
 			${multiModelHtml}
 			${modelCostHtml}
-			${buildModelEfficiencySectionHtml(stats)}
+			${modelEfficiencyHtml}
 			${thinkingEffortHtml}
-			${buildContextWindowSectionHtml(stats)}
+			${contextWindowHtml}
 		</div>`;
 }
 
@@ -4162,12 +4170,32 @@ function buildToolsTabPanelHtml(
 		</div>`;
 }
 
-function renderLayout(stats: UsageAnalysisStats): void {
-	const root = document.getElementById('root');
-	if (!root) {
-		return;
+/**
+ * Assigns the full dashboard HTML to `root`, isolating any failure that escapes the
+ * per-section/per-tab safeSectionHtml wrapping in buildUsageRootHtml. On failure, falls back
+ * to a minimal error state with a reload button instead of leaving the page on stale/blank
+ * content. Returns true on success, false if the fallback error state was shown instead.
+ */
+function assignUsageRootHtml(root: HTMLElement, build: () => string): boolean {
+	try {
+		root.innerHTML = build();
+		return true;
+	} catch (error) {
+		const message = error instanceof Error ? error.message : String(error);
+		console.error(`[usage-webview] renderLayout failed: ${message}`);
+		root.innerHTML = `<div style="padding: 32px; text-align: center; font-size: 14px;">
+			<div style="color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;">⚠️ Something went wrong rendering the dashboard.</div>
+			${createRefreshButton().outerHTML}
+		</div>`;
+		return false;
 	}
+}
 
+/**
+ * Syncs module-level UI state (hygiene matrix, workspace paths, curation analysis cache) from
+ * a fresh stats payload, and resolves the customization matrix to use for this render.
+ */
+function syncRenderLayoutState(stats: UsageAnalysisStats): WorkspaceCustomizationMatrix | null {
 	// customizationMatrix is passed as an extra field on the stats object alongside the typed fields
 	type StatsWithMatrix = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null };
 	const matrix =
@@ -4190,12 +4218,24 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	} else {
 		traceCurationOnce('render-no-curation-update', 'renderLayout.curation.notProvidedInUpdate');
 	}
+	return matrix;
+}
 
-	const customizationHtml = buildCustomizationSectionHtml(matrix);
+function renderLayout(stats: UsageAnalysisStats): void {
+	const root = document.getElementById('root');
+	if (!root) {
+		return;
+	}
+
+	const matrix = syncRenderLayoutState(stats);
+	const customizationHtml = safeSectionHtml('Workspace Customization', () => buildCustomizationSectionHtml(matrix));
+	// buildUsageAllKeysSets and the context-ref totals are cheap, pure aggregations over
+	// already-validated stats — not worth isolating individually. buildUsageRootHtml (and each
+	// tab/section within it) is isolated via safeSectionHtml / assignUsageRootHtml below.
 	const allKeys = buildUsageAllKeysSets(stats);
 	const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
 	const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
-	const thinkingEffortHtml = buildThinkingEffortSectionHtml(stats);
+	const thinkingEffortHtml = safeSectionHtml('Thinking Effort', () => buildThinkingEffortSectionHtml(stats));
 	const sessionsSummaryHtml = `
 		<!-- Summary Section -->
 		<div class="section">
@@ -4208,7 +4248,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 			</div>
 		</div>`;
 
-	root.innerHTML = buildUsageRootHtml(
+	const rendered = assignUsageRootHtml(root, () => buildUsageRootHtml(
 		stats,
 		customizationHtml,
 		'',
@@ -4223,7 +4263,8 @@ function renderLayout(stats: UsageAnalysisStats): void {
 		allKeys.allLowCostModels,
 		allKeys.allMediumCostModels,
 		allKeys.allUnknownModels,
-	);
+	));
+	if (!rendered) { return; }
 
 	wireNavigationButtons();
 	wireAboutInfoToggle();
