@@ -181,17 +181,19 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           $tag = "vs/v${{ steps.version.outputs.local_version }}"
+          $notesPath = Join-Path $env:RUNNER_TEMP "release_notes.md"
           Write-Host "Generating release notes for $tag ..."
           $notes = gh api repos/${{ github.repository }}/releases/generate-notes `
             -f tag_name="$tag" `
             --jq '.body' 2>$null
           if ($LASTEXITCODE -eq 0 -and $notes) {
-            $notes | Out-File -FilePath /tmp/release_notes.md -Encoding utf8
+            $notes | Out-File -FilePath $notesPath -Encoding utf8
             Write-Host "✅ Generated release notes from merged PRs"
           } else {
-            "Visual Studio Extension v${{ steps.version.outputs.local_version }}" | Out-File -FilePath /tmp/release_notes.md -Encoding utf8
+            "Visual Studio Extension v${{ steps.version.outputs.local_version }}" | Out-File -FilePath $notesPath -Encoding utf8
             Write-Host "⚠️ Could not auto-generate notes, using fallback"
           }
+          echo "notes_path=$notesPath" >> $env:GITHUB_OUTPUT
 
       - name: Create GitHub release
         if: ${{ steps.version.outputs.is_tag == 'true' && inputs.dry_run != true }}
@@ -204,7 +206,7 @@ jobs:
           Write-Host "Creating release $tag with $vsix ..."
           gh release create "$tag" `
             --title "Visual Studio Extension v${{ steps.version.outputs.local_version }}" `
-            --notes-file /tmp/release_notes.md `
+            --notes-file "${{ steps.release_notes.outputs.notes_path }}" `
             "$vsix"
           Write-Host "✅ GitHub release created: $tag"
 
