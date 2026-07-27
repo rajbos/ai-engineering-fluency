@@ -503,7 +503,7 @@ function buildProviderCard(stats: DetailedStats, provider: string): HTMLElement 
 	card.append(
 		el('div', 'provider-card-label', `${getProviderIcon(provider)} ${provider}`),
 		el('div', 'provider-card-value', formatCost(stats.month.billingGroupCosts?.[provider] || 0)),
-		el('div', 'provider-card-sub', `Today ${formatCost(stats.today.billingGroupCosts?.[provider] || 0)} · 30d ${formatCost(stats.last30Days.billingGroupCosts?.[provider] || 0)}`)
+		el('div', 'provider-card-sub', 'Cost this month')
 	);
 
 	const toggle = (): void => {
@@ -526,7 +526,7 @@ function buildProviderTotalCard(stats: DetailedStats, allProviders: string[]): H
 	card.append(
 		el('div', 'provider-card-label', '∑ Total (selected)'),
 		el('div', 'provider-card-value', formatCost(sumBillingGroupCosts(stats.month.billingGroupCosts, included))),
-		el('div', 'provider-card-sub', `Today ${formatCost(sumBillingGroupCosts(stats.today.billingGroupCosts, included))} · 30d ${formatCost(sumBillingGroupCosts(stats.last30Days.billingGroupCosts, included))}`)
+		el('div', 'provider-card-sub', 'Cost this month')
 	);
 	return card;
 }
