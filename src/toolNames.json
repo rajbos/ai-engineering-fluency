@@ -1154,4 +1154,10 @@
   ,"searchFiles": "Search Files"
   ,"search_files": "Search Files"
   ,"skill_view": "Skill View"
+  ,"EnterWorktree": "Git Entry Worktree"
+  ,"Grace": "Grace"
+  ,"ReportFindings": "Report Findings"
+  ,"__slash__compact": "Compact"
+  ,"mcp__ccd_session_mgmt__get_session": "Session Management: Get Session"
+  ,"mcp__ccd_session_mgmt__list_events": "Session Management: List Events"
 }
