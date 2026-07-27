@@ -542,6 +542,40 @@ test('calculateMaturityScores: AG multiAgentParentSessions=3 → Stage 4', async
     assert.equal(ag.stage, 4);
 });
 
+test('calculateMaturityScores: AG delegationSessions=2 → Stage 3', async () => {
+    const stats = emptyStats();
+    stats.last30Days.delegationSessions = 2;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.stage >= 3, `expected AG >= 3 with 2 delegation sessions, got ${ag.stage}`);
+    assert.ok(ag.evidence.some(e => e.includes('delegated work to sub-agents')), 'evidence should mention sub-agent delegation');
+});
+
+test('calculateMaturityScores: AG delegationSessions=5 → Stage 4', async () => {
+    const stats = emptyStats();
+    stats.last30Days.delegationSessions = 5;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.equal(ag.stage, 4);
+});
+
+test('calculateMaturityScores: AG delegationSessions=1 → no booster (below threshold)', async () => {
+    const stats = emptyStats();
+    stats.last30Days.delegationSessions = 1;
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(!ag.evidence.some(e => e.includes('delegated work to sub-agents')));
+});
+
+test('calculateMaturityScores: AG delegation tool-call volume adds evidence with avg per session', async () => {
+    const stats = emptyStats();
+    stats.last30Days.delegationSessions = 2;
+    stats.last30Days.toolCalls.byTool = { subagent: 4, delegate_task: 2, edit_file: 10 };
+    const result = await calculateMaturityScores(undefined, async () => stats);
+    const ag = result.categories.find(c => c.category === 'Agentic')!;
+    assert.ok(ag.evidence.some(e => e.includes('sub-agent/delegate tool calls executed') && e.includes('avg 3.0 per delegating session')));
+});
+
 test('calculateMaturityScores: AG editsAgent sessions provide evidence', async () => {
     const stats = emptyStats();
     stats.last30Days.agentTypes.editsAgent = 5;

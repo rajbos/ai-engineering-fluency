@@ -7,9 +7,11 @@ import type {
 	UsageAnalysisStats,
 	WorkspaceCustomizationMatrix,
 	UsageAnalysisPeriod,
+	AgenticTrendPoint,
 } from './types';
 import automaticToolIds from './automaticTools.json';
 import fluencyLevelDataRaw from './fluencyLevelData.json';
+import { countDelegationToolCalls } from './taskClassification';
 
 /** Set of tool IDs that Copilot uses autonomously (reading files, searching, etc.).
  *  These are excluded from fluency scoring since the user doesn't configure them. */
@@ -91,6 +93,10 @@ export const STAGE_THRESHOLDS = {
 		stage4MinMultiAgentParents: 3,
 		/** Minimum number of child workspaces per session to count as multi-agent orchestration. */
 		multiAgentMinChildren: 2,
+		/** Minimum sessions classified as `Delegation` (sub-agent/Task-tool usage) to reach at least Stage 3. */
+		stage3MinDelegationSessions: 2,
+		/** Minimum sessions classified as `Delegation` to reach at least Stage 4. */
+		stage4MinDelegationSessions: 5,
 	},
 	toolUsage: {
 		/** Minimum number of distinct advanced built-in tools used to promote to Stage 3. */
@@ -428,6 +434,26 @@ function _agApplyMultiAgentBooster(
 	return stage;
 }
 
+/**
+ * Booster for sessions classified as `Delegation` (tool calls matching subagent/delegate
+ * patterns — see `taskClassification.ts`). Complements `_agApplyMultiAgentBooster`: it works
+ * for adapters without data.db/JSONL parent-child hierarchy data (e.g. Hermes, Claude Code),
+ * since it only needs the tool names already captured in `toolCalls`/`taskCategory`.
+ */
+function _agApplyDelegationBooster(
+	delegationSessions: number,
+	T: typeof STAGE_THRESHOLDS.agentic,
+	stage: Stage,
+	evidence: string[],
+): Stage {
+	if (delegationSessions < T.stage3MinDelegationSessions) { return stage; }
+	const label = delegationSessions === 1 ? '1 session' : `${fmt(delegationSessions)} sessions`;
+	evidence.push(`${label} delegated work to sub-agents (Task/delegate tool calls)`);
+	stage = promoteStage(stage, 3);
+	if (delegationSessions >= T.stage4MinDelegationSessions) { stage = promoteStage(stage, 4); }
+	return stage;
+}
+
 function _agBuildTips(stage: Stage): string[] {
 	const tips: string[] = [];
 	if (stage < 2) { tips.push('Try [agent mode](https://code.visualstudio.com/docs/copilot/agents/overview) — it can run terminal commands, edit files, and explore your codebase autonomously — [▶ Agent Mode video](https://tech.hub.ms/github-copilot/videos/agent-mode)'); }
@@ -486,8 +512,23 @@ function _agApplyStageQualifications(stage: Stage, p: UsageAnalysisPeriod, T: ty
 	if (_agQualifiesMultiFileStage4(p.editScope, T)) { result = promoteStage(result, 4); }
 	
 	result = _agApplyMultiAgentBooster(p.multiAgentParentSessions ?? 0, T, result, evidence);
+	result = _agApplyDelegationBooster(p.delegationSessions ?? 0, T, result, evidence);
 	
 	return result;
+}
+
+/**
+ * Add evidence for sub-agent/delegate tool-call volume (adapter-agnostic, derived from
+ * `toolCalls.byTool` — see `countDelegationToolCalls()`). This is a volume signal shown
+ * alongside the `delegationSessions` stage booster; it doesn't affect the stage itself
+ * since a single delegating session can rack up many tool calls.
+ */
+function _agAddDelegationToolCallEvidence(evidence: string[], p: UsageAnalysisPeriod): void {
+	const delegationCalls = countDelegationToolCalls(p.toolCalls.byTool);
+	if (delegationCalls === 0) { return; }
+	const sessions = p.delegationSessions ?? 0;
+	const avgSuffix = sessions > 0 ? ` (avg ${(delegationCalls / sessions).toFixed(1)} per delegating session)` : '';
+	evidence.push(`${fmt(delegationCalls)} sub-agent/delegate tool calls executed${avgSuffix}`);
 }
 
 function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
@@ -498,6 +539,7 @@ function _scoreAgentic(p: UsageAnalysisPeriod): CategoryScore {
 	stage = _agAddBasicEvidence(evidence, p, stage);
 	stage = _agAddEditScopeEvidence(evidence, p, stage, T);
 	stage = _agApplyStageQualifications(stage, p, T, evidence);
+	_agAddDelegationToolCallEvidence(evidence, p);
 
 	return { stage, evidence, tips: _agBuildTips(stage) };
 }
@@ -1189,6 +1231,7 @@ export async function calculateMaturityScores(lastCustomizationMatrix: Workspace
 	categories: { category: string; icon: string; stage: number; evidence: string[]; tips: string[] }[];
 	period: UsageAnalysisPeriod;
 	lastUpdated: string;
+	agenticTrend?: AgenticTrendPoint[];
 }> {
 	const stats = await calculateUsageAnalysisStatsFn(useCache);
 	const p = stats.last30Days;
@@ -1214,6 +1257,7 @@ export async function calculateMaturityScores(lastCustomizationMatrix: Workspace
 			{ category: 'Workflow Integration', icon: '🔄', stage: wi.stage, evidence: wi.evidence, tips: wi.tips }
 		],
 		period: p,
-		lastUpdated: stats.lastUpdated.toISOString()
+		lastUpdated: stats.lastUpdated.toISOString(),
+		agenticTrend: stats.agenticDailyTrend
 	};
 }

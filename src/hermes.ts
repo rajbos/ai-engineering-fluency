@@ -42,6 +42,7 @@ import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
+import { STAGE_THRESHOLDS } from './maturityScoring';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
 type SqlDatabase = initSqlJs.Database;
@@ -303,6 +304,49 @@ export class HermesDataAccess {
 		} catch {
 			return [];
 		}
+	}
+
+	/**
+	 * Returns child-session counts (rows with `source = 'subagent'`) keyed by `parent_session_id`,
+	 * restricted to the given candidate session ids. Shared helper behind `getMultiAgentParentCount()`
+	 * and the daily multi-agent usage trend (`extension.ts`'s `_computeAgenticDailyTrend`).
+	 */
+	async getChildCounts(candidateSessionIds: string[]): Promise<Map<string, number>> {
+		const counts = new Map<string, number>();
+		if (candidateSessionIds.length === 0) { return counts; }
+		const db = await this.getDb(this.getDbPath());
+		if (!db) { return counts; }
+		try {
+			const result = db.exec(
+				`SELECT parent_session_id, COUNT(*) as child_count FROM sessions
+				 WHERE parent_session_id IS NOT NULL
+				 GROUP BY parent_session_id`,
+			);
+			const rows = this.rowsToObjects(result);
+			const candidateSet = new Set(candidateSessionIds);
+			for (const row of rows) {
+				const parentId = row['parent_session_id'] as string | null;
+				const childCount = (row['child_count'] as number) ?? 0;
+				if (parentId && candidateSet.has(parentId)) { counts.set(parentId, childCount); }
+			}
+		} catch { /* optional enrichment — suppress */ }
+		return counts;
+	}
+
+	/**
+	 * Counts how many of the given (candidate) session ids are "multi-agent parents" —
+	 * i.e. have `minChildren` or more sessions with `source = 'subagent'` pointing at them
+	 * via `parent_session_id`. Mirrors `CopilotAppDataAccess.getSessionHierarchy()`'s
+	 * multi-agent detection, but for Hermes's global state.db. Used to feed
+	 * `UsageAnalysisPeriod.multiAgentParentSessions` alongside Copilot CLI data.
+	 */
+	async getMultiAgentParentCount(candidateSessionIds: string[], minChildren: number = STAGE_THRESHOLDS.agentic.multiAgentMinChildren): Promise<number> {
+		const childCounts = await this.getChildCounts(candidateSessionIds);
+		let count = 0;
+		for (const childCount of childCounts.values()) {
+			if (childCount >= minChildren) { count++; }
+		}
+		return count;
 	}
 
 	/** Read session metadata for a virtual session path. */

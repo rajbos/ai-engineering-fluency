@@ -51,6 +51,7 @@ import type {
   WorkspaceCustomizationRow,
   WorkspaceCustomizationMatrix,
   UsageAnalysisPeriod,
+  AgenticTrendPoint,
   SessionFileDetails,
   PromptTokenDetail,
   ActualUsage,
@@ -98,6 +99,7 @@ import { getEcosystemDisplayName } from '../../src/ecosystemAdapter';
 import { buildAdapterRegistry, createDataAccessInstances } from '../../src/adapters';
 import { CopilotAppDataAccess, type SessionContextWindow } from './copilotAppData';
 import { PiDataAccess } from '../../src/pi';
+import { HermesDataAccess } from '../../src/hermes';
 import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
@@ -151,6 +153,7 @@ import {
   getFluencyLevelData as _getFluencyLevelData,
   calculateFluencyScoreForTeamMember as _calculateFluencyScoreForTeamMember,
   calculateMaturityScores as _calculateMaturityScores,
+  STAGE_THRESHOLDS,
 } from '../../src/maturityScoring';
 
 // --- Workspace helpers ---
@@ -405,6 +408,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private mistralVibe!: MistralVibeDataAccess;
 	private geminiCli!: GeminiCliDataAccess;
 	public windsurf!: WindsurfDataAccess;
+	private hermes!: HermesDataAccess;
 	private ecosystems!: IEcosystemAdapter[];
 	private cacheManager!: CacheManager;
 	private hookManager!: HookManager;
@@ -1227,6 +1231,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.mistralVibe = dataAccess.mistralVibe;
 		this.geminiCli = dataAccess.geminiCli;
 		this.windsurf = new WindsurfDataAccess(extensionUri, (m) => this.log(m));
+		this.hermes = dataAccess.hermes;
 		this.ecosystems = buildAdapterRegistry({
 			...dataAccess,
 			estimateTokens: (t, m) => this.estimateTokensFromText(t, m),
@@ -3498,6 +3503,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const unresolvedWorkspaceInteractionCounts = new Map<string, number>();
 		this._workspaceIdToFolderCache.clear();
 		this._customizationFilesCache.clear();
+		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
 			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
@@ -3506,6 +3512,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.deduplicateWorkspacePaths(workspaceSessionCounts, workspaceInteractionCounts);
 			this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts);
 			await this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey);
+			agenticDailyTrend = await this._computeAgenticDailyTrend(usageResults, last30DaysUtcStartKey);
 			await this.enrichContextWindowFromAppData(usageResults, periods, todaySessionsList);
 		} catch (error) {
 			this.error('Error calculating usage analysis stats:', error);
@@ -3522,6 +3529,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			missedPotential: this._lastMissedPotential || [],
 			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions),
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
+			agenticDailyTrend,
 		};
 		this.lastUsageAnalysisStats = stats;
 		return stats;
@@ -3704,34 +3712,128 @@ class CopilotTokenTracker implements vscode.Disposable {
 		};
 	}
 
+	/** Splits usage results (within the last-30-days window) into Copilot CLI uuids and Hermes session ids, along with each id's day key (for daily trend bucketing). */
+	private _collectMultiAgentCandidateIds(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		last30DaysUtcStartKey: string,
+	): { cliUuids: string[]; hermesIds: string[]; dayByCliUuid: Map<string, string>; dayByHermesId: Map<string, string> } {
+		const cliUuids: string[] = [];
+		const hermesIds: string[] = [];
+		const dayByCliUuid = new Map<string, string>();
+		const dayByHermesId = new Map<string, string>();
+		for (const r of usageResults) {
+			if (!r) { continue; }
+			const lastActivityKey = this.computeLastActivityKey(r.sessionData, r.mtime);
+			if (lastActivityKey < last30DaysUtcStartKey) { continue; }
+			const uuid = this.extractCopilotCliUuid(r.sessionFile);
+			if (uuid) { cliUuids.push(uuid); dayByCliUuid.set(uuid, lastActivityKey); continue; }
+			if (this.hermes.isHermesSessionFile(r.sessionFile)) {
+				const id = this.hermes.getSessionId(r.sessionFile);
+				if (id) { hermesIds.push(id); dayByHermesId.set(id, lastActivityKey); }
+			}
+		}
+		return { cliUuids, hermesIds, dayByCliUuid, dayByHermesId };
+	}
+
+	/** Counts Copilot CLI sessions (from data.db hierarchy) with 2+ direct child workspaces. */
+	private async _countCliMultiAgentParents(cliUuids: string[]): Promise<number> {
+		if (cliUuids.length === 0) { return 0; }
+		try {
+			const hierarchy = await this.copilotAppData.getSessionHierarchy(cliUuids);
+			let count = 0;
+			for (const uuid of cliUuids) {
+				const node = hierarchy.get(uuid);
+				if (node && node.totalChildCount >= STAGE_THRESHOLDS.agentic.multiAgentMinChildren) { count++; }
+			}
+			return count;
+		} catch {
+			return 0; /* optional enrichment — suppress */
+		}
+	}
+
 	/**
-	 * Query data.db for multi-agent parent count and set it on the period.
-	 * A session counts as a "multi-agent parent" when it has 2+ direct child workspaces.
-	 * Errors are swallowed — this is optional enrichment only.
+	 * Query data.db (Copilot CLI) and Hermes's state.db for multi-agent parent counts and
+	 * set the combined total on the period. A session counts as a "multi-agent parent" when
+	 * it has 2+ direct children (child workspaces for Copilot CLI; `source='subagent'` rows
+	 * pointing back via `parent_session_id` for Hermes). Errors are swallowed — optional enrichment only.
 	 */
 	private async enrichMultiAgentParentCount(
 		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		last30DaysStats: UsageAnalysisPeriod,
 		last30DaysUtcStartKey: string,
 	): Promise<void> {
-		const uuids: string[] = [];
-		for (const r of usageResults) {
-			if (!r) { continue; }
-			const lastActivityKey = this.computeLastActivityKey(r.sessionData, r.mtime);
-			if (lastActivityKey < last30DaysUtcStartKey) { continue; }
-			const uuid = this.extractCopilotCliUuid(r.sessionFile);
-			if (uuid) { uuids.push(uuid); }
+		const { cliUuids, hermesIds } = this._collectMultiAgentCandidateIds(usageResults, last30DaysUtcStartKey);
+		let count = await this._countCliMultiAgentParents(cliUuids);
+		if (hermesIds.length > 0) {
+			try {
+				count += await this.hermes.getMultiAgentParentCount(hermesIds);
+			} catch { /* optional enrichment — suppress */ }
 		}
-		if (uuids.length === 0) { return; }
-		try {
-			const hierarchy = await this.copilotAppData.getSessionHierarchy(uuids);
-			let count = 0;
-			for (const uuid of uuids) {
+		if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
+	}
+
+	/** Buckets multi-agent-parent counts (CLI + Hermes) per day into `byDay`. Shared by `_computeAgenticDailyTrend`. */
+	private async _bucketMultiAgentParentsByDay(
+		cliUuids: string[],
+		hermesIds: string[],
+		dayByCliUuid: Map<string, string>,
+		dayByHermesId: Map<string, string>,
+		byDay: Map<string, { multiAgentParentSessions: number; delegationSessions: number }>,
+	): Promise<void> {
+		const getEntry = (day: string) => {
+			let entry = byDay.get(day);
+			if (!entry) { entry = { multiAgentParentSessions: 0, delegationSessions: 0 }; byDay.set(day, entry); }
+			return entry;
+		};
+		const threshold = STAGE_THRESHOLDS.agentic.multiAgentMinChildren;
+		if (cliUuids.length > 0) {
+			const hierarchy = await this.copilotAppData.getSessionHierarchy(cliUuids);
+			for (const uuid of cliUuids) {
 				const node = hierarchy.get(uuid);
-				if (node && node.totalChildCount >= 2) { count++; }
+				const day = dayByCliUuid.get(uuid);
+				if (node && node.totalChildCount >= threshold && day) { getEntry(day).multiAgentParentSessions++; }
 			}
-			if (count > 0) { last30DaysStats.multiAgentParentSessions = count; }
-		} catch { /* optional enrichment — suppress */ }
+		}
+		if (hermesIds.length > 0) {
+			const childCounts = await this.hermes.getChildCounts(hermesIds);
+			for (const id of hermesIds) {
+				const childCount = childCounts.get(id) ?? 0;
+				const day = dayByHermesId.get(id);
+				if (childCount >= threshold && day) { getEntry(day).multiAgentParentSessions++; }
+			}
+		}
+	}
+
+	/**
+	 * Builds the daily "Multi-Agent Usage" trend (last ~30 days) shown as a sparkline on the
+	 * Fluency dashboard's Agentic category card. Each day combines two independent signals:
+	 * multi-agent-parent sessions (data.db/Hermes hierarchy, 2+ children) and delegation
+	 * sessions (adapter-agnostic tool-name classification). Errors are swallowed — optional
+	 * enrichment only, absent from the payload when it fails or there is no signal.
+	 */
+	private async _computeAgenticDailyTrend(
+		usageResults: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		last30DaysUtcStartKey: string,
+	): Promise<AgenticTrendPoint[] | undefined> {
+		try {
+			const { cliUuids, hermesIds, dayByCliUuid, dayByHermesId } = this._collectMultiAgentCandidateIds(usageResults, last30DaysUtcStartKey);
+			const byDay = new Map<string, { multiAgentParentSessions: number; delegationSessions: number }>();
+			await this._bucketMultiAgentParentsByDay(cliUuids, hermesIds, dayByCliUuid, dayByHermesId, byDay);
+			for (const r of usageResults) {
+				if (!r || r.sessionData.taskCategory !== 'Delegation') { continue; }
+				const day = this.computeLastActivityKey(r.sessionData, r.mtime);
+				if (day < last30DaysUtcStartKey) { continue; }
+				const entry = byDay.get(day) ?? { multiAgentParentSessions: 0, delegationSessions: 0 };
+				entry.delegationSessions++;
+				byDay.set(day, entry);
+			}
+			if (byDay.size === 0) { return undefined; }
+			return Array.from(byDay.entries())
+				.map(([date, v]) => ({ date, ...v }))
+				.sort((a, b) => a.date.localeCompare(b.date));
+		} catch {
+			return undefined; /* optional enrichment — suppress */
+		}
 	}
 
 	/** The usage periods whose date range contains the given UTC activity key. */
@@ -4011,6 +4113,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 	}
 
+	/** Increments `period.delegationSessions` when the session was classified as `Delegation` (see `taskClassification.ts`). */
+	private _incrementDelegationSessions(period: UsageAnalysisPeriod, sessionData: SessionFileCache): void {
+		if (sessionData.taskCategory !== 'Delegation') { return; }
+		period.delegationSessions = (period.delegationSessions ?? 0) + 1;
+	}
+
 	private aggregateSessionFileIntoStats(
 		r: { sessionFile: string; sessionData: SessionFileCache; mtime: number },
 		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
@@ -4031,6 +4139,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.mergeUsageAnalysis(periods.last30DaysStats, analysis);
 			this._mergeContextWindowStats(periods.last30DaysStats, sessionData);
 			_mergeModelEfficiencyTokens(periods.last30DaysStats, sessionData.modelUsage, this.modelPricing);
+			this._incrementDelegationSessions(periods.last30DaysStats, sessionData);
 			this.trackWorkspaceForSession(sessionFile, interactions,
 				wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
 				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
@@ -4040,18 +4149,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.mergeUsageAnalysis(periods.monthStats, analysis);
 			this._mergeContextWindowStats(periods.monthStats, sessionData);
 			_mergeModelEfficiencyTokens(periods.monthStats, sessionData.modelUsage, this.modelPricing);
+			this._incrementDelegationSessions(periods.monthStats, sessionData);
 		}
 		if (inLastMonth) {
 			periods.lastMonthStats.sessions++;
 			this.mergeUsageAnalysis(periods.lastMonthStats, analysis);
 			this._mergeContextWindowStats(periods.lastMonthStats, sessionData);
 			_mergeModelEfficiencyTokens(periods.lastMonthStats, sessionData.modelUsage, this.modelPricing);
+			this._incrementDelegationSessions(periods.lastMonthStats, sessionData);
 		}
 		if (lastActivityUtcKey === periods.todayUtcKey) {
 			periods.todayStats.sessions++;
 			this.mergeUsageAnalysis(periods.todayStats, analysis);
 			this._mergeContextWindowStats(periods.todayStats, sessionData);
 			_mergeModelEfficiencyTokens(periods.todayStats, sessionData.modelUsage, this.modelPricing);
+			this._incrementDelegationSessions(periods.todayStats, sessionData);
 			todaySessionsList.push(this.collectTodaySessionInfo(sessionData, sessionFile, analysis, interactions, mtime));
 		}
 	}
@@ -7049,6 +7161,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		categories: { category: string; icon: string; stage: number; evidence: string[]; tips: string[] }[];
 		period: UsageAnalysisPeriod;
 		lastUpdated: string;
+		agenticTrend?: AgenticTrendPoint[];
 	}> {
 		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded), useCache, this._copilotPlanResolved?.isMCPEnabled);
 	}
@@ -7562,6 +7675,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       }[];
       period: UsageAnalysisPeriod;
       lastUpdated: string;
+      agenticTrend?: AgenticTrendPoint[];
       dismissedTips?: string[];
       isDebugMode?: boolean;
       installedHooks?: string[];

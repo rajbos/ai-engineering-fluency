@@ -54,7 +54,21 @@ const EDIT_TOOL_PATTERN = /edit|write|create_?file|replace_?string|str_replace|a
 const READ_TOOL_PATTERN = /read_?file|grep_?search|file_?search|search|glob|list_dir|websearch|fetch/i;
 const TERMINAL_TOOL_PATTERN = /terminal|bash|shell|run_?command/i;
 const PLANNING_TOOL_PATTERN = /todo|task[-_]?create|enterplanmode|\bplan\b/i;
-const DELEGATION_TOOL_PATTERN = /subagent|sub[-_]?agent|agent[-_]?spawn|delegate/i;
+/** Exported so other modules (e.g. `maturityScoring.ts`) can detect delegation/sub-agent tool
+ *  calls without duplicating the pattern. Matches tool names used by Copilot CLI's Task tool,
+ *  Claude Code's Task tool, and similar sub-agent/delegate tools across other adapters. */
+export const DELEGATION_TOOL_PATTERN = /subagent|sub[-_]?agent|agent[-_]?spawn|delegate/i;
+
+/** Sums tool-call counts for tools matching `DELEGATION_TOOL_PATTERN` (e.g. `toolCalls.byTool`
+ *  from a `UsageAnalysisPeriod`). Used as an adapter-agnostic signal for sub-agent delegation
+ *  volume, independent of the per-session `Delegation` task-category classification above. */
+export function countDelegationToolCalls(byTool: Record<string, number>): number {
+	let total = 0;
+	for (const [tool, count] of Object.entries(byTool)) {
+		if (DELEGATION_TOOL_PATTERN.test(tool)) { total += count; }
+	}
+	return total;
+}
 const TEST_TOOL_PATTERN = /run_?tests?|pytest|vitest|jest/i;
 
 const GIT_KEYWORD_PATTERN = /\bgit\s+(push|commit|merge|pull|rebase|checkout|clone)\b/i;
@@ -169,4 +183,4 @@ export function buildClassificationInputFromChatTurns(turns: ChatTurn[]): TaskCl
 	return { toolNames, terminalCommands, userText: userTextParts.join(' ') };
 }
 
-export default { classifySessionTask, buildClassificationInputFromUsageAnalysis, buildClassificationInputFromChatTurns };
+export default { classifySessionTask, buildClassificationInputFromUsageAnalysis, buildClassificationInputFromChatTurns, countDelegationToolCalls };

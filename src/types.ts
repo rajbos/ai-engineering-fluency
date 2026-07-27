@@ -589,6 +589,22 @@ missedPotential?: MissedPotentialWorkspace[];
 todaySessions?: TodaySessionSummary[];
 /** Optional tool curation analysis (VS Code only; absent in CLI/VS/JetBrains). */
 curationAnalysis?: ToolCurationAnalysis | null;
+/**
+ * Daily-bucketed multi-agent/delegation usage over the trailing ~30 days, for the
+ * "Multi-Agent Usage" sparkline on the Fluency dashboard. Absent when no sessions
+ * with multi-agent signals were found in the window.
+ */
+agenticDailyTrend?: AgenticTrendPoint[];
+}
+
+/** One day's worth of multi-agent/delegation signal, used to render a trend sparkline. */
+export interface AgenticTrendPoint {
+  /** UTC date key, e.g. "2024-06-01". */
+  date: string;
+  /** Sessions that day with 2+ direct children (data.db/Hermes hierarchy). */
+  multiAgentParentSessions: number;
+  /** Sessions that day classified as `Delegation` by `classifySessionTask()`. */
+  delegationSessions: number;
 }
 
 /** Matrix types used for Usage Analysis customization matrix */
@@ -635,6 +651,14 @@ export interface UsageAnalysisPeriod {
    * absent (undefined) when data.db is not available.
    */
   multiAgentParentSessions?: number;
+  /**
+   * Number of sessions in this period classified as `Delegation` by `classifySessionTask()`
+   * (tool calls matching subagent/delegate patterns — Copilot CLI/Claude Code Task tool,
+   * Hermes subagent source, etc.). A second, adapter-agnostic signal for sub-agent usage,
+   * complementary to `multiAgentParentSessions` (which requires data.db/JSONL hierarchy data).
+   * Populated during session caching; absent (undefined) when no such sessions exist.
+   */
+  delegationSessions?: number;
   /**
    * Context-window usage aggregated across the period's sessions.
    * Absent when no session in the period carried context-size data.

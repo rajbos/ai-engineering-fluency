@@ -5,6 +5,7 @@ import taskClassificationDefault, {
 	classifySessionTask,
 	buildClassificationInputFromUsageAnalysis,
 	buildClassificationInputFromChatTurns,
+	countDelegationToolCalls,
 } from '../../../src/taskClassification';
 import type { ChatTurn, ContextReferenceUsage, SessionUsageAnalysis } from '../../../src/types';
 
@@ -133,4 +134,24 @@ test('default export bundles all three functions', () => {
 	assert.equal(taskClassificationDefault.classifySessionTask, classifySessionTask);
 	assert.equal(taskClassificationDefault.buildClassificationInputFromUsageAnalysis, buildClassificationInputFromUsageAnalysis);
 	assert.equal(taskClassificationDefault.buildClassificationInputFromChatTurns, buildClassificationInputFromChatTurns);
+});
+
+// ── countDelegationToolCalls ───────────────────────────────────────────────
+
+test('countDelegationToolCalls: sums counts for subagent/delegate-matching tool names', () => {
+	const total = countDelegationToolCalls({ subagent: 3, delegate_task: 2, edit_file: 10 });
+	assert.equal(total, 5);
+});
+
+test('countDelegationToolCalls: matches sub-agent, agent-spawn, and case-insensitively', () => {
+	const total = countDelegationToolCalls({ 'Sub-Agent': 1, agent_spawn: 4, Delegate: 2, run_tests: 7 });
+	assert.equal(total, 7);
+});
+
+test('countDelegationToolCalls: returns 0 when no tools match', () => {
+	assert.equal(countDelegationToolCalls({ edit_file: 5, read_file: 3 }), 0);
+});
+
+test('countDelegationToolCalls: returns 0 for empty input', () => {
+	assert.equal(countDelegationToolCalls({}), 0);
 });
