@@ -81,7 +81,7 @@ That's it! Files will upload during the next backend sync (runs every 5 minutes 
 
 1. **Trigger upload** manually:
    - Open VS Code Command Palette (Ctrl+Shift+P / Cmd+Shift+P)
-   - Run: "Copilot Token Tracker: Configure Backend"
+   - Run: "AI Engineering Fluency: Configure Backend"
    - Click "Test Connection" to verify access
    - Backend sync will upload files automatically
 
@@ -122,7 +122,7 @@ usage patterns from the last week"
 
 Check VS Code Output panel:
 1. View → Output
-2. Select "Copilot Token Tracker"
+2. Select "AI Engineering Fluency"
 3. Look for "Blob upload:" messages
 
 Common causes:
