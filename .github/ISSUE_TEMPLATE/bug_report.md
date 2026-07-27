@@ -40,4 +40,4 @@ Add any other context about the problem here.
 **Logs (if applicable)**
 If the extension shows unexpected behavior, you can help by sharing:
 - Any error messages from VS Code Developer Tools (Help > Toggle Developer Tools)
-- Contents of VS Code output panel for "Copilot Token Tracker" (if available)
+- Contents of VS Code output panel for "AI Engineering Fluency" (if available)

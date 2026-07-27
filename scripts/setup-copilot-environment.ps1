@@ -174,4 +174,4 @@ Write-Host "  1. Trigger the workflow to test: Actions > Copilot Setup Steps > R
 Write-Host "  2. Verify session logs download in the workflow run logs" -ForegroundColor Yellow
 Write-Host "  3. Verify aggregated data downloads in the workflow run logs" -ForegroundColor Yellow
 Write-Host ""
-Write-Host "For more details, see docs/BLOB-UPLOAD-QUICKSTART.md" -ForegroundColor Gray
+Write-Host "For more details, see docs/features/BLOB-UPLOAD-QUICKSTART.md" -ForegroundColor Gray
