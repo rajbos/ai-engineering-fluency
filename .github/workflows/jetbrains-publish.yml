@@ -298,15 +298,17 @@ jobs:
           mkdir -p cli/dist vscode-extension/dist/webview
 
           # CLI binaries (sql-wasm.wasm is the same on all platforms; one copy suffices)
-          # Note: artifact paths preserve the source directory structure
-          cp artifacts/cli-windows/cli/dist/copilot-token-tracker.exe      cli/dist/
-          cp artifacts/cli-windows/cli/dist/sql-wasm.wasm                  cli/dist/
-          cp artifacts/cli-macos-arm64/cli/dist/copilot-token-tracker-macos-arm64  cli/dist/
-          cp artifacts/cli-macos-x64/cli/dist/copilot-token-tracker-macos-x64      cli/dist/
-          cp artifacts/cli-linux/cli/dist/copilot-token-tracker-linux       cli/dist/
+          # Note: actions/upload-artifact strips the common leading directory of the
+          # listed paths, so files land flat at the artifact root (not under cli/dist/).
+          cp artifacts/cli-windows/copilot-token-tracker.exe      cli/dist/
+          cp artifacts/cli-windows/sql-wasm.wasm                  cli/dist/
+          cp artifacts/cli-macos-arm64/copilot-token-tracker-macos-arm64  cli/dist/
+          cp artifacts/cli-macos-x64/copilot-token-tracker-macos-x64      cli/dist/
+          cp artifacts/cli-linux/copilot-token-tracker-linux       cli/dist/
 
-          # Webview JS bundles (built by vscode-extension)
-          cp artifacts/webview-bundles/vscode-extension/dist/webview/*  vscode-extension/dist/webview/
+          # Webview JS bundles (built by vscode-extension; also flattened at upload)
+          # -r because the bundle includes the codicons/ subdirectory
+          cp -r artifacts/webview-bundles/*  vscode-extension/dist/webview/
 
           # Make unix binaries executable
           chmod +x cli/dist/copilot-token-tracker-macos-arm64 cli/dist/copilot-token-tracker-macos-x64 cli/dist/copilot-token-tracker-linux
