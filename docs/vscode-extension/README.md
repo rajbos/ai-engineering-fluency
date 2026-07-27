@@ -228,7 +228,7 @@ To enable log file uploads:
 }
 ```
 
-See [Blob Upload Guide](../BLOB-UPLOAD.md) for detailed setup instructions and security considerations.
+See [Blob Upload Guide](../features/BLOB-UPLOAD.md) for detailed setup instructions and security considerations.
 
 ### Authentication
 

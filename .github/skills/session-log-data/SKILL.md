@@ -159,12 +159,12 @@ Before using the data, check if the files exist:
 [ -f ./usage-data/usage-agg-daily.json ] && echo "Aggregated data available" || echo "No aggregated data"
 ```
 
-If neither directory exists, Azure Storage is not configured. See the `azure-storage-loader` skill and `docs/BLOB-UPLOAD.md` for setup instructions.
+If neither directory exists, Azure Storage is not configured. See the `azure-storage-loader` skill and `docs/features/BLOB-UPLOAD.md` for setup instructions.
 
 ## Related Files
 
-- `docs/BLOB-UPLOAD.md` — Full blob upload documentation and setup guide
-- `docs/BLOB-UPLOAD-QUICKSTART.md` — Quick start for blob upload and coding agent access
+- `docs/features/BLOB-UPLOAD.md` — Full blob upload documentation and setup guide
+- `docs/features/BLOB-UPLOAD-QUICKSTART.md` — Quick start for blob upload and coding agent access
 - `.github/skills/azure-storage-loader/SKILL.md` — Azure Table Storage loader skill
 - `.github/skills/copilot-log-analysis/SKILL.md` — Session file analysis techniques
 - `src/modelPricing.json` — Model pricing data for cost estimation

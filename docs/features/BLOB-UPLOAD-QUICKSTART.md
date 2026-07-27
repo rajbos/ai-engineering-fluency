@@ -141,6 +141,6 @@ Common causes:
 ### Need more help?
 
 See full documentation:
-- [Blob Upload Guide](../docs/BLOB-UPLOAD.md)
+- [Blob Upload Guide](BLOB-UPLOAD.md)
 - [Coding Agent Knowledge Base](.github/agents/coding-agent/knowledge.md)
 - [Backend Configuration](../docs/specs/backend.md)
