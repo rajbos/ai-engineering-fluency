@@ -98,7 +98,7 @@ val prepareBundledAssets by tasks.registering(Copy::class) {
     }
 
     // 2. The vscode-shim that fakes acquireVsCodeApi() — same file the VS extension uses.
-    from("$repoRoot/visualstudio-extension/src/CopilotTokenTracker/WebBridge") {
+    from("$repoRoot/visualstudio-extension/src/AIEngineeringFluency/WebBridge") {
         include("vscode-shim.js")
         into("webview")
     }

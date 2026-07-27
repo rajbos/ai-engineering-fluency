@@ -363,22 +363,34 @@ jobs:
       - name: Assert all CLI bundles are present in the ZIP
         run: |
           ZIP=$(find jetbrains-plugin/build/distributions/ -name "*.zip" | head -1)
+          # The plugin ZIP only contains the plugin's lib/*.jar files at its top level.
+          # Gradle's `sourceSets.main.resources` bundling packs our CLI/webview assets
+          # *inside* the main plugin jar (so the plugin can load them via the
+          # classloader), not as loose files in the outer ZIP. So we must inspect the
+          # nested jar's entries, not the outer ZIP's.
+          WORKDIR=$(mktemp -d)
+          unzip -q "$ZIP" -d "$WORKDIR"
+          JAR=$(find "$WORKDIR" -name "*.jar" ! -name "*-searchableOptions.jar" | head -1)
+          if [ -z "$JAR" ]; then
+            echo "❌ Could not find the plugin's main jar inside $ZIP"
+            exit 1
+          fi
           MISSING=()
           for ENTRY in \
             "cli-bundle/win-x64/copilot-token-tracker.exe" \
             "cli-bundle/darwin-arm64/copilot-token-tracker" \
             "cli-bundle/darwin-x64/copilot-token-tracker" \
             "cli-bundle/linux-x64/copilot-token-tracker"; do
-            if ! unzip -l "$ZIP" | grep -q "$ENTRY"; then
+            if ! unzip -l "$JAR" | grep -q "$ENTRY"; then
               MISSING+=("$ENTRY")
             fi
           done
           if [ ${#MISSING[@]} -gt 0 ]; then
-            echo "❌ Missing CLI bundle entries in plugin ZIP:"
+            echo "❌ Missing CLI bundle entries in plugin jar ($JAR):"
             for M in "${MISSING[@]}"; do echo "  - $M"; done
             exit 1
           fi
-          echo "✅ All CLI bundles present in plugin ZIP"
+          echo "✅ All CLI bundles present in plugin jar"
 
       - name: Publish to JetBrains Marketplace
         # Publish on tag push, or on workflow_dispatch when explicitly requested
