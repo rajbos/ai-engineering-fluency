@@ -267,6 +267,9 @@ jobs:
     needs: [build-cli-windows, build-cli-macos-arm64, build-cli-macos-x64, build-cli-linux, build-webview]
     permissions:
       contents: write   # needed to create GitHub release on tag push
+    outputs:
+      plugin_version: ${{ steps.version.outputs.plugin_version }}
+      is_tag: ${{ steps.version.outputs.is_tag }}
 
     steps:
       - name: Harden the runner (Audit all outbound calls)
@@ -451,5 +454,84 @@ jobs:
               echo "| **Marketplace** | ✅ Published |"
             else
               echo "| **Marketplace** | ⏭️ Skipped |"
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # Step 4 — Poll JetBrains Marketplace for the automated Plugin Verifier result
+  # ─────────────────────────────────────────────────────────────────────────────
+  # JetBrains runs the Plugin Verifier automatically right after a version is
+  # uploaded. If it finds no blocking issues the update is auto-approved within
+  # minutes; if it flags something (e.g. Internal/deprecated API usage) the
+  # update stays unapproved and JetBrains emails the author instead of failing
+  # the upload itself — so a bad release could otherwise go unnoticed here.
+  # This job polls the public, unauthenticated Marketplace API for that
+  # approval flag so a stuck/rejected verification shows up as a failed
+  # GitHub Actions run instead of relying on someone reading email.
+  verify-marketplace-approval:
+    name: Verify Marketplace Approval
+    runs-on: ubuntu-latest
+    needs: build-and-publish
+    if: ${{ needs.build-and-publish.outputs.is_tag == 'true' && inputs.dry_run != true }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
+        with:
+          egress-policy: audit
+
+      - name: Wait for JetBrains Plugin Verifier and poll approval status
+        env:
+          PLUGIN_ID: '31580' # numeric JetBrains Marketplace id for ai-engineering-fluency
+          PLUGIN_VERSION: ${{ needs.build-and-publish.outputs.plugin_version }}
+        run: |
+          # Give JetBrains a head start before the first poll.
+          echo "⏳ Waiting 3 minutes before the first check to let the Plugin Verifier start..."
+          sleep 180
+
+          MAX_ATTEMPTS=15
+          SLEEP_SECONDS=120
+          for ATTEMPT in $(seq 1 "$MAX_ATTEMPTS"); do
+            echo ""
+            echo "=== Attempt $ATTEMPT/$MAX_ATTEMPTS: checking plugin $PLUGIN_ID (v$PLUGIN_VERSION) ==="
+
+            INFO=$(curl -sf "https://plugins.jetbrains.com/api/plugins/${PLUGIN_ID}") || {
+              echo "⚠️ Could not reach JetBrains Marketplace API, retrying..."
+              sleep "$SLEEP_SECONDS"
+              continue
+            }
+
+            HAS_UNAPPROVED=$(echo "$INFO" | jq -r '.hasUnapprovedUpdate')
+            echo "hasUnapprovedUpdate: $HAS_UNAPPROVED"
+
+            if [ "$HAS_UNAPPROVED" = "false" ]; then
+              echo "✅ No pending unapproved update — the Plugin Verifier passed and v$PLUGIN_VERSION is live."
+              echo "verified=true" >> "$GITHUB_ENV"
+              break
+            fi
+
+            echo "⏳ Update still pending verification/approval, waiting ${SLEEP_SECONDS}s..."
+            sleep "$SLEEP_SECONDS"
+          done
+
+          if [ "${verified:-false}" != "true" ]; then
+            echo "❌ v$PLUGIN_VERSION is still unapproved after $((MAX_ATTEMPTS * SLEEP_SECONDS / 60)) minutes."
+            echo "This usually means the JetBrains Plugin Verifier flagged an issue (e.g. Internal/deprecated API usage)."
+            echo "Check https://plugins.jetbrains.com/plugin/${PLUGIN_ID}-ai-engineering-fluency/versions and your email for details."
+            exit 1
+          fi
+
+      - name: Summary
+        if: always()
+        run: |
+          {
+            echo "## JetBrains Marketplace Verification 🔍"
+            echo ""
+            echo "| | |"
+            echo "|---|---|"
+            echo "| **Version checked** | v${{ needs.build-and-publish.outputs.plugin_version }} |"
+            if [ "${{ job.status }}" = "success" ]; then
+              echo "| **Result** | ✅ Approved — Plugin Verifier passed |"
+            else
+              echo "| **Result** | ❌ Still unapproved — check email / Marketplace for verifier findings |"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
