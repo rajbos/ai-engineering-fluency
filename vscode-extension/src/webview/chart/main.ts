@@ -47,9 +47,11 @@ type ChartPeriodData = {
 	avgLocPerPeriod?: number;
 	editorCostDatasets?: ModelDataset[];
 	billingGroupCostDatasets?: ModelDataset[];
+	modelCostDatasets?: ModelDataset[];
 	modelSessionsDatasets?: ModelDataset[];
 	editorSessionsDatasets?: ModelDataset[];
 	providerSessionsDatasets?: ModelDataset[];
+	providerTokensDatasets?: ModelDataset[];
 };
 
 type ChartPeriod = import('./projectionUtils').ChartPeriod;
@@ -241,9 +243,11 @@ function copyFilteredDatasetFields(source: ChartPeriodData, target: ChartPeriodD
 		{ key: 'locRepositoryDatasets', source: source.locRepositoryDatasets },
 		{ key: 'editorCostDatasets', source: source.editorCostDatasets },
 		{ key: 'billingGroupCostDatasets', source: source.billingGroupCostDatasets },
+		{ key: 'modelCostDatasets', source: source.modelCostDatasets },
 		{ key: 'modelSessionsDatasets', source: source.modelSessionsDatasets },
 		{ key: 'editorSessionsDatasets', source: source.editorSessionsDatasets },
 		{ key: 'providerSessionsDatasets', source: source.providerSessionsDatasets },
+		{ key: 'providerTokensDatasets', source: source.providerTokensDatasets },
 		{ key: 'taskCategoryDatasets', source: source.taskCategoryDatasets },
 	];
 	for (const { key, source: ds } of datasetFields) {
@@ -308,7 +312,9 @@ function getChartTitle(): string {
 	}
 	if (currentMetric === 'cost') {
 		let titleText: string;
-		if (currentSplit === 'editor') {
+		if (currentSplit === 'model') {
+			titleText = periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Model');
+		} else if (currentSplit === 'editor') {
 			titleText = periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Editor');
 		} else if (currentSplit === 'provider') {
 			titleText = periodMeta.costTitle.replace('Est. Cost', 'Est. Cost by Provider');
@@ -369,9 +375,9 @@ const PERIOD_LABELS: Record<ChartPeriod, { title: string; footer: string; countL
 
 function isComboSupported(metric: string, split: string): boolean {
 	if (metric === 'sessions') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider'; }
-	if (metric === 'cost') { return split === 'total' || split === 'editor' || split === 'provider'; }
+	if (metric === 'cost') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider'; }
 	if (metric === 'output') { return split !== 'model' && split !== 'provider' && split !== 'taskCategory'; }
-	return split !== 'language' && split !== 'provider';
+	return split !== 'language';
 }
 
 function buildChartHeader(data: InitialChartData): HTMLElement {
@@ -744,7 +750,7 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 }
 
 function clampSplitForMetric(metric: typeof currentMetric): void {
-	if (metric === 'cost' && currentSplit !== 'editor' && currentSplit !== 'provider') { currentSplit = 'total'; return; }
+	if (metric === 'cost' && currentSplit !== 'model' && currentSplit !== 'editor' && currentSplit !== 'provider') { currentSplit = 'total'; return; }
 	if (metric === 'output' && currentSplit === 'model') { currentSplit = 'total'; return; }
 	if (metric === 'tokens' && currentSplit === 'language') { currentSplit = 'total'; return; }
 	if (metric === 'sessions' && currentSplit !== 'total' && currentSplit !== 'model' && currentSplit !== 'editor' && currentSplit !== 'provider') { currentSplit = 'total'; }
@@ -781,9 +787,9 @@ async function switchTimeWindow(timeWindow: ChartTimeWindow, data: InitialChartD
 
 function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
 	if (metric === 'sessions') { return split === 'total' || split === 'model' || split === 'editor' || split === 'provider'; }
-	return (metric === 'cost' && (split === 'total' || split === 'editor' || split === 'provider')) ||
+	return (metric === 'cost' && (split === 'total' || split === 'model' || split === 'editor' || split === 'provider')) ||
 		(metric === 'output' && split !== 'model' && split !== 'provider' && split !== 'taskCategory') ||
-		(metric === 'tokens' && split !== 'language' && split !== 'provider');
+		(metric === 'tokens' && split !== 'language');
 }
 
 async function reinitChart(data: InitialChartData): Promise<void> {
@@ -1104,6 +1110,35 @@ function buildCostEditorViewConfig(period: ChartPeriodData, baseOptions: ReturnT
 	} as ChartConfig;
 }
 
+function buildCostModelViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
+	const datasets = (period.modelCostDatasets ?? []) as ModelDataset[];
+	return {
+		type: 'bar' as const,
+		data: { labels: period.labels, datasets: datasets as any },
+		options: {
+			...baseOptions,
+			plugins: {
+				...baseOptions.plugins,
+				legend: { position: 'top' as const, labels: { color: c.textColor, font: { size: 11 } } },
+				tooltip: {
+					...baseOptions.plugins.tooltip,
+					callbacks: {
+						label: (ctx: any) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
+						footer: (items: any[]) => {
+							const total = items.reduce((sum: number, i: any) => sum + (Number(i.parsed.y) || 0), 0);
+							return `Total: $${total.toFixed(4)}`;
+						}
+					}
+				}
+			},
+			scales: {
+				x: { stacked: true, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 } } },
+				y: { stacked: true, type: 'linear' as const, display: true, position: 'left' as const, grid: { color: c.gridColor }, ticks: { color: c.textColor, font: { size: 11 }, callback: (value: any) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: 'Estimated Cost (USD)', color: c.textColor, font: { size: 12, weight: 'bold' as const } } }
+			}
+		}
+	} as ChartConfig;
+}
+
 function buildCostViewConfig(period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors, monthlyBudget = 0): ChartConfig {
 	const isRolling = currentDisplayMode === 'rolling';
 	const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
@@ -1236,7 +1271,7 @@ function refreshHeatmapView(data: InitialChartData): void {
 }
 
 function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptions: ReturnType<typeof buildBaseOptions>, c: ChartColors): ChartConfig {
-	const datasets = view === 'model' ? period.modelDatasets : view === 'repository' ? period.repositoryDatasets : view === 'taskCategory' ? (period.taskCategoryDatasets ?? []) : period.editorDatasets;
+	const datasets = view === 'model' ? period.modelDatasets : view === 'repository' ? period.repositoryDatasets : view === 'taskCategory' ? (period.taskCategoryDatasets ?? []) : view === 'provider' ? (period.providerTokensDatasets ?? []) : period.editorDatasets;
 	const lastIdx = period.tokensData.length - 1;
 	const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
 	const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_: number, i: number) => i === lastIdx ? Math.round(projExtra) : 0), backgroundColor: 'rgba(200, 200, 200, 0.25)', borderColor: 'rgba(200, 200, 200, 0.5)', borderWidth: 1 }] : [];
@@ -1260,10 +1295,12 @@ function resolveTokensView(split: typeof currentSplit): string {
 	if (split === 'editor') { return 'editor'; }
 	if (split === 'repository') { return 'repository'; }
 	if (split === 'taskCategory') { return 'taskCategory'; }
+	if (split === 'provider') { return 'provider'; }
 	return 'total';
 }
 
 function resolveCostView(split: typeof currentSplit): string {
+	if (split === 'model') { return 'cost-model'; }
 	if (split === 'editor') { return 'cost-editor'; }
 	if (split === 'provider') { return 'cost-provider'; }
 	return 'cost';
@@ -1292,6 +1329,7 @@ function createConfig(data: InitialChartData): ChartConfig {
 	if (view.startsWith('sessions')) { return buildSessionsViewConfig(view, period, baseOptions, c); }
 	if (view === 'total') { return buildTotalViewConfig(period, baseOptions, c); }
 	if (view === 'cost') { return buildCostViewConfig(period, baseOptions, c, data.monthlyBudget ?? 0); }
+	if (view === 'cost-model') { return buildCostModelViewConfig(period, baseOptions, c); }
 	if (view === 'cost-editor') { return buildCostEditorViewConfig(period, baseOptions, c); }
 	if (view === 'cost-provider') { return buildCostProviderViewConfig(period, baseOptions, c); }
 	if (view.startsWith('output-')) { return buildOutputViewConfig(view, period, baseOptions, c); }

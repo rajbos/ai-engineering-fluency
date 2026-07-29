@@ -225,12 +225,20 @@ export interface ChartPeriodData {
    * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
    */
   billingGroupCostDatasets?: object[];
+  /**
+   * Cost datasets split by model — one dataset per top model (by total cost), plus an
+   * "Other models" dataset for the remainder. Each model's usage is priced using the
+   * correct pricing source per editor it was used from.
+   */
+  modelCostDatasets?: object[];
   /** Session-count datasets split by model — one stacked-bar dataset per model. */
   modelSessionsDatasets?: object[];
   /** Session-count datasets split by editor — one stacked-bar dataset per editor. */
   editorSessionsDatasets?: object[];
   /** Session-count datasets split by billing provider — one stacked-bar dataset per provider group. */
   providerSessionsDatasets?: object[];
+  /** Token datasets split by billing provider — one stacked-bar dataset per provider group. */
+  providerTokensDatasets?: object[];
   /** Token datasets split by task category (e.g. "Coding", "Debugging", "Testing") — one stacked-bar dataset per category. */
   taskCategoryDatasets?: object[];
 }

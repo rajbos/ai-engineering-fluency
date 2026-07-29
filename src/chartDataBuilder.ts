@@ -379,6 +379,82 @@ export function getPricingSourceForBillingGroup(group: string): 'provider' | 'co
 }
 
 /**
+ * Computes the estimated cost of one model's usage within a single day/bucket entry,
+ * applying the correct pricing source per editor the model was used from.
+ * Falls back to Copilot pricing when no per-editor breakdown is available.
+ */
+function computeModelCostForEntry(entry: DailyTokenStats, model: string, deps: ChartDataBuilderDeps): number {
+	const editorModelUsage = entry.editorModelUsage;
+	if (!editorModelUsage) {
+		const usage = entry.modelUsage[model];
+		return usage ? deps.calculateEstimatedCost({ [model]: usage }, 'copilot') : 0;
+	}
+	let total = 0;
+	for (const [editor, modelUsage] of Object.entries(editorModelUsage)) {
+		const usage = modelUsage[model];
+		if (usage) { total += deps.calculateEstimatedCost({ [model]: usage }, getPricingSourceForEditor(editor)); }
+	}
+	return total;
+}
+
+/**
+ * Builds cost datasets split by model — one dataset per top model (by total cost),
+ * with a combined "Other models" dataset for the remainder.
+ * Each model's usage is priced using the correct pricing source per editor it was used from
+ * (e.g. the same Claude model costs differently via GitHub Copilot vs. a direct API surface).
+ */
+function buildModelCostDatasets(entries: DailyTokenStats[], deps: ChartDataBuilderDeps) {
+	const allModels = new Set<string>();
+	entries.forEach(e => Object.keys(e.modelUsage).forEach(m => allModels.add(m)));
+	const modelCostTotals = new Map<string, number>();
+	for (const model of allModels) {
+		const total = entries.reduce((sum, e) => sum + computeModelCostForEntry(e, model, deps), 0);
+		modelCostTotals.set(model, total);
+	}
+	const sortedModels = Array.from(allModels).sort((a, b) => (modelCostTotals.get(b) || 0) - (modelCostTotals.get(a) || 0));
+	const topModels = sortedModels.slice(0, 5);
+	const otherModels = sortedModels.slice(5);
+	const datasets = topModels.map((model, idx) => {
+		const color = getModelColor(idx);
+		return { label: getModelDisplayName(model), data: entries.map(e => computeModelCostForEntry(e, model, deps)), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+	if (otherModels.length > 0) {
+		datasets.push({ label: 'Other models', data: entries.map(e => otherModels.reduce((sum, m) => sum + computeModelCostForEntry(e, m, deps), 0)), backgroundColor: 'rgba(150, 150, 150, 0.5)', borderColor: 'rgba(150, 150, 150, 0.8)', borderWidth: 1 });
+	}
+	return datasets;
+}
+
+/** Aggregates per-editor-model token counts up to billing provider groups. */
+function aggregateBillingGroupTokens(entry: DailyTokenStats): Record<string, number> {
+	const result: Record<string, number> = {};
+	const editorModelUsage = entry.editorModelUsage;
+	if (!editorModelUsage) { return result; }
+	for (const [editor, modelUsage] of Object.entries(editorModelUsage)) {
+		for (const [modelId, usage] of Object.entries(modelUsage)) {
+			const group = getBillingGroup(editor, modelId);
+			result[group] = (result[group] ?? 0) + usage.inputTokens + usage.outputTokens;
+		}
+	}
+	return result;
+}
+
+/** Builds token datasets split by billing/hosting provider. */
+function buildProviderTokensDatasets(entries: DailyTokenStats[]) {
+	const allGroups = new Set<string>();
+	entries.forEach(e => Object.keys(aggregateBillingGroupTokens(e)).forEach(g => allGroups.add(g)));
+	const groupTotals = new Map<string, number>();
+	for (const group of allGroups) {
+		const total = entries.reduce((sum, e) => sum + (aggregateBillingGroupTokens(e)[group] ?? 0), 0);
+		groupTotals.set(group, total);
+	}
+	const sortedGroups = Array.from(allGroups).sort((a, b) => (groupTotals.get(b) || 0) - (groupTotals.get(a) || 0));
+	return sortedGroups.map((group, idx) => {
+		const color = getModelColor(idx);
+		return { label: group, data: entries.map(e => aggregateBillingGroupTokens(e)[group] ?? 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
+	});
+}
+
+/**
  * Builds cost datasets split by billing/hosting provider.
  * One dataset per billing group (e.g. "GitHub Copilot", "Anthropic", "Google", …),
  * using the correct pricing source for each group.
@@ -457,16 +533,18 @@ function buildPeriodData(buckets: BucketEntry[], deps: ChartDataBuilderDeps) {
 	});
 	const editorCostDatasets = buildEditorCostDatasets(entries, deps);
 	const billingGroupCostDatasets = buildBillingGroupCostDatasets(entries, deps);
+	const modelCostDatasets = buildModelCostDatasets(entries, deps);
 	const modelSessionsDatasets = buildModelSessionsDatasets(entries);
 	const editorSessionsDatasets = buildEditorSessionsDatasets(entries);
 	const providerSessionsDatasets = buildProviderSessionsDatasets(entries);
+	const providerTokensDatasets = buildProviderTokensDatasets(entries);
 	const allTaskCategories = new Set<string>();
 	entries.forEach(e => Object.keys(e.taskCategoryUsage ?? {}).forEach(tc => allTaskCategories.add(tc)));
 	const taskCategoryDatasets = Array.from(allTaskCategories).map((category, idx) => {
 		const color = getModelColor(idx);
 		return { label: category, data: entries.map(e => e.taskCategoryUsage?.[category]?.tokens || 0), backgroundColor: color.bg, borderColor: color.border, borderWidth: 1 };
 	});
-	return { labels, periodKeys, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, modelSessionsDatasets, editorSessionsDatasets, providerSessionsDatasets, taskCategoryDatasets };
+	return { labels, periodKeys, tokensData, sessionsData, modelDatasets, editorDatasets, repositoryDatasets, periodCount, totalTokens, totalSessions, avgPerPeriod: periodCount > 0 ? Math.round(totalTokens / periodCount) : 0, costData, totalCost, avgCostPerPeriod: periodCount > 0 ? totalCost / periodCount : 0, locData, linesAddedData, linesRemovedData, languageDatasets, locEditorDatasets, locRepositoryDatasets, totalLinesAdded, totalLinesRemoved, avgLocPerPeriod, editorCostDatasets, billingGroupCostDatasets, modelCostDatasets, modelSessionsDatasets, editorSessionsDatasets, providerSessionsDatasets, providerTokensDatasets, taskCategoryDatasets };
 }
 
 function computeSummaryTotals(dailyBuckets: BucketEntry[], deps: ChartDataBuilderDeps) {
