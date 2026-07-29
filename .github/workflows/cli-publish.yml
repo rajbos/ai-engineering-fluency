@@ -57,11 +57,11 @@ jobs:
           registry-url: 'https://registry.npmjs.org'
 
       - name: Install extension dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
         working-directory: vscode-extension
 
       - name: Install CLI dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build production bundle
         run: npm run build:production

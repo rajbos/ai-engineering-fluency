@@ -57,7 +57,7 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build and bundle Windows executable
         working-directory: cli
@@ -98,7 +98,7 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -148,7 +148,7 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -197,7 +197,7 @@ jobs:
 
       - name: Install CLI dependencies
         working-directory: cli
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build production bundle
         working-directory: cli
@@ -245,7 +245,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: vscode-extension
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build webview bundles
         working-directory: vscode-extension

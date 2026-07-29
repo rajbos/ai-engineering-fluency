@@ -49,8 +49,8 @@ jobs:
 
       - name: Install JavaScript dependencies
         run: |
-          cd vscode-extension && npm ci
-          cd ../cli && npm ci
+          cd vscode-extension && npm ci --ignore-scripts
+          cd ../cli && npm ci --ignore-scripts
 
       # Download session log files from Azure Blob Storage (optional)
       # This step only runs if Azure Storage credentials are configured in the `copilot` environment
@@ -138,7 +138,7 @@ jobs:
         if: ${{ vars.COPILOT_STORAGE_ACCOUNT != '' }}
         run: |
           cd .github/skills/azure-storage-loader
-          npm ci --production
+          npm ci --ignore-scripts --production
 
       - name: Download aggregated usage data from Azure Table Storage
         if: ${{ vars.COPILOT_STORAGE_ACCOUNT != '' }}

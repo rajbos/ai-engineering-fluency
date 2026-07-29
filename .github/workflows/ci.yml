@@ -51,7 +51,7 @@ jobs:
         
     - name: Install dependencies
       working-directory: vscode-extension
-      run: npm ci
+      run: npm ci --ignore-scripts
       
     - name: Validate JSON files
       working-directory: vscode-extension
@@ -162,7 +162,7 @@ jobs:
         
     - name: Install dependencies
       working-directory: vscode-extension
-      run: npm ci
+      run: npm ci --ignore-scripts
       
     - name: Package extension
       working-directory: vscode-extension

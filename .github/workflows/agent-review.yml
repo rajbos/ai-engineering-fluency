@@ -252,12 +252,12 @@ jobs:
       - name: Build PR head
         working-directory: pr/vscode-extension
         continue-on-error: true
-        run: npm ci && npm run compile-tests
+        run: npm ci --ignore-scripts && npm run compile-tests
 
       - name: Build base
         working-directory: base/vscode-extension
         continue-on-error: true
-        run: npm ci && npm run compile-tests
+        run: npm ci --ignore-scripts && npm run compile-tests
 
       - name: Run benchmarks (PR and base)
         if: always()
