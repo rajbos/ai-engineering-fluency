@@ -11,6 +11,8 @@ import type { ModelUsage } from './types';
 import { withErrorRecovery } from './utils/errors';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { toLocalDayKey } from './utils/dayKeys';
+import { isUnsafeObjectKey } from './utils/protoGuard';
+import { readTextFileWithSizeGuard } from './utils/safeFileRead';
 
 /**
  * Normalize a Claude Code API model ID to the dot-notation format used throughout this codebase.
@@ -131,7 +133,8 @@ export class ClaudeCodeDataAccess {
 	private async readSessionEvents(sessionFilePath: string): Promise<any[]> {
 		return withErrorRecovery(
 			async () => {
-				const content = await fs.promises.readFile(sessionFilePath, 'utf8');
+				const content = await readTextFileWithSizeGuard(sessionFilePath, 'claudecode');
+				if (content === undefined) { return []; }
 				const lines = content.trim().split('\n');
 				const events: any[] = [];
 				for (const line of lines) {
@@ -370,6 +373,9 @@ export class ClaudeCodeDataAccess {
 		model: string,
 		usage: any
 	): void {
+		// Untrusted `model` string from parsed session JSON — refuse keys that would
+		// resolve through the prototype chain instead of an own property (see protoGuard.ts).
+		if (isUnsafeObjectKey(model)) { return; }
 		if (!modelUsage[model]) {
 			modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		}

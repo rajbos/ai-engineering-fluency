@@ -30,6 +30,7 @@ import { createEmptyContextRefs } from '../tokenEstimation';
 import { createEmptySessionUsageAnalysis } from '../usageAnalysis';
 import { normalizePath } from '../utils/pathUtils';
 import { pathExists } from '../utils/fsAsync';
+import { readTextFileWithSizeGuard } from '../utils/safeFileRead';
 
 /** Returns the canonical Copilot CLI session-state directory (~/.copilot/session-state). */
 export function getCopilotCliSessionStateDir(): string {
@@ -96,14 +97,11 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	 */
 	async getWorkspacePathForDiscoveredPath(sessionFile: string): Promise<string | undefined> {
 		const yamlPath = path.join(path.dirname(sessionFile), 'workspace.yaml');
-		try {
-			const content = await fs.promises.readFile(yamlPath, 'utf8');
-			const match = content.match(/^cwd:\s*(.+)$/m);
-			const cwd = match?.[1]?.trim();
-			return cwd || undefined;
-		} catch {
-			return undefined;
-		}
+		const content = await readTextFileWithSizeGuard(yamlPath, 'copilotCliAdapter');
+		if (content === undefined) { return undefined; }
+		const match = content.match(/^cwd:\s*(.+)$/m);
+		const cwd = match?.[1]?.trim();
+		return cwd || undefined;
 	}
 
 	/**
@@ -228,17 +226,16 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 	 */
 	private async _tryMarkScoutFromWorkspaceYaml(uuidDir: string, uuid: string): Promise<void> {
 		const yamlPath = path.join(uuidDir, 'workspace.yaml');
-		try {
-			const content = await fs.promises.readFile(yamlPath, 'utf8');
-			const cwdMatch = content.match(/^cwd:\s*(.+)$/m);
-			if (cwdMatch && isMicrosoftScoutCwd(cwdMatch[1].trim())) {
-				this._scoutSessionIds.add(uuid);
-			}
-			const clientMatch = content.match(/^client_name:\s*(.+)$/m);
-			if (clientMatch && isCopilotAppClientName(clientMatch[1].trim())) {
-				this._appSessionIds.add(uuid);
-			}
-		} catch { /* workspace.yaml may not exist */ }
+		const content = await readTextFileWithSizeGuard(yamlPath, 'copilotCliAdapter');
+		if (content === undefined) { return; }
+		const cwdMatch = content.match(/^cwd:\s*(.+)$/m);
+		if (cwdMatch && isMicrosoftScoutCwd(cwdMatch[1].trim())) {
+			this._scoutSessionIds.add(uuid);
+		}
+		const clientMatch = content.match(/^client_name:\s*(.+)$/m);
+		if (clientMatch && isCopilotAppClientName(clientMatch[1].trim())) {
+			this._appSessionIds.add(uuid);
+		}
 	}
 
 	getCandidatePaths(): CandidatePath[] {

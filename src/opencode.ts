@@ -9,6 +9,8 @@ import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage, ModelId } from './types';
 import { normalizePathForComparison } from './workspaceHelpers';
+import { isUnsafeObjectKey } from './utils/protoGuard';
+import { readTextFileWithSizeGuardSync } from './utils/safeFileRead';
 
 // Access SqlJsStatic and Database via the globally declared initSqlJs namespace.
 type SqlJsStatic = initSqlJs.SqlJsStatic;
@@ -370,7 +372,8 @@ export class OpenCodeDataAccess {
 			for (const entry of entries) {
 				if (!entry.isFile() || !entry.name.endsWith('.json')) { continue; }
 				try {
-					const content = fs.readFileSync(path.join(messageDir, entry.name), 'utf8');
+					const content = readTextFileWithSizeGuardSync(path.join(messageDir, entry.name), 'opencode');
+					if (content === undefined) { continue; }
 					const msg = JSON.parse(content);
 					messages.push(msg);
 				} catch {
@@ -400,7 +403,8 @@ export class OpenCodeDataAccess {
 			for (const entry of entries) {
 				if (!entry.isFile() || !entry.name.endsWith('.json')) { continue; }
 				try {
-					const content = fs.readFileSync(path.join(partDir, entry.name), 'utf8');
+					const content = readTextFileWithSizeGuardSync(path.join(partDir, entry.name), 'opencode');
+					if (content === undefined) { continue; }
 					const part = JSON.parse(content);
 					parts.push(part);
 				} catch {
@@ -537,6 +541,8 @@ export class OpenCodeDataAccess {
 			const turnTokens = turnCumTotal - prevTotal;
 			if (turnTokens <= 0) { prevTotal = turnCumTotal; continue; }
 			const model = turnAssistantMsgs[0].modelID || turnAssistantMsgs[0].model?.modelID || 'unknown';
+			// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+			if (isUnsafeObjectKey(model)) { prevTotal = turnCumTotal; continue; }
 			if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 			const turnOutput = turnAssistantMsgs.reduce((sum, m) => sum + (m.tokens?.output || 0) + (m.tokens?.reasoning || 0), 0);
 			modelUsage[model].inputTokens += Math.max(0, turnTokens - turnOutput);
@@ -579,10 +585,13 @@ export class OpenCodeDataAccess {
 			if (turnAssistantMsgs.length === 0) { continue; }
 
 			const model = turnAssistantMsgs[0].modelID || turnAssistantMsgs[0].model?.modelID || 'unknown';
+			// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+			if (isUnsafeObjectKey(model)) { continue; }
 			modelInteractions[model] = (modelInteractions[model] || 0) + 1;
 		}
 
-		// Merge interaction counts into model usage
+		// Merge interaction counts into model usage. baseModelUsage's own keys are already
+		// guarded (see getOpenCodeModelUsageFromMessages), so Object.entries only yields safe keys.
 		const modelUsage: OpenCodeModelUsageWithInteractions = {};
 		for (const [model, usage] of Object.entries(baseModelUsage)) {
 			modelUsage[model] = {
