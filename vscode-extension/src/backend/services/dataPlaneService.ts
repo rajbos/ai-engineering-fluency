@@ -250,6 +250,47 @@ export class DataPlaneService {
   }> {
     const { tableClient, userId, datasetId, startDayKey, endDayKey } = args;
 
+    this.log(
+      `Deleting entities for user "${userId}" in dataset "${datasetId}" (${startDayKey} to ${endDayKey})`,
+    );
+
+    const toDelete = await this._findEntitiesToDelete(tableClient, {
+      userId,
+      datasetId,
+      startDayKey,
+      endDayKey,
+    });
+
+    this.log(
+      `Found ${toDelete.length} entities to delete for user "${userId}" in dataset "${datasetId}"`,
+    );
+
+    const { deletedCount, errors } = await this._deleteEntitiesWithErrors(
+      tableClient,
+      toDelete,
+    );
+
+    this.log(
+      `Deleted ${deletedCount}/${toDelete.length} entities (${errors.length} errors)`,
+    );
+    return { deletedCount, errors };
+  }
+
+  /**
+   * Scan the given date range and collect entities whose PartitionKey
+   * contains the dataset prefix and whose RowKey contains the user prefix.
+   */
+  private async _findEntitiesToDelete(
+    tableClient: TableClientLike,
+    args: {
+      userId: string;
+      datasetId: string;
+      startDayKey: string;
+      endDayKey: string;
+    },
+  ): Promise<Array<{ partitionKey: string; rowKey: string }>> {
+    const { userId, datasetId, startDayKey, endDayKey } = args;
+
     // Build the prefixes to match (these appear inside PK/RK as stored)
     const dsPrefix = `ds:${datasetId}`;
     const uPrefix = `u:${userId}`;
@@ -261,10 +302,6 @@ export class DataPlaneService {
     const pkStart = buildAggPartitionKey(datasetId, startDayKey);
     const pkEnd = buildAggPartitionKey(datasetId, endDayKey);
     const filter = `PartitionKey ge '${pkStart}' and PartitionKey le '${pkEnd}'`;
-
-    this.log(
-      `Deleting entities for user "${userId}" in dataset "${datasetId}" (${startDayKey} to ${endDayKey})`,
-    );
 
     const toDelete: Array<{ partitionKey: string; rowKey: string }> = [];
     const iterator = tableClient.listEntities({ queryOptions: { filter } });
@@ -279,10 +316,17 @@ export class DataPlaneService {
       }
     }
 
-    this.log(
-      `Found ${toDelete.length} entities to delete for user "${userId}" in dataset "${datasetId}"`,
-    );
+    return toDelete;
+  }
 
+  /** Delete each entity, collecting per-entity errors instead of aborting the batch. */
+  private async _deleteEntitiesWithErrors(
+    tableClient: TableClientLike,
+    entities: Array<{ partitionKey: string; rowKey: string }>,
+  ): Promise<{
+    deletedCount: number;
+    errors: Array<{ partitionKey: string; rowKey: string; error: Error }>;
+  }> {
     let deletedCount = 0;
     const errors: Array<{
       partitionKey: string;
@@ -290,7 +334,7 @@ export class DataPlaneService {
       error: Error;
     }> = [];
 
-    for (const { partitionKey, rowKey } of toDelete) {
+    for (const { partitionKey, rowKey } of entities) {
       try {
         await withTimeout(
           tableClient.deleteEntity(partitionKey, rowKey),
@@ -307,9 +351,6 @@ export class DataPlaneService {
       }
     }
 
-    this.log(
-      `Deleted ${deletedCount}/${toDelete.length} entities (${errors.length} errors)`,
-    );
     return { deletedCount, errors };
   }
 
