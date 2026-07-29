@@ -163,7 +163,7 @@ interface Window { __INITIAL_LOGDATA__?: SessionLogData; }
 const vscode = acquireVsCodeApi();
 const initialData = getWindowData<SessionLogData>('__INITIAL_LOGDATA__');
 
-import { resolveGuidMcpToolName } from '../../../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, resolveMcpFamilyToolName } from '../../../../src/utils/toolUtils';
 
 // Tool name map is injected by the extension host as window.__TOOL_NAMES__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -185,7 +185,7 @@ function lookupToolName(id: string): string {
 if (!TOOL_NAME_MAP) {
 return id;
 }
-return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? id;
+return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? resolveMcpFamilyToolName(id) ?? id;
 }
 
 function getEffortDisplayName(level: string): string {

@@ -631,7 +631,7 @@ function getEffortDisplayName(level: string): string {
 	return EFFORT_DISPLAY_NAMES[level] ?? level;
 }
 
-import { resolveGuidMcpToolName, isGuidMcpTool } from '../../../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool } from '../../../../src/utils/toolUtils';
 
 // Tool name maps are injected by the extension host as window.__TOOL_NAMES__ and window.__AUTOMATIC_TOOLS__
 const TOOL_NAME_MAP: { [key: string]: string } | null = getWindowData<Record<string, string>>('__TOOL_NAMES__') ?? null;
@@ -642,7 +642,7 @@ function lookupToolName(id: string): string {
 	if (!TOOL_NAME_MAP) {
 		return id;
 	}
-	return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? id;
+	return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? resolveMcpFamilyToolName(id) ?? id;
 }
 
 function lookupMcpToolName(id: string): string {
@@ -669,8 +669,11 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 
 	const suppressed = new Set<string>(stats.suppressedUnknownTools ?? []);
 	
-	// Filter to only unknown tools (not a key in the map, case-insensitively) and not suppressed
-	return Array.from(allTools).filter(tool => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !suppressed.has(tool)).sort();
+	// Filter to only unknown tools (not a key in the map, case-insensitively, and not
+	// resolvable via a known GUID/family pattern) and not suppressed. Tools resolved via
+	// isMcpFamilyResolvedTool are a recognized MCP tool under a new server-registration
+	// spelling (see issue #1760) — they shouldn't generate another "add missing name" report.
+	return Array.from(allTools).filter(tool => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
 }
 
 function createMcpToolIssueUrl(unknownTools: string[]): string {
