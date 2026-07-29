@@ -6673,6 +6673,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private async runRepoHygieneAnalysis(workspacePath?: string): Promise<any> {
+		this.ensureWorkspaceTrustedForGitAccess();
 		const workspaceRoot = this.resolveWorkspaceRoot(workspacePath);
 		const { branchName, repoName } = this.getGitRepoInfo(workspaceRoot);
 		const fileTree = await this.getWorkspaceFileTree(workspaceRoot);
@@ -6771,6 +6772,22 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			return fullResponse;
 		} finally {
 			cts.dispose();
+		}
+	}
+
+	/**
+	 * Repository hygiene analysis runs `git` (via child_process.execSync) and scans files
+	 * inside the workspace folder, so it must not run in untrusted or virtual workspaces
+	 * (see package.json `capabilities.untrustedWorkspaces`/`virtualWorkspaces`, both "limited").
+	 * This check runs fresh on every invocation (no cached result), so it automatically
+	 * reflects the current trust state — including right after the user grants trust.
+	 */
+	private ensureWorkspaceTrustedForGitAccess(): void {
+		if (!vscode.workspace.isTrusted) {
+			throw new Error('Repository hygiene analysis requires a trusted workspace because it runs git commands and reads workspace files. Grant workspace trust to enable it.');
+		}
+		if (vscode.workspace.workspaceFolders?.some(folder => folder.uri.scheme !== 'file')) {
+			throw new Error('Repository hygiene analysis is not available for virtual workspaces because it requires local git and filesystem access.');
 		}
 	}
 

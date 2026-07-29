@@ -23,6 +23,16 @@
     "onStartupFinished"
   ],
   "main": "./dist/extension.js",
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "Repository hygiene analysis runs `git` commands and scans files inside the workspace folder, so it is disabled in untrusted workspaces. Token/session usage tracking, dashboards, and insights only read AI session logs from your user home directory and continue to work normally."
+    },
+    "virtualWorkspaces": {
+      "supported": "limited",
+      "description": "Repository hygiene analysis relies on a local `git` checkout and workspace filesystem access, so it is disabled for virtual workspaces. Token/session usage tracking, dashboards, and insights only read AI session logs from your user home directory and continue to work normally."
+    }
+  },
   "contributes": {
     "commands": [
       {
