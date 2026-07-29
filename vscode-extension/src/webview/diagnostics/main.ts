@@ -1174,15 +1174,22 @@ function renderModelUsageTimeSelector(disabled: boolean = false): void {
 }
 
 function buildModelUsageTableRow(row: ModelUsageRow, showCache1h: boolean): string {
+  const sessionCountTitle = escapeHtml(`${row.sessionCount} session(s)`);
+  const inputTokensTitle = escapeHtml(`${row.inputTokens.toLocaleString()} tokens`);
+  const outputTokensTitle = escapeHtml(`${row.outputTokens.toLocaleString()} tokens`);
+  const cacheCreationTokensTitle = escapeHtml(`${row.cacheCreationTokens.toLocaleString()} tokens`);
+  const cacheCreation1hTokensTitle = escapeHtml(`${row.cacheCreation1hTokens.toLocaleString()} tokens`);
+  const cachedReadTokensTitle = escapeHtml(`${row.cachedReadTokens.toLocaleString()} tokens`);
+
   return `
     <tr>
       <td>${escapeHtml(row.model)}</td>
-      <td title="${row.sessionCount} session(s)">${row.sessionCount.toLocaleString()}</td>
-      <td title="${row.inputTokens.toLocaleString()} tokens">${formatTokenCount(row.inputTokens)}</td>
-      <td title="${row.outputTokens.toLocaleString()} tokens">${formatTokenCount(row.outputTokens)}</td>
-      <td title="${row.cacheCreationTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreationTokens)}</td>
-      ${showCache1h ? `<td title="${row.cacheCreation1hTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreation1hTokens)}</td>` : ""}
-      <td title="${row.cachedReadTokens.toLocaleString()} tokens">${formatTokenCount(row.cachedReadTokens)}</td>
+      <td title="${sessionCountTitle}">${row.sessionCount.toLocaleString()}</td>
+      <td title="${inputTokensTitle}">${formatTokenCount(row.inputTokens)}</td>
+      <td title="${outputTokensTitle}">${formatTokenCount(row.outputTokens)}</td>
+      <td title="${cacheCreationTokensTitle}">${formatTokenCount(row.cacheCreationTokens)}</td>
+      ${showCache1h ? `<td title="${cacheCreation1hTokensTitle}">${formatTokenCount(row.cacheCreation1hTokens)}</td>` : ""}
+      <td title="${cachedReadTokensTitle}">${formatTokenCount(row.cachedReadTokens)}</td>
       <td>$${row.estimatedCost.toFixed(2)}</td>
     </tr>`;
 }
