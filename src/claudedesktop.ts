@@ -59,6 +59,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { normalizeClaudeModelId } from './claudecode';
 import type { ModelUsage, ModelId } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison, normalizePath } from './workspaceHelpers';
 
 /** Package name for the Claude Desktop Windows Store app. */
@@ -263,6 +264,8 @@ export class ClaudeDesktopCoworkDataAccess {
 		if (!usage) { return; }
 		if (!this.shouldCountCoworkRequest(event, seenRequestIds)) { return; }
 		const model = normalizeClaudeModelId(event.message?.model || 'unknown');
+		// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { return; }
 		if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 		this.applyCoworkTokenCounts(modelUsage[model], usage);
 	}

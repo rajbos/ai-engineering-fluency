@@ -34,6 +34,7 @@ import * as path from 'path';
 import * as os from 'os';
 import * as crypto from 'crypto';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { toLocalDayKey } from './utils/dayKeys';
 
@@ -394,7 +395,8 @@ export class KiroDataAccess {
 			if (!Array.isArray(item.promptLogs)) { continue; }
 			for (const log of item.promptLogs) {
 				const title = (log.modelTitle as string) || (log.completionOptions?.model as string);
-				if (title) { return title; }
+				// Untrusted title from parsed session JSON, later used as an object key — see protoGuard.ts.
+				if (title && !isUnsafeObjectKey(title)) { return title; }
 			}
 		}
 		return 'agent';
@@ -409,6 +411,8 @@ export class KiroDataAccess {
 			if (!Array.isArray(item.promptLogs)) { continue; }
 			for (const log of item.promptLogs) {
 				const model: string = (log.modelTitle as string) || (log.completionOptions?.model as string) || 'unknown';
+				// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+				if (isUnsafeObjectKey(model)) { continue; }
 				if (!modelUsage[model]) {
 					modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 				}

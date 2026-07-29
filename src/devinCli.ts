@@ -50,6 +50,7 @@ import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
 
 type SqlJsStatic = initSqlJs.SqlJsStatic;
@@ -519,7 +520,10 @@ export class DevinCliDataAccess {
 	 */
 	async getModelUsage(virtualPath: string): Promise<ModelUsage> {
 		const session = await this.readSession(virtualPath);
-		const model = session?.model || 'unknown';
+		// Untrusted `model` string from the session database — treat unsafe object keys
+		// like a missing model (see protoGuard.ts).
+		const rawModel = session?.model;
+		const model = rawModel && !isUnsafeObjectKey(rawModel) ? rawModel : 'unknown';
 		const nodes = await this.getMessageNodes(virtualPath);
 		const usage: ModelUsage = { [model]: { inputTokens: 0, outputTokens: 0, sessions: 0 } };
 		for (const node of nodes) {
