@@ -15,6 +15,7 @@ import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import type { UriLike } from './opencode';
 import { normalizePath } from './utils/pathUtils';
 
@@ -348,6 +349,8 @@ export class CrushDataAccess {
 		const modelCounts: { [model: string]: number } = {};
 		for (const msg of assistantMsgs) {
 			const m = msg.model || 'unknown';
+			// Untrusted `model` string from the session database — see protoGuard.ts.
+			if (isUnsafeObjectKey(m)) { continue; }
 			modelCounts[m] = (modelCounts[m] || 0) + 1;
 		}
 		const totalMsgs = assistantMsgs.length;

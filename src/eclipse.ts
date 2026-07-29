@@ -42,6 +42,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { estimateTokensFromText } from './tokenEstimation';
 
@@ -363,6 +364,8 @@ export class EclipseDataAccess {
 			if (turn?.role !== 'user') { continue; }
 			const reply = this.findCopilotReply(turns, i, turn?.turnId);
 			const model: string = turn?.model || reply?.reply?.modelName || 'unknown';
+			// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+			if (isUnsafeObjectKey(model)) { continue; }
 			if (!usage[model]) { usage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 			usage[model].inputTokens += this.estimate(this.userText(turn));
 			usage[model].outputTokens += this.estimate(this.assistantText(reply));

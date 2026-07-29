@@ -41,6 +41,7 @@ import * as path from 'path';
 import * as os from 'os';
 import initSqlJs from 'sql.js';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
 import { STAGE_THRESHOLDS } from './maturityScoring';
 
@@ -456,6 +457,8 @@ export class HermesDataAccess {
 	/** Merge one session_model_usage row's token columns into a ModelUsage entry, in place. */
 	private mergeUsageRowIntoModelUsage(usage: ModelUsage, row: HermesModelUsageRow): void {
 		const model = row.model || 'unknown';
+		// Untrusted `model` string from the session database — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { return; }
 		const existing = usage[model] ?? { inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cacheCreationTokens: 0 };
 		existing.inputTokens += row.input_tokens || 0;
 		existing.outputTokens += row.output_tokens || 0;
@@ -468,7 +471,9 @@ export class HermesDataAccess {
 	private modelUsageFromSessionRow(session: HermesSession | null): ModelUsage {
 		const usage: ModelUsage = {};
 		if (!session || (session.input_tokens || 0) + (session.output_tokens || 0) === 0) { return usage; }
-		const model = session.model || 'unknown';
+		// Untrusted `model` string from the session database — treat unsafe object keys
+		// like a missing model (see protoGuard.ts).
+		const model = session.model && !isUnsafeObjectKey(session.model) ? session.model : 'unknown';
 		usage[model] = {
 			inputTokens: session.input_tokens || 0,
 			outputTokens: session.output_tokens || 0,

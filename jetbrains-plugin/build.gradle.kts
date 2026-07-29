@@ -12,7 +12,11 @@
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
 
 plugins {
-    kotlin("jvm") version "2.4.10"
+    // Pinned below CodeQL's Kotlin version ceiling: CodeQL (bundle 2.26.1, used by
+    // codeql-action v4.37.3 in .github/workflows/codeql.yml) only supports Kotlin
+    // versions up to 2.4.0 — 2.4.10 fails extraction with "Kotlin version 2.4.10
+    // is too recent". Bump back to 2.4.10+ once CodeQL adds support for it.
+    kotlin("jvm") version "2.4.0"
     id("org.jetbrains.intellij.platform") version "2.18.1"
 }
 

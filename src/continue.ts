@@ -8,6 +8,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './workspaceHelpers';
 
 
@@ -137,6 +138,8 @@ export class ContinueDataAccess {
 			if (!Array.isArray(item.promptLogs)) { continue; }
 			for (const log of item.promptLogs) {
 				const model: string = (log.modelTitle as string) || (session.chatModelTitle as string) || 'unknown';
+				// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+				if (isUnsafeObjectKey(model)) { continue; }
 				if (!modelUsage[model]) {
 					modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 				}

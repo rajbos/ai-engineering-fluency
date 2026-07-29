@@ -20,6 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePath } from './utils/pathUtils';
 
 export class MistralVibeDataAccess {
@@ -160,7 +161,10 @@ const completionTokens = typeof meta.stats?.session_completion_tokens === 'numbe
 if (promptTokens + completionTokens === 0) {
 return {};
 }
-const model: string = meta.config?.active_model || 'devstral';
+// Untrusted `active_model` string from parsed meta.json — treat unsafe object keys
+// like a missing model (see protoGuard.ts).
+const rawModel = meta.config?.active_model;
+const model: string = rawModel && !isUnsafeObjectKey(rawModel) ? rawModel : 'devstral';
 return {
 [model]: { inputTokens: promptTokens, outputTokens: completionTokens, sessions: 0 }
 };
