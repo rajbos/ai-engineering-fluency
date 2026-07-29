@@ -919,6 +919,26 @@ test('analyzeToolCuration: flags unused skill with refine recommendation', () =>
 	assert.equal(rec?.target, 'stale-skill');
 });
 
+test('analyzeToolCuration: a skill invoked via skillCalls.byName is NOT flagged as unused', () => {
+	// Regression test: Claude Code (and other wrapper-tool editors) never put the
+	// real skill name in toolCalls.byTool — only in skillCalls.byName. Before this
+	// was wired up, every discovered skill looked permanently unused regardless of
+	// real usage.
+	const available = [
+		{ name: 'graphify', description: 'Knowledge graph skill', source: 'skill' as const, skillPath: '.claude/skills/graphify/SKILL.md' },
+	];
+	const period: UsageAnalysisPeriod = {
+		...emptyPeriod(),
+		skillCalls: { total: 3, byName: { graphify: 3 } },
+	};
+
+	const result = analyzeToolCuration(available, period, 30);
+
+	assert.equal(result.unusedTools.length, 0);
+	assert.equal(result.recommendations.filter(r => r.type === 'refine-skill').length, 0);
+	assert.ok(result.usedTools.some(t => t.name === 'graphify' && t.count === 3));
+});
+
 test('analyzeToolCuration: includes windowDays in result', () => {
 	const result = analyzeToolCuration([], emptyPeriod(), 90);
 	assert.equal(result.windowDays, 90);

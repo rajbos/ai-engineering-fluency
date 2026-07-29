@@ -2,7 +2,7 @@ import * as fs from 'fs';
 import type { ModelUsage, ChatTurn, ActualUsage } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
 import { ClaudeCodeDataAccess, normalizeClaudeModelId } from '../claudecode';
-import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
+import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification, addSkillCall } from '../usageAnalysis';
 import { isMcpTool, extractMcpServerName, detectClaudeCodeEditorVariant } from '../workspaceHelpers';
 import { createEmptyContextRefs } from '../tokenEstimation';
 
@@ -36,6 +36,65 @@ export function extractClaudeSlashCommand(content: unknown): string | null {
 	if (!m) { return null; }
 	const cmd = m[1].toLowerCase();
 	return CLAUDE_SLASH_ALLOWLIST.has(cmd) ? cmd : null;
+}
+
+/**
+ * Resolve the actual skill name from a Claude Code `Skill` tool_use block.
+ * Claude Code wraps every skill invocation (e.g. `/graphify`) behind one generic
+ * `Skill` tool with the real name in `input.skill` — so per-skill usage would
+ * otherwise be invisible, collapsed into a single "Skill" tool-call bucket.
+ * Returns null for any other tool, or a malformed/missing `input.skill`.
+ * Exported for reuse by other Claude-family adapters (e.g. Claude Desktop).
+ */
+export function extractSkillName(toolName: string, input: unknown): string | null {
+	if (toolName !== 'Skill') { return null; }
+	const skill = (input as { skill?: unknown } | null | undefined)?.skill;
+	return typeof skill === 'string' && skill.trim() ? skill.trim() : null;
+}
+
+/**
+ * Resolve the skill/command name from a user-typed slash invocation, e.g. `/graphify`.
+ * When a user directly types a registered command or skill, Claude Code expands it into
+ * a plain user message whose content carries `<command-message>...</command-message>`
+ * followed by `<command-name>/name</command-name>` — a completely different, non-tool-call
+ * representation from the `Skill` tool_use path in {@link extractSkillName} (that path only
+ * fires when Claude itself decides to invoke a skill, not when the user types it directly).
+ * Deliberately agnostic (no allowlist) — this captures any command/skill name, unlike the
+ * legacy {@link CLAUDE_SLASH_ALLOWLIST} mechanism which only recognizes 5 hardcoded ones.
+ */
+export function extractInvokedSkillName(content: unknown): string | null {
+	let text = '';
+	if (typeof content === 'string') {
+		text = content;
+	} else if (Array.isArray(content)) {
+		for (const block of content) {
+			if (block?.type === 'text' && typeof block.text === 'string') {
+				text = block.text;
+				break;
+			}
+		}
+	}
+	const m = text.match(/<command-name>\/([a-zA-Z0-9_-]+)<\/command-name>/);
+	return m ? m[1] : null;
+}
+
+/**
+ * Record a skill invocation into `analysis.skillCalls`, if `toolName`/`input` resolve to one.
+ * No-op for any other tool call. Shared by every Claude-family adapter (Code, Desktop).
+ */
+export function recordSkillCall(analysis: import('../types').SessionUsageAnalysis, toolName: string, input: unknown): void {
+	const skillName = extractSkillName(toolName, input);
+	if (skillName) { addSkillCall(analysis, skillName); }
+}
+
+/**
+ * Record a user-typed slash invocation (`/graphify`, etc.) into `analysis.skillCalls`.
+ * No-op when the message content carries no `<command-name>` tag. Shared by every
+ * Claude-family adapter (Code, Desktop).
+ */
+export function recordInvokedSkillCall(analysis: import('../types').SessionUsageAnalysis, content: unknown): void {
+	const skillName = extractInvokedSkillName(content);
+	if (skillName) { addSkillCall(analysis, skillName); }
 }
 
 export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
@@ -269,6 +328,7 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			// Note: do NOT increment analysis.toolCalls.total — slash commands are not tool calls
 			analysis.toolCalls.byTool[key] = (analysis.toolCalls.byTool[key] || 0) + 1;
 		}
+		recordInvokedSkillCall(analysis, event.message?.content);
 	}
 
 	private processAssistantEvent(event: any, analysis: import('../types').SessionUsageAnalysis, ctx: UsageAnalysisAdapterContext, models: string[]): void {
@@ -286,6 +346,7 @@ export class ClaudeCodeAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 			} else {
 				analysis.toolCalls.total++;
 				analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+				recordSkillCall(analysis, toolName, c.input);
 			}
 		}
 	}

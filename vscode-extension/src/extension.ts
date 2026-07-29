@@ -9665,6 +9665,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         backendStorageInfo,
         githubAuth: githubAuthStatus,
         toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
+        skillCallStats: this.lastUsageAnalysisStats?.last30Days?.skillCalls ?? null,
         toolFamilies: getToolFamilies(),
         otelComparison,
       });
@@ -10146,6 +10147,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       displaySettings: { showTokens: this.getStatusBarShowTokensSetting(), showCost: this.getStatusBarShowCostSetting(), monthlyBudget: this.getMonthlyBudgetSetting() },
       quotaEntitlements: this._copilotQuotaEntitlements,
       toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
+      skillCallStats: this.lastUsageAnalysisStats?.last30Days?.skillCalls ?? null,
       toolFamilies: getToolFamilies(),
     }).replace(/</g, "\\u003c");
 

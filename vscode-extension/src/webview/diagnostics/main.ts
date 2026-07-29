@@ -162,6 +162,7 @@ type DiagnosticsData = {
   displaySettings?: DisplaySettings;
   quotaEntitlements?: QuotaEntitlements;
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
+  skillCallStats?: { total: number; byName: { [key: string]: number } } | null;
   toolFamilies?: ToolFamilyConfig[];
   otelComparison?: CopilotCliOtelComparison | null;
 };
@@ -1485,7 +1486,7 @@ function activateTab(tabId: string): boolean {
 /** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
 const TAB_GROUPS: Record<string, string[]> = {
   diagnostics: ["report", "sessions", "cache", "path-analyzer"],
-  research: ["model-usage", "tool-analysis", "otel-delta"],
+  research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta"],
   settings: ["display", "backend", "github", "debug"],
 };
 
@@ -2207,6 +2208,12 @@ function handleToolAnalysisSection(message: DiagMessage): void {
   replaceTabContent("tool-analysis", newContent, setupToolAnalysisSortHandlers);
 }
 
+function handleSkillUsageSection(message: DiagMessage): void {
+  if (message.skillCallStats === undefined) { return; }
+  const newContent = renderSkillUsageTab(message.skillCallStats as DiagnosticsData['skillCallStats']);
+  replaceTabContent("skill-usage", newContent);
+}
+
 /** Re-renders the OTel Delta tab body from currentOtelComparison + currentOtelDeltaPeriod, preserving active/tab state. */
 function rerenderOtelDeltaTab(): void {
   replaceTabContent("otel-delta", renderOtelDeltaTab(currentOtelComparison, currentOtelDeltaPeriod), setupOtelDeltaPeriodHandler);
@@ -2235,6 +2242,7 @@ function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleCandidatePathsSection(message);
   handleGithubAuthSection(message);
   handleToolAnalysisSection(message);
+  handleSkillUsageSection(message);
   handleOtelComparisonSection(message);
 }
 
@@ -2831,6 +2839,39 @@ ${sectionsHtml}
 </div>`;
 }
 
+/**
+ * Renders per-skill invocation counts (e.g. Claude Code's `/graphify`, custom SKILL.md
+ * workflows) over the last 30 days. Adapter-agnostic by design — populated only for
+ * editors whose session logs expose a distinguishable skill name (currently Claude Code
+ * and Claude Desktop); other editors show the empty state until their format is mapped.
+ */
+function renderSkillUsageTab(skillCallStats: DiagnosticsData['skillCallStats']): string {
+  const byName = skillCallStats?.byName ?? {};
+  const rows = Object.entries(byName).sort((a, b) => b[1] - a[1]);
+  if (rows.length === 0) {
+    return `<div id="tab-skill-usage" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🧩 Skill Usage</div>
+<div>Tracks how often each agent skill (e.g. a <code>/skill-name</code> invocation or another editor's <code>SKILL.md</code> workflow) was invoked over the last 30 days. No skill invocations have been recorded yet. Skill usage is currently detected for Claude Code, Claude Desktop, and Copilot CLI sessions — support for other editors depends on whether their session logs expose a distinguishable skill name.</div>
+</div>
+</div>`;
+  }
+  const total = rows.reduce((sum, [, count]) => sum + count, 0);
+  const bodyRows = rows
+    .map(([name, count]) => `<tr><td>${escapeHtml(name)}</td><td>${formatTokenCount(count)}</td></tr>`)
+    .join('');
+  return `<div id="tab-skill-usage" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🧩 Skill Usage</div>
+<div>${formatTokenCount(total)} skill invocation(s) across ${rows.length} skill(s) in the last 30 days. Currently detected for Claude Code / Claude Desktop / Copilot CLI sessions.</div>
+</div>
+<table class="session-table skill-usage-table">
+<thead><tr><th>Skill</th><th>Invocations</th></tr></thead>
+<tbody>${bodyRows}</tbody>
+</table>
+</div>`;
+}
+
 function renderOtelDeltaSetupNotice(comparison: CopilotCliOtelComparison | null | undefined): string {
   if (comparison && comparison.otelSessionsIndexed > 0) { return ''; }
   const dirStatus = comparison?.otelDirExists
@@ -3048,6 +3089,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <div class="tabs leaf-tabs" data-group="research" style="display: none;">
 <button class="tab" data-tab="model-usage">🧮 Model Usage</button>
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
+<button class="tab" data-tab="skill-usage">🧩 Skill Usage</button>
 <button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
 </div>
 
@@ -3086,6 +3128,7 @@ ${renderShareCardTab(detailedFiles, isLoading)}
 ${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+${renderSkillUsageTab(data.skillCallStats)}
 ${renderOtelDeltaTab(data.otelComparison)}
 </div>
 `;

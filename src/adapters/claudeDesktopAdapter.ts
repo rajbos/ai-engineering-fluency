@@ -5,7 +5,7 @@ import { ClaudeDesktopCoworkDataAccess } from '../claudedesktop';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
 import { normalizeClaudeModelId } from '../claudecode';
-import { extractClaudeSlashCommand } from './claudeCodeAdapter';
+import { extractClaudeSlashCommand, recordSkillCall, recordInvokedSkillCall } from './claudeCodeAdapter';
 
 export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem {
 	readonly id = 'claudedesktop';
@@ -220,6 +220,7 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 			// Note: do NOT increment analysis.toolCalls.total — slash commands are not tool calls
 			analysis.toolCalls.byTool[key] = (analysis.toolCalls.byTool[key] || 0) + 1;
 		}
+		recordInvokedSkillCall(analysis, event.message?.content);
 	}
 
 	private processDesktopAssistantEvent(event: any, analysis: import('../types').SessionUsageAnalysis, models: string[]): void {
@@ -231,6 +232,7 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 			analysis.toolCalls.total++;
 			const toolName = String(c.name || 'tool');
 			analysis.toolCalls.byTool[toolName] = (analysis.toolCalls.byTool[toolName] || 0) + 1;
+			recordSkillCall(analysis, toolName, c.input);
 		}
 	}
 

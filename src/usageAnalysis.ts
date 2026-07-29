@@ -1155,6 +1155,13 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	for (const [tool, count] of Object.entries(analysis.mcpTools.byTool)) {
 		period.mcpTools.byTool[tool] = (period.mcpTools.byTool[tool] || 0) + count;
 	}
+	if (analysis.skillCalls) {
+		if (!period.skillCalls) { period.skillCalls = { total: 0, byName: {} }; }
+		period.skillCalls.total += analysis.skillCalls.total;
+		for (const [name, count] of Object.entries(analysis.skillCalls.byName)) {
+			period.skillCalls.byName[name] = (period.skillCalls.byName[name] || 0) + count;
+		}
+	}
 	_muaMergeModelSwitching(period, analysis);
 	_muaMergeEnhancedMetrics(period, analysis);
 }
@@ -1847,6 +1854,18 @@ export async function trackEnhancedMetrics(deps: Pick<UsageAnalysisDeps, 'warn'>
 }
 
 /**
+ * Increment `analysis.skillCalls` for `skillName`, lazily initializing the bucket.
+ * Shared low-level helper — every adapter capable of resolving a specific skill/command
+ * name from its own session format (whatever that format's representation looks like)
+ * funnels through this one function, so `skillCalls` stays consistent across editors.
+ */
+export function addSkillCall(analysis: SessionUsageAnalysis, skillName: string): void {
+	if (!analysis.skillCalls) { analysis.skillCalls = { total: 0, byName: {} }; }
+	analysis.skillCalls.total++;
+	analysis.skillCalls.byName[skillName] = (analysis.skillCalls.byName[skillName] || 0) + 1;
+}
+
+/**
  * Create an empty SessionUsageAnalysis object, used as the baseline for adapter analyzeUsage() implementations.
  */
 export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
@@ -1855,6 +1874,7 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 		modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
 		contextReferences: createEmptyContextRefs(),
 		mcpTools: { total: 0, byServer: {}, byTool: {} },
+		skillCalls: { total: 0, byName: {} },
 		modelSwitching: {
 			uniqueModels: [],
 			modelCount: 0,
@@ -2056,8 +2076,21 @@ export function analyzeCliAttachments(attachments: unknown, refs: ContextReferen
 	}
 }
 
+/**
+ * Resolve a user-typed slash invocation from Copilot CLI's plain-text `user.message` content
+ * (e.g. `/graphify`, `/chronicle standup`). Unlike Claude Code (which wraps explicit
+ * invocations in `<command-message>`/`<command-name>` tags), Copilot CLI's raw command is
+ * the literal message text — no wrapper. Deliberately agnostic (no allowlist), matching
+ * any registered skill/command name, not just a hardcoded few.
+ */
+export function extractInvokedSkillNameFromPlainText(content: unknown): string | null {
+	if (typeof content !== 'string') { return null; }
+	const m = content.trim().match(/^\/([a-zA-Z0-9_-]+)(?:\s|$)/);
+	return m ? m[1] : null;
+}
+
 /** Handle Copilot CLI events (session.start, session.model_change, user.message). */
- 
+
 function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
 	if (event.type === 'session.start' && event.data) { _asuHandleSessionStartEvent(event.data as Record<string, unknown>, cliState); }
 	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { cliState.defaultModel = event.data.newModel; }
@@ -2068,15 +2101,25 @@ function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: Sessi
 		cliState.efficiencyTurns.push({ model: event.model || cliState.defaultModel, toolCalls: [] });
 		analyzeCliAttachments(event.data?.attachments, analysis.contextReferences);
 		_asuHandleUserMessageMode(jetBrainsMode, analysis);
+		const skillName = extractInvokedSkillNameFromPlainText(event.data?.content);
+		if (skillName) { addSkillCall(analysis, skillName); }
 	}
 }
 
 /** Handle tool.call / tool.result / tool.execution_start events. */
- 
+
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
 	if (event.type !== 'tool.call' && event.type !== 'tool.result' && event.type !== 'tool.execution_start') { return; }
 	const toolName = event.data?.toolName || event.toolName || 'unknown';
 	recordToolOrMcpInvocation(toolName, analysis, toolNameMap);
+	// Copilot CLI wraps autonomous skill invocations behind a generic "skill" tool call
+	// (lowercase, unlike Claude Code's "Skill") — only tool.execution_start is confirmed to
+	// carry `arguments.skill`; gate on that exact event type to avoid any risk of the other
+	// two event types (tool.call/tool.result, an older/parallel schema) double-counting.
+	if (event.type === 'tool.execution_start' && toolName === 'skill') {
+		const skillName = event.data?.arguments?.skill;
+		if (typeof skillName === 'string' && skillName.trim()) { addSkillCall(analysis, skillName.trim()); }
+	}
 }
 
 /** Handle mcp.tool.call events and events with data.mcpServer set. */

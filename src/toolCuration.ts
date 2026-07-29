@@ -718,6 +718,12 @@ function buildUsedCounts(usagePeriod: UsageAnalysisPeriod): Record<string, numbe
 	for (const [tool, count] of Object.entries(usagePeriod.mcpTools.byTool)) {
 		counts[tool] = (counts[tool] ?? 0) + count;
 	}
+	// Skills are invoked behind a generic wrapper tool call on some editors (e.g. Claude
+	// Code's "Skill" tool), so the real skill name only ever shows up here, never in
+	// toolCalls.byTool. Without this, every discovered skill looks permanently unused.
+	for (const [name, count] of Object.entries(usagePeriod.skillCalls?.byName ?? {})) {
+		counts[name] = (counts[name] ?? 0) + count;
+	}
 	return counts;
 }
 
