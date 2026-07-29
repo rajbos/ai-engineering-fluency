@@ -28,6 +28,7 @@
  */
 import type { ModelUsage } from './types';
 import { estimateTokensFromText } from './tokenEstimation';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 
 export type JetBrainsMode = 'ask' | 'agent';
 
@@ -406,7 +407,8 @@ function _jbpFinalizeSession(result: JetBrainsParsedSession, state: JbpState): v
 	result.turns = Array.from(state.turnById.values());
 	result.messageIds = [...state.messageIds];
 	
-	if (result.tokens > 0 && result.modelHint !== 'unknown') {
+	// Untrusted `modelHint` string from parsed session JSON — see protoGuard.ts.
+	if (result.tokens > 0 && result.modelHint !== 'unknown' && !isUnsafeObjectKey(result.modelHint)) {
 		result.modelUsage[result.modelHint] = { inputTokens: state.inputTokens, outputTokens: state.outputTokens, sessions: 0 };
 	}
 }

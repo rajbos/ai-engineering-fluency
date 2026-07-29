@@ -55,6 +55,7 @@ import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
 import { detectJetBrainsModeFromContent, type JetBrainsMode } from './jetbrains';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isAnalyzable } from './ecosystemAdapter';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 
 
 // ---------------------------------------------------------------------------
@@ -2465,6 +2466,8 @@ function _gmusProcessJsonlLine(event: any, state: GmusJsonlState, modelUsage: Mo
 	}
 	_gmusUpdateDefaultModelFromEvent(event, state);
 	const model = event.data?.model || event.model || state.defaultModel;
+	// Untrusted `model` string from parsed session JSONL — see protoGuard.ts.
+	if (isUnsafeObjectKey(model)) { return; }
 	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!state.isDeltaBased) { _gmusProcessCliEventLine(event, model, state, modelUsage, deps); }
 }
