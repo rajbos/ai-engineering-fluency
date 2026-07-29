@@ -117,6 +117,15 @@ jobs:
       - name: Setup Gradle
         if: matrix.language == 'java-kotlin'
         uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
+        with:
+          # CodeQL needs to observe an actual compiler invocation between the
+          # init and analyze steps. If this action restores a previous run's
+          # Gradle User Home (including the local build cache), Gradle can mark
+          # compileKotlin/compileTestKotlin as UP-TO-DATE without ever invoking
+          # kotlinc — CodeQL then sees no compilation and fails with "No source
+          # code was seen during the build" / exit code 32. Disable caching for
+          # this job so the build always compiles for real under the tracer.
+          cache-disabled: true
 
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL
@@ -143,7 +152,11 @@ jobs:
       - name: Build JetBrains plugin (Gradle)
         if: matrix.language == 'java-kotlin'
         working-directory: jetbrains-plugin
-        run: ./gradlew compileKotlin compileTestKotlin --no-daemon
+        # --rerun-tasks / --no-build-cache force Gradle to actually invoke the
+        # Kotlin/Java compilers rather than restoring UP-TO-DATE task outputs
+        # from the (now-disabled, but belt-and-braces) build cache — see the
+        # comment on the "Setup Gradle" step above for why that matters to CodeQL.
+        run: ./gradlew compileKotlin compileTestKotlin --no-daemon --rerun-tasks --no-build-cache
 
       # Autobuild attempts to build any compiled languages (C/C++, C#, or Java)
       # that aren't otherwise handled above. csharp uses build-mode: none (no
