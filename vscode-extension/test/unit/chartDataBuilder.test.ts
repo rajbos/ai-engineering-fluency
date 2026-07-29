@@ -181,3 +181,45 @@ test('buildChartData builds non-empty provider session datasets', () => {
 	assert.ok(copilotDataset, 'expected GitHub Copilot provider session dataset');
 	assert.equal((copilotDataset as any).data.reduce((a: number, b: number) => a + b, 0), 3);
 });
+
+// ── modelCostDatasets ─────────────────────────────────────────────────────────
+
+/** Test cost stub: $1 per input token + $2 per output token, doubled for 'provider' pricing source. */
+const costPerModelDeps = {
+	...testDeps,
+	calculateEstimatedCost: (usage: Record<string, { inputTokens: number; outputTokens: number }>, pricingSource: 'provider' | 'copilot') => {
+		const multiplier = pricingSource === 'provider' ? 2 : 1;
+		return Object.values(usage).reduce((sum, u) => sum + (u.inputTokens * 1 + u.outputTokens * 2) * multiplier, 0);
+	},
+};
+
+test('buildChartData builds non-empty model cost datasets', () => {
+	const data = buildChartData(testDailyStats, costPerModelDeps);
+	assert.ok(data.periods.day.modelCostDatasets);
+	const gptDataset = data.periods.day.modelCostDatasets!.find((d: any) => d.label.toLowerCase().includes('gpt-4o') || d.label.toLowerCase().includes('4o'));
+	assert.ok(gptDataset, 'expected a GPT-4o model cost dataset');
+	// Both days' gpt-4o usage is via VS Code (Copilot pricing, multiplier 1):
+	// day1: 400*1 + 100*2 = 600, day2: 300*1 + 200*2 = 700
+	assert.equal((gptDataset as any).data.reduce((a: number, b: number) => a + b, 0), 1300);
+});
+
+test('buildChartData model cost datasets sum to same total as billing group cost datasets', () => {
+	const data = buildChartData(testDailyStats, costPerModelDeps);
+	const modelTotal = (data.periods.day.modelCostDatasets ?? []).reduce((sum: number, ds: any) => sum + ds.data.reduce((a: number, b: number) => a + b, 0), 0);
+	const providerTotal = (data.periods.day.billingGroupCostDatasets ?? []).reduce((sum: number, ds: any) => sum + ds.data.reduce((a: number, b: number) => a + b, 0), 0);
+	assert.equal(modelTotal, providerTotal);
+});
+
+// ── providerTokensDatasets ────────────────────────────────────────────────────
+
+test('buildChartData builds non-empty provider token datasets', () => {
+	const data = buildChartData(testDailyStats, testDeps);
+	assert.ok(data.periods.day.providerTokensDatasets);
+	assert.ok(data.periods.day.providerTokensDatasets!.length > 0);
+	const copilotDataset = data.periods.day.providerTokensDatasets!.find((d: any) => d.label === 'GitHub Copilot');
+	assert.ok(copilotDataset, 'expected GitHub Copilot provider token dataset');
+	// All usage in testDailyStats comes from VS Code (a Copilot surface):
+	// day1: (400+100)+(300+200)=1000, day2: 300+200=500
+	assert.equal((copilotDataset as any).data.reduce((a: number, b: number) => a + b, 0), 1500);
+});
+
