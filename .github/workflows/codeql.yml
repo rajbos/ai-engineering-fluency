@@ -82,6 +82,7 @@ jobs:
             api.github.com:443
             cache-redirector.jetbrains.com:443
             data.services.jetbrains.com:443
+            download-cdn.jetbrains.com:443
             download.jetbrains.com:443
             github.com:443
             hosted-compute-watchdog-prod-*.githubapp.com:443
