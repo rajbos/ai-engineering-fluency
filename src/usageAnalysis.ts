@@ -2348,6 +2348,8 @@ function accumulateSubAgentTokenUsage(
 		const subAgent = extractSubAgentData(responseItem);
 		if (subAgent) {
 			const saModel = subAgent.modelName || baseModel;
+			// Untrusted `modelName` string from parsed session JSON — see protoGuard.ts.
+			if (isUnsafeObjectKey(saModel)) { continue; }
 			if (!modelUsage[saModel]) { modelUsage[saModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 			if (subAgent.prompt) { modelUsage[saModel].inputTokens += estimateTokensFromText(subAgent.prompt, saModel, tokenEstimators); }
 			if (subAgent.result) { modelUsage[saModel].outputTokens += estimateTokensFromText(subAgent.result, saModel, tokenEstimators); }
@@ -2369,6 +2371,9 @@ type GmusJsonlState = {
 type CliShutdownMetricsEntry = { usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } };
 
 function _gmusApplyMetricEntry(modelName: string, usage: NonNullable<CliShutdownMetricsEntry['usage']>, dest: ModelUsage): void {
+	// Untrusted `modelName` key from a parsed modelMetrics JSON object (JSON.parse
+	// creates own "__proto__" properties, so Object.entries can yield it) — see protoGuard.ts.
+	if (isUnsafeObjectKey(modelName)) { return; }
 	if (!dest[modelName]) { dest[modelName] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	dest[modelName].inputTokens += typeof usage.inputTokens === 'number' ? usage.inputTokens : 0;
 	dest[modelName].outputTokens += typeof usage.outputTokens === 'number' ? usage.outputTokens : 0;
@@ -2513,6 +2518,8 @@ function _gmusProcessDeltaRequest(request: SessionRequestRaw, defaultModel: stri
 	} else if (request.result?.details) {
 		requestModel = getModelFromRequest(request, deps.modelPricing);
 	}
+	// Untrusted `modelId` string from parsed session JSON — see protoGuard.ts.
+	if (isUnsafeObjectKey(requestModel)) { return; }
 	if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!tryExtractExactTokenUsage(request, requestModel, modelUsage)) {
 		_gmusEstimateDeltaRequestTokens(request, requestModel, modelUsage, deps);
@@ -2540,6 +2547,8 @@ function _gmusDeltaFallbackExtraction(lines: string[], state: GmusJsonlState, mo
 		if (request.result?.usage || (typeof request.result?.promptTokens === 'number') || (request.result?.metadata && typeof request.result.metadata.promptTokens === 'number')) { continue; }
 		let requestModel = state.defaultModel;
 		if (request.modelId) { requestModel = request.modelId.replace(/^copilot\//, ''); }
+		// Untrusted `modelId` string from parsed session JSON — see protoGuard.ts.
+		if (isUnsafeObjectKey(requestModel)) { continue; }
 		if (!modelUsage[requestModel]) { modelUsage[requestModel] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 		modelUsage[requestModel].inputTokens += extracted.promptTokens;
 		modelUsage[requestModel].outputTokens += extracted.outputTokens;
@@ -2586,6 +2595,8 @@ function _gmusProcessJsonRequestEstimate(request: SessionRequestRaw, model: stri
 /** Process a single JSON-format session request, accumulating its token usage. */
 function _gmusProcessJsonRequest(request: SessionRequestRaw, modelUsage: ModelUsage, deps: GmusDeps): void {
 	const model = getModelFromRequest(request, deps.modelPricing);
+	// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+	if (isUnsafeObjectKey(model)) { return; }
 	if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 	if (!tryExtractExactTokenUsage(request, model, modelUsage)) { _gmusProcessJsonRequestEstimate(request, model, modelUsage, deps); }
 	if (request.response && Array.isArray(request.response)) {

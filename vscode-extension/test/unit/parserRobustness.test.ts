@@ -28,6 +28,15 @@ import { parseJetBrainsPartition } from '../../../src/jetbrains';
 import { CopilotChatAdapter } from '../../../src/adapters/copilotChatAdapter';
 import { MAX_SESSION_FILE_BYTES } from '../../../src/utils/safeFileRead';
 import { isUnsafeObjectKey } from '../../../src/utils/protoGuard';
+import { ContinueDataAccess } from '../../../src/continue';
+import { KiroDataAccess } from '../../../src/kiro';
+import { ClineDataAccess } from '../../../src/cline';
+import { PiDataAccess } from '../../../src/pi';
+import { ClaudeDesktopCoworkDataAccess } from '../../../src/claudedesktop';
+import { EclipseDataAccess } from '../../../src/eclipse';
+import { MistralVibeDataAccess } from '../../../src/mistralvibe';
+import { TokenAccumulator } from '../../../src/sessionParser';
+import { addModelUsage } from '../../../src/statsHelpers';
 
 function assertNoPrototypePollution(): void {
 	assert.equal(({} as any).polluted, undefined, 'Object.prototype must not be polluted');
@@ -405,6 +414,210 @@ test('OpenCode: __proto__ modelID does not pollute Object.prototype', () => {
 	} finally {
 		rm(tmpDir);
 	}
+});
+
+// ---------------------------------------------------------------------------
+// Continue
+// ---------------------------------------------------------------------------
+
+test('Continue: __proto__ modelTitle is skipped and does not pollute Object.prototype', async () => {
+	const tmpDir = mkTmpDir('continue-robust-');
+	try {
+		const file = path.join(tmpDir, 'session.json');
+		const session = {
+			history: [
+				{ promptLogs: [{ modelTitle: '__proto__', prompt: 'evil', completion: 'evil' }] },
+				{ promptLogs: [{ modelTitle: 'gpt-4o', prompt: 'hello there', completion: 'hi' }] },
+			],
+		};
+		fs.writeFileSync(file, JSON.stringify(session), 'utf8');
+		const cont = new ContinueDataAccess();
+		const modelUsage = await cont.getContinueModelUsage(file);
+		assertNoPrototypePollution();
+		assert.equal(Object.prototype.hasOwnProperty.call(modelUsage, '__proto__'), false);
+		assert.ok(modelUsage['gpt-4o'], 'legitimate model must still be counted');
+	} finally {
+		rm(tmpDir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Kiro
+// ---------------------------------------------------------------------------
+
+test('Kiro: __proto__ modelTitle is skipped and does not pollute Object.prototype', async () => {
+	const tmpDir = mkTmpDir('kiro-robust-');
+	try {
+		const file = path.join(tmpDir, 'session.json');
+		const session = {
+			history: [
+				{ promptLogs: [{ modelTitle: '__proto__', prompt: 'evil', completion: 'evil' }] },
+				{ promptLogs: [{ modelTitle: 'Agent', prompt: 'hello there', completion: 'hi' }] },
+			],
+		};
+		fs.writeFileSync(file, JSON.stringify(session), 'utf8');
+		const kiro = new KiroDataAccess();
+		const modelUsage = await kiro.getKiroModelUsage(file);
+		assertNoPrototypePollution();
+		assert.equal(Object.prototype.hasOwnProperty.call(modelUsage, '__proto__'), false);
+		assert.ok(modelUsage['Agent'], 'legitimate model must still be counted');
+	} finally {
+		rm(tmpDir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Cline
+// ---------------------------------------------------------------------------
+
+test('Cline: __proto__ modelId is skipped and does not pollute Object.prototype', async () => {
+	const tmpDir = mkTmpDir('cline-robust-');
+	try {
+		const taskDir = path.join(tmpDir, 'tasks', '123');
+		fs.mkdirSync(taskDir, { recursive: true });
+		const file = path.join(taskDir, 'ui_messages.json');
+		const messages = [
+			{
+				ts: 1, type: 'say', say: 'api_req_started',
+				text: JSON.stringify({ tokensIn: 10, tokensOut: 5, cacheWrites: 0, cacheReads: 0 }),
+				modelInfo: { modelId: '__proto__' },
+			},
+			{
+				ts: 2, type: 'say', say: 'api_req_started',
+				text: JSON.stringify({ tokensIn: 7, tokensOut: 3, cacheWrites: 0, cacheReads: 0 }),
+				modelInfo: { modelId: 'claude-sonnet-4-6' },
+			},
+		];
+		fs.writeFileSync(file, JSON.stringify(messages), 'utf8');
+		const cline = new ClineDataAccess();
+		const modelUsage = await cline.getClineModelUsage(file);
+		assertNoPrototypePollution();
+		assert.equal(Object.prototype.hasOwnProperty.call(modelUsage, '__proto__'), false);
+		assert.ok(modelUsage['claude-sonnet-4-6'], 'legitimate model must still be counted');
+	} finally {
+		rm(tmpDir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Pi
+// ---------------------------------------------------------------------------
+
+test('Pi: __proto__ model is skipped and does not pollute Object.prototype', async () => {
+	const tmpDir = mkTmpDir('pi-robust-');
+	try {
+		const file = path.join(tmpDir, 'session.jsonl');
+		const lines = [
+			{ type: 'message', message: { role: 'assistant', model: '__proto__', usage: { input: 10, output: 5 } } },
+			{ type: 'message', message: { role: 'assistant', model: 'claude-sonnet-4-6', usage: { input: 7, output: 3 } } },
+		];
+		fs.writeFileSync(file, lines.map(l => JSON.stringify(l)).join('\n'), 'utf8');
+		const pi = new PiDataAccess();
+		const modelUsage = await pi.getModelUsage(file);
+		assertNoPrototypePollution();
+		assert.equal(Object.prototype.hasOwnProperty.call(modelUsage, '__proto__'), false);
+		assert.ok(modelUsage['claude-sonnet-4-6'], 'legitimate model must still be counted');
+	} finally {
+		rm(tmpDir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Claude Desktop (Cowork)
+// ---------------------------------------------------------------------------
+
+test('ClaudeDesktop Cowork: __proto__ model is skipped and does not pollute Object.prototype', async () => {
+	const tmpDir = mkTmpDir('cowork-robust-');
+	try {
+		const file = path.join(tmpDir, 'session.jsonl');
+		const events = [
+			{ type: 'assistant', message: { role: 'assistant', model: '__proto__', stop_reason: 'end_turn', usage: { input_tokens: 10, output_tokens: 5 } } },
+			{ type: 'assistant', message: { role: 'assistant', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: { input_tokens: 7, output_tokens: 3 } } },
+		];
+		fs.writeFileSync(file, events.map(e => JSON.stringify(e)).join('\n'), 'utf8');
+		const cowork = new ClaudeDesktopCoworkDataAccess();
+		const modelUsage = await cowork.getCoworkModelUsage(file);
+		assertNoPrototypePollution();
+		assert.equal(Object.prototype.hasOwnProperty.call(modelUsage, '__proto__'), false);
+		assert.ok(modelUsage['claude-sonnet-4.6'], 'legitimate model must still be counted');
+	} finally {
+		rm(tmpDir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Eclipse
+// ---------------------------------------------------------------------------
+
+test('Eclipse: __proto__ model is skipped and does not pollute Object.prototype', async () => {
+	const tmpDir = mkTmpDir('eclipse-robust-');
+	try {
+		const file = path.join(tmpDir, 'conv.json');
+		const session = {
+			turns: [
+				{ role: 'user', turnId: 't1', model: '__proto__', message: { text: 'evil prompt' } },
+				{ role: 'user', turnId: 't2', model: 'gpt-4o', message: { text: 'hello there' } },
+			],
+		};
+		fs.writeFileSync(file, JSON.stringify(session), 'utf8');
+		const eclipse = new EclipseDataAccess();
+		const modelUsage = await eclipse.getEclipseModelUsage(file);
+		assertNoPrototypePollution();
+		assert.equal(Object.prototype.hasOwnProperty.call(modelUsage, '__proto__'), false);
+		assert.ok(modelUsage['gpt-4o'], 'legitimate model must still be counted');
+	} finally {
+		rm(tmpDir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Mistral Vibe
+// ---------------------------------------------------------------------------
+
+test('MistralVibe: __proto__ active_model falls back to the default model', async () => {
+	const tmpDir = mkTmpDir('mistral-robust-');
+	try {
+		const file = path.join(tmpDir, 'meta.json');
+		const meta = {
+			config: { active_model: '__proto__' },
+			stats: { session_prompt_tokens: 10, session_completion_tokens: 5 },
+		};
+		fs.writeFileSync(file, JSON.stringify(meta), 'utf8');
+		const vibe = new MistralVibeDataAccess();
+		const modelUsage = await vibe.getModelUsage(file);
+		assertNoPrototypePollution();
+		assert.equal(Object.prototype.hasOwnProperty.call(modelUsage, '__proto__'), false);
+		assert.ok(modelUsage['devstral'], 'tokens must be attributed to the default model instead');
+	} finally {
+		rm(tmpDir);
+	}
+});
+
+// ---------------------------------------------------------------------------
+// Shared accumulators (sessionParser.TokenAccumulator, statsHelpers.addModelUsage)
+// ---------------------------------------------------------------------------
+
+test('TokenAccumulator: __proto__ model is skipped and does not pollute Object.prototype', () => {
+	const acc = new TokenAccumulator('default-model', (text: string) => text.length);
+	acc.addInput('__proto__', 'evil');
+	acc.addOutput('constructor', 'evil');
+	acc.addInput('gpt-4o', 'hello');
+	assertNoPrototypePollution();
+	assert.equal(Object.prototype.hasOwnProperty.call(acc.modelUsage, '__proto__'), false);
+	assert.equal(Object.prototype.hasOwnProperty.call(acc.modelUsage, 'constructor'), false);
+	assert.ok(acc.modelUsage['gpt-4o'], 'legitimate model must still be counted');
+});
+
+test('addModelUsage: an own __proto__ key in source is skipped and does not pollute', () => {
+	// A computed property creates an own "__proto__" key, mimicking what an
+	// unguarded adapter could hand to the central merge.
+	const key = '__proto__';
+	const source = { [key]: { inputTokens: 10, outputTokens: 5, sessions: 0 }, 'gpt-4o': { inputTokens: 7, outputTokens: 3, sessions: 0 } };
+	const target: Record<string, { inputTokens: number; outputTokens: number; sessions: number }> = {};
+	addModelUsage(target as any, source as any);
+	assertNoPrototypePollution();
+	assert.equal(Object.prototype.hasOwnProperty.call(target, '__proto__'), false);
+	assert.deepEqual(target['gpt-4o'], { inputTokens: 7, outputTokens: 3, sessions: 0 });
 });
 
 // ---------------------------------------------------------------------------

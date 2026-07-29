@@ -4,6 +4,7 @@ export interface ModelUsage {
 
 import { extractSubAgentData, extractResponseItemText } from './tokenEstimation';
 import { safeJsonParse } from './utils/jsonParse';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { type JsonObject, isObject, isSafePathSegment, isArrayIndexSegment, normalizeModelId } from './utils/typeGuards';
 
 interface MessagePart {
@@ -179,6 +180,8 @@ export class TokenAccumulator {
 
     addInput(model: string, text: string): void {
         const m = this.ensureModel(model);
+        // Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+        if (isUnsafeObjectKey(m)) { return; }
         if (!this.modelUsage[m]) { this.modelUsage[m] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
         const t = this.estimateTokens(text, m);
         this.modelUsage[m].inputTokens += t;
@@ -187,6 +190,8 @@ export class TokenAccumulator {
 
     addOutput(model: string, text: string): void {
         const m = this.ensureModel(model);
+        // Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+        if (isUnsafeObjectKey(m)) { return; }
         if (!this.modelUsage[m]) { this.modelUsage[m] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
         const t = this.estimateTokens(text, m);
         this.modelUsage[m].outputTokens += t;

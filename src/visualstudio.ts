@@ -24,6 +24,7 @@ import * as path from 'path';
 import * as os from 'os';
 import { decode, decodeMulti } from '@msgpack/msgpack';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './workspaceHelpers';
 
 /** Directory names to skip during filesystem scan (heavy / non-project dirs). */
@@ -429,8 +430,9 @@ if (!obj2Data?.Content) { continue; }
 const text = this.extractTextFromContent(obj2Data.Content);
 const isRequest = i % 2 === 1;
 const contextText = isRequest ? this.extractContextText(obj2Data.Context) : '';
-if (!text && !contextText) { continue; }
 const model = this.getModelId(obj2Data, isRequest) || 'unknown';
+// Untrusted `model` string from the decoded session file — see protoGuard.ts.
+if ((!text && !contextText) || isUnsafeObjectKey(model)) { continue; }
 if (!modelTexts[model]) { modelTexts[model] = { input: '', output: '' }; }
 if (isRequest) {
 modelTexts[model].input += text + contextText;

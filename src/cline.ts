@@ -32,6 +32,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import type { ModelUsage } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePathForComparison } from './workspaceHelpers';
 import { toLocalDayKey } from './utils/dayKeys';
 import { getVSCodeUserPaths } from './adapters/copilotChatAdapter';
@@ -291,6 +292,8 @@ export class ClineDataAccess {
 	}
 
 	private addRequestToModelUsage(usage: ModelUsage, model: string, inputTokens: number, outputTokens: number, cacheReads: number, cacheWrites: number): void {
+		// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { return; }
 		if (!usage[model]) {
 			usage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 };
 		}

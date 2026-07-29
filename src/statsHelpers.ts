@@ -6,6 +6,7 @@
  */
 
 import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
 
 /**
@@ -50,6 +51,9 @@ export function computeSessionDurationMs(firstInteraction: string | null | undef
  */
 export function addModelUsage(target: ModelUsage, source: ModelUsage): void {
 for (const [model, usage] of Object.entries(source)) {
+// Defense in depth: a source built from parsed JSON can carry an own "__proto__"
+// key (e.g. via a computed property) — see protoGuard.ts.
+if (isUnsafeObjectKey(model)) { continue; }
 if (!target[model]) { target[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 target[model].inputTokens += usage.inputTokens;
 target[model].outputTokens += usage.outputTokens;
@@ -343,6 +347,8 @@ function _apsBumpDailyEntry(entry: DailyTokenStats, tokens: number, interactions
 	entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);
 	for (const model of Object.keys(modelUsage)) {
+		// addModelUsage skips unsafe keys, so they have no entry here — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { continue; }
 		if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
 		entry.modelUsage[model].sessions += 1;
 	}
@@ -350,6 +356,7 @@ function _apsBumpDailyEntry(entry: DailyTokenStats, tokens: number, interactions
 	if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 	addModelUsage(entry.editorModelUsage[editorType], modelUsage);
 	for (const model of Object.keys(modelUsage)) {
+		if (isUnsafeObjectKey(model)) { continue; }
 		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
 		entry.editorModelUsage[editorType][model].sessions += 1;
 	}
@@ -549,6 +556,8 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	entry.repositoryUsage[repository].tokens += tokens; entry.repositoryUsage[repository].sessions += 1;
 	addModelUsage(entry.modelUsage, modelUsage);
 	for (const model of Object.keys(modelUsage)) {
+		// addModelUsage skips unsafe keys, so they have no entry here — see protoGuard.ts.
+		if (isUnsafeObjectKey(model)) { continue; }
 		if (!entry.modelUsage[model].sessions) { entry.modelUsage[model].sessions = 0; }
 		entry.modelUsage[model].sessions += 1;
 	}
@@ -556,6 +565,7 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 	addModelUsage(entry.editorModelUsage[editorType], modelUsage);
 	for (const model of Object.keys(modelUsage)) {
+		if (isUnsafeObjectKey(model)) { continue; }
 		if (!entry.editorModelUsage[editorType][model].sessions) { entry.editorModelUsage[editorType][model].sessions = 0; }
 		entry.editorModelUsage[editorType][model].sessions += 1;
 	}

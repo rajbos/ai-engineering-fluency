@@ -27,6 +27,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import type { ModelUsage, ModelId } from './types';
+import { isUnsafeObjectKey } from './utils/protoGuard';
 import { normalizePath } from './utils/pathUtils';
 
 export class PiDataAccess {
@@ -206,6 +207,8 @@ const inputTokens = typeof usage.input === 'number' ? usage.input : 0;
 const outputTokens = typeof usage.output === 'number' ? usage.output : 0;
 if (inputTokens + outputTokens === 0) { return; }
 const model: string = msg.model || 'unknown';
+// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+if (isUnsafeObjectKey(model)) { return; }
 if (!modelUsage[model]) { modelUsage[model] = { inputTokens: 0, outputTokens: 0, sessions: 0 }; }
 modelUsage[model].inputTokens += inputTokens;
 modelUsage[model].outputTokens += outputTokens;
