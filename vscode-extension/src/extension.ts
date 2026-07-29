@@ -6784,10 +6784,14 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 	 */
 	private ensureWorkspaceTrustedForGitAccess(): void {
 		if (!vscode.workspace.isTrusted) {
-			throw new Error('Repository hygiene analysis requires a trusted workspace because it runs git commands and reads workspace files. Grant workspace trust to enable it.');
+			if (!vscode.workspace.isTrusted) {
+  throw new Error('Repository hygiene analysis requires a trusted workspace because it runs git commands and reads workspace files. Grant workspace trust to enable it.');
+}
 		}
 		if (vscode.workspace.workspaceFolders?.some(folder => folder.uri.scheme !== 'file')) {
-			throw new Error('Repository hygiene analysis is not available for virtual workspaces because it requires local git and filesystem access.');
+			if (vscode.workspace.workspaceFolders?.some(folder => folder.uri.scheme !== 'file')) {
+  throw new Error('Repository hygiene analysis is not available for virtual workspaces because it requires local git and filesystem access.');
+}
 		}
 	}
 
