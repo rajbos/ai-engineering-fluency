@@ -5,6 +5,8 @@ import type { ChatTurn, ModelUsage, PromptTokenDetail } from './types';
 import { createEmptyContextRefs } from './tokenEstimation';
 import { normalizePathForComparison, normalizePath } from './workspaceHelpers';
 import { toLocalDayKey } from './utils/dayKeys';
+import { isUnsafeObjectKey } from './utils/protoGuard';
+import { readTextFileWithSizeGuard, MAX_SESSION_FILE_BYTES } from './utils/safeFileRead';
 
 interface GeminiCliSessionHeader {
 	sessionId: string;
@@ -398,6 +400,8 @@ export class GeminiCliDataAccess {
 
 		for (const assistant of session.assistantRecords) {
 			const model = normalizeGeminiModelId(assistant.model || 'unknown');
+			// Untrusted `model` string from parsed session JSON — see protoGuard.ts.
+			if (isUnsafeObjectKey(model)) { continue; }
 			const tokenData = this.getTokenBreakdown(assistant.tokens);
 
 			if (!modelUsage[model]) {
@@ -563,14 +567,12 @@ export class GeminiCliDataAccess {
 	}
 
 	private async readJsonlLines(sessionFilePath: string): Promise<string[]> {
-		try {
-			return (await fs.promises.readFile(sessionFilePath, 'utf8'))
-				.split(/\r?\n/)
-				.map(line => line.trim())
-				.filter(line => line.length > 0);
-		} catch {
-			return [];
-		}
+		const content = await readTextFileWithSizeGuard(sessionFilePath, 'geminicli');
+		if (content === undefined) { return []; }
+		return content
+			.split(/\r?\n/)
+			.map(line => line.trim())
+			.filter(line => line.length > 0);
 	}
 
 	private getProjectBucketFromPath(sessionFilePath: string): string | undefined {
@@ -622,6 +624,10 @@ export class GeminiCliDataAccess {
 		const readPromise = (async (): Promise<Map<string, string>> => {
 			const mappings = new Map<string, string>();
 			try {
+				if (stats.size > MAX_SESSION_FILE_BYTES) {
+					console.debug(`[geminicli] Skipping oversized projects index (${stats.size} bytes): ${projectsPath}`);
+					return mappings;
+				}
 				const raw = JSON.parse(await fs.promises.readFile(projectsPath, 'utf8'));
 				if (Array.isArray(raw)) {
 					for (const entry of raw) {

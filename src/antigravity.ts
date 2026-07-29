@@ -17,6 +17,7 @@ import * as path from 'path';
 import type { ChatTurn, ModelUsage } from './types';
 import { createEmptyContextRefs } from './tokenEstimation';
 import { normalizePathForComparison } from './workspaceHelpers';
+import { readTextFileWithSizeGuard } from './utils/safeFileRead';
 
 // ---------------------------------------------------------------------------
 // Transcript entry interfaces
@@ -202,10 +203,8 @@ const userEntries: AntigravityEntry[] = [];
 const modelEntries: AntigravityEntry[] = [];
 const allEntries: AntigravityEntry[] = [];
 
-let rawContent: string;
-try {
-rawContent = await fs.promises.readFile(filePath, 'utf8');
-} catch {
+const rawContent = await readTextFileWithSizeGuard(filePath, 'antigravity');
+if (rawContent === undefined) {
 return { sessionId, userEntries, modelEntries, allEntries };
 }
 
