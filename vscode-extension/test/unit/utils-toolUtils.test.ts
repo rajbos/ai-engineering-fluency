@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { resolveGuidMcpToolName, isGuidMcpTool } from '../../../src/utils/toolUtils';
+import { resolveGuidMcpToolName, isGuidMcpTool, resolveMcpFamilyToolName, isMcpFamilyResolvedTool } from '../../../src/utils/toolUtils';
 
 // ── resolveGuidMcpToolName ───────────────────────────────────────────────────
 
@@ -57,4 +57,82 @@ test('isGuidMcpTool: returns false for regular tool', () => {
 
 test('isGuidMcpTool: returns false for mcp_ (underscore) format', () => {
 	assert.equal(isGuidMcpTool('mcp_io_github_git_list_issues'), false);
+});
+
+// ── resolveMcpFamilyToolName ─────────────────────────────────────────────────
+// Regression coverage for issue #1760: new MCP client/server-registration
+// spellings of an already-recognized tool must resolve without a literal
+// toolNames.json entry for every possible prefix.
+
+test('resolveMcpFamilyToolName: resolves bare Claude Code GitHub MCP registration', () => {
+	assert.equal(resolveMcpFamilyToolName('mcp__github__create_pull_request'), 'GitHub MCP: Create Pull Request');
+	assert.equal(resolveMcpFamilyToolName('mcp__github__list_pull_requests'), 'GitHub MCP: List Pull Requests');
+	assert.equal(resolveMcpFamilyToolName('mcp__github__pull_request_read'), 'GitHub MCP: Pull Request Read');
+	assert.equal(resolveMcpFamilyToolName('mcp__github__update_pull_request'), 'GitHub MCP: Update Pull Request');
+});
+
+test('resolveMcpFamilyToolName: resolves VS Code plugin-marketplace Playwright registration', () => {
+	assert.equal(
+		resolveMcpFamilyToolName('mcp__plugin_playwright_playwright__browser_click'),
+		'Playwright MCP: Browser Click'
+	);
+	assert.equal(
+		resolveMcpFamilyToolName('mcp__plugin_playwright_playwright__browser_take_screenshot'),
+		'Playwright MCP: Browser Take Screenshot'
+	);
+});
+
+test('resolveMcpFamilyToolName: resolves other known prefix spellings for the same families', () => {
+	assert.equal(resolveMcpFamilyToolName('mcp_github_mcp_se_issue_write'), 'GitHub MCP: Issue Write');
+	assert.equal(resolveMcpFamilyToolName('mcp_playwright_browser_navigate'), 'Playwright MCP: Browser Navigate');
+	assert.equal(resolveMcpFamilyToolName('mcp_context7_resolve_library_id'), 'Context7 MCP: Resolve Library Id');
+	assert.equal(resolveMcpFamilyToolName('mcp_tavily_tavily_search'), 'Tavily MCP: Tavily Search');
+	assert.equal(resolveMcpFamilyToolName('mcp__claude-in-chrome__navigate'), 'Claude Browser MCP: Navigate');
+});
+
+test('resolveMcpFamilyToolName: does NOT resolve a VS Code 13-char-truncated prefix (needs a literal entry)', () => {
+	// "mcp_microsoft_pla_" truncates "microsoft_playwright" to 13 chars — the
+	// literal keyword "playwright" never appears, so this intentionally falls
+	// through to the literal toolNames.json entry rather than this resolver.
+	assert.equal(resolveMcpFamilyToolName('mcp_microsoft_pla_browser_navigate'), undefined);
+});
+
+test('resolveMcpFamilyToolName: returns undefined for unrelated tools', () => {
+	assert.equal(resolveMcpFamilyToolName('shell_command'), undefined);
+	assert.equal(resolveMcpFamilyToolName('Apply Patch'), undefined);
+	assert.equal(resolveMcpFamilyToolName('run_in_terminal'), undefined);
+});
+
+test('resolveMcpFamilyToolName: does not match a family action without the family keyword present', () => {
+	assert.equal(resolveMcpFamilyToolName('mcp__foo__create_pull_request'), undefined);
+});
+
+// ── isMcpFamilyResolvedTool ───────────────────────────────────────────────────
+
+test('isMcpFamilyResolvedTool: true for a new-prefix family match', () => {
+	assert.ok(isMcpFamilyResolvedTool('mcp__github__create_pull_request'));
+	assert.ok(isMcpFamilyResolvedTool('mcp__plugin_playwright_playwright__browser_click'));
+});
+
+test('isMcpFamilyResolvedTool: false for tools outside known families', () => {
+	assert.equal(isMcpFamilyResolvedTool('shell_command'), false);
+});
+
+// Regression coverage for issue #1761: a differently-cased VS Code server alias
+// ("Microsoft_Learn") and a not-yet-seen GitHub action ("get_label").
+
+test('resolveMcpFamilyToolName: resolves Microsoft Learn docs tools under a mixed-case VS Code alias', () => {
+	assert.equal(
+		resolveMcpFamilyToolName('mcp_Microsoft_Learn_microsoft_docs_fetch'),
+		'Microsoft Docs MCP: Docs Fetch'
+	);
+	assert.equal(
+		resolveMcpFamilyToolName('mcp_Microsoft_Learn_microsoft_docs_search'),
+		'Microsoft Docs MCP: Docs Search'
+	);
+});
+
+test('resolveMcpFamilyToolName: resolves GitHub get_label under an unseen server alias', () => {
+	assert.equal(resolveMcpFamilyToolName('mcp_github_mcp_s13be_get_label'), 'GitHub MCP: Get Label');
+	assert.equal(resolveMcpFamilyToolName('mcp_github_mcp_s13be_issue_write'), 'GitHub MCP: Issue Write');
 });
