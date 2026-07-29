@@ -81,6 +81,10 @@ jobs:
             api.adoptium.net:443
             api.github.com:443
             cache-redirector.jetbrains.com:443
+            # d2cico3c979uwg.cloudfront.net is the CloudFront distribution that
+            # download-cdn.jetbrains.com itself resolves/redirects to when the
+            # IntelliJ Platform Gradle plugin fetches the IC IDE distribution.
+            d2cico3c979uwg.cloudfront.net:443
             data.services.jetbrains.com:443
             download-cdn.jetbrains.com:443
             download.jetbrains.com:443
