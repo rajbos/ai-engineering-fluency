@@ -35,9 +35,30 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        language: ["actions", "typescript"]
         # CodeQL supports [ $supported-codeql-languages ]
         # Learn more about CodeQL language support at https://aka.ms/codeql-docs/language-support
+        #
+        # Each entry only checks out and sets up the toolchain its own language
+        # needs (see the sparse-checkout / conditional setup steps below):
+        #   - actions / typescript: repo-wide, no compiled build required.
+        #   - csharp: build-mode "none" (the CodeQL C# extractor can analyze the
+        #     visualstudio-extension/ source without an MSBuild/dotnet build).
+        #   - java-kotlin: build-mode "manual", built via the jetbrains-plugin/
+        #     Gradle wrapper (compileKotlin only — buildPlugin isn't needed for
+        #     extraction and would pull down the full IntelliJ Platform SDK).
+        include:
+          - language: actions
+          - language: typescript
+          - language: csharp
+            build-mode: none
+            sparse-checkout: |
+              visualstudio-extension
+              .github
+          - language: java-kotlin
+            build-mode: manual
+            sparse-checkout: |
+              jetbrains-plugin
+              .github
 
     steps:
       - name: Harden the runner (Block all outbound calls except allowed)
@@ -45,29 +66,68 @@ jobs:
         with:
           egress-policy: block
           # Allowlist inferred from the harden-runner audit output of the 10 most
-          # recent successful runs of this workflow (run ids 28795598756..28802374085).
+          # recent successful runs of this workflow (run ids 28795598756..28802374085),
+          # plus the well-known endpoints the csharp/java-kotlin matrix entries added
+          # below need (Gradle wrapper distribution, Gradle Plugin Portal, Maven
+          # Central, JetBrains' IntelliJ Platform repositories, Temurin JDK). These
+          # were proactively added and then trued up against real run failures — see
+          # the PR description for the endpoints actually observed as blocked.
           # Use a wildcard for the rotating Actions results storage account names.
           # The *.githubusercontent.com hosts serve the CodeQL bundle download when
           # the requested version is not in the runner's toolcache (release
           # downloads on github.com redirect there) — without them, init fails
           # with ECONNREFUSED on runner images that lack the pinned version.
           allowed-endpoints: >
+            api.adoptium.net:443
             api.github.com:443
+            cache-redirector.jetbrains.com:443
+            # d2cico3c979uwg.cloudfront.net is the CloudFront distribution that
+            # download-cdn.jetbrains.com itself resolves/redirects to when the
+            # IntelliJ Platform Gradle plugin fetches the IC IDE distribution.
+            d2cico3c979uwg.cloudfront.net:443
+            data.services.jetbrains.com:443
+            download-cdn.jetbrains.com:443
+            download.jetbrains.com:443
             github.com:443
+            hosted-compute-watchdog-prod-*.githubapp.com:443
             objects.githubusercontent.com:443
-            release-assets.githubusercontent.com:443
+            plugins-artifacts.gradle.org:443
+            plugins.gradle.org:443
             productionresultssa*.blob.core.windows.net:443
+            release-assets.githubusercontent.com:443
+            repo.maven.apache.org:443
+            repo1.maven.org:443
             results-receiver.actions.githubusercontent.com:443
+            services.gradle.org:443
             uploads.github.com:443
+            www.jetbrains.com:443
 
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: ${{ matrix.sparse-checkout }}
+
+      - name: Set up Java 21 (Temurin)
+        if: matrix.language == 'java-kotlin'
+        uses: actions/setup-java@03ad4de0992f5dab5e18fcb136590ce7c4a0ac95 # v5.6.0
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+
+      - name: Setup Gradle
+        if: matrix.language == 'java-kotlin'
+        uses: gradle/actions/setup-gradle@3f131e8634966bd73d06cc69884922b02e6faf92 # v6.2.0
 
       # Initializes the CodeQL tools for scanning.
       - name: Initialize CodeQL
         uses: github/codeql-action/init@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
         with:
           languages: ${{ matrix.language }}
+          build-mode: ${{ matrix.build-mode }}
+          # Use the broader security-extended query suite (adds lower-precision /
+          # lower-severity security queries on top of the default security-and-quality
+          # set) across every language in the matrix.
+          queries: security-extended
           # Exclude committed *generated* build artifacts (the minified Visual
           # Studio webview bundles) from analysis. Their hand-written TypeScript
           # source in vscode-extension/src/webview/** is still scanned. See the
@@ -77,9 +137,20 @@ jobs:
           # By default, queries listed here will override any specified in a config file.
           # Prefix the list here with "+" to use these queries and those in the config file.
 
-      # Autobuild attempts to build any compiled languages  (C/C++, C#, or Java).
-      # If this step fails, then you should remove it and run the build manually (see below)
+      # build-mode: manual — trace the JetBrains plugin's own Gradle wrapper build.
+      # compileKotlin/compileTestKotlin is enough for extraction; buildPlugin would
+      # additionally download and assemble the full IntelliJ Platform distribution.
+      - name: Build JetBrains plugin (Gradle)
+        if: matrix.language == 'java-kotlin'
+        working-directory: jetbrains-plugin
+        run: ./gradlew compileKotlin compileTestKotlin --no-daemon
+
+      # Autobuild attempts to build any compiled languages (C/C++, C#, or Java)
+      # that aren't otherwise handled above. csharp uses build-mode: none (no
+      # build required) and java-kotlin is built manually above, so this only
+      # ever runs for languages that fall through to CodeQL's default build-mode.
       - name: Autobuild
+        if: matrix.language != 'csharp' && matrix.language != 'java-kotlin'
         uses: github/codeql-action/autobuild@e4fba868fa4b1b91e1fdab776edc8cfbe6e9fb81 # v4.37.3
 
       # ℹ️ Command-line programs to run using the OS shell.
