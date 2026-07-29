@@ -228,7 +228,7 @@ jobs:
     - name: Install dependencies
       if: inputs.vs_only != true
       working-directory: vscode-extension
-      run: npm ci
+      run: npm ci --ignore-scripts
       
     - name: Run linting
       if: inputs.vs_only != true
@@ -436,7 +436,7 @@ jobs:
 
     - name: Install dependencies
       working-directory: vscode-extension
-      run: npm ci
+      run: npm ci --ignore-scripts
 
     - name: Download VSIXs from release
       id: download_vsix
@@ -598,11 +598,11 @@ jobs:
     # ── Install dependencies ────────────────────────────────────────────────
 
     - name: Install vscode-extension dependencies
-      run: npm ci
+      run: npm ci --ignore-scripts
       working-directory: vscode-extension
 
     - name: Install CLI dependencies
-      run: npm ci
+      run: npm ci --ignore-scripts
       working-directory: cli
 
     # ── Build CLI (production bundle + Windows .exe) ───────────────────────

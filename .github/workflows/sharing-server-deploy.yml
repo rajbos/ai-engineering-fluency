@@ -169,7 +169,7 @@ jobs:
 
       - name: Install dependencies
         working-directory: sharing-server
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Type-check
         working-directory: sharing-server

@@ -78,7 +78,7 @@ jobs:
     - name: Install dependencies
       if: steps.gate.outputs.should_run == 'true'
       working-directory: vscode-extension
-      run: npm ci
+      run: npm ci --ignore-scripts
 
     - name: Compile tests
       if: steps.gate.outputs.should_run == 'true'

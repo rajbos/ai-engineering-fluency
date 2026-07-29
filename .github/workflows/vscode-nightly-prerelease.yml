@@ -101,7 +101,7 @@ jobs:
     - name: Install dependencies
       if: steps.check_changes.outputs.has_changes == 'true'
       working-directory: vscode-extension
-      run: npm ci
+      run: npm ci --ignore-scripts
 
     - name: Run linting
       if: steps.check_changes.outputs.has_changes == 'true'
