@@ -1,6 +1,7 @@
 // Maturity Score webview
 import { navButtonsHtml } from '../shared/buttonConfig';
 import type { ContextReferenceUsage } from '../shared/contextRefUtils';
+import { setHtml } from '../shared/domUtils';
 import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis, ToolCallUsage, CategoryLevelData } from '../shared/types';
@@ -544,7 +545,7 @@ async function handleScreenshotExport(command: 'exportPdf' | 'exportPptx'): Prom
 
   const titleEl = document.createElement('div');
   titleEl.style.cssText = 'text-align:center;margin-bottom:20px;';
-  titleEl.innerHTML = `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${new Date().toLocaleDateString()}</div>`;
+  setHtml(titleEl, `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${new Date().toLocaleDateString()}</div>`);
   coverContainer.appendChild(titleEl);
 
   if (stageBanner) { coverContainer.appendChild(stageBanner.cloneNode(true)); }
@@ -590,7 +591,7 @@ async function handleShareToSocial(platform: 'linkedin' | 'bluesky' | 'mastodon'
   const stageColors = ['#93c5fd', '#a78bfa', '#3b82f6', '#22d3ee'];
   const stageColor = stageColors[data.overallStage - 1] || '#58a6ff';
 
-  card.innerHTML = `
+  setHtml(card, `
     <div style="text-align:center;color:#fff;padding:48px;">
       <div style="font-size:28px;margin-bottom:12px;">🎯 AI Engineering Fluency Score</div>
       <div style="font-size:14px;color:#b8b8c8;margin-bottom:32px;text-transform:uppercase;letter-spacing:2px;">Overall AI Engineering Fluency</div>
@@ -599,7 +600,7 @@ async function handleShareToSocial(platform: 'linkedin' | 'bluesky' | 'mastodon'
       <div style="font-size:22px;font-weight:700;color:#58a6ff;margin-bottom:8px;">#AIEngineeringFluency</div>
       <div style="font-size:14px;color:#7a7a8a;">Track your AI usage with AI Engineering Fluency</div>
     </div>
-  `;
+  `);
 
   document.body.appendChild(card);
   try {
@@ -692,7 +693,7 @@ function renderLayout(data: MaturityData): void {
     buildCategoryCard(cat, catIdx, dismissedTips, Boolean(useDemoCards), data)
   ).join('');
 
-  root.innerHTML = buildMaturityRootHtml(data, categoryCards, dismissedTips);
+  setHtml(root, buildMaturityRootHtml(data, categoryCards, dismissedTips));
 
   wireMaturityNavButtons();
   wireMaturityActionButtons();

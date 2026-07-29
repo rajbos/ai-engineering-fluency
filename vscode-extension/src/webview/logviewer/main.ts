@@ -1,5 +1,6 @@
 // Log Viewer webview - displays session file details and chat turns
 import { ContextReferenceUsage, getTotalContextRefs, getImplicitContextRefs, getExplicitContextRefs, getContextRefsSummary } from '../shared/contextRefUtils';
+import { setHtml } from '../shared/domUtils';
 import { escapeHtml, formatCompact, formatFileSize, setCompactNumbers, getEditorIcon } from '../shared/formatUtils';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
 import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
@@ -1357,7 +1358,7 @@ function renderLayout(data: SessionLogData): void {
 		modeSubLabel: modeStats.modeSubLabel,
 	};
 
-	root.innerHTML = `
+	setHtml(root, `
 <style>${themeStyles}</style>
 <style>${styles}</style>
 
@@ -1387,7 +1388,7 @@ ${data.turns.length > 0
 
 
 </div>
-`;
+`);
 
 	wireUpEventHandlers();
 }

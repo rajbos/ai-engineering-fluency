@@ -1,5 +1,6 @@
 // Diagnostics Report webview with tabbed interface
 import { navButtonsHtml } from "../shared/buttonConfig";
+import { setHtml } from "../shared/domUtils";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
 import { escapeHtml, formatFileSize, getTimeSince, getEditorIcon } from "../shared/formatUtils";
 import { createPeriodSelector, PERIOD_LABELS, type Period } from "../shared/periodSelector";
@@ -1672,7 +1673,7 @@ function setupSubtabHandlers(): void {
 function reRenderTable(): void {
   const container = document.getElementById("session-table-container");
   if (container) {
-    container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
+    setHtml(container, renderSessionTable(storedDetailedFiles, isLoading));
     if (!isLoading) {
       setupSortHandlers();
       setupEditorFilterHandlers();
@@ -1692,9 +1693,9 @@ function reRenderToolAnalysisTable(): void {
     const baselineRaw = table.getAttribute("data-baseline");
     const baseline = baselineRaw ? parseFloat(baselineRaw) : NaN;
     const tbody = table.querySelector("tbody");
-    if (tbody) { tbody.innerHTML = renderToolAnalysisRows(rows, baseline); }
+    if (tbody) { setHtml(tbody, renderToolAnalysisRows(rows, baseline)); }
     const thead = table.querySelector("thead");
-    if (thead) { thead.innerHTML = toolAnalysisTheadHtml(); }
+    if (thead) { setHtml(thead, toolAnalysisTheadHtml()); }
   });
   setupToolAnalysisSortHandlers();
 }
@@ -1813,16 +1814,16 @@ function setupFolderAnalyzerHandlers(): void {
     const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
     if (btn) {
       btn.disabled = true;
-      btn.innerHTML = "<span>⏳</span><span>Analyzing…</span>";
+      setHtml(btn, "<span>⏳</span><span>Analyzing…</span>");
     }
 
     const resultsDiv = document.getElementById("folder-analysis-results");
     if (resultsDiv) {
-      resultsDiv.innerHTML = `
+      setHtml(resultsDiv, `
           <div class="analyzer-loading">
             <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
             <span>Scanning files…</span>
-          </div>`;
+          </div>`);
     }
 
     vscode.postMessage({
@@ -1841,11 +1842,11 @@ function triggerModelUsageAnalysis(): void {
 
   const resultsDiv = document.getElementById("model-usage-results");
   if (resultsDiv) {
-    resultsDiv.innerHTML = `
+    setHtml(resultsDiv, `
         <div class="analyzer-loading">
           <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
           <span>Aggregating model usage…</span>
-        </div>`;
+        </div>`);
   }
 
   vscode.postMessage({ command: "analyzeModelUsage", editor, timeRange });
@@ -1865,14 +1866,14 @@ function handleModelUsageResult(message: DiagMessage): void {
     renderModelUsageTimeSelector(false);
   }
   if (message.stillLoading) {
-    resultsDiv.innerHTML = `
+    setHtml(resultsDiv, `
       <div class="info-box" style="margin-top: 12px;">
         <div class="info-box-title">⏳ Still loading session files</div>
         <div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>
-      </div>`;
+      </div>`);
     return;
   }
-  resultsDiv.innerHTML = renderModelUsageResults(
+  setHtml(resultsDiv, renderModelUsageResults(
     String(message.editor || "all"),
     Number(message.fileCount || 0),
     Number(message.filesWithUsage || 0),
@@ -1880,7 +1881,7 @@ function handleModelUsageResult(message: DiagMessage): void {
     Number(message.totalCost || 0),
     message.supportsCache1h !== false,
     String(message.timeRange || "all"),
-  );
+  ));
 }
 
 function setupTabHandlers(): void {
@@ -1901,7 +1902,7 @@ function setupTabHandlers(): void {
 
 function handleClearCacheClick(target: HTMLElement): void {
   target.style.background = "#d97706";
-  target.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+  setHtml(target, "<span>⏳</span><span>Clearing...</span>");
   if (target instanceof HTMLButtonElement) {
     target.disabled = true;
   }
@@ -2071,7 +2072,7 @@ function setupButtonHandlers(): void {
     ) as HTMLButtonElement | null;
     if (btn) {
       btn.style.background = "#d97706";
-      btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+      setHtml(btn, "<span>⏳</span><span>Clearing...</span>");
       btn.disabled = true;
     }
     updateCacheNumbers();
@@ -2086,7 +2087,7 @@ function setupButtonHandlers(): void {
       ) as HTMLButtonElement | null;
       if (btn) {
         btn.style.background = "#d97706";
-        btn.innerHTML = "<span>⏳</span><span>Clearing...</span>";
+        setHtml(btn, "<span>⏳</span><span>Clearing...</span>");
         btn.disabled = true;
       }
       updateCacheNumbers();
@@ -2120,7 +2121,7 @@ function handleBackendStorageSection(message: DiagMessage): void {
   if (!backendTabContent) { return; }
   const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
   const previousSubtab = activeSubtabEl?.getAttribute("data-subtab") ?? diagState.restore().activeSubtab;
-  backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+  setHtml(backendTabContent, renderBackendStoragePanel(currentBackendInfo, currentGithubAuth));
   setupBackendButtonHandlers();
   setupSubtabHandlers();
   if (previousSubtab) {
@@ -2175,7 +2176,7 @@ function replaceTabContent(tabId: string, newContent: string, onReplaced?: () =>
   if (!tabContent) { return; }
   const wasActive = tabContent.classList.contains("active");
   const temp = document.createElement('div');
-  temp.innerHTML = newContent;
+  setHtml(temp, newContent);
   const newTab = temp.firstElementChild as HTMLElement | null;
   if (!newTab) { return; }
   if (wasActive) { newTab.classList.add("active"); }
@@ -2187,7 +2188,7 @@ function handleGithubAuthSection(message: DiagMessage): void {
   if (message.githubAuth === undefined) { return; }
   const githubTabContent = document.getElementById("tab-github");
   if (githubTabContent) {
-    githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
+    setHtml(githubTabContent, renderGitHubAuthPanel(message.githubAuth));
     setupGitHubAuthHandlers();
   }
 }
@@ -2234,14 +2235,14 @@ function handleGithubAuthUpdated(message: DiagMessage): void {
   currentGithubAuth = message.githubAuth;
   const githubTabContent = document.getElementById("tab-github");
   if (githubTabContent) {
-    githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
+    setHtml(githubTabContent, renderGitHubAuthPanel(currentGithubAuth));
     setupGitHubAuthHandlers();
   }
   const backendTabContent = document.getElementById("tab-backend");
   if (backendTabContent && currentBackendInfo) {
     const activeSubtabEl = backendTabContent.querySelector(".subtab.active") as HTMLElement | null;
     const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
-    backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+    setHtml(backendTabContent, renderBackendStoragePanel(currentBackendInfo, currentGithubAuth));
     setupBackendButtonHandlers();
     setupSubtabHandlers();
     if (previousSubtab) {
@@ -2257,10 +2258,10 @@ function handleDiagnosticDataError(message: DiagMessage): void {
     const errorDiv = document.createElement("div");
     errorDiv.style.cssText =
       "color: #ff6b6b; padding: 20px; text-align: center;";
-    errorDiv.innerHTML = `
+    setHtml(errorDiv, `
 <h3><span class="codicon codicon-warning"></span> Error Loading Diagnostic Data</h3>
 <p>${escapeHtml(message.error || "Unknown error")}</p>
-`;
+`);
     rootEl.insertBefore(errorDiv, rootEl.firstChild);
   }
 }
@@ -2385,7 +2386,7 @@ function handleSessionFilesLoaded(message: DiagMessage): void {
     const editorOptions = Object.keys(editorStats).sort()
       .map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`)
       .join("");
-    modelUsageSelect.innerHTML = `<option value="all">🌐 All Editors</option>${editorOptions}`;
+    setHtml(modelUsageSelect, `<option value="all">🌐 All Editors</option>${editorOptions}`);
     modelUsageSelect.disabled = false;
   }
   renderModelUsageTimeSelector(false);
@@ -2407,23 +2408,23 @@ function handleCacheCleared(): void {
   ) as HTMLButtonElement | null;
   if (btnReport) {
     btnReport.style.background = "#2d6a4f";
-    btnReport.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
+    setHtml(btnReport, "<span>✅</span><span>Cache Cleared</span>");
     btnReport.disabled = false;
   }
   if (btnTab) {
     btnTab.style.background = "#2d6a4f";
-    btnTab.innerHTML = "<span>✅</span><span>Cache Cleared</span>";
+    setHtml(btnTab, "<span>✅</span><span>Cache Cleared</span>");
     btnTab.disabled = false;
   }
 
   setTimeout(() => {
     if (btnReport) {
       btnReport.style.background = "";
-      btnReport.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
+      setHtml(btnReport, "<span>🗑️</span><span>Clear Cache</span>");
     }
     if (btnTab) {
       btnTab.style.background = "";
-      btnTab.innerHTML = "<span>🗑️</span><span>Clear Cache</span>";
+      setHtml(btnTab, "<span>🗑️</span><span>Clear Cache</span>");
     }
   }, 2000);
 }
@@ -2459,24 +2460,24 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
   const btn = document.getElementById("btn-analyze-folder") as HTMLButtonElement | null;
   if (btn) {
     btn.disabled = false;
-    btn.innerHTML = "<span>🔍</span><span>Analyze</span>";
+    setHtml(btn, "<span>🔍</span><span>Analyze</span>");
   }
   const resultsDiv = document.getElementById("folder-analysis-results");
   if (resultsDiv) {
     if (message.error) {
-      resultsDiv.innerHTML = `
+      setHtml(resultsDiv, `
         <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
           <div class="info-box-title">⚠️ Analysis Error</div>
           <div>${escapeHtml(message.error)}</div>
-        </div>`;
+        </div>`);
     } else {
-      resultsDiv.innerHTML = renderFolderAnalysisResults(
+      setHtml(resultsDiv, renderFolderAnalysisResults(
         message.files || [],
         message.totalScanned || 0,
         message.parseErrors || 0,
         message.truncated || false,
         escapeHtml(String(message.folderPath || "")),
-      );
+      ));
     }
   }
 }
@@ -3103,7 +3104,7 @@ function renderLayout(data: DiagnosticsData): void {
     ? LOADING_MESSAGE.trim()
     : removeSessionFilesSection(escapeHtml(data.report));
 
-  root.innerHTML = buildDiagRootHtml(data, detailedFiles, escapedReport);
+  setHtml(root, buildDiagRootHtml(data, detailedFiles, escapedReport));
 
   // Render session folders via DOM API (XSS-safe, no innerHTML)
   const sessionFolders = groupSessionFolders(data.sessionFolders || []);

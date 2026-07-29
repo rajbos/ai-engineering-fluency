@@ -1,6 +1,6 @@
 // Import shared utilities
 import { BUTTONS } from "../shared/buttonConfig";
-import { createButton, el } from "../shared/domUtils";
+import { createButton, el, setHtml } from "../shared/domUtils";
 import { escapeHtml, formatCost, formatNumber, formatCompact, setCompactNumbers } from "../shared/formatUtils";
 import { getModelDisplayName } from "../../../../src/webview/shared/modelUtils";
 import { wireExtensionPointButtons } from "../shared/extensionPoints";
@@ -460,7 +460,7 @@ function buildFluencyDetailPanel(member: TeamMemberStats): HTMLElement {
       for (const tip of cat.tips) {
         const tipEl = document.createElement("div");
         tipEl.className = "fluency-tip";
-        tipEl.innerHTML = renderTipHtml(tip);
+        setHtml(tipEl, renderTipHtml(tip));
         tipsSection.append(tipEl);
       }
       card.append(tipsSection);
