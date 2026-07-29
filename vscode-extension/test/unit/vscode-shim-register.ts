@@ -5,7 +5,8 @@ type ConfigStore = Record<string, unknown>;
 
 type VscodeMockState = {
 	config: ConfigStore;
-	workspaceFolders: Array<{ uri: { fsPath: string; toString: () => string } }> | undefined;
+	workspaceFolders: Array<{ uri: { fsPath: string; scheme?: string; toString: () => string } }> | undefined;
+	isTrusted: boolean;
 	clipboardText: string;
 	clipboardThrow: boolean;
 	lastInfoMessages: string[];
@@ -18,6 +19,7 @@ type VscodeMockState = {
 const state: VscodeMockState = {
 	config: {},
 	workspaceFolders: undefined,
+	isTrusted: true,
 	clipboardText: '',
 	clipboardThrow: false,
 	lastInfoMessages: [],
@@ -85,6 +87,7 @@ function attachMock(target: any): void {
 		reset(): void {
 			state.config = {};
 			state.workspaceFolders = undefined;
+			state.isTrusted = true;
 			state.clipboardText = '';
 			state.clipboardThrow = false;
 			state.lastInfoMessages = [];
@@ -96,13 +99,17 @@ function attachMock(target: any): void {
 		setConfig(values: ConfigStore): void {
 			state.config = { ...values };
 		},
-		setWorkspaceFolders(folders: Array<{ fsPath: string; uriString?: string }>): void {
+		setWorkspaceFolders(folders: Array<{ fsPath: string; uriString?: string; scheme?: string }>): void {
 			state.workspaceFolders = folders.map((f) => ({
 				uri: {
 					fsPath: f.fsPath,
+					scheme: f.scheme ?? 'file',
 					toString: () => f.uriString ?? `file://${f.fsPath.replace(/\\/g, '/')}`
 				}
 			}));
+		},
+		setIsTrusted(trusted: boolean): void {
+			state.isTrusted = trusted;
 		},
 		setNextPick(value: string | undefined): void {
 			state.nextPick = value;
@@ -156,6 +163,14 @@ function attachMock(target: any): void {
 		},
 		set(folders: any) {
 			state.workspaceFolders = folders;
+		}
+	});
+	Object.defineProperty(target.workspace, 'isTrusted', {
+		get() {
+			return state.isTrusted;
+		},
+		set(trusted: boolean) {
+			state.isTrusted = trusted;
 		}
 	});
 
