@@ -882,6 +882,105 @@ cleanup(filePath);
 }
 });
 
+// ----- ClaudeCodeAdapter.analyzeUsage: Skill tool_use -> skillCalls (agnostic skill-usage tracking) -----
+
+test('ClaudeCodeAdapter.analyzeUsage: unwraps Skill tool_use into skillCalls.byName', async () => {
+const events = [
+{
+type: 'assistant',
+message: {
+id: 'msg_skill_1',
+model: 'claude-sonnet-4-6',
+role: 'assistant',
+stop_reason: 'tool_use',
+content: [{ type: 'tool_use', id: 'toolu_1', name: 'Skill', input: { skill: 'graphify' } }]
+}
+}
+];
+const filePath = createTempSession(events);
+try {
+const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+assert.equal(result.skillCalls?.byName['graphify'], 1);
+assert.equal(result.skillCalls?.total, 1);
+// Additive (Option C): the raw "Skill" wrapper tool call is still counted as-is, unchanged.
+assert.equal(result.toolCalls.byTool['Skill'], 1);
+assert.equal(result.toolCalls.total, 1);
+} finally {
+cleanup(filePath);
+}
+});
+
+test('ClaudeCodeAdapter.analyzeUsage: accumulates multiple invocations of the same and different skills', async () => {
+const events = [
+{ type: 'assistant', message: { id: 'm1', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'tool_use',
+content: [{ type: 'tool_use', id: 't1', name: 'Skill', input: { skill: 'graphify' } }] } },
+{ type: 'assistant', message: { id: 'm2', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'tool_use',
+content: [{ type: 'tool_use', id: 't2', name: 'Skill', input: { skill: 'graphify' } }] } },
+{ type: 'assistant', message: { id: 'm3', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'tool_use',
+content: [{ type: 'tool_use', id: 't3', name: 'Skill', input: { skill: 'sync-host-views' } }] } },
+];
+const filePath = createTempSession(events);
+try {
+const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+assert.equal(result.skillCalls?.byName['graphify'], 2);
+assert.equal(result.skillCalls?.byName['sync-host-views'], 1);
+assert.equal(result.skillCalls?.total, 3);
+} finally {
+cleanup(filePath);
+}
+});
+
+test('ClaudeCodeAdapter.analyzeUsage: does not record skillCalls for non-Skill tool calls', async () => {
+const events = [
+{ type: 'assistant', message: { id: 'm1', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'tool_use',
+content: [{ type: 'tool_use', id: 't1', name: 'Bash', input: { command: 'ls' } }] } },
+];
+const filePath = createTempSession(events);
+try {
+const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+assert.equal(result.skillCalls?.total ?? 0, 0);
+assert.equal(result.toolCalls.byTool['Bash'], 1);
+} finally {
+cleanup(filePath);
+}
+});
+
+test('ClaudeCodeAdapter.analyzeUsage: ignores Skill tool_use with missing/malformed input.skill', async () => {
+const events = [
+{ type: 'assistant', message: { id: 'm1', model: 'claude-sonnet-4-6', role: 'assistant', stop_reason: 'tool_use',
+content: [{ type: 'tool_use', id: 't1', name: 'Skill', input: {} }] } },
+];
+const filePath = createTempSession(events);
+try {
+const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+assert.equal(result.skillCalls?.total ?? 0, 0);
+assert.equal(result.toolCalls.byTool['Skill'], 1);
+} finally {
+cleanup(filePath);
+}
+});
+
+test('ClaudeCodeAdapter.analyzeUsage: a user-typed slash invocation (<command-name>) also populates skillCalls', async () => {
+	// Regression test for the real /graphify session: when a user directly types a
+	// registered skill/command, Claude Code expands it into a plain USER message
+	// carrying <command-message>/<command-name> tags - it is never a Skill tool_use
+	// block, so this is a completely separate detection path from extractSkillName.
+	const events = [
+		{
+			type: 'user', isSidechain: false,
+			message: { role: 'user', content: '<command-message>graphify</command-message>\n<command-name>/graphify</command-name>' },
+		},
+	];
+	const filePath = createTempSession(events);
+	try {
+		const result = await claudeCodeAdapter.analyzeUsage(filePath, adapterCtx);
+		assert.equal(result.skillCalls?.byName['graphify'], 1);
+		assert.equal(result.skillCalls?.total, 1);
+	} finally {
+		cleanup(filePath);
+	}
+});
+
 // ----- getClaudeCodeDailyFractions (issue #1608, root cause A) -----
 
 test('getClaudeCodeDailyFractions: splits usage by each assistant event day, weighted by tokens', async () => {

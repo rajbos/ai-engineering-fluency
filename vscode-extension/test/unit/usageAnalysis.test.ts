@@ -16,6 +16,7 @@ import {
     isParsedSessionJson,
     createEmptySessionUsageAnalysis,
     applyModelTierClassification,
+    extractInvokedSkillNameFromPlainText,
     type UsageAnalysisDeps,
 } from '../../../src/usageAnalysis';
 import type {
@@ -1220,6 +1221,70 @@ test('analyzeSessionUsage: CLI JSONL session extracts LOC from successful edit t
     assert.equal(result.editScope?.totalEditedFiles, 1);
     assert.ok(result.editScope?.languageUsage?.['ts'], 'expected ts language usage');
     assert.equal(result.editScope?.languageUsage?.['ts']?.linesAdded, 4);
+});
+
+// ---------------------------------------------------------------------------
+// extractInvokedSkillNameFromPlainText — Copilot CLI's user-typed slash invocation
+// ---------------------------------------------------------------------------
+
+test('extractInvokedSkillNameFromPlainText: resolves the command name from a bare slash invocation', () => {
+    assert.equal(extractInvokedSkillNameFromPlainText('/graphify'), 'graphify');
+    assert.equal(extractInvokedSkillNameFromPlainText('/chronicle standup'), 'chronicle');
+    assert.equal(extractInvokedSkillNameFromPlainText('/code-review'), 'code-review');
+});
+
+test('extractInvokedSkillNameFromPlainText: returns null for non-slash or non-string content', () => {
+    assert.equal(extractInvokedSkillNameFromPlainText('can you help me fix this?'), null);
+    assert.equal(extractInvokedSkillNameFromPlainText(''), null);
+    assert.equal(extractInvokedSkillNameFromPlainText(null), null);
+    assert.equal(extractInvokedSkillNameFromPlainText(undefined), null);
+    assert.equal(extractInvokedSkillNameFromPlainText(123), null);
+});
+
+test('extractInvokedSkillNameFromPlainText: ignores slash commands not at the start', () => {
+    assert.equal(extractInvokedSkillNameFromPlainText('some text /graphify'), null);
+    assert.equal(extractInvokedSkillNameFromPlainText('check the path /usr/bin'), null);
+});
+
+test('analyzeSessionUsage: Copilot CLI autonomous "skill" tool call populates skillCalls', async () => {
+    // Copilot CLI wraps an autonomously-invoked skill behind a generic "skill" tool.execution_start
+    // (lowercase, unlike Claude Code's "Skill"), with the real name in data.arguments.skill.
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        { type: 'tool.execution_start', data: { toolCallId: 'c1', toolName: 'skill', arguments: { skill: 'sync-host-views' } } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.skillCalls?.byName['sync-host-views'], 1);
+    assert.equal(result.skillCalls?.total, 1);
+    // Additive: the raw "skill" wrapper tool call is still counted as-is, unchanged.
+    assert.equal(result.toolCalls.byTool['skill'], 1);
+});
+
+test('analyzeSessionUsage: Copilot CLI user-typed slash invocation (plain text, no wrapper) populates skillCalls', async () => {
+    // Unlike Claude Code's <command-message>/<command-name> tags, Copilot CLI's explicit
+    // slash invocation is just the literal user-typed text, e.g. "/graphify".
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        { type: 'user.message', data: { content: '/graphify' } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.skillCalls?.byName['graphify'], 1);
+    assert.equal(result.skillCalls?.total, 1);
+});
+
+test('analyzeSessionUsage: Copilot CLI regular user message (no slash) does not populate skillCalls', async () => {
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' }, timestamp: '2026-05-01T10:00:00Z' },
+        { type: 'user.message', data: { content: 'can you fix the failing test?' } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
+    assert.equal(result.skillCalls?.total ?? 0, 0);
 });
 
 test('analyzeSessionUsage: CLI JSONL session produces model efficiency counters with retry detection', async () => {

@@ -354,6 +354,8 @@ export interface SessionUsageAnalysis {
   modeUsage: ModeUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
+  /** Agent-skill invocation counts for this session. See {@link SkillCallUsage}. */
+  skillCalls?: SkillCallUsage;
   modelSwitching: {
     uniqueModels: string[];
     modelCount: number;
@@ -432,6 +434,18 @@ export interface McpToolUsage {
   total: number;
   byServer: { [serverName: string]: number };
   byTool: { [toolName: string]: number };
+}
+
+/**
+ * Agent-skill invocation counts (e.g. Claude Code's `Skill` tool unwrapped to the
+ * actual skill name from `input.skill`). Adapter-agnostic — populated only by
+ * adapters whose session format can resolve a specific skill name from a wrapper
+ * tool call; absent/empty for adapters where skill/prompt invocation leaves no
+ * distinguishable session-log signal.
+ */
+export interface SkillCallUsage {
+  total: number;
+  byName: { [skillName: string]: number };
 }
 
 /**
@@ -639,6 +653,8 @@ export interface UsageAnalysisPeriod {
   modeUsage: ModeUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
+  /** Aggregated agent-skill invocation counts across the period's sessions. See {@link SkillCallUsage}. */
+  skillCalls?: SkillCallUsage;
   modelSwitching: ModelSwitchingAnalysis;
   repositories: string[]; // Unique repositories worked in during this period
   repositoriesWithCustomization: string[]; // Repos with copilot-instructions.md or agents.md

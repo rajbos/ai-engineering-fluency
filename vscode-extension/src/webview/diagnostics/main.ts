@@ -162,6 +162,11 @@ type DiagnosticsData = {
   displaySettings?: DisplaySettings;
   quotaEntitlements?: QuotaEntitlements;
   toolCallStats?: { total: number; byTool: { [key: string]: number }; outputTokensByTool?: { [key: string]: number } } | null;
+  skillCallStats?: { total: number; byName: { [key: string]: number } } | null;
+  /** Per-skill, per-editor invocation counts (skillName -> editorSource -> count), for the Skill Usage tab's editor filter. */
+  skillCallsByEditor?: { [skillName: string]: { [editorSource: string]: number } } | null;
+  /** Skill name -> description, sourced from discovered SKILL.md frontmatter. */
+  skillDescriptions?: { [skillName: string]: string };
   toolFamilies?: ToolFamilyConfig[];
   otelComparison?: CopilotCliOtelComparison | null;
 };
@@ -181,6 +186,7 @@ type DiagnosticsViewState = {
   activeSubtab?: string;
   otelDeltaPeriod?: OtelDeltaPeriod;
   shareCardPeriod?: Period;
+  skillUsageEditorFilter?: string;
 };
 
 type FolderFileResult = {
@@ -206,6 +212,7 @@ const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeSubtab: undefined,
   otelDeltaPeriod: "all",
   shareCardPeriod: "last14",
+  skillUsageEditorFilter: "all",
 });
 
 let currentOtelComparison: CopilotCliOtelComparison | null | undefined;
@@ -227,6 +234,12 @@ let showOnlyUnattributed = false; // filter to only sessions with unattributed t
 let toolSortColumn: "tool" | "calls" | "total" | "avg" = "avg";
 let toolSortDir: "asc" | "desc" = "desc";
 let storedToolFamilies: ToolFamilyConfig[] | undefined;
+
+// Skill usage tab state
+let currentSkillCallStats: DiagnosticsData['skillCallStats'];
+let currentSkillCallsByEditor: DiagnosticsData['skillCallsByEditor'];
+let currentSkillDescriptions: DiagnosticsData['skillDescriptions'];
+let skillUsageEditorFilter: string = diagState.restore().skillUsageEditorFilter ?? "all";
 
 // Render state (promoted to module level so all setup functions can be top-level)
 let storedDetailedFiles: SessionFileDetails[] = [];
@@ -1485,7 +1498,7 @@ function activateTab(tabId: string): boolean {
 /** Which group tab (Diagnostics / Research / Settings) each leaf tab lives under. */
 const TAB_GROUPS: Record<string, string[]> = {
   diagnostics: ["report", "sessions", "cache", "path-analyzer"],
-  research: ["model-usage", "tool-analysis", "otel-delta"],
+  research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta"],
   settings: ["display", "backend", "github", "debug"],
 };
 
@@ -2207,6 +2220,35 @@ function handleToolAnalysisSection(message: DiagMessage): void {
   replaceTabContent("tool-analysis", newContent, setupToolAnalysisSortHandlers);
 }
 
+/** Re-renders the Skill Usage tab body from the cached data + current editor filter, preserving active/tab state. */
+function rerenderSkillUsageTab(): void {
+  replaceTabContent(
+    "skill-usage",
+    renderSkillUsageTab(currentSkillCallStats, currentSkillCallsByEditor, currentSkillDescriptions, skillUsageEditorFilter),
+    setupSkillUsageFilterHandler
+  );
+}
+
+function setupSkillUsageFilterHandler(): void {
+  document.querySelectorAll<HTMLElement>(".skill-usage-chip").forEach(chip => {
+    chip.addEventListener("click", () => {
+      const editor = chip.getAttribute("data-editor");
+      if (!editor) { return; }
+      skillUsageEditorFilter = editor;
+      diagState.patch({ skillUsageEditorFilter: editor });
+      rerenderSkillUsageTab();
+    });
+  });
+}
+
+function handleSkillUsageSection(message: DiagMessage): void {
+  if (message.skillCallStats !== undefined) { currentSkillCallStats = message.skillCallStats as DiagnosticsData['skillCallStats']; }
+  if (message.skillCallsByEditor !== undefined) { currentSkillCallsByEditor = message.skillCallsByEditor as DiagnosticsData['skillCallsByEditor']; }
+  if (message.skillDescriptions !== undefined) { currentSkillDescriptions = message.skillDescriptions as DiagnosticsData['skillDescriptions']; }
+  if (message.skillCallStats === undefined) { return; }
+  rerenderSkillUsageTab();
+}
+
 /** Re-renders the OTel Delta tab body from currentOtelComparison + currentOtelDeltaPeriod, preserving active/tab state. */
 function rerenderOtelDeltaTab(): void {
   replaceTabContent("otel-delta", renderOtelDeltaTab(currentOtelComparison, currentOtelDeltaPeriod), setupOtelDeltaPeriodHandler);
@@ -2235,6 +2277,7 @@ function handleDiagnosticDataLoaded(message: DiagMessage): void {
   handleCandidatePathsSection(message);
   handleGithubAuthSection(message);
   handleToolAnalysisSection(message);
+  handleSkillUsageSection(message);
   handleOtelComparisonSection(message);
 }
 
@@ -2831,6 +2874,82 @@ ${sectionsHtml}
 </div>`;
 }
 
+/** Sum every editor's count for one skill's byEditor map. */
+function _sumSkillEditorCounts(byEditor: { [editorSource: string]: number } | undefined): number {
+  return Object.values(byEditor ?? {}).reduce((s, n) => s + n, 0);
+}
+
+/** Build the "All" + per-editor filter chip row, with each chip's own total invocation count. */
+function _renderSkillUsageFilterPanel(
+  skillCallsByEditor: DiagnosticsData['skillCallsByEditor'],
+  totalAll: number,
+  activeFilter: string
+): string {
+  const editorTotals = new Map<string, number>();
+  for (const byEditor of Object.values(skillCallsByEditor ?? {})) {
+    for (const [editor, count] of Object.entries(byEditor)) {
+      editorTotals.set(editor, (editorTotals.get(editor) ?? 0) + count);
+    }
+  }
+  const editors = [...editorTotals.entries()].sort((a, b) => b[1] - a[1]);
+  if (editors.length === 0) { return ''; }
+  const allChip = `<button class="skill-usage-chip${activeFilter === 'all' ? ' active' : ''}" data-editor="all">All <span class="skill-usage-chip-count">${formatTokenCount(totalAll)}</span></button>`;
+  const editorChips = editors.map(([editor, count]) =>
+    `<button class="skill-usage-chip${activeFilter === editor ? ' active' : ''}" data-editor="${escapeHtml(editor)}">${escapeHtml(editor)} <span class="skill-usage-chip-count">${formatTokenCount(count)}</span></button>`
+  ).join('');
+  return `<div class="skill-usage-filter-panel">${allChip}${editorChips}</div>`;
+}
+
+/**
+ * Renders per-skill invocation counts (e.g. Claude Code's `/graphify`, custom SKILL.md
+ * workflows) over the last 30 days, filterable by editor. Adapter-agnostic by design —
+ * populated only for editors whose session logs expose a distinguishable skill name
+ * (currently Claude Code, Claude Desktop, and Copilot CLI); other editors show the empty
+ * state until their format is mapped.
+ */
+function renderSkillUsageTab(
+  skillCallStats: DiagnosticsData['skillCallStats'],
+  skillCallsByEditor: DiagnosticsData['skillCallsByEditor'],
+  skillDescriptions: DiagnosticsData['skillDescriptions'],
+  editorFilter: string = 'all'
+): string {
+  const byName = skillCallStats?.byName ?? {};
+  if (Object.keys(byName).length === 0) {
+    return `<div id="tab-skill-usage" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🧩 Skill Usage</div>
+<div>Tracks how often each agent skill (e.g. a <code>/skill-name</code> invocation or another editor's <code>SKILL.md</code> workflow) was invoked over the last 30 days. No skill invocations have been recorded yet. Skill usage is currently detected for Claude Code, Claude Desktop, and Copilot CLI sessions — support for other editors depends on whether their session logs expose a distinguishable skill name.</div>
+</div>
+</div>`;
+  }
+  const totalAll = Object.values(byName).reduce((s, n) => s + n, 0);
+  const filterPanel = _renderSkillUsageFilterPanel(skillCallsByEditor, totalAll, editorFilter);
+  const rows = Object.keys(byName)
+    .map(name => ({
+      name,
+      count: editorFilter === 'all' ? byName[name] : (skillCallsByEditor?.[name]?.[editorFilter] ?? 0),
+      description: skillDescriptions?.[name] ?? '',
+    }))
+    .filter(r => r.count > 0)
+    .sort((a, b) => b.count - a.count);
+  const shownTotal = rows.reduce((s, r) => s + r.count, 0);
+  const bodyRows = rows
+    .map(r => `<tr><td>${escapeHtml(r.name)}</td><td class="skill-usage-description">${r.description ? escapeHtml(r.description) : '<span class="hint">—</span>'}</td><td>${formatTokenCount(r.count)}</td></tr>`)
+    .join('');
+  const scopeLabel = editorFilter === 'all' ? 'across all editors' : `for ${escapeHtml(editorFilter)}`;
+  return `<div id="tab-skill-usage" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">🧩 Skill Usage</div>
+<div>${formatTokenCount(shownTotal)} skill invocation(s) across ${rows.length} skill(s) ${scopeLabel} in the last 30 days. Currently detected for Claude Code / Claude Desktop / Copilot CLI sessions.</div>
+</div>
+${filterPanel}
+<table class="session-table skill-usage-table">
+<thead><tr><th>Skill</th><th>Description</th><th>Invocations</th></tr></thead>
+<tbody>${bodyRows}</tbody>
+</table>
+</div>`;
+}
+
 function renderOtelDeltaSetupNotice(comparison: CopilotCliOtelComparison | null | undefined): string {
   if (comparison && comparison.otelSessionsIndexed > 0) { return ''; }
   const dirStatus = comparison?.otelDirExists
@@ -3048,6 +3167,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <div class="tabs leaf-tabs" data-group="research" style="display: none;">
 <button class="tab" data-tab="model-usage">🧮 Model Usage</button>
 <button class="tab" data-tab="tool-analysis">🔧 Tool Analysis</button>
+<button class="tab" data-tab="skill-usage">🧩 Skill Usage</button>
 <button class="tab" data-tab="otel-delta">📡 OTel Delta</button>
 </div>
 
@@ -3086,6 +3206,7 @@ ${renderShareCardTab(detailedFiles, isLoading)}
 ${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+${renderSkillUsageTab(data.skillCallStats, data.skillCallsByEditor, data.skillDescriptions, skillUsageEditorFilter)}
 ${renderOtelDeltaTab(data.otelComparison)}
 </div>
 `;
@@ -3105,6 +3226,9 @@ function renderLayout(data: DiagnosticsData): void {
   currentGithubAuth = data.githubAuth;
   currentOtelComparison = data.otelComparison;
   if (data.toolFamilies) { storedToolFamilies = data.toolFamilies; }
+  currentSkillCallStats = data.skillCallStats;
+  currentSkillCallsByEditor = data.skillCallsByEditor;
+  currentSkillDescriptions = data.skillDescriptions;
 
   const reportIsLoading = data.report === LOADING_PLACEHOLDER;
   const escapedReport = reportIsLoading
@@ -3142,6 +3266,7 @@ function renderLayout(data: DiagnosticsData): void {
   setupButtonHandlers();
   setupDisplaySettingHandlers();
   setupToolAnalysisSortHandlers();
+  setupSkillUsageFilterHandler();
   setupOtelDeltaPeriodHandler();
 
   const savedState = diagState.restore();

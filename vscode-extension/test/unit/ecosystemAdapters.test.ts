@@ -513,7 +513,7 @@ test('getCandidatePaths paths are consistent with discover candidatePaths', asyn
 // extractClaudeSlashCommand — slash command detection
 // ---------------------------------------------------------------------------
 
-import { extractClaudeSlashCommand } from '../../../src/adapters/claudeCodeAdapter';
+import { extractClaudeSlashCommand, extractSkillName, extractInvokedSkillName } from '../../../src/adapters/claudeCodeAdapter';
 
 test('extractClaudeSlashCommand: returns command name for allowed slash commands', () => {
     assert.equal(extractClaudeSlashCommand('/review'), 'review');
@@ -548,6 +548,60 @@ test('extractClaudeSlashCommand: handles array content blocks', () => {
 test('extractClaudeSlashCommand: ignores slash commands not at the start', () => {
     assert.equal(extractClaudeSlashCommand('some text\n/review'), null);
     assert.equal(extractClaudeSlashCommand('prefix /review'), null);
+});
+
+// ---------------------------------------------------------------------------
+// extractSkillName — agnostic Skill tool_use unwrapping (any skill, not an allowlist)
+// ---------------------------------------------------------------------------
+
+test('extractSkillName: resolves the skill name from a Skill tool_use input', () => {
+    assert.equal(extractSkillName('Skill', { skill: 'graphify' }), 'graphify');
+    assert.equal(extractSkillName('Skill', { skill: 'sync-host-views' }), 'sync-host-views');
+});
+
+test('extractSkillName: trims whitespace around the skill name', () => {
+    assert.equal(extractSkillName('Skill', { skill: '  graphify  ' }), 'graphify');
+});
+
+test('extractSkillName: returns null for non-Skill tool names', () => {
+    assert.equal(extractSkillName('Bash', { skill: 'graphify' }), null);
+    assert.equal(extractSkillName('Read', {}), null);
+});
+
+test('extractSkillName: returns null for missing or malformed input.skill', () => {
+    assert.equal(extractSkillName('Skill', {}), null);
+    assert.equal(extractSkillName('Skill', undefined), null);
+    assert.equal(extractSkillName('Skill', null), null);
+    assert.equal(extractSkillName('Skill', { skill: '' }), null);
+    assert.equal(extractSkillName('Skill', { skill: '   ' }), null);
+    assert.equal(extractSkillName('Skill', { skill: 123 }), null);
+});
+
+// ---------------------------------------------------------------------------
+// extractInvokedSkillName — user-typed slash invocation (<command-name> tag),
+// a completely different representation from the Skill tool_use path above.
+// ---------------------------------------------------------------------------
+
+test('extractInvokedSkillName: resolves the skill name from a <command-name> tag (string content)', () => {
+    const content = '<command-message>graphify</command-message>\n<command-name>/graphify</command-name>';
+    assert.equal(extractInvokedSkillName(content), 'graphify');
+});
+
+test('extractInvokedSkillName: resolves any command name agnostically, no allowlist', () => {
+    assert.equal(extractInvokedSkillName('<command-name>/some-random-skill</command-name>'), 'some-random-skill');
+    assert.equal(extractInvokedSkillName('<command-name>/code-review</command-name>'), 'code-review');
+});
+
+test('extractInvokedSkillName: handles array content blocks', () => {
+    const content = [{ type: 'text', text: '<command-message>graphify</command-message>\n<command-name>/graphify</command-name>' }];
+    assert.equal(extractInvokedSkillName(content), 'graphify');
+});
+
+test('extractInvokedSkillName: returns null when no <command-name> tag is present', () => {
+    assert.equal(extractInvokedSkillName('just a normal user message'), null);
+    assert.equal(extractInvokedSkillName(''), null);
+    assert.equal(extractInvokedSkillName(null), null);
+    assert.equal(extractInvokedSkillName(undefined), null);
 });
 
 // ---------------------------------------------------------------------------
@@ -679,6 +733,61 @@ test('ClaudeDesktopAdapter.buildTurns: unique requestIds across turns sum correc
         assert.equal(turns[0].actualUsage?.completionTokens, 20);
         assert.equal(turns[1].actualUsage?.promptTokens, 150);
         assert.equal(turns[1].actualUsage?.completionTokens, 25);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+// ---------------------------------------------------------------------------
+// ClaudeDesktopAdapter.analyzeUsage — Skill tool_use -> skillCalls
+// (Claude Desktop Cowork shares Claude Code's Skill tool wrapper convention.)
+// ---------------------------------------------------------------------------
+
+const desktopAdapterCtx = { modelPricing: {}, toolNameMap: {} };
+
+test('ClaudeDesktopAdapter.analyzeUsage: unwraps Skill tool_use into skillCalls.byName', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const sessionFile = path.join(tmpDir, 'session.jsonl');
+    try {
+        const events = [
+            {
+                type: 'assistant', requestId: 'req_skill',
+                message: {
+                    role: 'assistant', model: 'claude-sonnet-4-6', stop_reason: 'tool_use',
+                    content: [{ type: 'tool_use', id: 'toolu_1', name: 'Skill', input: { skill: 'graphify' } }],
+                },
+            },
+        ];
+        fs.writeFileSync(sessionFile, events.map(e => JSON.stringify(e)).join('\n'));
+
+        const result = await claudeDesktopAdapter.analyzeUsage(sessionFile, desktopAdapterCtx);
+        assert.equal(result.skillCalls?.byName['graphify'], 1);
+        assert.equal(result.skillCalls?.total, 1);
+        // Additive (Option C): the raw "Skill" wrapper tool call is still counted as-is, unchanged.
+        assert.equal(result.toolCalls.byTool['Skill'], 1);
+    } finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+
+test('ClaudeDesktopAdapter.analyzeUsage: does not record skillCalls for non-Skill tool calls', async () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cowork-test-'));
+    const sessionFile = path.join(tmpDir, 'session.jsonl');
+    try {
+        const events = [
+            {
+                type: 'assistant', requestId: 'req_bash',
+                message: {
+                    role: 'assistant', model: 'claude-sonnet-4-6', stop_reason: 'tool_use',
+                    content: [{ type: 'tool_use', id: 'toolu_1', name: 'Bash', input: { command: 'ls' } }],
+                },
+            },
+        ];
+        fs.writeFileSync(sessionFile, events.map(e => JSON.stringify(e)).join('\n'));
+
+        const result = await claudeDesktopAdapter.analyzeUsage(sessionFile, desktopAdapterCtx);
+        assert.equal(result.skillCalls?.total ?? 0, 0);
+        assert.equal(result.toolCalls.byTool['Bash'], 1);
     } finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
