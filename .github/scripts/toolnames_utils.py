@@ -89,6 +89,90 @@ def _normalize_friendly_name(name: str) -> str:
     return re.sub(r"\s+", " ", name.strip().lower())
 
 
+# Known MCP tool families: keyed by a display prefix, matched by (a) a keyword
+# appearing anywhere in the (normalized) tool id and (b) the id ending in one
+# of the family's known action names. This mirrors src/utils/toolUtils.ts's
+# resolveMcpFamilyToolName — keep the two in sync when either changes.
+#
+# Every MCP client/host mints its own server-id segment for the same upstream
+# server (VS Code truncates a configured server name, Claude Code uses the
+# literal package/plugin id, local vs. remote registrations differ, etc.), so
+# the id's *prefix* is effectively unbounded while the upstream server's own
+# tool/action names are a small, stable set (see issue #1760). Matching on
+# family keyword + action suffix recognizes new prefix spellings without a
+# per-prefix rule in _CANONICAL_PREFIX_RULES above.
+_MCP_TOOL_FAMILIES: list[tuple[str, list[str], set[str]]] = [
+    (
+        "GitHub MCP",
+        ["github"],
+        {
+            "actions_list", "add_comment_to_pending_review", "add_issue_comment",
+            "add_reply_to_pull_request_comment", "assign_copilot_to_issue",
+            "create_or_update_file", "create_pull_request", "create_repository",
+            "get_commit", "get_file_contents", "get_job_logs", "get_label", "get_latest_release",
+            "get_me", "get_release_by_tag", "get_repository_tree", "get_tag",
+            "issue_read", "issue_write", "label_write", "list_branches",
+            "list_code_scanning_alerts", "list_commits", "list_issue_fields",
+            "list_issue_types", "list_issues", "list_label", "list_pull_requests",
+            "list_tags", "projects_list", "pull_request_read",
+            "pull_request_review_write", "request_copilot_review", "search_code",
+            "search_issues", "search_pull_requests", "search_repositories",
+            "search_users", "semantic_issue_similarity_search",
+            "semantic_issues_search", "sub_issue_write", "update_pull_request",
+        },
+    ),
+    (
+        "Playwright MCP",
+        ["playwright"],
+        {
+            "browser_click", "browser_close", "browser_console_messages",
+            "browser_evaluate", "browser_fill_form", "browser_find", "browser_hover",
+            "browser_install", "browser_navigate", "browser_network_request",
+            "browser_network_requests", "browser_press_key", "browser_resize",
+            "browser_run_code", "browser_run_code_unsafe", "browser_snapshot",
+            "browser_tabs", "browser_take_screenshot", "browser_type", "browser_wait_for",
+        },
+    ),
+    (
+        "Context7 MCP",
+        ["context7"],
+        {"get_library_docs", "query_docs", "resolve_library_id"},
+    ),
+    (
+        "Tavily MCP",
+        ["tavily"],
+        {"tavily_crawl", "tavily_extract", "tavily_research", "tavily_search", "crawl", "extract", "research", "search"},
+    ),
+    (
+        "Microsoft Docs MCP",
+        ["microsoft_doc", "microsoftdocs", "microsoft_learn"],
+        {"docs_fetch", "docs_search", "code_sample_search"},
+    ),
+    (
+        "Claude Browser MCP",
+        ["claude_browser", "claude_in_chrome"],
+        {
+            "computer", "find", "get_page_text", "javascript_tool", "navigate",
+            "preview_list", "preview_logs", "preview_start", "preview_stop",
+            "read_console_messages", "read_network_requests", "read_page",
+            "resize_window", "tabs_close", "tabs_context", "tabs_create", "tabs_select",
+        },
+    ),
+]
+
+
+def resolve_mcp_family_tool_name(tool_id: str) -> str | None:
+    """Resolve a tool id via known MCP family keyword + action suffix, or None."""
+    normalized = _normalize_separators(tool_id.lower())
+    for display_name, keywords, actions in _MCP_TOOL_FAMILIES:
+        if not any(keyword in normalized for keyword in keywords):
+            continue
+        for action in actions:
+            if normalized == action or normalized.endswith(f"_{action}"):
+                return f"{display_name}: {action.replace('_', ' ').title()}"
+    return None
+
+
 def find_matches_for_new_tool(
     tool_id: str, existing: dict[str, str]
 ) -> dict[str, list[tuple[str, str]]]:
@@ -98,11 +182,15 @@ def find_matches_for_new_tool(
       - exact: same key exists
       - case_variant: same key with different casing
       - canonical_equivalent: different key that normalizes to the same canonical form
+      - family_equivalent: not in the map at all, but resolves via a known MCP
+        family + action pair (e.g. a new server-registration spelling of a
+        GitHub/Playwright/Context7/Tavily/Claude Browser tool we already recognize)
     """
     result: dict[str, list[tuple[str, str]]] = {
         "exact": [],
         "case_variant": [],
         "canonical_equivalent": [],
+        "family_equivalent": [],
     }
 
     if tool_id in existing:
@@ -120,6 +208,11 @@ def find_matches_for_new_tool(
             continue
         if canonicalize_tool_id(existing_id) == canonical:
             result["canonical_equivalent"].append((existing_id, friendly))
+
+    if not result["case_variant"] and not result["canonical_equivalent"]:
+        family_name = resolve_mcp_family_tool_name(tool_id)
+        if family_name:
+            result["family_equivalent"].append((tool_id, family_name))
 
     return result
 
