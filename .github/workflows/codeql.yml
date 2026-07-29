@@ -61,16 +61,39 @@ jobs:
               .github
 
     steps:
-      - name: Harden the runner (Audit all outbound calls)
+      - name: Harden the runner (Block all outbound calls except allowed)
         uses: step-security/harden-runner@bf7454d06d71f1098171f2acdf0cd4708d7b5920 # v2.20.0
         with:
-          # Audit rather than a curated block-list: the java-kotlin matrix entry
-          # runs a real Gradle build (Gradle wrapper, Gradle Plugin Portal, Maven
-          # Central, JetBrains' IntelliJ Platform repositories), whose full set of
-          # egress endpoints isn't practical to enumerate and pin here. This
-          # matches the egress-policy used by the repo's other build-heavy
-          # workflows (build.yml, visualstudio-build.yml, jetbrains-publish.yml).
-          egress-policy: audit
+          egress-policy: block
+          # Allowlist inferred from the harden-runner audit output of the 10 most
+          # recent successful runs of this workflow (run ids 28795598756..28802374085),
+          # plus the well-known endpoints the csharp/java-kotlin matrix entries added
+          # below need (Gradle wrapper distribution, Gradle Plugin Portal, Maven
+          # Central, JetBrains' IntelliJ Platform repositories, Temurin JDK). These
+          # were proactively added and then trued up against real run failures — see
+          # the PR description for the endpoints actually observed as blocked.
+          # Use a wildcard for the rotating Actions results storage account names.
+          # The *.githubusercontent.com hosts serve the CodeQL bundle download when
+          # the requested version is not in the runner's toolcache (release
+          # downloads on github.com redirect there) — without them, init fails
+          # with ECONNREFUSED on runner images that lack the pinned version.
+          allowed-endpoints: >
+            api.adoptium.net:443
+            api.github.com:443
+            cache-redirector.jetbrains.com:443
+            download.jetbrains.com:443
+            github.com:443
+            objects.githubusercontent.com:443
+            plugins-artifacts.gradle.org:443
+            plugins.gradle.org:443
+            productionresultssa*.blob.core.windows.net:443
+            release-assets.githubusercontent.com:443
+            repo.maven.apache.org:443
+            repo1.maven.org:443
+            results-receiver.actions.githubusercontent.com:443
+            services.gradle.org:443
+            uploads.github.com:443
+            www.jetbrains.com:443
 
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
