@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-07-26",
+    "lastUpdated": "2026-07-29",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1191,6 +1191,16 @@
       ],
       "cachedInputCostPerMillion": 0.5,
       "cacheCreationCostPerMillion": 6.25
+    },
+    "grok-4.5": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 6.0,
+      "category": "xAI Grok models",
+      "tier": "standard",
+      "displayNames": [
+        "Grok 4.5"
+      ],
+      "cachedInputCostPerMillion": 0.5
     }
   }
 }
