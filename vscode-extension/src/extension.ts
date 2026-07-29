@@ -9,6 +9,7 @@ import * as childProcess from 'child_process';
 import tokenEstimatorsData from '../../src/tokenEstimators.json';
 import modelPricingData from '../../src/modelPricing.json';
 import toolNamesData from '../../src/toolNames.json';
+import builtinCommandDescriptionsData from '../../src/builtinCommandDescriptions.json';
 import automaticToolsData from '../../src/automaticTools.json';
 import customizationPatternsData from '../../src/customizationPatterns.json';
 import copilotPlansData from './copilotPlans.json';
@@ -74,6 +75,7 @@ import {
   buildMcpEntriesFromSettings as _buildMcpEntriesFromSettings,
   discoverSkillEntries as _discoverSkillEntries,
   analyzeToolCuration as _analyzeToolCuration,
+  findSkillDescriptionInWorkspaces as _findSkillDescriptionInWorkspaces,
 } from '../../src/toolCuration';
 
 // --- Insights engine ---
@@ -542,6 +544,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Last computed customization matrix for usage analysis (typed)
 	private _lastCustomizationMatrix?: WorkspaceCustomizationMatrix;
 	private _lastMissedPotential?: MissedPotentialWorkspace[];
+	// Per-skill, per-editor invocation counts for the last-30-days window (Skill Usage tab).
+	// Accumulated per session in aggregateSessionFileIntoStats, reset at the top of each refresh.
+	private _skillCallsByEditorAccum: Map<string, Map<string, number>> = new Map();
+	private _lastSkillCallsByEditor?: Record<string, Record<string, number>>;
+	// Distinct workspace folder paths each skill was invoked from (last 30 days), used to
+	// backfill descriptions for skills whose repo isn't the one currently open (see
+	// findSkillDescriptionInWorkspaces).
+	private _skillWorkspacePathsAccum: Map<string, Set<string>> = new Map();
 
 	// Model pricing data - loaded from modelPricing.json
 	// Reference: OpenAI API Pricing (https://openai.com/api/pricing/) - Retrieved December 2025
@@ -3503,12 +3513,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const unresolvedWorkspaceInteractionCounts = new Map<string, number>();
 		this._workspaceIdToFolderCache.clear();
 		this._customizationFilesCache.clear();
+		this._skillCallsByEditorAccum = new Map();
+		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
 			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
 			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
+			this._lastSkillCallsByEditor = {};
+			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
+				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
+			}
 			this.deduplicateWorkspacePaths(workspaceSessionCounts, workspaceInteractionCounts);
 			this.buildUsageCustomizationMatrix(workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts);
 			await this.enrichMultiAgentParentCount(usageResults, last30DaysStats, last30DaysUtcStartKey);
@@ -4119,6 +4135,60 @@ class CopilotTokenTracker implements vscode.Disposable {
 		period.delegationSessions = (period.delegationSessions ?? 0) + 1;
 	}
 
+	/**
+	 * Accumulate this session's skill invocations into `_skillCallsByEditorAccum`
+	 * (skillName -> editorSource -> count), powering the Skill Usage tab's per-editor
+	 * breakdown/filter. Only resolves editorSource when there's actually a skill call to
+	 * attribute, since `detectEditorSource` does path-based work best skipped otherwise.
+	 */
+	private _accumulateSkillCallsByEditor(sessionFile: string, analysis: SessionUsageAnalysis, workspaceFolderPath?: string): void {
+		const byName = analysis.skillCalls?.byName;
+		if (!byName) { return; }
+		const entries = Object.entries(byName);
+		if (entries.length === 0) { return; }
+		const editorSource = this.detectEditorSource(sessionFile);
+		for (const [skillName, count] of entries) {
+			let byEditor = this._skillCallsByEditorAccum.get(skillName);
+			if (!byEditor) { byEditor = new Map(); this._skillCallsByEditorAccum.set(skillName, byEditor); }
+			byEditor.set(editorSource, (byEditor.get(editorSource) || 0) + count);
+			if (workspaceFolderPath) {
+				let paths = this._skillWorkspacePathsAccum.get(skillName);
+				if (!paths) { paths = new Set(); this._skillWorkspacePathsAccum.set(skillName, paths); }
+				paths.add(workspaceFolderPath);
+			}
+		}
+	}
+
+	/**
+	 * Skill name -> description, for the Skill Usage tab. Three tiers, in order:
+	 * 1. `curationAnalysis.availableTools` (populated by `discoverSkillEntries()`, scoped to
+	 *    the currently open workspace(s)).
+	 * 2. For an invoked skill still missing a description — e.g. one invoked from a repo
+	 *    that isn't open right now — a targeted lookup in that skill's own historical
+	 *    workspace path(s) via `findSkillDescriptionInWorkspaces()`.
+	 * 3. `builtinCommandDescriptions.json` — many "skills" invoked via a bare `/name` are
+	 *    actually the CLI's own built-in commands (e.g. Copilot CLI's `/model`, `/login`),
+	 *    baked into the binary with no SKILL.md anywhere to find. This static, hand-curated
+	 *    list (sourced from Claude Code's and Copilot CLI's official docs) is the last resort.
+	 */
+	private _buildSkillDescriptions(): Record<string, string> {
+		const descriptions: Record<string, string> = {};
+		for (const t of this.lastUsageAnalysisStats?.curationAnalysis?.availableTools ?? []) {
+			if (t.source === 'skill' && t.description) { descriptions[t.name] = t.description; }
+		}
+		const builtins = builtinCommandDescriptionsData as { [key: string]: string };
+		for (const skillName of this._skillCallsByEditorAccum.keys()) {
+			if (descriptions[skillName]) { continue; }
+			const workspacePaths = this._skillWorkspacePathsAccum.get(skillName);
+			const found = workspacePaths && workspacePaths.size > 0
+				? _findSkillDescriptionInWorkspaces(skillName, workspacePaths)
+				: undefined;
+			if (found) { descriptions[skillName] = found; }
+			else if (builtins[skillName]) { descriptions[skillName] = builtins[skillName]; }
+		}
+		return descriptions;
+	}
+
 	private aggregateSessionFileIntoStats(
 		r: { sessionFile: string; sessionData: SessionFileCache; mtime: number },
 		periods: { todayStats: UsageAnalysisPeriod; last30DaysStats: UsageAnalysisPeriod; monthStats: UsageAnalysisPeriod; lastMonthStats: UsageAnalysisPeriod; todayUtcKey: string; last30DaysUtcStartKey: string; monthUtcStartKey: string; lastMonthUtcStartKey: string; lastMonthUtcEndKey: string },
@@ -4143,6 +4213,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.trackWorkspaceForSession(sessionFile, interactions,
 				wsMaps.workspaceSessionCounts, wsMaps.workspaceInteractionCounts,
 				wsMaps.unresolvedWorkspaceIds, wsMaps.unresolvedWorkspaceInteractionCounts);
+			this._accumulateSkillCallsByEditor(sessionFile, analysis, sessionData.workspaceFolderPath);
 		}
 		if (lastActivityUtcKey >= periods.monthUtcStartKey) {
 			periods.monthStats.sessions++;
@@ -9666,6 +9737,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         githubAuth: githubAuthStatus,
         toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
         skillCallStats: this.lastUsageAnalysisStats?.last30Days?.skillCalls ?? null,
+        skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
+        skillDescriptions: this._buildSkillDescriptions(),
         toolFamilies: getToolFamilies(),
         otelComparison,
       });
@@ -10148,6 +10221,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       quotaEntitlements: this._copilotQuotaEntitlements,
       toolCallStats: this.lastUsageAnalysisStats?.last30Days?.toolCalls ?? null,
       skillCallStats: this.lastUsageAnalysisStats?.last30Days?.skillCalls ?? null,
+      skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
+      skillDescriptions: this._buildSkillDescriptions(),
       toolFamilies: getToolFamilies(),
     }).replace(/</g, "\\u003c");
 

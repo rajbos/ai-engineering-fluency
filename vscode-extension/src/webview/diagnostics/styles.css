@@ -585,6 +585,48 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .share-btn-mastodon { 
 	text-align: right;
 }
 
+/* Skill Usage tab: editor filter chip row */
+.skill-usage-filter-panel {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 14px;
+}
+
+.skill-usage-chip {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 999px;
+	padding: 5px 12px;
+	font-size: 12px;
+	color: var(--text-primary);
+	cursor: pointer;
+	transition: all 0.15s;
+	white-space: nowrap;
+}
+
+.skill-usage-chip:hover {
+	background: var(--list-hover-bg);
+}
+
+.skill-usage-chip.active {
+	background: var(--list-active-bg);
+	border-color: var(--link-color);
+	color: var(--list-active-fg);
+}
+
+.skill-usage-chip-count {
+	opacity: 0.75;
+	font-variant-numeric: tabular-nums;
+	margin-left: 2px;
+}
+
+.skill-usage-description {
+	color: var(--text-primary);
+	opacity: 0.8;
+	font-size: 12px;
+}
+
 .tool-builtin-label {
 	opacity: 0.5;
 	font-style: italic;
