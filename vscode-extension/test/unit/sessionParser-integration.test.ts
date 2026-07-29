@@ -12,7 +12,9 @@ import { parseSessionFileContent } from '../../../src/sessionParser';
  * data in test/fixtures/sample-session-data/chatSessions/.
  */
 
-const SAMPLES_DIR = path.resolve(__dirname, '..', '..', '..', 'test', 'fixtures', 'sample-session-data', 'chatSessions');
+// Compiled tests run from out/vscode-extension/test/unit (rootDir is the repo
+// root), so four levels up reaches vscode-extension/ where the fixtures live.
+const SAMPLES_DIR = path.resolve(__dirname, '..', '..', '..', '..', 'test', 'fixtures', 'sample-session-data', 'chatSessions');
 
 function estimateTokensByLength(text: string): number {
 	return text.length;
@@ -36,6 +38,10 @@ function getModelFromRequest(req: any): string {
 const sampleFiles = fs.existsSync(SAMPLES_DIR)
 	? fs.readdirSync(SAMPLES_DIR).filter(f => f.endsWith('.json'))
 	: [];
+
+test('integration: sample fixture files are found', () => {
+	assert.ok(sampleFiles.length > 0, `no .json fixtures found in ${SAMPLES_DIR} — fixture path is likely broken`);
+});
 
 for (const fileName of sampleFiles) {
 	test(`integration: ${fileName} parses without error and returns non-zero tokens`, () => {
