@@ -1,5 +1,6 @@
 // Fluency Level Viewer webview
 import { buttonHtml } from '../shared/buttonConfig';
+import { setHtml } from '../shared/domUtils';
 import { escapeHtml, markdownToHtml, STAGE_LABELS, STAGE_DESCRIPTIONS } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import styles from './styles.css';
@@ -105,7 +106,7 @@ function renderLayout(data: FluencyLevelData): void {
 
 	const selectedCategory = data.categories[selectedCategoryIndex];
 
-	root.innerHTML = `
+	setHtml(root, `
 		<style>${styles}</style>
 		<div class="container">
 			<div class="header">
@@ -146,7 +147,7 @@ function renderLayout(data: FluencyLevelData): void {
 				📊 Scoring Guide &middot; ${data.categories.length} categories &middot; 4 stages each
 			</div>
 		</div>
-	`;
+	`);
 
 	wireNavButtons(data);
 }

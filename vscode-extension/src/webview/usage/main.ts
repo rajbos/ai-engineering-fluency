@@ -1,5 +1,5 @@
 // Usage Analysis webview
-import { el } from '../shared/domUtils';
+import { el, setHtml } from '../shared/domUtils';
 import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
@@ -17,6 +17,7 @@ import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
+import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentSessionsResult } from './agentSessionsSanitizer';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -435,7 +436,7 @@ function renderUsageLoadingState(initialMessage = 'Loading usage analysis...'): 
 		return `<div class="${cls}" id="${s.id}"><span class="ul-ico">${ico}</span><span class="ul-lbl">${escapeHtml(s.label)}</span><span class="ul-cnt" id="${s.id}-cnt"></span></div>`;
 	}).join('');
 
-	root.innerHTML = `${USAGE_LOADING_CSS}
+	setHtml(root, `${USAGE_LOADING_CSS}
 <div id="usage-loading-wrap">
   <div id="usage-loading-card">
     <div id="ul-header">
@@ -452,7 +453,7 @@ function renderUsageLoadingState(initialMessage = 'Loading usage analysis...'): 
     <div id="ul-track"><div id="ul-fill" class="ul-indeterminate"></div></div>
     <div id="ul-steps">${stepsHtml}</div>
   </div>
-</div>`;
+</div>`);
 }
 
 function _ulSetDone(id: string): void {
@@ -460,7 +461,7 @@ function _ulSetDone(id: string): void {
 	if (!el) { return; }
 	el.className = 'ul-step ul-done';
 	const ico = el.querySelector('.ul-ico');
-	if (ico) { ico.innerHTML = '<span class="ul-pop">✓</span>'; }
+	if (ico) { setHtml(ico, '<span class="ul-pop">✓</span>'); }
 }
 
 function _ulSetActive(id: string): void {
@@ -468,7 +469,7 @@ function _ulSetActive(id: string): void {
 	if (!el) { return; }
 	el.className = 'ul-step ul-active';
 	const ico = el.querySelector('.ul-ico');
-	if (ico) { ico.innerHTML = '<span class="ul-spin">↻</span>'; }
+	if (ico) { setHtml(ico, '<span class="ul-spin">↻</span>'); }
 }
 
 function _ulSetCnt(id: string, text: string): void {
@@ -557,7 +558,7 @@ function showLoadError(message: string): void {
 	container.style.cssText = 'padding: 32px; text-align: center; font-size: 14px;';
 	const icon = document.createElement('div');
 	icon.style.cssText = 'font-size: 24px; margin-bottom: 12px;';
-	icon.innerHTML = statusBadgeHtml('❌', 'Error');
+	setHtml(icon, statusBadgeHtml('❌', 'Error'));
 	const msg = document.createElement('div');
 	msg.style.cssText = 'color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;';
 	msg.textContent = message;
@@ -597,30 +598,6 @@ type RepoPrStatsResult = {
   repos: RepoPrInfo[];
   authenticated: boolean;
   since: string;
-};
-
-type AgentRepoSummary = {
-  owner: string;
-  repo: string;
-  /** Pre-validated safe https URL for this repo. */
-  repoUrl: string;
-  totalTasks: number;
-  totalSessions: number;
-  totalCredits: number;
-  tasksScanned: number;
-  tasksTotal: number;
-  partial: boolean;
-  error?: string;
-};
-
-type AgentSessionsResult = {
-  repos: AgentRepoSummary[];
-  totalTasks: number;
-  totalSessions: number;
-  totalCredits: number;
-  authenticated: boolean;
-  since: string;
-  fetchedAt: string;
 };
 
 const EFFORT_DISPLAY_NAMES: Record<string, string> = {
@@ -1194,7 +1171,7 @@ function setupSessionsTableSort(): void {
 			sessionSortDirection = 'desc';
 		}
 		const container = document.getElementById('sessions-table-container');
-		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+		if (container) { setHtml(container, buildSessionsTableHtml(cachedTodaySessions)); }
 	});
 	renderSessionsLookbackSelector();
 	setupSessionColumnsMenu();
@@ -1217,7 +1194,7 @@ function setupSessionColumnsMenu(): void {
 		if (!columnId) { return; }
 		if (checkbox.checked) { enabledSessionColumns.add(columnId); } else { enabledSessionColumns.delete(columnId); }
 		const container = document.getElementById('sessions-table-container');
-		if (container) { container.innerHTML = buildSessionsTableHtml(cachedTodaySessions); }
+		if (container) { setHtml(container, buildSessionsTableHtml(cachedTodaySessions)); }
 		saveSessionColumnSettings();
 	});
 	// Attached once ever (not per re-render) and re-queries the live menu element on
@@ -1259,15 +1236,15 @@ function refreshSessionsPanelBody(): void {
 	const body = document.getElementById('sessions-panel-body');
 	if (!body) { return; }
 	if (sessionsLookback === 'today') {
-		body.innerHTML = renderTodaySessionsTable(latestTodaySessions);
+		setHtml(body, renderTodaySessionsTable(latestTodaySessions));
 		return;
 	}
 	const cached = recentSessionsCache[sessionsLookback];
 	if (cached) {
-		body.innerHTML = renderTodaySessionsTable(cached);
+		setHtml(body, renderTodaySessionsTable(cached));
 		return;
 	}
-	body.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>`;
+	setHtml(body, `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>`);
 	vscode.postMessage({ command: 'loadRecentSessions', period: sessionsLookback });
 }
 
@@ -1493,17 +1470,17 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 
 function updateWorktreeControls(): void {
 	const controlsEl = document.getElementById("worktree-controls");
-	if (controlsEl) { controlsEl.innerHTML = renderWorktreeControls(); }
+	if (controlsEl) { setHtml(controlsEl, renderWorktreeControls()); }
 }
 
 function updateWorktreeResults(): void {
 	const resultsEl = document.getElementById("worktree-results");
-	if (resultsEl) { resultsEl.innerHTML = renderWorktreeResults(); }
+	if (resultsEl) { setHtml(resultsEl, renderWorktreeResults()); }
 }
 
 function updateWorktreeProgressArea(): void {
 	const el = document.getElementById("worktree-progress-area");
-	if (el) { el.innerHTML = renderWorktreeProgress(); }
+	if (el) { setHtml(el, renderWorktreeProgress()); }
 }
 
 function scheduleWorktreeResultsRender(): void {
@@ -1920,24 +1897,6 @@ function setupTabs(): void {
 	});
 }
 
-function toSafeNumber(value: unknown): number {
-	const n = Number(value);
-	return Number.isFinite(n) && n >= 0 ? n : 0;
-}
-
-function toSafeHttpUrl(value: unknown): string {
-	const raw = typeof value === 'string' ? value.trim() : '';
-	try {
-		const parsed = new URL(raw);
-		if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-			return parsed.toString();
-		}
-	} catch {
-		// Ignore invalid URL and fall back to placeholder.
-	}
-	return '#';
-}
-
 function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 	const src = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {};
 	const repos = Array.isArray(src.repos) ? src.repos : [];
@@ -2059,42 +2018,10 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 		</div>`;
 }
 
-/** Sanitize agent sessions data received from the extension host — escapes all string fields at
- *  the trust boundary so render functions can interpolate them directly into innerHTML safely. */
-function sanitizeAgentSessionsData(input: unknown): AgentSessionsResult {
-	const src = (input && typeof input === 'object') ? (input as Record<string, unknown>) : {};
-	const repos = Array.isArray(src.repos) ? src.repos : [];
-	return {
-		authenticated: Boolean(src.authenticated),
-		since: typeof src.since === 'string' ? escapeHtml(src.since) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1000).toISOString(),
-		fetchedAt: typeof src.fetchedAt === 'string' ? src.fetchedAt : '',
-		totalTasks: toSafeNumber(src.totalTasks),
-		totalSessions: toSafeNumber(src.totalSessions),
-		totalCredits: toSafeNumber(src.totalCredits),
-		repos: repos.map((repo) => {
-			const r = (repo && typeof repo === 'object') ? (repo as Record<string, unknown>) : {};
-			const owner = escapeHtml(typeof r.owner === 'string' ? r.owner : '');
-			const repoName = escapeHtml(typeof r.repo === 'string' ? r.repo : '');
-			return {
-				owner,
-				repo: repoName,
-				repoUrl: toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
-				totalTasks: toSafeNumber(r.totalTasks),
-				totalSessions: toSafeNumber(r.totalSessions),
-				totalCredits: toSafeNumber(r.totalCredits),
-				tasksScanned: toSafeNumber(r.tasksScanned),
-				tasksTotal: toSafeNumber(r.tasksTotal),
-				partial: Boolean(r.partial),
-				error: typeof r.error === 'string' ? escapeHtml(r.error) : undefined,
-			};
-		}),
-	};
-}
-
 function updateReposPrPanel(data: RepoPrStatsResult): void {
 	const container = document.querySelector('#repos-pr-content');
 	if (!container) { return; }
-	container.innerHTML = `
+	setHtml(container, `
 		<div class="section-title"><span>🤖</span><span>AI Activity in Repository PRs</span></div>
 		<div class="section-subtitle">
 			PRs from the last 30 days across your known repositories, showing how many were <strong>authored by cloud agents</strong>
@@ -2102,7 +2029,7 @@ function updateReposPrPanel(data: RepoPrStatsResult): void {
 			or had an AI agent requested as a reviewer.
 		</div>
 		${renderReposPrContent(data)}
-	`;
+	`);
 }
 
 // ---------------------------------------------------------------------------
@@ -2204,7 +2131,7 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 function updateAgentSessionsPanel(data: AgentSessionsResult): void {
 	const container = document.querySelector('#agent-sessions-content');
 	if (!container) { return; }
-	container.innerHTML = `
+	setHtml(container, `
 		<div class="section-title"><span>🤖</span><span>Copilot Cloud Agent Sessions</span></div>
 		<div class="section-subtitle">
 			Cloud agent tasks and sessions from the last 30 days. Each <strong>task</strong> is a user request to the agent;
@@ -2212,7 +2139,7 @@ function updateAgentSessionsPanel(data: AgentSessionsResult): void {
 			<strong>CLI/remote sessions are excluded</strong> — they are separate from these cloud agent sessions.
 		</div>
 		${renderAgentSessionsContent(data)}
-	`;
+	`);
 }
 
 function buildCustomizationSectionHtml(matrix: WorkspaceCustomizationMatrix | null): string {
@@ -2973,7 +2900,7 @@ function updateTabButtonCount(insights: EvaluatedInsight[]): void {
 		? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>`
 		: '';
 	const titleOnly = '<span class="codicon codicon-lightbulb"></span> Insights';
-	tabButton.innerHTML = titleOnly + badgeHtml;
+	setHtml(tabButton, titleOnly + badgeHtml);
 }
 
 function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
@@ -2999,7 +2926,7 @@ function refreshInsightsPanel(insights: EvaluatedInsight[]): void {
 		</div>`
 		: '';
 
-	container.innerHTML = forYouSection + allSection;
+	setHtml(container, forYouSection + allSection);
 	wireInsightCardButtons();
 	updateTabButtonCount(insights);
 }
@@ -4093,7 +4020,7 @@ function renderModelEfficiencyPeriodSelector(): void {
 
 function rerenderModelEfficiencyTable(): void {
 	const table = document.getElementById('model-efficiency-table');
-	if (table) { table.innerHTML = buildModelEfficiencyTableHtml(); }
+	if (table) { setHtml(table, buildModelEfficiencyTableHtml()); }
 }
 
 function handleEfficiencySortClick(th: HTMLElement): void {
@@ -4190,15 +4117,15 @@ function buildToolsTabPanelHtml(
  */
 function assignUsageRootHtml(root: HTMLElement, build: () => string): boolean {
 	try {
-		root.innerHTML = build();
+		setHtml(root, build());
 		return true;
 	} catch (error) {
 		const message = error instanceof Error ? error.message : String(error);
 		console.error(`[usage-webview] renderLayout failed: ${message}`);
-		root.innerHTML = `<div style="padding: 32px; text-align: center; font-size: 14px;">
+		setHtml(root, `<div style="padding: 32px; text-align: center; font-size: 14px;">
 			<div style="color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;">⚠️ Something went wrong rendering the dashboard.</div>
 			${createRefreshButton().outerHTML}
-		</div>`;
+		</div>`);
 		return false;
 	}
 }
@@ -4689,7 +4616,7 @@ function buildCheckRowElement(check: RepoHygieneCheck): HTMLElement {
 	checkRow.setAttribute('style', 'padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;');
 	const icon = el('span');
 	icon.setAttribute('style', 'flex-shrink: 0; padding-top: 1px;');
-	icon.innerHTML = statusBadgeHtml(emoji);
+	setHtml(icon, statusBadgeHtml(emoji));
 	const weight = el('span');
 	weight.setAttribute('style', 'font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;');
 	weight.textContent = `+${toFiniteNumber(check?.weight)}`;
@@ -4848,7 +4775,7 @@ function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], has
 			<div style="width: 80px; flex-shrink: 0;"></div>
 		</div>
 	`;
-	listPane.innerHTML = headerHtml + visibleWorkspaces.map((ws, idx) => {
+	setHtml(listPane, headerHtml + visibleWorkspaces.map((ws, idx) => {
 		const record = repoAnalysisState.get(ws.workspacePath);
 		const hasResult = !!record?.data?.summary;
 		const scoreLabel = getScoreLabel(ws.workspacePath);
@@ -4872,7 +4799,7 @@ function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], has
 				</vscode-button>
 			</div>
 		`;
-	}).join('');
+	}).join(''));
 }
 
 function renderRepoDetailSuccess(detailsPane: HTMLElement, record: any, workspaceName: string): void {
@@ -4928,7 +4855,7 @@ function renderRepositoryHygienePanels(): void {
 	}
 
 	if (record?.error) {
-		detailsPane.innerHTML = `
+		setHtml(detailsPane, `
 			<div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px;">
 				<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
 					<div style="font-size: 11px; color: #fca5a5;">Repository: ${escapeHtml(workspaceName)}</div>
@@ -4937,11 +4864,11 @@ function renderRepositoryHygienePanels(): void {
 				<div style="font-size: 12px; font-weight: 600; color: #ef4444; margin-bottom: 4px;">❌ Analysis Failed</div>
 				<div style="font-size: 11px; color: #fca5a5;">${escapeHtml(record.error)}</div>
 			</div>
-		`;
+		`);
 		return;
 	}
 
-	detailsPane.innerHTML = `
+	setHtml(detailsPane, `
 		<div style="padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
 			<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
 				<div style="font-size: 12px; color: var(--text-secondary);">Repository: <span style="color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;">${escapeHtml(workspaceName)}</span></div>
@@ -4949,7 +4876,7 @@ function renderRepositoryHygienePanels(): void {
 			</div>
 			<div style="font-size: 11px; color: var(--text-muted);">No analysis data yet. Click Analyze in the list.</div>
 		</div>
-	`;
+	`);
 }
 
 function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: string): void {
@@ -4998,12 +4925,12 @@ function displayRepoAnalysisError(error: string, workspacePath?: string): void {
 
 	const resultsHost = document.getElementById('repo-analysis-results');
 	if (resultsHost) {
-		resultsHost.innerHTML = `
+		setHtml(resultsHost, `
 			<div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; margin-bottom: 12px;">
 				<div style="font-size: 12px; font-weight: 600; color: #ef4444; margin-bottom: 4px;">❌ Analysis Failed</div>
 				<div style="font-size: 11px; color: #fca5a5;">${escapeHtml(error)}</div>
 			</div>
-		`;
+		`);
 	}
 }
 
