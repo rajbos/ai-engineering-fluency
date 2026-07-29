@@ -31,6 +31,18 @@ jobs:
       actions: read
       contents: read
       security-events: write
+    # java-kotlin is marked experimental below: CodeQL (bundle 2.26.1, the
+    # default for codeql-action v4.37.3) rejects the plugin's Kotlin 2.4.10
+    # toolchain with "Kotlin version 2.4.10 is too recent. CodeQL currently
+    # supports versions below 2.4.10". CodeQL 2.26.0 added Kotlin 2.4.0
+    # support but hasn't caught up to 2.4.10 in any released bundle yet (the
+    # only newer bundle, codeql-bundle-v2.26.2, is an unreleased pre-release
+    # with no published CLI binaries — not safe to pin in CI). continue-on-error
+    # keeps this one matrix entry from blocking the workflow/PR while the
+    # other three languages remain fully enforced. Remove `experimental` from
+    # the java-kotlin matrix entry once a released CodeQL bundle supports
+    # Kotlin 2.4.10 (or jetbrains-plugin downgrades its Kotlin version).
+    continue-on-error: ${{ matrix.experimental || false }}
 
     strategy:
       fail-fast: false
@@ -56,6 +68,7 @@ jobs:
               .github
           - language: java-kotlin
             build-mode: manual
+            experimental: true # see continue-on-error comment above: Kotlin 2.4.10 vs CodeQL's ceiling
             sparse-checkout: |
               jetbrains-plugin
               .github
