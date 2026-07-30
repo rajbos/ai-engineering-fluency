@@ -10171,17 +10171,31 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 
   private async scanFolderFile(full: string, ctx: { results: Array<{ file: string; size: number; modified: string; interactions: number; tokens: number; actualTokens: number }>; totalScanned: number; parseErrors: number }): Promise<void> {
     ctx.totalScanned++;
-    let stat: fs.Stats;
-    try { stat = await fs.promises.stat(full); } catch { ctx.parseErrors++; return; }
-    let content: string;
-    try { content = await fs.promises.readFile(full, "utf8"); } catch {
+    // Open once and stat/read the same file handle (not the path) so the file
+    // can't change between the size/mtime check and the read (TOCTOU race).
+    let handle: fs.promises.FileHandle;
+    try {
+      handle = await fs.promises.open(full, "r");
+    } catch {
       ctx.parseErrors++;
-      ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0, tokens: 0, actualTokens: 0 });
       return;
     }
-    const interactions = await this.countInteractionsInSession(full, content);
-    const tokenResult = await this.estimateTokensFromSession(full, content);
-    ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions, tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens });
+    try {
+      const stat = await handle.stat();
+      let content: string;
+      try {
+        content = await handle.readFile("utf8");
+      } catch {
+        ctx.parseErrors++;
+        ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions: 0, tokens: 0, actualTokens: 0 });
+        return;
+      }
+      const interactions = await this.countInteractionsInSession(full, content);
+      const tokenResult = await this.estimateTokensFromSession(full, content);
+      ctx.results.push({ file: full, size: stat.size, modified: stat.mtime.toISOString(), interactions, tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens });
+    } finally {
+      await handle.close();
+    }
   }
 
   /**

@@ -17,6 +17,16 @@ interface WindsurfCredentials {
 	port: number;
 }
 
+/**
+ * Strips characters that could be used for log injection/forging (newlines,
+ * carriage returns, and other control characters) from values that originate
+ * from the local Windsurf API (cascade IDs, error messages) before they are
+ * written to the console.
+ */
+function sanitizeForLog(value: unknown): string {
+	return String(value).replace(/[\x00-\x1F\x7F]+/g, ' ');
+}
+
 interface CascadeTrajectorySummary {
 	summary: string;
 	stepCount: number;
@@ -512,7 +522,7 @@ export class WindsurfDataAccess {
 			}
 			return result;
 		} catch (error) {
-			console.error('[Windsurf] Failed to get Cascade trajectories:', error);
+			console.error('[Windsurf] Failed to get Cascade trajectories:', sanitizeForLog(error));
 			// Clear credentials on error
 			this.credentials = null;
 			return null;
@@ -538,7 +548,7 @@ export class WindsurfDataAccess {
 			const data = await this.readResponseData(response);
 			return JSON.parse(data) as GetCascadeTrajectoryStepsResponse;
 		} catch (error) {
-			console.error(`Failed to get Cascade trajectory steps for ${cascadeId}:`, error);
+			console.error(`Failed to get Cascade trajectory steps for ${sanitizeForLog(cascadeId)}:`, sanitizeForLog(error));
 			// Clear credentials on error
 			this.credentials = null;
 			return null;
