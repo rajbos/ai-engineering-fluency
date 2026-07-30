@@ -2748,14 +2748,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tooltip.appendMarkdown(`|  |  |  |\n|---|---|---|\n`);
 		const { budget, source } = this.getEffectiveMonthlyBudgetWithSource();
 		if (budget > 0) {
-			const copilotCost = monthCosts['GitHub Copilot'] ?? 0;
-			const ratio = copilotCost / budget;
-			const color = ratio >= 0.9 ? '#EF5350' : ratio >= 0.75 ? '#FFA726' : '#4CAF50';
-			const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildBarSvg(ratio, color))})`;
-			// Budget row first, then a sub-header row labelling the section below, so the
-			// "these bars are a different scale" context sits right where it's needed
-			// instead of a footnote read only after the bars already look confusing.
-			tooltip.appendMarkdown(`| 🎯 Copilot Budget | $${copilotCost.toFixed(2)} / $${budget.toFixed(2)} | ${barCell} |\n`);
+			this.appendCopilotBudgetRow(tooltip, monthCosts['GitHub Copilot'] ?? 0, budget);
 			tooltip.appendMarkdown(`| **Share of total spend** |  |  |\n`);
 		}
 		for (const provider of providers) {
@@ -2767,6 +2760,48 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (budget > 0) {
 			tooltip.appendMarkdown(`\n*Budget from ${source}*\n`);
 		}
+	}
+
+	/** Appends the "🎯 Copilot Budget" gauge row (and, when applicable, an untracked-usage
+	 *  sub-row). The API balance (when available) reports usage across all channels — other
+	 *  PCs/VDIs, WSL, web chat, cloud agent, review agent — not just this device's local
+	 *  session logs. The gap between that total and our local copilotCost is usage we can't
+	 *  attribute to a tracked session, so it gets its own hatched bar segment instead of
+	 *  silently inflating (or understating) the "tracked" portion. */
+	private appendCopilotBudgetRow(tooltip: vscode.MarkdownString, copilotCost: number, budget: number): void {
+		const apiBalance = this._buildCopilotApiBalance();
+		const apiUsedUsd = apiBalance ? apiBalance.usedAiCredits * 0.01 : 0;
+		const gapUsd = apiBalance ? Math.max(0, apiUsedUsd - copilotCost) : 0;
+		const trackedRatio = copilotCost / budget;
+		const gapRatio = gapUsd / budget;
+		const totalRatio = trackedRatio + gapRatio;
+		const color = totalRatio >= 0.9 ? '#EF5350' : totalRatio >= 0.75 ? '#FFA726' : '#4CAF50';
+		const barCell = `![](data:image/svg+xml;charset=utf-8,${encodeURIComponent(this.buildTwoSegmentBarSvg(trackedRatio, gapRatio, color))})`;
+		// Budget row first, then a sub-header row labelling the section below, so the
+		// "these bars are a different scale" context sits right where it's needed
+		// instead of a footnote read only after the bars already look confusing.
+		tooltip.appendMarkdown(`| 🎯 Copilot Budget | $${copilotCost.toFixed(2)} / $${budget.toFixed(2)} | ${barCell} |\n`);
+		if (gapUsd > 0.005) {
+			tooltip.appendMarkdown(`| &nbsp;&nbsp;↳ untracked (other devices/cloud) | $${gapUsd.toFixed(2)} |  |\n`);
+		}
+	}
+
+	/** Generates a small SVG progress bar with two fill segments sharing one color: a solid
+	 *  segment for locally-tracked usage, and a diagonally-hatched segment for usage the
+	 *  Copilot API reports but this device has no local session data for (other devices,
+	 *  WSL, web chat, cloud agent, review agent). Ratios are 0–1 fractions of the bar width;
+	 *  the remainder is left as unfilled track. */
+	private buildTwoSegmentBarSvg(trackedRatio: number, gapRatio: number, fillColor: string): string {
+		const W = 130, H = 12, R = 4;
+		const clampedTracked = Math.max(0, Math.min(1, trackedRatio));
+		const clampedGap = Math.max(0, Math.min(1 - clampedTracked, gapRatio));
+		const trackedW = Math.round(clampedTracked * W);
+		const gapW = Math.round(clampedGap * W);
+		const pctLabel = `${Math.round((clampedTracked + clampedGap) * 100)}%`;
+		const segments = gapW > 0
+			? `<rect x="0" y="1" width="${trackedW}" height="${H - 2}" fill="${fillColor}"/><rect x="${trackedW}" y="1" width="${gapW}" height="${H - 2}" fill="url(#gapHatch)"/>`
+			: `<rect x="0" y="1" width="${trackedW}" height="${H - 2}" fill="${fillColor}"/>`;
+		return `<svg xmlns="http://www.w3.org/2000/svg" width="${W + 36}" height="${H}"><defs><pattern id="gapHatch" width="4" height="4" patternTransform="rotate(45)" patternUnits="userSpaceOnUse"><rect width="4" height="4" fill="${fillColor}"/><line x1="0" y1="0" x2="0" y2="4" stroke="#000" stroke-opacity="0.35" stroke-width="2"/></pattern><clipPath id="barClip"><rect x="0" y="1" width="${W}" height="${H - 2}" rx="${R}"/></clipPath></defs><rect x="0" y="1" width="${W}" height="${H - 2}" rx="${R}" fill="#444"/><g clip-path="url(#barClip)">${segments}</g><text x="${W + 4}" y="${H - 1}" font-family="sans-serif" font-size="9" fill="#ccc">${pctLabel}</text></svg>`;
 	}
 
 	/** Generates a small SVG progress bar with the given fill ratio (0–1) and color. */
