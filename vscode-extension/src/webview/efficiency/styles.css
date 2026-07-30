@@ -1,0 +1,263 @@
+/* Efficiency view styles */
+
+.efficiency-root {
+	padding: 0 16px 24px 16px;
+	max-width: 1100px;
+	margin: 0 auto;
+}
+
+.eff-header {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 12px 0 4px 0;
+}
+
+.eff-subtitle {
+	color: var(--vscode-descriptionForeground);
+	margin: 0 0 12px 0;
+	font-size: 0.9em;
+}
+
+/* ── Verdict banner ── */
+.eff-verdict {
+	display: flex;
+	align-items: center;
+	gap: 10px;
+	padding: 10px 14px;
+	border-radius: 6px;
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	background: var(--vscode-editorWidget-background);
+	margin-bottom: 16px;
+}
+.eff-verdict .verdict-icon { font-size: 1.4em; }
+.eff-verdict .verdict-text { line-height: 1.4; }
+.eff-verdict.improving { border-left: 4px solid var(--vscode-charts-green, #4ade80); }
+.eff-verdict.mixed { border-left: 4px solid var(--vscode-charts-yellow, #fbbf24); }
+.eff-verdict.declining { border-left: 4px solid var(--vscode-charts-red, #fb7185); }
+.eff-verdict.unknown { border-left: 4px solid var(--vscode-descriptionForeground); }
+
+/* ── Tab strip ── */
+.eff-tabs {
+	display: flex;
+	gap: 4px;
+	flex-wrap: wrap;
+	border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	margin-bottom: 16px;
+}
+.eff-tab {
+	background: none;
+	border: none;
+	border-bottom: 2px solid transparent;
+	color: var(--vscode-foreground);
+	padding: 6px 12px;
+	cursor: pointer;
+	font-size: 0.95em;
+	font-family: inherit;
+}
+.eff-tab:hover { color: var(--vscode-textLink-foreground); }
+.eff-tab.active {
+	border-bottom-color: var(--vscode-textLink-foreground);
+	color: var(--vscode-textLink-foreground);
+	font-weight: 600;
+}
+
+.eff-section-note {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.85em;
+	margin: 4px 0 14px 0;
+	line-height: 1.5;
+}
+
+/* ── Trend chart grid ── */
+.trend-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+	gap: 14px;
+}
+.trend-card {
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	border-radius: 6px;
+	padding: 10px 12px;
+	background: var(--vscode-editorWidget-background);
+}
+.trend-card h3 {
+	margin: 0 0 2px 0;
+	font-size: 0.95em;
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+}
+.trend-card .trend-desc {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.8em;
+	margin: 0 0 8px 0;
+}
+.trend-card .chart-wrap { position: relative; height: 170px; }
+.trend-empty {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.85em;
+	font-style: italic;
+	padding: 24px 0;
+	text-align: center;
+}
+.trend-badge {
+	font-size: 0.78em;
+	font-weight: 600;
+	padding: 1px 8px;
+	border-radius: 10px;
+	white-space: nowrap;
+}
+.trend-badge.good { background: rgba(74, 222, 128, 0.18); color: var(--vscode-charts-green, #4ade80); }
+.trend-badge.bad { background: rgba(251, 113, 133, 0.18); color: var(--vscode-charts-red, #fb7185); }
+.trend-badge.flat { background: rgba(128,128,128,0.18); color: var(--vscode-descriptionForeground); }
+
+/* ── Delta cards ── */
+.delta-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+	gap: 14px;
+}
+.delta-card {
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	border-radius: 6px;
+	padding: 12px 14px;
+	background: var(--vscode-editorWidget-background);
+}
+.delta-card h3 { margin: 0 0 6px 0; font-size: 0.92em; }
+.delta-values {
+	display: flex;
+	align-items: baseline;
+	gap: 8px;
+	margin-bottom: 4px;
+}
+.delta-cur { font-size: 1.5em; font-weight: 700; }
+.delta-prev { color: var(--vscode-descriptionForeground); font-size: 0.85em; }
+.delta-change { font-weight: 600; font-size: 0.9em; }
+.delta-change.good { color: var(--vscode-charts-green, #4ade80); }
+.delta-change.bad { color: var(--vscode-charts-red, #fb7185); }
+.delta-change.flat { color: var(--vscode-descriptionForeground); }
+.delta-desc {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.8em;
+	line-height: 1.45;
+	margin: 6px 0 0 0;
+}
+.delta-na { color: var(--vscode-descriptionForeground); font-style: italic; font-size: 0.9em; }
+
+/* ── Attribution ── */
+.attr-summary {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(170px, 1fr));
+	gap: 12px;
+	margin-bottom: 18px;
+}
+.attr-stat {
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	border-radius: 6px;
+	padding: 10px 12px;
+	background: var(--vscode-editorWidget-background);
+}
+.attr-stat .stat-label { color: var(--vscode-descriptionForeground); font-size: 0.8em; }
+.attr-stat .stat-value { font-size: 1.3em; font-weight: 700; margin-top: 2px; }
+.attr-stat .stat-sub { color: var(--vscode-descriptionForeground); font-size: 0.78em; margin-top: 2px; }
+
+.attr-bars { margin: 8px 0 18px 0; }
+.attr-bar-row {
+	display: grid;
+	grid-template-columns: 190px 1fr 90px;
+	align-items: center;
+	gap: 10px;
+	margin-bottom: 8px;
+}
+.attr-bar-label { font-size: 0.88em; text-align: right; }
+.attr-bar-track {
+	position: relative;
+	height: 20px;
+	background: var(--vscode-editorWidget-background);
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25));
+	border-radius: 4px;
+	overflow: hidden;
+}
+.attr-bar-mid {
+	position: absolute;
+	left: 50%;
+	top: 0;
+	bottom: 0;
+	width: 1px;
+	background: var(--vscode-widget-border, rgba(128,128,128,0.5));
+}
+.attr-bar-fill { position: absolute; top: 2px; bottom: 2px; border-radius: 3px; }
+.attr-bar-fill.pos { background: var(--vscode-charts-red, #fb7185); }
+.attr-bar-fill.neg { background: var(--vscode-charts-green, #4ade80); }
+.attr-bar-value { font-size: 0.88em; font-variant-numeric: tabular-nums; }
+
+.attr-shift-table { width: 100%; border-collapse: collapse; font-size: 0.88em; }
+.attr-shift-table th, .attr-shift-table td {
+	text-align: left;
+	padding: 5px 10px;
+	border-bottom: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.2));
+}
+.attr-shift-table th { color: var(--vscode-descriptionForeground); font-weight: 600; }
+.attr-shift-table td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.share-up { color: var(--vscode-charts-blue, #60a5fa); }
+.share-down { color: var(--vscode-descriptionForeground); }
+
+/* ── Value tab ── */
+.value-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+	gap: 14px;
+}
+.value-card {
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	border-radius: 6px;
+	padding: 12px 14px;
+	background: var(--vscode-editorWidget-background);
+}
+.value-card h3 { margin: 0 0 6px 0; font-size: 0.92em; }
+.value-big { font-size: 1.6em; font-weight: 700; }
+.value-sub { color: var(--vscode-descriptionForeground); font-size: 0.82em; margin-top: 4px; line-height: 1.45; }
+.value-hint {
+	margin-top: 16px;
+	padding: 10px 12px;
+	border-radius: 6px;
+	background: var(--vscode-textBlockQuote-background, rgba(128,128,128,0.1));
+	border-left: 3px solid var(--vscode-textLink-foreground);
+	font-size: 0.85em;
+	line-height: 1.5;
+}
+
+/* ── Tools & Skills tab ── */
+.skill-section-heading { margin: 20px 0 4px 0; font-size: 1.0em; }
+.skill-impact-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(380px, 1fr));
+	gap: 14px;
+}
+.skill-impact-card {
+	border: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.35));
+	border-radius: 6px;
+	padding: 12px 14px;
+	background: var(--vscode-editorWidget-background);
+}
+.skill-impact-card h3 { margin: 0 0 2px 0; font-size: 0.95em; }
+.skill-impact-sub {
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.8em;
+	margin-bottom: 8px;
+}
+
+/* ── Combined tab ── */
+.combined-wrap { position: relative; height: 380px; margin-bottom: 10px; }
+.caveat {
+	margin-top: 18px;
+	color: var(--vscode-descriptionForeground);
+	font-size: 0.82em;
+	line-height: 1.5;
+	border-top: 1px solid var(--vscode-widget-border, rgba(128,128,128,0.25));
+	padding-top: 10px;
+}

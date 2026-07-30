@@ -111,6 +111,52 @@ function rankModelsByEditRetries(p: UsageAnalysisPeriod): { model: string; retri
 		.sort((a, b) => b.retryRate - a.retryRate);
 }
 
+// ── Month-over-month trend helpers ─────────────────────────────────────────
+
+/** Minimum sessions in a period before its per-session ratios are trusted for trend insights. */
+const TREND_MIN_SESSIONS = 10;
+
+/** Average turns per session for a period, or null when the sample is too small. */
+function trendTurnsPerSession(p: UsageAnalysisPeriod | undefined): number | null {
+	if (!p || p.sessions < TREND_MIN_SESSIONS || !p.conversationPatterns) { return null; }
+	return p.conversationPatterns.avgTurnsPerSession;
+}
+
+/** Aggregate edit-retry rate for a period, or null when there are too few edit turns. */
+function trendRetryRate(p: UsageAnalysisPeriod | undefined): number | null {
+	if (!p) { return null; }
+	let retries = 0;
+	let editTurns = 0;
+	for (const c of Object.values(p.modelEfficiency ?? {})) {
+		retries += c.retries;
+		editTurns += c.editTurns;
+	}
+	return editTurns >= RETRY_INSIGHT_MIN_EDIT_TURNS ? retries / editTurns : null;
+}
+
+/** Output price per million tokens from the pricing catalog, or null when unknown. */
+function modelOutputPricePerMillion(id: string): number | null {
+	return MODEL_PRICING[id]?.outputCostPerMillion ?? null;
+}
+
+/**
+ * Best/worst retry-rate models with a price mismatch: the worst-retrying model
+ * both retries ≥2× as often and costs ≥1.5× as much per output token as the best.
+ */
+function findRetryPriceMismatch(p: UsageAnalysisPeriod): { worst: { model: string; retryRate: number }; best: { model: string; retryRate: number }; priceRatio: number } | null {
+	const ranked = rankModelsByEditRetries(p);
+	if (ranked.length < 2) { return null; }
+	const worst = ranked[0];
+	const best = ranked[ranked.length - 1];
+	if (best.retryRate <= 0 ? worst.retryRate < 0.25 : worst.retryRate < best.retryRate * 2) { return null; }
+	const worstPrice = modelOutputPricePerMillion(worst.model);
+	const bestPrice = modelOutputPricePerMillion(best.model);
+	if (worstPrice === null || bestPrice === null || bestPrice <= 0) { return null; }
+	const priceRatio = worstPrice / bestPrice;
+	if (priceRatio < 1.5) { return null; }
+	return { worst, best, priceRatio };
+}
+
 /** A today-session paired with the long-context tier info of its cheapest-threshold model. */
 interface SessionLongContextStatus {
 	session: TodaySessionSummary;
@@ -227,6 +273,10 @@ export type InsightStatus = 'new' | 'seen' | 'dismissed' | 'snoozed' | 'done';
 export interface InsightContext {
 	today: UsageAnalysisPeriod;
 	last30Days: UsageAnalysisPeriod;
+	/** Current calendar month-to-date — enables month-over-month trend insights. */
+	month?: UsageAnalysisPeriod;
+	/** Previous full calendar month — enables month-over-month trend insights. */
+	lastMonth?: UsageAnalysisPeriod;
 	missedPotential: MissedPotentialWorkspace[];
 	customizationMatrix?: WorkspaceCustomizationMatrix | null;
 	todaySessions?: TodaySessionSummary[];
@@ -908,6 +958,75 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				|| (ranked.length >= 2 && worst.retryRate >= 0.25 && worst.retryRate >= best.retryRate * 2);
 		},
 		weight: 50,
+	},
+
+	// ── Efficiency trends (month over month) ──────────────────────────────────
+	{
+		id: 'trend-leaner-sessions',
+		category: 'trend',
+		severity: 'celebration',
+		title: '📉 Your sessions are getting leaner',
+		buildBody: (ctx) => {
+			const prev = trendTurnsPerSession(ctx.lastMonth)!;
+			const cur = trendTurnsPerSession(ctx.month)!;
+			const pct = Math.round(((prev - cur) / prev) * 100);
+			return `You averaged ${cur.toFixed(1)} turns per session this month, down ${pct}% from ${prev.toFixed(1)} last month — ` +
+				`less back-and-forth to get to a usable result. See the Efficiency view for the full trend and what is driving it.`;
+		},
+		actionLabel: 'Open Efficiency view',
+		actionCommand: 'aiEngineeringFluency.showEfficiency',
+		appliesTo: (ctx) => {
+			const prev = trendTurnsPerSession(ctx.lastMonth);
+			const cur = trendTurnsPerSession(ctx.month);
+			if (prev === null || cur === null || prev <= 0) { return false; }
+			const retryPrev = trendRetryRate(ctx.lastMonth);
+			const retryCur = trendRetryRate(ctx.month);
+			// Celebrate only when quality did not regress alongside the drop in turns.
+			const retryOk = retryPrev === null || retryCur === null || retryCur <= retryPrev * 1.1;
+			return (prev - cur) / prev >= 0.15 && retryOk;
+		},
+		weight: 65,
+		allowToast: true,
+	},
+	{
+		id: 'trend-sessions-getting-heavier',
+		category: 'trend',
+		severity: 'opportunity',
+		title: '📈 Sessions are taking more turns than last month',
+		buildBody: (ctx) => {
+			const prev = trendTurnsPerSession(ctx.lastMonth)!;
+			const cur = trendTurnsPerSession(ctx.month)!;
+			const pct = Math.round(((cur - prev) / prev) * 100);
+			return `You are averaging ${cur.toFixed(1)} turns per session this month, up ${pct}% from ${prev.toFixed(1)} last month. ` +
+				`More turns can mean harder tasks — or prompts that need more context up front. ` +
+				`The Efficiency view's Cost Attribution tab shows whether this is also driving your cost up.`;
+		},
+		actionLabel: 'Open Efficiency view',
+		actionCommand: 'aiEngineeringFluency.showEfficiency',
+		appliesTo: (ctx) => {
+			const prev = trendTurnsPerSession(ctx.lastMonth);
+			const cur = trendTurnsPerSession(ctx.month);
+			if (prev === null || cur === null || prev <= 0) { return false; }
+			return (cur - prev) / prev >= 0.25;
+		},
+		weight: 58,
+	},
+	{
+		id: 'retry-price-mismatch',
+		category: 'trend',
+		severity: 'tip',
+		title: '💸 Your priciest model is also retrying the most',
+		buildBody: (ctx) => {
+			const mismatch = findRetryPriceMismatch(ctx.last30Days)!;
+			return `${modelDisplayName(mismatch.worst.model)} retried ${mismatch.worst.retryRate.toFixed(1)} times per edit turn over the last 30 days — ` +
+				`while costing ~${mismatch.priceRatio.toFixed(1)}× as much per output token as ${modelDisplayName(mismatch.best.model)} ` +
+				`(${mismatch.best.retryRate.toFixed(1)} retries per edit turn on comparable work). ` +
+				`For edit-heavy tasks, switching models could improve both quality and cost at once.`;
+		},
+		actionLabel: 'Open Efficiency view',
+		actionCommand: 'aiEngineeringFluency.showEfficiency',
+		appliesTo: (ctx) => findRetryPriceMismatch(ctx.last30Days) !== null,
+		weight: 55,
 	},
 
 	// ── Code application habits ───────────────────────────────────────────────

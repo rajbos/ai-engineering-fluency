@@ -280,6 +280,7 @@ function wireButtons(): void {
 	document.getElementById('btn-diagnostics')?.addEventListener('click', () => vscode.postMessage({ command: 'showDiagnostics' }));
 	document.getElementById('btn-maturity')?.addEventListener('click', () => vscode.postMessage({ command: 'showMaturity' }));
 	document.getElementById('btn-dashboard')?.addEventListener('click', () => vscode.postMessage({ command: 'showDashboard' }));
+	document.getElementById('btn-efficiency')?.addEventListener('click', () => vscode.postMessage({ command: 'showEfficiency' }));
 	wireExtensionPointButtons(vscode);
 }
 

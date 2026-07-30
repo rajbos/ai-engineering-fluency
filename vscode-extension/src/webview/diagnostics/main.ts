@@ -2015,6 +2015,11 @@ function wireNavButtons(): void {
     ?.addEventListener("click", () =>
       vscode.postMessage({ command: "showEnvironmental" }),
     );
+  document
+    .getElementById("btn-efficiency")
+    ?.addEventListener("click", () =>
+      vscode.postMessage({ command: "showEfficiency" }),
+    );
   wireExtensionPointButtons(vscode);
 }
 

@@ -623,6 +623,7 @@ function wireMaturityNavButtons(): void {
   document.getElementById('btn-diagnostics')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDiagnostics' }); });
   document.getElementById('btn-dashboard')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDashboard' }); });
   document.getElementById('btn-environmental')?.addEventListener('click', () => { vscode.postMessage({ command: 'showEnvironmental' }); });
+  document.getElementById('btn-efficiency')?.addEventListener('click', () => { vscode.postMessage({ command: 'showEfficiency' }); });
   wireExtensionPointButtons(vscode);
 }
 

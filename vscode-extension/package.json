@@ -151,6 +151,11 @@
         "category": "AI Engineering Fluency"
       },
       {
+        "command": "aiEngineeringFluency.showEfficiency",
+        "title": "Show Efficiency Trends",
+        "category": "AI Engineering Fluency"
+      },
+      {
         "command": "aiEngineeringFluency.authenticateGitHub",
         "title": "Authenticate with GitHub",
         "category": "AI Engineering Fluency"

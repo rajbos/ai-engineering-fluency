@@ -524,3 +524,100 @@ test('subagent-delegation: does NOT fire when multi-agent-orchestration already 
 	assert.equal(results.find(i => i.id === SUBAGENT_DELEGATION_ID), undefined, 'should defer to the richer multi-agent-orchestration insight');
 	assert.ok(results.find(i => i.id === MULTI_AGENT_ID), 'multi-agent-orchestration should still fire');
 });
+
+// ---------------------------------------------------------------------------
+// Efficiency trend insight tests
+// ---------------------------------------------------------------------------
+
+const LEANER_ID = 'trend-leaner-sessions';
+const HEAVIER_ID = 'trend-sessions-getting-heavier';
+const RETRY_PRICE_ID = 'retry-price-mismatch';
+
+function periodWithTurns(sessions: number, avgTurns: number): UsageAnalysisPeriod {
+	const p = emptyPeriod();
+	p.sessions = sessions;
+	p.conversationPatterns = { multiTurnSessions: sessions, singleTurnSessions: 0, avgTurnsPerSession: avgTurns, maxTurnsInSession: avgTurns };
+	return p;
+}
+
+test('trend-leaner-sessions: fires when turns/session drops >=15% month over month', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 10);
+	ctx.month = periodWithTurns(15, 7);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === LEANER_ID);
+	assert.ok(insight, 'should fire on a 30% drop in turns per session');
+	assert.ok(insight!.body.includes('7.0'));
+});
+
+test('trend-leaner-sessions: does NOT fire on a small drop', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 10);
+	ctx.month = periodWithTurns(15, 9.5);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LEANER_ID), undefined);
+});
+
+test('trend-leaner-sessions: does NOT fire without month periods in context', () => {
+	const ctx = makeCtx();
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LEANER_ID), undefined);
+});
+
+test('trend-leaner-sessions: does NOT fire when retry rate regressed alongside the drop', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 10);
+	ctx.lastMonth.modelEfficiency = { m: { calls: 20, editTurns: 20, oneShotEditTurns: 19, retries: 1, selfCorrections: 0, editToolCalls: 20, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 } };
+	ctx.month = periodWithTurns(15, 7);
+	ctx.month.modelEfficiency = { m: { calls: 20, editTurns: 20, oneShotEditTurns: 10, retries: 10, selfCorrections: 0, editToolCalls: 20, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 } };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === LEANER_ID), undefined, 'a 10x retry regression should suppress the celebration');
+});
+
+test('trend-sessions-getting-heavier: fires when turns/session rises >=25%', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 6);
+	ctx.month = periodWithTurns(15, 9);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === HEAVIER_ID));
+});
+
+test('trend-sessions-getting-heavier: does NOT fire below the sample-size floor', () => {
+	const ctx = makeCtx();
+	ctx.lastMonth = periodWithTurns(20, 6);
+	ctx.month = periodWithTurns(5, 9);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === HEAVIER_ID), undefined);
+});
+
+test('retry-price-mismatch: fires when the priciest model retries most', () => {
+	const ctx = makeCtx();
+	// gpt-5 ($10/M output) retries heavily; gpt-5-mini ($2/M) barely retries.
+	ctx.last30Days.modelEfficiency = {
+		'gpt-5': { calls: 30, editTurns: 30, oneShotEditTurns: 15, retries: 15, selfCorrections: 0, editToolCalls: 45, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+		'gpt-5-mini': { calls: 30, editTurns: 30, oneShotEditTurns: 28, retries: 2, selfCorrections: 0, editToolCalls: 32, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+	};
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === RETRY_PRICE_ID);
+	assert.ok(insight, 'should fire on a 7.5x retry gap with a 5x price gap');
+	assert.ok(insight!.body.includes('5.0'), 'body should mention the price ratio');
+});
+
+test('retry-price-mismatch: does NOT fire when the cheap model retries most', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modelEfficiency = {
+		'gpt-5-mini': { calls: 30, editTurns: 30, oneShotEditTurns: 15, retries: 15, selfCorrections: 0, editToolCalls: 45, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+		'gpt-5': { calls: 30, editTurns: 30, oneShotEditTurns: 28, retries: 2, selfCorrections: 0, editToolCalls: 32, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+	};
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRY_PRICE_ID), undefined, 'worst retrier is the cheaper model — no mismatch');
+});
+
+test('retry-price-mismatch: does NOT fire with a single model', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modelEfficiency = {
+		'gpt-5': { calls: 30, editTurns: 30, oneShotEditTurns: 15, retries: 15, selfCorrections: 0, editToolCalls: 45, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0 },
+	};
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === RETRY_PRICE_ID), undefined);
+});
