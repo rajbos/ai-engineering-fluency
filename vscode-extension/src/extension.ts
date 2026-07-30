@@ -5244,6 +5244,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return undefined;
 		}
 
+		// Cache entries written before repository extraction was attempted need one full
+		// re-parse to backfill the field. Key this off `repositoryResolved`, NOT off
+		// `repository === undefined` — the latter is also the correct, permanent value for
+		// sessions that genuinely have no resolvable repository, and treating it as "needs
+		// reparse" forced a full re-parse (including costly JSONL delta reconstruction and
+		// ecosystem adapter calls) on every single Diagnostics reload, forever, for any
+		// repo-less .jsonl session.
+		if (sessionFile.endsWith('.jsonl') && !cached.repositoryResolved) {
+			return undefined;
+		}
+
 		// Use the cached lastInteraction from session content directly.
 		// Do NOT fall back to file mtime here: mtime is updated whenever VS Code writes the
 		// session file (e.g. finalising a session just after midnight), which would shift
@@ -5317,6 +5328,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			lastInteraction: details.lastInteraction,
 			title: details.title,
 			repository: details.repository,
+			// This function only runs after a full parse, which always attempts repository
+			// extraction — so `repository` above is the definitive result (possibly undefined
+			// because none was found), not "not yet checked". See SessionFileCache.repositoryResolved.
+			repositoryResolved: true,
 			workspaceFolderPath: this.resolveCachedWorkspacePath(details, existingCache),
 		};
 
@@ -5380,7 +5395,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const stat = existingStat ?? await this.statSessionFile(sessionFile);
 
 		const cachedDetails = await this.getSessionFileDetailsFromCache(sessionFile, stat);
-		if (cachedDetails && !(cachedDetails.repository === undefined && sessionFile.endsWith('.jsonl'))) {
+		if (cachedDetails) {
 			this._cacheHits++;
 			return cachedDetails;
 		}
