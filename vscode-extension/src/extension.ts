@@ -6497,15 +6497,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.chartPanel = undefined;
 		});
 
-		// If we only have 30-day data, compute the full year in the background and push an update
+		// If we only have 30-day data, compute the full year in the background and push an update.
+		// This must NOT be awaited here: showChart() is wrapped in dispatch()'s in-flight guard, which
+		// only releases the 'showChart' key once this function returns. Awaiting the (potentially long)
+		// full-year calculation would keep that key locked — if the user closes the panel and reopens it
+		// before the calculation finishes, the reopen would be silently dropped as "already in flight".
 		if (!hasFullData) {
-			const fullStats = await this.calculateDailyStats();
-			if (this.chartPanel) {
-				void this.chartPanel.webview.postMessage({
-					command: 'updateChartData',
-					data: { ...this.buildChartData(fullStats), periodsReady: true, compactNumbers: this.getCompactNumbersSetting() }
-				});
-			}
+			void (async () => {
+				const fullStats = await this.calculateDailyStats();
+				if (this.chartPanel) {
+					void this.chartPanel.webview.postMessage({
+						command: 'updateChartData',
+						data: { ...this.buildChartData(fullStats), periodsReady: true, compactNumbers: this.getCompactNumbersSetting() }
+					});
+				}
+			})();
 		}
 	}
 
