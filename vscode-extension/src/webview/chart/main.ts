@@ -129,6 +129,8 @@ type ChartWebviewState = {
 	metric: 'tokens' | 'output' | 'cost' | 'sessions';
 	split: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'taskCategory';
 	displayMode: DisplayMode;
+	/** Whether the per-editor breakdown cards under the Summary section are collapsed. */
+	editorListCollapsed: boolean;
 	/** @deprecated Use metric + split instead. Kept for migration of old saved state. */
 	view?: 'total' | 'model' | 'editor' | 'repository' | 'cost';
 };
@@ -139,10 +141,13 @@ const chartState = createViewStateManager<ChartWebviewState>(vscode, {
 	metric: 'tokens',
 	split: 'total',
 	displayMode: 'actual',
+	editorListCollapsed: false,
 });
 
+let editorListCollapsed = false;
+
 function saveWebviewState(): void {
-	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode });
+	chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode, editorListCollapsed });
 }
 
 function getWindowStartDate(timeWindow: ChartTimeWindow, now: Date): string {
@@ -534,8 +539,8 @@ function renderLayout(data: InitialChartData): void {
 	const periodMeta = PERIOD_LABELS[currentPeriod];
 	const summarySection = el('div', 'section');
 	summarySection.append(iconHeading('h3', 'graph', 'Summary'), buildSummaryCards(periodData, periodMeta));
-	const editorCards = buildEditorCards(data.editorTotalsMap);
-	if (editorCards) { summarySection.append(editorCards); }
+	const editorSection = buildEditorSection(data.editorTotalsMap);
+	if (editorSection) { summarySection.append(editorSection); }
 	const chartSectionHeader = el('div', 'chart-section-header');
 	chartSectionHeader.append(iconHeading('h3', 'graph-line', 'Charts'));
 	const canvasWrap = el('div', 'canvas-wrap');
@@ -569,6 +574,7 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 		return null;
 	}
 	const wrap = el('div', 'cards');
+	wrap.id = 'editor-cards';
 	entries.forEach(([editor, tokens]) => {
 		const card = buildCard(`editor-${editor}`, editor, formatCompact(tokens));
 		// JetBrains only persists user messages + assistant text in its JSONL
@@ -587,6 +593,27 @@ function buildEditorCards(editorTotals: Record<string, number>): HTMLElement | n
 		wrap.append(card);
 	});
 	return wrap;
+}
+
+/** Builds the "By Editor" breakdown as a collapsible section: a toggle header plus the card grid. The collapsed state is persisted via webview state so it survives restarts. */
+function buildEditorSection(editorTotals: Record<string, number>): HTMLElement | null {
+	const cards = buildEditorCards(editorTotals);
+	if (!cards) { return null; }
+	if (editorListCollapsed) { cards.classList.add('hidden'); }
+
+	const header = el('div', 'editor-section-header');
+	const toggle = el('button', 'editor-list-toggle');
+	toggle.id = 'editor-list-toggle';
+	toggle.setAttribute('aria-expanded', String(!editorListCollapsed));
+	toggle.setAttribute('aria-controls', 'editor-cards');
+	toggle.title = editorListCollapsed ? 'Show per-editor breakdown' : 'Hide per-editor breakdown';
+	const chevron = el('span', 'editor-list-chevron', editorListCollapsed ? '▸' : '▾');
+	toggle.append(chevron, document.createTextNode(' By Editor'));
+	header.append(toggle);
+
+	const section = el('div', 'editor-section');
+	section.append(header, cards);
+	return section;
 }
 
 function updateSummaryCards(data: InitialChartData): void {
@@ -622,7 +649,25 @@ function updateSummaryCards(data: InitialChartData): void {
 	}
 }
 
+/** Wires up the collapsible "By Editor" breakdown toggle; the collapsed state is persisted via webview state so it survives restarts. */
+function wireEditorListToggle(): void {
+	const toggle = document.getElementById('editor-list-toggle');
+	const cards = document.getElementById('editor-cards');
+	if (!toggle || !cards) { return; }
+	const chevron = toggle.querySelector('.editor-list-chevron');
+	toggle.addEventListener('click', () => {
+		editorListCollapsed = !editorListCollapsed;
+		cards.classList.toggle('hidden', editorListCollapsed);
+		toggle.setAttribute('aria-expanded', String(!editorListCollapsed));
+		toggle.title = editorListCollapsed ? 'Show per-editor breakdown' : 'Hide per-editor breakdown';
+		if (chevron) { chevron.textContent = editorListCollapsed ? '▸' : '▾'; }
+		chartState.patch({ editorListCollapsed });
+	});
+}
+
 function wireInteractions(data: InitialChartData): void {
+	wireEditorListToggle();
+
 	const refresh = document.getElementById('btn-refresh');
 	refresh?.addEventListener('click', () => vscode.postMessage({ command: 'refresh' }));
 
@@ -1364,6 +1409,7 @@ function restoreChartState(initialData: InitialChartData): void {
 	currentPeriod = saved.period;
 	currentTimeWindow = saved.timeWindow ?? 'last30';
 	currentDisplayMode = saved.displayMode;
+	editorListCollapsed = saved.editorListCollapsed ?? false;
 	if (saved.view && !saved.metric) {
 		const m = migrateViewKey(saved.view);
 		currentMetric = m.metric; currentSplit = m.split;

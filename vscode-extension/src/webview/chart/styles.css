@@ -72,6 +72,38 @@ body {
 	margin-top: 16px;
 }
 
+.editor-section {
+	margin-top: 16px;
+}
+
+.editor-section-header {
+	display: flex;
+	justify-content: flex-start;
+}
+
+.editor-list-toggle {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	background: none;
+	border: none;
+	cursor: pointer;
+	padding: 0 0 8px;
+	margin: 0;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.editor-list-toggle:hover {
+	color: var(--text-secondary);
+}
+
+.editor-list-chevron {
+	font-size: 10px;
+	color: var(--text-secondary);
+}
+
 .card {
 	background: var(--bg-tertiary);
 	border: 1px solid var(--border-subtle);
