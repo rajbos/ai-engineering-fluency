@@ -4,13 +4,29 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.17.0] - 2026-07-30
+
 ### Features
+- Efficiency view: are you working more efficiently with AI over time, plus a one-time notification popup pointing users to it (#1791, #1794)
+- Cost by Model and Tokens by Provider chart splits (#1781)
+- Collapsible By Editor breakdown in Chart view summary (#1785)
+- Detect agent-skill usage across Claude Code, Claude Desktop, and Copilot CLI (#1778)
+- Show untracked Copilot usage in the API budget bar (#1783)
+- 3 additional friendly tool names from community issue #1787 (#1788)
 - Model Efficiency section in Usage Analysis: per-model one-shot edit rate, retry rate, self-correction rate, cost per turn, cost per edit, output tokens per turn, and cache hit rate, with sortable columns and period switcher (#1649)
 - Insight card that flags models with high edit-retry rates and compares them against your best-performing model (#1649)
 - GitHub API requests (PR stats, cloud-agent sessions, Copilot plan info) now honor VS Code's `github-enterprise.uri` setting, so they target a GHE.com or GitHub Enterprise Server host instead of always hitting github.com — matching where the user actually signed in
 
 ### Bug Fixes
+- Fix `Other` row sorting into the top-N list in Usage by Editor/Models tables (#1786)
+- Fix Diagnostics reload being much slower than the initial extension load (#1784)
 - Claude Code: attribute multi-day session tokens to the day each turn actually occurred instead of collapsing everything onto the session's start day, and discover subagent/workflow transcripts under `<sessionId>/subagents/**` that were previously silently excluded (#1608)
+
+### Security
+- Fix open code-scanning alerts, including a log injection issue sanitized inline (#77-98) (#1790)
+
+### Maintenance
+- Decompose `deleteEntitiesForUserDataset` into focused private helpers (#1777)
 
 ## [0.13.0] - 2026-07-11
 
