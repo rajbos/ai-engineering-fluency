@@ -42,13 +42,25 @@ const TEST_RELEASES = [
   }
 ];
 
+// The only GitHub owner/repo this script is ever meant to talk to. Kept as
+// hardcoded constants (not read from a file) so the values actually embedded
+// in outbound GitHub API requests never carry file-derived data — see
+// getGitHubOwnerRepo() below for why this matters.
+const EXPECTED_OWNER = 'rajbos';
+const EXPECTED_REPO = 'ai-engineering-fluency';
+
 /**
- * Read package.json and extract a validated GitHub `owner`/`repo` pair from its
- * `repository.url` field. The extracted values are later embedded in outbound
- * GitHub API requests (and a `gh api` command line), so they are restricted to
- * the character set GitHub actually allows in owner/repo names — this rejects
- * anything unexpected in package.json rather than passing arbitrary file
- * content into a network request or shell command.
+ * Read package.json and confirm its `repository.url` field points at the
+ * expected GitHub repo, then return the hardcoded EXPECTED_OWNER/EXPECTED_REPO
+ * constants — not the strings extracted from package.json.
+ *
+ * This script only ever needs to call the GitHub API for this one repo, so
+ * package.json is used purely as a sanity check, never as the source of the
+ * values embedded in outbound requests (and the `gh api` command line).
+ * Returning the file-derived strings directly would mean file content flows
+ * into a network request/shell command; returning the hardcoded constants
+ * instead — after validating they match — avoids that entirely, regardless of
+ * what package.json happens to contain.
  */
 function getGitHubOwnerRepo() {
   const packageJson = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -58,7 +70,12 @@ function getGitHubOwnerRepo() {
     throw new Error('Could not extract repository information from package.json');
   }
   const [, owner, repo] = match;
-  return { owner, repo };
+  if (owner !== EXPECTED_OWNER || repo !== EXPECTED_REPO) {
+    throw new Error(
+      `package.json repository (${owner}/${repo}) does not match the expected ${EXPECTED_OWNER}/${EXPECTED_REPO}; refusing to use it`
+    );
+  }
+  return { owner: EXPECTED_OWNER, repo: EXPECTED_REPO };
 }
 
 async function fetchGitHubReleases() {
