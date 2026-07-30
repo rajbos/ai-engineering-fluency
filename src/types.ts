@@ -298,6 +298,13 @@ export interface SessionFileCache {
   lastInteraction?: string | null; // ISO timestamp of last interaction
   title?: string; // Session title (customTitle from session file)
   repository?: string; // Git remote origin URL for the session's workspace
+  /**
+   * True once a full parse has attempted repository extraction for this cache entry.
+   * `repository` can legitimately stay undefined afterward (e.g. no resolvable repo) —
+   * this flag is what distinguishes "resolved to nothing" from "never attempted", so a
+   * repo-less session doesn't get re-parsed on every single cache read forever.
+   */
+  repositoryResolved?: boolean;
   workspaceFolderPath?: string; // Full local path to the workspace folder (optional)
   thinkingTokens?: number; // Estimated thinking/reasoning tokens
   actualTokens?: number; // Actual token count from LLM API usage data (when available)
