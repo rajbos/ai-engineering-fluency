@@ -1573,6 +1573,12 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   });
 
   // src/webview/shared/domUtils.ts
+  function setHtml(el2, html) {
+    if (!el2) {
+      return;
+    }
+    el2.innerHTML = html;
+  }
   function el(tag, className, text) {
     const node = document.createElement(tag);
     if (className) {
@@ -1805,6 +1811,20 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   }
   function escapeHtml(text) {
     return text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+  }
+  function safeSectionHtml(label, builder, onError = (m2) => console.error(m2)) {
+    try {
+      return builder();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      onError(`[usage-webview] Section "${label}" failed to render: ${message}`);
+      return `<div class="section" style="border-color: rgba(239, 68, 68, 0.3);">
+			<div class="section-title"><span>\u26A0\uFE0F</span><span>${escapeHtml(label)}</span></div>
+			<div style="color: var(--text-secondary); font-size: 12px; padding: 8px 0;">
+				This section couldn't be displayed due to an unexpected error. Other sections are unaffected \u2014 try refreshing the dashboard.
+			</div>
+		</div>`;
+    }
   }
   function formatFileSize(bytes) {
     const numericBytes = Number(bytes);
@@ -2369,6 +2389,52 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     }
   }
 
+  // src/webview/usage/agentSessionsSanitizer.ts
+  function toSafeNumber(value) {
+    const n5 = Number(value);
+    return Number.isFinite(n5) && n5 >= 0 ? n5 : 0;
+  }
+  function toSafeHttpUrl(value) {
+    const raw = typeof value === "string" ? value.trim() : "";
+    try {
+      const parsed = new URL(raw);
+      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
+        return parsed.toString();
+      }
+    } catch {
+    }
+    return "#";
+  }
+  function sanitizeAgentSessionsData(input) {
+    const src = input && typeof input === "object" ? input : {};
+    const repos = Array.isArray(src.repos) ? src.repos : [];
+    return {
+      authenticated: Boolean(src.authenticated),
+      since: typeof src.since === "string" ? escapeHtml(src.since) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3).toISOString(),
+      fetchedAt: typeof src.fetchedAt === "string" ? src.fetchedAt : "",
+      totalTasks: toSafeNumber(src.totalTasks),
+      totalSessions: toSafeNumber(src.totalSessions),
+      totalCredits: toSafeNumber(src.totalCredits),
+      repos: repos.map((repo) => {
+        const r6 = repo && typeof repo === "object" ? repo : {};
+        const owner = escapeHtml(typeof r6.owner === "string" ? r6.owner : "");
+        const repoName = escapeHtml(typeof r6.repo === "string" ? r6.repo : "");
+        return {
+          owner,
+          repo: repoName,
+          repoUrl: toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
+          totalTasks: toSafeNumber(r6.totalTasks),
+          totalSessions: toSafeNumber(r6.totalSessions),
+          totalCredits: toSafeNumber(r6.totalCredits),
+          tasksScanned: toSafeNumber(r6.tasksScanned),
+          tasksTotal: toSafeNumber(r6.tasksTotal),
+          partial: Boolean(r6.partial),
+          error: typeof r6.error === "string" ? escapeHtml(r6.error) : void 0
+        };
+      })
+    };
+  }
+
   // ../src/utils/toolUtils.ts
   var GUID_MCP_PATTERN = /^mcp__[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}__(.+)$/i;
   function toTitleCase(s4) {
@@ -2383,6 +2449,140 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   }
   function isGuidMcpTool(id) {
     return GUID_MCP_PATTERN.test(id);
+  }
+  var MCP_TOOL_FAMILIES = [
+    {
+      displayName: "GitHub MCP",
+      keywords: ["github"],
+      actions: /* @__PURE__ */ new Set([
+        "actions_list",
+        "add_comment_to_pending_review",
+        "add_issue_comment",
+        "add_reply_to_pull_request_comment",
+        "assign_copilot_to_issue",
+        "create_or_update_file",
+        "create_pull_request",
+        "create_repository",
+        "get_commit",
+        "get_file_contents",
+        "get_job_logs",
+        "get_label",
+        "get_latest_release",
+        "get_me",
+        "get_release_by_tag",
+        "get_repository_tree",
+        "get_tag",
+        "issue_read",
+        "issue_write",
+        "label_write",
+        "list_branches",
+        "list_code_scanning_alerts",
+        "list_commits",
+        "list_issue_fields",
+        "list_issue_types",
+        "list_issues",
+        "list_label",
+        "list_pull_requests",
+        "list_tags",
+        "projects_list",
+        "pull_request_read",
+        "pull_request_review_write",
+        "request_copilot_review",
+        "search_code",
+        "search_issues",
+        "search_pull_requests",
+        "search_repositories",
+        "search_users",
+        "semantic_issue_similarity_search",
+        "semantic_issues_search",
+        "sub_issue_write",
+        "update_pull_request"
+      ])
+    },
+    {
+      displayName: "Playwright MCP",
+      keywords: ["playwright"],
+      actions: /* @__PURE__ */ new Set([
+        "browser_click",
+        "browser_close",
+        "browser_console_messages",
+        "browser_evaluate",
+        "browser_fill_form",
+        "browser_find",
+        "browser_hover",
+        "browser_install",
+        "browser_navigate",
+        "browser_network_request",
+        "browser_network_requests",
+        "browser_press_key",
+        "browser_resize",
+        "browser_run_code",
+        "browser_run_code_unsafe",
+        "browser_snapshot",
+        "browser_tabs",
+        "browser_take_screenshot",
+        "browser_type",
+        "browser_wait_for"
+      ])
+    },
+    {
+      displayName: "Context7 MCP",
+      keywords: ["context7"],
+      actions: /* @__PURE__ */ new Set(["get_library_docs", "query_docs", "resolve_library_id"])
+    },
+    {
+      displayName: "Tavily MCP",
+      keywords: ["tavily"],
+      actions: /* @__PURE__ */ new Set(["tavily_crawl", "tavily_extract", "tavily_research", "tavily_search", "crawl", "extract", "research", "search"])
+    },
+    {
+      displayName: "Microsoft Docs MCP",
+      keywords: ["microsoft_doc", "microsoftdocs", "microsoft_learn"],
+      actions: /* @__PURE__ */ new Set(["docs_fetch", "docs_search", "code_sample_search"])
+    },
+    {
+      displayName: "Claude Browser MCP",
+      keywords: ["claude_browser", "claude_in_chrome"],
+      actions: /* @__PURE__ */ new Set([
+        "computer",
+        "find",
+        "get_page_text",
+        "javascript_tool",
+        "navigate",
+        "preview_list",
+        "preview_logs",
+        "preview_start",
+        "preview_stop",
+        "read_console_messages",
+        "read_network_requests",
+        "read_page",
+        "resize_window",
+        "tabs_close",
+        "tabs_context",
+        "tabs_create",
+        "tabs_select"
+      ])
+    }
+  ];
+  function normalizeMcpId(id) {
+    return id.toLowerCase().replace(/[.-]/g, "_");
+  }
+  function resolveMcpFamilyToolName(id) {
+    const normalized = normalizeMcpId(id);
+    for (const family of MCP_TOOL_FAMILIES) {
+      if (!family.keywords.some((keyword) => normalized.includes(keyword))) {
+        continue;
+      }
+      for (const action of family.actions) {
+        if (normalized === action || normalized.endsWith(`_${action}`)) {
+          return `${family.displayName}: ${toTitleCase(action)}`;
+        }
+      }
+    }
+    return void 0;
+  }
+  function isMcpFamilyResolvedTool(id) {
+    return resolveMcpFamilyToolName(id) !== void 0;
   }
 
   // src/webview/usage/main.ts
@@ -2520,7 +2720,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       const ico = isFirst ? '<span class="ul-spin">\u21BB</span>' : "\u25CB";
       return `<div class="${cls}" id="${s4.id}"><span class="ul-ico">${ico}</span><span class="ul-lbl">${escapeHtml(s4.label)}</span><span class="ul-cnt" id="${s4.id}-cnt"></span></div>`;
     }).join("");
-    root.innerHTML = `${USAGE_LOADING_CSS}
+    setHtml(root, `${USAGE_LOADING_CSS}
 <div id="usage-loading-wrap">
   <div id="usage-loading-card">
     <div id="ul-header">
@@ -2537,7 +2737,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     <div id="ul-track"><div id="ul-fill" class="ul-indeterminate"></div></div>
     <div id="ul-steps">${stepsHtml}</div>
   </div>
-</div>`;
+</div>`);
   }
   function _ulSetDone(id) {
     const el2 = document.getElementById(id);
@@ -2547,7 +2747,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     el2.className = "ul-step ul-done";
     const ico = el2.querySelector(".ul-ico");
     if (ico) {
-      ico.innerHTML = '<span class="ul-pop">\u2713</span>';
+      setHtml(ico, '<span class="ul-pop">\u2713</span>');
     }
   }
   function _ulSetActive(id) {
@@ -2558,7 +2758,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     el2.className = "ul-step ul-active";
     const ico = el2.querySelector(".ul-ico");
     if (ico) {
-      ico.innerHTML = '<span class="ul-spin">\u21BB</span>';
+      setHtml(ico, '<span class="ul-spin">\u21BB</span>');
     }
   }
   function _ulSetCnt(id, text) {
@@ -2666,7 +2866,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     container.style.cssText = "padding: 32px; text-align: center; font-size: 14px;";
     const icon = document.createElement("div");
     icon.style.cssText = "font-size: 24px; margin-bottom: 12px;";
-    icon.innerHTML = statusBadgeHtml("\u274C", "Error");
+    setHtml(icon, statusBadgeHtml("\u274C", "Error"));
     const msg = document.createElement("div");
     msg.style.cssText = "color: var(--vscode-errorForeground, #f48771); margin-bottom: 16px;";
     msg.textContent = message;
@@ -2691,7 +2891,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     if (!TOOL_NAME_MAP) {
       return id;
     }
-    return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? id;
+    return TOOL_NAME_MAP[id] ?? TOOL_NAME_MAP[id.toLowerCase()] ?? resolveGuidMcpToolName(id) ?? resolveMcpFamilyToolName(id) ?? id;
   }
   function lookupMcpToolName(id) {
     const full = lookupToolName(id);
@@ -2710,7 +2910,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.month.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
     const suppressed = new Set(stats.suppressedUnknownTools ?? []);
-    return Array.from(allTools).filter((tool) => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !suppressed.has(tool)).sort();
+    return Array.from(allTools).filter((tool) => !TOOL_NAME_MAP?.[tool] && !TOOL_NAME_MAP?.[tool.toLowerCase()] && !isGuidMcpTool(tool) && !isMcpFamilyResolvedTool(tool) && !suppressed.has(tool)).sort();
   }
   function createMcpToolIssueUrl(unknownTools) {
     const repoUrl = "https://github.com/rajbos/ai-engineering-fluency";
@@ -3144,7 +3344,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
       }
       const container = document.getElementById("sessions-table-container");
       if (container) {
-        container.innerHTML = buildSessionsTableHtml(cachedTodaySessions);
+        setHtml(container, buildSessionsTableHtml(cachedTodaySessions));
       }
     });
     renderSessionsLookbackSelector();
@@ -3175,7 +3375,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
       }
       const container = document.getElementById("sessions-table-container");
       if (container) {
-        container.innerHTML = buildSessionsTableHtml(cachedTodaySessions);
+        setHtml(container, buildSessionsTableHtml(cachedTodaySessions));
       }
       saveSessionColumnSettings();
     });
@@ -3217,15 +3417,15 @@ ${_renderMultiModelMixedCostSessions(switching)}
       return;
     }
     if (sessionsLookback === "today") {
-      body.innerHTML = renderTodaySessionsTable(latestTodaySessions);
+      setHtml(body, renderTodaySessionsTable(latestTodaySessions));
       return;
     }
     const cached = recentSessionsCache[sessionsLookback];
     if (cached) {
-      body.innerHTML = renderTodaySessionsTable(cached);
+      setHtml(body, renderTodaySessionsTable(cached));
       return;
     }
-    body.innerHTML = `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}\u2026</div>`;
+    setHtml(body, `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}\u2026</div>`);
     vscode.postMessage({ command: "loadRecentSessions", period: sessionsLookback });
   }
   function handleRecentSessionsLoaded(message) {
@@ -3418,19 +3618,19 @@ ${_renderMultiModelMixedCostSessions(switching)}
   function updateWorktreeControls() {
     const controlsEl = document.getElementById("worktree-controls");
     if (controlsEl) {
-      controlsEl.innerHTML = renderWorktreeControls();
+      setHtml(controlsEl, renderWorktreeControls());
     }
   }
   function updateWorktreeResults() {
     const resultsEl = document.getElementById("worktree-results");
     if (resultsEl) {
-      resultsEl.innerHTML = renderWorktreeResults();
+      setHtml(resultsEl, renderWorktreeResults());
     }
   }
   function updateWorktreeProgressArea() {
     const el2 = document.getElementById("worktree-progress-area");
     if (el2) {
-      el2.innerHTML = renderWorktreeProgress();
+      setHtml(el2, renderWorktreeProgress());
     }
   }
   function scheduleWorktreeResultsRender() {
@@ -3852,21 +4052,6 @@ ${_renderMultiModelMixedCostSessions(switching)}
       });
     });
   }
-  function toSafeNumber(value) {
-    const n5 = Number(value);
-    return Number.isFinite(n5) && n5 >= 0 ? n5 : 0;
-  }
-  function toSafeHttpUrl(value) {
-    const raw = typeof value === "string" ? value.trim() : "";
-    try {
-      const parsed = new URL(raw);
-      if (parsed.protocol === "http:" || parsed.protocol === "https:") {
-        return parsed.toString();
-      }
-    } catch {
-    }
-    return "#";
-  }
   function sanitizeRepoPrStatsData(input) {
     const src = input && typeof input === "object" ? input : {};
     const repos = Array.isArray(src.repos) ? src.repos : [];
@@ -3976,41 +4161,12 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			\u{1F916} Cloud Agent Authored = PR author's GitHub login matches a known cloud agent (e.g. <code>copilot-swe-agent</code>, <code>claude-code-action</code>, <code>openai-code-agent</code>).
 		</div>`;
   }
-  function sanitizeAgentSessionsData(input) {
-    const src = input && typeof input === "object" ? input : {};
-    const repos = Array.isArray(src.repos) ? src.repos : [];
-    return {
-      authenticated: Boolean(src.authenticated),
-      since: typeof src.since === "string" ? escapeHtml(src.since) : new Date(Date.now() - 30 * 24 * 60 * 60 * 1e3).toISOString(),
-      fetchedAt: typeof src.fetchedAt === "string" ? src.fetchedAt : "",
-      totalTasks: toSafeNumber(src.totalTasks),
-      totalSessions: toSafeNumber(src.totalSessions),
-      totalCredits: toSafeNumber(src.totalCredits),
-      repos: repos.map((repo) => {
-        const r6 = repo && typeof repo === "object" ? repo : {};
-        const owner = escapeHtml(typeof r6.owner === "string" ? r6.owner : "");
-        const repoName = escapeHtml(typeof r6.repo === "string" ? r6.repo : "");
-        return {
-          owner,
-          repo: repoName,
-          repoUrl: toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
-          totalTasks: toSafeNumber(r6.totalTasks),
-          totalSessions: toSafeNumber(r6.totalSessions),
-          totalCredits: toSafeNumber(r6.totalCredits),
-          tasksScanned: toSafeNumber(r6.tasksScanned),
-          tasksTotal: toSafeNumber(r6.tasksTotal),
-          partial: Boolean(r6.partial),
-          error: typeof r6.error === "string" ? escapeHtml(r6.error) : void 0
-        };
-      })
-    };
-  }
   function updateReposPrPanel(data) {
     const container = document.querySelector("#repos-pr-content");
     if (!container) {
       return;
     }
-    container.innerHTML = `
+    setHtml(container, `
 		<div class="section-title"><span>\u{1F916}</span><span>AI Activity in Repository PRs</span></div>
 		<div class="section-subtitle">
 			PRs from the last 30 days across your known repositories, showing how many were <strong>authored by cloud agents</strong>
@@ -4018,7 +4174,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			or had an AI agent requested as a reviewer.
 		</div>
 		${renderReposPrContent(data)}
-	`;
+	`);
   }
   function buildAgentSessionRows(data, cell, cellCenter) {
     return data.repos.map((r6) => {
@@ -4107,7 +4263,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     if (!container) {
       return;
     }
-    container.innerHTML = `
+    setHtml(container, `
 		<div class="section-title"><span>\u{1F916}</span><span>Copilot Cloud Agent Sessions</span></div>
 		<div class="section-subtitle">
 			Cloud agent tasks and sessions from the last 30 days. Each <strong>task</strong> is a user request to the agent;
@@ -4115,7 +4271,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			<strong>CLI/remote sessions are excluded</strong> \u2014 they are separate from these cloud agent sessions.
 		</div>
 		${renderAgentSessionsContent(data)}
-	`;
+	`);
   }
   function buildCustomizationSectionHtml(matrix) {
     if (!matrix || !matrix.workspaces || matrix.workspaces.length === 0) {
@@ -4832,7 +4988,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const newCount = insights.filter((i6) => i6.status === "new").length;
     const badgeHtml = newCount > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${newCount}</span>` : "";
     const titleOnly = '<span class="codicon codicon-lightbulb"></span> Insights';
-    tabButton.innerHTML = titleOnly + badgeHtml;
+    setHtml(tabButton, titleOnly + badgeHtml);
   }
   function refreshInsightsPanel(insights) {
     const container = document.getElementById("insights-container");
@@ -4852,7 +5008,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			<div style="font-size:12px; font-weight:600; text-transform:uppercase; color:var(--text-secondary); letter-spacing:0.05em; margin-bottom:10px;">All Tips</div>
 			${other.map(buildInsightCardHtml).join("")}
 		</div>` : "";
-    container.innerHTML = forYouSection + allSection;
+    setHtml(container, forYouSection + allSection);
     wireInsightCardButtons();
     updateTabButtonCount(insights);
   }
@@ -4974,13 +5130,13 @@ ${_renderMultiModelMixedCostSessions(switching)}
 				<button class="tab-button ${activeTab === "insights" ? "active" : ""}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter((i6) => i6.status === "new").length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter((i6) => i6.status === "new").length}</span>` : ""}</button>
 			</div>
 
-			${buildSessionsTabPanelHtml(stats)}
-			${buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs)}
-			${buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels)}
-			${buildHealthTabPanelHtml(customizationHtml, stats)}
-			${buildReposAndAgentTabPanelsHtml()}
-			${buildWorktreesTabPanelHtml()}
-			${buildInsightsTabPanelHtml(stats.insights ?? [])}
+			${safeSectionHtml("Recent Sessions", () => buildSessionsTabPanelHtml(stats))}
+			${safeSectionHtml("My Activity", () => buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs))}
+			${safeSectionHtml("Tools & Integrations", () => buildToolsTabPanelHtml(stats, allToolKeys, allMcpToolKeys, allMcpServerKeys, allHighCostModels, allLowCostModels, allMediumCostModels, allUnknownModels))}
+			${safeSectionHtml("Workspace Health", () => buildHealthTabPanelHtml(customizationHtml, stats))}
+			${safeSectionHtml("Repository PRs & Cloud Agent", () => buildReposAndAgentTabPanelsHtml())}
+			${safeSectionHtml("Worktrees", () => buildWorktreesTabPanelHtml())}
+			${safeSectionHtml("Insights", () => buildInsightsTabPanelHtml(stats.insights ?? []))}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} \xB7 Updates every 5 minutes
 			</div>
@@ -5263,11 +5419,23 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>
 		</div>`;
   }
-  function _billingApiBalanceHtml(api) {
-    const pct = formatFixed(api.pctAvailable, 1);
+  function _billingApiBalanceHtml(api, copilotCostUsd) {
+    const apiUsedUsd = api.usedAiCredits * 0.01;
+    const trackedUsd = Math.max(0, Math.min(copilotCostUsd, apiUsedUsd));
+    const gapUsd = Math.max(0, apiUsedUsd - trackedUsd);
+    const budgetUsd = api.budgetUsd;
+    const trackedPct = budgetUsd > 0 ? Math.min(100, trackedUsd / budgetUsd * 100) : 0;
+    const gapPct = budgetUsd > 0 ? Math.min(100 - trackedPct, gapUsd / budgetUsd * 100) : 0;
+    const totalUsedPct = trackedPct + gapPct;
     const usedPct = formatFixed(100 - api.pctAvailable, 1);
-    const barFill = Math.min(100 - api.pctAvailable, 100);
-    const barColor = barFill > 90 ? "var(--error-color, #f14c4c)" : barFill > 75 ? "var(--warning-color, #cca700)" : "var(--accent-color, #4d9cf8)";
+    const pct = formatFixed(api.pctAvailable, 1);
+    const severityColor = totalUsedPct > 90 ? "var(--error-color, #f14c4c)" : totalUsedPct > 75 ? "var(--warning-color, #cca700)" : "var(--accent-color, #4d9cf8)";
+    const trackedSegment = trackedPct > 0 ? `<div style="height:100%; width:${formatFixed(trackedPct, 4)}%; background:${severityColor};"></div>` : "";
+    const gapSegment = gapPct > 0 ? `<div title="Usage the API reports but this device has no local session data for" style="height:100%; width:${formatFixed(gapPct, 4)}%; background:${severityColor}; background-image:repeating-linear-gradient(135deg, rgba(0,0,0,0.35) 0px, rgba(0,0,0,0.35) 3px, transparent 3px, transparent 6px);"></div>` : "";
+    const legend = gapPct > 0 ? `<div style="display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--text-secondary); margin-top:6px;">
+				<span><span style="display:inline-block; width:9px; height:9px; border-radius:2px; background:${severityColor}; margin-right:4px; vertical-align:middle;"></span>Tracked here (${formatFixed(trackedPct, 1)}%)</span>
+				<span><span style="display:inline-block; width:9px; height:9px; border-radius:2px; background:${severityColor}; background-image:repeating-linear-gradient(135deg, rgba(0,0,0,0.35) 0px, rgba(0,0,0,0.35) 2px, transparent 2px, transparent 4px); margin-right:4px; vertical-align:middle;"></span>Other devices/cloud (${formatFixed(gapPct, 1)}%)</span>
+			</div>` : "";
     return `
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub Copilot API (all channels)</div>
@@ -5288,9 +5456,10 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			<div style="margin-bottom:4px; font-size:11px; color:var(--text-secondary); display:flex; justify-content:space-between;">
 				<span>${usedPct}% used</span><span>${pct}% available</span>
 			</div>
-			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
-				<div style="height:100%; width:100%; background:${barColor}; border-radius:4px; transform-origin:left; transform:scaleX(${formatFixed(barFill / 100, 4)});"></div>
+			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden; display:flex;">
+				${trackedSegment}${gapSegment}
 			</div>
+			${legend}
 			<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
 				1 AI Credit = $0.01 \xB7 Budget = $${formatFixed(api.budgetUsd, 2)}/month
 			</div>
@@ -5360,7 +5529,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const copilotCostUsd = groupCosts?.["GitHub Copilot"] ?? 0;
     const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) : 0;
     const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
-    const apiHtml = api ? _billingApiBalanceHtml(api) : "";
+    const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : "";
     const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts) : "";
     const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
     return `
@@ -5373,13 +5542,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
 		</div>`;
   }
   function buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs) {
-    const modelCostHtml = buildModelCostSectionHtml(stats);
-    const billingComparisonHtml = buildBillingComparisonSectionHtml(stats);
-    return `
-		<div id="tab-panel-activity" class="tab-panel"${activeTab !== "activity" ? ' style="display:none"' : ""}>
-			${sessionsSummaryHtml}
-			${billingComparisonHtml}
-			<!-- Mode Usage Section -->
+    const modelCostHtml = safeSectionHtml("Model Cost", () => buildModelCostSectionHtml(stats));
+    const billingComparisonHtml = safeSectionHtml("Copilot Billing Coverage", () => buildBillingComparisonSectionHtml(stats));
+    const modeUsageHtml = safeSectionHtml("Interaction Modes", () => `
 			<div class="section">
 				<div class="section-title"><span>\u{1F3AF}</span><span>Interaction Modes</span></div>
 				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
@@ -5387,13 +5552,22 @@ ${_renderMultiModelMixedCostSessions(switching)}
 					${renderModeBarChart(stats.today.modeUsage, "\u{1F4C5} Today")}
 					${renderModeBarChart(stats.last30Days.modeUsage, "\u{1F4CA} Last 30 Days")}
 				</div>
-			</div>
-			${buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs)}
+			</div>`);
+    const contextRefsHtml = safeSectionHtml("Context References", () => buildContextRefsHtml(stats, todayTotalRefs, last30DaysTotalRefs));
+    const modelEfficiencyHtml = safeSectionHtml("Model Efficiency", () => buildModelEfficiencySectionHtml(stats));
+    const contextWindowHtml = safeSectionHtml("Context Window", () => buildContextWindowSectionHtml(stats));
+    return `
+		<div id="tab-panel-activity" class="tab-panel"${activeTab !== "activity" ? ' style="display:none"' : ""}>
+			${sessionsSummaryHtml}
+			${billingComparisonHtml}
+			<!-- Mode Usage Section -->
+			${modeUsageHtml}
+			${contextRefsHtml}
 			${multiModelHtml}
 			${modelCostHtml}
-			${buildModelEfficiencySectionHtml(stats)}
+			${modelEfficiencyHtml}
 			${thinkingEffortHtml}
-			${buildContextWindowSectionHtml(stats)}
+			${contextWindowHtml}
 		</div>`;
   }
   var _modelPricingData = getWindowData("__MODEL_PRICING__");
@@ -5817,7 +5991,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   function rerenderModelEfficiencyTable() {
     const table = document.getElementById("model-efficiency-table");
     if (table) {
-      table.innerHTML = buildModelEfficiencyTableHtml();
+      setHtml(table, buildModelEfficiencyTableHtml());
     }
   }
   function handleEfficiencySortClick(th) {
@@ -5899,11 +6073,21 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>
 		</div>`;
   }
-  function renderLayout(stats) {
-    const root = document.getElementById("root");
-    if (!root) {
-      return;
+  function assignUsageRootHtml(root, build) {
+    try {
+      setHtml(root, build());
+      return true;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[usage-webview] renderLayout failed: ${message}`);
+      setHtml(root, `<div style="padding: 32px; text-align: center; font-size: 14px;">
+			<div style="color: var(--vscode-foreground); opacity: 0.7; margin-bottom: 12px;">\u26A0\uFE0F Something went wrong rendering the dashboard.</div>
+			${createRefreshButton().outerHTML}
+		</div>`);
+      return false;
     }
+  }
+  function syncRenderLayoutState(stats) {
     const matrix = stats.customizationMatrix ?? initialData?.customizationMatrix ?? null;
     hygieneMatrixState = matrix ?? null;
     if (!hygieneMatrixState || hygieneMatrixState.workspaces.length === 0) {
@@ -5921,11 +6105,19 @@ ${_renderMultiModelMixedCostSessions(switching)}
     } else {
       traceCurationOnce("render-no-curation-update", "renderLayout.curation.notProvidedInUpdate");
     }
-    const customizationHtml = buildCustomizationSectionHtml(matrix);
+    return matrix;
+  }
+  function renderLayout(stats) {
+    const root = document.getElementById("root");
+    if (!root) {
+      return;
+    }
+    const matrix = syncRenderLayoutState(stats);
+    const customizationHtml = safeSectionHtml("Workspace Customization", () => buildCustomizationSectionHtml(matrix));
     const allKeys = buildUsageAllKeysSets(stats);
     const todayTotalRefs = getTotalContextRefs(stats.today.contextReferences);
     const last30DaysTotalRefs = getTotalContextRefs(stats.last30Days.contextReferences);
-    const thinkingEffortHtml = buildThinkingEffortSectionHtml(stats);
+    const thinkingEffortHtml = safeSectionHtml("Thinking Effort", () => buildThinkingEffortSectionHtml(stats));
     const sessionsSummaryHtml = `
 		<!-- Summary Section -->
 		<div class="section">
@@ -5937,7 +6129,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 				<div class="stat-card"><div class="stat-label">\u{1F4C5} Last Month Sessions</div><div class="stat-value">${formatNumber(stats.lastMonth.sessions)}</div></div>
 			</div>
 		</div>`;
-    root.innerHTML = buildUsageRootHtml(
+    const rendered = assignUsageRootHtml(root, () => buildUsageRootHtml(
       stats,
       customizationHtml,
       "",
@@ -5952,7 +6144,10 @@ ${_renderMultiModelMixedCostSessions(switching)}
       allKeys.allLowCostModels,
       allKeys.allMediumCostModels,
       allKeys.allUnknownModels
-    );
+    ));
+    if (!rendered) {
+      return;
+    }
     wireNavigationButtons();
     wireAboutInfoToggle();
     wireRepositoryButtons();
@@ -6376,7 +6571,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     checkRow.setAttribute("style", "padding: 8px; border-bottom: 1px solid var(--border-subtle); display: flex; align-items: flex-start; gap: 8px;");
     const icon = el("span");
     icon.setAttribute("style", "flex-shrink: 0; padding-top: 1px;");
-    icon.innerHTML = statusBadgeHtml(emoji);
+    setHtml(icon, statusBadgeHtml(emoji));
     const weight = el("span");
     weight.setAttribute("style", "font-size: 10px; color: var(--text-muted); min-width: 30px; text-align: right;");
     weight.textContent = `+${toFiniteNumber(check?.weight)}`;
@@ -6531,7 +6726,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
 			<div style="width: 80px; flex-shrink: 0;"></div>
 		</div>
 	`;
-    listPane.innerHTML = headerHtml + visibleWorkspaces.map((ws, idx) => {
+    setHtml(listPane, headerHtml + visibleWorkspaces.map((ws, idx) => {
       const record = repoAnalysisState.get(ws.workspacePath);
       const hasResult = !!record?.data?.summary;
       const scoreLabel = getScoreLabel(ws.workspacePath);
@@ -6555,7 +6750,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
 				</vscode-button>
 			</div>
 		`;
-    }).join("");
+    }).join(""));
   }
   function renderRepoDetailSuccess(detailsPane, record, workspaceName) {
     detailsPane.replaceChildren();
@@ -6602,7 +6797,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
       return;
     }
     if (record?.error) {
-      detailsPane.innerHTML = `
+      setHtml(detailsPane, `
 			<div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px;">
 				<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
 					<div style="font-size: 11px; color: #fca5a5;">Repository: ${escapeHtml(workspaceName)}</div>
@@ -6611,10 +6806,10 @@ For each issue, please provide specific steps or code changes to fix it.`;
 				<div style="font-size: 12px; font-weight: 600; color: #ef4444; margin-bottom: 4px;">\u274C Analysis Failed</div>
 				<div style="font-size: 11px; color: #fca5a5;">${escapeHtml(record.error)}</div>
 			</div>
-		`;
+		`);
       return;
     }
-    detailsPane.innerHTML = `
+    setHtml(detailsPane, `
 		<div style="padding: 12px; background: var(--bg-secondary); border: 1px solid var(--border-color); border-radius: 6px;">
 			<div style="display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-bottom: 8px;">
 				<div style="font-size: 12px; color: var(--text-secondary);">Repository: <span style="color: var(--text-primary); font-weight: 600; font-family: 'Courier New', monospace;">${escapeHtml(workspaceName)}</span></div>
@@ -6622,7 +6817,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
 			</div>
 			<div style="font-size: 11px; color: var(--text-muted);">No analysis data yet. Click Analyze in the list.</div>
 		</div>
-	`;
+	`);
   }
   function displayRepoAnalysisResults(data, workspacePath) {
     if (workspacePath) {
@@ -6665,12 +6860,12 @@ For each issue, please provide specific steps or code changes to fix it.`;
     }
     const resultsHost = document.getElementById("repo-analysis-results");
     if (resultsHost) {
-      resultsHost.innerHTML = `
+      setHtml(resultsHost, `
 			<div style="padding: 12px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.3); border-radius: 6px; margin-bottom: 12px;">
 				<div style="font-size: 12px; font-weight: 600; color: #ef4444; margin-bottom: 4px;">\u274C Analysis Failed</div>
 				<div style="font-size: 11px; color: #fca5a5;">${escapeHtml(error)}</div>
 			</div>
-		`;
+		`);
     }
   }
   function handleBatchAnalysisComplete() {

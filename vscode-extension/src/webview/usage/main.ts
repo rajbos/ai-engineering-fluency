@@ -3385,11 +3385,38 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 		</div>`;
 }
 
-function _billingApiBalanceHtml(api: CopilotApiBalance): string {
-	const pct = formatFixed(api.pctAvailable, 1);
+/** Renders the "GitHub Copilot API (all channels)" gauge as three segments: usage this
+ *  extension can account for locally ("tracked here"), usage the API reports but this
+ *  extension has no local session data for ("other devices/cloud" — e.g. a different PC,
+ *  a VDI, WSL, web chat, cloud agent, or review agent), and whatever budget remains.
+ *  `copilotCostUsd` is the extension's locally-tracked GitHub Copilot spend for the
+ *  current month; it is clamped so a bar never renders more than 100% even if local
+ *  tracking briefly overshoots the API snapshot (e.g. due to refresh timing). */
+function _billingApiBalanceHtml(api: CopilotApiBalance, copilotCostUsd: number): string {
+	const apiUsedUsd = api.usedAiCredits * 0.01;
+	const trackedUsd = Math.max(0, Math.min(copilotCostUsd, apiUsedUsd));
+	const gapUsd = Math.max(0, apiUsedUsd - trackedUsd);
+	const budgetUsd = api.budgetUsd;
+	const trackedPct = budgetUsd > 0 ? Math.min(100, (trackedUsd / budgetUsd) * 100) : 0;
+	const gapPct = budgetUsd > 0 ? Math.min(100 - trackedPct, (gapUsd / budgetUsd) * 100) : 0;
+	const totalUsedPct = trackedPct + gapPct;
 	const usedPct = formatFixed(100 - api.pctAvailable, 1);
-	const barFill = Math.min(100 - api.pctAvailable, 100);
-	const barColor = barFill > 90 ? 'var(--error-color, #f14c4c)' : barFill > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
+	const pct = formatFixed(api.pctAvailable, 1);
+	const severityColor = totalUsedPct > 90 ? 'var(--error-color, #f14c4c)' : totalUsedPct > 75 ? 'var(--warning-color, #cca700)' : 'var(--accent-color, #4d9cf8)';
+	const trackedSegment = trackedPct > 0
+		? `<div style="height:100%; width:${formatFixed(trackedPct, 4)}%; background:${severityColor};"></div>`
+		: '';
+	// The "other usage" segment is hatched (striped) rather than solid — same severity
+	// color, but visually flagged as usage this device can't confirm the source of.
+	const gapSegment = gapPct > 0
+		? `<div title="Usage the API reports but this device has no local session data for" style="height:100%; width:${formatFixed(gapPct, 4)}%; background:${severityColor}; background-image:repeating-linear-gradient(135deg, rgba(0,0,0,0.35) 0px, rgba(0,0,0,0.35) 3px, transparent 3px, transparent 6px);"></div>`
+		: '';
+	const legend = gapPct > 0
+		? `<div style="display:flex; gap:14px; flex-wrap:wrap; font-size:11px; color:var(--text-secondary); margin-top:6px;">
+				<span><span style="display:inline-block; width:9px; height:9px; border-radius:2px; background:${severityColor}; margin-right:4px; vertical-align:middle;"></span>Tracked here (${formatFixed(trackedPct, 1)}%)</span>
+				<span><span style="display:inline-block; width:9px; height:9px; border-radius:2px; background:${severityColor}; background-image:repeating-linear-gradient(135deg, rgba(0,0,0,0.35) 0px, rgba(0,0,0,0.35) 2px, transparent 2px, transparent 4px); margin-right:4px; vertical-align:middle;"></span>Other devices/cloud (${formatFixed(gapPct, 1)}%)</span>
+			</div>`
+		: '';
 	return `
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">GitHub Copilot API (all channels)</div>
@@ -3410,9 +3437,10 @@ function _billingApiBalanceHtml(api: CopilotApiBalance): string {
 			<div style="margin-bottom:4px; font-size:11px; color:var(--text-secondary); display:flex; justify-content:space-between;">
 				<span>${usedPct}% used</span><span>${pct}% available</span>
 			</div>
-			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden;">
-				<div style="height:100%; width:100%; background:${barColor}; border-radius:4px; transform-origin:left; transform:scaleX(${formatFixed(barFill / 100, 4)});"></div>
+			<div style="height:8px; border-radius:4px; background:var(--border-subtle); overflow:hidden; display:flex;">
+				${trackedSegment}${gapSegment}
 			</div>
+			${legend}
 			<div style="font-size:11px; color:var(--text-muted); margin-top:6px;">
 				1 AI Credit = $0.01 · Budget = $${formatFixed(api.budgetUsd, 2)}/month
 			</div>
@@ -3491,7 +3519,7 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s, v) => s + v, 0) : 0;
 	const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
 
-	const apiHtml = api ? _billingApiBalanceHtml(api) : '';
+	const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : '';
 	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts) : '';
 	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
 
