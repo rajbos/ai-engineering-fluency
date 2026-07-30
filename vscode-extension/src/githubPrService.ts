@@ -18,6 +18,15 @@ export type RepoPrInfo = {
 	aiAuthoredPrs: number;
 	aiReviewRequestedPrs: number;
 	aiDetails: RepoPrDetail[];
+	/**
+	 * PRs in the window authored by the signed-in user. Distinct from
+	 * `aiAuthoredPrs`, which only counts PRs opened by AI bot accounts
+	 * (cloud agents) — work driven by a local AI assistant is authored by
+	 * the human and lands here instead. Absent when the user login is unknown.
+	 */
+	userAuthoredPrs?: number;
+	/** Subset of `userAuthoredPrs` that has been merged. */
+	userMergedPrs?: number;
 	error?: string;
 };
 

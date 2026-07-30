@@ -591,6 +591,8 @@ type RepoPrInfo = {
   aiAuthoredPrs: number;
   aiReviewRequestedPrs: number;
   aiDetails: RepoPrDetail[];
+  userAuthoredPrs?: number;
+  userMergedPrs?: number;
   error?: string;
 };
 
@@ -1914,6 +1916,8 @@ function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 				totalPrs: toSafeNumber(r.totalPrs),
 				aiAuthoredPrs: toSafeNumber(r.aiAuthoredPrs),
 				aiReviewRequestedPrs: toSafeNumber(r.aiReviewRequestedPrs),
+				userAuthoredPrs: toSafeNumber(r.userAuthoredPrs),
+				userMergedPrs: toSafeNumber(r.userMergedPrs),
 				aiDetails: aiDetails.map((d) => {
 					const detail = (d && typeof d === 'object') ? (d as Record<string, unknown>) : {};
 					const validAiTypes = ['copilot', 'claude', 'openai', 'other-ai'] as const;
@@ -1937,6 +1941,47 @@ function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 	} as RepoPrStatsResult;
 }
 
+/** Display label per detected AI agent type, used in the PR detail list. */
+const AI_PR_LABEL: Record<string, string> = {
+	copilot: '🤖 Copilot',
+	claude: '🧠 Claude',
+	openai: '✨ Codex',
+	'other-ai': '🤖 AI',
+};
+
+/** Renders one repository row of the Repository PRs table. */
+function renderRepoPrRow(r: RepoPrInfo, cell: string, cellCenter: string): string {
+	const repoLink = `<a href="${escapeHtml(r.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${escapeHtml(r.owner)}/${escapeHtml(r.repo)}</a>`;
+	if (r.error) {
+		return `<tr>
+			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+			<td colspan="4" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r.error)}</td>
+		</tr>`;
+	}
+	// Collapsible detail list
+	let detailsHtml = '';
+	if (r.aiDetails.length > 0) {
+		const items = r.aiDetails.map(d =>
+			`<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${AI_PR_LABEL[d.aiType] ?? escapeHtml(String(d.aiType))} (${d.role === 'author' ? 'authored' : 'review requested'})</li>`
+		).join('');
+		detailsHtml = `
+			<details style="margin-top:4px; font-size:11px;">
+				<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r.aiDetails.length} detail(s)</summary>
+				<ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${items}</ul>
+			</details>`;
+	}
+	const yours = (r.userAuthoredPrs ?? 0) > 0
+		? `<span style="font-weight:600;">${r.userMergedPrs ?? 0} / ${r.userAuthoredPrs}</span>`
+		: '0';
+	return `<tr>
+		<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${detailsHtml}</td>
+		<td style="${cellCenter} font-weight:600;">${r.totalPrs}</td>
+		<td style="${cellCenter}">${yours}</td>
+		<td style="${cellCenter}">${r.aiAuthoredPrs > 0 ? `<span style="font-weight:600;">${r.aiAuthoredPrs}</span>` : '0'}</td>
+		<td style="${cellCenter}">${r.aiReviewRequestedPrs > 0 ? `<span style="font-weight:600;">${r.aiReviewRequestedPrs}</span>` : '0'}</td>
+	</tr>`;
+}
+
 function renderReposPrContent(data: RepoPrStatsResult): string {
 	const sinceDate = escapeHtml(new Date(data.since).toLocaleDateString());
 	if (!data.authenticated) {
@@ -1953,44 +1998,11 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 			</div>`;
 	}
 
-	const aiLabel: Record<string, string> = {
-		copilot: '🤖 Copilot',
-		claude: '🧠 Claude',
-		openai: '✨ Codex',
-		'other-ai': '🤖 AI',
-	};
-
 	// Cell style shared across data rows — matches the customization matrix look
 	const cell = 'padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);';
 	const cellCenter = `${cell} text-align: center;`;
 
-	const rows = data.repos.map((r) => {
-		const repoLink = `<a href="${escapeHtml(r.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${escapeHtml(r.owner)}/${escapeHtml(r.repo)}</a>`;
-		if (r.error) {
-			return `<tr>
-				<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
-				<td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r.error)}</td>
-			</tr>`;
-		}
-		// Collapsible detail list
-		let detailsHtml = '';
-		if (r.aiDetails.length > 0) {
-			const items = r.aiDetails.map(d =>
-				`<li><a href="${escapeHtml(d.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d.number} ${escapeHtml(d.title)}</a> — ${aiLabel[d.aiType] ?? escapeHtml(String(d.aiType))} (${d.role === 'author' ? 'authored' : 'review requested'})</li>`
-			).join('');
-			detailsHtml = `
-				<details style="margin-top:4px; font-size:11px;">
-					<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r.aiDetails.length} detail(s)</summary>
-					<ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${items}</ul>
-				</details>`;
-		}
-		return `<tr>
-			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${detailsHtml}</td>
-			<td style="${cellCenter} font-weight:600;">${r.totalPrs}</td>
-			<td style="${cellCenter}">${r.aiAuthoredPrs > 0 ? `<span style="font-weight:600;">${r.aiAuthoredPrs}</span>` : '0'}</td>
-			<td style="${cellCenter}">${r.aiReviewRequestedPrs > 0 ? `<span style="font-weight:600;">${r.aiReviewRequestedPrs}</span>` : '0'}</td>
-		</tr>`;
-	}).join('');
+	const rows = data.repos.map((r) => renderRepoPrRow(r, cell, cellCenter)).join('');
 
 	return `
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
@@ -2003,6 +2015,7 @@ function renderReposPrContent(data: RepoPrStatsResult): string {
 					<tr>
 						<th style="text-align:left; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">📂 Repository</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">PRs</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs you opened yourself, shown as merged / opened. Work driven by a local AI assistant lands here, not under Cloud Agent Authored.">🚢 Yours (merged / opened)</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs where the PR author's GitHub login matches a known AI agent (e.g. copilot-swe-agent, claude-code-action, openai-code-agent)">🤖 Cloud Agent Authored</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Open PRs where an AI agent was listed as a requested reviewer">👁 Copilot Review Agent requested†</th>
 					</tr>
@@ -4293,6 +4306,9 @@ function wireNavigationButtons(): void {
 	});
 	document.getElementById('btn-environmental')?.addEventListener('click', () => {
 		vscode.postMessage({ command: 'showEnvironmental' });
+	});
+	document.getElementById('btn-efficiency')?.addEventListener('click', () => {
+		vscode.postMessage({ command: 'showEfficiency' });
 	});
 	wireExtensionPointButtons(vscode);
 }

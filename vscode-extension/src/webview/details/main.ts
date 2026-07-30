@@ -75,6 +75,7 @@ type WebviewMessage =
 | { command: 'showMaturity' }
 | { command: 'showDashboard' }
 | { command: 'showEnvironmental' }
+| { command: 'showEfficiency' }
 | { command: 'saveSortSettings'; settings: {
 editor: { key: TableSortKey; dir: SortDir };
 model: { key: TableSortKey; dir: SortDir };
@@ -1249,6 +1250,9 @@ dashboard?.addEventListener('click', () => vscode.postMessage({ command: 'showDa
 
 const environmental = document.getElementById('btn-environmental');
 environmental?.addEventListener('click', () => vscode.postMessage({ command: 'showEnvironmental' }));
+
+const efficiency = document.getElementById('btn-efficiency');
+efficiency?.addEventListener('click', () => vscode.postMessage({ command: 'showEfficiency' }));
 
 // Cast to the looser signature required by the shared wireExtensionPointButtons utility,
 // which posts extension-point-specific messages not modelled in WebviewMessage.

@@ -689,6 +689,9 @@ function wireInteractions(data: InitialChartData): void {
 	const environmental = document.getElementById('btn-environmental');
 	environmental?.addEventListener('click', () => vscode.postMessage({ command: 'showEnvironmental' }));
 
+	const efficiency = document.getElementById('btn-efficiency');
+	efficiency?.addEventListener('click', () => vscode.postMessage({ command: 'showEfficiency' }));
+
 	wireExtensionPointButtons(vscode);
 
 	// Period toggle buttons

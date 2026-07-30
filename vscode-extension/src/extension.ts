@@ -150,6 +150,20 @@ import {
   type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
 
+// --- Efficiency analysis ---
+import {
+  buildEfficiencyTrends as _buildEfficiencyTrends,
+  buildSkillUsageTrends as _buildSkillUsageTrends,
+  computeCostAttribution as _computeCostAttribution,
+  computeEfficiencyDeltas as _computeEfficiencyDeltas,
+  computeSkillImpact as _computeSkillImpact,
+  computeValueSignals as _computeValueSignals,
+  splitTrailingWindows as _splitTrailingWindows,
+  type EfficiencySessionInput,
+  type EfficiencyViewData,
+  type PeriodVolumeTotals,
+} from '../../src/efficiencyAnalysis';
+
 // --- Maturity & fluency scoring ---
 import {
   getFluencyLevelData as _getFluencyLevelData,
@@ -471,6 +485,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private dashboardPanel: vscode.WebviewPanel | undefined;
 	private fluencyLevelViewerPanel: vscode.WebviewPanel | undefined;
 	private environmentalPanel: vscode.WebviewPanel | undefined;
+	private efficiencyPanel: vscode.WebviewPanel | undefined;
+	/** Memoized per-session efficiency inputs; cleared wherever the daily/usage stat caches are. */
+	private lastEfficiencySessionInputs: EfficiencySessionInput[] | undefined;
 	private outputChannel!: vscode.OutputChannel;
 	private lastDetailedStats: DetailedStats | undefined;
 	private lastDailyStats: DailyTokenStats[] | undefined;
@@ -793,6 +810,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			showMaturity:           () => this.showMaturity(),
 			showDashboard:          () => this.showDashboard(),
 			showEnvironmental:      () => this.showEnvironmental(),
+			showEfficiency:         () => this.showEfficiency(),
 			showFluencyLevelViewer: () => this.showFluencyLevelViewer(),
 			openFile:               () => {
 				if (typeof message.path === 'string' && message.path) {
@@ -1017,6 +1035,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.localRegressionSampleDataDir = '';
 		this.sessionDiscovery.clearCache();
 		this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = undefined;
+		this.lastEfficiencySessionInputs = undefined;
 		const results: LocalViewRegressionResult[] = [];
 		let dataSourceLabel = 'local session data';
 		try {
@@ -1034,6 +1053,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.localRegressionSampleDataDir = previousSampleDir;
 			this.sessionDiscovery.clearCache();
 			this.lastDetailedStats = this.lastDailyStats = this.lastFullDailyStats = this.lastUsageAnalysisStats = this.lastDashboardData = undefined;
+			this.lastEfficiencySessionInputs = undefined;
 		}
 		await this.reportLocalViewRegressionResults(results, dataSourceLabel);
 	}
@@ -1170,6 +1190,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.lastFullDailyStats = undefined;
 			this.lastUsageAnalysisStats = undefined;
 			this.lastDashboardData = undefined;
+			this.lastEfficiencySessionInputs = undefined;
 
 			this.log(`Cache cleared successfully. Removed ${cacheSize} entries.`);
 			vscode.window.showInformationMessage('Cache cleared successfully. Reloading statistics...');
@@ -1776,7 +1797,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (let i = 0; i < repos.length; i++) {
 			const { owner, repo } = repos[i];
 			const { prs, error } = await fetchRepoPrs(owner, repo, session.accessToken, since);
-			const stats = this.collectAiPrStats(prs, error);
+			const stats = this.collectAiPrStats(prs, error, session.account.label);
 			results.push({ owner, repo, repoUrl: `https://github.com/${owner}/${repo}`, ...stats, error });
 			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
 		}
@@ -1786,29 +1807,53 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
 	}
 
-	private collectAiPrStats(prs: any[], error: any): { totalPrs: number; aiAuthoredPrs: number; aiReviewRequestedPrs: number; aiDetails: RepoPrDetail[] } {
+	/** Classify one PR, pushing any AI detail rows and returning its contribution to the counters. */
+	private classifyPr(pr: any, login: string | undefined, aiDetails: RepoPrDetail[]): { aiAuthored: number; aiReviewRequested: number; userAuthored: number; userMerged: number } {
+		const author = pr.user?.login ?? '';
+		const authorAi = detectAiType(author);
+		let aiAuthored = 0;
+		if (authorAi) {
+			aiAuthored = 1;
+			aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: authorAi, role: 'author' });
+		}
+		let aiReviewRequested = 0;
+		for (const reviewer of (pr.requested_reviewers ?? [])) {
+			const reviewerAi = detectAiType(reviewer.login ?? '');
+			if (reviewerAi) {
+				aiReviewRequested++;
+				aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: reviewerAi, role: 'reviewer-requested' });
+			}
+		}
+		const isUser = !!login && author.toLowerCase() === login;
+		return {
+			aiAuthored,
+			aiReviewRequested,
+			userAuthored: isUser ? 1 : 0,
+			userMerged: isUser && pr.merged_at ? 1 : 0,
+		};
+	}
+
+	private collectAiPrStats(prs: any[], error: any, userLogin?: string): { totalPrs: number; aiAuthoredPrs: number; aiReviewRequestedPrs: number; aiDetails: RepoPrDetail[]; userAuthoredPrs?: number; userMergedPrs?: number } {
 		let totalPrs = 0;
 		let aiAuthoredPrs = 0;
 		let aiReviewRequestedPrs = 0;
+		let userAuthoredPrs = 0;
+		let userMergedPrs = 0;
 		const aiDetails: RepoPrDetail[] = [];
+		const login = userLogin?.toLowerCase();
 		if (!error) {
 			totalPrs = prs.length;
 			for (const pr of prs) {
-				const authorAi = detectAiType(pr.user?.login ?? '');
-				if (authorAi) {
-					aiAuthoredPrs++;
-					aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: authorAi, role: 'author' });
-				}
-				for (const reviewer of (pr.requested_reviewers ?? [])) {
-					const reviewerAi = detectAiType(reviewer.login ?? '');
-					if (reviewerAi) {
-						aiReviewRequestedPrs++;
-						aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: reviewerAi, role: 'reviewer-requested' });
-					}
-				}
+				const c = this.classifyPr(pr, login, aiDetails);
+				aiAuthoredPrs += c.aiAuthored;
+				aiReviewRequestedPrs += c.aiReviewRequested;
+				userAuthoredPrs += c.userAuthored;
+				userMergedPrs += c.userMerged;
 			}
 		}
-		return { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails };
+		return login
+			? { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails, userAuthoredPrs, userMergedPrs }
+			: { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails };
 	}
 
 	/**
@@ -2915,6 +2960,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const ctx = {
 			today: stats.today,
 			last30Days: stats.last30Days,
+			month: stats.month,
+			lastMonth: stats.lastMonth,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 		};
@@ -2973,6 +3020,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const ctx = {
 			today: stats.today,
 			last30Days: stats.last30Days,
+			month: stats.month,
+			lastMonth: stats.lastMonth,
 			missedPotential: stats.missedPotential ?? [],
 			customizationMatrix: stats.customizationMatrix,
 			todaySessions: stats.todaySessions,
@@ -7870,6 +7919,212 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		</html>`;
   }
 
+	// ── Efficiency view ───────────────────────────────────────────────
+
+	/**
+	 * Opens the Efficiency panel: weekly ratio trends, month-over-month deltas,
+	 * cost-change attribution (volume vs. efficiency vs. model mix), and value signals.
+	 */
+	public async showEfficiency(): Promise<void> {
+		this.log('⚡ Opening Efficiency view');
+
+		// Already open — just reveal it. Recomputing here would make re-focusing the
+		// tab as slow as a cold open; the Refresh button is the way to get new data.
+		if (this.efficiencyPanel) {
+			this.efficiencyPanel.reveal();
+			this.log('⚡ Efficiency view revealed (already exists)');
+			return;
+		}
+
+		// Create the panel before computing anything so the tab appears immediately,
+		// then swap the loading screen for the rendered view once the data is ready.
+		this.efficiencyPanel = vscode.window.createWebviewPanel(
+			'copilotEfficiency', 'AI Efficiency Trends',
+			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
+			// `media` is needed for the shared loading screen's icon; `dist/webview` for the view bundle.
+			{
+				enableScripts: true,
+				retainContextWhenHidden: true,
+				localResourceRoots: [
+					vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview'),
+					vscode.Uri.joinPath(this.extensionUri, 'media'),
+				],
+			}
+		);
+		this.efficiencyPanel.webview.onDidReceiveMessage(async (message) => {
+			if (this.handleLocalViewRegressionMessage(message)) { return; }
+			if (await this.dispatchSharedCommand(message)) { return; }
+			if (message.command === 'refresh') { await this.dispatch('refresh:efficiency', () => this.refreshEfficiencyPanel()); }
+		});
+		this.efficiencyPanel.onDidDispose(() => { this.log('⚡ Efficiency view closed'); this.efficiencyPanel = undefined; });
+
+		const panel = this.efficiencyPanel;
+		panel.webview.html = this.getLoadingHtml(panel.webview);
+		void panel.webview.postMessage({ command: 'loadingStep', step: 'computing' });
+
+		const data = await this.buildEfficiencyViewData();
+		// The user may have closed the panel while the data was being computed.
+		if (this.efficiencyPanel !== panel) { return; }
+		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+		this.log('⚡ Efficiency view rendered');
+	}
+
+	private async refreshEfficiencyPanel(): Promise<void> {
+		if (!this.efficiencyPanel) { return; }
+		this.log('🔄 Refreshing Efficiency view');
+		const data = await this.buildEfficiencyViewData(true);
+		this.efficiencyPanel.webview.html = this.getEfficiencyHtml(this.efficiencyPanel.webview, data);
+	}
+
+	/** Maps one cached session to the pure-module input shape for efficiency trends. */
+	private toEfficiencySessionInput(sessionData: SessionFileCache, mtime: number): EfficiencySessionInput {
+		const dayKey = this.computeLastActivityKey(sessionData, mtime);
+		const ua = sessionData.usageAnalysis;
+		let editTurns = 0, retries = 0;
+		for (const c of Object.values(ua?.modelEfficiency ?? {})) { editTurns += c.editTurns; retries += c.retries; }
+		const skillCalls = ua?.skillCalls?.byName && Object.keys(ua.skillCalls.byName).length > 0
+			? ua.skillCalls.byName
+			: undefined;
+		return {
+			dayKey,
+			activeDurationMs: ua?.sessionDuration?.activeDurationMs,
+			editTurns,
+			retries,
+			applies: ua?.applyUsage?.totalApplies,
+			codeBlocks: ua?.applyUsage?.totalCodeBlocks,
+			interactions: sessionData.interactions,
+			totalTokens: sessionData.actualTokens ?? sessionData.tokens,
+			skillCalls,
+		};
+	}
+
+	/**
+	 * Collect per-session inputs (duration, retries, apply usage, skill calls) for the
+	 * trailing trend weeks.
+	 *
+	 * This walks every session file in the window, which is the most expensive part of
+	 * building the Efficiency view, so the result is memoized alongside the other
+	 * `last*` stat caches and invalidated by the same paths.
+	 */
+	private async collectEfficiencySessionInputs(weeksBack = 12, useCache = true): Promise<EfficiencySessionInput[]> {
+		if (useCache && this.lastEfficiencySessionInputs) {
+			this.log('⚡ [Efficiency] Using cached session inputs');
+			return this.lastEfficiencySessionInputs;
+		}
+		const now = new Date();
+		const cutoff = new Date(now.getFullYear(), now.getMonth(), now.getDate() - weeksBack * 7);
+		const inputs: EfficiencySessionInput[] = [];
+		try {
+			const { results } = await this.loadUsageSessionFiles(undefined, cutoff.getTime());
+			for (const r of results) {
+				if (!r || r.sessionData.interactions === 0) { continue; }
+				inputs.push(this.toEfficiencySessionInput(r.sessionData, r.mtime));
+			}
+			this.lastEfficiencySessionInputs = inputs;
+		} catch (error) {
+			this.error('Error collecting efficiency session inputs:', error);
+		}
+		return inputs;
+	}
+
+	/** Sums token/session/cost totals for the daily entries within one calendar month (YYYY-MM). */
+	private monthVolumeTotals(dailyStats: DailyTokenStats[], monthKey: string): PeriodVolumeTotals {
+		let tokens = 0, sessions = 0, estimatedCost = 0;
+		for (const day of dailyStats) {
+			if (day.date.slice(0, 7) !== monthKey) { continue; }
+			tokens += day.tokens;
+			sessions += day.sessions;
+			estimatedCost += this.calculateEstimatedCost(day.modelUsage, 'copilot');
+		}
+		return { tokens, sessions, estimatedCost };
+	}
+
+	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {
+		const now = new Date();
+		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateDailyStats();
+		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
+		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc);
+		const deps = {
+			calculateEstimatedCost: (mu: ModelUsage, src: 'provider' | 'copilot') => this.calculateEstimatedCost(mu, src),
+			now,
+		};
+		const weekly = _buildEfficiencyTrends(dailyStats, sessionInputs, deps);
+		const skillTrends = _buildSkillUsageTrends(sessionInputs, deps);
+		const skillImpact = _computeSkillImpact(sessionInputs);
+		const { prevDays, curDays } = _splitTrailingWindows(dailyStats, now);
+		const attribution = _computeCostAttribution(prevDays, curDays, deps);
+		const monthKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
+		const lastMonthDate = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+		const lastMonthKey = `${lastMonthDate.getFullYear()}-${String(lastMonthDate.getMonth() + 1).padStart(2, '0')}`;
+		const deltas = _computeEfficiencyDeltas(
+			usage.month, usage.lastMonth,
+			this.monthVolumeTotals(dailyStats, monthKey),
+			this.monthVolumeTotals(dailyStats, lastMonthKey),
+		);
+		const curCost = curDays.reduce((s, d) => s + this.calculateEstimatedCost(d.modelUsage, 'copilot'), 0);
+		const curLoc = curDays.reduce((s, d) => s + (d.linesAdded ?? 0) + (d.linesRemoved ?? 0), 0);
+		const prStats = this._lastRepoPrStats?.authenticated ? this._lastRepoPrStats : undefined;
+		const sumRepos = (pick: (r: RepoPrInfo) => number | undefined): number | null =>
+			prStats ? prStats.repos.reduce((s, r) => s + (pick(r) ?? 0), 0) : null;
+		const value = _computeValueSignals({
+			userPrs: sumRepos(r => r.userAuthoredPrs),
+			mergedPrs: sumRepos(r => r.userMergedPrs),
+			aiPrs: sumRepos(r => r.aiAuthoredPrs),
+			prsSince: prStats?.since ?? null,
+			periodCost: curCost,
+			applyUsage: usage.last30Days.applyUsage,
+			linesChanged: curLoc,
+			now,
+		});
+		return {
+			weekly,
+			hasLoc: weekly.some(w => w.loc > 0),
+			hasDuration: weekly.some(w => w.activeMinutesPerSession !== null),
+			hasRetry: weekly.some(w => w.retryRate !== null),
+			hasApply: weekly.some(w => w.applyRate !== null),
+			attribution,
+			attributionWindows: { prev: 'previous 30 days', cur: 'last 30 days' },
+			deltas,
+			deltaWindows: {
+				prev: lastMonthDate.toLocaleDateString('en-US', { month: 'long', year: 'numeric' }),
+				cur: `${now.toLocaleDateString('en-US', { month: 'long', year: 'numeric' })} (to date)`,
+			},
+			value,
+			skillTrends,
+			skillImpact,
+			hasSkills: skillTrends.totalCalls > 0,
+			lastUpdated: now.toISOString(),
+			backendConfigured: this.isBackendConfigured(),
+			compactNumbers: this.getCompactNumbersSetting(),
+			isDebugMode: this.context.extensionMode === vscode.ExtensionMode.Development,
+		};
+	}
+
+	private getEfficiencyHtml(webview: vscode.Webview, data: EfficiencyViewData): string {
+		const nonce = getNonce();
+		const scriptUri = webview.asWebviewUri(
+			vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'efficiency.js'),
+		);
+		const initialData = JSON.stringify(data).replace(/</g, '\\u003c');
+		return `<!DOCTYPE html>
+		<html lang="en">
+		<head>
+			<meta charset="UTF-8" />
+			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+			${buildCspMeta(webview, nonce)}
+			${getCodiconStylesheetTag(webview, this.extensionUri)}
+			<title>AI Efficiency Trends</title>
+		</head>
+		<body>
+			<div id="root"></div>
+			<script nonce="${nonce}">window.__INITIAL_EFFICIENCY__ = ${initialData};</script>
+			${this.getJsonConfigScript(nonce)}
+			${this.extensionPointButtonsScript(nonce)}
+			<script nonce="${nonce}" src="${scriptUri}"></script>
+		</body>
+		</html>`;
+	}
+
   /**
    * Opens the Team Dashboard panel showing personal and team usage comparison.
    */
@@ -10774,6 +11029,13 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
       await tokenTracker.showEnvironmental();
     },
   );
+  const showEfficiencyCommand = vscode.commands.registerCommand(
+    "aiEngineeringFluency.showEfficiency",
+    async () => {
+      tokenTracker.log("Show efficiency trends command called");
+      await tokenTracker.showEfficiency();
+    },
+  );
   const openMcpJsonCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.openMcpJson",
     async () => {
@@ -10781,7 +11043,7 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
       await tokenTracker.openMcpJson();
     },
   );
-  context.subscriptions.push(showMaturityCommand, showDashboardCommand, showEnvironmentalCommand, openMcpJsonCommand);
+  context.subscriptions.push(showMaturityCommand, showDashboardCommand, showEnvironmentalCommand, showEfficiencyCommand, openMcpJsonCommand);
 }
 
 function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {

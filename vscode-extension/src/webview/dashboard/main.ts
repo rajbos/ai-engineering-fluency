@@ -183,6 +183,7 @@ function renderShell(root: HTMLElement, stats: DashboardStats): void {
     createButton(BUTTONS["btn-details"]),
     createButton(BUTTONS["btn-chart"]),
     createButton(BUTTONS["btn-usage"]),
+    createButton(BUTTONS["btn-efficiency"]),
     createButton(BUTTONS["btn-environmental"]),
     createButton(BUTTONS["btn-diagnostics"]),
     createButton(BUTTONS["btn-maturity"]),
@@ -594,6 +595,7 @@ function showTeamServerView(url: string): void {
     createButton(BUTTONS["btn-details"]),
     createButton(BUTTONS["btn-chart"]),
     createButton(BUTTONS["btn-usage"]),
+    createButton(BUTTONS["btn-efficiency"]),
     createButton(BUTTONS["btn-environmental"]),
     createButton(BUTTONS["btn-diagnostics"]),
     createButton(BUTTONS["btn-maturity"]),
@@ -633,6 +635,9 @@ function wireButtons(): void {
   });
   document.getElementById("btn-environmental")?.addEventListener("click", () => {
     vscode.postMessage({ command: "showEnvironmental" });
+  });
+  document.getElementById("btn-efficiency")?.addEventListener("click", () => {
+    vscode.postMessage({ command: "showEfficiency" });
   });
 
   // Note: No dashboard button handler - users are already on the dashboard
