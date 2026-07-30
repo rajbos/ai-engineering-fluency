@@ -9,6 +9,7 @@ import { createViewStateManager } from "../shared/viewState";
 import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
 import { getWindowData } from "../../../../src/webview/shared/dataLoader";
+import { registerMessageHandler } from "../shared/messageHandler";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -524,16 +525,20 @@ function getSortIndicator(column: typeof currentSortColumn): string {
 function getEditorStats(files: SessionFileDetails[]): {
   [key: string]: { count: number; interactions: number };
 } {
-  const stats: { [key: string]: { count: number; interactions: number } } = {};
+  // Use a Map keyed by (attacker-influenceable) editor name instead of a plain
+  // object, so a crafted session file with an editor name like "__proto__"
+  // can't pollute Object.prototype.
+  const stats = new Map<string, { count: number; interactions: number }>();
   for (const sf of files) {
     const editor = sf.editorName || sf.editorSource || "Unknown";
-    if (!stats[editor]) {
-      stats[editor] = { count: 0, interactions: 0 };
+    if (!stats.has(editor)) {
+      stats.set(editor, { count: 0, interactions: 0 });
     }
-    stats[editor].count++;
-    stats[editor].interactions += sf.interactions;
+    const entry = stats.get(editor)!;
+    entry.count++;
+    entry.interactions += sf.interactions;
   }
-  return stats;
+  return Object.fromEntries(stats);
 }
 
 function safeText(value: unknown): string {
@@ -2533,8 +2538,7 @@ function handleFolderAnalysisResult(message: DiagMessage): void {
 }
 
 function setupMessageHandlers(): void {
-  window.addEventListener("message", (event) => {
-    const message = event.data as DiagMessage;
+  registerMessageHandler((message: DiagMessage) => {
     if (message.command === "diagnosticDataLoaded") {
       handleDiagnosticDataLoaded(message);
     } else if (message.command === "backendStorageInfoLoaded") {

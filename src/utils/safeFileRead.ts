@@ -25,21 +25,28 @@ export async function readTextFileWithSizeGuard(
 	context: string,
 	maxBytes: number = MAX_SESSION_FILE_BYTES
 ): Promise<string | undefined> {
+	// Open once and stat/read the same file handle (not the path) so the file
+	// can't be swapped out for something larger between the size check and the
+	// read (TOCTOU race).
+	let handle: fs.promises.FileHandle;
 	try {
-		const stat = await fs.promises.stat(filePath);
+		handle = await fs.promises.open(filePath, 'r');
+	} catch (err) {
+		console.error(`[${context}] Failed to open ${filePath}:`, err);
+		return undefined;
+	}
+	try {
+		const stat = await handle.stat();
 		if (stat.size > maxBytes) {
 			console.debug(`[${context}] Skipping oversized file (${stat.size} bytes > ${maxBytes} byte cap): ${filePath}`);
 			return undefined;
 		}
-	} catch (err) {
-		console.error(`[${context}] Failed to stat ${filePath}:`, err);
-		return undefined;
-	}
-	try {
-		return await fs.promises.readFile(filePath, 'utf8');
+		return await handle.readFile({ encoding: 'utf8' });
 	} catch (err) {
 		console.error(`[${context}] Failed to read ${filePath}:`, err);
 		return undefined;
+	} finally {
+		await handle.close();
 	}
 }
 
@@ -49,20 +56,27 @@ export function readTextFileWithSizeGuardSync(
 	context: string,
 	maxBytes: number = MAX_SESSION_FILE_BYTES
 ): string | undefined {
+	// Open once and fstat/read the same file descriptor (not the path) so the
+	// file can't be swapped out for something larger between the size check
+	// and the read (TOCTOU race).
+	let fd: number;
 	try {
-		const stat = fs.statSync(filePath);
+		fd = fs.openSync(filePath, 'r');
+	} catch (err) {
+		console.error(`[${context}] Failed to open ${filePath}:`, err);
+		return undefined;
+	}
+	try {
+		const stat = fs.fstatSync(fd);
 		if (stat.size > maxBytes) {
 			console.debug(`[${context}] Skipping oversized file (${stat.size} bytes > ${maxBytes} byte cap): ${filePath}`);
 			return undefined;
 		}
-	} catch (err) {
-		console.error(`[${context}] Failed to stat ${filePath}:`, err);
-		return undefined;
-	}
-	try {
-		return fs.readFileSync(filePath, 'utf8');
+		return fs.readFileSync(fd, 'utf8');
 	} catch (err) {
 		console.error(`[${context}] Failed to read ${filePath}:`, err);
 		return undefined;
+	} finally {
+		fs.closeSync(fd);
 	}
 }

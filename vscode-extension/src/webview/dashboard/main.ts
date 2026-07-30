@@ -8,6 +8,7 @@ import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
 import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import type { ModelUsage } from "../shared/types";
+import { registerMessageHandler } from "../shared/messageHandler";
 
 interface UserSummary {
   userId: string;
@@ -639,8 +640,7 @@ function wireButtons(): void {
 }
 
 // Listen for messages from the extension
-window.addEventListener("message", (event) => {
-  const message = event.data;
+registerMessageHandler((message: any) => {
   switch (message.command) {
     case "dashboardData":
       console.log(

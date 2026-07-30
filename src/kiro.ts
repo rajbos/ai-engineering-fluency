@@ -215,22 +215,29 @@ export class KiroDataAccess {
 	}
 
 	private async readExecutionFile(filePath: string): Promise<any | null> {
-		let stat: fs.Stats;
+		// Open once and stat/read the same file handle (not the path) so the file
+		// can't change between the mtime check and the read (TOCTOU race).
+		let handle: fs.promises.FileHandle;
 		try {
-			stat = await fs.promises.stat(filePath);
+			handle = await fs.promises.open(filePath, 'r');
 		} catch {
 			return null;
 		}
-		const cached = this._executionRecordCache.get(filePath);
-		if (cached && cached.mtimeMs === stat.mtimeMs) { return cached.parsed; }
-		let parsed: any | null = null;
 		try {
-			parsed = JSON.parse(await fs.promises.readFile(filePath, 'utf8'));
-		} catch {
-			parsed = null;
+			const stat = await handle.stat();
+			const cached = this._executionRecordCache.get(filePath);
+			if (cached && cached.mtimeMs === stat.mtimeMs) { return cached.parsed; }
+			let parsed: any | null = null;
+			try {
+				parsed = JSON.parse(await handle.readFile('utf8'));
+			} catch {
+				parsed = null;
+			}
+			this._executionRecordCache.set(filePath, { mtimeMs: stat.mtimeMs, parsed });
+			return parsed;
+		} finally {
+			await handle.close();
 		}
-		this._executionRecordCache.set(filePath, { mtimeMs: stat.mtimeMs, parsed });
-		return parsed;
 	}
 
 	/** Convert a raw execution JSON into a KiroExecutionRecord with token estimates. */

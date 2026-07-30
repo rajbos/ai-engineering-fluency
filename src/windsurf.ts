@@ -512,7 +512,9 @@ export class WindsurfDataAccess {
 			}
 			return result;
 		} catch (error) {
-			console.error('[Windsurf] Failed to get Cascade trajectories:', error);
+			// Remove newlines from the (attacker-influenceable) error message before
+			// logging, so it can't be used to forge extra log lines.
+			console.error('[Windsurf] Failed to get Cascade trajectories:', String(error).replace(/\n|\r/g, ''));
 			// Clear credentials on error
 			this.credentials = null;
 			return null;
@@ -538,7 +540,11 @@ export class WindsurfDataAccess {
 			const data = await this.readResponseData(response);
 			return JSON.parse(data) as GetCascadeTrajectoryStepsResponse;
 		} catch (error) {
-			console.error(`Failed to get Cascade trajectory steps for ${cascadeId}:`, error);
+			// Remove newlines from the (attacker-influenceable) cascadeId/error
+			// message before logging, so they can't be used to forge extra log lines.
+			const safeCascadeId = String(cascadeId).replace(/\n|\r/g, '');
+			const safeError = String(error).replace(/\n|\r/g, '');
+			console.error(`Failed to get Cascade trajectory steps for ${safeCascadeId}:`, safeError);
 			// Clear credentials on error
 			this.credentials = null;
 			return null;

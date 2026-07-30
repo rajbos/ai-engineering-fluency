@@ -221,16 +221,23 @@ export class BlobUploadService {
 		compress: boolean
 	): Promise<void> {
 		const fileName = path.basename(sessionFilePath);
-		const stats = fs.statSync(sessionFilePath);
-		const mtime = stats.mtime.toISOString().replace(/[:.]/g, '-');
-		
+		// Open once and stat/read the same file handle (not the path) so the
+		// file can't change between the mtime check and the read (TOCTOU race).
+		const handle = await fs.promises.open(sessionFilePath, 'r');
+		let content: Buffer;
+		let mtime: string;
+		try {
+			const stats = await handle.stat();
+			mtime = stats.mtime.toISOString().replace(/[:.]/g, '-');
+			content = await handle.readFile();
+		} finally {
+			await handle.close();
+		}
+
 		// Create blob path: dataset/machine/YYYY-MM-DD/filename
 		const blobName = `${datasetId}/${machineId}/${mtime.substring(0, 10)}/${fileName}${compress ? '.gz' : ''}`;
 		const blockBlobClient = containerClient.getBlockBlobClient(blobName);
 
-		// Read file content
-		const content = await fs.promises.readFile(sessionFilePath);
-		
 		// Compress if enabled
 		const uploadContent = compress ? await gzip(content) : content;
 		
