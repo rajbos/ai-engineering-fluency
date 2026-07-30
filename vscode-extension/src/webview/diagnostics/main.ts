@@ -101,6 +101,7 @@ type GlobalStateCounters = {
   unknownMcpOpenCount: number;
   fluencyBannerDismissed: boolean;
   unknownMcpDismissedVersion: string;
+  efficiencyTabBannerDismissed: boolean;
 };
 
 type GitHubAuthStatus = {
@@ -807,7 +808,7 @@ function renderShareCardTab(detailedFiles: SessionFileDetails[], isLoadingSessio
 }
 
 function renderDebugTab(counters: GlobalStateCounters | undefined): string {
-  const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '' };
+  const c = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: '', efficiencyTabBannerDismissed: false };
   return `
     <div id="tab-debug" class="tab-content">
       <div class="info-box">
@@ -824,6 +825,7 @@ function renderDebugTab(counters: GlobalStateCounters | undefined): string {
         <table><tbody>
           ${flagRow('news.fluencyScoreBanner.v1.dismissed', 'news.fluencyScoreBanner.v1.dismissed', c.fluencyBannerDismissed)}
           ${stringRow('news.unknownMcpTools.dismissedVersion', 'news.unknownMcpTools.dismissedVersion', c.unknownMcpDismissedVersion)}
+          ${flagRow('news.efficiencyTab.v1.dismissed', 'news.efficiencyTab.v1.dismissed', c.efficiencyTabBannerDismissed)}
         </tbody></table>
         <div style="margin-top: 16px;">
           <button class="button secondary" id="btn-reset-debug-counters"><span>🔄</span><span>Reset All Counters &amp; Dismissed Flags</span></button>

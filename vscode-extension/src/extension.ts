@@ -1418,6 +1418,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				this.startBackendSyncAfterInitialAnalysis();
 				await this.checkAndShowOnboarding();
 				await this.showFluencyScoreNewsBanner();
+				await this.showEfficiencyTabNewsBanner();
 				await this.showUnknownMcpToolsBanner();
 			} catch (error) {
 				this.error('Error in initial update:', error);
@@ -1546,6 +1547,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.context.globalState.update(dismissedKey, true);
 		if (choice === open) {
 			await this.showMaturity();
+		}
+	}
+
+	/**
+	 * Shows a one-time popup pointing users at the new Efficiency view. Fires once per
+	 * install: the dismissed flag is set immediately so the notification never reappears,
+	 * even if the user ignores it. Can be cleared from Diagnostics > Debug for re-testing.
+	 */
+	private async showEfficiencyTabNewsBanner(): Promise<void> {
+		const dismissedKey = 'news.efficiencyTab.v1.dismissed';
+		if (this.context.globalState.get<boolean>(dismissedKey)) {
+			return;
+		}
+		await this.context.globalState.update(dismissedKey, true);
+		const open = 'Open Efficiency';
+		const choice = await vscode.window.showInformationMessage(
+			'📈 New: Efficiency view — see whether you\'re working more efficiently with AI over time.',
+			open
+		);
+		if (choice === open) {
+			await this.showEfficiency();
 		}
 	}
 
@@ -9091,6 +9113,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     await this.context.globalState.update('extension.unknownMcpOpenCount', 0);
     await this.context.globalState.update('news.fluencyScoreBanner.v1.dismissed', false);
     await this.context.globalState.update('news.unknownMcpTools.dismissedVersion', undefined);
+    await this.context.globalState.update('news.efficiencyTab.v1.dismissed', false);
     vscode.window.showInformationMessage('Debug counters and dismissed flags have been reset.');
     await this.showDiagnosticReport();
   }
@@ -10536,6 +10559,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       unknownMcpOpenCount: this.context.globalState.get<number>('extension.unknownMcpOpenCount') ?? 0,
       fluencyBannerDismissed: this.context.globalState.get<boolean>('news.fluencyScoreBanner.v1.dismissed') ?? false,
       unknownMcpDismissedVersion: this.context.globalState.get<string>('news.unknownMcpTools.dismissedVersion') ?? '',
+      efficiencyTabBannerDismissed: this.context.globalState.get<boolean>('news.efficiencyTab.v1.dismissed') ?? false,
     };
 
     const initialData = JSON.stringify({
