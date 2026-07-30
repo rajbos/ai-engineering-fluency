@@ -77,9 +77,17 @@ jobs:
           # the requested version is not in the runner's toolcache (release
           # downloads on github.com redirect there) — without them, init fails
           # with ECONNREFUSED on runner images that lack the pinned version.
+          # api.nuget.org / globalcdn.nuget.org: CodeQL's C# build-mode "none"
+          # extractor restores NuGet dependencies itself (from *.csproj/*.sln) to
+          # resolve external types before extraction — see
+          # https://docs.github.com/en/code-security/reference/code-scanning/codeql/build-options-for-compiled-languages#no-build-for-c
+          # Without these, that restore is silently blocked by egress-policy,
+          # degrading database quality ("Low C# analysis quality" / percentage of
+          # calls with call target below the 85% threshold).
           allowed-endpoints: >
             api.adoptium.net:443
             api.github.com:443
+            api.nuget.org:443
             cache-redirector.jetbrains.com:443
             # d2cico3c979uwg.cloudfront.net is the CloudFront distribution that
             # download-cdn.jetbrains.com itself resolves/redirects to when the
@@ -89,6 +97,7 @@ jobs:
             download-cdn.jetbrains.com:443
             download.jetbrains.com:443
             github.com:443
+            globalcdn.nuget.org:443
             hosted-compute-watchdog-prod-*.githubapp.com:443
             objects.githubusercontent.com:443
             plugins-artifacts.gradle.org:443
