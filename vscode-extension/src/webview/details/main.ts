@@ -804,14 +804,15 @@ if (editors.length === 0) {
 	tbody.append(buildNoDataRow(6, 'No editor usage matches the selected provider filter.'));
 	return tbody;
 }
-// Split into the top N editors for the currently selected column and an aggregated "Other" group,
-// then sort those rows according to the user's sort direction.
+// Split into the top N editors for the currently selected column and an aggregated "Other" group.
+// Only the top-N rows are sorted by the user's chosen column; the "Other" row always stays last
+// so it doesn't get interleaved among the individual editors it summarizes.
 const sortedBySignificance = sortEditorsBySignificance(stats, editors);
 const topEditors = sortedBySignificance.slice(0, TOP_N_EDITORS);
 const otherEditors = sortedBySignificance.slice(TOP_N_EDITORS);
 const items: EditorItem[] = topEditors.map(editor => toEditorItem(stats, editor));
-if (otherEditors.length > 0) { items.push(toOtherEditorItem(stats, otherEditors)); }
 sortEditorItems(items);
+if (otherEditors.length > 0) { items.push(toOtherEditorItem(stats, otherEditors)); }
 items.forEach(item => {
 	if (item.otherEditors) {
 		appendOtherEditors(item, totals, onToggleOther, tbody, stats);
@@ -1053,14 +1054,15 @@ function appendOtherModels(item: ModelItem, onToggleOther: () => void, tbody: HT
 }
 
 function buildModelTbody(stats: DetailedStats, visibleModels: string[], onToggleOther: () => void): HTMLTableSectionElement {
-	// Split into the top N models for the currently selected column and an aggregated "Other" group,
-	// then sort those rows according to the user's sort direction.
+	// Split into the top N models for the currently selected column and an aggregated "Other" group.
+	// Only the top-N rows are sorted by the user's chosen column; the "Other" row always stays last
+	// so it doesn't get interleaved among the individual models it summarizes.
 	const sortedBySignificance = sortModelsBySignificance(stats, visibleModels);
 	const topModels = sortedBySignificance.slice(0, TOP_N_MODELS);
 	const otherModels = sortedBySignificance.slice(TOP_N_MODELS);
 	const items: ModelItem[] = topModels.map(m => toModelItem(stats, m));
-	if (otherModels.length > 0) { items.push(toOtherModelItem(stats, otherModels)); }
 	sortModelItems(items);
+	if (otherModels.length > 0) { items.push(toOtherModelItem(stats, otherModels)); }
 	const tbody = document.createElement('tbody');
 	items.forEach(item => {
 		if (item.otherModels) {
