@@ -7984,11 +7984,18 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		panel.webview.html = this.getLoadingHtml(panel.webview);
 		void panel.webview.postMessage({ command: 'loadingStep', step: 'computing' });
 
-		const data = await this.buildEfficiencyViewData();
-		// The user may have closed the panel while the data was being computed.
-		if (this.efficiencyPanel !== panel) { return; }
-		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
-		this.log('⚡ Efficiency view rendered');
+		// Build the data in the background rather than awaiting it here: showEfficiency() is
+		// wrapped in dispatch()'s in-flight guard, which only releases the 'showEfficiency' key
+		// once this function returns. Awaiting the (potentially long) data build would keep that
+		// key locked — if the user closes the panel and reopens it before the build finishes, the
+		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
+		void (async () => {
+			const data = await this.buildEfficiencyViewData();
+			// The user may have closed the panel while the data was being computed.
+			if (this.efficiencyPanel !== panel) { return; }
+			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+			this.log('⚡ Efficiency view rendered');
+		})();
 	}
 
 	private async refreshEfficiencyPanel(): Promise<void> {
