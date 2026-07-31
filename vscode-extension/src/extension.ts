@@ -5132,7 +5132,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 
 	private computeDailyRollups(
-		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
+		sessionMeta: { firstInteraction: string | null; lastInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
 		modelUsage: ModelUsage,
 		interactions: number
@@ -5151,15 +5151,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return this.computeRollupsFromInteractionCounts(dailyInteractionMap, tokenResult, modelUsage, totalNanoAiu);
 		}
 
+		// Last-resort fallback for adapters/formats with no per-request timestamps at all
+		// (e.g. Claude Desktop, which has no getDailyFractions()). Bucket the whole session
+		// under its *last* activity day, not its first: a multi-day session (started days ago,
+		// still active today) must show up as "today"'s activity, matching the mtime-based
+		// fallback the CLI uses (see extractDailyFractions) and the lastInteraction-based
+		// fallback aggregatePeriodStats itself uses when dailyRollups is absent. Using
+		// firstInteraction here silently buried all subsequent days' activity — including
+		// "today" — under the session's start date, making Today/Details show 0.
 		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
-		this.computeFallbackDailyRollup(dailyRollups, sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
+		this.computeFallbackDailyRollup(dailyRollups, sessionMeta.lastInteraction ?? sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
 		return { dailyRollups, totalInteractions };
 	}
 
-	private computeFallbackDailyRollup(dailyRollups: { [localDayKey: string]: DailyRollupEntry }, firstInteraction: string | null, tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number }, modelUsage: ModelUsage, interactions: number): void {
-		if (!tokenResult.tokens || !firstInteraction) { return; }
+	private computeFallbackDailyRollup(dailyRollups: { [localDayKey: string]: DailyRollupEntry }, activityTimestamp: string | null, tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number }, modelUsage: ModelUsage, interactions: number): void {
+		if (!tokenResult.tokens || !activityTimestamp) { return; }
 		try {
-			const interactionDate = new Date(firstInteraction);
+			const interactionDate = new Date(activityTimestamp);
 			if (isNaN(interactionDate.getTime())) { return; }
 			const dayKey = toLocalDayKey(interactionDate);
 			const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
