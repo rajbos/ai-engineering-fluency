@@ -207,7 +207,7 @@ import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceFor
 import { classifySessionTask, buildClassificationInputFromUsageAnalysis, type TaskCategory } from '../../src/taskClassification';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -5160,19 +5160,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// firstInteraction here silently buried all subsequent days' activity — including
 		// "today" — under the session's start date, making Today/Details show 0.
 		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
-		this.computeFallbackDailyRollup(dailyRollups, sessionMeta.lastInteraction ?? sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
+		_computeFallbackDailyRollup(dailyRollups, sessionMeta.lastInteraction ?? sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
 		return { dailyRollups, totalInteractions };
-	}
-
-	private computeFallbackDailyRollup(dailyRollups: { [localDayKey: string]: DailyRollupEntry }, activityTimestamp: string | null, tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number }, modelUsage: ModelUsage, interactions: number): void {
-		if (!tokenResult.tokens || !activityTimestamp) { return; }
-		try {
-			const interactionDate = new Date(activityTimestamp);
-			if (isNaN(interactionDate.getTime())) { return; }
-			const dayKey = toLocalDayKey(interactionDate);
-			const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
-			dailyRollups[dayKey] = { tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens || 0, thinkingTokens: tokenResult.thinkingTokens || 0, cachedReadTokens: 0, interactions: Math.max(1, interactions), modelUsage: dayModelUsage };
-		} catch { /* ignore */ }
 	}
 
 	private scaledModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
