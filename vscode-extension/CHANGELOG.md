@@ -4,6 +4,12 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.17.1] - 2026-07-31
+
+### Bug Fixes
+- Fix Efficiency view stuck 'already in flight' after close+reopen (#1797)
+- Fix Today stats showing 0 for multi-day adapter sessions with ongoing activity (#1797)
+
 ## [0.17.0] - 2026-07-30
 
 ### Features
