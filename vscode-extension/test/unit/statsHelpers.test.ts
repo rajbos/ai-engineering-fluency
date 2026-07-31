@@ -12,10 +12,11 @@ reconcileModelUsageToTotal,
 reconcileModelUsageToActualTokens,
 distributeModelUsageToDays,
 sumModelUsageTokens,
+computeFallbackDailyRollup,
 type SessionAggregateInput,
 type UtcDateRanges,
 } from '../../../src/statsHelpers';
-import type { ModelUsage, EditorUsage, SessionFileCache } from '../../../src/types';
+import type { ModelUsage, EditorUsage, SessionFileCache, DailyRollupEntry } from '../../../src/types';
 
 // ── Helper factory ───────────────────────────────────────────────────────────
 
@@ -1173,4 +1174,55 @@ test('aggregatePeriodStats: stale rollup tokens with debug-log modelUsage reprod
 	const inputTokens = Object.values(result.last30DaysStats.modelUsage).reduce((s, u) => s + u.inputTokens, 0);
 	assert.ok(inputTokens > result.last30DaysStats.tokens,
 		'unsynced rollups make Input exceed Total — this is why distributeModelUsageToDays must re-sync actualTokens');
+});
+
+// ── computeFallbackDailyRollup ───────────────────────────────────────────────
+// Guards against a regression where a multi-day session (no per-request
+// timestamps, e.g. an adapter with no getDailyFractions() such as Claude
+// Desktop) had its entire token/interaction count bucketed under
+// firstInteraction's day. An ongoing session (started days ago, still active
+// today) then showed 0 for "Today" everywhere, even with real activity today.
+
+test('computeFallbackDailyRollup: buckets under the last-activity day, not the first (regression)', () => {
+	const dailyRollups: Record<string, DailyRollupEntry> = {};
+	const modelUsage: ModelUsage = { 'gpt-4.1': { inputTokens: 1000, outputTokens: 500, sessions: 1 } };
+	const firstInteraction = '2025-03-10T09:00:00.000Z';
+	const lastInteraction = '2025-03-15T09:00:00.000Z'; // "today" in this scenario
+
+	void firstInteraction; // not used directly — documents the bug scenario's start date
+	computeFallbackDailyRollup(
+		dailyRollups,
+		lastInteraction,
+		{ tokens: 5000, actualTokens: 4500, thinkingTokens: 0 },
+		modelUsage,
+		3,
+	);
+
+	assert.ok(dailyRollups['2025-03-15'], 'session activity must be attributed to the last-activity day ("today")');
+	assert.ok(!dailyRollups['2025-03-10'], 'session activity must NOT be attributed to the first-interaction day');
+	assert.equal(dailyRollups['2025-03-15'].tokens, 5000);
+	assert.equal(dailyRollups['2025-03-15'].interactions, 3);
+});
+
+test('computeFallbackDailyRollup: falls back to firstInteraction when no lastInteraction is available', () => {
+	const dailyRollups: Record<string, DailyRollupEntry> = {};
+	const firstInteraction = '2025-03-10T09:00:00.000Z';
+	const lastInteraction: string | null = null;
+	computeFallbackDailyRollup(
+		dailyRollups,
+		lastInteraction ?? firstInteraction,
+		{ tokens: 100, actualTokens: 100, thinkingTokens: 0 },
+		{},
+		1,
+	);
+	assert.ok(dailyRollups['2025-03-10'], 'must still fall back to firstInteraction when lastInteraction is unavailable');
+});
+
+test('computeFallbackDailyRollup: no-ops when tokens or timestamp are missing', () => {
+	const dailyRollups: Record<string, DailyRollupEntry> = {};
+	computeFallbackDailyRollup(dailyRollups, null, { tokens: 100 }, {}, 1);
+	assert.equal(Object.keys(dailyRollups).length, 0, 'no timestamp means no rollup entry');
+
+	computeFallbackDailyRollup(dailyRollups, '2025-03-10T09:00:00.000Z', { tokens: 0 }, {}, 1);
+	assert.equal(Object.keys(dailyRollups).length, 0, 'zero tokens means no rollup entry');
 });

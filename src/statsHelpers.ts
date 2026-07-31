@@ -183,6 +183,43 @@ function scaleModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
 }
 
 /**
+ * Last-resort single-day rollup for sessions with no per-request timestamps at all
+ * (e.g. an ecosystem adapter with no `getDailyFractions()`, such as Claude Desktop).
+ * Buckets the whole session's tokens/interactions under one day, keyed by
+ * `activityTimestamp` (mutates `dailyRollups` in place).
+ *
+ * Callers must pass the session's *last* known activity timestamp (falling back to
+ * the first, only if no last timestamp is available) — never `firstInteraction` alone.
+ * A multi-day session (started days ago, still active today) must show up as
+ * "today"'s activity; bucketing by first-interaction silently buries all
+ * subsequent days — including "today" — under the session's start date, making
+ * Today/Details period stats show 0 despite real recent activity.
+ */
+export function computeFallbackDailyRollup(
+	dailyRollups: Record<string, DailyRollupEntry>,
+	activityTimestamp: string | null,
+	tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
+	modelUsage: ModelUsage,
+	interactions: number,
+): void {
+	if (!tokenResult.tokens || !activityTimestamp) { return; }
+	try {
+		const interactionDate = new Date(activityTimestamp);
+		if (isNaN(interactionDate.getTime())) { return; }
+		const dayKey = toLocalDayKey(interactionDate);
+		const dayModelUsage = scaleModelUsage(modelUsage, 1);
+		dailyRollups[dayKey] = {
+			tokens: tokenResult.tokens,
+			actualTokens: tokenResult.actualTokens || 0,
+			thinkingTokens: tokenResult.thinkingTokens || 0,
+			cachedReadTokens: 0,
+			interactions: Math.max(1, interactions),
+			modelUsage: dayModelUsage,
+		};
+	} catch { /* ignore */ }
+}
+
+/**
  * Distributes a session-level model usage breakdown across the session's daily
  * rollups, weighted by each day's interaction count, and re-syncs each day's
  * `actualTokens` to that day's distributed input+output total.

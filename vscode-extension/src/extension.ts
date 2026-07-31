@@ -207,7 +207,7 @@ import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceFor
 import { classifySessionTask, buildClassificationInputFromUsageAnalysis, type TaskCategory } from '../../src/taskClassification';
 
 // --- Stats helpers ---
-import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, type SessionAggregateInput } from '../../src/statsHelpers';
+import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
 
 // --- GitHub & agent sessions ---
 import {
@@ -5132,7 +5132,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 
 	private computeDailyRollups(
-		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
+		sessionMeta: { firstInteraction: string | null; lastInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
 		modelUsage: ModelUsage,
 		interactions: number
@@ -5151,20 +5151,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return this.computeRollupsFromInteractionCounts(dailyInteractionMap, tokenResult, modelUsage, totalNanoAiu);
 		}
 
+		// Last-resort fallback for adapters/formats with no per-request timestamps at all
+		// (e.g. Claude Desktop, which has no getDailyFractions()). Bucket the whole session
+		// under its *last* activity day, not its first: a multi-day session (started days ago,
+		// still active today) must show up as "today"'s activity, matching the mtime-based
+		// fallback the CLI uses (see extractDailyFractions) and the lastInteraction-based
+		// fallback aggregatePeriodStats itself uses when dailyRollups is absent. Using
+		// firstInteraction here silently buried all subsequent days' activity — including
+		// "today" — under the session's start date, making Today/Details show 0.
 		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
-		this.computeFallbackDailyRollup(dailyRollups, sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
+		_computeFallbackDailyRollup(dailyRollups, sessionMeta.lastInteraction ?? sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
 		return { dailyRollups, totalInteractions };
-	}
-
-	private computeFallbackDailyRollup(dailyRollups: { [localDayKey: string]: DailyRollupEntry }, firstInteraction: string | null, tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number }, modelUsage: ModelUsage, interactions: number): void {
-		if (!tokenResult.tokens || !firstInteraction) { return; }
-		try {
-			const interactionDate = new Date(firstInteraction);
-			if (isNaN(interactionDate.getTime())) { return; }
-			const dayKey = toLocalDayKey(interactionDate);
-			const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
-			dailyRollups[dayKey] = { tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens || 0, thinkingTokens: tokenResult.thinkingTokens || 0, cachedReadTokens: 0, interactions: Math.max(1, interactions), modelUsage: dayModelUsage };
-		} catch { /* ignore */ }
 	}
 
 	private scaledModelUsage(modelUsage: ModelUsage, fraction: number): ModelUsage {
@@ -7984,11 +7981,18 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		panel.webview.html = this.getLoadingHtml(panel.webview);
 		void panel.webview.postMessage({ command: 'loadingStep', step: 'computing' });
 
-		const data = await this.buildEfficiencyViewData();
-		// The user may have closed the panel while the data was being computed.
-		if (this.efficiencyPanel !== panel) { return; }
-		panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
-		this.log('⚡ Efficiency view rendered');
+		// Build the data in the background rather than awaiting it here: showEfficiency() is
+		// wrapped in dispatch()'s in-flight guard, which only releases the 'showEfficiency' key
+		// once this function returns. Awaiting the (potentially long) data build would keep that
+		// key locked — if the user closes the panel and reopens it before the build finishes, the
+		// reopen would be silently dropped as "already in flight" (same fix as showChart above).
+		void (async () => {
+			const data = await this.buildEfficiencyViewData();
+			// The user may have closed the panel while the data was being computed.
+			if (this.efficiencyPanel !== panel) { return; }
+			panel.webview.html = this.getEfficiencyHtml(panel.webview, data);
+			this.log('⚡ Efficiency view rendered');
+		})();
 	}
 
 	private async refreshEfficiencyPanel(): Promise<void> {
