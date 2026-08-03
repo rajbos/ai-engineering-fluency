@@ -529,10 +529,10 @@
     "cli": "cd cli && node dist/cli.js"
   },
   "devDependencies": {
-    "@github/copilot": "^1.0.75",
+    "@github/copilot": "^1.0.77",
     "@stryker-mutator/core": "^9.6.1",
     "@types/mocha": "^10.0.10",
-    "@types/node": "^26.1.1",
+    "@types/node": "^26.1.2",
     "@types/sql.js": "1.4.11",
     "@types/vscode": "1.125.0",
     "@typescript-eslint/eslint-plugin": "^8.65.0",
