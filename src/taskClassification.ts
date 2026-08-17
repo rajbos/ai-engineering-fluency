@@ -55,9 +55,10 @@ const READ_TOOL_PATTERN = /read_?file|grep_?search|file_?search|search|glob|list
 const TERMINAL_TOOL_PATTERN = /terminal|bash|shell|run_?command/i;
 const PLANNING_TOOL_PATTERN = /todo|task[-_]?create|enterplanmode|\bplan\b/i;
 /** Exported so other modules (e.g. `maturityScoring.ts`) can detect delegation/sub-agent tool
- *  calls without duplicating the pattern. Matches tool names used by Copilot CLI's Task tool,
- *  Claude Code's Task tool, and similar sub-agent/delegate tools across other adapters. */
-export const DELEGATION_TOOL_PATTERN = /subagent|sub[-_]?agent|agent[-_]?spawn|delegate/i;
+ *  calls without duplicating the pattern. Matches the sub-agent/delegate tools across adapters:
+ *  Copilot CLI's `task` + background-agent tools (`read_agent`/`write_agent`/`list_agents`),
+ *  Claude Code's `Task` tool, VS Code Chat's `runSubagent`, and similar delegate tools. */
+export const DELEGATION_TOOL_PATTERN = /^(task|read_agent|write_agent|list_agents)$|subagent|sub[-_]?agent|agent[-_]?spawn|delegate/i;
 
 /** Sums tool-call counts for tools matching `DELEGATION_TOOL_PATTERN` (e.g. `toolCalls.byTool`
  *  from a `UsageAnalysisPeriod`). Used as an adapter-agnostic signal for sub-agent delegation

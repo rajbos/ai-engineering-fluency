@@ -58,6 +58,20 @@ test('classifySessionTask: Delegation — sub-agent tool call', () => {
 	assert.equal(classifySessionTask({ toolNames: ['delegate_task'] }), 'Delegation');
 });
 
+test('classifySessionTask: Delegation — Copilot CLI task tool', () => {
+	assert.equal(classifySessionTask({ toolNames: ['task', 'edit_file'] }), 'Delegation');
+});
+
+test('classifySessionTask: Delegation — Copilot CLI background-agent tools', () => {
+	assert.equal(classifySessionTask({ toolNames: ['read_agent'] }), 'Delegation');
+	assert.equal(classifySessionTask({ toolNames: ['write_agent'] }), 'Delegation');
+	assert.equal(classifySessionTask({ toolNames: ['list_agents'] }), 'Delegation');
+});
+
+test('classifySessionTask: Delegation — Claude Code Task tool (capitalized)', () => {
+	assert.equal(classifySessionTask({ toolNames: ['Task'] }), 'Delegation');
+});
+
 test('classifySessionTask: Planning — dedicated planning/todo tool call', () => {
 	assert.equal(classifySessionTask({ toolNames: ['todo_write'] }), 'Planning');
 });
@@ -154,4 +168,13 @@ test('countDelegationToolCalls: returns 0 when no tools match', () => {
 
 test('countDelegationToolCalls: returns 0 for empty input', () => {
 	assert.equal(countDelegationToolCalls({}), 0);
+});
+
+test('countDelegationToolCalls: matches the Copilot CLI sub-agent tool family', () => {
+	const total = countDelegationToolCalls({ task: 2, read_agent: 1, write_agent: 1, list_agents: 1, edit: 20 });
+	assert.equal(total, 5);
+});
+
+test('countDelegationToolCalls: does not match tool names merely containing "task" or "agent"', () => {
+	assert.equal(countDelegationToolCalls({ task_create: 1, todo_write: 1, manage_agents_config: 1 }), 0);
 });

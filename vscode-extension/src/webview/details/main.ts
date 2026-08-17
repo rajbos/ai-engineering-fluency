@@ -40,6 +40,8 @@ cachedTokens?: number;
 billingGroupCosts?: Record<string, number>;
 /** Per-editor model usage breakdown, used to determine which billing group(s) an editor/model belongs to for provider filtering. */
 editorModelUsage?: { [editor: string]: ModelUsage };
+/** Number of sessions in this period that delegated work to sub-agents (1+ sub-agent tool calls). Absent when zero. */
+subAgentSessions?: number;
 };
 
 type DetailedStats = {
@@ -402,6 +404,7 @@ function buildMetricsGroups(stats: DetailedStats, projections: Projections): Met
 	];
 	const activityRows: MetricRow[] = [
 		{ label: 'Sessions', icon: '📂', color: '#66aaff', today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
+		{ label: 'Sessions with sub-agents', labelTooltip: 'Sessions that delegated work to sub-agents in this period (task/read_agent/write_agent/list_agents, runSubagent, delegate_* tool calls detected in the session logs).', icon: '🤖', color: '#66aaff', today: formatNumber(stats.today.subAgentSessions ?? 0), last30Days: formatNumber(stats.last30Days.subAgentSessions ?? 0), month: formatNumber(stats.month.subAgentSessions ?? 0), lastMonth: formatNumber(stats.lastMonth.subAgentSessions ?? 0), projected: '—' },
 		{ label: 'Average interactions/session', icon: '💬', color: '#8ce0ff', today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: '—' },
 		{ label: 'Average tokens/session', icon: '🔢', color: '#7ce38b', today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: '—' },
 	];

@@ -506,9 +506,9 @@ function _apsProcessFallbackSession(sessionInput: SessionAggregateInput, ranges:
 		const entry = _apsGetOrCreateDailyEntry(accs.dailyStatsMap, lastActivityUtcKey);
 		_apsProcessFallback30Days(entry, f, sessionInput, repository, accs);
 	}
-	
+
 	_apsProcessFallbackPeriods(lastActivityUtcKey, ranges, accs, f);
-	
+
 	return false;
 }
 
@@ -541,6 +541,8 @@ editorModelUsage: { [editor: string]: ModelUsage };
 exactCopilotCostDollars: number;
 /** Model usage for Copilot-surface sessions that do NOT have exact nanoAiu billing data (used as fallback for Copilot cost estimate). Non-Copilot surfaces (Claude Code, Gemini CLI, …) are excluded — they bill their own provider. */
 modelUsageNoExact: ModelUsage;
+/** Number of sessions in this period with 1+ sub-agent tool calls (`SessionFileCache.subAgentCalls`). */
+subAgentSessions: number;
 }
 
 /** Result returned by `aggregatePeriodStats`. */
@@ -568,6 +570,7 @@ editorUsage: {},
 editorModelUsage: {},
 exactCopilotCostDollars: 0,
 modelUsageNoExact: {},
+subAgentSessions: 0,
 };
 }
 
@@ -652,6 +655,18 @@ function processOneRollupDay(dayKey: string, dayRollup: any, flags: { addedToLas
 	}
 }
 
+/** Flags tracking which periods a session has already been counted into (rollup path), or should be counted into (fallback path). */
+type SubAgentPeriodFlags = { today: boolean; month: boolean; lastMonth: boolean; last30Days: boolean };
+
+/** Counts a session with sub-agent tool calls once into each period accumulator it participated in. */
+function bumpSubAgentSessions(sessionData: SessionFileCache, acc: PeriodAccumulators, flags: SubAgentPeriodFlags): void {
+	if ((sessionData.subAgentCalls ?? 0) <= 0) { return; }
+	if (flags.today) { acc.todayStats.subAgentSessions += 1; }
+	if (flags.month) { acc.monthStats.subAgentSessions += 1; }
+	if (flags.lastMonth) { acc.lastMonthStats.subAgentSessions += 1; }
+	if (flags.last30Days) { acc.last30DaysStats.subAgentSessions += 1; }
+}
+
 function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
 	const { editorType, sessionData } = input;
 	const repository = sessionData.repository || 'Unknown';
@@ -664,7 +679,14 @@ function processRollupPath(input: SessionAggregateInput, acc: PeriodAccumulators
 		const locDay = dayKeys.filter(k => k >= dates.last30DaysUtcStartKey).pop();
 		if (locDay) { const locEntry = dailyStatsMap.get(locDay); if (locEntry) { attributeLocToDay(locEntry, sessionData, editorType, repository); } }
 	}
+	bumpSubAgentSessions(sessionData, acc, { today: flags.addedToToday, month: flags.addedToMonth, lastMonth: flags.addedToLastMonth, last30Days: flags.addedToLast30Days });
 	return !flags.addedToLast30Days && !flags.addedToLastMonth;
+}
+
+/** Computes sub-agent period flags for the fallback path, which attributes the whole session to its last-activity day. */
+function subAgentFlagsForFallback(lastActivityUtcKey: string, dates: UtcDateRanges, inLast30Days: boolean, inLastMonth: boolean): SubAgentPeriodFlags {
+	const inMonth = lastActivityUtcKey >= dates.monthUtcStartKey;
+	return { today: lastActivityUtcKey === dates.todayUtcKey, month: inMonth, lastMonth: !inMonth && inLastMonth, last30Days: inLast30Days };
 }
 
 function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulators, dates: UtcDateRanges, dailyStatsMap: Map<string, DailyTokenStats>): boolean {
@@ -694,6 +716,8 @@ function processFallbackPath(input: SessionAggregateInput, acc: PeriodAccumulato
 	} else if (inLastMonth) {
 		accumulatePeriod(acc.lastMonthStats, tokens, estimatedTokens, actualTokens, thinking, cached, sessionData.interactions, true, editorType, sessionData.modelUsage, sessionData.copilotExactCostDollars);
 	}
+	// Fallback path attributes the whole session to its last-activity day; mirror that for the sub-agent counter.
+	bumpSubAgentSessions(sessionData, acc, subAgentFlagsForFallback(lastActivityUtcKey, dates, inLast30Days, inLastMonth));
 	return false;
 }
 

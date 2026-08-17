@@ -43,6 +43,8 @@ type SessionFileDetails = {
   parentInfo?: { uuid: string; name: string; sessionFile?: string } | null;
   childInfo?: Array<{ uuid: string; name: string; sessionFile?: string }>;
   totalChildCount?: number;
+  /** Sub-agent/delegation tool calls detected in this session (from cache). Absent when zero/unknown. */
+  subAgentCalls?: number;
   /** Per-model input/output token breakdown (when model attribution data is available). */
   modelUsage?: { [model: string]: { inputTokens: number; outputTokens: number } };
 };
@@ -606,6 +608,13 @@ function buildSessionSummaryCardsHtml(filteredFiles: SessionFileDetails[], allFi
   <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? 'checked' : ''}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ''}</label>${unattributedCheckbox}</div>`;
 }
 
+/** Badge for sessions with detected sub-agent tool calls. */
+function buildSubAgentBadgeHtml(sf: SessionFileDetails): string {
+  if (!sf.subAgentCalls || sf.subAgentCalls <= 0) { return ''; }
+  const label = sf.subAgentCalls === 1 ? '1 sub-agent tool call' : `${sf.subAgentCalls} sub-agent tool calls`;
+  return `<span class="session-hierarchy-badge" title="${label} detected in this session">🤖 ${sf.subAgentCalls} Sub-Agent${sf.subAgentCalls === 1 ? '' : 's'}</span>`;
+}
+
 function buildHierarchyBadgesHtml(sf: SessionFileDetails): string {
   let html = '';
   if (sf.parentInfo) {
@@ -620,6 +629,7 @@ function buildHierarchyBadgesHtml(sf: SessionFileDetails): string {
     const label = count === 1 ? '1 child session' : `${count} child sessions`;
     html += `<span class="session-hierarchy-badge hierarchy-children" title="${label}">↓ ${count} ${count === 1 ? 'Child' : 'Children'}</span>`;
   }
+  html += buildSubAgentBadgeHtml(sf);
   return html ? `<div class="session-hierarchy-badges">${html}</div>` : '';
 }
 
@@ -2406,6 +2416,7 @@ function sanitizeSessionFileItem(item: unknown): SessionFileDetails {
     parentInfo: sanitizeParentInfo(sf),
     childInfo: sanitizeChildInfo(sf),
     totalChildCount: sf.totalChildCount === null || sf.totalChildCount === undefined ? undefined : Number(sf.totalChildCount),
+    subAgentCalls: sf.subAgentCalls === null || sf.subAgentCalls === undefined ? undefined : Number(sf.subAgentCalls),
   } as SessionFileDetails;
 }
 

@@ -464,6 +464,49 @@ assert.equal(result.last30DaysStats.tokens, 120);
 assert.equal(result.skippedCount, 0);
 });
 
+test('aggregatePeriodStats: rollup path – counts sub-agent sessions once per period', () => {
+const ranges = makeRanges('2025-03-15');
+const withSubAgents: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({
+subAgentCalls: 3,
+dailyRollups: {
+'2025-03-14': { tokens: 100, actualTokens: 0, thinkingTokens: 0, interactions: 1, modelUsage: {} },
+'2025-03-15': { tokens: 100, actualTokens: 0, thinkingTokens: 0, interactions: 1, modelUsage: {} },
+},
+}),
+};
+const withoutSubAgents: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T11:00:00.000Z').getTime(),
+sessionData: makeSession({
+dailyRollups: {
+'2025-03-15': { tokens: 50, actualTokens: 0, thinkingTokens: 0, interactions: 1, modelUsage: {} },
+},
+}),
+};
+const result = aggregatePeriodStats([withSubAgents, withoutSubAgents], ranges);
+assert.equal(result.todayStats.subAgentSessions, 1, 'multi-day session counted once for today');
+assert.equal(result.monthStats.subAgentSessions, 1);
+assert.equal(result.last30DaysStats.subAgentSessions, 1);
+assert.equal(result.lastMonthStats.subAgentSessions, 0);
+});
+
+test('aggregatePeriodStats: fallback path – counts sub-agent sessions by last-activity day', () => {
+const ranges = makeRanges('2025-03-15');
+const input: SessionAggregateInput = {
+editorType: 'vscode',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+sessionData: makeSession({ subAgentCalls: 1, lastInteraction: '2025-03-15T10:00:00.000Z' }),
+};
+const result = aggregatePeriodStats([input], ranges);
+assert.equal(result.todayStats.subAgentSessions, 1);
+assert.equal(result.monthStats.subAgentSessions, 1);
+assert.equal(result.last30DaysStats.subAgentSessions, 1);
+assert.equal(result.lastMonthStats.subAgentSessions, 0);
+});
+
 test('aggregatePeriodStats: rollup path – falls back to tokens when actualTokens is 0', () => {
 const ranges = makeRanges('2025-03-15');
 const input: SessionAggregateInput = {
