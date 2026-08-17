@@ -4,6 +4,19 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.17.2] - 2026-08-17
+
+### Features
+- 2 additional friendly tool names from community issue #1823 (#1824)
+
+### Bug Fixes
+- Recognize Copilot App's `<repo>.worktrees` worktree layout in path/repo detection (#1827)
+- Fix Recent Sessions view stuck on "Loading..." for non-Today periods (#1826)
+- Fix initial scan showing 0 tokens for today on cold boot with multiple windows and stale refresh-lock recycling (#1825, #1822)
+
+### Chores
+- Sync latest model data (#1796)
+
 ## [0.17.1] - 2026-07-31
 
 ### Bug Fixes
