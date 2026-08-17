@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-07-29",
+    "lastUpdated": "2026-08-16",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -1103,14 +1103,14 @@
       "cachedInputCostPerMillion": 0.19
     },
     "gpt-5.6-luna": {
-      "inputCostPerMillion": 1.0,
-      "outputCostPerMillion": 6.0,
+      "inputCostPerMillion": 0.2,
+      "outputCostPerMillion": 1.2,
       "category": "GPT-5 models",
       "tier": "standard",
       "displayNames": [
         "GPT-5.6 Luna"
       ],
-      "cachedInputCostPerMillion": 0.1,
+      "cachedInputCostPerMillion": 0.02,
       "copilotPricing": {
         "inputCostPerMillion": 1.0,
         "cachedInputCostPerMillion": 0.1,
@@ -1123,7 +1123,8 @@
           "outputCostPerMillion": 9.0,
           "threshold": "> 200K"
         }
-      }
+      },
+      "cacheCreationCostPerMillion": 0.25
     },
     "gpt-5.6-sol": {
       "inputCostPerMillion": 5.0,
@@ -1146,17 +1147,18 @@
           "outputCostPerMillion": 45.0,
           "threshold": "> 272K"
         }
-      }
+      },
+      "cacheCreationCostPerMillion": 6.25
     },
     "gpt-5.6-terra": {
-      "inputCostPerMillion": 2.5,
-      "outputCostPerMillion": 15.0,
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 12.0,
       "category": "GPT-5 models",
       "tier": "standard",
       "displayNames": [
         "GPT-5.6 Terra"
       ],
-      "cachedInputCostPerMillion": 0.25,
+      "cachedInputCostPerMillion": 0.2,
       "copilotPricing": {
         "inputCostPerMillion": 2.5,
         "cachedInputCostPerMillion": 0.25,
@@ -1169,17 +1171,18 @@
           "outputCostPerMillion": 22.5,
           "threshold": "> 272K"
         }
-      }
+      },
+      "cacheCreationCostPerMillion": 2.5
     },
     "gemini-3.6-flash": {
-      "inputCostPerMillion": 1.5,
-      "outputCostPerMillion": 7.5,
+      "inputCostPerMillion": 0.75,
+      "outputCostPerMillion": 3.75,
       "category": "Google Gemini models",
       "tier": "standard",
       "displayNames": [
         "Gemini 3.6 Flash"
       ],
-      "cachedInputCostPerMillion": 0.15
+      "cachedInputCostPerMillion": 0.075
     },
     "claude-opus-5": {
       "inputCostPerMillion": 5.0,
@@ -1201,6 +1204,55 @@
         "Grok 4.5"
       ],
       "cachedInputCostPerMillion": 0.5
+    },
+    "gemini-3.7-flash": {
+      "inputCostPerMillion": 0.75,
+      "outputCostPerMillion": 3.75,
+      "category": "Google Gemini models",
+      "tier": "standard",
+      "displayNames": [
+        "Gemini 3.7 Flash"
+      ],
+      "cachedInputCostPerMillion": 0.075
+    },
+    "grok-4.6": {
+      "inputCostPerMillion": 2.0,
+      "outputCostPerMillion": 6.0,
+      "category": "xAI Grok models",
+      "tier": "standard",
+      "displayNames": [
+        "Grok 4.6"
+      ],
+      "cachedInputCostPerMillion": 0.5
+    },
+    "these-models": {
+      "inputCostPerMillion": 0.0,
+      "outputCostPerMillion": 0.0,
+      "category": "xAI Grok models",
+      "tier": "standard",
+      "displayNames": [
+        "these models"
+      ]
+    },
+    "mai-code-1.1-flash": {
+      "inputCostPerMillion": 0.2,
+      "outputCostPerMillion": 1.2,
+      "category": " models",
+      "tier": "standard",
+      "displayNames": [
+        "MAI-Code-1.1-Flash"
+      ],
+      "cachedInputCostPerMillion": 0.02
+    },
+    "kimi-k3": {
+      "inputCostPerMillion": 3.0,
+      "outputCostPerMillion": 15.0,
+      "category": " models",
+      "tier": "standard",
+      "displayNames": [
+        "Kimi K3"
+      ],
+      "cachedInputCostPerMillion": 0.3
     }
   }
 }
