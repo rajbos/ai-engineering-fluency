@@ -21,13 +21,13 @@
     "test": "node esbuild.tests.js && node --test \"out/test/*.test.js\""
   },
   "dependencies": {
-    "@hono/node-server": "^2.0.12",
-    "hono": "^4.13.0"
+    "@hono/node-server": "^2.1.1",
+    "hono": "^4.13.2"
   },
   "devDependencies": {
-    "@types/node": "^26.1.2",
+    "@types/node": "^26.2.0",
     "chart.js": "^4.4.7",
-    "esbuild": "^0.28.1",
+    "esbuild": "^0.28.2",
     "typescript": "^5.8.0"
   },
   "engines": {
