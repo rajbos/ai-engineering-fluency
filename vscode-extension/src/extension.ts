@@ -395,7 +395,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 63; // Add SessionFileCache.subAgentCalls (sub-agent/delegation tool-call count per session)
+	private static readonly CACHE_VERSION = 64; // Widen sub-agent detection: Claude Agent tool, MCP spawn_task/spawn_agent, Copilot App session-spawning tools
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -5007,7 +5007,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const taskCategory = classifySessionTask(buildClassificationInputFromUsageAnalysis(usageAnalysis, sessionMeta.title));
 		// Counted once per session from the same tool-name data as the task classification;
 		// powers the sub-agent badge/counters in the sessions list, details and diagnostics views.
-		const subAgentCalls = countDelegationToolCalls(usageAnalysis?.toolCalls?.byTool ?? {});
+		// MCP tools are included because some ecosystems spawn sub-agents via MCP
+		// (e.g. Claude Desktop's mcp__ccd_session__spawn_task).
+		const subAgentCalls = countDelegationToolCalls(usageAnalysis?.toolCalls?.byTool ?? {})
+			+ countDelegationToolCalls(usageAnalysis?.mcpTools?.byTool ?? {});
 		return {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,

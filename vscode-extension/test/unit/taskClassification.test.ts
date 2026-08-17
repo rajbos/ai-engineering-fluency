@@ -72,6 +72,19 @@ test('classifySessionTask: Delegation — Claude Code Task tool (capitalized)', 
 	assert.equal(classifySessionTask({ toolNames: ['Task'] }), 'Delegation');
 });
 
+test('classifySessionTask: Delegation — Claude Agent tool', () => {
+	assert.equal(classifySessionTask({ toolNames: ['Bash', 'Agent'] }), 'Delegation');
+});
+
+test('classifySessionTask: Delegation — Copilot App session-spawning tools', () => {
+	assert.equal(classifySessionTask({ toolNames: ['create_session'] }), 'Delegation');
+	assert.equal(classifySessionTask({ toolNames: ['open_pr_session'] }), 'Delegation');
+});
+
+test('classifySessionTask: Delegation — MCP spawn_task tool', () => {
+	assert.equal(classifySessionTask({ toolNames: ['mcp__ccd_session__spawn_task'] }), 'Delegation');
+});
+
 test('classifySessionTask: Planning — dedicated planning/todo tool call', () => {
 	assert.equal(classifySessionTask({ toolNames: ['todo_write'] }), 'Planning');
 });
@@ -124,6 +137,16 @@ test('buildClassificationInputFromUsageAnalysis: handles missing usageAnalysis/t
 	assert.equal(result.userText, undefined);
 });
 
+test('buildClassificationInputFromUsageAnalysis: includes MCP spawn tools so MCP-only delegation classifies as Delegation', () => {
+	const usageAnalysis = {
+		toolCalls: { total: 5, byTool: { Bash: 5 } },
+		mcpTools: { total: 3, byServer: { ccd_session: 3 }, byTool: { mcp__ccd_session__spawn_task: 3 } },
+	} as unknown as SessionUsageAnalysis;
+	const input = buildClassificationInputFromUsageAnalysis(usageAnalysis, 'do some work');
+	assert.ok(input.toolNames.includes('mcp__ccd_session__spawn_task'));
+	assert.equal(classifySessionTask(input), 'Delegation');
+});
+
 // ── buildClassificationInputFromChatTurns ─────────────────────────────────────
 
 test('buildClassificationInputFromChatTurns: collects tool names, terminal commands, and joined user text', () => {
@@ -173,6 +196,11 @@ test('countDelegationToolCalls: returns 0 for empty input', () => {
 test('countDelegationToolCalls: matches the Copilot CLI sub-agent tool family', () => {
 	const total = countDelegationToolCalls({ task: 2, read_agent: 1, write_agent: 1, list_agents: 1, edit: 20 });
 	assert.equal(total, 5);
+});
+
+test('countDelegationToolCalls: matches Claude Agent tool, MCP spawn tools, and App session spawners', () => {
+	const total = countDelegationToolCalls({ Agent: 2, mcp__ccd_session__spawn_task: 3, create_session: 1, fork_session: 1, Bash: 50 });
+	assert.equal(total, 7);
 });
 
 test('countDelegationToolCalls: does not match tool names merely containing "task" or "agent"', () => {

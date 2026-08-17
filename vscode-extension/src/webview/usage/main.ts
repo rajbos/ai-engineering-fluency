@@ -1006,7 +1006,7 @@ type SessionColumnDef = {
 const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => ({ html: formatNumber(s.interactions) }) },
 	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => ({ html: formatNumber(s.toolCalls) }) },
-	{ id: 'subAgentCalls', label: '🤖 Sub-Agents', sortKey: 'subAgentCalls', align: 'right', render: s => s.subAgentCalls
+	{ id: 'subAgentCalls', label: 'Sub-Agents', sortKey: 'subAgentCalls', align: 'right', render: s => s.subAgentCalls
 		? { html: formatNumber(s.subAgentCalls), title: `${s.subAgentCalls} sub-agent tool call${s.subAgentCalls === 1 ? '' : 's'} detected in this session` }
 		: { html: '—', title: 'No sub-agent calls detected in this session' } },
 	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => ({ html: formatNumber(s.inputTokens) }) },

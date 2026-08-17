@@ -3191,7 +3191,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   var SESSION_COLUMN_DEFS = [
     { id: "interactions", label: "Turns", sortKey: "interactions", align: "right", render: (s4) => ({ html: formatNumber(s4.interactions) }) },
     { id: "toolCalls", label: "Tools", sortKey: "toolCalls", align: "right", render: (s4) => ({ html: formatNumber(s4.toolCalls) }) },
-    { id: "subAgentCalls", label: "\u{1F916} Sub-Agents", sortKey: "subAgentCalls", align: "right", render: (s4) => s4.subAgentCalls ? { html: formatNumber(s4.subAgentCalls), title: `${s4.subAgentCalls} sub-agent tool call${s4.subAgentCalls === 1 ? "" : "s"} detected in this session` } : { html: "\u2014", title: "No sub-agent calls detected in this session" } },
+    { id: "subAgentCalls", label: "Sub-Agents", sortKey: "subAgentCalls", align: "right", render: (s4) => s4.subAgentCalls ? { html: formatNumber(s4.subAgentCalls), title: `${s4.subAgentCalls} sub-agent tool call${s4.subAgentCalls === 1 ? "" : "s"} detected in this session` } : { html: "\u2014", title: "No sub-agent calls detected in this session" } },
     { id: "inputTokens", label: "Input", sortKey: "inputTokens", align: "right", render: (s4) => ({ html: formatNumber(s4.inputTokens) }) },
     { id: "outputTokens", label: "Output", sortKey: "outputTokens", align: "right", render: (s4) => ({ html: formatNumber(s4.outputTokens) }) },
     { id: "thinkingTokens", label: "Thinking", sortKey: "thinkingTokens", align: "right", render: (s4) => ({ html: formatNumber(s4.thinkingTokens) }) },
