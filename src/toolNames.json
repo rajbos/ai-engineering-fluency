@@ -1192,5 +1192,5 @@
   ,"wait": "Wait"
   ,"mcp__ccd_session_mgmt__list_sessions": "MCP: Ccd Session Mgmt - List Sessions"
   ,"mcp__ccd_session_mgmt__search_session_transcripts": "MCP: Ccd Session Mgmt - Search Session Transcripts"
-  ,"mcp__claude-in-chrome__browser_batch": "MCP  Claude In Chrome  Browser Batch"
+  ,"mcp__claude-in-chrome__browser_batch": "MCP: Claude In Chrome - Browser Batch"
 }
