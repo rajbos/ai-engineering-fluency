@@ -538,8 +538,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// window still shows fresh data (the "hybrid" freshness policy).
 	private static readonly FOLLOWER_MISS_BUDGET = 25;
 	// Bounded retry chain a follower uses to pick up the leader's snapshot when it
-	// started before any snapshot existed (cold simultaneous start).
-	private static readonly FOLLOWER_RESYNC_MAX_RETRIES = 4;
+	// started before any snapshot existed (cold simultaneous start). Must cover a
+	// worst-case cold-boot leader parse: with an empty cache the leader can need
+	// several minutes to parse thousands of session files before it publishes.
+	// 24 × 15s = 6 minutes of coverage; without this the follower shows partial
+	// (near-zero) stats until the 5-minute periodic refresh happens to fire.
+	private static readonly FOLLOWER_RESYNC_MAX_RETRIES = 24;
 	private static readonly FOLLOWER_RESYNC_DELAY_MS = 15 * 1000;
 	private _followerResyncTimer: NodeJS.Timeout | undefined;
 	private _refreshHeartbeat: NodeJS.Timeout | undefined;
@@ -2470,6 +2474,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		const missBudget = isLeader ? undefined : { remaining: CopilotTokenTracker.FOLLOWER_MISS_BUDGET };
 		const { sessionFiles, preloaded } = await this._preloadSessionFiles(fileLoadCutoffMs, progressCallback, discoveredEditorSet, missBudget);
+		if (!isLeader && preloaded.length < sessionFiles.length) {
+			this.log(`Follower with cold cache: stats below are partial (${preloaded.length}/${sessionFiles.length} files within date range parsed within the follower budget). Will resync once the leader publishes its snapshot.`);
+		}
 		try {
 			await this.storeDiscoveredEditorsAndNotify(discoveredEditorSet);
 		} catch (error) {
