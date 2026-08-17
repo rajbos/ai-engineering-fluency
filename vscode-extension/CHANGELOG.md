@@ -4,6 +4,76 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+## [0.17.2]
+
+<!-- Release notes generated using configuration in .github/release.yml at main -->
+
+## What's Changed
+### Changes
+* fix(jetbrains): replace internal PluginManagerCore.getPlugin API usage by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1757
+* feat: add 10 friendly tool name(s) from issue #1750 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1756
+* chore: sync model data from rajbos/github-copilot-model-notifier by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1763
+* fix: recognize MCP tools by family+action to stop unknown-tool duplicates by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1771
+* security(parsers): bound untrusted session-file reads and guard JSON merges by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1767
+* security: add SECURITY.md and ignore npm install scripts in CI by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1766
+* security: declare workspace trust and virtual workspace capabilities by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1765
+* fix(test): correct fixture path in sessionParser integration test by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1773
+* security(webview): enforce innerHTML wrapper via ESLint + hostile session-log fixture tests by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1770
+* security(parsers): extend prototype-pollution guards to remaining adapters by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1772
+* feat: add 1 friendly tool name(s) from issue #1762 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1774
+* ci(codeql): cover C# and Kotlin components, use security-extended suite by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1764
+* feat: add 21 friendly tool name(s) from issue #1768 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1775
+* ci(codeql): fix Java/Kotlin "no source seen" by disabling Gradle build cache by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1780
+* refactor: decompose deleteEntitiesForUserDataset into focused private helpers by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1777
+* chore: bump versions for release (vscode-extension 0.16.1, cli 0.5.1) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1776
+* Add Cost by Model and Tokens by Provider chart splits by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1781
+* Detect agent-skill usage across Claude Code, Claude Desktop, and Copilot CLI by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1778
+* Show untracked Copilot usage in the API budget bar by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1783
+* Fix Diagnostics reload being much slower than initial extension load by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1784
+* Collapsible By Editor breakdown in Chart view + fix stuck reopen bug by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1785
+* Fix Other row sorting into top-N list in details tables by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1786
+* feat: add 3 friendly tool name(s) from issue #1787 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1788
+* Fix Dependabot alerts: pin MessagePack and Microsoft.IO.Redist versions by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1789
+* Fix open code-scanning alerts (#77-96) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1790
+* Add Efficiency view: track whether AI usage is getting more efficient over time by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1791
+* Fix code-scanning alert #95: sever file-to-network taint flow in sync-changelog.js by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1792
+* ci(codeql): allow NuGet endpoints for C# build-mode none restore by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1793
+* Add one-time Efficiency view notification popup by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1794
+* chore: bump vscode-extension version for release (minor) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1795
+* Fix Efficiency view stuck lock and Today-stats showing 0 by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1797
+* chore: bump vscode-extension version for release (patch, 0.17.0 -> 0.17.1) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1798
+* chore: sync model data from rajbos/github-copilot-model-notifier by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1796
+* fix(extension): cover cold-boot leader parse in follower resync chain by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1822
+* feat: add 2 friendly tool name(s) from issue #1823 by @github-actions[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1824
+* fix initial scan zero today usage by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1825
+* fix(vscode): Recent Sessions stuck on Loading for non-Today periods by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1826
+* fix: recognize Copilot App's "<repo>.worktrees" worktree layout by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1827
+* chore: bump versions for release (vscode-extension) by @rajbos in https://github.com/rajbos/ai-engineering-fluency/pull/1828
+### 📦 npm Dependencies
+* npm(deps): bump jsdom from 29.1.1 to 30.0.1 in /vscode-extension by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1801
+* npm(deps-dev): bump the minor-and-patch-updates group across 2 directories with 2 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1800
+* npm(deps): bump postcss from 8.5.20 to 8.5.25 in /vscode-extension by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1803
+* npm(deps): bump hono from 4.12.32 to 4.13.0 in /sharing-server by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1805
+* npm(deps): bump the minor-and-patch-updates group across 2 directories with 9 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1819
+* npm(deps): bump dompurify from 3.4.12 to 3.4.13 in /vscode-extension by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1810
+* npm(deps): bump js-yaml from 4.3.0 to 4.3.1 in /vscode-extension by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1820
+### 📦 GitHub Actions Dependencies
+* github-actions(deps): bump the minor-and-patch-updates group with 6 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1802
+* github-actions(deps): bump the minor-and-patch-updates group with 9 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1813
+### 📦 Other Dependencies
+* build(deps-dev): bump @types/node from 26.1.1 to 26.1.2 in /cli in the minor-and-patch-updates group across 1 directory by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1758
+* build(deps-dev): bump @types/node from 26.1.1 to 26.1.2 in /desktop in the minor-and-patch-updates group across 1 directory by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1759
+* gradle(deps): bump jvm from 2.4.0 to 2.4.10 in /jetbrains-plugin in the minor-and-patch-updates group by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1799
+* build(deps-dev): bump the minor-and-patch-updates group across 1 directory with 2 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1816
+* build(deps-dev): bump fast-uri from 3.1.4 to 3.1.5 in /desktop by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1804
+* gradle(deps): bump the minor-and-patch-updates group across 1 directory with 2 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1818
+* build(deps-dev): bump undici from 6.27.0 to 6.28.0 in /desktop by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1806
+* build(deps-dev): bump the minor-and-patch-updates group across 1 directory with 3 updates by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1817
+* build(deps): bump js-yaml from 4.3.0 to 4.3.1 in /desktop by @dependabot[bot] in https://github.com/rajbos/ai-engineering-fluency/pull/1821
+
+
+**Full Changelog**: https://github.com/rajbos/ai-engineering-fluency/compare/jetbrains/v0.4.1...vscode/v0.17.2
+
 ## [0.17.2] - 2026-08-17
 
 ### Features
