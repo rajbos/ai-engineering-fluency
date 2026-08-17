@@ -1225,15 +1225,6 @@
       ],
       "cachedInputCostPerMillion": 0.5
     },
-    "these-models": {
-      "inputCostPerMillion": 0.0,
-      "outputCostPerMillion": 0.0,
-      "category": "xAI Grok models",
-      "tier": "standard",
-      "displayNames": [
-        "these models"
-      ]
-    },
     "mai-code-1.1-flash": {
       "inputCostPerMillion": 0.2,
       "outputCostPerMillion": 1.2,
