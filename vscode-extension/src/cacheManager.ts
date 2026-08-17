@@ -6,6 +6,7 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { execFileSync } from 'child_process';
 import type { SessionFileCache } from '../../src/types';
 import { type CachePolicy, VsCodeCachePolicy } from '../../src/cachePolicy';
 
@@ -242,12 +243,43 @@ export class CacheManager {
 		if (typeof pid !== 'number') { return true; }
 		try {
 			process.kill(pid, 0);
-			return true;
 		} catch (killErr: unknown) {
 			if (killErr instanceof Error && (killErr as NodeJS.ErrnoException).code === 'ESRCH') {
 				return false; // Process no longer exists
 			}
 			return true; // EPERM means process exists but is owned by another user
+		}
+		// A PID being alive is not enough on its own: Windows reuses PIDs
+		// aggressively, so after a reboot or crash a stale lock can appear "owned" by
+		// an unrelated new process, forcing every window into follower mode. On
+		// Windows, only treat the lock as live when the PID's image is an
+		// Electron-family host OR the current process itself (tests / same-process
+		// re-acquire). A live but clearly-foreign image (e.g. cmd.exe) means the
+		// PID was recycled and the lock is stale.
+		if (process.platform === 'win32') {
+			return pid === process.pid || this.isWindowsHostProcess(pid);
+		}
+		return true;
+	}
+
+	/**
+	 * Windows-only check that a PID belongs to a VS Code/Electron host process.
+	 * Uses tasklist's CSV output; on any failure we assume the owner is alive so
+	 * we never break a lock that is genuinely in use.
+	 */
+	private isWindowsHostProcess(pid: number): boolean {
+		try {
+			const out = execFileSync(
+				'tasklist',
+				['/FI', `PID eq ${pid}`, '/FO', 'CSV', '/NH'],
+				{ encoding: 'utf-8', timeout: 5000, windowsHide: true },
+			);
+			// No match → "INFO: No tasks are running which match the specified criteria."
+			if (!out.startsWith('"')) { return false; }
+			const image = (out.split('","')[0] ?? '').replace(/^"/, '').toLowerCase();
+			return /code|codium|electron|windsurf|cursor|kiro|antigravity|vibe|tray/.test(image);
+		} catch {
+			return true; // Can't verify — err on the side of not breaking the lock
 		}
 	}
 

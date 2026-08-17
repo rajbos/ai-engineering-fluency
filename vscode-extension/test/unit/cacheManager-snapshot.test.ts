@@ -167,6 +167,29 @@ test('refresh lock and cache lock are independent files', async () => {
 	await m.releaseCacheLock();
 });
 
+// Windows reuses PIDs aggressively: after a reboot a leftover lock file can point
+// at a PID now owned by an unrelated process. The stale-lock check must not trust
+// a live PID whose image is not a VS Code/Electron host.
+test('refresh lock: breaks stale lock owned by a recycled non-host PID (win32)', { skip: process.platform !== 'win32' }, async () => {
+	const dir = tmpDir();
+	const holder = makeManager(dir);
+	assert.equal(await holder.acquireRefreshLock(), true);
+
+	// Simulate a reboot: overwrite the lock with a fresh timestamp but point the
+	// PID at cmd.exe, which is alive and guaranteed not to be an editor host.
+	const lockPath = holder.getRefreshLockPath();
+	const cmdPid: number = (require('node:child_process') as typeof import('node:child_process'))
+		.spawn('cmd.exe', ['/c', 'ping -n 30 127.0.0.1 >nul'], { windowsHide: true }).pid!;
+	try {
+		fs.writeFileSync(lockPath, JSON.stringify({ sessionId: 'old-session', pid: cmdPid, timestamp: Date.now() }));
+		const fresh = makeManager(dir);
+		assert.equal(await fresh.acquireRefreshLock(), true, 'recycled non-host PID must be treated as stale');
+		await fresh.releaseRefreshLock();
+	} finally {
+		try { process.kill(cmdPid); } catch { /* already exited */ }
+	}
+});
+
 // ---------------------------------------------------------------------------
 // loadCacheFromStorage (disk-based)
 // ---------------------------------------------------------------------------
