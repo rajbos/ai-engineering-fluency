@@ -249,12 +249,15 @@ export class CacheManager {
 			}
 			return true; // EPERM means process exists but is owned by another user
 		}
-		// A PID being alive is not enough: Windows reuses PIDs aggressively, so after
-		// a reboot or crash a stale lock can appear "owned" by an unrelated new
-		// process, forcing every window into follower mode. Verify the process image
-		// is actually a VS Code/Electron host before trusting it.
+		// A PID being alive is not enough on its own: Windows reuses PIDs
+		// aggressively, so after a reboot or crash a stale lock can appear "owned" by
+		// an unrelated new process, forcing every window into follower mode. On
+		// Windows, only treat the lock as live when the PID's image is an
+		// Electron-family host OR the current process itself (tests / same-process
+		// re-acquire). A live but clearly-foreign image (e.g. cmd.exe) means the
+		// PID was recycled and the lock is stale.
 		if (process.platform === 'win32') {
-			return this.isWindowsHostProcess(pid);
+			return pid === process.pid || this.isWindowsHostProcess(pid);
 		}
 		return true;
 	}
