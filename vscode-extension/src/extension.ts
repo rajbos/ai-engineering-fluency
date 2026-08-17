@@ -3629,11 +3629,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._skillCallsByEditorAccum = new Map();
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
+		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
 			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
 			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
+			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
 			this._lastSkillCallsByEditor = {};
 			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
 				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
@@ -3657,6 +3659,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			customizationMatrix: this._lastCustomizationMatrix,
 			missedPotential: this._lastMissedPotential || [],
 			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions),
+			recentSessions,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
 			agenticDailyTrend,
 		};
@@ -4098,38 +4101,47 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 */
 	private async loadRecentSessions(period: ChartTimeWindow): Promise<void> {
 		if (!this.analysisPanel) { return; }
-		const now = new Date();
-		let windowStart: Date;
-		switch (period) {
-			case 'last7':
-				windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7);
-				break;
-			case 'last30':
-				windowStart = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30);
-				break;
-			case 'currentMonth':
-				windowStart = new Date(now.getFullYear(), now.getMonth(), 1);
-				break;
-			case 'today':
-			case 'allTime':
-			default:
-				return;
-		}
-		const windowStartKey = toLocalDayKey(windowStart);
-		const sessions: TodaySessionSummary[] = [];
+		if (period === 'today' || period === 'allTime') { return; }
+		// Serve from the main analysis's already-parsed sessions (like Today) instead of
+		// re-walking the whole session corpus per period switch; guarantee a post-back on
+		// every path (including errors) so the webview never hangs on "Loading...".
+		let sessions: TodaySessionSummary[] = [];
 		try {
-			const { results } = await this.loadUsageSessionFiles(undefined, windowStart.getTime());
-			for (const r of results) {
-				if (!r || r.sessionData.interactions === 0) { continue; }
-				if (this.computeLastActivityKey(r.sessionData, r.mtime) < windowStartKey) { continue; }
-				const analysis = r.sessionData.usageAnalysis || this.buildDefaultSessionAnalysis();
-				sessions.push(this.collectTodaySessionInfo(r.sessionData, r.sessionFile, analysis, r.sessionData.interactions, r.mtime));
-			}
+			const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
+			sessions = stats.recentSessions?.[period as 'last7' | 'last30' | 'currentMonth'] ?? [];
 		} catch (error) {
 			this.error('Error loading recent sessions:', error);
 		}
-		sessions.sort((a, b) => b.interactions - a.interactions);
 		this.analysisPanel.webview.postMessage({ command: 'recentSessionsLoaded', period, sessions });
+	}
+
+	/**
+	 * Buckets already-parsed session results into last7 / last30 / currentMonth summaries,
+	 * once per analysis calculation, so the Recent Sessions tab can serve any period from
+	 * memory instead of re-parsing the whole session corpus on every period switch.
+	 */
+	private buildRecentSessionBuckets(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		now: Date
+	): { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } {
+		const last7Key = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
+		const last30Key = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30));
+		const monthKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), 1));
+		const items: { activityKey: string; interactions: number; value: TodaySessionSummary }[] = [];
+		for (const r of results) {
+			if (!r || r.sessionData.interactions === 0) { continue; }
+			const analysis = r.sessionData.usageAnalysis || this.buildDefaultSessionAnalysis();
+			const value = this.collectTodaySessionInfo(r.sessionData, r.sessionFile, analysis, r.sessionData.interactions, r.mtime);
+			items.push({ activityKey: this.computeLastActivityKey(r.sessionData, r.mtime), interactions: r.sessionData.interactions, value });
+		}
+		items.sort((a, b) => b.interactions - a.interactions);
+		const buckets = { last7: [] as TodaySessionSummary[], last30: [] as TodaySessionSummary[], currentMonth: [] as TodaySessionSummary[] };
+		for (const it of items) {
+			if (it.activityKey >= last7Key) { buckets.last7.push(it.value); }
+			if (it.activityKey >= last30Key) { buckets.last30.push(it.value); }
+			if (it.activityKey >= monthKey) { buckets.currentMonth.push(it.value); }
+		}
+		return buckets;
 	}
 
 	private computeLastActivityKey(sessionData: SessionFileCache, mtime: number): string {
@@ -6682,7 +6694,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			},
 			loadRepoPrStats: () => this.dispatch('loadRepoPrStats', () => this.loadRepoPrStats()),
 			loadAgentSessions: () => this.dispatch('loadAgentSessions', () => this.loadAgentSessions()),
-			loadRecentSessions: (message) => this.dispatch('loadRecentSessions', () => this.loadRecentSessions(message.period as ChartTimeWindow)),
+			loadRecentSessions: (message) => this.dispatch(`loadRecentSessions:${message.period}`, () => this.loadRecentSessions(message.period as ChartTimeWindow)),
 			openSessionFile: (message) => this._handleOpenSessionFile(message),
 			insightAction: (message) => this.dispatch(`insightAction:${message.id ?? ''}`, () => this.handleInsightAction(message)),
 			traceUsageCuration: (message) => this._logTraceCuration(message),

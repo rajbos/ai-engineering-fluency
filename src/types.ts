@@ -616,6 +616,12 @@ lastUpdated: Date;
 customizationMatrix?: WorkspaceCustomizationMatrix;
 missedPotential?: MissedPotentialWorkspace[];
 todaySessions?: TodaySessionSummary[];
+/**
+ * Per-period session summaries for the "Recent Sessions" lookback selector, bucketed from
+ * the already-parsed sessions the main analysis walks. Lets the host serve last7/last30/
+ * currentMonth instantly instead of re-parsing the whole session corpus per period switch.
+ */
+recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 /** Optional tool curation analysis (VS Code only; absent in CLI/VS/JetBrains). */
 curationAnalysis?: ToolCurationAnalysis | null;
 /**
