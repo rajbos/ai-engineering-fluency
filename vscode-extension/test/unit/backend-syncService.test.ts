@@ -1332,6 +1332,30 @@ test('acquireSyncLock breaks stale lock', async () => {
 	}
 });
 
+test('acquireSyncLock breaks corrupt (empty) lock file', async () => {
+	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
+	try {
+		const lockPath = path.join(dir, 'backend_sync.lock');
+		// A writer killed between atomic create and content write leaves a
+		// 0-byte lock; unparseable content must be treated as stale or the
+		// lock blocks every sync attempt forever.
+		fs.writeFileSync(lockPath, '');
+
+		const mockContext = {
+			globalStorageUri: { fsPath: dir },
+		};
+		const svc = makeService({ context: mockContext as any });
+
+		const acquired = await (svc as any).acquireSyncLock();
+		assert.equal(acquired, true, 'empty lock must be treated as stale');
+
+		const content = JSON.parse(fs.readFileSync(lockPath, 'utf-8'));
+		assert.equal(content.sessionId, vscode.env.sessionId);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
 test('acquireSyncLock returns false when same server URL is locked by another session', async () => {
 	const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'lock-test-'));
 	try {

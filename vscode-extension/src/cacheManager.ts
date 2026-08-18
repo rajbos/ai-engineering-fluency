@@ -229,9 +229,11 @@ export class CacheManager {
 
 	private async writeLockFile(lockPath: string): Promise<boolean> {
 		try {
-			const fd = await fs.promises.open(lockPath, 'wx');
-			await fd.writeFile(JSON.stringify({ sessionId: vscode.env.sessionId, pid: process.pid, timestamp: Date.now() }));
-			await fd.close();
+			await fs.promises.writeFile(
+				lockPath,
+				JSON.stringify({ sessionId: vscode.env.sessionId, pid: process.pid, timestamp: Date.now() }),
+				{ flag: 'wx' },
+			);
 			return true;
 		} catch (err: unknown) {
 			if (err instanceof Error && (err as NodeJS.ErrnoException).code === 'EEXIST') { throw err; }
@@ -286,7 +288,16 @@ export class CacheManager {
 	private async handleExistingLock(lockPath: string): Promise<boolean> {
 		try {
 			const content = await fs.promises.readFile(lockPath, 'utf-8');
-			const lock = JSON.parse(content);
+			const lock = this.parseLockContent(content);
+			if (!lock) {
+				// Corrupt/empty lock (e.g. owner killed between atomic create and
+				// write). The staleness checks below can never run on unparseable
+				// content, so without this branch the file would block every
+				// acquire attempt forever, forcing all windows into follower mode.
+				this.deps.log('Breaking corrupt cache lock (unparseable content)');
+				await fs.promises.unlink(lockPath);
+				return this.writeLockFile(lockPath);
+			}
 			const staleThreshold = 5 * 60 * 1000;
 			const ownerAlive = this.checkOwnerAlive(lock.pid);
 			const isTimestampStale = Date.now() - lock.timestamp > staleThreshold;
@@ -299,6 +310,16 @@ export class CacheManager {
 			// Can't read lock file — might have been deleted by the owner already
 		}
 		return false;
+	}
+
+	private parseLockContent(content: string): { sessionId?: unknown; pid?: unknown; timestamp: number } | undefined {
+		try {
+			const lock = JSON.parse(content);
+			if (!lock || typeof lock !== 'object' || typeof lock.timestamp !== 'number') { return undefined; }
+			return lock;
+		} catch {
+			return undefined;
+		}
 	}
 
 	/**
