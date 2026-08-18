@@ -9447,6 +9447,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
+    },
+    "btn-efficiency": {
+      id: "btn-efficiency",
+      label: "Efficiency",
+      icon: "dashboard",
+      iconColor: "#f472b6",
+      appearance: "secondary"
     }
   };
   var NAV_ORDER = [
@@ -9455,6 +9462,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     "btn-chart",
     "btn-usage",
     "btn-maturity",
+    "btn-efficiency",
     "btn-environmental",
     "btn-diagnostics",
     "btn-dashboard"
@@ -9475,6 +9483,14 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   }
   function navButtonsHtml(activeView, backendConfigured) {
     return getNavButtons(activeView, backendConfigured).map((config) => buttonHtml(config)).join("\n");
+  }
+
+  // src/webview/shared/domUtils.ts
+  function setHtml(el, html) {
+    if (!el) {
+      return;
+    }
+    el.innerHTML = html;
   }
 
   // ../src/webview/shared/dataLoader.ts
@@ -10891,6 +10907,41 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
         return "#666";
     }
   }
+  function renderAgenticSparkline(trend) {
+    if (!trend || trend.length === 0) {
+      return "";
+    }
+    const totalSessions = trend.reduce((sum, p3) => sum + p3.multiAgentParentSessions + p3.delegationSessions, 0);
+    if (totalSessions === 0) {
+      return "";
+    }
+    const width = 260, height = 46, padding = 4;
+    const maxVal = Math.max(1, ...trend.map((p3) => p3.multiAgentParentSessions + p3.delegationSessions));
+    const n5 = trend.length;
+    const stepX = n5 > 1 ? (width - padding * 2) / (n5 - 1) : 0;
+    const toY = (v2) => height - padding - v2 / maxVal * (height - padding * 2);
+    const linePoints = (values) => values.map((v2, i6) => `${(padding + i6 * stepX).toFixed(1)},${toY(v2).toFixed(1)}`).join(" ");
+    const totalPoints = linePoints(trend.map((p3) => p3.multiAgentParentSessions + p3.delegationSessions));
+    const parentPoints = linePoints(trend.map((p3) => p3.multiAgentParentSessions));
+    const first = escapeHtml(trend[0].date);
+    const last = escapeHtml(trend[n5 - 1].date);
+    return `
+    <div class="agentic-sparkline" style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2a30;">
+      <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 4px;">
+        <span style="font-size: 11px; font-weight: 600; color: #999;">\u{1F4C8} Multi-Agent Usage (last ${n5} days)</span>
+      </div>
+      <svg viewBox="0 0 ${width} ${height}" width="100%" height="${height}" xmlns="http://www.w3.org/2000/svg">
+        <polyline points="${totalPoints}" fill="none" stroke="#22d3ee" stroke-width="2" />
+        <polyline points="${parentPoints}" fill="none" stroke="#a78bfa" stroke-width="1.5" stroke-dasharray="3,2" />
+      </svg>
+      <div style="display: flex; justify-content: space-between; font-size: 9px; color: #666;">
+        <span>${first}</span>
+        <span style="color:#22d3ee;">\u2014 total</span>
+        <span style="color:#a78bfa;">\u2504 multi-agent parents</span>
+        <span>${last}</span>
+      </div>
+    </div>`;
+  }
   function renderDemoControls(categories) {
     const sliders = categories.map((cat, i6) => {
       const currentStage = demoModeActive ? demoStageOverrides[i6] : cat.stage;
@@ -11031,6 +11082,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
     </div>
   ` : "";
     const hookButton = buildHookReminderButton(cat.category, cat.tips.length, data.installedHooks ?? []);
+    const sparklineHtml = cat.category === "Agentic" ? renderAgenticSparkline(data.agenticTrend) : "";
     return `
     <div class="category-card">
       <div class="category-header">
@@ -11042,6 +11094,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
         <div class="category-progress-fill" style="width: ${progressPct}%; background: ${color};"></div>
       </div>
       <ul class="evidence-list">${evidenceHtml || '<li class="evidence-item"><span class="evidence-icon">-</span><span>No significant activity detected</span></li>'}</ul>
+      ${sparklineHtml}
       ${!tipsAreDismissed && cat.tips.length > 0 ? `
         <div style="margin-top: 10px; padding-top: 8px; border-top: 1px solid #2a2a30;">
           <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
@@ -11174,7 +11227,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
     coverContainer.style.cssText = "position:absolute;left:-9999px;top:0;width:1200px;background:#1b1b1e;padding:24px;border-radius:10px;";
     const titleEl = document.createElement("div");
     titleEl.style.cssText = "text-align:center;margin-bottom:20px;";
-    titleEl.innerHTML = `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${(/* @__PURE__ */ new Date()).toLocaleDateString()}</div>`;
+    setHtml(titleEl, `<div style="font-size:28px;font-weight:800;color:#fff;margin-bottom:8px;">AI Engineering Fluency Score</div><div style="font-size:16px;color:#b8b8c8;">Report &middot; ${(/* @__PURE__ */ new Date()).toLocaleDateString()}</div>`);
     coverContainer.appendChild(titleEl);
     if (stageBanner) {
       coverContainer.appendChild(stageBanner.cloneNode(true));
@@ -11217,7 +11270,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
     card.style.cssText = "position:absolute;left:-9999px;top:0;width:1200px;height:630px;background:#1b1b1e;border-radius:16px;display:flex;flex-direction:column;justify-content:center;align-items:center;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;";
     const stageColors = ["#93c5fd", "#a78bfa", "#3b82f6", "#22d3ee"];
     const stageColor2 = stageColors[data.overallStage - 1] || "#58a6ff";
-    card.innerHTML = `
+    setHtml(card, `
     <div style="text-align:center;color:#fff;padding:48px;">
       <div style="font-size:28px;margin-bottom:12px;">\u{1F3AF} AI Engineering Fluency Score</div>
       <div style="font-size:14px;color:#b8b8c8;margin-bottom:32px;text-transform:uppercase;letter-spacing:2px;">Overall AI Engineering Fluency</div>
@@ -11226,7 +11279,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
       <div style="font-size:22px;font-weight:700;color:#58a6ff;margin-bottom:8px;">#AIEngineeringFluency</div>
       <div style="font-size:14px;color:#7a7a8a;">Track your AI usage with AI Engineering Fluency</div>
     </div>
-  `;
+  `);
     document.body.appendChild(card);
     try {
       const canvas = await html2canvas(card, { backgroundColor: "#1b1b1e", scale: 2, useCORS: true, width: 1200, height: 630 });
@@ -11262,6 +11315,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
     });
     document.getElementById("btn-environmental")?.addEventListener("click", () => {
       vscode.postMessage({ command: "showEnvironmental" });
+    });
+    document.getElementById("btn-efficiency")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "showEfficiency" });
     });
     wireExtensionPointButtons(vscode);
   }
@@ -11347,7 +11403,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .demo-step-active.demo
     const categoryCards = data.categories.map(
       (cat, catIdx) => buildCategoryCard(cat, catIdx, dismissedTips, Boolean(useDemoCards), data)
     ).join("");
-    root.innerHTML = buildMaturityRootHtml(data, categoryCards, dismissedTips);
+    setHtml(root, buildMaturityRootHtml(data, categoryCards, dismissedTips));
     wireMaturityNavButtons();
     wireMaturityActionButtons();
     wireExportHandlers();

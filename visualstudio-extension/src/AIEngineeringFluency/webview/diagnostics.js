@@ -1635,6 +1635,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
+    },
+    "btn-efficiency": {
+      id: "btn-efficiency",
+      label: "Efficiency",
+      icon: "dashboard",
+      iconColor: "#f472b6",
+      appearance: "secondary"
     }
   };
   var NAV_ORDER = [
@@ -1643,6 +1650,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     "btn-chart",
     "btn-usage",
     "btn-maturity",
+    "btn-efficiency",
     "btn-environmental",
     "btn-diagnostics",
     "btn-dashboard"
@@ -1663,6 +1671,24 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   }
   function navButtonsHtml(activeView, backendConfigured) {
     return getNavButtons(activeView, backendConfigured).map((config) => buttonHtml(config)).join("\n");
+  }
+
+  // src/webview/shared/domUtils.ts
+  function setHtml(el2, html) {
+    if (!el2) {
+      return;
+    }
+    el2.innerHTML = html;
+  }
+  function el(tag, className, text) {
+    const node = document.createElement(tag);
+    if (className) {
+      node.className = className;
+    }
+    if (text !== void 0) {
+      node.textContent = text;
+    }
+    return node;
   }
 
   // src/webview/shared/extensionPoints.ts
@@ -1784,18 +1810,6 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     } catch {
       return "Unknown";
     }
-  }
-
-  // src/webview/shared/domUtils.ts
-  function el(tag, className, text) {
-    const node = document.createElement(tag);
-    if (className) {
-      node.className = className;
-    }
-    if (text !== void 0) {
-      node.textContent = text;
-    }
-    return node;
   }
 
   // src/webview/shared/periodSelector.ts
@@ -2816,6 +2830,48 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .share-btn-mastodon { 
 	text-align: right;
 }
 
+/* Skill Usage tab: editor filter chip row */
+.skill-usage-filter-panel {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin-bottom: 14px;
+}
+
+.skill-usage-chip {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 999px;
+	padding: 5px 12px;
+	font-size: 12px;
+	color: var(--text-primary);
+	cursor: pointer;
+	transition: all 0.15s;
+	white-space: nowrap;
+}
+
+.skill-usage-chip:hover {
+	background: var(--list-hover-bg);
+}
+
+.skill-usage-chip.active {
+	background: var(--list-active-bg);
+	border-color: var(--link-color);
+	color: var(--list-active-fg);
+}
+
+.skill-usage-chip-count {
+	opacity: 0.75;
+	font-variant-numeric: tabular-nums;
+	margin-left: 2px;
+}
+
+.skill-usage-description {
+	color: var(--text-primary);
+	opacity: 0.8;
+	font-size: 12px;
+}
+
 .tool-builtin-label {
 	opacity: 0.5;
 	font-style: italic;
@@ -3308,6 +3364,16 @@ border: 1px solid #1f6feb;
 
 `;
 
+  // src/webview/shared/messageHandler.ts
+  function registerMessageHandler(handler) {
+    window.addEventListener("message", (event) => {
+      if (event.source !== window) {
+        return;
+      }
+      handler(event.data);
+    });
+  }
+
   // src/webview/shared/contextRefUtils.ts
   function getTotalContextRefs(refs) {
     return refs.file + refs.selection + refs.implicitSelection + refs.symbol + refs.codebase + refs.workspace + refs.terminal + refs.vscode + refs.copilotInstructions + refs.agentsMd + (refs.terminalLastCommand || 0) + (refs.terminalSelection || 0) + (refs.clipboard || 0) + (refs.changes || 0) + (refs.outputPanel || 0) + (refs.problemsPanel || 0) + (refs.pullRequest || 0);
@@ -3356,7 +3422,8 @@ The view will automatically update when data is ready.`;
     activeTab: void 0,
     activeSubtab: void 0,
     otelDeltaPeriod: "all",
-    shareCardPeriod: "last14"
+    shareCardPeriod: "last14",
+    skillUsageEditorFilter: "all"
   });
   var currentOtelComparison;
   var currentOtelDeltaPeriod = diagState.restore().otelDeltaPeriod ?? "all";
@@ -3371,6 +3438,10 @@ The view will automatically update when data is ready.`;
   var toolSortColumn = "avg";
   var toolSortDir = "desc";
   var storedToolFamilies;
+  var currentSkillCallStats;
+  var currentSkillCallsByEditor;
+  var currentSkillDescriptions;
+  var skillUsageEditorFilter = diagState.restore().skillUsageEditorFilter ?? "all";
   var storedDetailedFiles = [];
   var isLoading = true;
   var currentBackendInfo;
@@ -3641,16 +3712,17 @@ The view will automatically update when data is ready.`;
     return currentSortDirection === "desc" ? " \u25BC" : " \u25B2";
   }
   function getEditorStats(files) {
-    const stats = {};
+    const stats = /* @__PURE__ */ new Map();
     for (const sf of files) {
       const editor = sf.editorName || sf.editorSource || "Unknown";
-      if (!stats[editor]) {
-        stats[editor] = { count: 0, interactions: 0 };
+      if (!stats.has(editor)) {
+        stats.set(editor, { count: 0, interactions: 0 });
       }
-      stats[editor].count++;
-      stats[editor].interactions += sf.interactions;
+      const entry = stats.get(editor);
+      entry.count++;
+      entry.interactions += sf.interactions;
     }
-    return stats;
+    return Object.fromEntries(stats);
   }
   function safeText(value) {
     if (value === null || value === void 0) {
@@ -3721,6 +3793,13 @@ The view will automatically update when data is ready.`;
   </div>
   <div class="filter-options"><label class="empty-sessions-toggle"><input type="checkbox" id="hide-empty-sessions" ${hideEmptySessions ? "checked" : ""}>Hide sessions with 0 interactions${zeroInteractionCount > 0 ? `<span class="hidden-count">(${zeroInteractionCount} hidden)</span>` : ""}</label>${unattributedCheckbox}</div>`;
   }
+  function buildSubAgentBadgeHtml(sf) {
+    if (!sf.subAgentCalls || sf.subAgentCalls <= 0) {
+      return "";
+    }
+    const label = sf.subAgentCalls === 1 ? "1 sub-agent tool call" : `${sf.subAgentCalls} sub-agent tool calls`;
+    return `<span class="session-hierarchy-badge" title="${label} detected in this session">\u{1F916} ${sf.subAgentCalls} Sub-Agent${sf.subAgentCalls === 1 ? "" : "s"}</span>`;
+  }
   function buildHierarchyBadgesHtml(sf) {
     let html = "";
     if (sf.parentInfo) {
@@ -3733,6 +3812,7 @@ The view will automatically update when data is ready.`;
       const label = count === 1 ? "1 child session" : `${count} child sessions`;
       html += `<span class="session-hierarchy-badge hierarchy-children" title="${label}">\u2193 ${count} ${count === 1 ? "Child" : "Children"}</span>`;
     }
+    html += buildSubAgentBadgeHtml(sf);
     return html ? `<div class="session-hierarchy-badges">${html}</div>` : "";
   }
   function buildUnattributedBadge(sf) {
@@ -3894,7 +3974,7 @@ The view will automatically update when data is ready.`;
   </div>`;
   }
   function renderDebugTab(counters) {
-    const c4 = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: "" };
+    const c4 = counters ?? { openCount: 0, unknownMcpOpenCount: 0, fluencyBannerDismissed: false, unknownMcpDismissedVersion: "", efficiencyTabBannerDismissed: false };
     return `
     <div id="tab-debug" class="tab-content">
       <div class="info-box">
@@ -3911,6 +3991,7 @@ The view will automatically update when data is ready.`;
         <table><tbody>
           ${flagRow("news.fluencyScoreBanner.v1.dismissed", "news.fluencyScoreBanner.v1.dismissed", c4.fluencyBannerDismissed)}
           ${stringRow("news.unknownMcpTools.dismissedVersion", "news.unknownMcpTools.dismissedVersion", c4.unknownMcpDismissedVersion)}
+          ${flagRow("news.efficiencyTab.v1.dismissed", "news.efficiencyTab.v1.dismissed", c4.efficiencyTabBannerDismissed)}
         </tbody></table>
         <div style="margin-top: 16px;">
           <button class="button secondary" id="btn-reset-debug-counters"><span>\u{1F504}</span><span>Reset All Counters &amp; Dismissed Flags</span></button>
@@ -4237,15 +4318,21 @@ ${authenticated ? `
     wrapper.append(select);
   }
   function buildModelUsageTableRow(row, showCache1h) {
+    const sessionCountTitle = escapeHtml(`${row.sessionCount} session(s)`);
+    const inputTokensTitle = escapeHtml(`${row.inputTokens.toLocaleString()} tokens`);
+    const outputTokensTitle = escapeHtml(`${row.outputTokens.toLocaleString()} tokens`);
+    const cacheCreationTokensTitle = escapeHtml(`${row.cacheCreationTokens.toLocaleString()} tokens`);
+    const cacheCreation1hTokensTitle = escapeHtml(`${row.cacheCreation1hTokens.toLocaleString()} tokens`);
+    const cachedReadTokensTitle = escapeHtml(`${row.cachedReadTokens.toLocaleString()} tokens`);
     return `
     <tr>
       <td>${escapeHtml(row.model)}</td>
-      <td title="${row.sessionCount} session(s)">${row.sessionCount.toLocaleString()}</td>
-      <td title="${row.inputTokens.toLocaleString()} tokens">${formatTokenCount(row.inputTokens)}</td>
-      <td title="${row.outputTokens.toLocaleString()} tokens">${formatTokenCount(row.outputTokens)}</td>
-      <td title="${row.cacheCreationTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreationTokens)}</td>
-      ${showCache1h ? `<td title="${row.cacheCreation1hTokens.toLocaleString()} tokens">${formatTokenCount(row.cacheCreation1hTokens)}</td>` : ""}
-      <td title="${row.cachedReadTokens.toLocaleString()} tokens">${formatTokenCount(row.cachedReadTokens)}</td>
+      <td title="${sessionCountTitle}">${row.sessionCount.toLocaleString()}</td>
+      <td title="${inputTokensTitle}">${formatTokenCount(row.inputTokens)}</td>
+      <td title="${outputTokensTitle}">${formatTokenCount(row.outputTokens)}</td>
+      <td title="${cacheCreationTokensTitle}">${formatTokenCount(row.cacheCreationTokens)}</td>
+      ${showCache1h ? `<td title="${cacheCreation1hTokensTitle}">${formatTokenCount(row.cacheCreation1hTokens)}</td>` : ""}
+      <td title="${cachedReadTokensTitle}">${formatTokenCount(row.cachedReadTokens)}</td>
       <td>$${row.estimatedCost.toFixed(2)}</td>
     </tr>`;
   }
@@ -4493,7 +4580,7 @@ ${authenticated ? `
   }
   var TAB_GROUPS = {
     diagnostics: ["report", "sessions", "cache", "path-analyzer"],
-    research: ["model-usage", "tool-analysis", "otel-delta"],
+    research: ["model-usage", "tool-analysis", "skill-usage", "otel-delta"],
     settings: ["display", "backend", "github", "debug"]
   };
   function groupOfTab(tabId) {
@@ -4654,7 +4741,7 @@ ${authenticated ? `
   function reRenderTable() {
     const container = document.getElementById("session-table-container");
     if (container) {
-      container.innerHTML = renderSessionTable(storedDetailedFiles, isLoading);
+      setHtml(container, renderSessionTable(storedDetailedFiles, isLoading));
       if (!isLoading) {
         setupSortHandlers();
         setupEditorFilterHandlers();
@@ -4676,11 +4763,11 @@ ${authenticated ? `
       const baseline = baselineRaw ? parseFloat(baselineRaw) : NaN;
       const tbody = table.querySelector("tbody");
       if (tbody) {
-        tbody.innerHTML = renderToolAnalysisRows(rows, baseline);
+        setHtml(tbody, renderToolAnalysisRows(rows, baseline));
       }
       const thead = table.querySelector("thead");
       if (thead) {
-        thead.innerHTML = toolAnalysisTheadHtml();
+        setHtml(thead, toolAnalysisTheadHtml());
       }
     });
     setupToolAnalysisSortHandlers();
@@ -4788,15 +4875,15 @@ ${authenticated ? `
       const btn = document.getElementById("btn-analyze-folder");
       if (btn) {
         btn.disabled = true;
-        btn.innerHTML = "<span>\u23F3</span><span>Analyzing\u2026</span>";
+        setHtml(btn, "<span>\u23F3</span><span>Analyzing\u2026</span>");
       }
       const resultsDiv = document.getElementById("folder-analysis-results");
       if (resultsDiv) {
-        resultsDiv.innerHTML = `
+        setHtml(resultsDiv, `
           <div class="analyzer-loading">
             <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
             <span>Scanning files\u2026</span>
-          </div>`;
+          </div>`);
       }
       vscode.postMessage({
         command: "analyzeFolder",
@@ -4814,11 +4901,11 @@ ${authenticated ? `
     const timeRange = currentModelUsageTimeRange || "all";
     const resultsDiv = document.getElementById("model-usage-results");
     if (resultsDiv) {
-      resultsDiv.innerHTML = `
+      setHtml(resultsDiv, `
         <div class="analyzer-loading">
           <span class="spinner" style="width:18px;height:18px;border:2px solid var(--link-color);border-top-color:transparent;border-radius:50%;display:inline-block;animation:spin 0.7s linear infinite;"></span>
           <span>Aggregating model usage\u2026</span>
-        </div>`;
+        </div>`);
     }
     vscode.postMessage({ command: "analyzeModelUsage", editor, timeRange });
   }
@@ -4837,14 +4924,14 @@ ${authenticated ? `
       renderModelUsageTimeSelector(false);
     }
     if (message.stillLoading) {
-      resultsDiv.innerHTML = `
+      setHtml(resultsDiv, `
       <div class="info-box" style="margin-top: 12px;">
         <div class="info-box-title">\u23F3 Still loading session files</div>
         <div>Session files are still being scanned in the background. Wait a moment (watch the "Session Files" tab count) and try again.</div>
-      </div>`;
+      </div>`);
       return;
     }
-    resultsDiv.innerHTML = renderModelUsageResults(
+    setHtml(resultsDiv, renderModelUsageResults(
       String(message.editor || "all"),
       Number(message.fileCount || 0),
       Number(message.filesWithUsage || 0),
@@ -4852,7 +4939,7 @@ ${authenticated ? `
       Number(message.totalCost || 0),
       message.supportsCache1h !== false,
       String(message.timeRange || "all")
-    );
+    ));
   }
   function setupTabHandlers() {
     document.querySelectorAll(".tab").forEach((tab) => {
@@ -4872,7 +4959,7 @@ ${authenticated ? `
   }
   function handleClearCacheClick(target) {
     target.style.background = "#d97706";
-    target.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
+    setHtml(target, "<span>\u23F3</span><span>Clearing...</span>");
     if (target instanceof HTMLButtonElement) {
       target.disabled = true;
     }
@@ -4955,6 +5042,10 @@ ${authenticated ? `
       "click",
       () => vscode.postMessage({ command: "showEnvironmental" })
     );
+    document.getElementById("btn-efficiency")?.addEventListener(
+      "click",
+      () => vscode.postMessage({ command: "showEfficiency" })
+    );
     wireExtensionPointButtons(vscode);
   }
   function renderShareCardPeriodSelector() {
@@ -5018,7 +5109,7 @@ ${authenticated ? `
       );
       if (btn) {
         btn.style.background = "#d97706";
-        btn.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
+        setHtml(btn, "<span>\u23F3</span><span>Clearing...</span>");
         btn.disabled = true;
       }
       updateCacheNumbers();
@@ -5030,7 +5121,7 @@ ${authenticated ? `
       );
       if (btn) {
         btn.style.background = "#d97706";
-        btn.innerHTML = "<span>\u23F3</span><span>Clearing...</span>";
+        setHtml(btn, "<span>\u23F3</span><span>Clearing...</span>");
         btn.disabled = true;
       }
       updateCacheNumbers();
@@ -5068,7 +5159,7 @@ ${authenticated ? `
     }
     const activeSubtabEl = backendTabContent.querySelector(".subtab.active");
     const previousSubtab = activeSubtabEl?.getAttribute("data-subtab") ?? diagState.restore().activeSubtab;
-    backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+    setHtml(backendTabContent, renderBackendStoragePanel(currentBackendInfo, currentGithubAuth));
     setupBackendButtonHandlers();
     setupSubtabHandlers();
     if (previousSubtab) {
@@ -5128,7 +5219,7 @@ ${authenticated ? `
     }
     const wasActive = tabContent.classList.contains("active");
     const temp = document.createElement("div");
-    temp.innerHTML = newContent;
+    setHtml(temp, newContent);
     const newTab = temp.firstElementChild;
     if (!newTab) {
       return;
@@ -5145,7 +5236,7 @@ ${authenticated ? `
     }
     const githubTabContent = document.getElementById("tab-github");
     if (githubTabContent) {
-      githubTabContent.innerHTML = renderGitHubAuthPanel(message.githubAuth);
+      setHtml(githubTabContent, renderGitHubAuthPanel(message.githubAuth));
       setupGitHubAuthHandlers();
     }
   }
@@ -5158,6 +5249,41 @@ ${authenticated ? `
     }
     const newContent = renderToolAnalysisTab(message.toolCallStats, storedToolFamilies);
     replaceTabContent("tool-analysis", newContent, setupToolAnalysisSortHandlers);
+  }
+  function rerenderSkillUsageTab() {
+    replaceTabContent(
+      "skill-usage",
+      renderSkillUsageTab(currentSkillCallStats, currentSkillCallsByEditor, currentSkillDescriptions, skillUsageEditorFilter),
+      setupSkillUsageFilterHandler
+    );
+  }
+  function setupSkillUsageFilterHandler() {
+    document.querySelectorAll(".skill-usage-chip").forEach((chip) => {
+      chip.addEventListener("click", () => {
+        const editor = chip.getAttribute("data-editor");
+        if (!editor) {
+          return;
+        }
+        skillUsageEditorFilter = editor;
+        diagState.patch({ skillUsageEditorFilter: editor });
+        rerenderSkillUsageTab();
+      });
+    });
+  }
+  function handleSkillUsageSection(message) {
+    if (message.skillCallStats !== void 0) {
+      currentSkillCallStats = message.skillCallStats;
+    }
+    if (message.skillCallsByEditor !== void 0) {
+      currentSkillCallsByEditor = message.skillCallsByEditor;
+    }
+    if (message.skillDescriptions !== void 0) {
+      currentSkillDescriptions = message.skillDescriptions;
+    }
+    if (message.skillCallStats === void 0) {
+      return;
+    }
+    rerenderSkillUsageTab();
   }
   function rerenderOtelDeltaTab() {
     replaceTabContent("otel-delta", renderOtelDeltaTab(currentOtelComparison, currentOtelDeltaPeriod), setupOtelDeltaPeriodHandler);
@@ -5187,20 +5313,21 @@ ${authenticated ? `
     handleCandidatePathsSection(message);
     handleGithubAuthSection(message);
     handleToolAnalysisSection(message);
+    handleSkillUsageSection(message);
     handleOtelComparisonSection(message);
   }
   function handleGithubAuthUpdated(message) {
     currentGithubAuth = message.githubAuth;
     const githubTabContent = document.getElementById("tab-github");
     if (githubTabContent) {
-      githubTabContent.innerHTML = renderGitHubAuthPanel(currentGithubAuth);
+      setHtml(githubTabContent, renderGitHubAuthPanel(currentGithubAuth));
       setupGitHubAuthHandlers();
     }
     const backendTabContent = document.getElementById("tab-backend");
     if (backendTabContent && currentBackendInfo) {
       const activeSubtabEl = backendTabContent.querySelector(".subtab.active");
       const previousSubtab = activeSubtabEl?.getAttribute("data-subtab");
-      backendTabContent.innerHTML = renderBackendStoragePanel(currentBackendInfo, currentGithubAuth);
+      setHtml(backendTabContent, renderBackendStoragePanel(currentBackendInfo, currentGithubAuth));
       setupBackendButtonHandlers();
       setupSubtabHandlers();
       if (previousSubtab) {
@@ -5214,10 +5341,10 @@ ${authenticated ? `
     if (rootEl) {
       const errorDiv = document.createElement("div");
       errorDiv.style.cssText = "color: #ff6b6b; padding: 20px; text-align: center;";
-      errorDiv.innerHTML = `
+      setHtml(errorDiv, `
 <h3><span class="codicon codicon-warning"></span> Error Loading Diagnostic Data</h3>
 <p>${escapeHtml(message.error || "Unknown error")}</p>
-`;
+`);
       rootEl.insertBefore(errorDiv, rootEl.firstChild);
     }
   }
@@ -5301,7 +5428,8 @@ ${authenticated ? `
       contextReferences: sanitizeContextReferences(contextRefs),
       parentInfo: sanitizeParentInfo(sf),
       childInfo: sanitizeChildInfo(sf),
-      totalChildCount: sf.totalChildCount === null || sf.totalChildCount === void 0 ? void 0 : Number(sf.totalChildCount)
+      totalChildCount: sf.totalChildCount === null || sf.totalChildCount === void 0 ? void 0 : Number(sf.totalChildCount),
+      subAgentCalls: sf.subAgentCalls === null || sf.subAgentCalls === void 0 ? void 0 : Number(sf.subAgentCalls)
     };
   }
   function sanitizeDetailedSessionFiles(input) {
@@ -5338,7 +5466,7 @@ ${authenticated ? `
     if (modelUsageSelect) {
       const editorStats = getEditorStats(storedDetailedFiles);
       const editorOptions = Object.keys(editorStats).sort().map((editor) => `<option value="${escapeHtml(editor)}">${escapeHtml(getEditorIcon(editor))} ${escapeHtml(editor)} (${editorStats[editor].count})</option>`).join("");
-      modelUsageSelect.innerHTML = `<option value="all">\u{1F310} All Editors</option>${editorOptions}`;
+      setHtml(modelUsageSelect, `<option value="all">\u{1F310} All Editors</option>${editorOptions}`);
       modelUsageSelect.disabled = false;
     }
     renderModelUsageTimeSelector(false);
@@ -5359,22 +5487,22 @@ ${authenticated ? `
     );
     if (btnReport) {
       btnReport.style.background = "#2d6a4f";
-      btnReport.innerHTML = "<span>\u2705</span><span>Cache Cleared</span>";
+      setHtml(btnReport, "<span>\u2705</span><span>Cache Cleared</span>");
       btnReport.disabled = false;
     }
     if (btnTab) {
       btnTab.style.background = "#2d6a4f";
-      btnTab.innerHTML = "<span>\u2705</span><span>Cache Cleared</span>";
+      setHtml(btnTab, "<span>\u2705</span><span>Cache Cleared</span>");
       btnTab.disabled = false;
     }
     setTimeout(() => {
       if (btnReport) {
         btnReport.style.background = "";
-        btnReport.innerHTML = "<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>";
+        setHtml(btnReport, "<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>");
       }
       if (btnTab) {
         btnTab.style.background = "";
-        btnTab.innerHTML = "<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>";
+        setHtml(btnTab, "<span>\u{1F5D1}\uFE0F</span><span>Clear Cache</span>");
       }
     }, 2e3);
   }
@@ -5420,30 +5548,29 @@ ${authenticated ? `
     const btn = document.getElementById("btn-analyze-folder");
     if (btn) {
       btn.disabled = false;
-      btn.innerHTML = "<span>\u{1F50D}</span><span>Analyze</span>";
+      setHtml(btn, "<span>\u{1F50D}</span><span>Analyze</span>");
     }
     const resultsDiv = document.getElementById("folder-analysis-results");
     if (resultsDiv) {
       if (message.error) {
-        resultsDiv.innerHTML = `
+        setHtml(resultsDiv, `
         <div class="info-box" style="border-color: #d97706; background: rgba(217,119,6,0.08); margin-top: 12px;">
           <div class="info-box-title">\u26A0\uFE0F Analysis Error</div>
           <div>${escapeHtml(message.error)}</div>
-        </div>`;
+        </div>`);
       } else {
-        resultsDiv.innerHTML = renderFolderAnalysisResults(
+        setHtml(resultsDiv, renderFolderAnalysisResults(
           message.files || [],
           message.totalScanned || 0,
           message.parseErrors || 0,
           message.truncated || false,
           escapeHtml(String(message.folderPath || ""))
-        );
+        ));
       }
     }
   }
   function setupMessageHandlers() {
-    window.addEventListener("message", (event) => {
-      const message = event.data;
+    registerMessageHandler((message) => {
       if (message.command === "diagnosticDataLoaded") {
         handleDiagnosticDataLoaded(message);
       } else if (message.command === "backendStorageInfoLoaded") {
@@ -5757,6 +5884,55 @@ for quick scanning, or as full numbers (e.g. <strong>1,500</strong>, <strong>1,2
 ${sectionsHtml}
 </div>`;
   }
+  function _renderSkillUsageFilterPanel(skillCallsByEditor, totalAll, activeFilter) {
+    const editorTotals = /* @__PURE__ */ new Map();
+    for (const byEditor of Object.values(skillCallsByEditor ?? {})) {
+      for (const [editor, count] of Object.entries(byEditor)) {
+        editorTotals.set(editor, (editorTotals.get(editor) ?? 0) + count);
+      }
+    }
+    const editors = [...editorTotals.entries()].sort((a3, b3) => b3[1] - a3[1]);
+    if (editors.length === 0) {
+      return "";
+    }
+    const allChip = `<button class="skill-usage-chip${activeFilter === "all" ? " active" : ""}" data-editor="all">All <span class="skill-usage-chip-count">${formatTokenCount(totalAll)}</span></button>`;
+    const editorChips = editors.map(
+      ([editor, count]) => `<button class="skill-usage-chip${activeFilter === editor ? " active" : ""}" data-editor="${escapeHtml(editor)}">${escapeHtml(editor)} <span class="skill-usage-chip-count">${formatTokenCount(count)}</span></button>`
+    ).join("");
+    return `<div class="skill-usage-filter-panel">${allChip}${editorChips}</div>`;
+  }
+  function renderSkillUsageTab(skillCallStats, skillCallsByEditor, skillDescriptions, editorFilter = "all") {
+    const byName = skillCallStats?.byName ?? {};
+    if (Object.keys(byName).length === 0) {
+      return `<div id="tab-skill-usage" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">\u{1F9E9} Skill Usage</div>
+<div>Tracks how often each agent skill (e.g. a <code>/skill-name</code> invocation or another editor's <code>SKILL.md</code> workflow) was invoked over the last 30 days. No skill invocations have been recorded yet. Skill usage is currently detected for Claude Code, Claude Desktop, and Copilot CLI sessions \u2014 support for other editors depends on whether their session logs expose a distinguishable skill name.</div>
+</div>
+</div>`;
+    }
+    const totalAll = Object.values(byName).reduce((s4, n5) => s4 + n5, 0);
+    const filterPanel = _renderSkillUsageFilterPanel(skillCallsByEditor, totalAll, editorFilter);
+    const rows = Object.keys(byName).map((name) => ({
+      name,
+      count: editorFilter === "all" ? byName[name] : skillCallsByEditor?.[name]?.[editorFilter] ?? 0,
+      description: skillDescriptions?.[name] ?? ""
+    })).filter((r6) => r6.count > 0).sort((a3, b3) => b3.count - a3.count);
+    const shownTotal = rows.reduce((s4, r6) => s4 + r6.count, 0);
+    const bodyRows = rows.map((r6) => `<tr><td>${escapeHtml(r6.name)}</td><td class="skill-usage-description">${r6.description ? escapeHtml(r6.description) : '<span class="hint">\u2014</span>'}</td><td>${formatTokenCount(r6.count)}</td></tr>`).join("");
+    const scopeLabel = editorFilter === "all" ? "across all editors" : `for ${escapeHtml(editorFilter)}`;
+    return `<div id="tab-skill-usage" class="tab-content">
+<div class="info-box">
+<div class="info-box-title">\u{1F9E9} Skill Usage</div>
+<div>${formatTokenCount(shownTotal)} skill invocation(s) across ${rows.length} skill(s) ${scopeLabel} in the last 30 days. Currently detected for Claude Code / Claude Desktop / Copilot CLI sessions.</div>
+</div>
+${filterPanel}
+<table class="session-table skill-usage-table">
+<thead><tr><th>Skill</th><th>Description</th><th>Invocations</th></tr></thead>
+<tbody>${bodyRows}</tbody>
+</table>
+</div>`;
+  }
   function renderOtelDeltaSetupNotice(comparison) {
     if (comparison && comparison.otelSessionsIndexed > 0) {
       return "";
@@ -5967,6 +6143,7 @@ ${navButtonsHtml("btn-diagnostics", !!data?.backendConfigured)}
 <div class="tabs leaf-tabs" data-group="research" style="display: none;">
 <button class="tab" data-tab="model-usage">\u{1F9EE} Model Usage</button>
 <button class="tab" data-tab="tool-analysis">\u{1F527} Tool Analysis</button>
+<button class="tab" data-tab="skill-usage">\u{1F9E9} Skill Usage</button>
 <button class="tab" data-tab="otel-delta">\u{1F4E1} OTel Delta</button>
 </div>
 
@@ -6005,6 +6182,7 @@ ${renderShareCardTab(detailedFiles, isLoading)}
 ${renderModelUsageTab(detailedFiles, isLoading)}
 </div>
 ${renderToolAnalysisTab(data.toolCallStats, data.toolFamilies)}
+${renderSkillUsageTab(data.skillCallStats, data.skillCallsByEditor, data.skillDescriptions, skillUsageEditorFilter)}
 ${renderOtelDeltaTab(data.otelComparison)}
 </div>
 `;
@@ -6023,9 +6201,12 @@ ${renderOtelDeltaTab(data.otelComparison)}
     if (data.toolFamilies) {
       storedToolFamilies = data.toolFamilies;
     }
+    currentSkillCallStats = data.skillCallStats;
+    currentSkillCallsByEditor = data.skillCallsByEditor;
+    currentSkillDescriptions = data.skillDescriptions;
     const reportIsLoading = data.report === LOADING_PLACEHOLDER;
     const escapedReport = reportIsLoading ? LOADING_MESSAGE.trim() : removeSessionFilesSection(escapeHtml(data.report));
-    root.innerHTML = buildDiagRootHtml(data, detailedFiles, escapedReport);
+    setHtml(root, buildDiagRootHtml(data, detailedFiles, escapedReport));
     const sessionFolders = groupSessionFolders(data.sessionFolders || []);
     if (sessionFolders.length > 0) {
       const reportTab = document.getElementById("tab-report");
@@ -6053,6 +6234,7 @@ ${renderOtelDeltaTab(data.otelComparison)}
     setupButtonHandlers();
     setupDisplaySettingHandlers();
     setupToolAnalysisSortHandlers();
+    setupSkillUsageFilterHandler();
     setupOtelDeltaPeriodHandler();
     const savedState = diagState.restore();
     let restoredTab = "report";

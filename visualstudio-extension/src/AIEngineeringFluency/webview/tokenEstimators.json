@@ -86,6 +86,12 @@
     "gpt-5.6-sol": 0.25,
     "gpt-5.6-terra": 0.25,
     "gemini-3.6-flash": 0.25,
-    "claude-opus-5": 0.24
+    "claude-opus-5": 0.24,
+    "grok-4.5": 0.25,
+    "gemini-3.7-flash": 0.25,
+    "grok-4.6": 0.25,
+    "these-models": 0.25,
+    "mai-code-1.1-flash": 0.25,
+    "kimi-k3": 0.25
   }
 }

@@ -16249,6 +16249,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
+    },
+    "btn-efficiency": {
+      id: "btn-efficiency",
+      label: "Efficiency",
+      icon: "dashboard",
+      iconColor: "#f472b6",
+      appearance: "secondary"
     }
   };
   var NAV_ORDER = [
@@ -16257,6 +16264,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     "btn-chart",
     "btn-usage",
     "btn-maturity",
+    "btn-efficiency",
     "btn-environmental",
     "btn-diagnostics",
     "btn-dashboard"
@@ -16766,11 +16774,14 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
 `;
 
   // src/webview/chart/styles.css
-  var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 32px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.header-left {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n}\n\n.header-icon {\n	font-size: 20px;\n}\n\n.header-title {\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n	text-align: left;\n}\n\n\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 16px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n	text-align: center;\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n	text-align: left;\n}\n\n.cards {\n	display: grid;\n	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n	gap: 10px;\n	text-align: center;\n}\n\n.cards + .cards {\n	margin-top: 16px;\n}\n\n.card {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	padding: 12px;\n	box-shadow: 0 2px 6px var(--shadow-color);\n	text-align: center;\n}\n\n.card-label {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin-bottom: 6px;\n}\n\n.card-value {\n	color: var(--text-primary);\n	font-size: 18px;\n	font-weight: 700;\n}\n\n.card-sub {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 2px;\n}\n\n.chart-section-header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	margin-bottom: 10px;\n}\n\n.chart-section-header h3 {\n	margin: 0;\n}\n\n.chart-shell {	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 2px 8px var(--shadow-color);\n	text-align: center;\n}\n\n.chart-controls {\n	display: flex;\n	flex-direction: column;\n	gap: 10px;\n	margin-bottom: 12px;\n}\n\n.chart-controls-row {\n	display: flex;\n	flex-wrap: wrap;\n	align-items: center;\n	gap: 10px;\n	justify-content: flex-start;\n	padding-bottom: 10px;\n	border-bottom: 1px solid var(--border-subtle);\n}\n\n.chart-controls-row:last-child {\n	padding-bottom: 0;\n	border-bottom: none;\n}\n\n.control-group {\n	display: flex;\n	gap: 4px;\n	align-items: center;\n}\n\n.control-label {\n	font-size: 11px;\n	color: var(--text-secondary);\n}\n\n.loading-note {\n	font-size: 11px;\n	color: var(--text-secondary);\n	margin-left: 4px;\n	white-space: nowrap;\n}\n\n.control-group-separator {\n	width: 1px;\n	height: 20px;\n	background: var(--border-subtle);\n	margin: 0 4px;\n	flex-shrink: 0;\n}\n\n.period-controls {\n	display: flex;\n	gap: 4px;\n	align-items: center;\n}\n\n.period-controls-label {\n	font-size: 11px;\n	color: var(--text-secondary);\n	margin-right: 4px;\n}\n\n.period-controls .toggle {\n	padding: 6px 10px;\n}\n\n.toggle {\n	background: var(--button-secondary-bg);\n	border: 1px solid var(--border-subtle);\n	color: var(--text-primary);\n	padding: 6px 12px;\n	border-radius: 6px;\n	font-size: 12px;\n	cursor: pointer;\n	transition: all 0.15s ease;\n	min-height: 30px;\n	display: inline-flex;\n	align-items: center;\n	justify-content: center;\n}\n\n.toggle.active {\n	background: var(--button-bg);\n	border-color: var(--button-bg);\n	color: var(--button-fg);\n}\n\n.toggle:hover {\n	background: var(--button-secondary-hover-bg);\n}\n\n.toggle.active:hover {\n	background: var(--button-hover-bg);\n}\n\n.toggle:disabled {\n	opacity: 0.45;\n	cursor: not-allowed;\n}\n\n.toggle:disabled:hover {\n	background: var(--button-secondary-bg);\n}\n\n.canvas-wrap {\n	position: relative;\n	height: 420px;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n	text-align: center;\n}\n\n.footer em {\n	color: var(--text-secondary);\n}\n\n.hidden {\n	display: none !important;\n}\n\n.toggle.dim {\n	opacity: 0.6;\n}\n\n.toggle.disabled {\n	opacity: 0.45;\n	cursor: not-allowed;\n}\n\n.toggle.disabled:hover {\n	background: var(--button-secondary-bg);\n}\n\n.time-window-select {\n	background: var(--button-secondary-bg);\n	border: 1px solid var(--border-subtle);\n	color: var(--text-primary);\n	border-radius: 6px;\n	padding: 6px 10px;\n	font-size: 12px;\n	cursor: pointer;\n	outline: none;\n	min-height: 30px;\n}\n\n.time-window-select:focus {\n	border-color: var(--button-bg);\n}\n\n.time-window-select option {\n	background: var(--bg-secondary);\n	color: var(--text-primary);\n}\n\n/* Language Heatmap */\n.heatmap-container {\n	position: relative;\n	min-height: 420px;\n	overflow: auto;\n}\n\n.heatmap-wrap {\n	width: 100%;\n	min-height: 380px;\n	display: flex;\n	flex-direction: column;\n	padding-top: 8px;\n}\n\n.heatmap-empty {\n	flex: 1;\n	display: flex;\n	align-items: center;\n	justify-content: center;\n	color: var(--text-muted);\n	font-size: 13px;\n	min-height: 380px;\n}\n\n.heatmap-table {\n	border-collapse: separate;\n	border-spacing: 3px;\n	width: 100%;\n	table-layout: fixed;\n}\n\n.heatmap-lang-header {\n	width: 72px;\n	min-width: 72px;\n}\n\n.heatmap-date-header {\n	height: 56px;\n	vertical-align: bottom;\n	padding: 0 0 2px 0;\n	text-align: center;\n}\n\n.heatmap-date-header span {\n	display: block;\n	writing-mode: vertical-lr;\n	transform: rotate(180deg);\n	white-space: nowrap;\n	font-size: 10px;\n	color: var(--text-primary);\n	font-weight: 500;\n	opacity: 0.85;\n	max-height: 54px;\n	overflow: hidden;\n	margin: 0 auto;\n}\n\n.heatmap-lang-label {\n	text-align: right;\n	padding-right: 8px;\n	font-size: 11px;\n	color: var(--text-secondary);\n	white-space: nowrap;\n	overflow: hidden;\n	text-overflow: ellipsis;\n	max-width: 72px;\n	height: 22px;\n}\n\n.heatmap-data-cell {\n	border-radius: 3px;\n	cursor: default;\n	height: 22px;\n	transition: opacity 0.1s ease;\n}\n\n.heatmap-data-cell:hover {\n	opacity: 0.75;\n	outline: 1px solid rgba(34, 197, 94, 0.7);\n	outline-offset: -1px;\n}\n";
+  var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 32px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.header-left {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n}\n\n.header-icon {\n	font-size: 20px;\n}\n\n.header-title {\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n	text-align: left;\n}\n\n\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 16px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n	text-align: center;\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n	text-align: left;\n}\n\n.cards {\n	display: grid;\n	grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));\n	gap: 10px;\n	text-align: center;\n}\n\n.cards + .cards {\n	margin-top: 16px;\n}\n\n.editor-section {\n	margin-top: 16px;\n}\n\n.editor-section-header {\n	display: flex;\n	justify-content: flex-start;\n}\n\n.editor-list-toggle {\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	background: none;\n	border: none;\n	cursor: pointer;\n	padding: 0 0 8px;\n	margin: 0;\n	font-size: 13px;\n	font-weight: 600;\n	color: var(--text-primary);\n}\n\n.editor-list-toggle:hover {\n	color: var(--text-secondary);\n}\n\n.editor-list-chevron {\n	font-size: 10px;\n	color: var(--text-secondary);\n}\n\n.card {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	padding: 12px;\n	box-shadow: 0 2px 6px var(--shadow-color);\n	text-align: center;\n}\n\n.card-label {\n	color: var(--text-secondary);\n	font-size: 11px;\n	margin-bottom: 6px;\n}\n\n.card-value {\n	color: var(--text-primary);\n	font-size: 18px;\n	font-weight: 700;\n}\n\n.card-sub {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 2px;\n}\n\n.chart-section-header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	margin-bottom: 10px;\n}\n\n.chart-section-header h3 {\n	margin: 0;\n}\n\n.chart-shell {	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 2px 8px var(--shadow-color);\n	text-align: center;\n}\n\n.chart-controls {\n	display: flex;\n	flex-direction: column;\n	gap: 10px;\n	margin-bottom: 12px;\n}\n\n.chart-controls-row {\n	display: flex;\n	flex-wrap: wrap;\n	align-items: center;\n	gap: 10px;\n	justify-content: flex-start;\n	padding-bottom: 10px;\n	border-bottom: 1px solid var(--border-subtle);\n}\n\n.chart-controls-row:last-child {\n	padding-bottom: 0;\n	border-bottom: none;\n}\n\n.control-group {\n	display: flex;\n	gap: 4px;\n	align-items: center;\n}\n\n.control-label {\n	font-size: 11px;\n	color: var(--text-secondary);\n}\n\n.loading-note {\n	font-size: 11px;\n	color: var(--text-secondary);\n	margin-left: 4px;\n	white-space: nowrap;\n}\n\n.control-group-separator {\n	width: 1px;\n	height: 20px;\n	background: var(--border-subtle);\n	margin: 0 4px;\n	flex-shrink: 0;\n}\n\n.period-controls {\n	display: flex;\n	gap: 4px;\n	align-items: center;\n}\n\n.period-controls-label {\n	font-size: 11px;\n	color: var(--text-secondary);\n	margin-right: 4px;\n}\n\n.period-controls .toggle {\n	padding: 6px 10px;\n}\n\n.toggle {\n	background: var(--button-secondary-bg);\n	border: 1px solid var(--border-subtle);\n	color: var(--text-primary);\n	padding: 6px 12px;\n	border-radius: 6px;\n	font-size: 12px;\n	cursor: pointer;\n	transition: all 0.15s ease;\n	min-height: 30px;\n	display: inline-flex;\n	align-items: center;\n	justify-content: center;\n}\n\n.toggle.active {\n	background: var(--button-bg);\n	border-color: var(--button-bg);\n	color: var(--button-fg);\n}\n\n.toggle:hover {\n	background: var(--button-secondary-hover-bg);\n}\n\n.toggle.active:hover {\n	background: var(--button-hover-bg);\n}\n\n.toggle:disabled {\n	opacity: 0.45;\n	cursor: not-allowed;\n}\n\n.toggle:disabled:hover {\n	background: var(--button-secondary-bg);\n}\n\n.canvas-wrap {\n	position: relative;\n	height: 420px;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n	text-align: center;\n}\n\n.footer em {\n	color: var(--text-secondary);\n}\n\n.hidden {\n	display: none !important;\n}\n\n.toggle.dim {\n	opacity: 0.6;\n}\n\n.toggle.disabled {\n	opacity: 0.45;\n	cursor: not-allowed;\n}\n\n.toggle.disabled:hover {\n	background: var(--button-secondary-bg);\n}\n\n.time-window-select {\n	background: var(--button-secondary-bg);\n	border: 1px solid var(--border-subtle);\n	color: var(--text-primary);\n	border-radius: 6px;\n	padding: 6px 10px;\n	font-size: 12px;\n	cursor: pointer;\n	outline: none;\n	min-height: 30px;\n}\n\n.time-window-select:focus {\n	border-color: var(--button-bg);\n}\n\n.time-window-select option {\n	background: var(--bg-secondary);\n	color: var(--text-primary);\n}\n\n/* Language Heatmap */\n.heatmap-container {\n	position: relative;\n	min-height: 420px;\n	overflow: auto;\n}\n\n.heatmap-wrap {\n	width: 100%;\n	min-height: 380px;\n	display: flex;\n	flex-direction: column;\n	padding-top: 8px;\n}\n\n.heatmap-empty {\n	flex: 1;\n	display: flex;\n	align-items: center;\n	justify-content: center;\n	color: var(--text-muted);\n	font-size: 13px;\n	min-height: 380px;\n}\n\n.heatmap-table {\n	border-collapse: separate;\n	border-spacing: 3px;\n	width: 100%;\n	table-layout: fixed;\n}\n\n.heatmap-lang-header {\n	width: 72px;\n	min-width: 72px;\n}\n\n.heatmap-date-header {\n	height: 56px;\n	vertical-align: bottom;\n	padding: 0 0 2px 0;\n	text-align: center;\n}\n\n.heatmap-date-header span {\n	display: block;\n	writing-mode: vertical-lr;\n	transform: rotate(180deg);\n	white-space: nowrap;\n	font-size: 10px;\n	color: var(--text-primary);\n	font-weight: 500;\n	opacity: 0.85;\n	max-height: 54px;\n	overflow: hidden;\n	margin: 0 auto;\n}\n\n.heatmap-lang-label {\n	text-align: right;\n	padding-right: 8px;\n	font-size: 11px;\n	color: var(--text-secondary);\n	white-space: nowrap;\n	overflow: hidden;\n	text-overflow: ellipsis;\n	max-width: 72px;\n	height: 22px;\n}\n\n.heatmap-data-cell {\n	border-radius: 3px;\n	cursor: default;\n	height: 22px;\n	transition: opacity 0.1s ease;\n}\n\n.heatmap-data-cell:hover {\n	opacity: 0.75;\n	outline: 1px solid rgba(34, 197, 94, 0.7);\n	outline-offset: -1px;\n}\n";
 
   // src/webview/shared/messageHandler.ts
   function registerMessageHandler(handler) {
     window.addEventListener("message", (event) => {
+      if (event.source !== window) {
+        return;
+      }
       handler(event.data);
     });
   }
@@ -16800,10 +16811,12 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     timeWindow: "last30",
     metric: "tokens",
     split: "total",
-    displayMode: "actual"
+    displayMode: "actual",
+    editorListCollapsed: false
   });
+  var editorListCollapsed = false;
   function saveWebviewState() {
-    chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode });
+    chartState.save({ period: currentPeriod, timeWindow: currentTimeWindow, metric: currentMetric, split: currentSplit, displayMode: currentDisplayMode, editorListCollapsed });
   }
   function getWindowStartDate(timeWindow, now) {
     const y3 = now.getFullYear();
@@ -16908,9 +16921,11 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       { key: "locRepositoryDatasets", source: source.locRepositoryDatasets },
       { key: "editorCostDatasets", source: source.editorCostDatasets },
       { key: "billingGroupCostDatasets", source: source.billingGroupCostDatasets },
+      { key: "modelCostDatasets", source: source.modelCostDatasets },
       { key: "modelSessionsDatasets", source: source.modelSessionsDatasets },
       { key: "editorSessionsDatasets", source: source.editorSessionsDatasets },
       { key: "providerSessionsDatasets", source: source.providerSessionsDatasets },
+      { key: "providerTokensDatasets", source: source.providerTokensDatasets },
       { key: "taskCategoryDatasets", source: source.taskCategoryDatasets }
     ];
     for (const { key, source: ds } of datasetFields) {
@@ -16978,7 +16993,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     }
     if (currentMetric === "cost") {
       let titleText2;
-      if (currentSplit === "editor") {
+      if (currentSplit === "model") {
+        titleText2 = periodMeta.costTitle.replace("Est. Cost", "Est. Cost by Model");
+      } else if (currentSplit === "editor") {
         titleText2 = periodMeta.costTitle.replace("Est. Cost", "Est. Cost by Editor");
       } else if (currentSplit === "provider") {
         titleText2 = periodMeta.costTitle.replace("Est. Cost", "Est. Cost by Provider");
@@ -17033,12 +17050,12 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       return split === "total" || split === "model" || split === "editor" || split === "provider";
     }
     if (metric === "cost") {
-      return split === "total" || split === "editor" || split === "provider";
+      return split === "total" || split === "model" || split === "editor" || split === "provider";
     }
     if (metric === "output") {
       return split !== "model" && split !== "provider" && split !== "taskCategory";
     }
-    return split !== "language" && split !== "provider";
+    return split !== "language";
   }
   function buildChartHeader(data) {
     const header = el("div", "header");
@@ -17206,9 +17223,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     const periodMeta = PERIOD_LABELS2[currentPeriod];
     const summarySection = el("div", "section");
     summarySection.append(iconHeading("h3", "graph", "Summary"), buildSummaryCards(periodData, periodMeta));
-    const editorCards = buildEditorCards(data.editorTotalsMap);
-    if (editorCards) {
-      summarySection.append(editorCards);
+    const editorSection = buildEditorSection(data.editorTotalsMap);
+    if (editorSection) {
+      summarySection.append(editorSection);
     }
     const chartSectionHeader = el("div", "chart-section-header");
     chartSectionHeader.append(iconHeading("h3", "graph-line", "Charts"));
@@ -17248,6 +17265,7 @@ Updates automatically every 5 minutes.`
       return null;
     }
     const wrap = el("div", "cards");
+    wrap.id = "editor-cards";
     entries.forEach(([editor, tokens]) => {
       const card = buildCard(`editor-${editor}`, editor, formatCompact(tokens));
       if (editor === "JetBrains") {
@@ -17267,6 +17285,27 @@ Updates automatically every 5 minutes.`
       wrap.append(card);
     });
     return wrap;
+  }
+  function buildEditorSection(editorTotals) {
+    const cards = buildEditorCards(editorTotals);
+    if (!cards) {
+      return null;
+    }
+    if (editorListCollapsed) {
+      cards.classList.add("hidden");
+    }
+    const header = el("div", "editor-section-header");
+    const toggle = el("button", "editor-list-toggle");
+    toggle.id = "editor-list-toggle";
+    toggle.setAttribute("aria-expanded", String(!editorListCollapsed));
+    toggle.setAttribute("aria-controls", "editor-cards");
+    toggle.title = editorListCollapsed ? "Show per-editor breakdown" : "Hide per-editor breakdown";
+    const chevron = el("span", "editor-list-chevron", editorListCollapsed ? "\u25B8" : "\u25BE");
+    toggle.append(chevron, document.createTextNode(" By Editor"));
+    header.append(toggle);
+    const section = el("div", "editor-section");
+    section.append(header, cards);
+    return section;
   }
   function updateSummaryCards(data) {
     const periodData = getActivePeriodData(data);
@@ -17304,7 +17343,26 @@ Last updated: ${new Date(data.lastUpdated).toLocaleString()}
 Updates automatically every 5 minutes.`;
     }
   }
+  function wireEditorListToggle() {
+    const toggle = document.getElementById("editor-list-toggle");
+    const cards = document.getElementById("editor-cards");
+    if (!toggle || !cards) {
+      return;
+    }
+    const chevron = toggle.querySelector(".editor-list-chevron");
+    toggle.addEventListener("click", () => {
+      editorListCollapsed = !editorListCollapsed;
+      cards.classList.toggle("hidden", editorListCollapsed);
+      toggle.setAttribute("aria-expanded", String(!editorListCollapsed));
+      toggle.title = editorListCollapsed ? "Show per-editor breakdown" : "Hide per-editor breakdown";
+      if (chevron) {
+        chevron.textContent = editorListCollapsed ? "\u25B8" : "\u25BE";
+      }
+      chartState.patch({ editorListCollapsed });
+    });
+  }
   function wireInteractions(data) {
+    wireEditorListToggle();
     const refresh = document.getElementById("btn-refresh");
     refresh?.addEventListener("click", () => vscode.postMessage({ command: "refresh" }));
     const details = document.getElementById("btn-details");
@@ -17319,6 +17377,8 @@ Updates automatically every 5 minutes.`;
     dashboard?.addEventListener("click", () => vscode.postMessage({ command: "showDashboard" }));
     const environmental = document.getElementById("btn-environmental");
     environmental?.addEventListener("click", () => vscode.postMessage({ command: "showEnvironmental" }));
+    const efficiency = document.getElementById("btn-efficiency");
+    efficiency?.addEventListener("click", () => vscode.postMessage({ command: "showEfficiency" }));
     wireExtensionPointButtons(vscode);
     const periodButtons = [
       { id: "period-day", period: "day" },
@@ -17424,7 +17484,7 @@ Updates automatically every 5 minutes.`;
     chart = new Chart2(ctx, createConfig(data));
   }
   function clampSplitForMetric(metric) {
-    if (metric === "cost" && currentSplit !== "editor" && currentSplit !== "provider") {
+    if (metric === "cost" && currentSplit !== "model" && currentSplit !== "editor" && currentSplit !== "provider") {
       currentSplit = "total";
       return;
     }
@@ -17477,7 +17537,7 @@ Updates automatically every 5 minutes.`;
     if (metric === "sessions") {
       return split === "total" || split === "model" || split === "editor" || split === "provider";
     }
-    return metric === "cost" && (split === "total" || split === "editor" || split === "provider") || metric === "output" && split !== "model" && split !== "provider" && split !== "taskCategory" || metric === "tokens" && split !== "language" && split !== "provider";
+    return metric === "cost" && (split === "total" || split === "model" || split === "editor" || split === "provider") || metric === "output" && split !== "model" && split !== "provider" && split !== "taskCategory" || metric === "tokens" && split !== "language";
   }
   async function reinitChart(data) {
     refreshHeatmapView(data);
@@ -17831,6 +17891,34 @@ Updates automatically every 5 minutes.`;
       }
     };
   }
+  function buildCostModelViewConfig(period, baseOptions, c4) {
+    const datasets = period.modelCostDatasets ?? [];
+    return {
+      type: "bar",
+      data: { labels: period.labels, datasets },
+      options: {
+        ...baseOptions,
+        plugins: {
+          ...baseOptions.plugins,
+          legend: { position: "top", labels: { color: c4.textColor, font: { size: 11 } } },
+          tooltip: {
+            ...baseOptions.plugins.tooltip,
+            callbacks: {
+              label: (ctx) => ` ${ctx.dataset.label}: $${Number(ctx.parsed.y).toFixed(4)}`,
+              footer: (items) => {
+                const total = items.reduce((sum, i6) => sum + (Number(i6.parsed.y) || 0), 0);
+                return `Total: $${total.toFixed(4)}`;
+              }
+            }
+          }
+        },
+        scales: {
+          x: { stacked: true, grid: { color: c4.gridColor }, ticks: { color: c4.textColor, font: { size: 11 } } },
+          y: { stacked: true, type: "linear", display: true, position: "left", grid: { color: c4.gridColor }, ticks: { color: c4.textColor, font: { size: 11 }, callback: (value) => `$${Number(value).toFixed(2)}` }, title: { display: true, text: "Estimated Cost (USD)", color: c4.textColor, font: { size: 12, weight: "bold" } } }
+        }
+      }
+    };
+  }
   function buildCostViewConfig(period, baseOptions, c4, monthlyBudget = 0) {
     const isRolling = currentDisplayMode === "rolling";
     const costData = isRolling ? computeRollingAverage(period.costData, ROLLING_WINDOW[currentPeriod]) : period.costData;
@@ -17965,7 +18053,7 @@ Updates automatically every 5 minutes.`;
     }
   }
   function buildStackedViewConfig(view, period, baseOptions, c4) {
-    const datasets = view === "model" ? period.modelDatasets : view === "repository" ? period.repositoryDatasets : view === "taskCategory" ? period.taskCategoryDatasets ?? [] : period.editorDatasets;
+    const datasets = view === "model" ? period.modelDatasets : view === "repository" ? period.repositoryDatasets : view === "taskCategory" ? period.taskCategoryDatasets ?? [] : view === "provider" ? period.providerTokensDatasets ?? [] : period.editorDatasets;
     const lastIdx = period.tokensData.length - 1;
     const projExtra = lastIdx >= 0 ? computeProjectionExtra(period.tokensData[lastIdx], getCurrentPeriodFraction(currentPeriod)) : null;
     const projDs = projExtra !== null ? [{ label: PROJECTION_LABELS[currentPeriod], data: period.tokensData.map((_2, i6) => i6 === lastIdx ? Math.round(projExtra) : 0), backgroundColor: "rgba(200, 200, 200, 0.25)", borderColor: "rgba(200, 200, 200, 0.5)", borderWidth: 1 }] : [];
@@ -18008,9 +18096,15 @@ Updates automatically every 5 minutes.`;
     if (split === "taskCategory") {
       return "taskCategory";
     }
+    if (split === "provider") {
+      return "provider";
+    }
     return "total";
   }
   function resolveCostView(split) {
+    if (split === "model") {
+      return "cost-model";
+    }
     if (split === "editor") {
       return "cost-editor";
     }
@@ -18058,6 +18152,9 @@ Updates automatically every 5 minutes.`;
     if (view === "cost") {
       return buildCostViewConfig(period, baseOptions, c4, data.monthlyBudget ?? 0);
     }
+    if (view === "cost-model") {
+      return buildCostModelViewConfig(period, baseOptions, c4);
+    }
     if (view === "cost-editor") {
       return buildCostEditorViewConfig(period, baseOptions, c4);
     }
@@ -18103,6 +18200,7 @@ Updates automatically every 5 minutes.`;
     currentPeriod = saved.period;
     currentTimeWindow = saved.timeWindow ?? "last30";
     currentDisplayMode = saved.displayMode;
+    editorListCollapsed = saved.editorListCollapsed ?? false;
     if (saved.view && !saved.metric) {
       const m2 = migrateViewKey(saved.view);
       currentMetric = m2.metric;

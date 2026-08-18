@@ -1698,6 +1698,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
+    },
+    "btn-efficiency": {
+      id: "btn-efficiency",
+      label: "Efficiency",
+      icon: "dashboard",
+      iconColor: "#f472b6",
+      appearance: "secondary"
     }
   };
   var NAV_ORDER = [
@@ -1706,6 +1713,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     "btn-chart",
     "btn-usage",
     "btn-maturity",
+    "btn-efficiency",
     "btn-environmental",
     "btn-diagnostics",
     "btn-dashboard"
@@ -2107,6 +2115,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   // src/webview/shared/messageHandler.ts
   function registerMessageHandler(handler) {
     window.addEventListener("message", (event) => {
+      if (event.source !== window) {
+        return;
+      }
       handler(event.data);
     });
   }
@@ -2314,6 +2325,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     document.getElementById("btn-diagnostics")?.addEventListener("click", () => vscode.postMessage({ command: "showDiagnostics" }));
     document.getElementById("btn-maturity")?.addEventListener("click", () => vscode.postMessage({ command: "showMaturity" }));
     document.getElementById("btn-dashboard")?.addEventListener("click", () => vscode.postMessage({ command: "showDashboard" }));
+    document.getElementById("btn-efficiency")?.addEventListener("click", () => vscode.postMessage({ command: "showEfficiency" }));
     wireExtensionPointButtons(vscode);
   }
   registerMessageHandler((message) => {

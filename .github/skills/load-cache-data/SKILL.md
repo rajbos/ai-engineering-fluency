@@ -46,6 +46,7 @@ interface SessionFileCache {
   modelUsage: ModelUsage;              // Per-model token breakdown
   mtime: number;                       // File modification timestamp
   usageAnalysis?: SessionUsageAnalysis; // Detailed usage statistics
+  subAgentCalls?: number;               // Sub-agent/delegation tool calls (absent when 0)
 }
 
 interface ModelUsage {

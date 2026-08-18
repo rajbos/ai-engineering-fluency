@@ -204,7 +204,7 @@ import {
 import { buildChartData as _buildChartData, getBillingGroup, getPricingSourceForBillingGroup } from '../../src/chartDataBuilder';
 
 // --- Task classification ---
-import { classifySessionTask, buildClassificationInputFromUsageAnalysis, type TaskCategory } from '../../src/taskClassification';
+import { classifySessionTask, buildClassificationInputFromUsageAnalysis, countDelegationToolCalls, type TaskCategory } from '../../src/taskClassification';
 
 // --- Stats helpers ---
 import { addModelUsage, addEditorUsage, addLanguageUsage, computeUtcDateRanges, aggregatePeriodStats, makePeriodAccumulator, computeSessionTotalTokens, computeSessionDurationMs, reconcileModelUsageToTotal, reconcileModelUsageToActualTokens, distributeModelUsageToDays, computeFallbackDailyRollup as _computeFallbackDailyRollup, type SessionAggregateInput } from '../../src/statsHelpers';
@@ -395,7 +395,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 62; // Re-sync dailyRollup actualTokens when debug-log modelUsage is distributed to days; fix ?? skipping reconciliation
+	private static readonly CACHE_VERSION = 64; // Widen sub-agent detection: Claude Agent tool, MCP spawn_task/spawn_agent, Copilot App session-spawning tools
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -2413,6 +2413,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			editorSource: this.detectEditorSource(sessionFile),
 			title: sessionData.title,
 			repository: sessionData.repository,
+			...(sessionData.subAgentCalls ? { subAgentCalls: sessionData.subAgentCalls } : {}),
 			...(sessionData.modelUsage && Object.keys(sessionData.modelUsage).length > 0 ? { modelUsage: sessionData.modelUsage } : {}),
 		};
 		this.enrichDetailsWithEditorInfo(sessionFile, details);
@@ -3208,6 +3209,27 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return result;
 	}
 
+	private buildSinglePeriodStats(acc: ReturnType<typeof makePeriodAccumulator>): PeriodStats {
+		const co2 = (acc.tokens / 1000) * this.co2Per1kTokens;
+		const copilotCost = acc.exactCopilotCostDollars + this.calculateEstimatedCost(acc.modelUsageNoExact, 'copilot');
+		return {
+			tokens: acc.tokens, thinkingTokens: acc.thinkingTokens,
+			estimatedTokens: acc.estimatedTokens, actualTokens: acc.actualTokens,
+			sessions: acc.sessions,
+			avgInteractionsPerSession: acc.sessions > 0 ? Math.round(acc.interactions / acc.sessions) : 0,
+			avgTokensPerSession: acc.sessions > 0 ? Math.round(acc.tokens / acc.sessions) : 0,
+			modelUsage: acc.modelUsage, editorUsage: acc.editorUsage,
+			co2, treesEquivalent: co2 / this.co2AbsorptionPerTreePerYear,
+			waterUsage: (acc.tokens / 1000) * this.waterUsagePer1kTokens,
+			estimatedCost: this.calculateEstimatedCost(acc.modelUsage),
+			estimatedCostCopilot: copilotCost,
+			billingGroupCosts: this.computeBillingGroupCosts(acc.editorModelUsage, copilotCost),
+			editorModelUsage: acc.editorModelUsage,
+			...(acc.cachedTokens > 0 ? { cachedTokens: acc.cachedTokens } : {}),
+			...(acc.subAgentSessions > 0 ? { subAgentSessions: acc.subAgentSessions } : {})
+		};
+	}
+
 	private buildDetailedStatsResult(
 		todayStats: ReturnType<typeof makePeriodAccumulator>,
 		monthStats: ReturnType<typeof makePeriodAccumulator>,
@@ -3215,75 +3237,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		last30DaysStats: ReturnType<typeof makePeriodAccumulator>,
 		now: Date
 	): DetailedStats {
-		const todayCo2 = (todayStats.tokens / 1000) * this.co2Per1kTokens;
-		const monthCo2 = (monthStats.tokens / 1000) * this.co2Per1kTokens;
-		const lastMonthCo2 = (lastMonthStats.tokens / 1000) * this.co2Per1kTokens;
-		const last30DaysCo2 = (last30DaysStats.tokens / 1000) * this.co2Per1kTokens;
-		const todayWater = (todayStats.tokens / 1000) * this.waterUsagePer1kTokens;
-		const monthWater = (monthStats.tokens / 1000) * this.waterUsagePer1kTokens;
-		const lastMonthWater = (lastMonthStats.tokens / 1000) * this.waterUsagePer1kTokens;
-		const last30DaysWater = (last30DaysStats.tokens / 1000) * this.waterUsagePer1kTokens;
-		const todayCopilotCost = todayStats.exactCopilotCostDollars + this.calculateEstimatedCost(todayStats.modelUsageNoExact, 'copilot');
-		const monthCopilotCost = monthStats.exactCopilotCostDollars + this.calculateEstimatedCost(monthStats.modelUsageNoExact, 'copilot');
-		const lastMonthCopilotCost = lastMonthStats.exactCopilotCostDollars + this.calculateEstimatedCost(lastMonthStats.modelUsageNoExact, 'copilot');
-		const last30DaysCopilotCost = last30DaysStats.exactCopilotCostDollars + this.calculateEstimatedCost(last30DaysStats.modelUsageNoExact, 'copilot');
 		return {
-			today: {
-				tokens: todayStats.tokens, thinkingTokens: todayStats.thinkingTokens,
-				estimatedTokens: todayStats.estimatedTokens, actualTokens: todayStats.actualTokens,
-				sessions: todayStats.sessions,
-				avgInteractionsPerSession: todayStats.sessions > 0 ? Math.round(todayStats.interactions / todayStats.sessions) : 0,
-				avgTokensPerSession: todayStats.sessions > 0 ? Math.round(todayStats.tokens / todayStats.sessions) : 0,
-				modelUsage: todayStats.modelUsage, editorUsage: todayStats.editorUsage,
-				co2: todayCo2, treesEquivalent: todayCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: todayWater, estimatedCost: this.calculateEstimatedCost(todayStats.modelUsage),
-				estimatedCostCopilot: todayCopilotCost,
-				billingGroupCosts: this.computeBillingGroupCosts(todayStats.editorModelUsage, todayCopilotCost),
-				editorModelUsage: todayStats.editorModelUsage,
-				...(todayStats.cachedTokens > 0 ? { cachedTokens: todayStats.cachedTokens } : {})
-			},
-			month: {
-				tokens: monthStats.tokens, thinkingTokens: monthStats.thinkingTokens,
-				estimatedTokens: monthStats.estimatedTokens, actualTokens: monthStats.actualTokens,
-				sessions: monthStats.sessions,
-				avgInteractionsPerSession: monthStats.sessions > 0 ? Math.round(monthStats.interactions / monthStats.sessions) : 0,
-				avgTokensPerSession: monthStats.sessions > 0 ? Math.round(monthStats.tokens / monthStats.sessions) : 0,
-				modelUsage: monthStats.modelUsage, editorUsage: monthStats.editorUsage,
-				co2: monthCo2, treesEquivalent: monthCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: monthWater, estimatedCost: this.calculateEstimatedCost(monthStats.modelUsage),
-				estimatedCostCopilot: monthCopilotCost,
-				billingGroupCosts: this.computeBillingGroupCosts(monthStats.editorModelUsage, monthCopilotCost),
-				editorModelUsage: monthStats.editorModelUsage,
-				...(monthStats.cachedTokens > 0 ? { cachedTokens: monthStats.cachedTokens } : {})
-			},
-			lastMonth: {
-				tokens: lastMonthStats.tokens, thinkingTokens: lastMonthStats.thinkingTokens,
-				estimatedTokens: lastMonthStats.estimatedTokens, actualTokens: lastMonthStats.actualTokens,
-				sessions: lastMonthStats.sessions,
-				avgInteractionsPerSession: lastMonthStats.sessions > 0 ? Math.round(lastMonthStats.interactions / lastMonthStats.sessions) : 0,
-				avgTokensPerSession: lastMonthStats.sessions > 0 ? Math.round(lastMonthStats.tokens / lastMonthStats.sessions) : 0,
-				modelUsage: lastMonthStats.modelUsage, editorUsage: lastMonthStats.editorUsage,
-				co2: lastMonthCo2, treesEquivalent: lastMonthCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: lastMonthWater, estimatedCost: this.calculateEstimatedCost(lastMonthStats.modelUsage),
-				estimatedCostCopilot: lastMonthCopilotCost,
-				billingGroupCosts: this.computeBillingGroupCosts(lastMonthStats.editorModelUsage, lastMonthCopilotCost),
-				editorModelUsage: lastMonthStats.editorModelUsage,
-				...(lastMonthStats.cachedTokens > 0 ? { cachedTokens: lastMonthStats.cachedTokens } : {})
-			},
-			last30Days: {
-				tokens: last30DaysStats.tokens, thinkingTokens: last30DaysStats.thinkingTokens,
-				estimatedTokens: last30DaysStats.estimatedTokens, actualTokens: last30DaysStats.actualTokens,
-				sessions: last30DaysStats.sessions,
-				avgInteractionsPerSession: last30DaysStats.sessions > 0 ? Math.round(last30DaysStats.interactions / last30DaysStats.sessions) : 0,
-				avgTokensPerSession: last30DaysStats.sessions > 0 ? Math.round(last30DaysStats.tokens / last30DaysStats.sessions) : 0,
-				modelUsage: last30DaysStats.modelUsage, editorUsage: last30DaysStats.editorUsage,
-				co2: last30DaysCo2, treesEquivalent: last30DaysCo2 / this.co2AbsorptionPerTreePerYear,
-				waterUsage: last30DaysWater, estimatedCost: this.calculateEstimatedCost(last30DaysStats.modelUsage),
-				estimatedCostCopilot: last30DaysCopilotCost,
-				billingGroupCosts: this.computeBillingGroupCosts(last30DaysStats.editorModelUsage, last30DaysCopilotCost),
-				editorModelUsage: last30DaysStats.editorModelUsage,
-				...(last30DaysStats.cachedTokens > 0 ? { cachedTokens: last30DaysStats.cachedTokens } : {})
-			},
+			today: this.buildSinglePeriodStats(todayStats),
+			month: this.buildSinglePeriodStats(monthStats),
+			lastMonth: this.buildSinglePeriodStats(lastMonthStats),
+			last30Days: this.buildSinglePeriodStats(last30DaysStats),
 			lastUpdated: now
 		};
 	}
@@ -4190,6 +4148,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...(durationMs !== undefined ? { durationMs } : {}),
 			...(activeDurationMs !== undefined ? { activeDurationMs } : {}),
 			...(workspace ? { workspace } : {}),
+			...(sessionData.subAgentCalls ? { subAgentCalls: sessionData.subAgentCalls } : {}),
 		};
 	}
 
@@ -5046,10 +5005,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Classified once per session (not per-render) using tool names from usageAnalysis and the
 		// already-extracted session title — see src/taskClassification.ts for the heuristic + rationale.
 		const taskCategory = classifySessionTask(buildClassificationInputFromUsageAnalysis(usageAnalysis, sessionMeta.title));
+		// Counted once per session from the same tool-name data as the task classification;
+		// powers the sub-agent badge/counters in the sessions list, details and diagnostics views.
+		// MCP tools are included because some ecosystems spawn sub-agents via MCP
+		// (e.g. Claude Desktop's mcp__ccd_session__spawn_task).
+		const subAgentCalls = countDelegationToolCalls(usageAnalysis?.toolCalls?.byTool ?? {})
+			+ countDelegationToolCalls(usageAnalysis?.mcpTools?.byTool ?? {});
 		return {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
 			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens, taskCategory,
+			...(subAgentCalls > 0 ? { subAgentCalls } : {}),
 			// Persist workspace attribution from the adapter so the Recent Sessions list can
 			// show it without requiring a separate getSessionFileDetails() parse pass.
 			...(sessionMeta.workspacePath ? { workspaceFolderPath: sessionMeta.workspacePath } : {}),
@@ -5398,6 +5364,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			title: cached.title,
 			repository: cached.repository,
 			workspacePath: cached.workspaceFolderPath,
+			subAgentCalls: cached.subAgentCalls,
 			...(cached.modelUsage && Object.keys(cached.modelUsage).length > 0 ? { modelUsage: cached.modelUsage } : {}),
 		};
 
@@ -5420,6 +5387,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 *   (the only other code path that computes it) — this is what caused the Model
 	 *   Usage diagnostics tab to show data for only a handful of editors.
 	 */
+	/** Resolve the sub-agent call count for a cache update: fresh count from just-parsed details, else the previously cached value. */
+	private resolveSubAgentCallsForCacheUpdate(details: SessionFileDetails, existingCache: SessionFileCache | undefined): number {
+		return details.toolCalls ? countDelegationToolCalls(details.toolCalls.byTool) : (existingCache?.subAgentCalls ?? 0);
+	}
+
 	private async updateCacheWithSessionDetails(
 		sessionFile: string,
 		stat: fs.Stats,
@@ -5432,6 +5404,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		details.tokens = resolved.actualTokens || resolved.tokens || 0;
 		const resolvedModelUsage = modelUsage && Object.keys(modelUsage).length > 0 ? modelUsage : (existingCache?.modelUsage || {});
 		if (Object.keys(resolvedModelUsage).length > 0) { details.modelUsage = resolvedModelUsage; }
+		// Prefer a fresh count from the just-parsed details; otherwise keep the cached value.
+		const subAgentCalls = this.resolveSubAgentCallsForCacheUpdate(details, existingCache);
+		if (subAgentCalls > 0) { details.subAgentCalls = subAgentCalls; }
 
 		const cacheEntry: SessionFileCache = {
 			tokens: resolved.tokens,
@@ -5455,6 +5430,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			// because none was found), not "not yet checked". See SessionFileCache.repositoryResolved.
 			repositoryResolved: true,
 			workspaceFolderPath: this.resolveCachedWorkspacePath(details, existingCache),
+			...(subAgentCalls > 0 ? { subAgentCalls } : {}),
 		};
 
 		cacheEntry.usageAnalysis!.contextReferences = details.contextReferences;

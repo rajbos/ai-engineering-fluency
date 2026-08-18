@@ -147,6 +147,8 @@ export interface PeriodStats {
    * model belongs to, so the "Usage by Editor"/"Model Usage" lists can be filtered by provider.
    */
   editorModelUsage?: { [editor: string]: ModelUsage };
+  /** Number of sessions in this period that delegated work to sub-agents (had 1+ sub-agent tool calls; see `SessionFileCache.subAgentCalls`). Absent when zero. */
+  subAgentSessions?: number;
 }
 
 export interface DetailedStats {
@@ -313,6 +315,8 @@ export interface SessionFileCache {
   debugLogInputTokens?: number; // Input token total from debug log (sum across all llm_request events)
   debugLogOutputTokens?: number; // Output token total from debug log (sum across all llm_request events)
   debugLogChecked?: boolean; // Sentinel: true means we already looked for a debug log and found none
+  /** Number of sub-agent/delegation tool calls in this session (Copilot CLI `task`/`read_agent`/`write_agent`/`list_agents`, Claude Code `Task`, `runSubagent`, `delegate_*`, …), via `countDelegationToolCalls()`. Absent when zero. */
+  subAgentCalls?: number;
   /** Exact GitHub Copilot billing for this session in USD (from session.shutdown.totalNanoAiu or debug log copilotUsageNanoAiu). */
   copilotExactCostDollars?: number;
   /** Number of session.truncation events where messages were removed (breaking prompt cache). 0 or absent means no truncation. */
@@ -602,6 +606,8 @@ export interface TodaySessionSummary {
   activeDurationMs?: number;
   /** Workspace/repository name the session belongs to. Absent when attribution is unavailable. */
   workspace?: string;
+  /** Number of sub-agent/delegation tool calls detected in this session (see `SessionFileCache.subAgentCalls`). Absent when zero. */
+  subAgentCalls?: number;
 }
 
 export interface UsageAnalysisStats {
@@ -756,6 +762,8 @@ export interface SessionFileDetails {
    * children fall outside the loaded 14-day diagnostic window.
    */
   totalChildCount?: number;
+  /** Number of sub-agent/delegation tool calls detected in this session (from cache; see `SessionFileCache.subAgentCalls`). Absent when zero/unknown. */
+  subAgentCalls?: number;
   // Per-model input/output/cached token breakdown.
   // Populated for all sessions where cached ModelUsage is available; always
   // present for Windsurf (derived from trajectory steps via the gRPC API).

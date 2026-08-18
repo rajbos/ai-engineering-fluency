@@ -1917,6 +1917,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
+    },
+    "btn-efficiency": {
+      id: "btn-efficiency",
+      label: "Efficiency",
+      icon: "dashboard",
+      iconColor: "#f472b6",
+      appearance: "secondary"
     }
   };
   var NAV_ORDER = [
@@ -1925,6 +1932,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     "btn-chart",
     "btn-usage",
     "btn-maturity",
+    "btn-efficiency",
     "btn-environmental",
     "btn-diagnostics",
     "btn-dashboard"
@@ -2293,6 +2301,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   // src/webview/shared/messageHandler.ts
   function registerMessageHandler(handler) {
     window.addEventListener("message", (event) => {
+      if (event.source !== window) {
+        return;
+      }
       handler(event.data);
     });
   }
@@ -2555,6 +2566,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     ];
     const activityRows = [
       { label: "Sessions", icon: "\u{1F4C2}", color: "#66aaff", today: formatNumber(stats.today.sessions), last30Days: formatNumber(stats.last30Days.sessions), month: formatNumber(stats.month.sessions), lastMonth: formatNumber(stats.lastMonth.sessions), projected: formatNumber(projections.projectedSessions) },
+      { label: "Sessions with sub-agents", labelTooltip: "Sessions that delegated work to sub-agents in this period (task/read_agent/write_agent/list_agents, runSubagent, delegate_* tool calls detected in the session logs).", icon: "\u{1F916}", color: "#66aaff", today: formatNumber(stats.today.subAgentSessions ?? 0), last30Days: formatNumber(stats.last30Days.subAgentSessions ?? 0), month: formatNumber(stats.month.subAgentSessions ?? 0), lastMonth: formatNumber(stats.lastMonth.subAgentSessions ?? 0), projected: "\u2014" },
       { label: "Average interactions/session", icon: "\u{1F4AC}", color: "#8ce0ff", today: formatNumber(stats.today.avgInteractionsPerSession), last30Days: formatNumber(stats.last30Days.avgInteractionsPerSession), month: formatNumber(stats.month.avgInteractionsPerSession), lastMonth: formatNumber(stats.lastMonth.avgInteractionsPerSession), projected: "\u2014" },
       { label: "Average tokens/session", icon: "\u{1F522}", color: "#7ce38b", today: formatCompact(stats.today.avgTokensPerSession), last30Days: formatCompact(stats.last30Days.avgTokensPerSession), month: formatCompact(stats.month.avgTokensPerSession), lastMonth: formatCompact(stats.lastMonth.avgTokensPerSession), projected: "\u2014" }
     ];
@@ -2952,10 +2964,10 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     const topEditors = sortedBySignificance.slice(0, TOP_N_EDITORS);
     const otherEditors = sortedBySignificance.slice(TOP_N_EDITORS);
     const items = topEditors.map((editor) => toEditorItem(stats, editor));
+    sortEditorItems(items);
     if (otherEditors.length > 0) {
       items.push(toOtherEditorItem(stats, otherEditors));
     }
-    sortEditorItems(items);
     items.forEach((item) => {
       if (item.otherEditors) {
         appendOtherEditors(item, totals, onToggleOther, tbody, stats);
@@ -3215,10 +3227,10 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     const topModels = sortedBySignificance.slice(0, TOP_N_MODELS);
     const otherModels = sortedBySignificance.slice(TOP_N_MODELS);
     const items = topModels.map((m2) => toModelItem(stats, m2));
+    sortModelItems(items);
     if (otherModels.length > 0) {
       items.push(toOtherModelItem(stats, otherModels));
     }
-    sortModelItems(items);
     const tbody = document.createElement("tbody");
     items.forEach((item) => {
       if (item.otherModels) {
@@ -3363,6 +3375,8 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     dashboard?.addEventListener("click", () => vscode.postMessage({ command: "showDashboard" }));
     const environmental = document.getElementById("btn-environmental");
     environmental?.addEventListener("click", () => vscode.postMessage({ command: "showEnvironmental" }));
+    const efficiency = document.getElementById("btn-efficiency");
+    efficiency?.addEventListener("click", () => vscode.postMessage({ command: "showEfficiency" }));
     wireExtensionPointButtons(vscode);
   }
   async function bootstrap() {
