@@ -43,9 +43,7 @@ export class SyncLock {
 		});
 		try {
 			await fs.promises.mkdir(path.dirname(lockPath), { recursive: true });
-			const fd = await fs.promises.open(lockPath, 'wx');
-			await fd.writeFile(lockContent);
-			await fd.close();
+			await fs.promises.writeFile(lockPath, lockContent, { flag: 'wx' });
 			return true;
 		} catch (err: any) {
 			if (err.code !== 'EEXIST') {
@@ -55,7 +53,14 @@ export class SyncLock {
 			// Lock file exists — check if it belongs to a different server or is stale
 			try {
 				const content = await fs.promises.readFile(lockPath, 'utf-8');
-				const lock = JSON.parse(content);
+				const lock = this.parseLockContent(content);
+				if (!lock) {
+					// Corrupt/empty lock (owner killed between atomic create and
+					// write): the staleness check can never run on unparseable
+					// content, so it would block every sync attempt forever.
+					this.log('Sync lock: breaking corrupt lock (unparseable content)');
+					return this.breakAndRewrite(lockPath, lockContent);
+				}
 				// Different server URL → the lock does not apply to this instance.
 				if (serverUrl && lock.serverUrl && lock.serverUrl !== serverUrl) {
 					this.log(`Sync lock: lock is held for a different server (${lock.serverUrl}), proceeding for ${serverUrl}`);
@@ -63,19 +68,31 @@ export class SyncLock {
 				}
 				if (Date.now() - lock.timestamp > SyncLock.STALE_MS) {
 					this.log('Sync lock: breaking stale lock from another window');
-					await fs.promises.unlink(lockPath);
-					try {
-						const fd = await fs.promises.open(lockPath, 'wx');
-						await fd.writeFile(lockContent);
-						await fd.close();
-						return true;
-					} catch {
-						return false;
-					}
+					return this.breakAndRewrite(lockPath, lockContent);
 				}
 			} catch {
 				// Lock file may have been deleted by its owner
 			}
+			return false;
+		}
+	}
+
+	private parseLockContent(content: string): { sessionId?: unknown; timestamp: number; serverUrl?: string } | undefined {
+		try {
+			const lock = JSON.parse(content);
+			if (!lock || typeof lock !== 'object' || typeof lock.timestamp !== 'number') { return undefined; }
+			return lock;
+		} catch {
+			return undefined;
+		}
+	}
+
+	private async breakAndRewrite(lockPath: string, lockContent: string): Promise<boolean> {
+		try {
+			await fs.promises.unlink(lockPath);
+			await fs.promises.writeFile(lockPath, lockContent, { flag: 'wx' });
+			return true;
+		} catch {
 			return false;
 		}
 	}
