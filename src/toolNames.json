@@ -1251,4 +1251,7 @@
   ,"xdebug_get_frame_values": "Xdebug Get Frame Values"
   ,"xdebug_get_stack": "Xdebug Get Stack"
   ,"xdebug_get_threads": "Xdebug Get Threads"
+  ,"addComment": "View Unreviewed Comments"
+  ,"resolveComments": "View Unreviewed Comments"
+  ,"viewUnreviewedComments": "View Unreviewed Comments"
 }
