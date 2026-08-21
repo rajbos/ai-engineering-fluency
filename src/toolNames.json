@@ -1254,4 +1254,7 @@
   ,"addComment": "View Unreviewed Comments"
   ,"resolveComments": "View Unreviewed Comments"
   ,"viewUnreviewedComments": "View Unreviewed Comments"
+  ,"archive_session": "Archive Session"
+  ,"reply_and_resolve_review_thread": "Reply And Resolve Review Thread"
+  ,"save_session_automation": "Save Session Automation"
 }
