@@ -32,6 +32,14 @@ repositories {
 
 kotlin {
     jvmToolchain(21)
+    compilerOptions {
+        // Generate real JVM default methods instead of delegating bridges in
+        // implementing classes. Without this, every Kotlin class implementing a
+        // Java interface with default methods (e.g. ToolWindowFactory) emits
+        // explicit calls to those defaults — which the Marketplace verifier
+        // counts as usages of deprecated/experimental platform APIs.
+        freeCompilerArgs.add("-Xjvm-default=all")
+    }
 }
 
 dependencies {
