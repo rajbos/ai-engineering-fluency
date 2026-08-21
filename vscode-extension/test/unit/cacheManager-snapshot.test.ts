@@ -190,6 +190,42 @@ test('refresh lock: breaks stale lock owned by a recycled non-host PID (win32)',
 	}
 });
 
+// A writer killed between the atomic create and the content write leaves a
+// 0-byte (or otherwise unparseable) lock behind. JSON.parse throwing used to be
+// swallowed by the same catch that handles "owner deleted the file", so the
+// corrupt lock blocked every acquire attempt forever and forced all windows
+// into follower mode.
+test('refresh lock: breaks corrupt (empty) lock file left by a crashed writer', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	fs.writeFileSync(m.getRefreshLockPath(), '');
+	assert.equal(await m.acquireRefreshLock(), true, 'empty lock must be treated as stale');
+	const content = JSON.parse(fs.readFileSync(m.getRefreshLockPath(), 'utf-8'));
+	assert.equal(typeof content.timestamp, 'number', 'lock must be rewritten with valid content');
+	await m.releaseRefreshLock();
+});
+
+test('refresh lock: breaks lock file with invalid JSON or missing fields', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+
+	fs.writeFileSync(m.getRefreshLockPath(), '{not json');
+	assert.equal(await m.acquireRefreshLock(), true, 'invalid JSON lock must be treated as stale');
+	await m.releaseRefreshLock();
+
+	fs.writeFileSync(m.getRefreshLockPath(), JSON.stringify({ sessionId: 'old-session' }));
+	assert.equal(await m.acquireRefreshLock(), true, 'lock without timestamp must be treated as stale');
+	await m.releaseRefreshLock();
+});
+
+test('cache lock: breaks corrupt (empty) lock file', async () => {
+	const dir = tmpDir();
+	const m = makeManager(dir);
+	fs.writeFileSync(m.getCacheLockPath(), '');
+	assert.equal(await m.acquireCacheLock(), true, 'empty cache lock must be treated as stale');
+	await m.releaseCacheLock();
+});
+
 // ---------------------------------------------------------------------------
 // loadCacheFromStorage (disk-based)
 // ---------------------------------------------------------------------------

@@ -55,12 +55,16 @@ const READ_TOOL_PATTERN = /read_?file|grep_?search|file_?search|search|glob|list
 const TERMINAL_TOOL_PATTERN = /terminal|bash|shell|run_?command/i;
 const PLANNING_TOOL_PATTERN = /todo|task[-_]?create|enterplanmode|\bplan\b/i;
 /** Exported so other modules (e.g. `maturityScoring.ts`) can detect delegation/sub-agent tool
- *  calls without duplicating the pattern. Matches tool names used by Copilot CLI's Task tool,
- *  Claude Code's Task tool, and similar sub-agent/delegate tools across other adapters. */
-export const DELEGATION_TOOL_PATTERN = /subagent|sub[-_]?agent|agent[-_]?spawn|delegate/i;
+ *  calls without duplicating the pattern. Matches the sub-agent/delegate tools across adapters:
+ *  Copilot CLI's `task` + background-agent tools (`read_agent`/`write_agent`/`list_agents`),
+ *  the Copilot App's session-spawning tools (`create_session`/`open_pr_session`/`open_issue_session`/`fork_session`),
+ *  Claude Code/Desktop's `Task`/`Agent` tools, MCP `spawn_task`/`spawn_agent` tools (e.g.
+ *  `mcp__ccd_session__spawn_task`), VS Code Chat's `runSubagent`, and similar delegate tools. */
+export const DELEGATION_TOOL_PATTERN = /^(task|agent|read_agent|write_agent|list_agents|create_session|open_pr_session|open_issue_session|fork_session)$|subagent|sub[-_]?agent|agent[-_]?spawn|spawn[-_]?(task|agent)|delegate/i;
 
 /** Sums tool-call counts for tools matching `DELEGATION_TOOL_PATTERN` (e.g. `toolCalls.byTool`
- *  from a `UsageAnalysisPeriod`). Used as an adapter-agnostic signal for sub-agent delegation
+ *  or `mcpTools.byTool` from a `UsageAnalysisPeriod` — MCP `spawn_task`/`spawn_agent` tools are
+ *  delegation too). Used as an adapter-agnostic signal for sub-agent delegation
  *  volume, independent of the per-session `Delegation` task-category classification above. */
 export function countDelegationToolCalls(byTool: Record<string, number>): number {
 	let total = 0;
@@ -152,15 +156,19 @@ export function classifySessionTask(input: TaskClassificationInput): TaskCategor
 
 /**
  * Lightweight builder used during session caching (`getSessionFileDataCached`).
- * Only tool names (from `toolCalls.byTool`) and the already-extracted session title
+ * Only tool names (from `toolCalls.byTool` + `mcpTools.byTool`, the latter for MCP
+ * spawn_task/spawn_agent delegation tools) and the already-extracted session title
  * are available at this stage — no raw terminal command text.
  */
 export function buildClassificationInputFromUsageAnalysis(
-	usageAnalysis: Pick<SessionUsageAnalysis, 'toolCalls'> | undefined,
+	usageAnalysis: Pick<SessionUsageAnalysis, 'toolCalls'> & Partial<Pick<SessionUsageAnalysis, 'mcpTools'>> | undefined,
 	userText?: string | null
 ): TaskClassificationInput {
 	const toolNames = usageAnalysis ? Object.keys(usageAnalysis.toolCalls?.byTool ?? {}) : [];
-	return { toolNames, userText: userText ?? undefined };
+	// MCP spawn_task/spawn_agent tools (e.g. Claude Desktop's mcp__ccd_session__spawn_task) are
+	// delegation signals too; other MCP tools can't match the anchored delegation alternatives.
+	const mcpToolNames = usageAnalysis?.mcpTools ? Object.keys(usageAnalysis.mcpTools.byTool ?? {}) : [];
+	return { toolNames: [...toolNames, ...mcpToolNames], userText: userText ?? undefined };
 }
 
 /**

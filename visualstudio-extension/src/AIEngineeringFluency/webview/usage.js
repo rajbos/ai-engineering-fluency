@@ -1731,6 +1731,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
+    },
+    "btn-efficiency": {
+      id: "btn-efficiency",
+      label: "Efficiency",
+      icon: "dashboard",
+      iconColor: "#f472b6",
+      appearance: "secondary"
     }
   };
   var NAV_ORDER = [
@@ -1739,6 +1746,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     "btn-chart",
     "btn-usage",
     "btn-maturity",
+    "btn-efficiency",
     "btn-environmental",
     "btn-diagnostics",
     "btn-dashboard"
@@ -2220,6 +2228,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   // src/webview/shared/messageHandler.ts
   function registerMessageHandler(handler) {
     window.addEventListener("message", (event) => {
+      if (event.source !== window) {
+        return;
+      }
       handler(event.data);
     });
   }
@@ -3180,6 +3191,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   var SESSION_COLUMN_DEFS = [
     { id: "interactions", label: "Turns", sortKey: "interactions", align: "right", render: (s4) => ({ html: formatNumber(s4.interactions) }) },
     { id: "toolCalls", label: "Tools", sortKey: "toolCalls", align: "right", render: (s4) => ({ html: formatNumber(s4.toolCalls) }) },
+    { id: "subAgentCalls", label: "Sub-Agents", sortKey: "subAgentCalls", align: "right", render: (s4) => s4.subAgentCalls ? { html: formatNumber(s4.subAgentCalls), title: `${s4.subAgentCalls} sub-agent tool call${s4.subAgentCalls === 1 ? "" : "s"} detected in this session` } : { html: "\u2014", title: "No sub-agent calls detected in this session" } },
     { id: "inputTokens", label: "Input", sortKey: "inputTokens", align: "right", render: (s4) => ({ html: formatNumber(s4.inputTokens) }) },
     { id: "outputTokens", label: "Output", sortKey: "outputTokens", align: "right", render: (s4) => ({ html: formatNumber(s4.outputTokens) }) },
     { id: "thinkingTokens", label: "Thinking", sortKey: "thinkingTokens", align: "right", render: (s4) => ({ html: formatNumber(s4.thinkingTokens) }) },
@@ -3235,6 +3247,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     editor: (a3, b3) => (a3.editor || "").localeCompare(b3.editor || ""),
     workspace: (a3, b3) => (a3.workspace || "").localeCompare(b3.workspace || ""),
     durationMs: (a3, b3) => (a3.activeDurationMs ?? a3.durationMs ?? -1) - (b3.activeDurationMs ?? b3.durationMs ?? -1),
+    subAgentCalls: (a3, b3) => (a3.subAgentCalls ?? 0) - (b3.subAgentCalls ?? 0),
     lastActivity: (a3, b3) => (a3.lastActivity || "").localeCompare(b3.lastActivity || "")
   };
   function _compareTodaySessionsByColumn(a3, b3) {
@@ -4069,6 +4082,8 @@ ${_renderMultiModelMixedCostSessions(switching)}
           totalPrs: toSafeNumber(r6.totalPrs),
           aiAuthoredPrs: toSafeNumber(r6.aiAuthoredPrs),
           aiReviewRequestedPrs: toSafeNumber(r6.aiReviewRequestedPrs),
+          userAuthoredPrs: toSafeNumber(r6.userAuthoredPrs),
+          userMergedPrs: toSafeNumber(r6.userMergedPrs),
           aiDetails: aiDetails.map((d3) => {
             const detail = d3 && typeof d3 === "object" ? d3 : {};
             const validAiTypes = ["copilot", "claude", "openai", "other-ai"];
@@ -4087,6 +4102,40 @@ ${_renderMultiModelMixedCostSessions(switching)}
       })
     };
   }
+  var AI_PR_LABEL = {
+    copilot: "\u{1F916} Copilot",
+    claude: "\u{1F9E0} Claude",
+    openai: "\u2728 Codex",
+    "other-ai": "\u{1F916} AI"
+  };
+  function renderRepoPrRow(r6, cell, cellCenter) {
+    const repoLink = `<a href="${escapeHtml(r6.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${escapeHtml(r6.owner)}/${escapeHtml(r6.repo)}</a>`;
+    if (r6.error) {
+      return `<tr>
+			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+			<td colspan="4" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r6.error)}</td>
+		</tr>`;
+    }
+    let detailsHtml = "";
+    if (r6.aiDetails.length > 0) {
+      const items = r6.aiDetails.map(
+        (d3) => `<li><a href="${escapeHtml(d3.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d3.number} ${escapeHtml(d3.title)}</a> \u2014 ${AI_PR_LABEL[d3.aiType] ?? escapeHtml(String(d3.aiType))} (${d3.role === "author" ? "authored" : "review requested"})</li>`
+      ).join("");
+      detailsHtml = `
+			<details style="margin-top:4px; font-size:11px;">
+				<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r6.aiDetails.length} detail(s)</summary>
+				<ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${items}</ul>
+			</details>`;
+    }
+    const yours = (r6.userAuthoredPrs ?? 0) > 0 ? `<span style="font-weight:600;">${r6.userMergedPrs ?? 0} / ${r6.userAuthoredPrs}</span>` : "0";
+    return `<tr>
+		<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${detailsHtml}</td>
+		<td style="${cellCenter} font-weight:600;">${r6.totalPrs}</td>
+		<td style="${cellCenter}">${yours}</td>
+		<td style="${cellCenter}">${r6.aiAuthoredPrs > 0 ? `<span style="font-weight:600;">${r6.aiAuthoredPrs}</span>` : "0"}</td>
+		<td style="${cellCenter}">${r6.aiReviewRequestedPrs > 0 ? `<span style="font-weight:600;">${r6.aiReviewRequestedPrs}</span>` : "0"}</td>
+	</tr>`;
+  }
   function renderReposPrContent(data) {
     const sinceDate = escapeHtml(new Date(data.since).toLocaleDateString());
     if (!data.authenticated) {
@@ -4102,40 +4151,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
 				No GitHub repositories detected in your workspace folders.
 			</div>`;
     }
-    const aiLabel = {
-      copilot: "\u{1F916} Copilot",
-      claude: "\u{1F9E0} Claude",
-      openai: "\u2728 Codex",
-      "other-ai": "\u{1F916} AI"
-    };
     const cell = "padding: 6px 8px; border-bottom: 1px solid var(--border-subtle);";
     const cellCenter = `${cell} text-align: center;`;
-    const rows = data.repos.map((r6) => {
-      const repoLink = `<a href="${escapeHtml(r6.repoUrl)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${escapeHtml(r6.owner)}/${escapeHtml(r6.repo)}</a>`;
-      if (r6.error) {
-        return `<tr>
-				<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
-				<td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${escapeHtml(r6.error)}</td>
-			</tr>`;
-      }
-      let detailsHtml = "";
-      if (r6.aiDetails.length > 0) {
-        const items = r6.aiDetails.map(
-          (d3) => `<li><a href="${escapeHtml(d3.url)}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color);">#${d3.number} ${escapeHtml(d3.title)}</a> \u2014 ${aiLabel[d3.aiType] ?? escapeHtml(String(d3.aiType))} (${d3.role === "author" ? "authored" : "review requested"})</li>`
-        ).join("");
-        detailsHtml = `
-				<details style="margin-top:4px; font-size:11px;">
-					<summary style="cursor:pointer; color:var(--text-secondary);">Show ${r6.aiDetails.length} detail(s)</summary>
-					<ul style="margin:4px 0 0 16px; padding:0; list-style:disc;">${items}</ul>
-				</details>`;
-      }
-      return `<tr>
-			<td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${detailsHtml}</td>
-			<td style="${cellCenter} font-weight:600;">${r6.totalPrs}</td>
-			<td style="${cellCenter}">${r6.aiAuthoredPrs > 0 ? `<span style="font-weight:600;">${r6.aiAuthoredPrs}</span>` : "0"}</td>
-			<td style="${cellCenter}">${r6.aiReviewRequestedPrs > 0 ? `<span style="font-weight:600;">${r6.aiReviewRequestedPrs}</span>` : "0"}</td>
-		</tr>`;
-    }).join("");
+    const rows = data.repos.map((r6) => renderRepoPrRow(r6, cell, cellCenter)).join("");
     return `
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
 			Showing PRs created since ${sinceDate}.
@@ -4147,6 +4165,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 					<tr>
 						<th style="text-align:left; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">\u{1F4C2} Repository</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;">PRs</th>
+						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs you opened yourself, shown as merged / opened. Work driven by a local AI assistant lands here, not under Cloud Agent Authored.">\u{1F6A2} Yours (merged / opened)</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="PRs where the PR author's GitHub login matches a known AI agent (e.g. copilot-swe-agent, claude-code-action, openai-code-agent)">\u{1F916} Cloud Agent Authored</th>
 						<th style="text-align:center; padding:8px; border-bottom:2px solid var(--border-color); font-size:12px; color:var(--text-secondary); opacity:0.9;" title="Open PRs where an AI agent was listed as a requested reviewer">\u{1F441} Copilot Review Agent requested\u2020</th>
 					</tr>
@@ -5398,12 +5417,23 @@ ${_renderMultiModelMixedCostSessions(switching)}
       <div id="worktree-results">${renderWorktreeResults()}</div>
     </div>`;
   }
+  function buildSubAgentSummaryHtml(sessions) {
+    const sessionsWithSubAgents = sessions.filter((s4) => (s4.subAgentCalls ?? 0) > 0).length;
+    if (sessionsWithSubAgents === 0) {
+      return "";
+    }
+    const totalCalls = sessions.reduce((sum, s4) => sum + (s4.subAgentCalls ?? 0), 0);
+    return `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);" title="Sessions that delegated work to sub-agents (task/read_agent/write_agent/list_agents, runSubagent, delegate_*, \u2026)">
+		\u{1F916} <strong>${sessionsWithSubAgents}</strong> session${sessionsWithSubAgents === 1 ? "" : "s"} used sub-agents (${formatNumber(totalCalls)} sub-agent call${totalCalls === 1 ? "" : "s"}) in this period
+	</div>`;
+  }
   function buildSessionsTabPanelHtml(stats) {
     if (Array.isArray(stats.todaySessions)) {
       latestTodaySessions = stats.todaySessions;
     }
     const cachedForLookback = sessionsLookback === "today" ? latestTodaySessions : recentSessionsCache[sessionsLookback];
     const bodyHtml = cachedForLookback ? renderTodaySessionsTable(cachedForLookback) : `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}\u2026</div>`;
+    const subAgentBanner = cachedForLookback ? buildSubAgentSummaryHtml(cachedForLookback) : "";
     return `
 		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== "sessions" ? ' style="display:none"' : ""}>
 			<div class="section">
@@ -5413,6 +5443,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 					${buildSessionColumnsMenuHtml()}
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period \u2014 sorted by number of interactions (most active first).</div>
+				${subAgentBanner}
 				<div id="sessions-panel-body" style="margin-top: 12px;">
 					${bodyHtml}
 				</div>
@@ -6207,6 +6238,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
     });
     document.getElementById("btn-environmental")?.addEventListener("click", () => {
       vscode.postMessage({ command: "showEnvironmental" });
+    });
+    document.getElementById("btn-efficiency")?.addEventListener("click", () => {
+      vscode.postMessage({ command: "showEfficiency" });
     });
     wireExtensionPointButtons(vscode);
   }

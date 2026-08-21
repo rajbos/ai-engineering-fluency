@@ -76,6 +76,7 @@ type TodaySessionSummary = {
 	durationMs?: number;
 	activeDurationMs?: number;
 	workspace?: string;
+	subAgentCalls?: number;
 };
 
 type InsightSeverity = 'tip' | 'opportunity' | 'celebration';
@@ -993,11 +994,11 @@ function renderToolsTable(byTool: { [key: string]: number }, limit = 10, nameRes
 }
 
 // --- Recent Sessions table with sortable, toggleable columns ---
-type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity';
+type SessionSortColumn = 'title' | 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'durationMs' | 'lastActivity' | 'subAgentCalls';
 type SessionsLookback = Period;
 
 /** Optional (toggleable) session table columns. Title is always shown and is not part of this set. */
-type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity';
+type SessionColumnId = 'interactions' | 'toolCalls' | 'inputTokens' | 'outputTokens' | 'thinkingTokens' | 'cachedTokens' | 'totalTokens' | 'estimatedCost' | 'editor' | 'workspace' | 'models' | 'durationMs' | 'lastActivity' | 'subAgentCalls';
 
 type SessionColumnDef = {
 	id: SessionColumnId;
@@ -1013,6 +1014,9 @@ type SessionColumnDef = {
 const SESSION_COLUMN_DEFS: SessionColumnDef[] = [
 	{ id: 'interactions', label: 'Turns', sortKey: 'interactions', align: 'right', render: s => ({ html: formatNumber(s.interactions) }) },
 	{ id: 'toolCalls', label: 'Tools', sortKey: 'toolCalls', align: 'right', render: s => ({ html: formatNumber(s.toolCalls) }) },
+	{ id: 'subAgentCalls', label: 'Sub-Agents', sortKey: 'subAgentCalls', align: 'right', render: s => s.subAgentCalls
+		? { html: formatNumber(s.subAgentCalls), title: `${s.subAgentCalls} sub-agent tool call${s.subAgentCalls === 1 ? '' : 's'} detected in this session` }
+		: { html: '—', title: 'No sub-agent calls detected in this session' } },
 	{ id: 'inputTokens', label: 'Input', sortKey: 'inputTokens', align: 'right', render: s => ({ html: formatNumber(s.inputTokens) }) },
 	{ id: 'outputTokens', label: 'Output', sortKey: 'outputTokens', align: 'right', render: s => ({ html: formatNumber(s.outputTokens) }) },
 	{ id: 'thinkingTokens', label: 'Thinking', sortKey: 'thinkingTokens', align: 'right', render: s => ({ html: formatNumber(s.thinkingTokens) }) },
@@ -1069,6 +1073,7 @@ const _todaySessionColumnComparators: Partial<Record<SessionSortColumn, (a: Toda
 	editor: (a, b) => (a.editor || '').localeCompare(b.editor || ''),
 	workspace: (a, b) => (a.workspace || '').localeCompare(b.workspace || ''),
 	durationMs: (a, b) => (a.activeDurationMs ?? a.durationMs ?? -1) - (b.activeDurationMs ?? b.durationMs ?? -1),
+	subAgentCalls: (a, b) => (a.subAgentCalls ?? 0) - (b.subAgentCalls ?? 0),
 	lastActivity: (a, b) => (a.lastActivity || '').localeCompare(b.lastActivity || ''),
 };
 
@@ -3380,6 +3385,16 @@ function buildWorktreesTabPanelHtml(): string {
     </div>`;
 }
 
+/** Summary banner above the Recent Sessions table highlighting sub-agent usage in the selected period. */
+function buildSubAgentSummaryHtml(sessions: TodaySessionSummary[]): string {
+	const sessionsWithSubAgents = sessions.filter(s => (s.subAgentCalls ?? 0) > 0).length;
+	if (sessionsWithSubAgents === 0) { return ''; }
+	const totalCalls = sessions.reduce((sum, s) => sum + (s.subAgentCalls ?? 0), 0);
+	return `<div style="margin-top:8px; font-size:12px; color:var(--text-secondary);" title="Sessions that delegated work to sub-agents (task/read_agent/write_agent/list_agents, runSubagent, delegate_*, …)">
+		🤖 <strong>${sessionsWithSubAgents}</strong> session${sessionsWithSubAgents === 1 ? '' : 's'} used sub-agents (${formatNumber(totalCalls)} sub-agent call${totalCalls === 1 ? '' : 's'}) in this period
+	</div>`;
+}
+
 function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	// Guard against silent host updates that omit todaySessions (e.g. a stale payload
 	// shape): keep showing the last known sessions instead of clearing the table.
@@ -3390,6 +3405,7 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 	const bodyHtml = cachedForLookback
 		? renderTodaySessionsTable(cachedForLookback)
 		: `<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">Loading sessions for ${PERIOD_LABELS[sessionsLookback]}…</div>`;
+	const subAgentBanner = cachedForLookback ? buildSubAgentSummaryHtml(cachedForLookback) : '';
 	return `
 		<div id="tab-panel-sessions" class="tab-panel"${activeTab !== 'sessions' ? ' style="display:none"' : ''}>
 			<div class="section">
@@ -3399,6 +3415,7 @@ function buildSessionsTabPanelHtml(stats: UsageAnalysisStats): string {
 					${buildSessionColumnsMenuHtml()}
 				</div>
 				<div class="section-subtitle">Individual session breakdown for the selected period — sorted by number of interactions (most active first).</div>
+				${subAgentBanner}
 				<div id="sessions-panel-body" style="margin-top: 12px;">
 					${bodyHtml}
 				</div>

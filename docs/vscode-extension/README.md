@@ -151,6 +151,16 @@ Sub-agent tool rows are displayed with friendly names:
 
 Each sub-agent row also shows a green **↑N ↓M tokens** badge with the estimated input/output token usage for that specific sub-agent invocation.
 
+### Sub-Agent usage elsewhere in the extension
+
+Sub-agent activity is also surfaced outside the log viewer, so you can spot it without opening individual sessions:
+
+- **Usage Analysis → Recent Sessions**: a sortable/toggleable **🤖 Sub-Agents** column shows the number of sub-agent tool calls per session, and a banner above the table summarizes how many sessions in the selected period used sub-agents.
+- **Details page**: the Activity group includes a **🤖 Sessions with sub-agents** row for Today / Last 30 days / This month / Last month.
+- **Diagnostics view**: sessions with sub-agent calls get a **🤖 N Sub-Agents** badge next to the session title.
+
+Detection is adapter-agnostic: it counts tool calls matching the delegation pattern (`task`, `read_agent`/`write_agent`/`list_agents`, Claude Code's `Task`, `runSubagent`, `delegate_*`, …) — see `countDelegationToolCalls()` in `src/taskClassification.ts`.
+
 ### Tool call pill filters
 
 Each turn with tool calls shows clickable pill badges (e.g. `read_file: 3`, `🤖 Sub-Agents: 2`). Clicking a pill:
