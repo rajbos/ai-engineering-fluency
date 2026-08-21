@@ -279,7 +279,8 @@ function traceCurationOnce(key: string, stage: string, details?: Record<string, 
 	traceCuration(stage, details);
 }
 
-type InitialUsageData = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null; missedPotential?: MissedPotentialWorkspace[]; worktreeScanRoots?: string[] };
+type WorktreeBackgroundScanData = { scannedAt: string; totalBytes: number; worktreeCount: number; worktrees: unknown[] };
+type InitialUsageData = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null; missedPotential?: MissedPotentialWorkspace[]; worktreeScanRoots?: string[]; worktreeBackgroundScan?: WorktreeBackgroundScanData | null };
 const initialData = getWindowData<InitialUsageData>('__INITIAL_USAGE__');
 let hygieneMatrixState: WorkspaceCustomizationMatrix | null = null;
 const repoAnalysisState = new Map<string, RepoAnalysisRecord>();
@@ -327,7 +328,14 @@ type WorktreeScanStatus = {
 
 // Worktree discovery tab state
 let worktreeRoots: string[] = initialData?.worktreeScanRoots ? [...initialData.worktreeScanRoots] : [];
-let worktreeResults: WorktreeResult[] = [];
+let worktreeResults: WorktreeResult[] = initialData?.worktreeBackgroundScan
+	? initialData.worktreeBackgroundScan.worktrees.map(sanitizeWorktreeResult)
+	: [];
+// Set when worktreeResults reflects the once-daily background scan rather than a live/manual
+// scan the user just ran — used to show a "found automatically" banner instead of empty state.
+let worktreeBackgroundScanMeta: { scannedAt: string; totalBytes: number } | null = initialData?.worktreeBackgroundScan
+	? { scannedAt: initialData.worktreeBackgroundScan.scannedAt, totalBytes: initialData.worktreeBackgroundScan.totalBytes }
+	: null;
 let worktreeScanInProgress = false;
 let worktreeScanStatus: WorktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
 let worktreeScanError: string | null = null;
@@ -1514,6 +1522,7 @@ function startWorktreeScan(): void {
 	if (worktreeRoots.length === 0 || worktreeScanInProgress || worktreeCleanupInProgress) { return; }
 	worktreeScanInProgress = true;
 	worktreeResults = [];
+	worktreeBackgroundScanMeta = null;
 	worktreeScanError = null;
 	worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
 	worktreeCleanupLog = [];
@@ -1842,6 +1851,21 @@ function handleWorktreeScanCancelled(): void {
 	updateWorktreeControls();
 }
 
+/**
+ * Populates the Worktrees tab from the once-daily background scan (see extension.ts
+ * `postWorktreeBackgroundResults`), sent either in the initial payload or live when the
+ * notification's "Show Me" action reveals an already-open panel. Ignored while a live/manual
+ * scan or cleanup is in flight so it can't clobber what the user is actively watching.
+ */
+function handleWorktreeBackgroundResults(message: any): void {
+	if (worktreeScanInProgress || worktreeCleanupInProgress) { return; }
+	const worktrees = Array.isArray(message.worktrees) ? message.worktrees : [];
+	worktreeResults = worktrees.map(sanitizeWorktreeResult);
+	worktreeBackgroundScanMeta = { scannedAt: String(message.scannedAt ?? ""), totalBytes: numField(message.totalBytes) };
+	updateWorktreeControls();
+	updateWorktreeResults();
+}
+
 /** Dispatches worktree-tab messages via static, literal command comparisons (no dynamic method lookup). */
 const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
 	worktreeRootPicked: handleWorktreeRootPicked,
@@ -1859,6 +1883,7 @@ const _worktreeMessageHandlers: Record<string, (message: any) => void> = {
 	worktreeDeleted: handleWorktreeDeleted,
 	worktreeScanComplete: () => handleWorktreeScanComplete(),
 	worktreeScanCancelled: () => handleWorktreeScanCancelled(),
+	worktreeBackgroundResults: handleWorktreeBackgroundResults,
 	cleanupDeclined: () => handleCleanupDeclined(),
 	cleanupStarted: handleCleanupStarted,
 	cleanupWorktreeResult: handleCleanupWorktreeResult,
@@ -3146,6 +3171,15 @@ function renderWorktreeProgress(): string {
 	return _renderWorktreeScanningProgress(s, seconds);
 }
 
+/** Banner noting that the visible results came from the once-daily automatic scan, not one the user just ran. */
+function renderWorktreeBackgroundScanBanner(): string {
+	if (!worktreeBackgroundScanMeta || worktreeScanInProgress || worktreeResults.length === 0) { return ""; }
+	const when = escapeHtml(new Date(worktreeBackgroundScanMeta.scannedAt).toLocaleString());
+	const size = formatFileSize(worktreeBackgroundScanMeta.totalBytes);
+	const count = worktreeResults.length;
+	return `<div class="info-box" style="margin-top: 12px;"><div>🌳 Found automatically by the daily background scan: ${size} across ${count} worktree${count === 1 ? "" : "s"}, last checked ${when}. Scan again for the latest.</div></div>`;
+}
+
 function renderWorktreeControls(): string {
 	return `
     <div class="section">
@@ -3166,6 +3200,7 @@ function renderWorktreeControls(): string {
         <button class="button" id="btn-scan-worktrees" ${worktreeScanInProgress || worktreeCleanupInProgress || worktreeRoots.length === 0 ? "disabled" : ""}>🔍 Scan for Worktrees</button>
         ${worktreeScanInProgress ? '<button class="button secondary" id="btn-cancel-worktree-scan">✕ Cancel</button>' : ""}
       </div>
+      ${renderWorktreeBackgroundScanBanner()}
       ${worktreeScanError ? `<div class="info-box" style="margin-top: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);"><div>⚠️ ${escapeHtml(worktreeScanError)}</div></div>` : ""}
       <div id="worktree-progress-area">${renderWorktreeProgress()}</div>
     </div>`;
