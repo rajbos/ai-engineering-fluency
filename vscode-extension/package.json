@@ -571,10 +571,12 @@
     "brace-expansion": ">=5.0.8",
     "diff": ">=8.0.3",
     "dompurify": ">=3.4.13",
-    "fast-uri": ">=3.1.2",
+    "fast-uri": ">=4.1.2",
     "qs": ">=6.15.2",
     "serialize-javascript": ">=7.0.3",
-    "undici": "7.28.0",
+    "cheerio": {
+      "undici": "7.29.0"
+    },
     "uuid": "^14.0.0"
   },
   "allowScripts": {
