@@ -1,5 +1,5 @@
 // Import shared utilities
-import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
+import { getModelDisplayName, isCustomProviderGroup } from '../../../../src/webview/shared/modelUtils';
 import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumber, formatCost, formatCompact, setCompactNumbers } from '../shared/formatUtils';
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
@@ -490,7 +490,9 @@ const PROVIDER_ICONS: Record<string, string> = {
 };
 
 function getProviderIcon(provider: string): string {
-	return PROVIDER_ICONS[provider] ?? '💵';
+	if (PROVIDER_ICONS[provider]) { return PROVIDER_ICONS[provider]; }
+	// User-configured custom endpoints ("Mistral (Custom)") share one icon.
+	return isCustomProviderGroup(provider) ? '🧩' : '💵';
 }
 
 /** Builds a single clickable provider card; clicking toggles it in/out of `excludedProviders`. */

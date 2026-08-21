@@ -4,6 +4,9 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ## [Unreleased]
 
+### Features
+- Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the provider cost chart data
+
 ### Bug Fixes
 - Fix update sync-host-views skill paths after CopilotTokenTracker rename (#1398)
 - Fix modelSwitching cost model array initialization

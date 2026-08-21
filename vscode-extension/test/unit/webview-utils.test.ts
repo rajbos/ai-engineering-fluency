@@ -1,7 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { getModelDisplayName } from '../../../src/webview/shared/modelUtils';
+import { getModelDisplayName, parseCustomProviderModel, getCustomProviderGroup, isCustomProviderGroup } from '../../../src/webview/shared/modelUtils';
 import {
 	setFormatLocale,
 	getEditorIcon,
@@ -34,15 +34,68 @@ test('getModelDisplayName: returns raw model ID for unknown models', () => {
 });
 
 test('getModelDisplayName: decodes URI-encoded segments in unknown model IDs', () => {
-	assert.equal(
-		getModelDisplayName('unify-chat-provider/OpenCode%20Go%20(Anthropic%20Messages)/qwen3.7-max'),
-		'unify-chat-provider/OpenCode Go (Anthropic Messages)/qwen3.7-max'
-	);
 	assert.equal(getModelDisplayName('provider/Model%20Name'), 'provider/Model Name');
 });
 
 test('getModelDisplayName: returns raw ID when URI decoding fails (malformed percent)', () => {
 	assert.equal(getModelDisplayName('bad%2model'), 'bad%2model');
+});
+
+test('getModelDisplayName: drops the custom-endpoint prefix and provider name', () => {
+	// Only the model part is shown — the provider name becomes its own provider group.
+	assert.equal(getModelDisplayName('customendpoint/Mistral/MistralMedium3.5'), 'MistralMedium3.5');
+	assert.equal(
+		getModelDisplayName('unify-chat-provider/OpenCode%20Go%20(Anthropic%20Messages)/qwen3.7-max'),
+		'qwen3.7-max'
+	);
+});
+
+test('getModelDisplayName: resolves the friendly name of a custom-endpoint model part', () => {
+	assert.equal(getModelDisplayName('customendpoint/Mistral/gpt-4o'), 'GPT-4o');
+});
+
+// ── parseCustomProviderModel ────────────────────────────────────────────
+
+test('parseCustomProviderModel: splits a three-part custom-endpoint ID', () => {
+	assert.deepEqual(parseCustomProviderModel('customendpoint/Mistral/mistral-medium-latest'), {
+		source: 'customendpoint',
+		providerName: 'Mistral',
+		modelId: 'mistral-medium-latest'
+	});
+});
+
+test('parseCustomProviderModel: URI-decodes each part', () => {
+	assert.deepEqual(parseCustomProviderModel('unify-chat-provider/OpenCode%20Go/qwen3.7-max'), {
+		source: 'unify-chat-provider',
+		providerName: 'OpenCode Go',
+		modelId: 'qwen3.7-max'
+	});
+});
+
+test('parseCustomProviderModel: returns undefined unless there are exactly three non-empty parts', () => {
+	assert.equal(parseCustomProviderModel('gpt-4o'), undefined);
+	assert.equal(parseCustomProviderModel('provider/Model%20Name'), undefined);
+	assert.equal(parseCustomProviderModel('customendpoint//mistral-medium-latest'), undefined);
+	assert.equal(parseCustomProviderModel('a/b/c/d'), undefined);
+	assert.equal(parseCustomProviderModel(''), undefined);
+});
+
+// ── getCustomProviderGroup / isCustomProviderGroup ──────────────────────
+
+test('getCustomProviderGroup: names the group after the user-chosen provider', () => {
+	assert.equal(getCustomProviderGroup('customendpoint/Mistral/mistral-medium-latest'), 'Mistral (Custom)');
+	assert.equal(getCustomProviderGroup('unify-chat-provider/OpenCode%20Go/qwen3.7-max'), 'OpenCode Go (Custom)');
+});
+
+test('getCustomProviderGroup: returns undefined for regular model IDs', () => {
+	assert.equal(getCustomProviderGroup('gpt-4o'), undefined);
+	assert.equal(getCustomProviderGroup('provider/Model%20Name'), undefined);
+});
+
+test('isCustomProviderGroup: recognizes only custom provider groups', () => {
+	assert.equal(isCustomProviderGroup('Mistral (Custom)'), true);
+	assert.equal(isCustomProviderGroup('Mistral AI'), false);
+	assert.equal(isCustomProviderGroup('GitHub Copilot'), false);
 });
 
 // ── formatDurationShort ─────────────────────────────────────────────────

@@ -1,6 +1,6 @@
 import type { DailyTokenStats, ChartDataPayload, ModelUsage, LanguageUsage } from './types';
 import { addModelUsage, COPILOT_EDITOR_NAMES } from './statsHelpers';
-import { getModelDisplayName } from './webview/shared/modelUtils';
+import { getModelDisplayName, getCustomProviderGroup } from './webview/shared/modelUtils';
 
 // Re-exported for existing consumers; the set lives in statsHelpers so the
 // period accumulator can use it without a circular import.
@@ -37,8 +37,12 @@ const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [
 /**
  * Maps a model ID to its billing provider name.
  * Used for non-Copilot surfaces where the bill goes directly to the model vendor.
+ * Models from a user-configured custom endpoint get their own group named after the
+ * provider name the user typed (e.g. "Mistral (Custom)").
  */
 export function getModelBillingProvider(modelId: string): string {
+	const customGroup = getCustomProviderGroup(modelId);
+	if (customGroup) { return customGroup; }
 	const id = modelId.toLowerCase();
 	const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
 	return match ? match[1] : 'Other';
@@ -46,10 +50,15 @@ export function getModelBillingProvider(modelId: string): string {
 
 /**
  * Returns the billing group for a (editor, modelId) pair:
- * - Copilot surfaces → always "GitHub Copilot" regardless of underlying model
+ * - Custom endpoints (BYOK) → the user's own provider group ("Mistral (Custom)"), on every
+ *   surface: these calls go straight to the user's endpoint with their own key, so they are
+ *   billed by that provider and not through Copilot's AI-Credit system
+ * - Other models on Copilot surfaces → always "GitHub Copilot" regardless of underlying model
  * - All other surfaces → the model's provider (Anthropic, Google, Mistral AI, OpenAI, etc.)
  */
 export function getBillingGroup(editor: string, modelId: string): string {
+	const customGroup = getCustomProviderGroup(modelId);
+	if (customGroup) { return customGroup; }
 	if (COPILOT_EDITOR_NAMES.has(editor)) { return 'GitHub Copilot'; }
 	return getModelBillingProvider(modelId);
 }

@@ -264,6 +264,19 @@ test('calculateEstimatedCost: unknown models contribute $0 (no gpt-4o-mini fallb
         assert.equal(cost, 0);
 });
 
+test('calculateEstimatedCost: prices a custom-endpoint model from its model-ID part', () => {
+        const modelUsage = { 'customendpoint/Mistral/mistral-medium-latest': { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 0} };
+        const pricing = { 'mistral-medium-latest': { inputCostPerMillion: 0.4, outputCostPerMillion: 2.0 } };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        assert.ok(Math.abs(cost - 2.4) < 1e-9);
+});
+
+test('calculateEstimatedCost: custom-endpoint model with an unpriced model part stays $0', () => {
+        const modelUsage = { 'customendpoint/Mistral/some-private-model': { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 0} };
+        const pricing = { 'mistral-medium-latest': { inputCostPerMillion: 0.4, outputCostPerMillion: 2.0 } };
+        assert.equal(calculateEstimatedCost(modelUsage, pricing), 0);
+});
+
 test('calculateEstimatedCost: copilot source uses copilotPricing block when present', () => {
         const modelUsage = { 'gpt-x': { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 0} };
         const pricing = {

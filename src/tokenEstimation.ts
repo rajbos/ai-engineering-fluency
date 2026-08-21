@@ -5,6 +5,7 @@
 import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
 import type { CopilotCliOtelSessionUsage } from './copilotCliOtel';
+import { parseCustomProviderModel } from './webview/shared/modelUtils';
 
 /** Minimum request shape needed by getModelFromRequest. */
 interface ModelRequestSource {
@@ -1210,6 +1211,19 @@ export function getModelCostBucket(modelId: string, modelPricing: { [key: string
 }
 
 /**
+ * Resolves the pricing entry for a model served by a user-configured custom endpoint,
+ * e.g. `customendpoint/Mistral/mistral-medium-latest` → the `mistral-medium-latest` rates.
+ * Returns undefined for plain model ids and for endpoint models with no pricing entry.
+ */
+function _pricingForCustomEndpointModel(
+	model: string,
+	modelPricing: { [key: string]: ModelPricing }
+): ModelPricing | undefined {
+	const custom = parseCustomProviderModel(model);
+	return custom ? modelPricing[custom.modelId] : undefined;
+}
+
+/**
  * Calculate estimated cost in USD based on model usage.
  * Applies cache-aware pricing when cachedReadTokens / cacheCreationTokens breakdowns
  * are available (e.g. Claude Desktop / Claude Code / OpenCode sessions).
@@ -1248,7 +1262,9 @@ export function calculateEstimatedCost(
 	for (const [model, usage] of Object.entries(modelUsage)) {
 		// No pricing entry → model still appears in usage breakdowns (via modelUsage)
 		// but contributes $0 to cost. Do NOT fall back to another model's rates.
-		const baseEntry = modelPricing[model];
+		// Custom-endpoint ids (`customendpoint/<provider>/<model id>`) are priced by their
+		// model-id part — the same model, just reached through a user-configured endpoint.
+		const baseEntry = modelPricing[model] ?? _pricingForCustomEndpointModel(model, modelPricing);
 		if (!baseEntry) {
 			continue;
 		}

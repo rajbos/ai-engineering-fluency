@@ -58,6 +58,14 @@ test('getModelBillingProvider: qwen maps to Alibaba', () => {
 	assert.equal(getModelBillingProvider('qwen2.5-coder'), 'Alibaba');
 });
 
+test('getModelBillingProvider: custom endpoint model maps to the user-chosen provider group', () => {
+	assert.equal(getModelBillingProvider('customendpoint/Mistral/mistral-medium-latest'), 'Mistral (Custom)');
+});
+
+test('getModelBillingProvider: two-part model IDs are not treated as custom endpoints', () => {
+	assert.equal(getModelBillingProvider('mistral/mistral-medium-latest'), 'Mistral AI');
+});
+
 test('getModelBillingProvider: mai- maps to Microsoft', () => {
 	assert.equal(getModelBillingProvider('mai-ds-r1'), 'Microsoft');
 });
@@ -99,6 +107,16 @@ test('getBillingGroup: Gemini CLI editor returns Google from model', () => {
 
 test('getBillingGroup: unknown editor with OpenAI model returns OpenAI', () => {
 	assert.equal(getBillingGroup('Some Editor', 'gpt-4o'), 'OpenAI');
+});
+
+test('getBillingGroup: custom endpoint model keeps its own group on a Copilot surface', () => {
+	// BYOK endpoints are billed by the user's own provider, not through Copilot credits.
+	assert.equal(getBillingGroup('VS Code', 'customendpoint/Mistral/mistral-medium-latest'), 'Mistral (Custom)');
+	assert.equal(getBillingGroup('VS Code', 'customendpoint/Mistral/MistralMedium3.5'), 'Mistral (Custom)');
+});
+
+test('getBillingGroup: custom endpoint model on a non-Copilot surface uses the same group', () => {
+	assert.equal(getBillingGroup('Some Editor', 'unify-chat-provider/OpenCode%20Go/qwen3.7-max'), 'OpenCode Go (Custom)');
 });
 
 // ── COPILOT_EDITOR_NAMES ─────────────────────────────────────────────────────

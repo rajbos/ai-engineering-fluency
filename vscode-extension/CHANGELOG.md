@@ -4,6 +4,10 @@ All notable changes to the VS Code extension will be documented in this file.
 
 ## [Unreleased]
 
+### Features
+- Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the Details "Cost by Provider" panel and the provider charts, instead of lumping them into "GitHub Copilot"/"Other"
+- Show only the model part of a three-part custom-endpoint model ID (`customendpoint/Mistral/mistral-medium-latest` → `mistral-medium-latest`), and estimate its cost from that model's pricing entry
+
 ## [0.17.2] - 2026-08-17
 
 ### Features
