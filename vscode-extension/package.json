@@ -1,7 +1,7 @@
 {
   "name": "ai-engineering-fluency",
-  "displayName": "AI Engineering Fluency",
-  "description": "Track your AI Engineering Fluency — daily and monthly token usage, cost estimates, and AI fluency insights in VS Code.",
+  "displayName": "%displayName%",
+  "description": "%description%",
   "version": "0.17.1",
   "publisher": "RobBos",
   "icon": "assets/logo.png",
@@ -37,157 +37,157 @@
     "commands": [
       {
         "command": "aiEngineeringFluency.refresh",
-        "title": "Refresh Token Usage",
+        "title": "%command.refresh.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.showDetails",
-        "title": "Show Token Usage Details",
+        "title": "%command.showDetails.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.showChart",
-        "title": "Show Token Usage Chart",
+        "title": "%command.showChart.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.showUsageAnalysis",
-        "title": "Show Usage Analysis Dashboard",
+        "title": "%command.showUsageAnalysis.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.openMcpJson",
-        "title": "Open MCP Configuration (mcp.json)",
+        "title": "%command.openMcpJson.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.generateDiagnosticReport",
-        "title": "Generate Diagnostic Report",
+        "title": "%command.generateDiagnosticReport.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.showMaturity",
-        "title": "Show AI Engineering Fluency Score",
+        "title": "%command.showMaturity.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.showFluencyLevelViewer",
-        "title": "Scoring Guide",
+        "title": "%command.showFluencyLevelViewer.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.runLocalViewRegression",
-        "title": "Run Local View Regression (Debug Only)",
+        "title": "%command.runLocalViewRegression.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.configureBackend",
-        "title": "Configure Backend",
+        "title": "%command.configureBackend.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.configureTeamServer",
-        "title": "Configure Team Server Backend",
+        "title": "%command.configureTeamServer.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.copyBackendConfig",
-        "title": "Copy Backend Config (No Secrets)",
+        "title": "%command.copyBackendConfig.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.exportCurrentView",
-        "title": "Export Current View (JSON)",
+        "title": "%command.exportCurrentView.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.setBackendSharedKey",
-        "title": "Set Backend Storage Shared Key",
+        "title": "%command.setBackendSharedKey.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.rotateBackendSharedKey",
-        "title": "Rotate Backend Storage Shared Key",
+        "title": "%command.rotateBackendSharedKey.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.clearBackendSharedKey",
-        "title": "Clear Backend Storage Shared Key",
+        "title": "%command.clearBackendSharedKey.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.toggleBackendWorkspaceMachineNameSync",
-        "title": "Backend: Toggle Workspace/Machine Name Sync",
+        "title": "%command.toggleBackendWorkspaceMachineNameSync.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.setSharingProfile",
-        "title": "Set Sharing Profile",
+        "title": "%command.setSharingProfile.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.clearAzureSettings",
-        "title": "Clear Azure Settings",
+        "title": "%command.clearAzureSettings.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.clearCache",
-        "title": "Clear Cache",
+        "title": "%command.clearCache.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.resetInsightsState",
-        "title": "Reset Insights Dismissal State",
+        "title": "%command.resetInsightsState.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.showDashboard",
-        "title": "Show Team Dashboard",
+        "title": "%command.showDashboard.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.showEnvironmental",
-        "title": "Show Environmental Impact",
+        "title": "%command.showEnvironmental.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.showEfficiency",
-        "title": "Show Efficiency Trends",
+        "title": "%command.showEfficiency.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.authenticateGitHub",
-        "title": "Authenticate with GitHub",
+        "title": "%command.authenticateGitHub.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "aiEngineeringFluency.signOutGitHub",
-        "title": "Disconnect GitHub",
+        "title": "%command.signOutGitHub.title%",
         "category": "AI Engineering Fluency"
       },
       {
         "command": "copilot-token-tracker.checkWindsurfStatus",
-        "title": "Check Windsurf Status",
+        "title": "%command.checkWindsurfStatus.title%",
         "category": "AI Engineering Fluency"
       }
     ],
     "configuration": {
-      "title": "AI Engineering Fluency",
+      "title": "%config.title%",
       "properties": {
         "aiEngineeringFluency.display.compactNumbers": {
           "type": "boolean",
           "default": true,
-          "description": "Show token counts in compact format using K/M suffixes (e.g. 1.5K, 1.2M). When disabled, full numbers are shown (e.g. 1,500, 1,200,000)."
+          "description": "%config.display.compactNumbers.description%"
         },
         "aiEngineeringFluency.display.use24HourTime": {
           "type": "boolean",
           "default": true,
-          "description": "Show times in 24-hour format (e.g. 14:30). When disabled, 12-hour AM/PM format is used (e.g. 2:30 PM)."
+          "description": "%config.display.use24HourTime.description%"
         },
         "aiEngineeringFluency.display.hideAutomaticToolCalls": {
           "type": "boolean",
           "default": true,
-          "description": "In the Tool Usage view, hide tools marked \"auto\" (tools Copilot calls automatically, e.g. file reads and searches) so purposeful/intentional tool calls stand out. Disable to show automatic tool calls again."
+          "description": "%config.display.hideAutomaticToolCalls.description%"
         },
         "aiEngineeringFluency.display.statusBar.showTokens": {
           "type": "string",
@@ -200,15 +200,15 @@
             "todayAndCurrentMonth"
           ],
           "enumDescriptions": [
-            "Do not show token counts in the status bar",
-            "Show today's token count only",
-            "Show the last 30 days (rolling window) token count only",
-            "Show the current calendar month's token count only",
-            "Show both today's and last 30 days' token counts (default)",
-            "Show both today's and current calendar month's token counts"
+            "%config.display.statusBar.showTokens.enum.none%",
+            "%config.display.statusBar.showTokens.enum.today%",
+            "%config.display.statusBar.showTokens.enum.last30days%",
+            "%config.display.statusBar.showTokens.enum.currentMonth%",
+            "%config.display.statusBar.showTokens.enum.both%",
+            "%config.display.statusBar.showTokens.enum.todayAndCurrentMonth%"
           ],
           "default": "both",
-          "description": "Controls which token counts are shown in the status bar. Token counts are estimated from session log files."
+          "description": "%config.display.statusBar.showTokens.description%"
         },
         "aiEngineeringFluency.display.statusBar.showCost": {
           "type": "string",
@@ -221,26 +221,26 @@
             "todayAndCurrentMonth"
           ],
           "enumDescriptions": [
-            "Do not show estimated cost in the status bar (default)",
-            "Show today's estimated cost only",
-            "Show the last 30 days (rolling window) estimated cost only",
-            "Show the current calendar month's estimated cost only",
-            "Show both today's and last 30 days' estimated costs",
-            "Show both today's and current calendar month's estimated costs"
+            "%config.display.statusBar.showCost.enum.none%",
+            "%config.display.statusBar.showCost.enum.today%",
+            "%config.display.statusBar.showCost.enum.last30days%",
+            "%config.display.statusBar.showCost.enum.currentMonth%",
+            "%config.display.statusBar.showCost.enum.both%",
+            "%config.display.statusBar.showCost.enum.todayAndCurrentMonth%"
           ],
           "default": "none",
-          "description": "Controls which estimated costs (in USD) are shown in the status bar. Cost is estimated using GitHub Copilot AI-Credit rates (Usage Based Billing)."
+          "description": "%config.display.statusBar.showCost.description%"
         },
         "aiEngineeringFluency.display.statusBar.monthlyBudget": {
           "type": "number",
           "default": 0,
           "minimum": 0,
-          "description": "Monthly AI spend budget in USD. When set above 0, the status bar will change color as you approach the limit: yellow at 75%, orange at 90%, red at 100% or over. Set to 0 to disable budget coloring. Cost is estimated using GitHub Copilot AI-Credit rates."
+          "description": "%config.display.statusBar.monthlyBudget.description%"
         },
         "aiEngineeringFluency.backend.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable backend sync to an Azure-backed store (default: Azure Storage Tables)."
+          "description": "%config.backend.enabled.description%"
         },
         "aiEngineeringFluency.backend.backend": {
           "type": "string",
@@ -249,11 +249,11 @@
             "sharingServer"
           ],
           "enumDescriptions": [
-            "Azure Storage Tables (requires Azure subscription + RBAC setup)",
-            "Self-hosted sharing server (configure endpoint URL; authenticates via your existing GitHub session)"
+            "%config.backend.backend.enum.storageTables%",
+            "%config.backend.backend.enum.sharingServer%"
           ],
           "default": "storageTables",
-          "description": "Backend sync backend. Supports Azure Storage Tables and self-hosted sharing server."
+          "description": "%config.backend.backend.description%"
         },
         "aiEngineeringFluency.backend.authMode": {
           "type": "string",
@@ -262,12 +262,12 @@
             "sharedKey"
           ],
           "default": "entraId",
-          "description": "Authentication mode for backend sync data-plane access. Default is Entra ID RBAC (DefaultAzureCredential). Shared Key uses VS Code SecretStorage and does not sync across devices."
+          "description": "%config.backend.authMode.description%"
         },
         "aiEngineeringFluency.backend.datasetId": {
           "type": "string",
           "default": "default",
-          "description": "Logical dataset identifier to avoid accidental mixing when sharing a backend."
+          "description": "%config.backend.datasetId.description%"
         },
         "aiEngineeringFluency.backend.sharingProfile": {
           "type": "string",
@@ -278,28 +278,35 @@
             "teamPseudonymous",
             "teamIdentified"
           ],
+          "enumDescriptions": [
+            "%config.backend.sharingProfile.enum.off%",
+            "%config.backend.sharingProfile.enum.soloFull%",
+            "%config.backend.sharingProfile.enum.teamAnonymized%",
+            "%config.backend.sharingProfile.enum.teamPseudonymous%",
+            "%config.backend.sharingProfile.enum.teamIdentified%"
+          ],
           "default": "off",
-          "description": "Sharing Profile (single source of truth): off (no cloud sync), soloFull (personal full fidelity), teamAnonymized (no per-user key), teamPseudonymous (stable per-user key), teamIdentified (explicit identity)."
+          "description": "%config.backend.sharingProfile.description%"
         },
         "aiEngineeringFluency.backend.userId": {
           "type": "string",
           "default": "",
-          "description": "Optional user identifier to enable team-wide reporting with per-user filtering. Empty disables the user dimension."
+          "description": "%config.backend.userId.description%"
         },
         "aiEngineeringFluency.backend.shareWithTeam": {
           "type": "boolean",
           "default": false,
-          "description": "Explicit consent flag. When false, no per-user identifier is written to the backend store."
+          "description": "%config.backend.shareWithTeam.description%"
         },
         "aiEngineeringFluency.backend.shareWorkspaceMachineNames": {
           "type": "boolean",
           "default": false,
-          "description": "When team sharing is enabled, also write workspace and machine display names to the backend store (may contain sensitive information)."
+          "description": "%config.backend.shareWorkspaceMachineNames.description%"
         },
         "aiEngineeringFluency.backend.shareConsentAt": {
           "type": "string",
           "default": "",
-          "description": "ISO timestamp when team sharing was enabled (consent recorded)."
+          "description": "%config.backend.shareConsentAt.description%"
         },
         "aiEngineeringFluency.backend.userIdentityMode": {
           "type": "string",
@@ -309,7 +316,7 @@
             "entraObjectId"
           ],
           "default": "pseudonymous",
-          "description": "How the per-user dimension is derived when team sharing is enabled. pseudonymous hashes Entra claims scoped to datasetId; teamAlias uses backend.userId (validated); entraObjectId stores a GUID (advanced)."
+          "description": "%config.backend.userIdentityMode.description%"
         },
         "aiEngineeringFluency.backend.userIdMode": {
           "type": "string",
@@ -318,81 +325,81 @@
             "custom"
           ],
           "default": "alias",
-          "description": "How the user identifier is intended to be used. 'alias' is recommended; 'custom' may contain personal data (PII)."
+          "description": "%config.backend.userIdMode.description%"
         },
         "aiEngineeringFluency.backend.subscriptionId": {
           "type": "string",
           "default": "",
-          "description": "Azure subscription ID used for provisioning (wizard-managed)."
+          "description": "%config.backend.subscriptionId.description%"
         },
         "aiEngineeringFluency.backend.resourceGroup": {
           "type": "string",
           "default": "",
-          "description": "Azure resource group name for the Storage account (wizard-managed)."
+          "description": "%config.backend.resourceGroup.description%"
         },
         "aiEngineeringFluency.backend.storageAccount": {
           "type": "string",
           "default": "",
-          "description": "Azure Storage account name for backend sync (wizard-managed)."
+          "description": "%config.backend.storageAccount.description%"
         },
         "aiEngineeringFluency.backend.aggTable": {
           "type": "string",
           "default": "usageAggDaily",
-          "description": "Azure Table name for daily rollups."
+          "description": "%config.backend.aggTable.description%"
         },
         "aiEngineeringFluency.backend.eventsTable": {
           "type": "string",
           "default": "usageEvents",
-          "description": "Azure Table name for optional raw events (not required for MVP reporting)."
+          "description": "%config.backend.eventsTable.description%"
         },
         "aiEngineeringFluency.backend.lookbackDays": {
           "type": "number",
           "default": 30,
           "minimum": 1,
           "maximum": 90,
-          "description": "Default backfill/lookback window (days) for syncing local usage to the backend store."
+          "description": "%config.backend.lookbackDays.description%"
         },
         "aiEngineeringFluency.backend.includeMachineBreakdown": {
           "type": "boolean",
           "default": false,
-          "description": "Include machine dimension in backend rollups. Recommended for correct cross-device convergence."
+          "description": "%config.backend.includeMachineBreakdown.description%"
         },
         "aiEngineeringFluency.backend.blobUploadEnabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable uploading session log files to Azure Blob Storage. Files are uploaded with configurable frequency and can be used by GitHub Copilot Coding Agent."
+          "description": "%config.backend.blobUploadEnabled.description%"
         },
         "aiEngineeringFluency.backend.blobContainerName": {
           "type": "string",
           "default": "copilot-session-logs",
-          "description": "Name of the Azure Blob Storage container for session log files."
+          "description": "%config.backend.blobContainerName.description%"
         },
         "aiEngineeringFluency.backend.blobUploadFrequencyHours": {
           "type": "number",
           "default": 24,
           "minimum": 1,
           "maximum": 168,
-          "description": "How often to upload session log files to blob storage (in hours). Default is once per day (24 hours)."
+          "description": "%config.backend.blobUploadFrequencyHours.description%"
         },
         "aiEngineeringFluency.backend.blobCompressFiles": {
           "type": "boolean",
           "default": true,
-          "description": "Compress session log files with gzip before uploading to blob storage to reduce storage costs and bandwidth."
+          "description": "%config.backend.blobCompressFiles.description%"
         },
         "aiEngineeringFluency.backend.sharingServer.enabled": {
           "type": "boolean",
           "default": false,
-          "description": "Enable syncing to the self-hosted Team Server backend. Can run simultaneously with Azure Storage (backend.enabled). Requires backend.sharingServer.endpointUrl to be configured."
+          "description": "%config.backend.sharingServer.enabled.description%"
         },
         "aiEngineeringFluency.backend.sharingServer.endpointUrl": {
           "type": "string",
           "default": "",
-          "description": "Base URL of the self-hosted sharing server (e.g. https://copilot-sharing.example.com). Authentication is handled automatically via your existing GitHub session — no API key needed."
+          "description": "%config.backend.sharingServer.endpointUrl.description%"
         },
         "aiEngineeringFluency.sampleDataDirectory": {
           "type": "string",
           "default": "",
-          "description": "Screenshot/demo mode: when set to a folder path, overrides all session file scanning and returns only .json/.jsonl files from this directory. Leave empty for normal operation."
+          "description": "%config.sampleDataDirectory.description%"
         },
         "aiEngineeringFluency.suppressedUnknownTools": {
           "type": "array",
@@ -400,7 +407,7 @@
             "type": "string"
           },
           "default": [],
-          "description": "List of tool names to suppress from the 'Unknown Tools Found' section in the Usage Analysis dashboard. Useful for tools you are testing that don't yet have friendly display names."
+          "description": "%config.suppressedUnknownTools.description%"
         },
         "aiEngineeringFluency.curation.timeWindowDays": {
           "type": "number",
@@ -411,16 +418,16 @@
             90
           ],
           "enumDescriptions": [
-            "Look back 7 days when determining which tools are unused",
-            "Look back 30 days when determining which tools are unused (default)",
-            "Look back 90 days when determining which tools are unused"
+            "%config.curation.timeWindowDays.enum.7%",
+            "%config.curation.timeWindowDays.enum.30%",
+            "%config.curation.timeWindowDays.enum.90%"
           ],
-          "description": "Number of days to look back when determining which tools are unused for the Tool Curation analysis."
+          "description": "%config.curation.timeWindowDays.description%"
         },
         "aiEngineeringFluency.toolFamilies": {
           "type": "array",
           "default": [],
-          "description": "Override or extend tool family groupings used in the Tool Output Token Analysis tab. Each entry with an 'id' matching a built-in family replaces that family entirely. Entries with new 'id' values are appended. Leave empty to use the built-in defaults. Example: { \"id\": \"reading\", \"name\": \"File Reading\", \"builtIn\": [\"read\"], \"alternatives\": [\"lean-ctx\", \"my-custom-reader\"] }",
+          "description": "%config.toolFamilies.description%",
           "items": {
             "type": "object",
             "required": [
@@ -462,34 +469,34 @@
         "aiEngineeringFluency.insights.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable personalized AI usage insights and nudges in the Usage Analysis dashboard and status bar."
+          "description": "%config.insights.enabled.description%"
         },
         "aiEngineeringFluency.insights.toastsEnabled": {
           "type": "boolean",
           "default": true,
-          "description": "Show occasional toast notifications for high-value insights (e.g. missing copilot-instructions.md, new fluency stage). Respects the cadenceDays limit."
+          "description": "%config.insights.toastsEnabled.description%"
         },
         "aiEngineeringFluency.insights.cadenceDays": {
           "type": "number",
           "default": 2,
           "minimum": 1,
           "maximum": 30,
-          "description": "Minimum number of days between insight toast notifications."
+          "description": "%config.insights.cadenceDays.description%"
         },
         "copilotTokenTracker.windsurf.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Enable Windsurf session tracking when running inside Windsurf editor."
+          "description": "%config.copilotTokenTracker.windsurf.enabled.description%"
         },
         "copilotTokenTracker.windsurf.includeCascadeDetails": {
           "type": "boolean",
           "default": true,
-          "description": "Include detailed Cascade trajectory information in Windsurf session analysis."
+          "description": "%config.copilotTokenTracker.windsurf.includeCascadeDetails.description%"
         },
         "copilotTokenTracker.windsurf.cacheCredentials": {
           "type": "boolean",
           "default": true,
-          "description": "Cache Windsurf API credentials to reduce authentication overhead. Credentials are automatically invalidated when Windsurf restarts."
+          "description": "%config.copilotTokenTracker.windsurf.cacheCredentials.description%"
         }
       }
     }
@@ -581,5 +588,14 @@
     "core-js@3.49.0": true,
     "esbuild@0.28.1": true,
     "keytar@7.9.0": true
+  },
+  "__metadata": {
+    "localization": {
+      "uri": "./package.nls.json",
+      "availableLanguages": {
+        "": "en",
+        "zh-cn": "zh-CN"
+      }
+    }
   }
 }

@@ -5,6 +5,9 @@ import * as path from 'path';
 import * as os from 'os';
 import * as childProcess from 'child_process';
 
+// Localization support
+const l10n = vscode.l10n;
+
 // --- JSON data files ---
 import tokenEstimatorsData from '../../src/tokenEstimators.json';
 import modelPricingData from '../../src/modelPricing.json';
@@ -1368,15 +1371,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private initializeStatusBar(): void {
 		this.statusBarItem = vscode.window.createStatusBarItem('ai-engineering-fluency', vscode.StatusBarAlignment.Right, 102);
-		this.statusBarItem.name = "AI Engineering Fluency";
-		this.setStatusBarText("$(loading~spin) AI Fluency: Loading...");
-		this.statusBarItem.tooltip = "AI Engineering Fluency — daily and 30-day token usage - Click to open details";
+		this.statusBarItem.name = vscode.l10n.t("statusBar.name");
+		this.setStatusBarText(vscode.l10n.t("statusBar.loadingText"));
+		this.statusBarItem.tooltip = vscode.l10n.t("statusBar.tooltip");
 		this.statusBarItem.command = 'aiEngineeringFluency.showDetails';
 		this.statusBarItem.show();
 
 		// Separate insights badge — hidden until there are new insights
 		this.insightsStatusBarItem = vscode.window.createStatusBarItem('ai-engineering-fluency-insights', vscode.StatusBarAlignment.Right, 101);
-		this.insightsStatusBarItem.name = "AI Engineering Fluency — Insights";
+		this.insightsStatusBarItem.name = vscode.l10n.t("statusBar.name") + " — Insights";
 		this.insightsStatusBarItem.command = 'aiEngineeringFluency.openInsightsTab';
 		// starts hidden; shown in refreshStatusBarInsightBadge when count > 0
 
@@ -1481,25 +1484,30 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		switch (action) {
 			case 'welcome': {
+				const message = l10n.t('onboarding.welcome.message');
+				const openFluencyScore = l10n.t('onboarding.welcome.openFluencyScore');
+				const learnMore = l10n.t('onboarding.welcome.learnMore');
 				const choice = await vscode.window.showInformationMessage(
-					'AI Engineering Fluency tracks your GitHub Copilot usage — token counts, cost estimates, and fluency scores based on how you interact with AI tools.',
-					'Open Fluency Score',
-					'Learn More',
+					message,
+					openFluencyScore,
+					learnMore,
 				);
 				await this.context.globalState.update('hasSeenOnboarding', true);
-				if (choice === 'Open Fluency Score') {
+				if (choice === openFluencyScore) {
 					await this.showMaturity();
-				} else if (choice === 'Learn More') {
+				} else if (choice === learnMore) {
 					await vscode.env.openExternal(vscode.Uri.parse('https://github.com/rajbos/ai-engineering-fluency#supported-editors'));
 				}
 				break;
 			}
 			case 'diagnostics': {
+				const message = l10n.t('onboarding.diagnostics.message');
+				const openDiagnostics = l10n.t('onboarding.diagnostics.openDiagnostics');
 				const choice = await vscode.window.showWarningMessage(
-					'AI Engineering Fluency: session files could not be found. Open Diagnostics to investigate.',
-					'Open Diagnostics',
+					message,
+					openDiagnostics,
 				);
-				if (choice === 'Open Diagnostics') {
+				if (choice === openDiagnostics) {
 					await this.showDiagnosticReport();
 				}
 				break;
@@ -1541,10 +1549,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (openCount < 5) {
 			return;
 		}
-		const open = 'Open Fluency Score';
-		const dismiss = 'Dismiss';
+		const message = l10n.t('news.fluencyScoreBanner.message');
+		const open = l10n.t('news.fluencyScoreBanner.open');
+		const dismiss = l10n.t('news.fluencyScoreBanner.dismiss');
 		const choice = await vscode.window.showInformationMessage(
-			'🎯 New: AI Engineering Fluency Score dashboard — track how deeply your team uses GitHub Copilot across 6 categories and 4 stages.',
+			message,
 			open,
 			dismiss
 		);
@@ -1565,9 +1574,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return;
 		}
 		await this.context.globalState.update(dismissedKey, true);
-		const open = 'Open Efficiency';
+		const message = l10n.t('news.efficiencyTabBanner.message');
+		const open = l10n.t('news.efficiencyTabBanner.open');
 		const choice = await vscode.window.showInformationMessage(
-			'📈 New: Efficiency view — see whether you\'re working more efficiently with AI over time.',
+			message,
 			open
 		);
 		if (choice === open) {
@@ -3308,6 +3318,32 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private getCompactNumbersSetting(): boolean {
 		return vscode.workspace.getConfiguration('aiEngineeringFluency').get<boolean>('display.compactNumbers', true);
+	}
+
+	/**
+	 * Get localization strings for webviews based on the current VS Code language.
+	 * This provides localized button labels and other UI strings for webview panels.
+	 */
+	private getWebviewLocalization(): Record<string, string> {
+		const l10n = vscode.l10n;
+		const language = vscode.env.language;
+		
+		// Return navigation button labels and other webview-localizable strings
+		return {
+			// Navigation button labels
+			'nav.btnRefresh': l10n.t('nav.btnRefresh'),
+			'nav.btnDetails': l10n.t('nav.btnDetails'),
+			'nav.btnChart': l10n.t('nav.btnChart'),
+			'nav.btnUsage': l10n.t('nav.btnUsage'),
+			'nav.btnDiagnostics': l10n.t('nav.btnDiagnostics'),
+			'nav.btnMaturity': l10n.t('nav.btnMaturity'),
+			'nav.btnDashboard': l10n.t('nav.btnDashboard'),
+			'nav.btnLevelViewer': l10n.t('nav.btnLevelViewer'),
+			'nav.btnEnvironmental': l10n.t('nav.btnEnvironmental'),
+			'nav.btnEfficiency': l10n.t('nav.btnEfficiency'),
+			// Current language for reference
+			'__language__': language
+		};
 	}
 
 	private getUse24HourTimeSetting(): boolean {
@@ -6510,6 +6546,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...stats,
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
+			localization: this.getWebviewLocalization(),
 		};
 		const initialData = JSON.stringify(dataWithBackend).replace(/</g, '\\u003c');
 
@@ -7317,7 +7354,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const nonce = getNonce();
 		const scriptUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'logviewer.js'));
 
-		const initialData = JSON.stringify({ ...logData, compactNumbers: this.getCompactNumbersSetting() }).replace(/</g, '\\u003c');
+		const initialData = JSON.stringify({ ...logData, compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }).replace(/</g, '\\u003c');
 
 		return `<!DOCTYPE html>
 		<html lang="en">
@@ -7866,6 +7903,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const dataWithBackend = {
       ...data,
       backendConfigured: this.isBackendConfigured(),
+      localization: this.getWebviewLocalization(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -7931,6 +7969,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const dataWithBackend = {
       ...data,
       backendConfigured: this.isBackendConfigured(),
+      localization: this.getWebviewLocalization(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -8150,7 +8189,11 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		const scriptUri = webview.asWebviewUri(
 			vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview', 'efficiency.js'),
 		);
-		const initialData = JSON.stringify(data).replace(/</g, '\\u003c');
+		const dataWithLocalization = {
+			...data,
+			localization: this.getWebviewLocalization(),
+		};
+		const initialData = JSON.stringify(dataWithLocalization).replace(/</g, '\\u003c');
 		return `<!DOCTYPE html>
 		<html lang="en">
 		<head>
@@ -8659,7 +8702,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const backendConfig = this.getDashboardBackendConfig();
 
     const dataWithBackend = data
-      ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting() }
+      ? { ...data, backendConfigured: this.isBackendConfigured(), compactNumbers: this.getCompactNumbersSetting(), localization: this.getWebviewLocalization() }
       : undefined;
     const initialDataScript = dataWithBackend
       ? `<script nonce="${nonce}">window.__INITIAL_DASHBOARD__ = ${JSON.stringify(dataWithBackend).replace(/</g, "\\u003c")};</script>`
@@ -8772,6 +8815,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       sortSettings,
       compactNumbers: this.getCompactNumbersSetting(),
       copilotPlan: this._copilotPlanResolved,
+      localization: this.getWebviewLocalization(),
     };
     const initialData = JSON.stringify(dataWithBackend).replace(
       /</g,
@@ -10596,6 +10640,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       skillCallsByEditor: this._lastSkillCallsByEditor ?? null,
       skillDescriptions: this._buildSkillDescriptions(),
       toolFamilies: getToolFamilies(),
+      localization: this.getWebviewLocalization(),
     }).replace(/</g, "\\u003c");
 
     return `<!DOCTYPE html>
@@ -10682,7 +10727,17 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       vscode.Uri.joinPath(this.extensionUri, "dist", "webview", "chart.js"),
     );
 
-    const chartData = { ...this.buildChartData(dailyStats), periodsReady, initialPeriod: this.lastChartPeriod, initialTimeWindow: this.lastChartTimeWindow, initialView: this.lastChartView, initialMetric: this.lastChartMetric, initialSplit: this.lastChartSplit, monthlyBudget: this.getEffectiveMonthlyBudget() };
+    const chartData = { 
+      ...this.buildChartData(dailyStats), 
+      periodsReady, 
+      initialPeriod: this.lastChartPeriod, 
+      initialTimeWindow: this.lastChartTimeWindow, 
+      initialView: this.lastChartView, 
+      initialMetric: this.lastChartMetric, 
+      initialSplit: this.lastChartSplit, 
+      monthlyBudget: this.getEffectiveMonthlyBudget(),
+      localization: this.getWebviewLocalization()
+    };
 
     const initialData = JSON.stringify(chartData).replace(/</g, "\\u003c");
 
@@ -10756,6 +10811,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       copilotApiBalance: this._buildCopilotApiBalance(),
       monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
+      localization: this.getWebviewLocalization(),
     }).replace(/</g, "\\u003c");
   }
 

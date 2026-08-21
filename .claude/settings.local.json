@@ -5,7 +5,8 @@
       "Bash(npm ci *)",
       "Bash(node_modules/.bin/eslint src *)",
       "Bash(node -e ' *)",
-      "Bash(git fetch *)"
+      "Bash(git fetch *)",
+      "Bash(cd \"C:\\\\Users\\\\RobBos\\\\code\\\\repos\\\\rajbos\\\\ai-engineering-fluency-refactor-wt\\\\vscode-extension\" && node_modules/.bin/eslint src --rule '{\"max-lines-per-function\": [\"warn\", 80]}' --format stylish 2>&1 | tail -60)"
     ]
   }
 }

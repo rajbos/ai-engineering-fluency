@@ -3,6 +3,8 @@
  * This ensures consistent button IDs, labels, and icons across all webviews.
  */
 
+import { localize } from './localization';
+
 export type ButtonId = 'btn-refresh' | 'btn-details' | 'btn-chart' | 'btn-usage' | 'btn-diagnostics' | 'btn-maturity' | 'btn-dashboard' | 'btn-level-viewer' | 'btn-environmental' | 'btn-efficiency';
 
 export interface ButtonConfig {
@@ -32,69 +34,69 @@ export interface ButtonConfig {
 export const BUTTONS: Record<ButtonId, ButtonConfig> = {
 	'btn-refresh': {
 		id: 'btn-refresh',
-		label: 'Refresh',
+		label: localize('nav.btnRefresh'),
 		icon: 'refresh',
 		appearance: 'primary'
 	},
 	'btn-details': {
 		id: 'btn-details',
-		label: 'Details',
+		label: localize('nav.btnDetails'),
 		icon: 'robot',
 		iconColor: '#c37bff',
 		appearance: 'secondary'
 	},
 	'btn-chart': {
 		id: 'btn-chart',
-		label: 'Chart',
+		label: localize('nav.btnChart'),
 		icon: 'graph-line',
 		iconColor: '#60a5fa',
 		appearance: 'secondary'
 	},
 	'btn-usage': {
 		id: 'btn-usage',
-		label: 'Usage Analysis',
+		label: localize('nav.btnUsage'),
 		icon: 'graph',
 		iconColor: '#22d3ee',
 		appearance: 'secondary'
 	},
 	'btn-diagnostics': {
 		id: 'btn-diagnostics',
-		label: 'Diagnostics',
+		label: localize('nav.btnDiagnostics'),
 		icon: 'search',
 		iconColor: '#fb7185',
 		appearance: 'secondary'
 	},
 	'btn-maturity': {
 		id: 'btn-maturity',
-		label: 'Fluency Score',
+		label: localize('nav.btnMaturity'),
 		icon: 'target',
 		iconColor: '#fbbf24',
 		appearance: 'secondary'
 	},
 	'btn-dashboard': {
 		id: 'btn-dashboard',
-		label: 'Team Dashboard',
+		label: localize('nav.btnDashboard'),
 		icon: 'organization',
 		iconColor: '#818cf8',
 		appearance: 'secondary'
   },
 	'btn-level-viewer': {
 		id: 'btn-level-viewer',
-		label: 'Level Viewer',
+		label: localize('nav.btnLevelViewer'),
 		icon: 'list-tree',
 		iconColor: '#94a3b8',
 		appearance: 'secondary'
 	},
 	'btn-environmental': {
 		id: 'btn-environmental',
-		label: 'Environmental Impact',
+		label: localize('nav.btnEnvironmental'),
 		icon: 'globe',
 		iconColor: '#4ade80',
 		appearance: 'secondary'
 	},
 	'btn-efficiency': {
 		id: 'btn-efficiency',
-		label: 'Efficiency',
+		label: localize('nav.btnEfficiency'),
 		icon: 'dashboard',
 		iconColor: '#f472b6',
 		appearance: 'secondary'
