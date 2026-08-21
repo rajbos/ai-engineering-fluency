@@ -33,6 +33,9 @@ object CliBridge {
     private const val DEFAULT_TIMEOUT_SECONDS = 120L
     private const val PREFERENCES_KEY_TIMEOUT = "ai-engineering-fluency.cli.timeout.seconds"
 
+    /** Plugin ID; must match the `<id>` in META-INF/plugin.xml. */
+    private const val PLUGIN_ID = "com.github.rajbos.ai-engineering-fluency"
+
     /** Timeout used for CLI invocations; can be overridden (e.g. for "wait longer" retry). */
     @Volatile var timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS
 
@@ -174,7 +177,7 @@ object CliBridge {
 
     /** Plugin version string, used to version the extraction directory so upgrades don't reuse stale binaries. */
     private val pluginVersion: String by lazy {
-        PluginManagerCore.getPlugin(PluginId.getId("com.github.rajbos.ai-engineering-fluency"))
+        PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))
             ?.version
             ?: "unknown"
     }
