@@ -10,6 +10,11 @@
 // `prepareBundledAssets` task below (or by the root build.ps1 orchestrator).
 
 import org.jetbrains.intellij.platform.gradle.TestFrameworkType
+import org.gradle.api.file.DirectoryProperty
+import org.gradle.api.provider.Property
+import org.gradle.api.tasks.Input
+import org.gradle.api.tasks.OutputDirectory
+import org.gradle.api.tasks.TaskAction
 
 plugins {
     // Pinned below CodeQL's Kotlin version ceiling: CodeQL (bundle 2.26.1, used by
@@ -97,6 +102,29 @@ intellijPlatform {
 // user's OS isn't covered.
 // ─────────────────────────────────────────────────────────────────────────────
 
+// Writes the plugin version into a classpath resource so runtime code can read
+// it without touching PluginManagerCore (flagged as internal API by the
+// Marketplace verifier). A typed task keeps this configuration-cache safe.
+abstract class GenerateVersionFileTask : DefaultTask() {
+    @get:Input
+    abstract val pluginVersion: Property<String>
+
+    @get:OutputDirectory
+    abstract val outputDir: DirectoryProperty
+
+    @TaskAction
+    fun generate() {
+        val dir = outputDir.get().asFile
+        dir.mkdirs()
+        dir.resolve("plugin-version.txt").writeText(pluginVersion.get())
+    }
+}
+
+val generatePluginVersionFile by tasks.registering(GenerateVersionFileTask::class) {
+    pluginVersion.set(providers.gradleProperty("pluginVersion"))
+    outputDir.set(layout.buildDirectory.dir("generated/plugin-version"))
+}
+
 val prepareBundledAssets by tasks.registering(Copy::class) {
     description = "Copy webview bundles, vscode-shim, and CLI binaries into plugin resources."
     group = "build"
@@ -146,6 +174,7 @@ sourceSets {
     main {
         resources {
             srcDir(prepareBundledAssets)
+            srcDir(generatePluginVersionFile)
         }
     }
 }
