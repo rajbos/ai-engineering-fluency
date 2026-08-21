@@ -440,7 +440,7 @@ export class AzureResourceService {
 		}
 	}
 
-	private async _saveConfigAndActivate(
+	private async _persistBackendConfig(
 		config: vscode.WorkspaceConfiguration,
 		subscriptionId: string,
 		rgResult: ResourceGroupResult,
@@ -463,8 +463,14 @@ export class AzureResourceService {
 		await config.update('backend.userIdentityMode', profile.userIdentityMode, vscode.ConfigurationTarget.Global);
 		await config.update('backend.authMode', authMode, vscode.ConfigurationTarget.Global);
 		await config.update('backend.enabled', true, vscode.ConfigurationTarget.Global);
+	}
 
-		const finalSettings = this.deps.getSettings();
+	/**
+	 * Verifies data-plane credentials and access. Returns false if activation should stop here
+	 * (either because no Storage Shared Key is set yet, or validation failed) — in both cases
+	 * the appropriate user-facing message and fallback side effects have already been handled.
+	 */
+	private async _activateDataPlaneAccess(finalSettings: BackendSettings): Promise<boolean> {
 		try {
 			const creds = await this.credentialService.getBackendDataPlaneCredentials(finalSettings);
 			if (!creds) {
@@ -473,33 +479,56 @@ export class AzureResourceService {
 				);
 				this.deps.startTimerIfEnabled();
 				await this.deps.updateTokenStats?.();
-				return;
+				return false;
 			}
 			await this.dataPlaneService.ensureTableExists(finalSettings, creds.tableCredential);
 			await this.dataPlaneService.validateAccess(finalSettings, creds.tableCredential);
+			return true;
 		} catch (e: unknown) {
 			vscode.window.showErrorMessage(`Backend sync configured, but access validation failed: ${safeStringifyError(e)}`);
-			return;
+			return false;
 		}
+	}
 
-		if (tableConfig.createEvents.startsWith('Yes')) {
-			try {
-				const creds = await this.credentialService.getBackendDataPlaneCredentials(finalSettings);
-				if (creds) {
-					const endpoint = getAzureTableStorageEndpoint(finalSettings.storageAccount);
-					const serviceClient = new TableServiceClient(endpoint, creds.tableCredential as any);
-					await serviceClient.createTable(finalSettings.eventsTable);
-					this.deps.log(`Created optional events table: ${finalSettings.eventsTable}`);
-				}
-			} catch (e) {
-				this.deps.log(`Optional events table creation failed (non-blocking): ${safeStringifyError(e)}`);
+	private async _createOptionalEventsTable(finalSettings: BackendSettings, tableConfig: TableConfig): Promise<void> {
+		if (!tableConfig.createEvents.startsWith('Yes')) { return; }
+		try {
+			const creds = await this.credentialService.getBackendDataPlaneCredentials(finalSettings);
+			if (creds) {
+				const endpoint = getAzureTableStorageEndpoint(finalSettings.storageAccount);
+				const serviceClient = new TableServiceClient(endpoint, creds.tableCredential as any);
+				await serviceClient.createTable(finalSettings.eventsTable);
+				this.deps.log(`Created optional events table: ${finalSettings.eventsTable}`);
 			}
+		} catch (e) {
+			this.deps.log(`Optional events table creation failed (non-blocking): ${safeStringifyError(e)}`);
 		}
+	}
 
+	private async _finalizeBackendActivation(): Promise<void> {
 		this.deps.startTimerIfEnabled();
 		await this.deps.syncToBackendStore(true);
 		await this.deps.updateTokenStats?.();
 		vscode.window.showInformationMessage('Backend sync configured. Initial sync completed (or queued).');
+	}
+
+	private async _saveConfigAndActivate(
+		config: vscode.WorkspaceConfiguration,
+		subscriptionId: string,
+		rgResult: ResourceGroupResult,
+		storageAccount: string,
+		tableConfig: TableConfig,
+		authMode: BackendAuthMode,
+		profile: SharingProfileResult
+	): Promise<void> {
+		await this._persistBackendConfig(config, subscriptionId, rgResult, storageAccount, tableConfig, authMode, profile);
+
+		const finalSettings = this.deps.getSettings();
+		if (!await this._activateDataPlaneAccess(finalSettings)) { return; }
+
+		await this._createOptionalEventsTable(finalSettings, tableConfig);
+
+		await this._finalizeBackendActivation();
 	}
 
 	/**
