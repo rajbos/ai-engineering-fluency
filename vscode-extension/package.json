@@ -574,7 +574,9 @@
     "fast-uri": ">=4.1.2",
     "qs": ">=6.15.2",
     "serialize-javascript": ">=7.0.3",
-    "undici": "7.29.0",
+    "cheerio": {
+      "undici": "7.29.0"
+    },
     "uuid": "^14.0.0"
   },
   "allowScripts": {
