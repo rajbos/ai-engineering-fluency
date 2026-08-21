@@ -1,7 +1,5 @@
 package com.github.rajbos.aiengineeringfluency
 
-import com.intellij.ide.plugins.PluginManagerCore
-import com.intellij.openapi.extensions.PluginId
 import com.intellij.ide.util.PropertiesComponent
 import com.intellij.openapi.diagnostic.Logger
 import com.intellij.util.io.createDirectories
@@ -32,9 +30,6 @@ object CliBridge {
     private val log = Logger.getInstance(CliBridge::class.java)
     private const val DEFAULT_TIMEOUT_SECONDS = 120L
     private const val PREFERENCES_KEY_TIMEOUT = "ai-engineering-fluency.cli.timeout.seconds"
-
-    /** Plugin ID; must match the `<id>` in META-INF/plugin.xml. */
-    private const val PLUGIN_ID = "com.github.rajbos.ai-engineering-fluency"
 
     /** Timeout used for CLI invocations; can be overridden (e.g. for "wait longer" retry). */
     @Volatile var timeoutSeconds: Long = DEFAULT_TIMEOUT_SECONDS
@@ -177,8 +172,13 @@ object CliBridge {
 
     /** Plugin version string, used to version the extraction directory so upgrades don't reuse stale binaries. */
     private val pluginVersion: String by lazy {
-        PluginManagerCore.getPlugin(PluginId.getId(PLUGIN_ID))
-            ?.version
+        // Version is baked into a classpath resource at build time (see the
+        // generatePluginVersionFile task in build.gradle.kts). Reading the
+        // version from the plugin descriptor would require PluginManagerCore
+        // APIs that the Marketplace verifier flags as internal.
+        CliBridge::class.java.getResourceAsStream("/plugin-version.txt")
+            ?.bufferedReader()?.use { it.readText().trim() }
+            ?.takeIf { it.isNotBlank() }
             ?: "unknown"
     }
 
