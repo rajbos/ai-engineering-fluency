@@ -530,7 +530,7 @@
   },
   "devDependencies": {
     "@github/copilot": "^1.0.80",
-    "@stryker-mutator/core": "^9.6.1",
+    "@stryker-mutator/core": "^10.0.0",
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.2.0",
     "@types/sql.js": "1.4.11",
