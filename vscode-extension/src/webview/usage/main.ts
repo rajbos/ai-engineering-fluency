@@ -5,6 +5,7 @@ import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
 import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -280,8 +281,15 @@ function traceCurationOnce(key: string, stage: string, details?: Record<string, 
 }
 
 type WorktreeBackgroundScanData = { scannedAt: string; totalBytes: number; worktreeCount: number; worktrees: unknown[] };
-type InitialUsageData = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null; missedPotential?: MissedPotentialWorkspace[]; worktreeScanRoots?: string[]; worktreeBackgroundScan?: WorktreeBackgroundScanData | null };
+type InitialUsageData = UsageAnalysisStats & { customizationMatrix?: WorkspaceCustomizationMatrix | null; missedPotential?: MissedPotentialWorkspace[]; worktreeScanRoots?: string[]; localization?: Record<string, string>; worktreeBackgroundScan?: WorktreeBackgroundScanData | null };
 const initialData = getWindowData<InitialUsageData>('__INITIAL_USAGE__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 let hygieneMatrixState: WorkspaceCustomizationMatrix | null = null;
 const repoAnalysisState = new Map<string, RepoAnalysisRecord>();
 let selectedRepoPath: string | null = null;

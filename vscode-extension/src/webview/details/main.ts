@@ -4,6 +4,7 @@ import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumb
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -113,10 +114,16 @@ declare global {
 }
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = getWindowData<DetailedStats>('__INITIAL_DETAILS__');
+const initialData = getWindowData<DetailedStats & { localization?: Record<string, string> }>('__INITIAL_DETAILS__');
 console.log('[CopilotTokenTracker] details webview loaded');
-console.log('[CopilotTokenTracker] initialData:', initialData);
-console.log('[CopilotTokenTracker] initialData:', initialData);
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+	console.log('[CopilotTokenTracker] Webview localization initialized for language:', language);
+}
 
 const _initSort = initialData?.sortSettings;
 let editorSortKey: TableSortKey = (_initSort?.editor?.key as TableSortKey) ?? 'name';
@@ -398,8 +405,14 @@ function buildMetricsGroups(stats: DetailedStats, projections: Projections): Met
 		{ label: 'Service overhead %', icon: '☁️', color: '#90a4ae', today: serviceOverheadPct(stats.today), last30Days: serviceOverheadPct(stats.last30Days), month: serviceOverheadPct(stats.month), lastMonth: serviceOverheadPct(stats.lastMonth), projected: '—' },
 		{ label: 'Thinking tokens', icon: '🧠', color: '#a78bfa', today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: '—' },
 	];
-	const costRows: MetricRow[] = [
+	// With GitHub Copilot as the only provider the "selected providers" row is just a
+	// duplicate of the Copilot UBB row below it, so drop it — same reasoning as the
+	// "Cost by Provider" panel hiding itself when there is nothing to compare.
+	const selectedProvidersCostRows: MetricRow[] = isCopilotOnlyProviders(allProviders) ? [] : [
 		{ label: 'Estimated cost (selected providers)', labelTooltip: 'Sum of estimated cost across the providers selected in the Cost by Provider filter below — GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.', icon: '💵', color: '#7ce38b', today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) },
+	];
+	const costRows: MetricRow[] = [
+		...selectedProvidersCostRows,
 		{ label: 'Estimated cost (GitHub Copilot UBB)', labelTooltip: 'Based on GitHub Copilot AI Credit rates (1 credit = $0.01) — this is what Copilot will bill you. UBB = Usage Based Billing.', icon: '🟢', color: '#7ce38b', today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) },
 	];
 	const activityRows: MetricRow[] = [
@@ -595,6 +608,15 @@ if (a === 'GitHub Copilot') { return -1; }
 if (b === 'GitHub Copilot') { return 1; }
 return a.localeCompare(b);
 });
+}
+
+/**
+ * Whether GitHub Copilot is the only provider in play — either it is the single billing
+ * group seen, or there is no billing-group breakdown at all (older cached stats, which
+ * fall back to the Copilot-only estimate).
+ */
+function isCopilotOnlyProviders(allProviders: string[]): boolean {
+	return allProviders.every(p => p === 'GitHub Copilot');
 }
 
 /** Providers currently selected (not filtered out) from the given full provider list. */

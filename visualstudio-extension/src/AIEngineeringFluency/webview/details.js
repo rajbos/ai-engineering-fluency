@@ -2560,8 +2560,11 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       { label: "Service overhead %", icon: "\u2601\uFE0F", color: "#90a4ae", today: serviceOverheadPct(stats.today), last30Days: serviceOverheadPct(stats.last30Days), month: serviceOverheadPct(stats.month), lastMonth: serviceOverheadPct(stats.lastMonth), projected: "\u2014" },
       { label: "Thinking tokens", icon: "\u{1F9E0}", color: "#a78bfa", today: formatCompact(stats.today.thinkingTokens || 0), last30Days: formatCompact(stats.last30Days.thinkingTokens || 0), month: formatCompact(stats.month.thinkingTokens || 0), lastMonth: formatCompact(stats.lastMonth.thinkingTokens || 0), projected: "\u2014" }
     ];
+    const selectedProvidersCostRows = isCopilotOnlyProviders(allProviders) ? [] : [
+      { label: "Estimated cost (selected providers)", labelTooltip: "Sum of estimated cost across the providers selected in the Cost by Provider filter below \u2014 GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.", icon: "\u{1F4B5}", color: "#7ce38b", today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) }
+    ];
     const costRows = [
-      { label: "Estimated cost (selected providers)", labelTooltip: "Sum of estimated cost across the providers selected in the Cost by Provider filter below \u2014 GitHub Copilot uses UBB AI Credit rates, other providers use their own API pricing.", icon: "\u{1F4B5}", color: "#7ce38b", today: formatCost(totalCostForPeriod(stats.today, allProviders)), last30Days: formatCost(totalCostForPeriod(stats.last30Days, allProviders)), month: formatCost(totalCostForPeriod(stats.month, allProviders)), lastMonth: formatCost(totalCostForPeriod(stats.lastMonth, allProviders)), projected: formatCost(projections.projectedCost) },
+      ...selectedProvidersCostRows,
       { label: "Estimated cost (GitHub Copilot UBB)", labelTooltip: "Based on GitHub Copilot AI Credit rates (1 credit = $0.01) \u2014 this is what Copilot will bill you. UBB = Usage Based Billing.", icon: "\u{1F7E2}", color: "#7ce38b", today: formatCost(stats.today.estimatedCostCopilot ?? 0), last30Days: formatCost(stats.last30Days.estimatedCostCopilot ?? 0), month: formatCost(stats.month.estimatedCostCopilot ?? 0), lastMonth: formatCost(stats.lastMonth.estimatedCostCopilot ?? 0), projected: formatCost(projections.projectedCostCopilot ?? 0) }
     ];
     const activityRows = [
@@ -2727,6 +2730,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       }
       return a3.localeCompare(b3);
     });
+  }
+  function isCopilotOnlyProviders(allProviders) {
+    return allProviders.every((p3) => p3 === "GitHub Copilot");
   }
   function includedProviders(allProviders) {
     return allProviders.filter((p3) => !excludedProviders.has(p3));

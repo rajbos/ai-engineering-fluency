@@ -3,6 +3,8 @@
  * This ensures consistent button IDs, labels, and icons across all webviews.
  */
 
+import { localize } from './localization';
+
 export type ButtonId = 'btn-refresh' | 'btn-details' | 'btn-chart' | 'btn-usage' | 'btn-diagnostics' | 'btn-maturity' | 'btn-dashboard' | 'btn-level-viewer' | 'btn-environmental' | 'btn-efficiency';
 
 export interface ButtonConfig {
@@ -24,82 +26,101 @@ export interface ButtonConfig {
 }
 
 /**
- * Navigation button definitions used across all webview panels.
- * Every button besides Refresh renders as `appearance: 'secondary'` (outlined) so the row
- * doesn't read as a wall of identical solid pills; the active view is still picked out via
- * the `.nav-active` treatment in theme.css regardless of this base appearance.
+ * Static button metadata (icon/appearance/etc.) keyed by the l10n key used to resolve the
+ * label, rather than the resolved label string. Every button besides Refresh renders as
+ * `appearance: 'secondary'` (outlined) so the row doesn't read as a wall of identical solid
+ * pills; the active view is still picked out via the `.nav-active` treatment in theme.css
+ * regardless of this base appearance.
  */
-export const BUTTONS: Record<ButtonId, ButtonConfig> = {
+const BUTTON_DEFS: Record<ButtonId, Omit<ButtonConfig, 'label'> & { labelKey: string }> = {
 	'btn-refresh': {
 		id: 'btn-refresh',
-		label: 'Refresh',
+		labelKey: 'nav.btnRefresh',
 		icon: 'refresh',
 		appearance: 'primary'
 	},
 	'btn-details': {
 		id: 'btn-details',
-		label: 'Details',
+		labelKey: 'nav.btnDetails',
 		icon: 'robot',
 		iconColor: '#c37bff',
 		appearance: 'secondary'
 	},
 	'btn-chart': {
 		id: 'btn-chart',
-		label: 'Chart',
+		labelKey: 'nav.btnChart',
 		icon: 'graph-line',
 		iconColor: '#60a5fa',
 		appearance: 'secondary'
 	},
 	'btn-usage': {
 		id: 'btn-usage',
-		label: 'Usage Analysis',
+		labelKey: 'nav.btnUsage',
 		icon: 'graph',
 		iconColor: '#22d3ee',
 		appearance: 'secondary'
 	},
 	'btn-diagnostics': {
 		id: 'btn-diagnostics',
-		label: 'Diagnostics',
+		labelKey: 'nav.btnDiagnostics',
 		icon: 'search',
 		iconColor: '#fb7185',
 		appearance: 'secondary'
 	},
 	'btn-maturity': {
 		id: 'btn-maturity',
-		label: 'Fluency Score',
+		labelKey: 'nav.btnMaturity',
 		icon: 'target',
 		iconColor: '#fbbf24',
 		appearance: 'secondary'
 	},
 	'btn-dashboard': {
 		id: 'btn-dashboard',
-		label: 'Team Dashboard',
+		labelKey: 'nav.btnDashboard',
 		icon: 'organization',
 		iconColor: '#818cf8',
 		appearance: 'secondary'
   },
 	'btn-level-viewer': {
 		id: 'btn-level-viewer',
-		label: 'Level Viewer',
+		labelKey: 'nav.btnLevelViewer',
 		icon: 'list-tree',
 		iconColor: '#94a3b8',
 		appearance: 'secondary'
 	},
 	'btn-environmental': {
 		id: 'btn-environmental',
-		label: 'Environmental Impact',
+		labelKey: 'nav.btnEnvironmental',
 		icon: 'globe',
 		iconColor: '#4ade80',
 		appearance: 'secondary'
 	},
 	'btn-efficiency': {
 		id: 'btn-efficiency',
-		label: 'Efficiency',
+		labelKey: 'nav.btnEfficiency',
 		icon: 'dashboard',
 		iconColor: '#f472b6',
 		appearance: 'secondary'
 	}
 };
+
+/**
+ * Navigation button definitions used across all webview panels, wrapped in a Proxy so
+ * `label` is resolved via `localize()` on every property access instead of once at module
+ * load time. Resolving eagerly would freeze every label to whatever locale was active when
+ * this module was first evaluated (typically before `initializeWebviewLocalization()` runs),
+ * permanently locking the UI to the default English strings regardless of the active locale.
+ */
+export const BUTTONS: Record<ButtonId, ButtonConfig> = new Proxy({} as Record<ButtonId, ButtonConfig>, {
+	get(_target, prop): ButtonConfig | undefined {
+		const def = BUTTON_DEFS[prop as ButtonId];
+		if (!def) {
+			return undefined;
+		}
+		const { labelKey, ...rest } = def;
+		return { ...rest, label: localize(labelKey) };
+	}
+});
 
 /**
  * Helper function to get button configuration by ID.

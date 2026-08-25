@@ -61,6 +61,119 @@ The entire extension's logic is contained within the `CopilotTokenTracker` class
 
 > ⚠️ **Common mistake**: The `edit` tool's old_str/new_str replacement can accidentally drop comment delimiters (e.g. `/**` opening a JSDoc block) when the match boundary falls exactly at that line. After editing `tokenEstimation.ts` or any file with JSDoc comments, always verify the file compiles before committing.
 
+## Localization
+
+The extension supports localization for all user-facing strings, including commands, configuration, status bar, and webview UI elements. Currently, Simplified Chinese (zh-CN) translations are provided alongside the base English strings.
+
+### Localization Files
+
+- **`package.nls.json`**: Base English strings. Contains all localizable text with descriptive keys.
+- **`package.nls.zh-cn.json`**: Simplified Chinese translations. Must contain all keys from `package.nls.json`.
+- **`package.json`**: References localization files via `__metadata.localization` and uses `%key%` syntax for localizable strings.
+
+> ⚠️ **`package.nls*.json` files must be strict JSON** — VS Code's localization loader does not tolerate `//` comments or trailing commas. Don't add comments to these files even for section organization; use blank lines to group related keys instead.
+
+### Adding New Localizable Strings
+
+**For package.json entries** (commands, configuration, display names):
+1. Add a new key to `package.nls.json` with the English text
+2. Add the same key to `package.nls.zh-cn.json` with the Chinese translation
+3. Update `package.json` to reference the key using `%key%` syntax
+
+Example:
+
+**`package.nls.json`**:
+```json
+{
+  "command.myCommand.title": "My Command"
+}
+```
+
+**`package.nls.zh-cn.json`**:
+```json
+{
+  "command.myCommand.title": "我的命令"
+}
+```
+
+**`package.json`**:
+```json
+{
+  "contributes": {
+    "commands": [{
+      "command": "aiEngineeringFluency.myCommand",
+      "title": "%command.myCommand.title%"
+    }]
+  }
+}
+```
+
+**For runtime strings in TypeScript code**:
+Use the VS Code localization API:
+```typescript
+import * as vscode from 'vscode';
+const l10n = vscode.l10n;
+
+// Use l10n.t() with the same key from package.nls.json
+const message = l10n.t('command.myCommand.message');
+```
+
+### Webview Localization
+
+Webviews receive localized strings from the extension via the initial data passed when creating the panel. The shared localization module in `src/webview/shared/localization.ts` handles string lookup.
+
+**To add localization to a webview**:
+1. Import the localization module in the webview's main.ts:
+```typescript
+import { initializeWebviewLocalization, localize } from '../shared/localization';
+```
+
+2. Extract localization data from window initial data and initialize:
+```typescript
+const vscode = acquireVsCodeApi();
+const initialData = window.initialData;
+initializeWebviewLocalization(initialData.localization);
+```
+
+3. Use `localize()` function for UI strings:
+```typescript
+const button = document.createElement('button');
+button.textContent = localize('button.refresh.label');
+```
+
+4. Update the extension code to pass localization data when creating the webview HTML. In `extension.ts`, add the localization strings to the initial data:
+```typescript
+const localization = this.getWebviewLocalization();
+const html = this.getSomeViewHtml(..., { localization });
+```
+
+5. Add the new webview strings to `package.nls.json` and `package.nls.zh-cn.json`:
+
+**`package.nls.json`**:
+```json
+{
+  "webview.button.refresh.label": "Refresh"
+}
+```
+
+**`package.nls.zh-cn.json`**:
+```json
+{
+  "webview.button.refresh.label": "刷新"
+}
+```
+
+### Adding a New Language
+
+1. Create a new file `package.nls.<locale>.json` (e.g., `package.nls.fr.json` for French)
+2. Copy all keys from `package.nls.json` and provide translations
+3. Update `package.json` `__metadata.localization` to include the new locale:
+```json
+"__metadata": {
+  "localization": ["zh-cn", "fr"]
+}
+```
+
 ## Development Guidelines
 
 - **Minimal Changes**: Only modify files that are directly needed for the actual changes being implemented. Avoid touching unrelated files, configuration files, or dependencies unless absolutely necessary for the feature or fix.
