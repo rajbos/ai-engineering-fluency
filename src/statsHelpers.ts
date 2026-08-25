@@ -8,6 +8,7 @@
 import type { ModelUsage, EditorUsage, DailyTokenStats, SessionFileCache, LanguageUsage, DailyRollupEntry } from './types';
 import { isUnsafeObjectKey } from './utils/protoGuard';
 import { toLocalDayKey } from './utils/dayKeys';
+import { getCustomProviderGroup } from './webview/shared/modelUtils';
 
 /**
  * Editor display names that bill through GitHub Copilot's AI-Credit system.
@@ -611,6 +612,22 @@ function addToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: n
 	}
 }
 
+/**
+ * Drops models served by a user-configured custom endpoint (BYOK) from a model-usage map.
+ * Those requests go straight to the user's own endpoint with their own key, so they are
+ * billed by that provider and must stay out of the GitHub Copilot cost estimate — they are
+ * reported under their own provider group instead.
+ */
+function withoutCustomEndpointModels(modelUsage: ModelUsage): ModelUsage {
+	const entries = Object.entries(modelUsage);
+	if (!entries.some(([model]) => getCustomProviderGroup(model))) { return modelUsage; }
+	const filtered: ModelUsage = {};
+	for (const [model, usage] of entries) {
+		if (!getCustomProviderGroup(model)) { filtered[model] = usage; }
+	}
+	return filtered;
+}
+
 function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: number, actual: number, thinking: number, cached: number, interactions: number, countSession: boolean, editorType: string, modelUsage: ModelUsage, copilotExactCostDollars?: number): void {
 	acc.tokens += tokens; acc.estimatedTokens += estimated; acc.actualTokens += actual;
 	acc.thinkingTokens += thinking; acc.cachedTokens += cached; acc.interactions += interactions;
@@ -625,7 +642,7 @@ function accumulatePeriod(acc: PeriodAccumulator, tokens: number, estimated: num
 		// Only Copilot surfaces feed the Copilot cost-estimate fallback; sessions from
 		// other tools (Claude Code, Gemini CLI, …) bill their own provider and would
 		// otherwise inflate the estimated GitHub Copilot spend.
-		addModelUsage(acc.modelUsageNoExact, modelUsage);
+		addModelUsage(acc.modelUsageNoExact, withoutCustomEndpointModels(modelUsage));
 	}
 }
 

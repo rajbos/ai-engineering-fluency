@@ -7,6 +7,7 @@
  */
 import { calculateEstimatedCost } from '../../src/tokenEstimation';
 import { normalizePathForComparison, detectClaudeCodeEditorVariant } from '../../src/workspaceHelpers';
+import { getCustomProviderGroup } from '../../src/webview/shared/modelUtils';
 import { createEmptyContextRefs } from '../../src/tokenEstimation';
 import type { ModelUsage, ModelPricing, PeriodStats, UsageAnalysisPeriod } from '../../src/types';
 export type { PeriodStats, UsageAnalysisPeriod } from '../../src/types';
@@ -79,12 +80,17 @@ function getPricingSourceForEditor(editor: string): 'provider' | 'copilot' {
 }
 
 function getModelBillingProvider(modelId: string): string {
+	const customGroup = getCustomProviderGroup(modelId);
+	if (customGroup) { return customGroup; }
 	const id = modelId.toLowerCase();
 	const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
 	return match ? match[1] : 'Other';
 }
 
+/** Custom endpoints (BYOK) bill the user's own provider, so they keep their own group on Copilot surfaces too. */
 function getBillingGroup(editor: string, modelId: string): string {
+	const customGroup = getCustomProviderGroup(modelId);
+	if (customGroup) { return customGroup; }
 	return COPILOT_EDITOR_NAMES.has(editor) ? 'GitHub Copilot' : getModelBillingProvider(modelId);
 }
 

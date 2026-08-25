@@ -1038,6 +1038,29 @@ assert.deepEqual(result.monthStats.modelUsageNoExact['gpt-4.1'], { inputTokens: 
 assert.equal(result.monthStats.exactCopilotCostDollars, 0);
 });
 
+test('modelUsageNoExact: custom-endpoint models on a Copilot surface stay out of the Copilot estimate', () => {
+// BYOK/custom endpoints are called with the user's own key, so they are billed by that
+// provider and reported under their own provider group instead of GitHub Copilot.
+const ranges = makeRanges('2025-03-15');
+const usage: ModelUsage = {
+'gpt-4.1': { inputTokens: 100, outputTokens: 50, sessions: 0},
+'customendpoint/Mistral/mistral-medium-latest': { inputTokens: 1_000_000, outputTokens: 500_000, sessions: 0}
+};
+const input: SessionAggregateInput = {
+editorType: 'VS Code',
+mtime: new Date('2025-03-15T10:00:00.000Z').getTime(),
+lastInteraction: '2025-03-15T10:00:00.000Z',
+sessionData: makeSession({ modelUsage: usage, interactions: 1 }),
+};
+const result = aggregatePeriodStats([input], ranges);
+assert.deepEqual(result.monthStats.modelUsageNoExact, { 'gpt-4.1': { inputTokens: 100, outputTokens: 50, sessions: 0} });
+assert.equal(
+result.monthStats.editorModelUsage['VS Code']['customendpoint/Mistral/mistral-medium-latest'].inputTokens,
+1_000_000,
+'still attributed to its own provider group via editorModelUsage'
+);
+});
+
 test('modelUsageNoExact: non-Copilot session does not leak into the Copilot cost estimate (regression)', () => {
 // Claude Code sessions bill Anthropic directly. Before the fix they landed in
 // modelUsageNoExact and were priced at Copilot AI-Credit rates, inflating the
