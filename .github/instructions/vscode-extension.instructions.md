@@ -71,6 +71,8 @@ The extension supports localization for all user-facing strings, including comma
 - **`package.nls.zh-cn.json`**: Simplified Chinese translations. Must contain all keys from `package.nls.json`.
 - **`package.json`**: References localization files via `__metadata.localization` and uses `%key%` syntax for localizable strings.
 
+> ⚠️ **`package.nls*.json` files must be strict JSON** — VS Code's localization loader does not tolerate `//` comments or trailing commas. Don't add comments to these files even for section organization; use blank lines to group related keys instead.
+
 ### Adding New Localizable Strings
 
 **For package.json entries** (commands, configuration, display names):
@@ -79,18 +81,23 @@ The extension supports localization for all user-facing strings, including comma
 3. Update `package.json` to reference the key using `%key%` syntax
 
 Example:
+
+**`package.nls.json`**:
 ```json
-// package.nls.json
 {
   "command.myCommand.title": "My Command"
 }
+```
 
-// package.nls.zh-cn.json
+**`package.nls.zh-cn.json`**:
+```json
 {
   "command.myCommand.title": "我的命令"
 }
+```
 
-// package.json
+**`package.json`**:
+```json
 {
   "contributes": {
     "commands": [{
@@ -141,9 +148,17 @@ const html = this.getSomeViewHtml(..., { localization });
 ```
 
 5. Add the new webview strings to `package.nls.json` and `package.nls.zh-cn.json`:
+
+**`package.nls.json`**:
 ```json
 {
-  "webview.button.refresh.label": "Refresh",
+  "webview.button.refresh.label": "Refresh"
+}
+```
+
+**`package.nls.zh-cn.json`**:
+```json
+{
   "webview.button.refresh.label": "刷新"
 }
 ```

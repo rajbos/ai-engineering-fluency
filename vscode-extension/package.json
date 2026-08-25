@@ -542,7 +542,7 @@
     "@types/mocha": "^10.0.10",
     "@types/node": "^26.2.0",
     "@types/sql.js": "1.4.11",
-    "@types/vscode": "1.125.0",
+    "@types/vscode": "1.134.0",
     "@typescript-eslint/eslint-plugin": "^8.67.0",
     "@typescript-eslint/parser": "^8.42.0",
     "@vscode/vsce": "^3.7.1",
@@ -561,7 +561,7 @@
     "@azure/arm-storage": "^20.1.0",
     "@azure/arm-subscriptions": "^6.0.0",
     "@azure/data-tables": "^13.3.2",
-    "@azure/identity": "^4.13.1",
+    "@azure/identity": "^4.13.2",
     "@azure/storage-blob": "^12.33.0",
     "@msgpack/msgpack": "^3.1.3",
     "@vscode-elements/elements": "^2.5.1",
@@ -571,7 +571,7 @@
     "jsdom": "^30.0.1",
     "jspdf": "4.2.1",
     "pptxgenjs": "4.0.1",
-    "sql.js": "1.14.1"
+    "sql.js": "1.14.2"
   },
   "overrides": {
     "@azure/msal-node": "5.1.4",
@@ -579,10 +579,12 @@
     "brace-expansion": ">=5.0.8",
     "diff": ">=8.0.3",
     "dompurify": ">=3.4.13",
-    "fast-uri": ">=3.1.2",
+    "fast-uri": ">=4.1.2",
     "qs": ">=6.15.2",
     "serialize-javascript": ">=7.0.3",
-    "undici": "7.28.0",
+    "cheerio": {
+      "undici": "7.29.0"
+    },
     "uuid": "^14.0.0"
   },
   "allowScripts": {

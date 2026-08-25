@@ -2,7 +2,6 @@
   "displayName": "AI Engineering Fluency",
   "description": "Track your AI Engineering Fluency — daily and monthly token usage, cost estimates, and AI fluency insights in VS Code.",
 
-  // Commands
   "command.refresh.title": "Refresh Token Usage",
   "command.showDetails.title": "Show Token Usage Details",
   "command.showChart.title": "Show Token Usage Chart",
@@ -31,15 +30,12 @@
   "command.signOutGitHub.title": "Disconnect GitHub",
   "command.checkWindsurfStatus.title": "Check Windsurf Status",
 
-  // Configuration
   "config.title": "AI Engineering Fluency",
 
-  // Display settings
   "config.display.compactNumbers.description": "Show token counts in compact format using K/M suffixes (e.g. 1.5K, 1.2M). When disabled, full numbers are shown (e.g. 1,500, 1,200,000).",
   "config.display.use24HourTime.description": "Show times in 24-hour format (e.g. 14:30). When disabled, 12-hour AM/PM format is used (e.g. 2:30 PM).",
   "config.display.hideAutomaticToolCalls.description": "In the Tool Usage view, hide tools marked \"auto\" (tools Copilot calls automatically, e.g. file reads and searches) so purposeful/intentional tool calls stand out. Disable to show automatic tool calls again.",
 
-  // Status Bar settings
   "config.display.statusBar.showTokens.description": "Controls which token counts are shown in the status bar. Token counts are estimated from session log files.",
   "config.display.statusBar.showTokens.enum.none": "Do not show token counts in the status bar",
   "config.display.statusBar.showTokens.enum.today": "Show today's token count only",
@@ -58,7 +54,6 @@
 
   "config.display.statusBar.monthlyBudget.description": "Monthly AI spend budget in USD. When set above 0, the status bar will change color as you approach the limit: yellow at 75%, orange at 90%, red at 100% or over. Set to 0 to disable budget coloring. Cost is estimated using GitHub Copilot AI-Credit rates.",
 
-  // Backend settings
   "config.backend.enabled.description": "Enable backend sync to an Azure-backed store (default: Azure Storage Tables).",
   "config.backend.backend.description": "Backend sync backend. Supports Azure Storage Tables and self-hosted sharing server.",
   "config.backend.backend.enum.storageTables": "Azure Storage Tables (requires Azure subscription + RBAC setup)",
@@ -98,7 +93,6 @@
   "config.backend.sharingServer.enabled.description": "Enable syncing to the self-hosted Team Server backend. Can run simultaneously with Azure Storage (backend.enabled). Requires backend.sharingServer.endpointUrl to be configured.",
   "config.backend.sharingServer.endpointUrl.description": "Base URL of the self-hosted sharing server (e.g. https://copilot-sharing.example.com). Authentication is handled automatically via your existing GitHub session — no API key needed.",
 
-  // Other settings
   "config.sampleDataDirectory.description": "Screenshot/demo mode: when set to a folder path, overrides all session file scanning and returns only .json/.jsonl files from this directory. Leave empty for normal operation.",
   "config.suppressedUnknownTools.description": "List of tool names to suppress from the 'Unknown Tools Found' section in the Usage Analysis dashboard. Useful for tools you are testing that don't yet have friendly display names.",
   "config.curation.timeWindowDays.description": "Number of days to look back when determining which tools are unused for the Tool Curation analysis.",
@@ -113,7 +107,6 @@
   "config.copilotTokenTracker.windsurf.includeCascadeDetails.description": "Include detailed Cascade trajectory information in Windsurf session analysis.",
   "config.copilotTokenTracker.windsurf.cacheCredentials.description": "Cache Windsurf API credentials to reduce authentication overhead. Credentials are automatically invalidated when Windsurf restarts.",
 
-  // Status bar
   "statusBar.name": "AI Engineering Fluency",
   "statusBar.tooltip": "AI Engineering Fluency — daily and 30-day token usage - Click to open details",
   "statusBar.loadingText": "$(loading~spin) AI Fluency: Loading...",
@@ -160,7 +153,6 @@
   "htmlTitle": "AI Engineering Fluency",
   "htmlTitleChart": "AI Engineering Fluency — Chart",
 
-  // Webview buttons
   "button.refresh": "Refresh",
   "button.details": "Details",
   "button.chart": "Chart",
@@ -170,8 +162,7 @@
   "button.dashboard": "Team Dashboard",
   "button.levelViewer": "Level Viewer",
   "button.environmental": "Environmental Impact",
-  "button.efficiency": "Efficiency",  
-  // Button labels (for webview navigation)
+  "button.efficiency": "Efficiency",
   "nav.btnRefresh": "Refresh",
   "nav.btnDetails": "Details",
   "nav.btnChart": "Chart",
@@ -182,22 +173,19 @@
   "nav.btnLevelViewer": "Level Viewer",
   "nav.btnEnvironmental": "Environmental Impact",
   "nav.btnEfficiency": "Efficiency",
-  // Onboarding messages
   "onboarding.welcome.message": "AI Engineering Fluency tracks your GitHub Copilot usage — token counts, cost estimates, and fluency scores based on how you interact with AI tools.",
   "onboarding.welcome.openFluencyScore": "Open Fluency Score",
   "onboarding.welcome.learnMore": "Learn More",
   "onboarding.diagnostics.message": "AI Engineering Fluency: session files could not be found. Open Diagnostics to investigate.",
   "onboarding.diagnostics.openDiagnostics": "Open Diagnostics",
 
-  // News banners
   "news.fluencyScoreBanner.message": "🎯 New: AI Engineering Fluency Score dashboard — track how deeply your team uses GitHub Copilot across 6 categories and 4 stages.",
   "news.fluencyScoreBanner.open": "Open Fluency Score",
   "news.fluencyScoreBanner.dismiss": "Dismiss",
-  "news.efficiencyTabBanner.message": "� New: Efficiency view — see whether you're working more efficiently with AI over time.",
+  "news.efficiencyTabBanner.message": "⚡ New: Efficiency view — see whether you're working more efficiently with AI over time.",
   "news.efficiencyTabBanner.open": "Open Efficiency",
   "news.efficiencyTabBanner.dismiss": "Dismiss",
 
-  // Insights
   "insights.enabled": "Enable personalized AI usage insights and nudges in the Usage Analysis dashboard and status bar.",
   "insights.toastsEnabled": "Show occasional toast notifications for high-value insights",
   "insights.cadenceDays": "Minimum number of days between insight toast notifications"

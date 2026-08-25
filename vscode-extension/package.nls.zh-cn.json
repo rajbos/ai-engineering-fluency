@@ -2,7 +2,6 @@
   "displayName": "AI 工程熟练度",
   "description": "在 VS Code 中跟踪您的 AI 工程熟练度——每日和每月令牌使用量、成本估算以及 AI 熟练度洞察。",
 
-  // 命令
   "command.refresh.title": "刷新令牌使用量",
   "command.showDetails.title": "显示令牌使用详情",
   "command.showChart.title": "显示令牌使用图表",
@@ -31,15 +30,12 @@
   "command.signOutGitHub.title": "断开 GitHub 连接",
   "command.checkWindsurfStatus.title": "检查 Windsurf 状态",
 
-  // 配置
   "config.title": "AI 工程熟练度",
 
-  // 显示设置
   "config.display.compactNumbers.description": "使用 K/M 后缀显示令牌计数的紧凑格式（例如 1.5K、1.2M）。禁用后，将显示完整数字（例如 1,500、1,200,000）。",
   "config.display.use24HourTime.description": "使用 24 小时格式显示时间（例如 14:30）。禁用后，将使用 12 小时 AM/PM 格式（例如 2:30 PM）。",
   "config.display.hideAutomaticToolCalls.description": "在工具使用视图中，隐藏标记为“auto”的工具（Copilot 自动调用的工具，例如文件读取和搜索），以便突出显示有意图的工具调用。禁用后将再次显示自动工具调用。",
 
-  // 状态栏设置
   "config.display.statusBar.showTokens.description": "控制状态栏中显示哪些令牌计数。令牌计数是从会话日志文件估算的。",
   "config.display.statusBar.showTokens.enum.none": "不在状态栏中显示令牌计数",
   "config.display.statusBar.showTokens.enum.today": "仅显示今日令牌计数",
@@ -58,7 +54,6 @@
 
   "config.display.statusBar.monthlyBudget.description": "每月 AI 支出预算（USD）。设置大于 0 时，状态栏颜色会随着接近限额而变化：75% 时为黄色，90% 时为橙色，100% 或超过时为红色。设置为 0 可禁用预算着色。成本估算使用 GitHub Copilot AI 积分费率。",
 
-  // 后端设置
   "config.backend.enabled.description": "启用到 Azure 支持的存储的后端同步（默认：Azure 存储表）。",
   "config.backend.backend.description": "后端同步后端。支持 Azure 存储表和自托管共享服务器。",
   "config.backend.backend.enum.storageTables": "Azure 存储表（需要 Azure 订阅 + RBAC 设置）",
@@ -98,7 +93,6 @@
   "config.backend.sharingServer.enabled.description": "启用到自托管团队服务器后端的同步。可以与 Azure 存储（backend.enabled）同时运行。需要配置 backend.sharingServer.endpointUrl。",
   "config.backend.sharingServer.endpointUrl.description": "自托管共享服务器的基础 URL（例如 https://copilot-sharing.example.com）。身份验证会通过现有 GitHub 会话自动处理——无需 API 密钥。",
 
-  // 其他设置
   "config.sampleDataDirectory.description": "截图/演示模式：设置为文件夹路径时，将覆盖所有会话文件扫描，仅返回该目录中的 .json/.jsonl 文件。留空即可正常操作。",
   "config.suppressedUnknownTools.description": "要从使用分析仪表板中的“发现未知工具”部分隐藏的工具名称列表。对于您正在测试且尚无友好显示名称的工具很有用。",
   "config.curation.timeWindowDays.description": "确定工具未使用时回顾的天数，用于工具管理分析。",
@@ -113,7 +107,6 @@
   "config.copilotTokenTracker.windsurf.includeCascadeDetails.description": "在 Windsurf 会话分析中包含详细的 Cascade 轨迹信息。",
   "config.copilotTokenTracker.windsurf.cacheCredentials.description": "缓存 Windsurf API 凭据以减少身份验证开销。Windsurf 重新启动时凭据会自动失效。",
 
-  // 状态栏
   "statusBar.name": "AI 工程熟练度",
   "statusBar.tooltip": "AI 工程熟练度 —— 每日和 30 天令牌使用量 - 单击打开详情",
   "statusBar.loadingText": "$(loading~spin) AI 熟练度: 正在加载...",
@@ -160,7 +153,6 @@
   "htmlTitle": "AI 工程熟练度",
   "htmlTitleChart": "AI 工程熟练度 —— 图表",
 
-  // Webview 按钮
   "button.refresh": "刷新",
   "button.details": "详情",
   "button.chart": "图表",
@@ -171,8 +163,7 @@
   "button.levelViewer": "等级查看器",
   "button.environmental": "环境影响",
   "button.efficiency": "效率",
-  
-  // 导航按钮标签（用于 webview 导航）
+
   "nav.btnRefresh": "刷新",
   "nav.btnDetails": "详情",
   "nav.btnChart": "图表",
@@ -184,22 +175,19 @@
   "nav.btnEnvironmental": "环境影响",
   "nav.btnEfficiency": "效率",
 
-  // 入门消息
   "onboarding.welcome.message": "AI 工程熟练度跟踪您的 GitHub Copilot 使用情况——令牌计数、成本估算以及基于您与 AI 工具交互方式的熟练度评分。",
   "onboarding.welcome.openFluencyScore": "打开熟练度评分",
   "onboarding.welcome.learnMore": "了解更多",
   "onboarding.diagnostics.message": "AI 工程熟练度：无法找到会话文件。打开诊断进行调查。",
   "onboarding.diagnostics.openDiagnostics": "打开诊断",
 
-  // 新功能横幅
   "news.fluencyScoreBanner.message": "🎯 新功能：AI 工程熟练度评分仪表板——跟踪您的团队在 6 个类别和 4 个阶段中对 GitHub Copilot 的深度使用情况。",
   "news.fluencyScoreBanner.open": "打开熟练度评分",
   "news.fluencyScoreBanner.dismiss": "关闭",
-  "news.efficiencyTabBanner.message": "� 新功能：效率视图——查看您是否随时间更高效地使用 AI。",
+  "news.efficiencyTabBanner.message": "⚡ 新功能：效率视图——查看您是否随时间更高效地使用 AI。",
   "news.efficiencyTabBanner.open": "打开效率",
   "news.efficiencyTabBanner.dismiss": "关闭",
 
-  // 洞察
   "insights.enabled": "在使用分析仪表板和状态栏中启用个性化 AI 使用洞察和提醒。",
   "insights.toastsEnabled": "显示偶尔的高价值洞察通知",
   "insights.cadenceDays": "洞察通知之间的最少天数"

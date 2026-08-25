@@ -89,6 +89,15 @@ import {
   isToastAllowed as _isToastAllowed,
 } from './insightsEngine';
 
+// --- Worktree background scan (once-daily, leader-only disk-usage scan) ---
+import {
+  shouldRunDailyWorktreeScan as _shouldRunDailyWorktreeScan,
+  shouldNotifyWorktreeFindings as _shouldNotifyWorktreeFindings,
+  formatBytesForNotification as _formatBytesForNotification,
+  sumWorktreeBytes as _sumWorktreeBytes,
+  type WorktreeBackgroundScanResult,
+} from './worktreeBackgroundScan';
+
 // --- Ecosystem adapter types & helpers ---
 import type { OpenCodeDataAccess } from '../../src/opencode';
 import type { CrushDataAccess } from '../../src/crush';
@@ -415,6 +424,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private worktreeScanId: number = 0;
 	// Incremented on each cleanup start/cancel; an in-flight cleanup loop checks this to stop early
 	private worktreeCleanupId: number = 0;
+	// Incremented on each background worktree scan start/dispose; the in-flight drip scan checks this to stop early
+	private backgroundWorktreeScanId: number = 0;
+	// True while a daily background worktree scan is in flight in this window, to avoid starting a second one concurrently
+	private backgroundWorktreeScanRunning: boolean = false;
+	private static readonly WORKTREE_BG_SCAN_STARTED_KEY = 'worktrees.backgroundScan.startedAt';
+	private static readonly WORKTREE_BG_SCAN_RESULT_KEY = 'worktrees.backgroundScan.result';
+	private static readonly WORKTREE_BG_SCAN_NOTIFIED_BYTES_KEY = 'worktrees.backgroundScan.lastNotifiedBytes';
 	private logViewerPanel?: vscode.WebviewPanel;
 	private logViewerSessionFilePath: string = '';
 	private logViewerCurrentData?: SessionLogData;
@@ -713,6 +729,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		await Promise.all(workers);
 		return results;
+	}
+
+	private sleep(ms: number): Promise<void> {
+		return new Promise((resolve) => setTimeout(resolve, ms));
 	}
 
 	/**
@@ -2449,6 +2469,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		try { isLeader = await this.cacheManager.acquireRefreshLock(); }
 		catch (err) { this.warn(`Failed to acquire refresh lock, proceeding as leader: ${err}`); isLeader = true; }
 		this.startRefreshHeartbeat(isLeader);
+
+		// Piggyback the once-daily background worktree scan on the same leader election: only
+		// the window that won this refresh's leader lock may start it, and it runs detached
+		// (drip-throttled, can take far longer than this refresh cycle) so it never blocks it.
+		if (isLeader) { void this.maybeStartBackgroundWorktreeScan(); }
 
 		try {
 			return await this._runRefreshCore(silent, isLeader);
@@ -6666,6 +6691,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'tools', anchor: 'section-tool-curation' });
 	}
 
+	/** Opens the Usage Analysis panel, pushes the latest background worktree scan findings, and activates the Worktrees tab. */
+	public async showUsageAnalysisOnWorktreesTab(): Promise<void> {
+		await this.showUsageAnalysis();
+		this.postWorktreeBackgroundResults();
+		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'worktrees' });
+	}
+
 	private async _handleSuppressUnknownTool(toolName: string): Promise<void> {
 		this.analysisPanel?.webview.postMessage({ command: 'toolSuppressed', toolName });
 		const config = vscode.workspace.getConfiguration('aiEngineeringFluency');
@@ -9433,6 +9465,105 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   /**
+   * Starts the once-daily background worktree scan if it's due and this window is the current
+   * refresh leader. A no-op most of the time (cheap timestamp check); when it does run, it runs
+   * detached from the caller so it never blocks the cache refresh that gated it.
+   */
+  private async maybeStartBackgroundWorktreeScan(): Promise<void> {
+    if (this.backgroundWorktreeScanRunning) { return; }
+    const startedAt = this.context.globalState.get<string>(CopilotTokenTracker.WORKTREE_BG_SCAN_STARTED_KEY);
+    if (!_shouldRunDailyWorktreeScan(startedAt, Date.now())) { return; }
+    const rootPaths = this.buildInitialWorktreeRoots();
+    if (rootPaths.length === 0) { return; }
+
+    this.backgroundWorktreeScanRunning = true;
+    const scanId = ++this.backgroundWorktreeScanId;
+    await this.context.globalState.update(CopilotTokenTracker.WORKTREE_BG_SCAN_STARTED_KEY, new Date().toISOString());
+    this.log(`🌳 Starting daily background worktree scan across ${rootPaths.length} root(s)`);
+    try {
+      await this.runBackgroundWorktreeScan(rootPaths, scanId);
+    } catch (err) {
+      this.warn(`Background worktree scan failed: ${err}`);
+    } finally {
+      this.backgroundWorktreeScanRunning = false;
+    }
+  }
+
+  /**
+   * Drip-scans the given roots at low concurrency with pacing delays between each worktree, so
+   * the scan can run unattended over the course of the day without contending with foreground
+   * disk activity. Reuses the same discovery/enrichment helpers as the interactive Worktrees tab
+   * scan, just with no webview to stream progress to and much gentler throttling.
+   */
+  private async runBackgroundWorktreeScan(rootPaths: string[], scanId: number): Promise<void> {
+    const excludeDirs = new Set(["node_modules", ".git", ".hg", ".svn", "packages", "vendor"]);
+    const isActive = () => scanId === this.backgroundWorktreeScanId;
+    const noop = () => { /* no webview open for this scan — findings are persisted instead */ };
+    const startTime = Date.now();
+
+    const discovered: WorktreeScanResult[] = [];
+    for (const root of rootPaths) {
+      if (!isActive()) { return; }
+      let isDirectory = false;
+      try { isDirectory = (await fs.promises.stat(root)).isDirectory(); } catch { isDirectory = false; }
+      if (!isDirectory) { continue; }
+
+      const gitMarkers: string[] = [];
+      await this.findGitMarkerFiles(root, excludeDirs, gitMarkers, isActive);
+      if (!isActive()) { return; }
+
+      discovered.push(...await this.discoverWorktreesFromMarkers(gitMarkers, root, isActive, noop, startTime, { concurrency: 1, throttleMs: 200 }));
+      if (!isActive()) { return; }
+      await this.sleep(500);
+    }
+
+    await this.enrichWorktrees(discovered, isActive, noop, startTime, { concurrency: 1, throttleMs: 400 });
+    if (!isActive()) { return; }
+
+    await this.finishBackgroundWorktreeScan(discovered);
+  }
+
+  /** Persists the completed background scan and decides whether to surface a findings notification. */
+  private async finishBackgroundWorktreeScan(discovered: WorktreeScanResult[]): Promise<void> {
+    const totalBytes = _sumWorktreeBytes(discovered);
+    const result: WorktreeBackgroundScanResult = {
+      scannedAt: new Date().toISOString(),
+      totalBytes,
+      worktreeCount: discovered.length,
+      worktrees: discovered,
+    };
+    await this.context.globalState.update(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY, result);
+    this.postWorktreeBackgroundResults();
+
+    const lastNotifiedBytes = this.context.globalState.get<number>(CopilotTokenTracker.WORKTREE_BG_SCAN_NOTIFIED_BYTES_KEY);
+    if (_shouldNotifyWorktreeFindings(totalBytes, lastNotifiedBytes)) {
+      await this.context.globalState.update(CopilotTokenTracker.WORKTREE_BG_SCAN_NOTIFIED_BYTES_KEY, totalBytes);
+      this.showWorktreeFindingsNotification(totalBytes, discovered.length);
+    }
+    this.log(`🌳 Background worktree scan complete: ${discovered.length} worktree(s), ${_formatBytesForNotification(totalBytes)}`);
+  }
+
+  /** Native notification pointing the user at the Worktrees tab findings. Fire-and-forget. */
+  private showWorktreeFindingsNotification(totalBytes: number, count: number): void {
+    const sizeLabel = _formatBytesForNotification(totalBytes);
+    void (async () => {
+      const choice = await vscode.window.showInformationMessage(
+        `We found ${sizeLabel} of data hidden in ${count} git worktree${count === 1 ? "" : "s"} that might no longer be needed.`,
+        "Show Me",
+      );
+      if (choice === "Show Me") { await this.showUsageAnalysisOnWorktreesTab(); }
+    })();
+  }
+
+  /** Sends the persisted background scan result to the Usage Analysis webview, if it's open. */
+  private postWorktreeBackgroundResults(): void {
+    if (!this.analysisPanel) { return; }
+    const result = this.context.globalState.get<WorktreeBackgroundScanResult>(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY);
+    if (!result) { return; }
+    void this.analysisPanel.webview.postMessage({ command: "worktreeBackgroundResults", ...result });
+  }
+
+  /**
    * Resolve .git markers to unique worktree roots (cheap, sequential) then fetch cheap git
    * metadata concurrently, streaming each worktree to the webview as soon as it is known.
    */
@@ -9442,7 +9573,10 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     isActive: () => boolean,
     send: (msg: Record<string, unknown>) => void,
     startTime: number,
+    options?: { concurrency?: number; throttleMs?: number },
   ): Promise<WorktreeScanResult[]> {
+    const concurrency = options?.concurrency ?? 8;
+    const throttleMs = options?.throttleMs ?? 0;
     const foundRoots: string[] = [];
     const worktreeRoots: string[] = [];
     let checked = 0;
@@ -9463,7 +9597,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       if (!isActive()) { return; }
       discovered.push(result);
       send({ command: "worktreeFound", worktree: result });
-    }, 8);
+      if (throttleMs) { await this.sleep(throttleMs); }
+    }, concurrency);
     return discovered;
   }
 
@@ -9476,7 +9611,10 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     isActive: () => boolean,
     send: (msg: Record<string, unknown>) => void,
     startTime: number,
+    options?: { concurrency?: number; throttleMs?: number },
   ): Promise<void> {
+    const concurrency = options?.concurrency ?? 4;
+    const throttleMs = options?.throttleMs ?? 0;
     const total = worktrees.length;
     if (total === 0) { return; }
     send({ command: "worktreeEnrichStarted", total, elapsedMs: Date.now() - startTime });
@@ -9489,6 +9627,11 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         this.getWorktreePushedStatus(worktreePath),
       ]);
       if (!isActive()) { return; }
+      // Patch the caller's own objects (not just the webview, which tracks its own copy from
+      // the message below) so callers without a webview — the background scan — still end up
+      // with fully-enriched results in `worktrees` once this resolves.
+      const target = worktrees.find((w) => w.path === worktreePath);
+      if (target) { target.files = stats.files; target.folders = stats.folders; target.bytes = stats.bytes; target.pushed = pushed; }
       enriched++;
       send({ command: "worktreeEnriched", path: worktreePath, files: stats.files, folders: stats.folders, bytes: stats.bytes, pushed });
       const now = Date.now();
@@ -9496,7 +9639,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         lastPost = now;
         send({ command: "worktreeEnrichProgress", enriched, total, elapsedMs: now - startTime });
       }
-    }, 4);
+      if (throttleMs) { await this.sleep(throttleMs); }
+    }, concurrency);
   }
 
 
@@ -10788,6 +10932,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,
       worktreeScanRoots: this.buildInitialWorktreeRoots(),
       localization: this.getWebviewLocalization(),
+      worktreeBackgroundScan: this.context.globalState.get<WorktreeBackgroundScanResult>(CopilotTokenTracker.WORKTREE_BG_SCAN_RESULT_KEY) ?? null,
     }).replace(/</g, "\\u003c");
   }
 
@@ -10827,6 +10972,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     if (this.updateInterval) {
       clearInterval(this.updateInterval);
     }
+    // Stop any in-flight background worktree scan from doing further disk I/O once disposed.
+    this.backgroundWorktreeScanId++;
     this.stopRefreshHeartbeat();
     if (this._followerResyncTimer) {
       clearTimeout(this._followerResyncTimer);
