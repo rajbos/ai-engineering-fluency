@@ -8,6 +8,10 @@
  * package.nls.json, and that every key referenced from source/package.json
  * actually exists in the base file. Run as part of CI to catch missing
  * translations before merge.
+ *
+ * When running inside GitHub Actions (GITHUB_ACTIONS=true), findings are also
+ * emitted as workflow error/warning annotations pinned to the offending file
+ * and line, so they show up inline on the "Files changed" tab of the PR.
  */
 
 const fs = require('fs');
@@ -54,31 +58,43 @@ function collectFiles(dir, extensions) {
   return results;
 }
 
+/** 1-based line number of `index` within `content`. */
+function lineAt(content, index) {
+  return content.slice(0, index).split('\n').length;
+}
+
+/** 1-based line number of the first `"key":` occurrence in `content`, or undefined if not found. */
+function lineOfKey(content, key) {
+  const escaped = key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const match = new RegExp(`"${escaped}"\\s*:`).exec(content);
+  return match ? lineAt(content, match.index) : undefined;
+}
+
 /** Extract l10n.t('key' ...) / vscode.l10n.t('key' ...) keys referenced from TS source. */
 function findUsedKeysInSource() {
-  const keys = new Set();
+  const found = []; // { key, file, line }
   const pattern = /\bl10n\.t\(\s*['"]([^'"]+)['"]/g;
   for (const file of collectFiles(srcDir, ['.ts'])) {
     if (file.endsWith('.test.ts')) { continue; }
     const content = fs.readFileSync(file, 'utf8');
     let match;
     while ((match = pattern.exec(content)) !== null) {
-      keys.add(match[1]);
+      found.push({ key: match[1], file, line: lineAt(content, match.index) });
     }
   }
-  return keys;
+  return found;
 }
 
 /** Extract %key% placeholders referenced from package.json (contribution point strings). */
 function findUsedKeysInPackageJson() {
-  const keys = new Set();
+  const found = []; // { key, file, line }
   const content = fs.readFileSync(basePackageJsonPath, 'utf8');
   const pattern = /%([a-zA-Z0-9_.]+)%/g;
   let match;
   while ((match = pattern.exec(content)) !== null) {
-    keys.add(match[1]);
+    found.push({ key: match[1], file: basePackageJsonPath, line: lineAt(content, match.index) });
   }
-  return keys;
+  return found;
 }
 
 /** True if a string looks like it contains translatable prose (not just symbols/numbers). */
@@ -86,20 +102,41 @@ function looksTranslatable(value) {
   return typeof value === 'string' && /[A-Za-z]{2,}/.test(value);
 }
 
+/** Escape a value for use as GitHub Actions workflow command data. */
+function escapeData(value) {
+  return String(value).replace(/%/g, '%25').replace(/\r/g, '%0D').replace(/\n/g, '%0A');
+}
+
+/** Escape a value for use as a GitHub Actions workflow command property. */
+function escapeProperty(value) {
+  return escapeData(value).replace(/,/g, '%2C').replace(/:/g, '%3A');
+}
+
+const inGitHubActions = process.env.GITHUB_ACTIONS === 'true';
+
+/** Emit a GitHub Actions error/warning annotation pinned to `file`/`line` (no-op outside CI). */
+function annotate(level, { file, line, message }) {
+  if (!inGitHubActions) { return; }
+  const props = [`file=${escapeProperty(path.relative(repoRoot, file).replace(/\\/g, '/'))}`];
+  if (line) { props.push(`line=${line}`); }
+  console.log(`::${level} ${props.join(',')}::${escapeData(message)}`);
+}
+
 function main() {
   console.log('🔍 Validating VS Code extension localization files...\n');
 
-  const errors = [];
-  const warnings = [];
+  const errors = []; // { message, file, line }
+  const warnings = []; // { message, file, line }
 
-  const baseNls = parseJsonc(fs.readFileSync(baseNlsPath, 'utf8'));
+  const baseContent = fs.readFileSync(baseNlsPath, 'utf8');
+  const baseNls = parseJsonc(baseContent);
   const baseKeys = new Set(Object.keys(baseNls));
 
   // 1. Every key referenced from source/package.json must exist in the base file.
-  const usedKeys = new Set([...findUsedKeysInSource(), ...findUsedKeysInPackageJson()]);
-  for (const key of usedKeys) {
+  const usedKeys = [...findUsedKeysInSource(), ...findUsedKeysInPackageJson()];
+  for (const { key, file, line } of usedKeys) {
     if (!baseKeys.has(key)) {
-      errors.push(`Key "${key}" is referenced but missing from package.nls.json`);
+      errors.push({ file, line, message: `Key "${key}" is referenced but missing from package.nls.json` });
     }
   }
 
@@ -109,48 +146,65 @@ function main() {
     .sort();
 
   if (localeFiles.length === 0) {
-    warnings.push('No package.nls.<locale>.json files found — nothing to compare against the base file.');
+    warnings.push({ file: baseNlsPath, message: 'No package.nls.<locale>.json files found — nothing to compare against the base file.' });
   }
 
   for (const localeFile of localeFiles) {
     const locale = localeFile.replace(/^package\.nls\.|\.json$/g, '');
     const localePath = path.join(vscodeExtDir, localeFile);
-    const localeData = parseJsonc(fs.readFileSync(localePath, 'utf8'));
+    const localeContent = fs.readFileSync(localePath, 'utf8');
+    const localeData = parseJsonc(localeContent);
     const localeKeys = new Set(Object.keys(localeData));
 
     const missing = [...baseKeys].filter((k) => !localeKeys.has(k));
     for (const key of missing) {
-      errors.push(`[${locale}] Missing translation for key "${key}" (present in package.nls.json)`);
+      // Annotate the base file at the key's definition, since that's the line that changed.
+      errors.push({
+        file: baseNlsPath,
+        line: lineOfKey(baseContent, key),
+        message: `Missing "${key}" translation in ${localeFile}`
+      });
     }
 
     const extra = [...localeKeys].filter((k) => !baseKeys.has(k));
     for (const key of extra) {
-      warnings.push(`[${locale}] Stale key "${key}" is not present in package.nls.json`);
+      warnings.push({
+        file: localePath,
+        line: lineOfKey(localeContent, key),
+        message: `Stale key "${key}" is not present in package.nls.json`
+      });
     }
 
     for (const key of localeKeys) {
       if (!baseKeys.has(key)) { continue; }
       const localeValue = localeData[key];
       const baseValue = baseNls[key];
+      const line = lineOfKey(localeContent, key);
       if (looksTranslatable(baseValue) && localeValue === baseValue) {
-        warnings.push(`[${locale}] Key "${key}" looks untranslated (identical to English)`);
+        warnings.push({ file: localePath, line, message: `Key "${key}" looks untranslated (identical to English)` });
       }
       if (typeof localeValue === 'string' && localeValue.trim().length === 0) {
-        errors.push(`[${locale}] Key "${key}" has an empty translation`);
+        errors.push({ file: localePath, line, message: `Key "${key}" has an empty translation` });
       }
     }
   }
 
-  // Print results
+  // Print + annotate results
   if (warnings.length > 0) {
     console.log(`⚠️  ${warnings.length} warning(s):`);
-    for (const w of warnings) { console.log(`   - ${w}`); }
+    for (const w of warnings) {
+      console.log(`   - [${path.relative(repoRoot, w.file)}${w.line ? `:${w.line}` : ''}] ${w.message}`);
+      annotate('warning', w);
+    }
     console.log('');
   }
 
   if (errors.length > 0) {
     console.error(`❌ ${errors.length} error(s):`);
-    for (const e of errors) { console.error(`   - ${e}`); }
+    for (const e of errors) {
+      console.error(`   - [${path.relative(repoRoot, e.file)}${e.line ? `:${e.line}` : ''}] ${e.message}`);
+      annotate('error', e);
+    }
     console.error('\n❌ Localization validation failed!\n');
     process.exit(1);
   }
@@ -163,4 +217,4 @@ if (require.main === module) {
   main();
 }
 
-module.exports = { findUsedKeysInSource, findUsedKeysInPackageJson };
+module.exports = { findUsedKeysInSource, findUsedKeysInPackageJson, lineOfKey };
