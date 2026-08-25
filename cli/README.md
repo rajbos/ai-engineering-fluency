@@ -26,9 +26,10 @@ The `segment` command outputs a compact token usage string designed for use in s
 See [`../omp-segment/README.md`](../omp-segment/README.md) for full setup instructions.
 
 ```bash
-node dist/cli.js segment            # Use 15-minute cache (default)
-node dist/cli.js segment --refresh  # Force refresh, bypass cache
+node dist/cli.js segment              # Use 5-minute cache (default)
+node dist/cli.js segment --refresh    # Force refresh, bypass cache
 node dist/cli.js segment --hide-zero  # Output nothing when both counts are zero
+node dist/cli.js segment --json       # Structured JSON (today/month/30d) instead of the formatted string
 ```
 
 ## Requirements

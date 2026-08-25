@@ -6,10 +6,12 @@ All notable changes to the CLI (@rajbos/ai-engineering-fluency) will be document
 
 ### Features
 - Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the provider cost chart data
+- Add `--json` flag to `segment` command, so oh-my-posh/prompt hooks can get structured per-period token data from the fast, cached `segment` path instead of the uncached `usage --json` command
 
 ### Bug Fixes
 - Fix update sync-host-views skill paths after CopilotTokenTracker rename (#1398)
 - Fix modelSwitching cost model array initialization
+- Fix `posh-hook.ps1` reference hook blocking shell startup for 45-80+ seconds by calling `usage --json` synchronously; it now reads from a cache file and refreshes in a detached background process
 
 ### Maintenance
 - Added unit tests for error handling and CLI utilities (#1375)
