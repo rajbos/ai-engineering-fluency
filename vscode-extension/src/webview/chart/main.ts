@@ -6,6 +6,7 @@ import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { getCurrentPeriodFraction, computeProjectionExtra } from './projectionUtils';
 import { createViewStateManager } from '../shared/viewState';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -99,7 +100,14 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = getWindowData<InitialChartData>('__INITIAL_CHART__');
+const initialData = getWindowData<InitialChartData & { localization?: Record<string, string> }>('__INITIAL_CHART__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 let chart: ChartInstance | undefined;
 let Chart: ChartConstructor | undefined;

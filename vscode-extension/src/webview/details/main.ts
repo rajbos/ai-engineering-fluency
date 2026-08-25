@@ -4,6 +4,7 @@ import { getEditorIcon, getCharsPerToken, formatFixed, formatPercent, formatNumb
 import { el, createButton, iconHeading } from '../shared/domUtils';
 import { getNavButtons } from '../shared/buttonConfig';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
@@ -113,10 +114,16 @@ declare global {
 }
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = getWindowData<DetailedStats>('__INITIAL_DETAILS__');
+const initialData = getWindowData<DetailedStats & { localization?: Record<string, string> }>('__INITIAL_DETAILS__');
 console.log('[CopilotTokenTracker] details webview loaded');
-console.log('[CopilotTokenTracker] initialData:', initialData);
-console.log('[CopilotTokenTracker] initialData:', initialData);
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+	console.log('[CopilotTokenTracker] Webview localization initialized for language:', language);
+}
 
 const _initSort = initialData?.sortSettings;
 let editorSortKey: TableSortKey = (_initSort?.editor?.key as TableSortKey) ?? 'name';

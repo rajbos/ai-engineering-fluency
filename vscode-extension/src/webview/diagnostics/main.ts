@@ -10,6 +10,7 @@ import themeStyles from "../shared/theme.css";
 import styles from "./styles.css";
 import { getWindowData } from "../../../../src/webview/shared/dataLoader";
 import { registerMessageHandler } from "../shared/messageHandler";
+import { initializeWebviewLocalization, setCurrentLanguage } from "../shared/localization";
 
 // Constants
 const LOADING_PLACEHOLDER = "Loading...";
@@ -209,7 +210,14 @@ declare function acquireVsCodeApi<TState = DiagnosticsViewState>(): {
 };
 
 const vscode = acquireVsCodeApi<DiagnosticsViewState>();
-const initialData = getWindowData<DiagnosticsData>('__INITIAL_DIAGNOSTICS__');
+const initialData = getWindowData<DiagnosticsData & { localization?: Record<string, string> }>('__INITIAL_DIAGNOSTICS__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 const diagState = createViewStateManager<DiagnosticsViewState>(vscode, {
   activeTab: undefined,

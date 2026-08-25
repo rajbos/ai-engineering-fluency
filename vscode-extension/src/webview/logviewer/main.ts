@@ -8,6 +8,7 @@ import type { McpToolUsage, ModeUsage, ToolCallUsage } from '../shared/types';
 import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
 // ── Type definitions ──────────────────────────────────────────────────────────
 
@@ -162,7 +163,14 @@ interface Window { __INITIAL_LOGDATA__?: SessionLogData; }
 }
 
 const vscode = acquireVsCodeApi();
-const initialData = getWindowData<SessionLogData>('__INITIAL_LOGDATA__');
+const initialData = getWindowData<SessionLogData & { localization?: Record<string, string> }>('__INITIAL_LOGDATA__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 import { resolveGuidMcpToolName, resolveMcpFamilyToolName } from '../../../../src/utils/toolUtils';
 

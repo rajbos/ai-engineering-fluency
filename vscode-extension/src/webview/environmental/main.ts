@@ -8,6 +8,7 @@ import themeStyles from '../shared/theme.css';
 import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
 // --- Analogy constants ---
 /** Average EU petrol car CO₂ emissions per km (grams) */
@@ -61,7 +62,14 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 type VSCodeApi = ReturnType<typeof acquireVsCodeApi>;
 
 const vscode: VSCodeApi = acquireVsCodeApi();
-const initialData = getWindowData<EnvironmentalStats>('__INITIAL_ENVIRONMENTAL__');
+const initialData = getWindowData<EnvironmentalStats & { localization?: Record<string, string> }>('__INITIAL_ENVIRONMENTAL__');
+
+// Initialize localization for webview
+if (initialData?.localization) {
+	initializeWebviewLocalization(initialData.localization);
+	const language = initialData.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 function calculateProjection(last30DaysValue: number): number {
 	return (last30DaysValue / 30) * 365.25;

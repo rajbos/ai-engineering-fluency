@@ -15,6 +15,7 @@ import type {
 	EfficiencyViewData,
 	SkillImpact,
 } from '../../../../src/efficiencyAnalysis';
+import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
 // Minimal structural types for the dynamically imported Chart.js bundle —
 // a `typeof import('chart.js/auto')` type-import trips TS1542 under CJS resolution.
@@ -28,7 +29,14 @@ declare function acquireVsCodeApi<TState = unknown>(): {
 };
 
 const vscode = acquireVsCodeApi();
-const data = getWindowData<EfficiencyViewData>('__INITIAL_EFFICIENCY__');
+const data = getWindowData<EfficiencyViewData & { localization?: Record<string, string> }>('__INITIAL_EFFICIENCY__');
+
+// Initialize localization for webview
+if (data?.localization) {
+	initializeWebviewLocalization(data.localization);
+	const language = data.localization['__language__'] || 'en';
+	setCurrentLanguage(language);
+}
 
 let Chart: ChartConstructor | undefined;
 const liveCharts: ChartInstance[] = [];

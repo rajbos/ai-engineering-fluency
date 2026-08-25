@@ -56,6 +56,10 @@ jobs:
     - name: Validate JSON files
       working-directory: vscode-extension
       run: npm run lint:json
+
+    - name: Validate localization files
+      working-directory: vscode-extension
+      run: npm run lint:l10n
       
     - name: Run linting
       working-directory: vscode-extension
