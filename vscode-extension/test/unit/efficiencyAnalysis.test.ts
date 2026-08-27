@@ -13,6 +13,8 @@ import {
 	listComparableModels,
 	compareModels,
 	buildModelWeeklySeries,
+	resolveModelCompareWindow,
+	selectDaysInWindow,
 	type EfficiencyDeps,
 	type EfficiencySessionInput,
 } from '../../../src/efficiencyAnalysis';
@@ -672,4 +674,65 @@ test('buildModelWeeklySeries: ignores days outside the requested window', () => 
 	const days = [modelDay('2020-01-01', { kimi: solidModel({}) })];
 	const series = buildModelWeeklySeries(days, 'kimi', NOW, 4);
 	assert.ok(series.every(p => p.metrics === null));
+});
+
+// ── Comparison windows ───────────────────────────────────────────────────────
+
+test('resolveModelCompareWindow: last30 covers the 30 days ending today', () => {
+	const w = resolveModelCompareWindow('last30', NOW);
+	assert.equal(w.startKey, '2026-06-16');
+	assert.equal(w.endKey, '2026-07-15');
+	assert.equal(w.label, 'Last 30 days');
+});
+
+test('resolveModelCompareWindow: prev30 sits immediately before last30 without overlapping', () => {
+	const last = resolveModelCompareWindow('last30', NOW);
+	const prev = resolveModelCompareWindow('prev30', NOW);
+	assert.equal(prev.startKey, '2026-05-17');
+	assert.equal(prev.endKey, '2026-06-15');
+	assert.ok(prev.endKey < last.startKey, 'previous window must end before the last window starts');
+});
+
+test('resolveModelCompareWindow: last90 spans 90 days ending today', () => {
+	const w = resolveModelCompareWindow('last90', NOW);
+	assert.equal(w.startKey, '2026-04-17');
+	assert.equal(w.endKey, '2026-07-15');
+});
+
+test('resolveModelCompareWindow: thisMonth runs from the 1st to today and is labelled by month', () => {
+	const w = resolveModelCompareWindow('thisMonth', NOW);
+	assert.equal(w.startKey, '2026-07-01');
+	assert.equal(w.endKey, '2026-07-15');
+	assert.equal(w.label, 'July 2026');
+});
+
+test('resolveModelCompareWindow: lastMonth covers the whole previous calendar month', () => {
+	const w = resolveModelCompareWindow('lastMonth', NOW);
+	assert.equal(w.startKey, '2026-06-01');
+	assert.equal(w.endKey, '2026-06-30');
+	assert.equal(w.label, 'June 2026');
+});
+
+test('resolveModelCompareWindow: lastMonth rolls back across a year boundary', () => {
+	const w = resolveModelCompareWindow('lastMonth', new Date(2026, 0, 9, 12, 0, 0));
+	assert.equal(w.startKey, '2025-12-01');
+	assert.equal(w.endKey, '2025-12-31');
+	assert.equal(w.label, 'December 2025');
+});
+
+test('selectDaysInWindow: keeps only days inside the window, bounds included', () => {
+	const days = [
+		modelDay('2026-06-30', {}),
+		modelDay('2026-07-01', {}),
+		modelDay('2026-07-10', {}),
+		modelDay('2026-07-15', {}),
+		modelDay('2026-07-16', {}),
+	];
+	const picked = selectDaysInWindow(days, resolveModelCompareWindow('thisMonth', NOW));
+	assert.deepEqual(picked.map(d => d.date), ['2026-07-01', '2026-07-10', '2026-07-15']);
+});
+
+test('selectDaysInWindow: returns nothing when no day falls inside the window', () => {
+	const days = [modelDay('2026-01-05', {}), modelDay('2026-02-05', {})];
+	assert.equal(selectDaysInWindow(days, resolveModelCompareWindow('last30', NOW)).length, 0);
 });

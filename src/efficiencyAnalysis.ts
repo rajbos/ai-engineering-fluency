@@ -859,12 +859,24 @@ const TASK_MIX_DIVERGENCE_THRESHOLD = 0.2;
 const COMPARE_NOISE_PCT = 10;
 
 /**
+ * The minimal slice of a day needed for model comparisons. `DailyTokenStats`
+ * satisfies this shape, so the webview can be handed a trimmed payload instead
+ * of the full daily stats array.
+ */
+export interface ModelDailyInput {
+	/** Local day key, YYYY-MM-DD. */
+	date: string;
+	modelEfficiency?: DailyModelEfficiency;
+	taskCategoryUsage?: { [category: string]: { tokens: number; sessions: number } };
+}
+
+/**
  * Distributes a day's task-category tokens across the models active that day,
  * weighted by each model's share of the day's tokens. Task categories are
  * classified per session, not per model, so this is the closest attribution
  * available — it is used for context only, never to score a model.
  */
-function accumulateTaskMix(day: DailyTokenStats, model: string, target: Map<string, number>): void {
+function accumulateTaskMix(day: ModelDailyInput, model: string, target: Map<string, number>): void {
 	const categories = day.taskCategoryUsage;
 	if (!categories || !day.modelEfficiency) { return; }
 	const dayModelTokens = Object.values(day.modelEfficiency).reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0);
@@ -894,7 +906,7 @@ function gatedRatio(numerator: number, denominator: number, gate = true): number
  * Aggregates one model's daily efficiency entries across `days` into a single
  * comparable profile. Returns null when the model never appears in the window.
  */
-export function computeModelPeriodMetrics(days: DailyTokenStats[], model: string, periodLabel: string): ModelPeriodMetrics | null {
+export function computeModelPeriodMetrics(days: ModelDailyInput[], model: string, periodLabel: string): ModelPeriodMetrics | null {
 	const totals = createEmptyDailyModelEfficiencyEntry();
 	const taskMixRaw = new Map<string, number>();
 	let seen = false;
@@ -963,7 +975,7 @@ export interface ComparableModel {
  * Lists the models present in `days`, most-used first, so the comparison UI can
  * populate its pickers and default to the two most-used comparable models.
  */
-export function listComparableModels(days: DailyTokenStats[]): ComparableModel[] {
+export function listComparableModels(days: ModelDailyInput[]): ComparableModel[] {
 	const totals: DailyModelEfficiency = {};
 	for (const day of days) { mergeDailyModelEfficiency(totals, day.modelEfficiency); }
 	return Object.entries(totals)
@@ -993,13 +1005,13 @@ export interface ModelWeekPoint {
  * was not used carry a null profile (rendered as a gap, not a zero).
  */
 export function buildModelWeeklySeries(
-	days: DailyTokenStats[],
+	days: ModelDailyInput[],
 	model: string,
 	now: Date,
 	weeks = DEFAULT_TREND_WEEKS,
 ): ModelWeekPoint[] {
 	const thisMonday = getMondayOfWeek(now);
-	const buckets: { monday: Date; days: DailyTokenStats[] }[] = [];
+	const buckets: { monday: Date; days: ModelDailyInput[] }[] = [];
 	const indexByKey = new Map<string, number>();
 	for (let i = weeks - 1; i >= 0; i--) {
 		const monday = new Date(thisMonday);
@@ -1022,8 +1034,46 @@ export function buildModelWeeklySeries(
 	});
 }
 
-export type ModelComparisonMetricId =
-	| 'cost-per-edit-turn' | 'cost-per-session' | 'cost-per-kloc' | 'dollars-per-mtokens'
+/** Selectable comparison windows, shared by the extension and the Models tab. */
+export type ModelCompareWindowId = 'last30' | 'prev30' | 'last90' | 'thisMonth' | 'lastMonth';
+
+/** A resolved date window: inclusive `startKey`..`endKey` day keys plus a human label. */
+export interface ModelCompareWindow {
+	id: ModelCompareWindowId;
+	label: string;
+	startKey: string;
+	endKey: string;
+}
+
+/** Resolves a window id into concrete day-key bounds relative to `now`. */
+export function resolveModelCompareWindow(id: ModelCompareWindowId, now: Date): ModelCompareWindow {
+	const monthLabel = (d: Date): string => d.toLocaleDateString('en-US', { month: 'long', year: 'numeric' });
+	const dayOffset = (days: number): Date => new Date(now.getFullYear(), now.getMonth(), now.getDate() - days);
+	switch (id) {
+		case 'last30':
+			return { id, label: 'Last 30 days', startKey: fmtKey(dayOffset(29)), endKey: fmtKey(now) };
+		case 'prev30':
+			return { id, label: 'Previous 30 days', startKey: fmtKey(dayOffset(59)), endKey: fmtKey(dayOffset(30)) };
+		case 'last90':
+			return { id, label: 'Last 90 days', startKey: fmtKey(dayOffset(89)), endKey: fmtKey(now) };
+		case 'thisMonth': {
+			const start = new Date(now.getFullYear(), now.getMonth(), 1);
+			return { id, label: monthLabel(start), startKey: fmtKey(start), endKey: fmtKey(now) };
+		}
+		case 'lastMonth': {
+			const start = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+			const end = new Date(now.getFullYear(), now.getMonth(), 0);
+			return { id, label: monthLabel(start), startKey: fmtKey(start), endKey: fmtKey(end) };
+		}
+	}
+}
+
+/** Filters `days` down to the resolved window (inclusive on both ends). */
+export function selectDaysInWindow(days: ModelDailyInput[], window: ModelCompareWindow): ModelDailyInput[] {
+	return days.filter(d => d.date >= window.startKey && d.date <= window.endKey);
+}
+
+export type ModelComparisonMetricId =	| 'cost-per-edit-turn' | 'cost-per-session' | 'cost-per-kloc' | 'dollars-per-mtokens'
 	| 'tokens-per-edit-turn' | 'tokens-per-session' | 'one-shot-rate' | 'retry-rate'
 	| 'self-correction-rate' | 'cache-read-share' | 'active-minutes-per-session' | 'apply-rate';
 
@@ -1199,6 +1249,14 @@ export interface EfficiencyViewData {
 	skillImpact: SkillImpact[];
 	/** True when any skill invocation was detected in the trend window. */
 	hasSkills: boolean;
+	/**
+	 * Trimmed per-day, per-model efficiency data backing the Models tab. The tab
+	 * recomputes comparisons client-side from this so switching models or windows
+	 * is instant and needs no round trip to the extension host.
+	 */
+	modelDaily: ModelDailyInput[];
+	/** True when at least two models cleared the comparison sample floor. */
+	hasModelComparison: boolean;
 	lastUpdated: string;
 	backendConfigured: boolean;
 	compactNumbers?: boolean;

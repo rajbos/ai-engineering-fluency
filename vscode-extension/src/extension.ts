@@ -174,10 +174,12 @@ import {
   computeCostAttribution as _computeCostAttribution,
   computeEfficiencyDeltas as _computeEfficiencyDeltas,
   computeSkillImpact as _computeSkillImpact,
+  listComparableModels as _listComparableModels,
   computeValueSignals as _computeValueSignals,
   splitTrailingWindows as _splitTrailingWindows,
   type EfficiencySessionInput,
   type EfficiencyViewData,
+  type ModelDailyInput,
   type PeriodVolumeTotals,
 } from '../../src/efficiencyAnalysis';
 
@@ -8155,8 +8157,27 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		return { tokens, sessions, estimatedCost };
 	}
 
-	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {
-		const now = new Date();
+	/**
+	 * Trims the daily stats down to the per-model slice the Models tab needs, over
+	 * the last year so month-vs-month comparisons have history to draw on. Days
+	 * without per-model data are dropped to keep the webview payload small.
+	 */
+	private buildModelDailyPayload(dailyStats: DailyTokenStats[], now: Date): ModelDailyInput[] {
+		const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+		const cutoffKey = toLocalDayKey(cutoff);
+		const payload: ModelDailyInput[] = [];
+		for (const day of dailyStats) {
+			if (day.date < cutoffKey || !day.modelEfficiency || Object.keys(day.modelEfficiency).length === 0) { continue; }
+			payload.push({
+				date: day.date,
+				modelEfficiency: day.modelEfficiency,
+				...(day.taskCategoryUsage ? { taskCategoryUsage: day.taskCategoryUsage } : {}),
+			});
+		}
+		return payload;
+	}
+
+	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {		const now = new Date();
 		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateDailyStats();
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
 		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc);
@@ -8165,6 +8186,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			now,
 		};
 		const weekly = _buildEfficiencyTrends(dailyStats, sessionInputs, deps);
+		const modelDaily = this.buildModelDailyPayload(dailyStats, now);
 		const skillTrends = _buildSkillUsageTrends(sessionInputs, deps);
 		const skillImpact = _computeSkillImpact(sessionInputs);
 		const { prevDays, curDays } = _splitTrailingWindows(dailyStats, now);
@@ -8209,6 +8231,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			skillTrends,
 			skillImpact,
 			hasSkills: skillTrends.totalCalls > 0,
+			modelDaily,
+			hasModelComparison: _listComparableModels(modelDaily).filter(m => m.sampleSufficient).length >= 2,
 			lastUpdated: now.toISOString(),
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),
