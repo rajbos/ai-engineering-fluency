@@ -147,7 +147,9 @@ jobs:
             } >> "$GITHUB_OUTPUT"
           fi
 
-  # ── Type-check & unit tests ───────────────────────────────────────────────────
+  # ── Type-check, unit tests & library build ───────────────────────────────────
+  # The server is also consumed as an npm library by downstream servers, so a broken
+  # lib/ build must fail here rather than at publish time.
   test:
     name: Type-check & unit tests
     runs-on: ubuntu-latest
@@ -178,6 +180,26 @@ jobs:
       - name: Run unit tests
         working-directory: sharing-server
         run: npm test
+
+      - name: Build library (lib/)
+        working-directory: sharing-server
+        run: npm run build:lib
+
+      - name: Verify the published entry point loads
+        working-directory: sharing-server
+        run: |
+          node -e "
+            const api = require('./lib/index.js');
+            for (const name of ['createApp', 'startServer', 'registerSchemaExtension', 'requireBearerAuth', 'getDb']) {
+              if (typeof api[name] !== 'function') {
+                throw new Error('Missing export: ' + name);
+              }
+            }
+            if (typeof api.createApp().fetch !== 'function') {
+              throw new Error('createApp() did not return a Hono app');
+            }
+            console.log('Package entry point OK');
+          "
 
   # ── Build & push container image to GHCR ─────────────────────────────────────
   build:
