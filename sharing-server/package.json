@@ -4,6 +4,31 @@
   "description": "Self-hosted sharing server for AI Engineering Fluency — accepts daily usage uploads from VS Code via GitHub OAuth tokens",
   "license": "MIT",
   "author": "RobBos",
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "default": "./lib/index.js"
+    },
+    "./db": {
+      "types": "./lib/db.d.ts",
+      "default": "./lib/db.js"
+    },
+    "./auth": {
+      "types": "./lib/auth.d.ts",
+      "default": "./lib/auth.js"
+    },
+    "./session": {
+      "types": "./lib/session.d.ts",
+      "default": "./lib/session.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib",
+    "README.md"
+  ],
   "repository": {
     "type": "git",
     "url": "git+https://github.com/rajbos/ai-engineering-fluency.git",
@@ -12,6 +37,8 @@
   "scripts": {
     "build": "node esbuild.js",
     "build:production": "node esbuild.js --production",
+    "build:lib": "tsc -p tsconfig.lib.json",
+    "prepack": "npm run build:lib",
     "start": "node --env-file=.env dist/server.js",
     "dev": "node --env-file=.env --watch dist/server.js",
     "serve": "node esbuild.js && node --env-file=.env --watch dist/server.js",
@@ -23,6 +50,14 @@
   "dependencies": {
     "@hono/node-server": "^2.1.1",
     "hono": "^4.13.3"
+  },
+  "peerDependencies": {
+    "chart.js": "^4.4.7"
+  },
+  "peerDependenciesMeta": {
+    "chart.js": {
+      "optional": true
+    }
   },
   "devDependencies": {
     "@types/node": "^26.2.0",

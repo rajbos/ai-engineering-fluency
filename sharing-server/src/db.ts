@@ -117,6 +117,7 @@ export function getDb(): DatabaseSync {
 			db.exec('PRAGMA journal_mode = WAL');
 			db.exec('PRAGMA foreign_keys = ON');
 			initSchema(db);
+			runSchemaExtensions(db);
 			_db = db;
 		} catch (err) {
 			try { db.close(); } catch { /* ignore */ }
@@ -228,6 +229,44 @@ function initSchema(db: DatabaseSync): void {
 		.all() as unknown as Array<{ name: string }>;
 	if (!userCols.some(c => c.name === 'fluency_score_json')) {
 		db.exec('ALTER TABLE users ADD COLUMN fluency_score_json TEXT');
+	}
+}
+
+export type SchemaExtension = (db: DatabaseSync) => void;
+
+const _schemaExtensions = new Map<string, SchemaExtension>();
+
+/**
+ * Register additional schema (tables, indexes, migrations) owned by a downstream server.
+ *
+ * Downstream tables live alongside the core ones instead of widening `usage_uploads`, so
+ * core migrations and downstream migrations stay independent. Join downstream rows onto
+ * core rows on `(user_id, dataset_id, day, workspace_id, machine_id)` at read time.
+ *
+ * Call this before the first `getDb()`. If the database is already open the extension is
+ * applied immediately. Registering the same `name` twice is a no-op.
+ */
+export function registerSchemaExtension(name: string, fn: SchemaExtension): void {
+	if (_schemaExtensions.has(name)) return;
+	_schemaExtensions.set(name, fn);
+	if (_db) {
+		applySchemaExtension(_db, name, fn);
+	}
+}
+
+function applySchemaExtension(db: DatabaseSync, name: string, fn: SchemaExtension): void {
+	try {
+		fn(db);
+		console.log(`[db] Applied schema extension "${name}"`);
+	} catch (err) {
+		console.error(`[db] Schema extension "${name}" failed:`, err);
+		throw err;
+	}
+}
+
+function runSchemaExtensions(db: DatabaseSync): void {
+	for (const [name, fn] of _schemaExtensions) {
+		applySchemaExtension(db, name, fn);
 	}
 }
 

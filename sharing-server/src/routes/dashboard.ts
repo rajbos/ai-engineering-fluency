@@ -22,14 +22,25 @@ const DEPLOY_SHA    = process.env.DEPLOY_SHA    ?? 'unknown';
 const DEPLOY_BRANCH = process.env.DEPLOY_BRANCH ?? 'unknown';
 const DEPLOY_DATE   = process.env.DEPLOY_DATE   ?? 'unknown';
 
-// Load Chart.js UMD bundle once at startup — copied to dist/ by esbuild.js
-// eslint-disable-next-line @typescript-eslint/no-require-imports
+// Load Chart.js UMD bundle once at startup.
+// Bundled build: esbuild.js copies it next to dist/server.js.
+// Library build: fall back to resolving chart.js from node_modules, since a downstream
+// server consuming this package has its own dist/ layout.
 const _chartJsCode: string = (() => {
-	try {
-		return readFileSync(join(__dirname, 'chart.min.js'), 'utf-8');
-	} catch {
-		return '/* chart.js not bundled — run npm run build in sharing-server/ */';
+	const candidates = [
+		process.env.CHART_JS_PATH,
+		join(__dirname, 'chart.min.js'),
+		join(__dirname, '..', 'chart.min.js'),
+		// Library consumers: chart.js does not export its dist files, so read it directly.
+		join(process.cwd(), 'node_modules', 'chart.js', 'dist', 'chart.umd.min.js'),
+	].filter((p): p is string => Boolean(p));
+
+	for (const candidate of candidates) {
+		try {
+			return readFileSync(candidate, 'utf-8');
+		} catch { /* try next candidate */ }
 	}
+	return '/* chart.js not bundled — run npm run build in sharing-server/ */';
 })();
 
 // ── Auth ─────────────────────────────────────────────────────────────────────
