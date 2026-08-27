@@ -10,9 +10,13 @@ import {
     deriveModelEfficiencyRates,
     createEmptyModelEfficiencyCounters,
     computeEfficiencyLowUsageThreshold,
+    computeModelTokenShares,
+    accumulateDailyModelTokens,
+    accumulateDailyModelCounters,
+    mergeDailyModelEfficiency,
     type EfficiencyTurn,
 } from '../../../src/modelEfficiency';
-import type { ModelEfficiencyUsage, ModelPricing } from '../../../src/types';
+import type { DailyModelEfficiency, DailyModelEfficiencyEntry, ModelEfficiencyCounters, ModelEfficiencyUsage, ModelPricing } from '../../../src/types';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -290,4 +294,151 @@ test('computeEfficiencyLowUsageThreshold: correctly identifies Q1 across larger 
         usage[`model-${i}`] = { ...createEmptyModelEfficiencyCounters(), calls };
     });
     assert.equal(computeEfficiencyLowUsageThreshold(usage), 2);
+});
+
+// ---------------------------------------------------------------------------
+// Daily (time-sliceable) per-model efficiency
+// ---------------------------------------------------------------------------
+
+function counters(overrides: Partial<ModelEfficiencyCounters>): ModelEfficiencyCounters {
+    return { ...createEmptyModelEfficiencyCounters(), ...overrides };
+}
+
+test('computeModelTokenShares: splits by token share and normalizes to 1', () => {
+    const shares = computeModelTokenShares({
+        modelUsage: {
+            'kimi-k3': { inputTokens: 700, outputTokens: 100, sessions: 1 },
+            'gpt-5.5': { inputTokens: 150, outputTokens: 50, sessions: 1 },
+        },
+    });
+    assert.equal(shares.get('kimi-k3'), 0.8);
+    assert.equal(shares.get('gpt-5.5'), 0.2);
+});
+
+test('computeModelTokenShares: falls back to efficiency token counters when modelUsage is empty', () => {
+    const shares = computeModelTokenShares({
+        modelUsage: {},
+        modelEfficiency: {
+            a: counters({ inputTokens: 300, outputTokens: 0 }),
+            b: counters({ inputTokens: 100, outputTokens: 0 }),
+        },
+    });
+    assert.equal(shares.get('a'), 0.75);
+    assert.equal(shares.get('b'), 0.25);
+});
+
+test('computeModelTokenShares: splits equally when no token data exists at all', () => {
+    const shares = computeModelTokenShares({
+        modelEfficiency: { a: counters({ calls: 3 }), b: counters({ calls: 1 }) },
+    });
+    assert.equal(shares.get('a'), 0.5);
+    assert.equal(shares.get('b'), 0.5);
+});
+
+test('computeModelTokenShares: returns an empty map when the session names no model', () => {
+    assert.equal(computeModelTokenShares({ modelUsage: {}, modelEfficiency: {} }).size, 0);
+});
+
+test('accumulateDailyModelCounters: splits duration and LOC by token share, summing back to the session total', () => {
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelCounters(daily, {
+        modelUsage: {
+            'kimi-k3': { inputTokens: 700, outputTokens: 100, sessions: 1 },
+            'gpt-5.5': { inputTokens: 150, outputTokens: 50, sessions: 1 },
+        },
+        modelEfficiency: {
+            'kimi-k3': counters({ calls: 8, editTurns: 5, retries: 2, oneShotEditTurns: 3 }),
+            'gpt-5.5': counters({ calls: 2, editTurns: 1, oneShotEditTurns: 1 }),
+        },
+        activeDurationMs: 600_000,
+        linesAdded: 100,
+        linesRemoved: 50,
+        applies: 10,
+        codeBlocks: 20,
+    });
+
+    // Turn counters are exact per model — never split.
+    assert.equal(daily['kimi-k3'].editTurns, 5);
+    assert.equal(daily['kimi-k3'].retries, 2);
+    assert.equal(daily['gpt-5.5'].editTurns, 1);
+
+    // Session-level signals are split 80/20 by token share.
+    assert.equal(daily['kimi-k3'].activeDurationMs, 480_000);
+    assert.equal(daily['gpt-5.5'].activeDurationMs, 120_000);
+    assert.equal(daily['kimi-k3'].linesAdded, 80);
+    assert.equal(daily['gpt-5.5'].linesAdded, 20);
+    assert.equal(daily['kimi-k3'].codeBlocks, 16);
+
+    // The split is lossless: the parts sum back to the session totals.
+    const sum = (pick: (e: DailyModelEfficiencyEntry) => number): number =>
+        Object.values(daily).reduce((acc, e) => acc + pick(e), 0);
+    assert.equal(sum(e => e.activeDurationMs), 600_000);
+    assert.equal(sum(e => e.linesAdded), 100);
+    assert.equal(sum(e => e.linesRemoved), 50);
+    assert.equal(sum(e => e.applies), 10);
+    assert.equal(sum(e => e.codeBlocks), 20);
+    // One session split across two models is exactly one session equivalent.
+    assert.equal(sum(e => e.sessionShare), 1);
+});
+
+test('accumulateDailyModelCounters: a single-model session attributes everything to that model', () => {
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelCounters(daily, {
+        modelUsage: { 'kimi-k3': { inputTokens: 1000, outputTokens: 200, sessions: 1 } },
+        modelEfficiency: { 'kimi-k3': counters({ calls: 4, editTurns: 3 }) },
+        activeDurationMs: 300_000,
+        linesAdded: 42,
+    });
+    assert.equal(daily['kimi-k3'].sessionShare, 1);
+    assert.equal(daily['kimi-k3'].activeDurationMs, 300_000);
+    assert.equal(daily['kimi-k3'].linesAdded, 42);
+    assert.equal(daily['kimi-k3'].durationSessionShare, 1);
+});
+
+test('accumulateDailyModelCounters: sessions without duration do not inflate the duration denominator', () => {
+    const daily: DailyModelEfficiency = {};
+    const input = { modelUsage: { a: { inputTokens: 100, outputTokens: 0, sessions: 1 } }, modelEfficiency: { a: counters({ calls: 1 }) } };
+    accumulateDailyModelCounters(daily, { ...input, activeDurationMs: 60_000 });
+    accumulateDailyModelCounters(daily, input); // no duration data
+    assert.equal(daily['a'].sessionShare, 2);
+    assert.equal(daily['a'].durationSessionShare, 1);
+    assert.equal(daily['a'].activeDurationMs, 60_000);
+});
+
+test('accumulateDailyModelTokens: adds per-day tokens, cost and session counts', () => {
+    const pricing: { [k: string]: ModelPricing } = {
+        'kimi-k3': { inputCostPerMillion: 1, outputCostPerMillion: 2 } as ModelPricing,
+    };
+    const daily: DailyModelEfficiency = {};
+    accumulateDailyModelTokens(daily, { 'kimi-k3': { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 1 } }, pricing);
+    accumulateDailyModelTokens(daily, { 'kimi-k3': { inputTokens: 1_000_000, outputTokens: 0, sessions: 1 } }, pricing);
+    assert.equal(daily['kimi-k3'].inputTokens, 2_000_000);
+    assert.equal(daily['kimi-k3'].outputTokens, 1_000_000);
+    assert.equal(daily['kimi-k3'].sessions, 2);
+    assert.equal(daily['kimi-k3'].cost, 4); // (1 + 2) + 1
+});
+
+test('mergeDailyModelEfficiency: sums every field when rolling days into a window', () => {
+    const a: DailyModelEfficiency = {};
+    const b: DailyModelEfficiency = {};
+    const input = {
+        modelUsage: { m: { inputTokens: 100, outputTokens: 0, sessions: 1 } },
+        modelEfficiency: { m: counters({ calls: 2, editTurns: 1, retries: 1 }) },
+        activeDurationMs: 1000, linesAdded: 10, applies: 2, codeBlocks: 4,
+    };
+    accumulateDailyModelCounters(a, input);
+    accumulateDailyModelCounters(b, input);
+    mergeDailyModelEfficiency(a, b);
+    assert.equal(a['m'].calls, 4);
+    assert.equal(a['m'].retries, 2);
+    assert.equal(a['m'].sessionShare, 2);
+    assert.equal(a['m'].activeDurationMs, 2000);
+    assert.equal(a['m'].linesAdded, 20);
+    assert.equal(a['m'].codeBlocks, 8);
+});
+
+test('mergeDailyModelEfficiency: tolerates an undefined source', () => {
+    const target: DailyModelEfficiency = {};
+    mergeDailyModelEfficiency(target, undefined);
+    assert.deepEqual(target, {});
 });

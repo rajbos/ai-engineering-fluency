@@ -161,6 +161,11 @@ import {
   mergeModelEfficiencyTokens as _mergeModelEfficiencyTokens,
   type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
+import {
+  accumulateDailyModelTokens as _accumulateDailyModelTokens,
+  accumulateDailyModelCounters as _accumulateDailyModelCounters,
+  buildSessionEfficiencyAttribution as _buildSessionEfficiencyAttribution,
+} from '../../src/modelEfficiency';
 
 // --- Efficiency analysis ---
 import {
@@ -3517,9 +3522,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, sessionData.taskCategory);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
-		if (lastDayKey && (sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
-			const locEntry = dailyStatsMap.get(lastDayKey)!;
-			this.addLocToDailyEntry(locEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
+		if (lastDayKey) {
+			// Session-level signals (turn counters, duration, LOC) describe the whole
+			// session and cannot be split per day, so they land on the last active day —
+			// the same convention the LOC attribution below already uses.
+			this.addModelEfficiencyToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData);
+			if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
+				this.addLocToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
+			}
 		}
 	}
 
@@ -3531,9 +3541,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
 		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategory);
+		this.addModelEfficiencyToDailyEntry(dailyEntry, sessionData);
 		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
 		}
+	}
+
+	/**
+	 * Folds one session's per-model efficiency signals into the day entry, so the
+	 * Efficiency view can compare models over arbitrary time windows. Session-level
+	 * duration/LOC/apply counts are split across the session's models by token share.
+	 */
+	private addModelEfficiencyToDailyEntry(entry: DailyTokenStats, sessionData: SessionFileCache): void {
+		if (!sessionData.usageAnalysis?.modelEfficiency && !sessionData.modelUsage) { return; }
+		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
+		_accumulateDailyModelCounters(entry.modelEfficiency, _buildSessionEfficiencyAttribution(sessionData));
 	}
 
 	private getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dateKey: string): DailyTokenStats {
@@ -3557,6 +3579,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const model of Object.keys(modelUsage)) {
 			entry.modelUsage[model]!.sessions += 1;
 		}
+		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
+		_accumulateDailyModelTokens(entry.modelEfficiency, modelUsage, this.modelPricing);
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
