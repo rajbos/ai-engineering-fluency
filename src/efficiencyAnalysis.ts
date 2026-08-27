@@ -1,5 +1,6 @@
-import type { ApplyButtonUsage, DailyTokenStats, ModelUsage, UsageAnalysisPeriod } from './types';
+import type { ApplyButtonUsage, DailyModelEfficiency, DailyTokenStats, ModelUsage, UsageAnalysisPeriod } from './types';
 import { getModelDisplayName } from './webview/shared/modelUtils';
+import { createEmptyDailyModelEfficiencyEntry, mergeDailyModelEfficiency } from './modelEfficiency';
 
 /**
  * Efficiency analysis — pure computations behind the "Efficiency" view.
@@ -801,6 +802,373 @@ export function computeSkillImpact(sessions: EfficiencySessionInput[]): SkillImp
 		});
 	}
 	return impacts.sort((a, b) => b.withSkill.sessions - a.withSkill.sessions);
+}
+
+// ---------------------------------------------------------------------------
+// Model comparison
+// ---------------------------------------------------------------------------
+
+/**
+ * One model's efficiency profile over a time window, derived from the daily
+ * per-model aggregates. Costs use provider/API rates (the basis carried by
+ * `ModelEfficiencyCounters.cost`), so "cheaper per edit turn" is a statement
+ * about the model, not about a Copilot billing plan.
+ *
+ * Every ratio is null when its denominator is 0 or below the sample floor.
+ */
+export interface ModelPeriodMetrics {
+	model: string;
+	displayName: string;
+	/** Human label for the window this was computed over, e.g. "Aug 2026". */
+	periodLabel: string;
+	sessions: number;
+	/** Token-weighted session equivalents — the denominator for per-session ratios. */
+	sessionShare: number;
+	calls: number;
+	editTurns: number;
+	tokens: number;
+	cost: number;
+	loc: number;
+	costPerEditTurn: number | null;
+	costPerSession: number | null;
+	costPerKloc: number | null;
+	dollarsPerMTokens: number | null;
+	tokensPerEditTurn: number | null;
+	tokensPerSession: number | null;
+	oneShotRate: number | null;
+	retryRate: number | null;
+	selfCorrectionRate: number | null;
+	cacheReadShare: number | null;
+	activeMinutesPerSession: number | null;
+	applyRate: number | null;
+	/** Share of this model's tokens per task category (0..1), for confounder context. */
+	taskMix: { [category: string]: number };
+	/** True when the window carries enough sessions for the ratios to be trusted. */
+	sampleSufficient: boolean;
+	/** True when the window carries enough edit turns for the edit-based rates. */
+	editSampleSufficient: boolean;
+}
+
+/** Minimum session equivalents before a model's period ratios are trusted. */
+const MIN_SESSION_SHARE_FOR_COMPARE = 5;
+/** Minimum edit turns before a model's edit-based rates are trusted. */
+const MIN_EDIT_TURNS_FOR_COMPARE = 10;
+/** Task-mix divergence (in share points) above which a confounder caveat is raised. */
+const TASK_MIX_DIVERGENCE_THRESHOLD = 0.2;
+/** Differences below this percentage are treated as noise, not signal. */
+const COMPARE_NOISE_PCT = 10;
+
+/**
+ * Distributes a day's task-category tokens across the models active that day,
+ * weighted by each model's share of the day's tokens. Task categories are
+ * classified per session, not per model, so this is the closest attribution
+ * available — it is used for context only, never to score a model.
+ */
+function accumulateTaskMix(day: DailyTokenStats, model: string, target: Map<string, number>): void {
+	const categories = day.taskCategoryUsage;
+	if (!categories || !day.modelEfficiency) { return; }
+	const dayModelTokens = Object.values(day.modelEfficiency).reduce((sum, e) => sum + e.inputTokens + e.outputTokens, 0);
+	if (dayModelTokens === 0) { return; }
+	const entry = day.modelEfficiency[model];
+	if (!entry) { return; }
+	const share = (entry.inputTokens + entry.outputTokens) / dayModelTokens;
+	for (const [category, usage] of Object.entries(categories)) {
+		target.set(category, (target.get(category) ?? 0) + usage.tokens * share);
+	}
+}
+
+function normalizeMix(raw: Map<string, number>): { [category: string]: number } {
+	const total = [...raw.values()].reduce((a, b) => a + b, 0);
+	const mix: { [category: string]: number } = {};
+	if (total === 0) { return mix; }
+	for (const [category, value] of raw) { mix[category] = value / total; }
+	return mix;
+}
+
+/** Safe division: null when the denominator is zero or the gate is closed. */
+function gatedRatio(numerator: number, denominator: number, gate = true): number | null {
+	return gate && denominator > 0 ? numerator / denominator : null;
+}
+
+/**
+ * Aggregates one model's daily efficiency entries across `days` into a single
+ * comparable profile. Returns null when the model never appears in the window.
+ */
+export function computeModelPeriodMetrics(days: DailyTokenStats[], model: string, periodLabel: string): ModelPeriodMetrics | null {
+	const totals = createEmptyDailyModelEfficiencyEntry();
+	const taskMixRaw = new Map<string, number>();
+	let seen = false;
+	for (const day of days) {
+		const entry = day.modelEfficiency?.[model];
+		if (!entry) { continue; }
+		seen = true;
+		mergeDailyModelEfficiency({ [model]: totals }, { [model]: entry });
+		accumulateTaskMix(day, model, taskMixRaw);
+	}
+	if (!seen) { return null; }
+
+	const tokens = totals.inputTokens + totals.outputTokens;
+	const loc = totals.linesAdded + totals.linesRemoved;
+	const enoughSessions = totals.sessionShare >= MIN_SESSION_SHARE_FOR_COMPARE;
+	const enoughEdits = totals.editTurns >= MIN_EDIT_TURNS_FOR_COMPARE;
+
+	return {
+		model,
+		displayName: getModelDisplayName(model),
+		periodLabel,
+		sessions: totals.sessions,
+		sessionShare: totals.sessionShare,
+		calls: totals.calls,
+		editTurns: totals.editTurns,
+		tokens,
+		cost: totals.cost,
+		loc,
+		costPerEditTurn: gatedRatio(totals.cost, totals.editTurns, enoughEdits),
+		costPerSession: gatedRatio(totals.cost, totals.sessionShare, enoughSessions),
+		costPerKloc: gatedRatio(totals.cost * 1000, loc, enoughSessions),
+		dollarsPerMTokens: gatedRatio(totals.cost * 1_000_000, tokens),
+		tokensPerEditTurn: gatedRatio(tokens, totals.editTurns, enoughEdits),
+		tokensPerSession: gatedRatio(tokens, totals.sessionShare, enoughSessions),
+		oneShotRate: gatedRatio(totals.oneShotEditTurns, totals.editTurns, enoughEdits),
+		retryRate: gatedRatio(totals.retries, totals.editTurns, enoughEdits),
+		selfCorrectionRate: gatedRatio(totals.selfCorrections, totals.editTurns, enoughEdits),
+		// Capped at 1.0: some providers report cachedReadTokens > inputTokens.
+		cacheReadShare: capShare(gatedRatio(totals.cachedReadTokens, totals.inputTokens)),
+		activeMinutesPerSession: gatedRatio(totals.activeDurationMs / 60_000, totals.durationSessionShare),
+		applyRate: gatedRatio(totals.applies, totals.codeBlocks),
+		taskMix: normalizeMix(taskMixRaw),
+		sampleSufficient: enoughSessions,
+		editSampleSufficient: enoughEdits,
+	};
+}
+
+function capShare(value: number | null): number | null {
+	return value === null ? null : Math.min(1, value);
+}
+
+/** A model that appears in the window, with the volume that decides whether it is worth comparing. */
+export interface ComparableModel {
+	model: string;
+	displayName: string;
+	sessions: number;
+	sessionShare: number;
+	editTurns: number;
+	tokens: number;
+	cost: number;
+	/** True when the model clears the sample floor and can be compared meaningfully. */
+	sampleSufficient: boolean;
+}
+
+/**
+ * Lists the models present in `days`, most-used first, so the comparison UI can
+ * populate its pickers and default to the two most-used comparable models.
+ */
+export function listComparableModels(days: DailyTokenStats[]): ComparableModel[] {
+	const totals: DailyModelEfficiency = {};
+	for (const day of days) { mergeDailyModelEfficiency(totals, day.modelEfficiency); }
+	return Object.entries(totals)
+		.map(([model, e]) => ({
+			model,
+			displayName: getModelDisplayName(model),
+			sessions: e.sessions,
+			sessionShare: e.sessionShare,
+			editTurns: e.editTurns,
+			tokens: e.inputTokens + e.outputTokens,
+			cost: e.cost,
+			sampleSufficient: e.sessionShare >= MIN_SESSION_SHARE_FOR_COMPARE,
+		}))
+		.sort((a, b) => b.tokens - a.tokens);
+}
+
+/** One week of one model's efficiency metrics, for the per-model trend chart. */
+export interface ModelWeekPoint {
+	weekKey: string;
+	label: string;
+	metrics: ModelPeriodMetrics | null;
+}
+
+/**
+ * Builds a weekly series of `model`'s efficiency profile across the trend
+ * window, so a model's own drift over time is visible. Weeks where the model
+ * was not used carry a null profile (rendered as a gap, not a zero).
+ */
+export function buildModelWeeklySeries(
+	days: DailyTokenStats[],
+	model: string,
+	now: Date,
+	weeks = DEFAULT_TREND_WEEKS,
+): ModelWeekPoint[] {
+	const thisMonday = getMondayOfWeek(now);
+	const buckets: { monday: Date; days: DailyTokenStats[] }[] = [];
+	const indexByKey = new Map<string, number>();
+	for (let i = weeks - 1; i >= 0; i--) {
+		const monday = new Date(thisMonday);
+		monday.setDate(thisMonday.getDate() - i * 7);
+		indexByKey.set(fmtKey(monday), buckets.length);
+		buckets.push({ monday, days: [] });
+	}
+
+	for (const day of days) {
+		const parsed = new Date(`${day.date}T00:00:00`);
+		if (Number.isNaN(parsed.getTime())) { continue; }
+		const index = indexByKey.get(fmtKey(getMondayOfWeek(parsed)));
+		if (index === undefined) { continue; }
+		buckets[index].days.push(day);
+	}
+
+	return buckets.map(b => {
+		const label = fmtWeekLabel(b.monday);
+		return { weekKey: fmtKey(b.monday), label, metrics: computeModelPeriodMetrics(b.days, model, label) };
+	});
+}
+
+export type ModelComparisonMetricId =
+	| 'cost-per-edit-turn' | 'cost-per-session' | 'cost-per-kloc' | 'dollars-per-mtokens'
+	| 'tokens-per-edit-turn' | 'tokens-per-session' | 'one-shot-rate' | 'retry-rate'
+	| 'self-correction-rate' | 'cache-read-share' | 'active-minutes-per-session' | 'apply-rate';
+
+/** One metric compared head-to-head between two sides. */
+export interface ModelComparisonRow {
+	id: ModelComparisonMetricId;
+	label: string;
+	/** What the metric means, and why its direction matters. */
+	description: string;
+	a: number | null;
+	b: number | null;
+	unit: DeltaUnit;
+	goodDirection: 'up' | 'down';
+	/** Percent difference of side B vs. side A; null when either side is missing. */
+	deltaPct: number | null;
+	/** Which side is better; 'tie' inside the noise band, null when not computable. */
+	winner: 'a' | 'b' | 'tie' | null;
+	/** True when both sides cleared the sample floor and the gap is outside the noise band. */
+	significant: boolean;
+}
+
+/**
+ * Head-to-head comparison of two efficiency profiles. Both "model A vs model B
+ * over the same window" and "one model, this period vs. last period" produce
+ * this same shape — the caller decides what the two sides mean.
+ */
+export interface ModelComparison {
+	a: ModelPeriodMetrics;
+	b: ModelPeriodMetrics;
+	rows: ModelComparisonRow[];
+	/** Reasons to distrust the comparison (small samples, diverging task mix, …). */
+	caveats: string[];
+	/** Net verdict across the significant rows; null when nothing is significant. */
+	verdict: { winner: 'a' | 'b' | 'tie'; wins: { a: number; b: number } } | null;
+}
+
+function comparisonRow(
+	id: ModelComparisonMetricId,
+	label: string,
+	description: string,
+	a: number | null,
+	b: number | null,
+	unit: DeltaUnit,
+	goodDirection: 'up' | 'down',
+): ModelComparisonRow {
+	let deltaPct: number | null = null;
+	let winner: ModelComparisonRow['winner'] = null;
+	let significant = false;
+	if (a !== null && b !== null && a !== 0) {
+		deltaPct = ((b - a) / Math.abs(a)) * 100;
+		if (Math.abs(deltaPct) < COMPARE_NOISE_PCT) {
+			winner = 'tie';
+		} else {
+			const bIsBetter = goodDirection === 'down' ? b < a : b > a;
+			winner = bIsBetter ? 'b' : 'a';
+			significant = true;
+		}
+	}
+	return { id, label, description, a, b, unit, goodDirection, deltaPct, winner, significant };
+}
+
+/** Total divergence between two task mixes, in share points (0 = identical, 1 = disjoint). */
+function taskMixDivergence(a: { [c: string]: number }, b: { [c: string]: number }): number {
+	const categories = new Set([...Object.keys(a), ...Object.keys(b)]);
+	let divergence = 0;
+	for (const c of categories) { divergence += Math.abs((a[c] ?? 0) - (b[c] ?? 0)); }
+	return divergence / 2;
+}
+
+function buildCaveats(a: ModelPeriodMetrics, b: ModelPeriodMetrics): string[] {
+	const caveats: string[] = [];
+	for (const side of [a, b]) {
+		if (!side.sampleSufficient) {
+			caveats.push(`${side.displayName} (${side.periodLabel}) has only ${side.sessionShare.toFixed(1)} session equivalents — below the ${MIN_SESSION_SHARE_FOR_COMPARE} needed for reliable per-session ratios.`);
+		}
+		if (!side.editSampleSufficient) {
+			caveats.push(`${side.displayName} (${side.periodLabel}) has only ${side.editTurns} edit turns — below the ${MIN_EDIT_TURNS_FOR_COMPARE} needed for reliable retry and one-shot rates.`);
+		}
+	}
+	const divergence = taskMixDivergence(a.taskMix, b.taskMix);
+	if (divergence >= TASK_MIX_DIVERGENCE_THRESHOLD) {
+		caveats.push(`The two sides did different kinds of work (${Math.round(divergence * 100)}% task-mix difference), so part of the gap may reflect the tasks rather than the models.`);
+	}
+	if (a.sessions > a.sessionShare * 1.5 || b.sessions > b.sessionShare * 1.5) {
+		caveats.push('Much of this usage comes from sessions that mixed several models; duration and lines-of-code are split by token share and are therefore approximate.');
+	}
+	return caveats;
+}
+
+function buildVerdict(rows: ModelComparisonRow[]): ModelComparison['verdict'] {
+	const significant = rows.filter(r => r.significant);
+	if (significant.length === 0) { return null; }
+	const wins = {
+		a: significant.filter(r => r.winner === 'a').length,
+		b: significant.filter(r => r.winner === 'b').length,
+	};
+	const winner = wins.a === wins.b ? 'tie' : wins.a > wins.b ? 'a' : 'b';
+	return { winner, wins };
+}
+
+/**
+ * Compares two efficiency profiles metric by metric. Rows whose denominators
+ * fell below the sample floor arrive as nulls (the view renders them as "—"),
+ * and `caveats` explains anything that should temper the conclusion.
+ */
+export function compareModels(a: ModelPeriodMetrics, b: ModelPeriodMetrics): ModelComparison {
+	const rows: ModelComparisonRow[] = [
+		comparisonRow('cost-per-edit-turn', 'Cost per edit turn',
+			'What one round of file edits actually costs. The headline efficiency number.',
+			a.costPerEditTurn, b.costPerEditTurn, 'currency', 'down'),
+		comparisonRow('cost-per-session', 'Cost per session',
+			'Average spend per session, at provider rates.',
+			a.costPerSession, b.costPerSession, 'currency', 'down'),
+		comparisonRow('cost-per-kloc', 'Cost per 1000 lines changed',
+			'Spend per unit of code actually shipped.',
+			a.costPerKloc, b.costPerKloc, 'currency', 'down'),
+		comparisonRow('dollars-per-mtokens', 'Cost per million tokens',
+			'The raw price of the model, before any behavioural differences.',
+			a.dollarsPerMTokens, b.dollarsPerMTokens, 'currency', 'down'),
+		comparisonRow('tokens-per-edit-turn', 'Tokens per edit turn',
+			'How much context the model burns to make one round of edits.',
+			a.tokensPerEditTurn, b.tokensPerEditTurn, 'tokens', 'down'),
+		comparisonRow('tokens-per-session', 'Tokens per session',
+			'Total token appetite per session.',
+			a.tokensPerSession, b.tokensPerSession, 'tokens', 'down'),
+		comparisonRow('one-shot-rate', 'One-shot edit rate',
+			'Share of edit turns finished with no retries and no self-corrections. Higher is better.',
+			a.oneShotRate, b.oneShotRate, 'percent', 'up'),
+		comparisonRow('retry-rate', 'Edit retry rate',
+			'Retries per edit turn — how often an edit fails and is immediately re-attempted.',
+			a.retryRate, b.retryRate, 'ratio', 'down'),
+		comparisonRow('self-correction-rate', 'Self-correction rate',
+			'How often the model goes back to fix its own earlier edit in the same turn.',
+			a.selfCorrectionRate, b.selfCorrectionRate, 'ratio', 'down'),
+		comparisonRow('cache-read-share', 'Cache read share',
+			'Share of input tokens served from the prompt cache. Higher is cheaper.',
+			a.cacheReadShare, b.cacheReadShare, 'percent', 'up'),
+		comparisonRow('active-minutes-per-session', 'Active minutes per session',
+			'Net working time per session, excluding idle gaps.',
+			a.activeMinutesPerSession, b.activeMinutesPerSession, 'minutes', 'down'),
+		comparisonRow('apply-rate', 'Apply rate',
+			'Share of suggested code blocks actually applied — does the output stick?',
+			a.applyRate, b.applyRate, 'percent', 'up'),
+	];
+	return { a, b, rows, caveats: buildCaveats(a, b), verdict: buildVerdict(rows) };
 }
 
 // ---------------------------------------------------------------------------
