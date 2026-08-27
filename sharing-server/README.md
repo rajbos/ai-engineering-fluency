@@ -230,7 +230,7 @@ import {
 	registerSchemaExtension,
 	requireBearerAuth,
 	getDb,
-} from '@rajbos/copilot-sharing-server';
+} from '@rajbos/ai-engineering-fluency-sharing-server';
 import { Hono } from 'hono';
 
 // Runs before the first getDb(), so the table exists at startup.

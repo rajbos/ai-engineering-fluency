@@ -1,10 +1,10 @@
 /**
- * Public entry point for `@rajbos/copilot-sharing-server`.
+ * Public entry point for `@rajbos/ai-engineering-fluency-sharing-server`.
  *
  * Downstream servers compose this package instead of forking it:
  *
  * ```ts
- * import { createApp, startServer, registerSchemaExtension, requireBearerAuth } from '@rajbos/copilot-sharing-server';
+ * import { createApp, startServer, registerSchemaExtension, requireBearerAuth } from '@rajbos/ai-engineering-fluency-sharing-server';
  *
  * registerSchemaExtension('vendor', (db) => db.exec(`CREATE TABLE IF NOT EXISTS ...`));
  *

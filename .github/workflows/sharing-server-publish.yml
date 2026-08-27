@@ -4,7 +4,7 @@ name: Sharing Server - Publish to npm
 # (createApp / startServer / registerSchemaExtension) instead of forking the repo.
 #
 # Uses npm trusted publishing (OIDC) — same as cli-publish.yml — so no NPM_TOKEN
-# secret is needed. Configure the trusted publisher for @rajbos/copilot-sharing-server
+# secret is needed. Configure the trusted publisher for @rajbos/ai-engineering-fluency-sharing-server
 # on npmjs.com pointing at this repository and this workflow file.
 on:
   workflow_dispatch:
@@ -165,7 +165,7 @@ jobs:
           git push origin "sharing-server/bump-version-v${VERSION}"
           gh pr create \
             --title "chore(sharing-server): bump version to v${VERSION}" \
-            --body "Automated version bump after publishing \`@rajbos/copilot-sharing-server@${VERSION}\` to npm." \
+            --body "Automated version bump after publishing \`@rajbos/ai-engineering-fluency-sharing-server@${VERSION}\` to npm." \
             --base main \
             --head "sharing-server/bump-version-v${VERSION}"
 
@@ -218,7 +218,7 @@ jobs:
               echo "- **Dry run:** ${DRY_RUN}"
               echo ""
               if [ "$DRY_RUN" = "false" ]; then
-                echo "Consume with: \`npm install @rajbos/copilot-sharing-server@${VERSION}\`"
+                echo "Consume with: \`npm install @rajbos/ai-engineering-fluency-sharing-server@${VERSION}\`"
                 echo ""
                 if [ "$IS_TAG" = "true" ]; then
                   echo "A GitHub release has been created: sharing-server/v${VERSION}"
