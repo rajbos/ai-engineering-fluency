@@ -67,3 +67,8 @@ graphify-out/*
 
 # Stray/misplaced graphify cache (wrong working directory on a past run)
 src/graphify-out/
+
+# Visual view-diff output (screenshots, diff images and reports produced by
+# .github/skills/visual-view-diff). Regenerable from any checkout — the fixtures
+# that drive the renders are committed, the rendered PNGs are not.
+visual-output/

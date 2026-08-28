@@ -1,0 +1,71 @@
+{
+  "report": "======================================================================\nAI ENGINEERING FLUENCY — DIAGNOSTIC REPORT\n======================================================================\n\nGenerated:            2026-03-14 09:30:00 UTC\nExtension version:    0.0.0-visual-fixture\nVS Code version:      1.134.0\nPlatform:             linux x64\n\n-- Session discovery ------------------------------------------------\nSession folders scanned:   4\nSession files found:       128\nEditors detected:          VS Code, Claude Code, Copilot CLI\n\n-- Token statistics -------------------------------------------------\nTokens (last 30 days):     15,188,800\nSessions (last 30 days):   264\nEstimated cost:            $38.17\n\n-- Cache -------------------------------------------------------------\nCached session entries:    128\nCache size on disk:        4.2 MB\n",
+  "sessionFiles": [
+    {
+      "file": "/home/dev/.copilot/session-state/session-a1b2c3.jsonl",
+      "size": 184320,
+      "modified": "2026-03-14T08:55:00.000Z"
+    },
+    {
+      "file": "/home/dev/.claude/projects/acme-web-app/2026-03-13.jsonl",
+      "size": 96256,
+      "modified": "2026-03-13T17:12:00.000Z"
+    },
+    {
+      "file": "/home/dev/.vscode/workspaceStorage/9f2/chatSessions/session-9f2e.json",
+      "size": 45056,
+      "modified": "2026-03-12T11:40:00.000Z"
+    }
+  ],
+  "cacheInfo": {
+    "entries": 128,
+    "sizeBytes": 4404019,
+    "oldestEntry": "2026-02-12T06:00:00.000Z",
+    "newestEntry": "2026-03-14T08:55:00.000Z"
+  },
+  "backendConfigured": false,
+  "isDebugMode": false,
+  "toolCallStats": {
+    "total": 842,
+    "byTool": {
+      "read_file": 214,
+      "run_in_terminal": 186,
+      "apply_patch": 151,
+      "grep_search": 132,
+      "semantic_search": 98,
+      "create_file": 61
+    },
+    "outputTokensByTool": {
+      "read_file": 412000,
+      "run_in_terminal": 196000,
+      "apply_patch": 88000,
+      "grep_search": 74000,
+      "semantic_search": 132000,
+      "create_file": 21000
+    }
+  },
+  "skillCallStats": {
+    "total": 34,
+    "byName": {
+      "graphify": 19,
+      "code-review": 15
+    }
+  },
+  "sessionFolders": [
+    {
+      "path": "/home/dev/.copilot/session-state",
+      "editor": "Copilot CLI",
+      "fileCount": 52
+    },
+    {
+      "path": "/home/dev/.claude/projects",
+      "editor": "Claude Code",
+      "fileCount": 41
+    },
+    {
+      "path": "/home/dev/.vscode/workspaceStorage",
+      "editor": "VS Code",
+      "fileCount": 35
+    }
+  ]
+}

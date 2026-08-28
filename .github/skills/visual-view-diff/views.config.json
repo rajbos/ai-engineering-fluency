@@ -1,0 +1,101 @@
+{
+  "$comment": [
+    "Registry of the webview panels the visual harness renders.",
+    "",
+    "Each entry mirrors one panel's HTML shell in vscode-extension/src/extension.ts:",
+    "  bundle  — the esbuild entry point name in esbuild.js (dist/webview/<bundle>.js)",
+    "  global  — the window global that shell assigns the view's data to",
+    "  fixture — a JSON file in ./fixtures holding that data",
+    "",
+    "To add a view: add its esbuild entry point name here, capture the data its",
+    "shell passes (the __INITIAL_*__ payload) into a fixture, and run",
+    "`node render-views.js --view <id>` to check it renders.",
+    "",
+    "noiseFloorPixels: how many differing pixels count as run-to-run noise",
+    "rather than a real change. Only views that draw to a <canvas> need it —",
+    "anti-aliasing there is not perfectly reproducible. Omit it (default 0) so",
+    "DOM-rendered views are compared exactly."
+  ],
+  "defaults": {
+    "viewport": { "width": 1280, "height": 900 },
+    "fullPage": true,
+    "settleMs": 1200
+  },
+  "views": [
+    {
+      "id": "details",
+      "title": "Details",
+      "bundle": "details",
+      "global": "__INITIAL_DETAILS__",
+      "fixture": "details.json"
+    },
+    {
+      "id": "environmental",
+      "title": "Environmental Impact",
+      "bundle": "environmental",
+      "global": "__INITIAL_ENVIRONMENTAL__",
+      "fixture": "environmental.json"
+    },
+    {
+      "id": "chart",
+      "title": "Token Usage Over Time",
+      "bundle": "chart",
+      "global": "__INITIAL_CHART__",
+      "fixture": "chart.json",
+      "settleMs": 2000,
+      "noiseFloorPixels": 400
+    },
+    {
+      "id": "fluency-level-viewer",
+      "title": "Fluency Level Viewer",
+      "bundle": "fluency-level-viewer",
+      "global": "__INITIAL_FLUENCY_LEVEL_DATA__",
+      "fixture": "fluency-level-viewer.json"
+    },
+    {
+      "id": "maturity",
+      "title": "Fluency Score",
+      "bundle": "maturity",
+      "global": "__INITIAL_MATURITY__",
+      "fixture": "maturity.json",
+      "noiseFloorPixels": 400
+    },
+    {
+      "id": "usage",
+      "title": "Usage Analysis",
+      "bundle": "usage",
+      "global": "__INITIAL_USAGE__",
+      "fixture": "usage.json"
+    },
+    {
+      "id": "efficiency",
+      "title": "Efficiency",
+      "bundle": "efficiency",
+      "global": "__INITIAL_EFFICIENCY__",
+      "fixture": "efficiency.json"
+    },
+    {
+      "id": "diagnostics",
+      "title": "Diagnostics",
+      "bundle": "diagnostics",
+      "global": "__INITIAL_DIAGNOSTICS__",
+      "fixture": "diagnostics.json"
+    },
+    {
+      "id": "logviewer",
+      "title": "Session Log Viewer",
+      "bundle": "logviewer",
+      "global": "__INITIAL_LOGDATA__",
+      "fixture": "logviewer.json"
+    },
+    {
+      "id": "dashboard",
+      "title": "Team Dashboard",
+      "bundle": "dashboard",
+      "global": "__INITIAL_DASHBOARD__",
+      "fixture": "dashboard.json",
+      "enabled": false,
+      "disabledReason": "Needs a configured team backend to produce meaningful data; the local view regression runner skips it for the same reason."
+    }
+  ]
+}

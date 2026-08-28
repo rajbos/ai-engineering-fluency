@@ -200,6 +200,24 @@ Agent Skills are directories containing a `SKILL.md` file and optional supportin
 - Exit codes: `0` in sync · `1` mechanical drift · `2` config error · `3` NEW views (human decision required)
 - Workflow for refreshing existing screens and the ask-before-adding procedure for new screens, including the navigation wiring needed in each host
 
+### visual-view-diff
+
+**Purpose**: Render the extension's webview panels headlessly, screenshot them, and report which views changed visually against a baseline commit. Produces the images and a Markdown report only — publishing them (a PR comment, a job summary, an artifact) is deliberately a separate concern.
+
+**Use this skill when:**
+- A change touches `vscode-extension/src/webview/**`, the shared webview CSS, or a `get*Html` method in `extension.ts`
+- A refactor is meant to be visually neutral and you want proof
+- You want before/after images of a UI change for a human to review
+
+**Contents:**
+- `visual-diff.js` — builds the baseline commit in a temporary `git worktree` (working tree untouched), builds the working tree, renders both, compares
+- `render-views.js` — renders the configured panels to PNGs from any build (`--dist` / `--repo-root` target another checkout)
+- `diff-screenshots.js` — per-pixel comparison producing diff images plus `report.md` / `report.json`
+- `lib/harness.js` — rebuilds each panel's HTML shell (`#root`, `window.__INITIAL_*__`, JSON config globals, the real bundle) around a committed fixture, with the `--vscode-*` theme tokens VS Code would normally inject
+- `fixtures/` — one JSON payload per view, using fixed timestamps so unchanged code renders byte-identical screenshots
+- Deliberately does **not** launch VS Code or the Extension Development Host, per "Never Launch a Real Editor/IDE Instance" in `.github/copilot-instructions.md` — it renders the real webview bundles instead
+- Requires Playwright + Chromium, found locally or globally rather than added as an extension dependency
+
 ## Using Agent Skills
 
 ### In VS Code

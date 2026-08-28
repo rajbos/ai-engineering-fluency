@@ -1,0 +1,138 @@
+{
+  "file": "/home/dev/.copilot/session-state/session-a1b2c3.jsonl",
+  "title": "Add retry handling to the sync service",
+  "editorSource": "copilot-cli",
+  "editorName": "Copilot CLI",
+  "size": 184320,
+  "modified": "2026-03-14T09:30:00.000Z",
+  "interactions": 3,
+  "contextReferences": {
+    "total": 6,
+    "byType": {
+      "file": 4,
+      "selection": 1,
+      "symbol": 1
+    }
+  },
+  "firstInteraction": "2026-03-14T09:10:00.000Z",
+  "lastInteraction": "2026-03-14T09:22:00.000Z",
+  "turns": [
+    {
+      "turnNumber": 1,
+      "timestamp": "2026-03-14T09:14:00.000Z",
+      "mode": "ask",
+      "userMessage": "Where does the sync service handle transient Azure failures?",
+      "assistantResponse": "The retry path lives in `backend/syncService.ts`. Right now only 429s are retried; connection resets fall straight through to the error handler.",
+      "model": "claude-sonnet-4.5",
+      "toolCalls": [
+        {
+          "toolName": "grep_search",
+          "arguments": "retry"
+        },
+        {
+          "toolName": "read_file",
+          "arguments": "backend/syncService.ts"
+        }
+      ],
+      "contextReferences": {
+        "total": 6,
+        "byType": {
+          "file": 4,
+          "selection": 1,
+          "symbol": 1
+        }
+      },
+      "mcpTools": [],
+      "inputTokensEstimate": 2220,
+      "outputTokensEstimate": 820,
+      "thinkingTokensEstimate": 320
+    },
+    {
+      "turnNumber": 2,
+      "timestamp": "2026-03-14T09:18:00.000Z",
+      "mode": "agent",
+      "userMessage": "Add exponential backoff for connection resets too.",
+      "assistantResponse": "Added a `shouldRetry` helper that treats ECONNRESET and ETIMEDOUT as retryable, with backoff at 2s/4s/8s/16s, and covered it with three unit tests.",
+      "model": "claude-sonnet-4.5",
+      "toolCalls": [
+        {
+          "toolName": "apply_patch"
+        },
+        {
+          "toolName": "run_in_terminal",
+          "arguments": "npm run test:node"
+        }
+      ],
+      "contextReferences": {
+        "total": 6,
+        "byType": {
+          "file": 4,
+          "selection": 1,
+          "symbol": 1
+        }
+      },
+      "mcpTools": [],
+      "inputTokensEstimate": 2640,
+      "outputTokensEstimate": 1000,
+      "thinkingTokensEstimate": 0
+    },
+    {
+      "turnNumber": 3,
+      "timestamp": "2026-03-14T09:22:00.000Z",
+      "mode": "ask",
+      "userMessage": "Does that change the behaviour for 429s?",
+      "assistantResponse": "No — 429s take the same backoff path they already did; the helper only widens which errors qualify.",
+      "model": "gpt-4o",
+      "toolCalls": [],
+      "contextReferences": {
+        "total": 6,
+        "byType": {
+          "file": 4,
+          "selection": 1,
+          "symbol": 1
+        }
+      },
+      "mcpTools": [],
+      "inputTokensEstimate": 3060,
+      "outputTokensEstimate": 1180,
+      "thinkingTokensEstimate": 320
+    }
+  ],
+  "usageAnalysis": {
+    "toolCalls": {
+      "total": 5,
+      "byTool": {
+        "grep_search": 1,
+        "read_file": 1,
+        "apply_patch": 1,
+        "run_in_terminal": 2
+      }
+    },
+    "modeUsage": {
+      "ask": 2,
+      "edit": 0,
+      "agent": 1,
+      "plan": 0,
+      "customAgent": 0,
+      "cli": 0
+    },
+    "contextReferences": {
+      "total": 6,
+      "byType": {
+        "file": 4,
+        "selection": 1,
+        "symbol": 1
+      }
+    },
+    "mcpTools": {
+      "total": 0,
+      "byServer": {},
+      "byTool": {}
+    }
+  },
+  "actualTokens": 9840,
+  "cachedTokens": 2100,
+  "subAgentsStarted": 0,
+  "modelTurns": 3,
+  "compactNumbers": false
+}
