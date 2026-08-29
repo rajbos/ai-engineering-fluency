@@ -110,11 +110,15 @@ jobs:
         cd "${GITHUB_WORKSPACE}/current-repo/"
         
         # Run gh copilot with the prompt using non-interactive mode
-        # Use -s/--silent for script-friendly output, -p for prompt, --allow-all for permissions
+        # Use -s/--silent for script-friendly output, -p for prompt,
+        # --allow-all-tools for tool permissions. Unlike --allow-all this does
+        # not grant --allow-all-paths/--allow-all-urls: file access stays
+        # confined to the workspace and the --add-dir paths below (least
+        # privilege), which covers everything this prompt needs.
         # Read the prompt into a variable for safer handling
         COPILOT_PROMPT_TEXT=$(cat /tmp/copilot-prompt.md)
         # > /tmp/copilot-output.txt
-        npx @github/copilot -p "$COPILOT_PROMPT_TEXT" --silent --allow-all --add-dir "${UPSTREAM_PATH}" --add-dir "${GITHUB_WORKSPACE}/current-repo" --no-ask-user  2>&1 || {
+        npx @github/copilot -p "$COPILOT_PROMPT_TEXT" --silent --allow-all-tools --add-dir "${UPSTREAM_PATH}" --add-dir "${GITHUB_WORKSPACE}/current-repo" --no-ask-user  2>&1 || {
           EXIT_CODE=$?
           echo "Warning: gh copilot command exited with code $EXIT_CODE, but continuing to check output"
           cat /tmp/copilot-output.txt 2>/dev/null || true
