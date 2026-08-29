@@ -1,0 +1,115 @@
+{
+  "overallStage": 3,
+  "overallLabel": "Stage 3: AI Collaborator",
+  "categories": [
+    {
+      "category": "Prompt Engineering",
+      "icon": "💬",
+      "stage": 3,
+      "evidence": [
+        "40 sessions analysed in the last 30 days",
+        "3 distinct models used across 2 editors"
+      ],
+      "tips": [
+        "You're at the highest level!",
+        "Continue exploring advanced combinations of models, modes, and commands"
+      ]
+    },
+    {
+      "category": "Context Engineering",
+      "icon": "📎",
+      "stage": 2,
+      "evidence": [
+        "47 sessions analysed in the last 30 days",
+        "4 distinct models used across 3 editors"
+      ],
+      "tips": [
+        "Try [image attachments](https://code.visualstudio.com/docs/copilot/chat/copilot-chat#_add-context-to-your-prompts), #changes, #problemsPanel, and other specialized context variables",
+        "Experiment with @terminal and @vscode for IDE-level context"
+      ]
+    },
+    {
+      "category": "Agentic",
+      "icon": "🤖",
+      "stage": 4,
+      "evidence": [
+        "54 sessions analysed in the last 30 days",
+        "5 distinct models used across 4 editors"
+      ],
+      "tips": [
+        "You're at the highest level!",
+        "Continue leveraging agent mode for complex, multi-step workflows"
+      ]
+    },
+    {
+      "category": "Tool Usage",
+      "icon": "🔧",
+      "stage": 3,
+      "evidence": [
+        "61 sessions analysed in the last 30 days",
+        "6 distinct models used across 2 editors"
+      ],
+      "tips": [
+        "You're at the highest level!",
+        "Keep exploring advanced tool combinations and new MCP servers"
+      ]
+    },
+    {
+      "category": "Customization",
+      "icon": "⚙️",
+      "stage": 2,
+      "evidence": [
+        "68 sessions analysed in the last 30 days",
+        "7 distinct models used across 3 editors"
+      ],
+      "tips": [
+        "Aim for consistent customization across all projects with [instructions and agents.md](https://code.visualstudio.com/docs/copilot/customization/custom-instructions)",
+        "Explore 5+ models to match tasks with optimal model capabilities — [▶ Model selection video](https://tech.hub.ms/github-copilot/videos/model-selection)"
+      ]
+    },
+    {
+      "category": "Workflow Integration",
+      "icon": "🔄",
+      "stage": 3,
+      "evidence": [
+        "75 sessions analysed in the last 30 days",
+        "8 distinct models used across 4 editors"
+      ],
+      "tips": [
+        "You're at the highest level!",
+        "Continue integrating Copilot into every aspect of your development workflow"
+      ]
+    }
+  ],
+  "period": "last30days",
+  "lastUpdated": "2026-03-14T09:30:00.000Z",
+  "agenticTrend": [
+    {
+      "date": "2026-02-16",
+      "multiAgentParentSessions": 2,
+      "delegationSessions": 5
+    },
+    {
+      "date": "2026-02-23",
+      "multiAgentParentSessions": 3,
+      "delegationSessions": 7
+    },
+    {
+      "date": "2026-03-02",
+      "multiAgentParentSessions": 4,
+      "delegationSessions": 9
+    },
+    {
+      "date": "2026-03-09",
+      "multiAgentParentSessions": 5,
+      "delegationSessions": 11
+    }
+  ],
+  "dismissedTips": [],
+  "isDebugMode": false,
+  "fluencyLevels": {
+    "$fromRepoJson": "src/fluencyLevelData.json"
+  },
+  "backendConfigured": false,
+  "installedHooks": []
+}

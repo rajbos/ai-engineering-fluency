@@ -1,0 +1,247 @@
+{
+  "labels": [
+    "2026-03-01",
+    "2026-03-02",
+    "2026-03-03",
+    "2026-03-04",
+    "2026-03-05",
+    "2026-03-06",
+    "2026-03-07",
+    "2026-03-08",
+    "2026-03-09",
+    "2026-03-10",
+    "2026-03-11",
+    "2026-03-12",
+    "2026-03-13",
+    "2026-03-14"
+  ],
+  "tokensData": [
+    240000,
+    180000,
+    120000,
+    225000,
+    165000,
+    270000,
+    210000,
+    150000,
+    255000,
+    195000,
+    135000,
+    240000,
+    180000,
+    120000
+  ],
+  "sessionsData": [
+    6,
+    5,
+    4,
+    3,
+    7,
+    6,
+    5,
+    4,
+    3,
+    7,
+    6,
+    5,
+    4,
+    3
+  ],
+  "modelDatasets": [
+    {
+      "label": "claude-sonnet-4.5",
+      "backgroundColor": "#b180d7",
+      "borderColor": "#b180d7",
+      "data": [
+        100800,
+        75600,
+        50400,
+        94500,
+        69300,
+        113400,
+        88200,
+        63000,
+        107100,
+        81900,
+        56700,
+        100800,
+        75600,
+        50400
+      ]
+    },
+    {
+      "label": "gpt-4o",
+      "backgroundColor": "#4daafc",
+      "borderColor": "#4daafc",
+      "data": [
+        79200,
+        59400,
+        39600,
+        74250,
+        54450,
+        89100,
+        69300,
+        49500,
+        84150,
+        64350,
+        44550,
+        79200,
+        59400,
+        39600
+      ]
+    },
+    {
+      "label": "gemini-2.5-pro",
+      "backgroundColor": "#89d185",
+      "borderColor": "#89d185",
+      "data": [
+        60000,
+        45000,
+        30000,
+        56250,
+        41250,
+        67500,
+        52500,
+        37500,
+        63750,
+        48750,
+        33750,
+        60000,
+        45000,
+        30000
+      ]
+    }
+  ],
+  "editorDatasets": [
+    {
+      "label": "VS Code",
+      "backgroundColor": "#4daafc",
+      "borderColor": "#4daafc",
+      "data": [
+        134400,
+        100800,
+        67200,
+        126000,
+        92400,
+        151200,
+        117600,
+        84000,
+        142800,
+        109200,
+        75600,
+        134400,
+        100800,
+        67200
+      ]
+    },
+    {
+      "label": "Claude Code",
+      "backgroundColor": "#d18616",
+      "borderColor": "#d18616",
+      "data": [
+        72000,
+        54000,
+        36000,
+        67500,
+        49500,
+        81000,
+        63000,
+        45000,
+        76500,
+        58500,
+        40500,
+        72000,
+        54000,
+        36000
+      ]
+    },
+    {
+      "label": "Copilot CLI",
+      "backgroundColor": "#89d185",
+      "borderColor": "#89d185",
+      "data": [
+        33600,
+        25200,
+        16800,
+        31500,
+        23100,
+        37800,
+        29400,
+        21000,
+        35700,
+        27300,
+        18900,
+        33600,
+        25200,
+        16800
+      ]
+    }
+  ],
+  "repositoryDatasets": [
+    {
+      "label": "acme/web-app",
+      "backgroundColor": "#4daafc",
+      "borderColor": "#4daafc",
+      "data": [
+        148800,
+        111600,
+        74400,
+        139500,
+        102300,
+        167400,
+        130200,
+        93000,
+        158100,
+        120900,
+        83700,
+        148800,
+        111600,
+        74400
+      ]
+    },
+    {
+      "label": "acme/api",
+      "backgroundColor": "#cca700",
+      "borderColor": "#cca700",
+      "data": [
+        91200,
+        68400,
+        45600,
+        85500,
+        62700,
+        102600,
+        79800,
+        57000,
+        96900,
+        74100,
+        51300,
+        91200,
+        68400,
+        45600
+      ]
+    }
+  ],
+  "editorTotalsMap": {
+    "VS Code": 980000,
+    "Claude Code": 525000,
+    "Copilot CLI": 245000
+  },
+  "repositoryTotalsMap": {
+    "acme/web-app": 1085000,
+    "acme/api": 665000
+  },
+  "dailyCount": 14,
+  "totalTokens": 2685000,
+  "avgTokensPerDay": 191786,
+  "totalSessions": 68,
+  "lastUpdated": "2026-03-14T09:30:00.000Z",
+  "backendConfigured": false,
+  "compactNumbers": false,
+  "periodsReady": false,
+  "hasLocData": false,
+  "initialPeriod": "day",
+  "initialTimeWindow": "last30",
+  "initialView": "total",
+  "initialMetric": "tokens",
+  "initialSplit": "total"
+}

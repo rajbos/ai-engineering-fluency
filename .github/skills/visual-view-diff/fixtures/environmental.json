@@ -1,0 +1,29 @@
+{
+  "today": {
+    "tokens": 1284500,
+    "co2": 4.82,
+    "treesEquivalent": 0.21,
+    "waterUsage": 1.94
+  },
+  "month": {
+    "tokens": 15414000,
+    "co2": 57.84,
+    "treesEquivalent": 2.52,
+    "waterUsage": 23.28
+  },
+  "lastMonth": {
+    "tokens": 11560500,
+    "co2": 43.38,
+    "treesEquivalent": 1.89,
+    "waterUsage": 17.46
+  },
+  "last30Days": {
+    "tokens": 14129500,
+    "co2": 53.02,
+    "treesEquivalent": 2.31,
+    "waterUsage": 21.34
+  },
+  "lastUpdated": "2026-03-14T09:30:00.000Z",
+  "backendConfigured": false,
+  "compactNumbers": false
+}

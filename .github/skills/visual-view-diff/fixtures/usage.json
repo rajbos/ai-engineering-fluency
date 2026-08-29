@@ -1,0 +1,794 @@
+{
+  "today": {
+    "sessions": 24,
+    "toolCalls": {
+      "total": 186,
+      "byTool": {
+        "read_file": 52,
+        "run_in_terminal": 41,
+        "apply_patch": 33,
+        "grep_search": 28,
+        "semantic_search": 20,
+        "create_file": 12
+      },
+      "outputTokensByTool": {
+        "read_file": 96000,
+        "run_in_terminal": 44000,
+        "apply_patch": 19000,
+        "grep_search": 16000,
+        "semantic_search": 29000,
+        "create_file": 5000
+      }
+    },
+    "modeUsage": {
+      "ask": 9,
+      "edit": 5,
+      "agent": 8,
+      "plan": 1,
+      "customAgent": 1,
+      "cli": 0
+    },
+    "contextReferences": {
+      "file": 42,
+      "selection": 11,
+      "implicitSelection": 8,
+      "symbol": 6,
+      "codebase": 4,
+      "workspace": 3,
+      "terminal": 5,
+      "vscode": 1,
+      "terminalLastCommand": 2,
+      "terminalSelection": 1,
+      "clipboard": 0,
+      "changes": 3,
+      "outputPanel": 1,
+      "problemsPanel": 2,
+      "pullRequest": 1,
+      "codeContextLines": 1840,
+      "byKind": {
+        "file": 42,
+        "selection": 11,
+        "symbol": 6,
+        "directory": 3,
+        "repository": 2
+      },
+      "copilotInstructions": 18,
+      "agentsMd": 7,
+      "byPath": {
+        "src/backend/syncService.ts": 12,
+        "src/webview/details/main.ts": 9,
+        ".github/copilot-instructions.md": 18,
+        "AGENTS.md": 7,
+        "src/tokenEstimation.ts": 5
+      }
+    },
+    "mcpTools": {
+      "total": 14,
+      "byServer": {
+        "github": 9,
+        "playwright": 5
+      },
+      "byTool": {
+        "github/create_issue": 5,
+        "github/list_prs": 4,
+        "playwright/navigate": 5
+      }
+    },
+    "skillCalls": {
+      "total": 8,
+      "byName": {
+        "graphify": 5,
+        "code-review": 3
+      }
+    },
+    "modelSwitching": {
+      "modelsPerSession": [
+        1,
+        2,
+        1,
+        3,
+        2
+      ],
+      "totalSessions": 24,
+      "averageModelsPerSession": 1.8,
+      "maxModelsPerSession": 3,
+      "minModelsPerSession": 1,
+      "switchingFrequency": 46.2,
+      "autoSessions": 6,
+      "foundryWindowsSessions": 0,
+      "unknownProviderSessions": 0,
+      "standardModels": [
+        "gpt-4o"
+      ],
+      "premiumModels": [
+        "claude-sonnet-4.5",
+        "gemini-2.5-pro"
+      ],
+      "unknownModels": [],
+      "mixedTierSessions": 7,
+      "standardRequests": 74,
+      "premiumRequests": 96,
+      "unknownRequests": 0,
+      "totalRequests": 170,
+      "lowCostModels": [
+        "gpt-4o"
+      ],
+      "mediumCostModels": [
+        "claude-sonnet-4.5"
+      ],
+      "highCostModels": [
+        "gemini-2.5-pro"
+      ],
+      "mixedCostSessions": 6,
+      "lowCostRequests": 74,
+      "mediumCostRequests": 62,
+      "highCostRequests": 34,
+      "selectedModelExtensions": [
+        "github.copilot-chat"
+      ],
+      "unknownProviderModels": []
+    },
+    "repositories": [
+      "acme/web-app",
+      "acme/api",
+      "acme/infra"
+    ],
+    "repositoriesWithCustomization": [
+      "acme/web-app",
+      "acme/api"
+    ],
+    "editScope": {
+      "singleFileEdits": 11,
+      "multiFileEdits": 7,
+      "totalEditedFiles": 63,
+      "avgFilesPerSession": 3.5,
+      "linesAdded": 1840,
+      "linesRemoved": 620,
+      "languageUsage": {
+        "TypeScript": 1420,
+        "CSS": 280,
+        "Markdown": 140
+      }
+    },
+    "applyUsage": {
+      "totalApplies": 62,
+      "totalCodeBlocks": 100,
+      "applyRate": 62
+    },
+    "sessionDuration": {
+      "totalDurationMs": 18600000,
+      "avgDurationMs": 775000,
+      "avgFirstProgressMs": 2400,
+      "avgTotalElapsedMs": 31000,
+      "avgWaitTimeMs": 18500,
+      "activeDurationMs": 9200000
+    },
+    "conversationPatterns": {
+      "multiTurnSessions": 17,
+      "singleTurnSessions": 7,
+      "avgTurnsPerSession": 7.5,
+      "maxTurnsInSession": 34
+    },
+    "agentTypes": {
+      "editsAgent": 8,
+      "defaultAgent": 12,
+      "workspaceAgent": 3,
+      "other": 1
+    },
+    "thinkingEffortUsage": {
+      "byEffort": {
+        "low": 6,
+        "medium": 11,
+        "high": 4
+      },
+      "sessionCount": 21,
+      "switchCount": 5
+    },
+    "multiAgentParentSessions": 3,
+    "delegationSessions": 5
+  },
+  "last30Days": {
+    "sessions": 264,
+    "toolCalls": {
+      "total": 2046,
+      "byTool": {
+        "read_file": 572,
+        "run_in_terminal": 451,
+        "apply_patch": 363,
+        "grep_search": 308,
+        "semantic_search": 220,
+        "create_file": 132
+      },
+      "outputTokensByTool": {
+        "read_file": 1056000,
+        "run_in_terminal": 484000,
+        "apply_patch": 209000,
+        "grep_search": 176000,
+        "semantic_search": 319000,
+        "create_file": 55000
+      }
+    },
+    "modeUsage": {
+      "ask": 99,
+      "edit": 55,
+      "agent": 88,
+      "plan": 11,
+      "customAgent": 11,
+      "cli": 0
+    },
+    "contextReferences": {
+      "file": 462,
+      "selection": 121,
+      "implicitSelection": 88,
+      "symbol": 66,
+      "codebase": 44,
+      "workspace": 33,
+      "terminal": 55,
+      "vscode": 11,
+      "terminalLastCommand": 22,
+      "terminalSelection": 11,
+      "clipboard": 0,
+      "changes": 33,
+      "outputPanel": 11,
+      "problemsPanel": 22,
+      "pullRequest": 11,
+      "codeContextLines": 20240,
+      "byKind": {
+        "file": 462,
+        "selection": 121,
+        "symbol": 66,
+        "directory": 33,
+        "repository": 22
+      },
+      "copilotInstructions": 198,
+      "agentsMd": 77,
+      "byPath": {
+        "src/backend/syncService.ts": 132,
+        "src/webview/details/main.ts": 99,
+        ".github/copilot-instructions.md": 198,
+        "AGENTS.md": 77,
+        "src/tokenEstimation.ts": 55
+      }
+    },
+    "mcpTools": {
+      "total": 154,
+      "byServer": {
+        "github": 99,
+        "playwright": 55
+      },
+      "byTool": {
+        "github/create_issue": 55,
+        "github/list_prs": 44,
+        "playwright/navigate": 55
+      }
+    },
+    "skillCalls": {
+      "total": 88,
+      "byName": {
+        "graphify": 55,
+        "code-review": 33
+      }
+    },
+    "modelSwitching": {
+      "modelsPerSession": [
+        1,
+        2,
+        1,
+        3,
+        2
+      ],
+      "totalSessions": 264,
+      "averageModelsPerSession": 1.8,
+      "maxModelsPerSession": 3,
+      "minModelsPerSession": 1,
+      "switchingFrequency": 46.2,
+      "autoSessions": 66,
+      "foundryWindowsSessions": 0,
+      "unknownProviderSessions": 0,
+      "standardModels": [
+        "gpt-4o"
+      ],
+      "premiumModels": [
+        "claude-sonnet-4.5",
+        "gemini-2.5-pro"
+      ],
+      "unknownModels": [],
+      "mixedTierSessions": 77,
+      "standardRequests": 814,
+      "premiumRequests": 1056,
+      "unknownRequests": 0,
+      "totalRequests": 1870,
+      "lowCostModels": [
+        "gpt-4o"
+      ],
+      "mediumCostModels": [
+        "claude-sonnet-4.5"
+      ],
+      "highCostModels": [
+        "gemini-2.5-pro"
+      ],
+      "mixedCostSessions": 66,
+      "lowCostRequests": 814,
+      "mediumCostRequests": 682,
+      "highCostRequests": 374,
+      "selectedModelExtensions": [
+        "github.copilot-chat"
+      ],
+      "unknownProviderModels": []
+    },
+    "repositories": [
+      "acme/web-app",
+      "acme/api",
+      "acme/infra"
+    ],
+    "repositoriesWithCustomization": [
+      "acme/web-app",
+      "acme/api"
+    ],
+    "editScope": {
+      "singleFileEdits": 121,
+      "multiFileEdits": 77,
+      "totalEditedFiles": 693,
+      "avgFilesPerSession": 3.5,
+      "linesAdded": 20240,
+      "linesRemoved": 6820,
+      "languageUsage": {
+        "TypeScript": 15620,
+        "CSS": 3080,
+        "Markdown": 1540
+      }
+    },
+    "applyUsage": {
+      "totalApplies": 682,
+      "totalCodeBlocks": 1100,
+      "applyRate": 62
+    },
+    "sessionDuration": {
+      "totalDurationMs": 204600000,
+      "avgDurationMs": 775000,
+      "avgFirstProgressMs": 2400,
+      "avgTotalElapsedMs": 31000,
+      "avgWaitTimeMs": 18500,
+      "activeDurationMs": 101200000
+    },
+    "conversationPatterns": {
+      "multiTurnSessions": 187,
+      "singleTurnSessions": 77,
+      "avgTurnsPerSession": 7.5,
+      "maxTurnsInSession": 34
+    },
+    "agentTypes": {
+      "editsAgent": 88,
+      "defaultAgent": 132,
+      "workspaceAgent": 33,
+      "other": 11
+    },
+    "thinkingEffortUsage": {
+      "byEffort": {
+        "low": 66,
+        "medium": 121,
+        "high": 44
+      },
+      "sessionCount": 231,
+      "switchCount": 55
+    },
+    "multiAgentParentSessions": 33,
+    "delegationSessions": 55
+  },
+  "month": {
+    "sessions": 288,
+    "toolCalls": {
+      "total": 2232,
+      "byTool": {
+        "read_file": 624,
+        "run_in_terminal": 492,
+        "apply_patch": 396,
+        "grep_search": 336,
+        "semantic_search": 240,
+        "create_file": 144
+      },
+      "outputTokensByTool": {
+        "read_file": 1152000,
+        "run_in_terminal": 528000,
+        "apply_patch": 228000,
+        "grep_search": 192000,
+        "semantic_search": 348000,
+        "create_file": 60000
+      }
+    },
+    "modeUsage": {
+      "ask": 108,
+      "edit": 60,
+      "agent": 96,
+      "plan": 12,
+      "customAgent": 12,
+      "cli": 0
+    },
+    "contextReferences": {
+      "file": 504,
+      "selection": 132,
+      "implicitSelection": 96,
+      "symbol": 72,
+      "codebase": 48,
+      "workspace": 36,
+      "terminal": 60,
+      "vscode": 12,
+      "terminalLastCommand": 24,
+      "terminalSelection": 12,
+      "clipboard": 0,
+      "changes": 36,
+      "outputPanel": 12,
+      "problemsPanel": 24,
+      "pullRequest": 12,
+      "codeContextLines": 22080,
+      "byKind": {
+        "file": 504,
+        "selection": 132,
+        "symbol": 72,
+        "directory": 36,
+        "repository": 24
+      },
+      "copilotInstructions": 216,
+      "agentsMd": 84,
+      "byPath": {
+        "src/backend/syncService.ts": 144,
+        "src/webview/details/main.ts": 108,
+        ".github/copilot-instructions.md": 216,
+        "AGENTS.md": 84,
+        "src/tokenEstimation.ts": 60
+      }
+    },
+    "mcpTools": {
+      "total": 168,
+      "byServer": {
+        "github": 108,
+        "playwright": 60
+      },
+      "byTool": {
+        "github/create_issue": 60,
+        "github/list_prs": 48,
+        "playwright/navigate": 60
+      }
+    },
+    "skillCalls": {
+      "total": 96,
+      "byName": {
+        "graphify": 60,
+        "code-review": 36
+      }
+    },
+    "modelSwitching": {
+      "modelsPerSession": [
+        1,
+        2,
+        1,
+        3,
+        2
+      ],
+      "totalSessions": 288,
+      "averageModelsPerSession": 1.8,
+      "maxModelsPerSession": 3,
+      "minModelsPerSession": 1,
+      "switchingFrequency": 46.2,
+      "autoSessions": 72,
+      "foundryWindowsSessions": 0,
+      "unknownProviderSessions": 0,
+      "standardModels": [
+        "gpt-4o"
+      ],
+      "premiumModels": [
+        "claude-sonnet-4.5",
+        "gemini-2.5-pro"
+      ],
+      "unknownModels": [],
+      "mixedTierSessions": 84,
+      "standardRequests": 888,
+      "premiumRequests": 1152,
+      "unknownRequests": 0,
+      "totalRequests": 2040,
+      "lowCostModels": [
+        "gpt-4o"
+      ],
+      "mediumCostModels": [
+        "claude-sonnet-4.5"
+      ],
+      "highCostModels": [
+        "gemini-2.5-pro"
+      ],
+      "mixedCostSessions": 72,
+      "lowCostRequests": 888,
+      "mediumCostRequests": 744,
+      "highCostRequests": 408,
+      "selectedModelExtensions": [
+        "github.copilot-chat"
+      ],
+      "unknownProviderModels": []
+    },
+    "repositories": [
+      "acme/web-app",
+      "acme/api",
+      "acme/infra"
+    ],
+    "repositoriesWithCustomization": [
+      "acme/web-app",
+      "acme/api"
+    ],
+    "editScope": {
+      "singleFileEdits": 132,
+      "multiFileEdits": 84,
+      "totalEditedFiles": 756,
+      "avgFilesPerSession": 3.5,
+      "linesAdded": 22080,
+      "linesRemoved": 7440,
+      "languageUsage": {
+        "TypeScript": 17040,
+        "CSS": 3360,
+        "Markdown": 1680
+      }
+    },
+    "applyUsage": {
+      "totalApplies": 744,
+      "totalCodeBlocks": 1200,
+      "applyRate": 62
+    },
+    "sessionDuration": {
+      "totalDurationMs": 223200000,
+      "avgDurationMs": 775000,
+      "avgFirstProgressMs": 2400,
+      "avgTotalElapsedMs": 31000,
+      "avgWaitTimeMs": 18500,
+      "activeDurationMs": 110400000
+    },
+    "conversationPatterns": {
+      "multiTurnSessions": 204,
+      "singleTurnSessions": 84,
+      "avgTurnsPerSession": 7.5,
+      "maxTurnsInSession": 34
+    },
+    "agentTypes": {
+      "editsAgent": 96,
+      "defaultAgent": 144,
+      "workspaceAgent": 36,
+      "other": 12
+    },
+    "thinkingEffortUsage": {
+      "byEffort": {
+        "low": 72,
+        "medium": 132,
+        "high": 48
+      },
+      "sessionCount": 252,
+      "switchCount": 60
+    },
+    "multiAgentParentSessions": 36,
+    "delegationSessions": 60
+  },
+  "lastMonth": {
+    "sessions": 216,
+    "toolCalls": {
+      "total": 1674,
+      "byTool": {
+        "read_file": 468,
+        "run_in_terminal": 369,
+        "apply_patch": 297,
+        "grep_search": 252,
+        "semantic_search": 180,
+        "create_file": 108
+      },
+      "outputTokensByTool": {
+        "read_file": 864000,
+        "run_in_terminal": 396000,
+        "apply_patch": 171000,
+        "grep_search": 144000,
+        "semantic_search": 261000,
+        "create_file": 45000
+      }
+    },
+    "modeUsage": {
+      "ask": 81,
+      "edit": 45,
+      "agent": 72,
+      "plan": 9,
+      "customAgent": 9,
+      "cli": 0
+    },
+    "contextReferences": {
+      "file": 378,
+      "selection": 99,
+      "implicitSelection": 72,
+      "symbol": 54,
+      "codebase": 36,
+      "workspace": 27,
+      "terminal": 45,
+      "vscode": 9,
+      "terminalLastCommand": 18,
+      "terminalSelection": 9,
+      "clipboard": 0,
+      "changes": 27,
+      "outputPanel": 9,
+      "problemsPanel": 18,
+      "pullRequest": 9,
+      "codeContextLines": 16560,
+      "byKind": {
+        "file": 378,
+        "selection": 99,
+        "symbol": 54,
+        "directory": 27,
+        "repository": 18
+      },
+      "copilotInstructions": 162,
+      "agentsMd": 63,
+      "byPath": {
+        "src/backend/syncService.ts": 108,
+        "src/webview/details/main.ts": 81,
+        ".github/copilot-instructions.md": 162,
+        "AGENTS.md": 63,
+        "src/tokenEstimation.ts": 45
+      }
+    },
+    "mcpTools": {
+      "total": 126,
+      "byServer": {
+        "github": 81,
+        "playwright": 45
+      },
+      "byTool": {
+        "github/create_issue": 45,
+        "github/list_prs": 36,
+        "playwright/navigate": 45
+      }
+    },
+    "skillCalls": {
+      "total": 72,
+      "byName": {
+        "graphify": 45,
+        "code-review": 27
+      }
+    },
+    "modelSwitching": {
+      "modelsPerSession": [
+        1,
+        2,
+        1,
+        3,
+        2
+      ],
+      "totalSessions": 216,
+      "averageModelsPerSession": 1.8,
+      "maxModelsPerSession": 3,
+      "minModelsPerSession": 1,
+      "switchingFrequency": 46.2,
+      "autoSessions": 54,
+      "foundryWindowsSessions": 0,
+      "unknownProviderSessions": 0,
+      "standardModels": [
+        "gpt-4o"
+      ],
+      "premiumModels": [
+        "claude-sonnet-4.5",
+        "gemini-2.5-pro"
+      ],
+      "unknownModels": [],
+      "mixedTierSessions": 63,
+      "standardRequests": 666,
+      "premiumRequests": 864,
+      "unknownRequests": 0,
+      "totalRequests": 1530,
+      "lowCostModels": [
+        "gpt-4o"
+      ],
+      "mediumCostModels": [
+        "claude-sonnet-4.5"
+      ],
+      "highCostModels": [
+        "gemini-2.5-pro"
+      ],
+      "mixedCostSessions": 54,
+      "lowCostRequests": 666,
+      "mediumCostRequests": 558,
+      "highCostRequests": 306,
+      "selectedModelExtensions": [
+        "github.copilot-chat"
+      ],
+      "unknownProviderModels": []
+    },
+    "repositories": [
+      "acme/web-app",
+      "acme/api",
+      "acme/infra"
+    ],
+    "repositoriesWithCustomization": [
+      "acme/web-app",
+      "acme/api"
+    ],
+    "editScope": {
+      "singleFileEdits": 99,
+      "multiFileEdits": 63,
+      "totalEditedFiles": 567,
+      "avgFilesPerSession": 3.5,
+      "linesAdded": 16560,
+      "linesRemoved": 5580,
+      "languageUsage": {
+        "TypeScript": 12780,
+        "CSS": 2520,
+        "Markdown": 1260
+      }
+    },
+    "applyUsage": {
+      "totalApplies": 558,
+      "totalCodeBlocks": 900,
+      "applyRate": 62
+    },
+    "sessionDuration": {
+      "totalDurationMs": 167400000,
+      "avgDurationMs": 775000,
+      "avgFirstProgressMs": 2400,
+      "avgTotalElapsedMs": 31000,
+      "avgWaitTimeMs": 18500,
+      "activeDurationMs": 82800000
+    },
+    "conversationPatterns": {
+      "multiTurnSessions": 153,
+      "singleTurnSessions": 63,
+      "avgTurnsPerSession": 7.5,
+      "maxTurnsInSession": 34
+    },
+    "agentTypes": {
+      "editsAgent": 72,
+      "defaultAgent": 108,
+      "workspaceAgent": 27,
+      "other": 9
+    },
+    "thinkingEffortUsage": {
+      "byEffort": {
+        "low": 54,
+        "medium": 99,
+        "high": 36
+      },
+      "sessionCount": 189,
+      "switchCount": 45
+    },
+    "multiAgentParentSessions": 27,
+    "delegationSessions": 45
+  },
+  "locale": "en-US",
+  "lastUpdated": "2026-03-14T09:30:00.000Z",
+  "agenticDailyTrend": [
+    {
+      "date": "2026-03-08",
+      "multiAgentParentSessions": 0,
+      "delegationSessions": 1
+    },
+    {
+      "date": "2026-03-09",
+      "multiAgentParentSessions": 1,
+      "delegationSessions": 2
+    },
+    {
+      "date": "2026-03-10",
+      "multiAgentParentSessions": 2,
+      "delegationSessions": 3
+    },
+    {
+      "date": "2026-03-11",
+      "multiAgentParentSessions": 0,
+      "delegationSessions": 4
+    },
+    {
+      "date": "2026-03-12",
+      "multiAgentParentSessions": 1,
+      "delegationSessions": 1
+    },
+    {
+      "date": "2026-03-13",
+      "multiAgentParentSessions": 2,
+      "delegationSessions": 2
+    },
+    {
+      "date": "2026-03-14",
+      "multiAgentParentSessions": 0,
+      "delegationSessions": 3
+    }
+  ],
+  "worktreeScanRoots": []
+}

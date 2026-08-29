@@ -526,6 +526,8 @@
     "package:pre-release": "tsc --noEmit && eslint src ../src && node esbuild.js --production && npx vsce package --pre-release",
     "pre-release": "node ../scripts/pre-release.js",
     "capture-screenshots": "pwsh -File ../scripts/capture-screenshots.ps1",
+    "visual:render": "node ../.github/skills/visual-view-diff/render-views.js",
+    "visual:diff": "node ../.github/skills/visual-view-diff/visual-diff.js",
     "sync-changelog": "node ../scripts/sync-changelog.js",
     "sync-changelog:test": "node ../scripts/sync-changelog.js --test",
     "cli:build": "cd cli && npm install && npm run build",

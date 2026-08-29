@@ -1,0 +1,7 @@
+{
+  "categories": {
+    "$fromRepoJson": "src/fluencyLevelData.json"
+  },
+  "isDebugMode": false,
+  "backendConfigured": false
+}
