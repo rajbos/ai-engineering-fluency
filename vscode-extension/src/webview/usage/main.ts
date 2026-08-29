@@ -3520,15 +3520,34 @@ function _billingApiBalanceHtml(api: CopilotApiBalance, copilotCostUsd: number):
 		</div>`;
 }
 
-function _billingExtGroupCostsHtml(groupCosts: Record<string, number>): string {
-	const totalCostUsd = Object.values(groupCosts).reduce((s, v) => s + v, 0);
+/** Cost of Copilot usage the API reports but the extension has no local session data for
+ *  (github.com/copilot web chat, cloud agent, review agent, or a different device/environment). */
+function _billingOtherSessionsCostUsd(groupCosts: Record<string, number>, api: CopilotApiBalance | null | undefined): number {
+	if (!api) { return 0; }
+	const copilotCostUsd = groupCosts['GitHub Copilot'] ?? 0;
+	return Math.max(0, (api.usedAiCredits * 0.01) - copilotCostUsd);
+}
+
+function _billingExtGroupCostsHtml(groupCosts: Record<string, number>, api: CopilotApiBalance | null | undefined): string {
+	const otherSessionsCostUsd = _billingOtherSessionsCostUsd(groupCosts, api);
+	const hasLocalCopilotRow = 'GitHub Copilot' in groupCosts;
+	const totalCostUsd = Object.values(groupCosts).reduce((s, v) => s + v, 0) + otherSessionsCostUsd;
+	const otherSessionsRowHtml = otherSessionsCostUsd > 0.001
+		? `<tr>
+			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary);">GitHub Copilot - other sessions (remote or different environment)</td>
+			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary); text-align:right;">$${formatFixed(otherSessionsCostUsd, 2)}</td>
+		</tr>`
+		: '';
 	const rows = Object.entries(groupCosts)
 		.sort(([, a], [, b]) => b - a)
-		.map(([group, cost]) => `
-			<tr>
-				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(group)}</td>
-				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
-			</tr>`).join('');
+		.map(([group, cost]) => {
+			const label = group === 'GitHub Copilot' ? 'GitHub Copilot - local sessions' : group;
+			return `
+				<tr>
+					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(label)}</td>
+					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
+				</tr>${group === 'GitHub Copilot' ? otherSessionsRowHtml : ''}`;
+		}).join('') + (hasLocalCopilotRow ? '' : otherSessionsRowHtml);
 	return `
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
@@ -3593,13 +3612,13 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
 
 	const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : '';
-	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts) : '';
+	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts, api) : '';
 	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
 
 	return `
 		<div class="section">
-			<div class="section-title"><span>💳</span><span>Copilot Billing Coverage</span></div>
-			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs.</div>
+			<div class="section-title"><span>💳</span><span>AI Billing Coverage</span></div>
+			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alongside estimated costs from other AI providers.</div>
 			${apiHtml}
 			${extHtml}
 			${deltaHtml}
@@ -3618,7 +3637,7 @@ function buildActivityTabPanelHtml(
 	// shape it doesn't expect) renders an inline error card for that section only, instead of
 	// throwing out of this template literal and blanking the entire Activity tab.
 	const modelCostHtml = safeSectionHtml('Model Cost', () => buildModelCostSectionHtml(stats));
-	const billingComparisonHtml = safeSectionHtml('Copilot Billing Coverage', () => buildBillingComparisonSectionHtml(stats));
+	const billingComparisonHtml = safeSectionHtml('AI Billing Coverage', () => buildBillingComparisonSectionHtml(stats));
 	const modeUsageHtml = safeSectionHtml('Interaction Modes', () => `
 			<div class="section">
 				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>

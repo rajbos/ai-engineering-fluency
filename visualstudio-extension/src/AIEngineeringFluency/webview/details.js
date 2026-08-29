@@ -1695,15 +1695,41 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       _modelNames[modelId] = pricing.displayNames[0];
     }
   }
+  var CUSTOM_PROVIDER_SUFFIX = " (Custom)";
+  function decodeSegment(segment) {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  }
+  function parseCustomProviderModel(model) {
+    const parts = model.split("/");
+    if (parts.length !== 3 || parts.some((part) => part.trim() === "")) {
+      return void 0;
+    }
+    return {
+      source: decodeSegment(parts[0]),
+      providerName: decodeSegment(parts[1]),
+      modelId: decodeSegment(parts[2])
+    };
+  }
+  function getCustomProviderGroup(model) {
+    const parsed = parseCustomProviderModel(model);
+    return parsed ? `${parsed.providerName}${CUSTOM_PROVIDER_SUFFIX}` : void 0;
+  }
+  function isCustomProviderGroup(group) {
+    return group.endsWith(CUSTOM_PROVIDER_SUFFIX);
+  }
   function getModelDisplayName(model) {
     if (_modelNames[model]) {
       return _modelNames[model];
     }
-    try {
-      return decodeURIComponent(model);
-    } catch {
-      return model;
+    const custom = parseCustomProviderModel(model);
+    if (custom) {
+      return _modelNames[custom.modelId] ?? custom.modelId;
     }
+    return decodeSegment(model);
   }
 
   // src/editorIcons.ts
@@ -1854,78 +1880,113 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     return button;
   }
 
+  // src/webview/shared/localization.ts
+  var DEFAULT_LOCALIZATION = {
+    "nav.btnRefresh": "Refresh",
+    "nav.btnDetails": "Details",
+    "nav.btnChart": "Chart",
+    "nav.btnUsage": "Usage Analysis",
+    "nav.btnDiagnostics": "Diagnostics",
+    "nav.btnMaturity": "Fluency Score",
+    "nav.btnDashboard": "Team Dashboard",
+    "nav.btnLevelViewer": "Level Viewer",
+    "nav.btnEnvironmental": "Environmental Impact",
+    "nav.btnEfficiency": "Efficiency"
+  };
+  var currentLocalization = { ...DEFAULT_LOCALIZATION };
+  function initializeWebviewLocalization(localization) {
+    currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization };
+  }
+  function localize(key) {
+    return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
+  }
+  var currentLanguage = "en";
+  function setCurrentLanguage(language) {
+    currentLanguage = language;
+  }
+
   // src/webview/shared/buttonConfig.ts
-  var BUTTONS = {
+  var BUTTON_DEFS = {
     "btn-refresh": {
       id: "btn-refresh",
-      label: "Refresh",
+      labelKey: "nav.btnRefresh",
       icon: "refresh",
       appearance: "primary"
     },
     "btn-details": {
       id: "btn-details",
-      label: "Details",
+      labelKey: "nav.btnDetails",
       icon: "robot",
       iconColor: "#c37bff",
       appearance: "secondary"
     },
     "btn-chart": {
       id: "btn-chart",
-      label: "Chart",
+      labelKey: "nav.btnChart",
       icon: "graph-line",
       iconColor: "#60a5fa",
       appearance: "secondary"
     },
     "btn-usage": {
       id: "btn-usage",
-      label: "Usage Analysis",
+      labelKey: "nav.btnUsage",
       icon: "graph",
       iconColor: "#22d3ee",
       appearance: "secondary"
     },
     "btn-diagnostics": {
       id: "btn-diagnostics",
-      label: "Diagnostics",
+      labelKey: "nav.btnDiagnostics",
       icon: "search",
       iconColor: "#fb7185",
       appearance: "secondary"
     },
     "btn-maturity": {
       id: "btn-maturity",
-      label: "Fluency Score",
+      labelKey: "nav.btnMaturity",
       icon: "target",
       iconColor: "#fbbf24",
       appearance: "secondary"
     },
     "btn-dashboard": {
       id: "btn-dashboard",
-      label: "Team Dashboard",
+      labelKey: "nav.btnDashboard",
       icon: "organization",
       iconColor: "#818cf8",
       appearance: "secondary"
     },
     "btn-level-viewer": {
       id: "btn-level-viewer",
-      label: "Level Viewer",
+      labelKey: "nav.btnLevelViewer",
       icon: "list-tree",
       iconColor: "#94a3b8",
       appearance: "secondary"
     },
     "btn-environmental": {
       id: "btn-environmental",
-      label: "Environmental Impact",
+      labelKey: "nav.btnEnvironmental",
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
     },
     "btn-efficiency": {
       id: "btn-efficiency",
-      label: "Efficiency",
+      labelKey: "nav.btnEfficiency",
       icon: "dashboard",
       iconColor: "#f472b6",
       appearance: "secondary"
     }
   };
+  var BUTTONS = new Proxy({}, {
+    get(_target, prop) {
+      const def = BUTTON_DEFS[prop];
+      if (!def) {
+        return void 0;
+      }
+      const { labelKey, ...rest } = def;
+      return { ...rest, label: localize(labelKey) };
+    }
+  });
   var NAV_ORDER = [
     "btn-refresh",
     "btn-details",
@@ -2323,6 +2384,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     "MS Scout (Copilot CLI)"
   ]);
 
+  // ../src/tokenEstimation.ts
+  var NANO_AIU_TO_DOLLARS = 1 / 1e11;
+
   // ../src/chartDataBuilder.ts
   var MODEL_PROVIDER_PREFIXES = [
     ["anthropic", "Anthropic"],
@@ -2346,11 +2410,19 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     ["raptor", "xAI"]
   ];
   function getModelBillingProvider(modelId) {
+    const customGroup = getCustomProviderGroup(modelId);
+    if (customGroup) {
+      return customGroup;
+    }
     const id = modelId.toLowerCase();
     const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
     return match ? match[1] : "Other";
   }
   function getBillingGroup(editor, modelId) {
+    const customGroup = getCustomProviderGroup(modelId);
+    if (customGroup) {
+      return customGroup;
+    }
     if (COPILOT_EDITOR_NAMES.has(editor)) {
       return "GitHub Copilot";
     }
@@ -2361,8 +2433,12 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   var vscode = acquireVsCodeApi();
   var initialData = getWindowData("__INITIAL_DETAILS__");
   console.log("[CopilotTokenTracker] details webview loaded");
-  console.log("[CopilotTokenTracker] initialData:", initialData);
-  console.log("[CopilotTokenTracker] initialData:", initialData);
+  if (initialData?.localization) {
+    initializeWebviewLocalization(initialData.localization);
+    const language = initialData.localization["__language__"] || "en";
+    setCurrentLanguage(language);
+    console.log("[CopilotTokenTracker] Webview localization initialized for language:", language);
+  }
   var _initSort = initialData?.sortSettings;
   var editorSortKey = _initSort?.editor?.key ?? "name";
   var editorSortDir = _initSort?.editor?.dir ?? "asc";
@@ -2640,7 +2716,10 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     "Other": "\u2754"
   };
   function getProviderIcon(provider) {
-    return PROVIDER_ICONS[provider] ?? "\u{1F4B5}";
+    if (PROVIDER_ICONS[provider]) {
+      return PROVIDER_ICONS[provider];
+    }
+    return isCustomProviderGroup(provider) ? "\u{1F9E9}" : "\u{1F4B5}";
   }
   function buildProviderCard(stats, provider) {
     const isExcluded = excludedProviders.has(provider);
