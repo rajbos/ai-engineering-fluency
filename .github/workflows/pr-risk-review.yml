@@ -163,10 +163,24 @@ jobs:
           FINDINGS_FILE: /tmp/validation-findings.txt
         run: bash .github/workflows/validate-input.sh
 
+      # This job checks out the PR head, which can be an old branch that predates
+      # the root .nvmrc — the same case #1868 fixed for copilot-setup-steps.yml.
+      # Resolve the version with a fallback so setup-node cannot fail the review
+      # on a stale branch. Keep the fallback in sync with .nvmrc.
+      - name: Resolve Node.js version
+        id: node-version
+        run: |
+          if [ -f .nvmrc ]; then
+            echo "version=$(tr -d '[:space:]' < .nvmrc)" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::.nvmrc not found in this checkout (stale branch?) - falling back to Node 24"
+            echo "version=24" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: .nvmrc
+          node-version: ${{ steps.node-version.outputs.version }}
 
       # Step 1 of the skill. Deterministic and dependency-free, so the facts and
       # the mechanical baseline exist even if the model never runs.
