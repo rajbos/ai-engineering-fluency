@@ -178,6 +178,46 @@ export interface DailyTokenStats {
   editorModelUsage?: { [editor: string]: ModelUsage };
   /** Per-task-category token/session breakdown for this day, keyed by `TaskCategory` (e.g. "Coding", "Debugging"). */
   taskCategoryUsage?: { [category: string]: { tokens: number; sessions: number } };
+  /**
+   * Per-model efficiency counters for this day — the time-sliceable form of
+   * {@link ModelEfficiencyUsage} that powers model-vs-model comparisons.
+   * Absent when no session on this day carried per-model efficiency data.
+   */
+  modelEfficiency?: DailyModelEfficiency;
+}
+
+/**
+ * One model's efficiency counters for a single day, extending the per-session
+ * {@link ModelEfficiencyCounters} with the session-level signals that have to be
+ * *attributed* to a model rather than measured per model (duration, lines of
+ * code, apply-button usage). For sessions that used several models these are
+ * split by the model's share of the session's tokens.
+ */
+export interface DailyModelEfficiencyEntry extends ModelEfficiencyCounters {
+  /** Sessions that used this model at all. A 2-model session adds 1 to both models. */
+  sessions: number;
+  /**
+   * Token-weighted "session equivalents" — a 2-model session splits 1.0 between
+   * its models. This is the honest denominator for per-session ratios, since
+   * `sessions` deliberately over-counts multi-model sessions.
+   */
+  sessionShare: number;
+  /** Net active session time attributed to this model (token-weighted), in ms. */
+  activeDurationMs: number;
+  /** Sessions that contributed to `activeDurationMs` (token-weighted). */
+  durationSessionShare: number;
+  /** Lines added attributed to this model (token-weighted). */
+  linesAdded: number;
+  /** Lines removed attributed to this model (token-weighted). */
+  linesRemoved: number;
+  /** Apply-button uses attributed to this model (token-weighted). */
+  applies: number;
+  /** Code blocks shown attributed to this model (token-weighted). */
+  codeBlocks: number;
+}
+
+export interface DailyModelEfficiency {
+  [modelName: string]: DailyModelEfficiencyEntry;
 }
 
 /** Time-window selector options available in the Chart view. */

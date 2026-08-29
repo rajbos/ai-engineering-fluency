@@ -13,7 +13,20 @@ import type {
 	CostAttribution,
 	EfficiencyDelta,
 	EfficiencyViewData,
+	ModelComparison,
+	ModelComparisonMetricId,
+	ModelComparisonRow,
+	ModelCompareWindowId,
+	ModelPeriodMetrics,
 	SkillImpact,
+} from '../../../../src/efficiencyAnalysis';
+import {
+	buildModelWeeklySeries,
+	compareModels,
+	computeModelPeriodMetrics,
+	listComparableModels,
+	resolveModelCompareWindow,
+	selectDaysInWindow,
 } from '../../../../src/efficiencyAnalysis';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 
@@ -47,7 +60,7 @@ async function loadChartModule(): Promise<void> {
 	Chart = mod.default as ChartConstructor;
 }
 
-type TabId = 'trends' | 'skills' | 'deltas' | 'attribution' | 'value' | 'combined';
+type TabId = 'trends' | 'skills' | 'deltas' | 'attribution' | 'models' | 'value' | 'combined';
 let activeTab: TabId = 'trends';
 
 const TABS: { id: TabId; label: string }[] = [
@@ -55,6 +68,7 @@ const TABS: { id: TabId; label: string }[] = [
 	{ id: 'skills', label: '🛠️ Tools & Skills' },
 	{ id: 'deltas', label: '🗓️ Month vs Month' },
 	{ id: 'attribution', label: '💸 Cost Attribution' },
+	{ id: 'models', label: '🤖 Models' },
 	{ id: 'value', label: '🎁 Value' },
 	{ id: 'combined', label: '🧩 Combined' },
 ];
@@ -439,7 +453,384 @@ function renderCombinedTab(d: EfficiencyViewData): string {
 		<div class="combined-wrap"><canvas id="combined-chart"></canvas></div>`;
 }
 
+// ── Models tab ─────────────────────────────────────────────────────────
+
+/** Metric accessors for the per-model weekly trend chart. */
+const MODEL_TREND_METRICS: { id: ModelComparisonMetricId; label: string; unit: EfficiencyDelta['unit']; goodDirection: 'up' | 'down'; pick: (m: ModelPeriodMetrics) => number | null }[] = [
+	{ id: 'cost-per-edit-turn', label: 'Cost per edit turn', unit: 'currency', goodDirection: 'down', pick: m => m.costPerEditTurn },
+	{ id: 'cost-per-session', label: 'Cost per session', unit: 'currency', goodDirection: 'down', pick: m => m.costPerSession },
+	{ id: 'cost-per-kloc', label: 'Cost per 1000 lines', unit: 'currency', goodDirection: 'down', pick: m => m.costPerKloc },
+	{ id: 'one-shot-rate', label: 'One-shot edit rate', unit: 'percent', goodDirection: 'up', pick: m => m.oneShotRate },
+	{ id: 'retry-rate', label: 'Edit retry rate', unit: 'ratio', goodDirection: 'down', pick: m => m.retryRate },
+	{ id: 'tokens-per-edit-turn', label: 'Tokens per edit turn', unit: 'tokens', goodDirection: 'down', pick: m => m.tokensPerEditTurn },
+	{ id: 'active-minutes-per-session', label: 'Active minutes per session', unit: 'minutes', goodDirection: 'down', pick: m => m.activeMinutesPerSession },
+];
+
+/** Metrics shown on the normalized radar — one axis per dimension of "efficient". */
+const RADAR_METRICS: ModelComparisonMetricId[] = [
+	'cost-per-edit-turn', 'one-shot-rate', 'retry-rate', 'tokens-per-edit-turn', 'active-minutes-per-session', 'apply-rate',
+];
+
+const WINDOW_OPTIONS: { id: ModelCompareWindowId; label: string }[] = [
+	{ id: 'last30', label: 'Last 30 days' },
+	{ id: 'prev30', label: 'Previous 30 days' },
+	{ id: 'last90', label: 'Last 90 days' },
+	{ id: 'thisMonth', label: 'This month' },
+	{ id: 'lastMonth', label: 'Last month' },
+];
+
+type CompareMode = 'models' | 'periods';
+
+const modelState: {
+	mode: CompareMode;
+	modelA: string;
+	modelB: string;
+	window: ModelCompareWindowId;
+	windowA: ModelCompareWindowId;
+	windowB: ModelCompareWindowId;
+	trendMetric: ModelComparisonMetricId;
+	initialized: boolean;
+} = {
+	mode: 'models', modelA: '', modelB: '',
+	window: 'last30', windowA: 'lastMonth', windowB: 'thisMonth',
+	trendMetric: 'cost-per-edit-turn', initialized: false,
+};
+
+/** The reference "now" for window maths — the moment the extension built this payload. */
+function payloadNow(d: EfficiencyViewData): Date {
+	const parsed = new Date(d.lastUpdated);
+	return Number.isNaN(parsed.getTime()) ? new Date() : parsed;
+}
+
+/** Picks sensible defaults on first render: the two most-used comparable models. */
+function initModelState(d: EfficiencyViewData): void {
+	if (modelState.initialized) { return; }
+	modelState.initialized = true;
+	const models = listComparableModels(d.modelDaily);
+	const preferred = models.filter(m => m.sampleSufficient);
+	const pool = preferred.length >= 2 ? preferred : models;
+	modelState.modelA = pool[0]?.model ?? '';
+	modelState.modelB = pool[1]?.model ?? pool[0]?.model ?? '';
+}
+
+/** Resolves the current selection into a comparison, or null when a side has no data. */
+function buildModelComparison(d: EfficiencyViewData): ModelComparison | null {
+	const now = payloadNow(d);
+	if (modelState.mode === 'periods') {
+		const wA = resolveModelCompareWindow(modelState.windowA, now);
+		const wB = resolveModelCompareWindow(modelState.windowB, now);
+		const a = computeModelPeriodMetrics(selectDaysInWindow(d.modelDaily, wA), modelState.modelA, wA.label);
+		const b = computeModelPeriodMetrics(selectDaysInWindow(d.modelDaily, wB), modelState.modelA, wB.label);
+		return a && b ? compareModels(a, b) : null;
+	}
+	const w = resolveModelCompareWindow(modelState.window, now);
+	const days = selectDaysInWindow(d.modelDaily, w);
+	const a = computeModelPeriodMetrics(days, modelState.modelA, w.label);
+	const b = computeModelPeriodMetrics(days, modelState.modelB, w.label);
+	return a && b ? compareModels(a, b) : null;
+}
+
+function selectHtml(id: string, options: { value: string; label: string; disabled?: boolean }[], selected: string): string {
+	const opts = options.map(o =>
+		`<option value="${escapeHtml(o.value)}"${o.value === selected ? ' selected' : ''}${o.disabled ? ' disabled' : ''}>${escapeHtml(o.label)}</option>`
+	).join('');
+	return `<select id="${id}" class="model-select">${opts}</select>`;
+}
+
+function modelOptions(d: EfficiencyViewData): { value: string; label: string }[] {
+	return listComparableModels(d.modelDaily).map(m => ({
+		value: m.model,
+		label: `${m.displayName} (${m.sessions} sessions${m.sampleSufficient ? '' : ', low sample'})`,
+	}));
+}
+
+function windowOptions(): { value: string; label: string }[] {
+	return WINDOW_OPTIONS.map(w => ({ value: w.id, label: w.label }));
+}
+
+function renderModelControls(d: EfficiencyViewData): string {
+	const models = modelOptions(d);
+	const windows = windowOptions();
+	const modeSelect = selectHtml('model-mode', [
+		{ value: 'models', label: 'Compare two models' },
+		{ value: 'periods', label: 'One model, two periods' },
+	], modelState.mode);
+	const body = modelState.mode === 'periods'
+		? `
+			<label>Model ${selectHtml('model-a', models, modelState.modelA)}</label>
+			<label>Baseline ${selectHtml('window-a', windows, modelState.windowA)}</label>
+			<label>Compared with ${selectHtml('window-b', windows, modelState.windowB)}</label>`
+		: `
+			<label>Model A ${selectHtml('model-a', models, modelState.modelA)}</label>
+			<label>Model B ${selectHtml('model-b', models, modelState.modelB)}</label>
+			<label>Window ${selectHtml('window', windows, modelState.window)}</label>`;
+	return `<div class="model-controls"><label>Mode ${modeSelect}</label>${body}</div>`;
+}
+
+/** Renders a side's headline volume so the reader can judge the sample for themselves. */
+function sideSummary(m: ModelPeriodMetrics, side: 'A' | 'B'): string {
+	return `
+		<div class="model-side model-side-${side.toLowerCase()}">
+			<div class="model-side-tag">${side}</div>
+			<div class="model-side-name">${escapeHtml(m.displayName)}</div>
+			<div class="model-side-period">${escapeHtml(m.periodLabel)}</div>
+			<div class="model-side-stats">${m.sessions} sessions · ${m.editTurns} edit turns · ${formatCompact(m.tokens)} tokens · $${m.cost.toFixed(2)}</div>
+		</div>`;
+}
+
+/** The "B vs A" cell: percentage change coloured by which side it favours. */
+function comparisonDeltaCell(r: ModelComparisonRow): string {
+	if (r.deltaPct === null) { return '<span class="delta-na">—</span>'; }
+	const cls = r.winner === 'b' ? 'good' : r.winner === 'a' ? 'bad' : 'flat';
+	const arrow = r.deltaPct > 0 ? '↑' : r.deltaPct < 0 ? '↓' : '→';
+	return `<span class="delta-change ${cls}">${arrow} ${Math.abs(r.deltaPct).toFixed(0)}%</span>`;
+}
+
+/** The "Better" cell — only decisive wins get a chip, so ties read as ties. */
+function comparisonWinnerCell(r: ModelComparisonRow): string {
+	if (r.significant && (r.winner === 'a' || r.winner === 'b')) {
+		return `<span class="model-win-chip">${r.winner.toUpperCase()}</span>`;
+	}
+	return r.winner === 'tie' ? '<span class="model-win-chip tie">tie</span>' : '';
+}
+
+function comparisonRowHtml(r: ModelComparisonRow): string {
+	const unavailable = r.a === null || r.b === null ? ' class="model-row-muted"' : '';
+	return `
+			<tr${unavailable}>
+				<td title="${escapeHtml(r.description)}">${escapeHtml(r.label)}</td>
+				<td class="num">${fmtValue(r.a, r.unit)}</td>
+				<td class="num">${fmtValue(r.b, r.unit)}</td>
+				<td class="num">${comparisonDeltaCell(r)}</td>
+				<td class="num">${comparisonWinnerCell(r)}</td>
+			</tr>`;
+}
+
+function comparisonTableHtml(cmp: ModelComparison): string {
+	const rows = cmp.rows.map(comparisonRowHtml).join('');
+	return `
+		<table class="attr-shift-table model-compare-table">
+			<thead><tr>
+				<th>Metric</th>
+				<th class="num">A · ${escapeHtml(cmp.a.displayName)}<br><span class="th-sub">${escapeHtml(cmp.a.periodLabel)}</span></th>
+				<th class="num">B · ${escapeHtml(cmp.b.displayName)}<br><span class="th-sub">${escapeHtml(cmp.b.periodLabel)}</span></th>
+				<th class="num">B vs A</th>
+				<th class="num">Better</th>
+			</tr></thead>
+			<tbody>${rows}</tbody>
+		</table>`;
+}
+
+function verdictHtml(cmp: ModelComparison): string {
+	if (!cmp.verdict) {
+		return `<div class="model-verdict tie">⚖️ No metric differs by more than 10% — on this evidence the two sides perform the same.</div>`;
+	}
+	const { winner, wins } = cmp.verdict;
+	if (winner === 'tie') {
+		return `<div class="model-verdict tie">⚖️ Honours even: ${wins.a} metrics favour ${escapeHtml(cmp.a.displayName)} (${escapeHtml(cmp.a.periodLabel)}) and ${wins.b} favour ${escapeHtml(cmp.b.displayName)} (${escapeHtml(cmp.b.periodLabel)}).</div>`;
+	}
+	const side = winner === 'a' ? cmp.a : cmp.b;
+	const count = winner === 'a' ? wins.a : wins.b;
+	const other = winner === 'a' ? wins.b : wins.a;
+	return `<div class="model-verdict ${winner === 'b' ? 'improving' : 'declining'}">🏆 ${escapeHtml(side.displayName)} (${escapeHtml(side.periodLabel)}) wins ${count} of ${count + other} decisive metrics.</div>`;
+}
+
+function caveatsHtml(cmp: ModelComparison): string {
+	if (cmp.caveats.length === 0) { return ''; }
+	return `
+		<div class="model-caveats">
+			<h3>⚠️ Read with care</h3>
+			<ul>${cmp.caveats.map(c => `<li>${escapeHtml(c)}</li>`).join('')}</ul>
+		</div>`;
+}
+
+/** Stacked task-mix bar, so a reader can see whether the two sides did comparable work. */
+function taskMixHtml(cmp: ModelComparison): string {
+	const categories = [...new Set([...Object.keys(cmp.a.taskMix), ...Object.keys(cmp.b.taskMix)])].sort();
+	if (categories.length === 0) { return ''; }
+	const palette = ['--vscode-charts-blue', '--vscode-charts-green', '--vscode-charts-orange', '--vscode-charts-purple', '--vscode-charts-red', '--vscode-charts-yellow'];
+	const bar = (m: ModelPeriodMetrics): string => {
+		const segments = categories.map((c, i) => {
+			const share = m.taskMix[c] ?? 0;
+			if (share <= 0) { return ''; }
+			return `<div class="task-seg" style="width:${(share * 100).toFixed(1)}%; background:${cssVar(palette[i % palette.length], '#60a5fa')}" title="${escapeHtml(c)}: ${(share * 100).toFixed(0)}%"></div>`;
+		}).join('');
+		return `<div class="task-mix-row"><div class="task-mix-label">${escapeHtml(m.displayName)} · ${escapeHtml(m.periodLabel)}</div><div class="task-mix-bar">${segments}</div></div>`;
+	};
+	const legend = categories.map((c, i) =>
+		`<span class="task-legend-item"><span class="task-legend-dot" style="background:${cssVar(palette[i % palette.length], '#60a5fa')}"></span>${escapeHtml(c)}</span>`
+	).join('');
+	return `
+		<h3>What kind of work each side did</h3>
+		<p class="eff-section-note">Task categories are classified per session and split across that session's models by token share, so this is context, not a score. Very different mixes mean part of any gap belongs to the work, not the model.</p>
+		<div class="task-mix">${bar(cmp.a)}${bar(cmp.b)}</div>
+		<div class="task-legend">${legend}</div>`;
+}
+
+function renderModelsTab(d: EfficiencyViewData): string {
+	initModelState(d);
+	if (d.modelDaily.length === 0) {
+		return `<p class="eff-section-note">No per-model efficiency data yet. This tab needs sessions whose logs carry per-turn tool-call detail (Copilot CLI, Claude Code, Copilot Chat and similar). Keep working and check back in a few days.</p>`;
+	}
+	const controls = renderModelControls(d);
+	const cmp = buildModelComparison(d);
+	if (!cmp) {
+		return `
+			${controls}
+			<p class="eff-section-note">No data for one of the two sides in the selected window. Pick a different model or a wider window.</p>`;
+	}
+	const metricOptions = MODEL_TREND_METRICS.map(m => ({ value: m.id, label: m.label }));
+	return `
+		<p class="eff-section-note">Head-to-head efficiency. Costs use <b>provider/API rates</b>, so this measures the models themselves rather than a billing plan. Metrics whose sample was too small show as “—”. Session-level signals (duration, lines changed) are split across a session's models by token share.</p>
+		${controls}
+		<div class="model-sides">${sideSummary(cmp.a, 'A')}${sideSummary(cmp.b, 'B')}</div>
+		${verdictHtml(cmp)}
+		${comparisonTableHtml(cmp)}
+		${caveatsHtml(cmp)}
+		${taskMixHtml(cmp)}
+		<h3>Shape of each side</h3>
+		<p class="eff-section-note">Each axis is indexed so the better side scores 100. A larger shape is a better all-round profile; a spiky shape means the side wins on some dimensions and loses on others.</p>
+		<div class="model-radar-wrap"><canvas id="model-radar"></canvas></div>
+		<h3>Drift over time</h3>
+		<p class="eff-section-note">Weekly values for each side's model, so a model getting better — or quietly getting worse — is visible. Gaps are weeks where the model was not used.</p>
+		<div class="model-trend-controls"><label>Metric ${selectHtml('model-trend-metric', metricOptions, modelState.trendMetric)}</label></div>
+		<div class="model-trend-wrap"><canvas id="model-trend"></canvas></div>`;
+}
+
+
+
 // ── Chart drawing ──────────────────────────────────────────────────────
+
+/**
+ * Normalizes one metric onto a 0–100 radar axis where the better side scores
+ * 100. Returns null when either side lacks the metric, so the axis is dropped.
+ */
+function radarScores(row: ModelComparisonRow): { a: number; b: number } | null {
+	if (row.a === null || row.b === null) { return null; }
+	const max = Math.max(row.a, row.b);
+	const min = Math.min(row.a, row.b);
+	if (max === 0) { return { a: 100, b: 100 }; }
+	if (row.goodDirection === 'up') {
+		return { a: (row.a / max) * 100, b: (row.b / max) * 100 };
+	}
+	if (row.a === 0 || row.b === 0) { return { a: row.a === min ? 100 : 0, b: row.b === min ? 100 : 0 }; }
+	return { a: (min / row.a) * 100, b: (min / row.b) * 100 };
+}
+
+function radarAxes(cmp: ModelComparison): { row: ModelComparisonRow; scores: { a: number; b: number } }[] {
+	const axes: { row: ModelComparisonRow; scores: { a: number; b: number } }[] = [];
+	for (const id of RADAR_METRICS) {
+		const row = cmp.rows.find(r => r.id === id);
+		if (!row) { continue; }
+		const scores = radarScores(row);
+		if (scores) { axes.push({ row, scores }); }
+	}
+	return axes;
+}
+
+async function drawModelRadar(cmp: ModelComparison): Promise<void> {
+	await loadChartModule();
+	const canvas = document.getElementById('model-radar') as HTMLCanvasElement | null;
+	if (!Chart || !canvas) { return; }
+	const axes = radarAxes(cmp);
+	if (axes.length < 3) {
+		setHtml(canvas.parentElement as HTMLElement, `<p class="eff-section-note">Not enough shared metrics between the two sides to draw a shape.</p>`);
+		return;
+	}
+	const fg = cssVar('--vscode-descriptionForeground', '#999');
+	const grid = cssVar('--vscode-widget-border', 'rgba(128,128,128,0.2)');
+	const colorA = cssVar('--vscode-charts-blue', '#60a5fa');
+	const colorB = cssVar('--vscode-charts-orange', '#ff9f40');
+	liveCharts.push(new Chart(canvas, {
+		type: 'radar',
+		data: {
+			labels: axes.map(x => x.row.label),
+			datasets: [
+				{ label: `${cmp.a.displayName} · ${cmp.a.periodLabel}`, data: axes.map(x => x.scores.a), borderColor: colorA, backgroundColor: 'rgba(96,165,250,0.20)', pointBackgroundColor: colorA },
+				{ label: `${cmp.b.displayName} · ${cmp.b.periodLabel}`, data: axes.map(x => x.scores.b), borderColor: colorB, backgroundColor: 'rgba(255,159,64,0.20)', pointBackgroundColor: colorB },
+			],
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: {
+				legend: { position: 'bottom', labels: { color: fg, boxWidth: 14 } },
+				tooltip: {
+					callbacks: {
+						label: (ctx: { datasetIndex: number; dataIndex: number; parsed: { r: number } }) => {
+							const axis = axes[ctx.dataIndex];
+							const raw = ctx.datasetIndex === 0 ? axis.row.a : axis.row.b;
+							return `${fmtValue(raw, axis.row.unit)} (score ${Math.round(ctx.parsed.r)})`;
+						},
+					},
+				},
+			},
+			scales: {
+				r: {
+					suggestedMin: 0, suggestedMax: 100,
+					angleLines: { color: grid }, grid: { color: grid },
+					pointLabels: { color: fg }, ticks: { display: false },
+				},
+			},
+		},
+	} as never));
+}
+
+/** The models whose weekly series belong on the trend chart for the current mode. */
+function trendModels(): string[] {
+	const wanted = modelState.mode === 'periods'
+		? [modelState.modelA]
+		: [modelState.modelA, modelState.modelB];
+	return wanted.filter((m, i, arr) => m !== '' && arr.indexOf(m) === i);
+}
+
+async function drawModelTrend(d: EfficiencyViewData): Promise<void> {
+	await loadChartModule();
+	const canvas = document.getElementById('model-trend') as HTMLCanvasElement | null;
+	if (!Chart || !canvas) { return; }
+	const spec = MODEL_TREND_METRICS.find(m => m.id === modelState.trendMetric) ?? MODEL_TREND_METRICS[0];
+	const now = payloadNow(d);
+	const models = trendModels();
+	const colors = [cssVar('--vscode-charts-blue', '#60a5fa'), cssVar('--vscode-charts-orange', '#ff9f40')];
+	const seriesList = models.map(m => buildModelWeeklySeries(d.modelDaily, m, now));
+	const labels = seriesList[0]?.map(p => p.label) ?? [];
+	const fg = cssVar('--vscode-descriptionForeground', '#999');
+	const grid = cssVar('--vscode-widget-border', 'rgba(128,128,128,0.2)');
+	liveCharts.push(new Chart(canvas, {
+		type: 'line',
+		data: {
+			labels,
+			datasets: seriesList.map((series, i) => ({
+				label: series.find(p => p.metrics)?.metrics?.displayName ?? models[i],
+				data: series.map(p => (p.metrics ? spec.pick(p.metrics) : null)),
+				borderColor: colors[i % colors.length],
+				backgroundColor: colors[i % colors.length],
+				spanGaps: true,
+				tension: 0.25,
+				pointRadius: 2.5,
+			})),
+		},
+		options: {
+			responsive: true,
+			maintainAspectRatio: false,
+			plugins: {
+				legend: { position: 'bottom', labels: { color: fg, boxWidth: 14 } },
+				tooltip: { callbacks: { label: (ctx: { parsed: { y: number | null } }) => ctx.parsed.y === null ? 'no data' : fmtValue(ctx.parsed.y, spec.unit) } },
+			},
+			scales: {
+				x: { ticks: { color: fg, maxRotation: 45, autoSkip: true, maxTicksLimit: 8 }, grid: { display: false } },
+				y: { beginAtZero: true, ticks: { color: fg, maxTicksLimit: 5 }, grid: { color: grid } },
+			},
+		},
+	} as never));
+}
+
+async function drawModelCharts(d: EfficiencyViewData): Promise<void> {
+	const cmp = buildModelComparison(d);
+	if (!cmp) { return; }
+	await drawModelRadar(cmp);
+	await drawModelTrend(d);
+}
 
 function destroyCharts(): void {
 	for (const c of liveCharts.splice(0)) { c.destroy(); }
@@ -567,6 +958,7 @@ function renderActiveTab(d: EfficiencyViewData): string {
 		case 'skills': return renderSkillsTab(d);
 		case 'deltas': return renderDeltasTab(d);
 		case 'attribution': return renderAttributionTab(d);
+		case 'models': return renderModelsTab(d);
 		case 'value': return renderValueTab(d);
 		case 'combined': return renderCombinedTab(d);
 	}
@@ -597,6 +989,24 @@ function render(): void {
 	if (activeTab === 'trends') { void drawTrendCharts(data); }
 	if (activeTab === 'skills' && data.hasSkills) { void drawSkillsChart(data); }
 	if (activeTab === 'combined') { void drawCombinedChart(data); }
+	if (activeTab === 'models') { void drawModelCharts(data); }
+}
+
+/** Wires the Models tab selects; each change updates state and re-renders. */
+function wireModelControls(): void {
+	const bind = (id: string, apply: (value: string) => void): void => {
+		document.getElementById(id)?.addEventListener('change', ev => {
+			apply((ev.target as HTMLSelectElement).value);
+			render();
+		});
+	};
+	bind('model-mode', v => { modelState.mode = v as CompareMode; });
+	bind('model-a', v => { modelState.modelA = v; });
+	bind('model-b', v => { modelState.modelB = v; });
+	bind('window', v => { modelState.window = v as ModelCompareWindowId; });
+	bind('window-a', v => { modelState.windowA = v as ModelCompareWindowId; });
+	bind('window-b', v => { modelState.windowB = v as ModelCompareWindowId; });
+	bind('model-trend-metric', v => { modelState.trendMetric = v as ModelComparisonMetricId; });
 }
 
 function wireEvents(): void {
@@ -606,6 +1016,7 @@ function wireEvents(): void {
 			render();
 		});
 	});
+	wireModelControls();
 	document.getElementById('btn-refresh')?.addEventListener('click', () => { vscode.postMessage({ command: 'refresh' }); });
 	document.getElementById('btn-details')?.addEventListener('click', () => { vscode.postMessage({ command: 'showDetails' }); });
 	document.getElementById('btn-chart')?.addEventListener('click', () => { vscode.postMessage({ command: 'showChart' }); });

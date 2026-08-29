@@ -73,6 +73,7 @@ Detailed documentation for individual features.
 | [features/FLUENCY-LEVEL-VIEWER-UI-MOCKUP.md](features/FLUENCY-LEVEL-VIEWER-UI-MOCKUP.md) | UI mockup for the Fluency Level Viewer |
 | [features/THEMING_CHANGES.md](features/THEMING_CHANGES.md) | Light theme support implementation details |
 | [features/TOOL-CURATION.md](features/TOOL-CURATION.md) | Tool Curation — surface unused MCP servers and stale skills |
+| [features/MODEL-EFFICIENCY-COMPARISON.md](features/MODEL-EFFICIENCY-COMPARISON.md) | Models tab — compare two models, or one model across two periods |
 
 ## Architecture Decision Records (ADR)
 

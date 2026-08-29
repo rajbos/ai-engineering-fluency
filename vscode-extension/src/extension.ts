@@ -161,6 +161,11 @@ import {
   mergeModelEfficiencyTokens as _mergeModelEfficiencyTokens,
   type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
+import {
+  accumulateDailyModelTokens as _accumulateDailyModelTokens,
+  accumulateDailyModelCounters as _accumulateDailyModelCounters,
+  buildSessionEfficiencyAttribution as _buildSessionEfficiencyAttribution,
+} from '../../src/modelEfficiency';
 
 // --- Efficiency analysis ---
 import {
@@ -169,10 +174,12 @@ import {
   computeCostAttribution as _computeCostAttribution,
   computeEfficiencyDeltas as _computeEfficiencyDeltas,
   computeSkillImpact as _computeSkillImpact,
+  listComparableModels as _listComparableModels,
   computeValueSignals as _computeValueSignals,
   splitTrailingWindows as _splitTrailingWindows,
   type EfficiencySessionInput,
   type EfficiencyViewData,
+  type ModelDailyInput,
   type PeriodVolumeTotals,
 } from '../../src/efficiencyAnalysis';
 
@@ -3517,9 +3524,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, sessionData.taskCategory);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
-		if (lastDayKey && (sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
-			const locEntry = dailyStatsMap.get(lastDayKey)!;
-			this.addLocToDailyEntry(locEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
+		if (lastDayKey) {
+			// Session-level signals (turn counters, duration, LOC) describe the whole
+			// session and cannot be split per day, so they land on the last active day —
+			// the same convention the LOC attribution below already uses.
+			this.addModelEfficiencyToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData);
+			if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
+				this.addLocToDailyEntry(dailyStatsMap.get(lastDayKey)!, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
+			}
 		}
 	}
 
@@ -3531,9 +3543,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
 		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategory);
+		this.addModelEfficiencyToDailyEntry(dailyEntry, sessionData);
 		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
 		}
+	}
+
+	/**
+	 * Folds one session's per-model efficiency signals into the day entry, so the
+	 * Efficiency view can compare models over arbitrary time windows. Session-level
+	 * duration/LOC/apply counts are split across the session's models by token share.
+	 */
+	private addModelEfficiencyToDailyEntry(entry: DailyTokenStats, sessionData: SessionFileCache): void {
+		if (!sessionData.usageAnalysis?.modelEfficiency && Object.keys(sessionData.modelUsage).length === 0) { return; }
+		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
+		_accumulateDailyModelCounters(entry.modelEfficiency, _buildSessionEfficiencyAttribution(sessionData));
 	}
 
 	private getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dateKey: string): DailyTokenStats {
@@ -3557,6 +3581,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		for (const model of Object.keys(modelUsage)) {
 			entry.modelUsage[model]!.sessions += 1;
 		}
+		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
+		_accumulateDailyModelTokens(entry.modelEfficiency, modelUsage, this.modelPricing);
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
@@ -8131,6 +8157,26 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		return { tokens, sessions, estimatedCost };
 	}
 
+	/**
+	 * Trims the daily stats down to the per-model slice the Models tab needs, over
+	 * the last year so month-vs-month comparisons have history to draw on. Days
+	 * without per-model data are dropped to keep the webview payload small.
+	 */
+	private buildModelDailyPayload(dailyStats: DailyTokenStats[], now: Date): ModelDailyInput[] {
+		const cutoff = new Date(now.getFullYear() - 1, now.getMonth(), now.getDate());
+		const cutoffKey = toLocalDayKey(cutoff);
+		const payload: ModelDailyInput[] = [];
+		for (const day of dailyStats) {
+			if (day.date < cutoffKey || !day.modelEfficiency || Object.keys(day.modelEfficiency).length === 0) { continue; }
+			payload.push({
+				date: day.date,
+				modelEfficiency: day.modelEfficiency,
+				...(day.taskCategoryUsage ? { taskCategoryUsage: day.taskCategoryUsage } : {}),
+			});
+		}
+		return payload;
+	}
+
 	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {
 		const now = new Date();
 		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateDailyStats();
@@ -8141,6 +8187,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			now,
 		};
 		const weekly = _buildEfficiencyTrends(dailyStats, sessionInputs, deps);
+		const modelDaily = this.buildModelDailyPayload(dailyStats, now);
 		const skillTrends = _buildSkillUsageTrends(sessionInputs, deps);
 		const skillImpact = _computeSkillImpact(sessionInputs);
 		const { prevDays, curDays } = _splitTrailingWindows(dailyStats, now);
@@ -8185,6 +8232,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			skillTrends,
 			skillImpact,
 			hasSkills: skillTrends.totalCalls > 0,
+			modelDaily,
+			hasModelComparison: _listComparableModels(modelDaily).filter(m => m.sampleSufficient).length >= 2,
 			lastUpdated: now.toISOString(),
 			backendConfigured: this.isBackendConfigured(),
 			compactNumbers: this.getCompactNumbersSetting(),

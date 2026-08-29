@@ -9,10 +9,17 @@ import {
 	computeEfficiencyDeltas,
 	computeValueSignals,
 	splitTrailingWindows,
+	computeModelPeriodMetrics,
+	listComparableModels,
+	compareModels,
+	buildModelWeeklySeries,
+	resolveModelCompareWindow,
+	selectDaysInWindow,
 	type EfficiencyDeps,
 	type EfficiencySessionInput,
 } from '../../../src/efficiencyAnalysis';
-import type { DailyTokenStats, ModelUsage, UsageAnalysisPeriod } from '../../../src/types';
+import { createEmptyDailyModelEfficiencyEntry } from '../../../src/modelEfficiency';
+import type { DailyModelEfficiency, DailyModelEfficiencyEntry, DailyTokenStats, ModelUsage, UsageAnalysisPeriod } from '../../../src/types';
 
 // ── Fixtures ─────────────────────────────────────────────────────────────────
 
@@ -483,4 +490,249 @@ test('computeSkillImpact: unfavourable differences are flagged red', () => {
 	assert.equal(impacts.length, 1);
 	const turns = impacts[0].metrics.find(m => m.id === 'turns')!;
 	assert.equal(turns.favorable, false);
+});
+
+// ── Model comparison ─────────────────────────────────────────────────────────
+
+function modelDay(date: string, models: { [model: string]: Partial<DailyModelEfficiencyEntry> }, taskCategoryUsage?: DailyTokenStats['taskCategoryUsage']): DailyTokenStats {
+	const modelEfficiency: DailyModelEfficiency = {};
+	for (const [model, overrides] of Object.entries(models)) {
+		modelEfficiency[model] = { ...createEmptyDailyModelEfficiencyEntry(), ...overrides };
+	}
+	return {
+		date, tokens: 0, sessions: 0, interactions: 0,
+		modelUsage: {}, editorUsage: {}, repositoryUsage: {},
+		modelEfficiency, ...(taskCategoryUsage ? { taskCategoryUsage } : {}),
+	};
+}
+
+/** A model profile that clears both sample floors, with the given overrides applied. */
+function solidModel(overrides: Partial<DailyModelEfficiencyEntry>): Partial<DailyModelEfficiencyEntry> {
+	return {
+		sessions: 10, sessionShare: 10, calls: 40, editTurns: 20, oneShotEditTurns: 15,
+		retries: 5, inputTokens: 900_000, outputTokens: 100_000, cost: 10,
+		linesAdded: 800, linesRemoved: 200, durationSessionShare: 10, activeDurationMs: 10 * 600_000,
+		applies: 40, codeBlocks: 50,
+		...overrides,
+	};
+}
+
+test('computeModelPeriodMetrics: returns null for a model absent from the window', () => {
+	const days = [modelDay('2026-07-01', { a: solidModel({}) })];
+	assert.equal(computeModelPeriodMetrics(days, 'missing', 'Jul'), null);
+});
+
+test('computeModelPeriodMetrics: aggregates across days and derives ratios', () => {
+	const days = [
+		modelDay('2026-07-01', { kimi: solidModel({}) }),
+		modelDay('2026-07-02', { kimi: solidModel({}) }),
+	];
+	const m = computeModelPeriodMetrics(days, 'kimi', 'Jul')!;
+	assert.equal(m.sessionShare, 20);
+	assert.equal(m.editTurns, 40);
+	assert.equal(m.cost, 20);
+	assert.equal(m.tokens, 2_000_000);
+	assert.equal(m.costPerEditTurn, 0.5);            // $20 / 40 edit turns
+	assert.equal(m.costPerSession, 1);               // $20 / 20 session equivalents
+	assert.equal(m.costPerKloc, 10);                 // $20 / 2000 lines * 1000
+	assert.equal(m.dollarsPerMTokens, 10);
+	assert.equal(m.oneShotRate, 0.75);               // 30 / 40
+	assert.equal(m.retryRate, 0.25);                 // 10 / 40
+	assert.equal(m.activeMinutesPerSession, 10);     // 600_000ms per session equivalent
+	assert.equal(m.applyRate, 0.8);                  // 80 / 100
+	assert.ok(m.sampleSufficient && m.editSampleSufficient);
+});
+
+test('computeModelPeriodMetrics: suppresses ratios that fall below the sample floors', () => {
+	const days = [modelDay('2026-07-01', { rare: { ...createEmptyDailyModelEfficiencyEntry(), sessions: 1, sessionShare: 1, editTurns: 2, retries: 1, cost: 3, inputTokens: 1000, linesAdded: 10 } })];
+	const m = computeModelPeriodMetrics(days, 'rare', 'Jul')!;
+	assert.equal(m.sampleSufficient, false);
+	assert.equal(m.editSampleSufficient, false);
+	assert.equal(m.retryRate, null);
+	assert.equal(m.costPerEditTurn, null);
+	assert.equal(m.costPerSession, null);
+	// Price per token needs no behavioural sample, so it still reports.
+	assert.ok(m.dollarsPerMTokens !== null);
+});
+
+test('computeModelPeriodMetrics: caps cache read share at 1.0', () => {
+	const days = [modelDay('2026-07-01', { a: solidModel({ inputTokens: 1000, cachedReadTokens: 5000 }) })];
+	assert.equal(computeModelPeriodMetrics(days, 'a', 'Jul')!.cacheReadShare, 1);
+});
+
+test('computeModelPeriodMetrics: attributes task mix by the model share of the day', () => {
+	const days = [modelDay('2026-07-01',
+		{ a: solidModel({ inputTokens: 750_000, outputTokens: 0 }), b: solidModel({ inputTokens: 250_000, outputTokens: 0 }) },
+		{ Coding: { tokens: 800, sessions: 1 }, Debugging: { tokens: 200, sessions: 1 } },
+	)];
+	const m = computeModelPeriodMetrics(days, 'a', 'Jul')!;
+	// Shares are normalized within the model, so the mix matches the day's mix.
+	assert.equal(m.taskMix['Coding'], 0.8);
+	assert.equal(m.taskMix['Debugging'], 0.2);
+});
+
+test('listComparableModels: sorts by tokens and flags models below the sample floor', () => {
+	const days = [modelDay('2026-07-01', {
+		small: { ...createEmptyDailyModelEfficiencyEntry(), sessionShare: 1, inputTokens: 100 },
+		big: solidModel({}),
+	})];
+	const models = listComparableModels(days);
+	assert.deepEqual(models.map(m => m.model), ['big', 'small']);
+	assert.equal(models[0].sampleSufficient, true);
+	assert.equal(models[1].sampleSufficient, false);
+});
+
+test('compareModels: picks the winner per metric respecting each metric direction', () => {
+	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: solidModel({ cost: 20 }) })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics([modelDay('2026-07-01', { b: solidModel({ cost: 10 }) })], 'b', 'Jul')!;
+	const cmp = compareModels(a, b);
+
+	const cost = cmp.rows.find(r => r.id === 'cost-per-edit-turn')!;
+	assert.equal(cost.a, 1);
+	assert.equal(cost.b, 0.5);
+	assert.equal(cost.deltaPct, -50);
+	assert.equal(cost.winner, 'b');   // cheaper is better
+	assert.equal(cost.significant, true);
+
+	// Identical one-shot rates are a tie, not a win.
+	const oneShot = cmp.rows.find(r => r.id === 'one-shot-rate')!;
+	assert.equal(oneShot.winner, 'tie');
+	assert.equal(oneShot.significant, false);
+});
+
+test('compareModels: higher-is-better metrics award the win to the larger value', () => {
+	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: solidModel({ oneShotEditTurns: 4 }) })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics([modelDay('2026-07-01', { b: solidModel({ oneShotEditTurns: 18 }) })], 'b', 'Jul')!;
+	const oneShot = compareModels(a, b).rows.find(r => r.id === 'one-shot-rate')!;
+	assert.equal(oneShot.winner, 'b');
+	assert.equal(oneShot.significant, true);
+});
+
+test('compareModels: nulls stay null and never produce a winner', () => {
+	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: solidModel({}) })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics([modelDay('2026-07-01', { b: { ...createEmptyDailyModelEfficiencyEntry(), sessionShare: 1, editTurns: 1, cost: 1, inputTokens: 10 } })], 'b', 'Jul')!;
+	const cost = compareModels(a, b).rows.find(r => r.id === 'cost-per-edit-turn')!;
+	assert.equal(cost.b, null);
+	assert.equal(cost.winner, null);
+	assert.equal(cost.significant, false);
+});
+
+test('compareModels: verdict counts significant wins on each side', () => {
+	// b is cheaper (wins cost rows) but retries far more (loses quality rows).
+	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: solidModel({ cost: 40 }) })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics([modelDay('2026-07-01', { b: solidModel({ cost: 10, retries: 18, oneShotEditTurns: 2 }) })], 'b', 'Jul')!;
+	const cmp = compareModels(a, b);
+	assert.ok(cmp.verdict !== null);
+	assert.ok(cmp.verdict!.wins.a > 0, 'a should win the quality rows');
+	assert.ok(cmp.verdict!.wins.b > 0, 'b should win the cost rows');
+});
+
+test('compareModels: verdict is null when nothing clears the noise band', () => {
+	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: solidModel({}) })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics([modelDay('2026-07-01', { b: solidModel({}) })], 'b', 'Jul')!;
+	assert.equal(compareModels(a, b).verdict, null);
+});
+
+test('compareModels: raises a caveat when a side is below the sample floor', () => {
+	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: solidModel({}) })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics([modelDay('2026-07-01', { b: { ...createEmptyDailyModelEfficiencyEntry(), sessionShare: 1, editTurns: 1, inputTokens: 10 } })], 'b', 'Jul')!;
+	const cmp = compareModels(a, b);
+	assert.ok(cmp.caveats.some(c => c.includes('session equivalents')));
+	assert.ok(cmp.caveats.some(c => c.includes('edit turns')));
+});
+
+test('compareModels: raises a caveat when the two sides did different kinds of work', () => {
+	const a = computeModelPeriodMetrics(
+		[modelDay('2026-07-01', { a: solidModel({}) }, { Coding: { tokens: 1000, sessions: 1 } })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics(
+		[modelDay('2026-07-01', { b: solidModel({}) }, { Debugging: { tokens: 1000, sessions: 1 } })], 'b', 'Jul')!;
+	assert.ok(compareModels(a, b).caveats.some(c => c.includes('task-mix')));
+});
+
+test('compareModels: warns when the usage is dominated by mixed-model sessions', () => {
+	// 20 sessions touched the model but they are worth only 5 session equivalents.
+	const mixed = solidModel({ sessions: 20, sessionShare: 5 });
+	const a = computeModelPeriodMetrics([modelDay('2026-07-01', { a: mixed })], 'a', 'Jul')!;
+	const b = computeModelPeriodMetrics([modelDay('2026-07-01', { b: solidModel({}) })], 'b', 'Jul')!;
+	assert.ok(compareModels(a, b).caveats.some(c => c.includes('mixed several models')));
+});
+
+test('buildModelWeeklySeries: buckets days into weeks and gaps unused weeks', () => {
+	// NOW is Wed 2026-07-15, so the last bucket is the week of Mon 2026-07-13.
+	const days = [
+		modelDay('2026-07-14', { kimi: solidModel({ cost: 10 }) }),
+		modelDay('2026-07-07', { kimi: solidModel({ cost: 20 }) }),
+	];
+	const series = buildModelWeeklySeries(days, 'kimi', NOW, 3);
+	assert.equal(series.length, 3);
+	assert.equal(series[0].metrics, null);              // week of Jun 29 — unused
+	assert.equal(series[1].metrics!.cost, 20);          // week of Jul 6
+	assert.equal(series[2].metrics!.cost, 10);          // week of Jul 13
+});
+
+test('buildModelWeeklySeries: ignores days outside the requested window', () => {
+	const days = [modelDay('2020-01-01', { kimi: solidModel({}) })];
+	const series = buildModelWeeklySeries(days, 'kimi', NOW, 4);
+	assert.ok(series.every(p => p.metrics === null));
+});
+
+// ── Comparison windows ───────────────────────────────────────────────────────
+
+test('resolveModelCompareWindow: last30 covers the 30 days ending today', () => {
+	const w = resolveModelCompareWindow('last30', NOW);
+	assert.equal(w.startKey, '2026-06-16');
+	assert.equal(w.endKey, '2026-07-15');
+	assert.equal(w.label, 'Last 30 days');
+});
+
+test('resolveModelCompareWindow: prev30 sits immediately before last30 without overlapping', () => {
+	const last = resolveModelCompareWindow('last30', NOW);
+	const prev = resolveModelCompareWindow('prev30', NOW);
+	assert.equal(prev.startKey, '2026-05-17');
+	assert.equal(prev.endKey, '2026-06-15');
+	assert.ok(prev.endKey < last.startKey, 'previous window must end before the last window starts');
+});
+
+test('resolveModelCompareWindow: last90 spans 90 days ending today', () => {
+	const w = resolveModelCompareWindow('last90', NOW);
+	assert.equal(w.startKey, '2026-04-17');
+	assert.equal(w.endKey, '2026-07-15');
+});
+
+test('resolveModelCompareWindow: thisMonth runs from the 1st to today and is labelled by month', () => {
+	const w = resolveModelCompareWindow('thisMonth', NOW);
+	assert.equal(w.startKey, '2026-07-01');
+	assert.equal(w.endKey, '2026-07-15');
+	assert.equal(w.label, 'July 2026');
+});
+
+test('resolveModelCompareWindow: lastMonth covers the whole previous calendar month', () => {
+	const w = resolveModelCompareWindow('lastMonth', NOW);
+	assert.equal(w.startKey, '2026-06-01');
+	assert.equal(w.endKey, '2026-06-30');
+	assert.equal(w.label, 'June 2026');
+});
+
+test('resolveModelCompareWindow: lastMonth rolls back across a year boundary', () => {
+	const w = resolveModelCompareWindow('lastMonth', new Date(2026, 0, 9, 12, 0, 0));
+	assert.equal(w.startKey, '2025-12-01');
+	assert.equal(w.endKey, '2025-12-31');
+	assert.equal(w.label, 'December 2025');
+});
+
+test('selectDaysInWindow: keeps only days inside the window, bounds included', () => {
+	const days = [
+		modelDay('2026-06-30', {}),
+		modelDay('2026-07-01', {}),
+		modelDay('2026-07-10', {}),
+		modelDay('2026-07-15', {}),
+		modelDay('2026-07-16', {}),
+	];
+	const picked = selectDaysInWindow(days, resolveModelCompareWindow('thisMonth', NOW));
+	assert.deepEqual(picked.map(d => d.date), ['2026-07-01', '2026-07-10', '2026-07-15']);
+});
+
+test('selectDaysInWindow: returns nothing when no day falls inside the window', () => {
+	const days = [modelDay('2026-01-05', {}), modelDay('2026-02-05', {})];
+	assert.equal(selectDaysInWindow(days, resolveModelCompareWindow('last30', NOW)).length, 0);
 });

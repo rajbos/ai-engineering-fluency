@@ -1,5 +1,6 @@
 import type { DailyTokenStats, ChartDataPayload, ModelUsage, LanguageUsage } from './types';
 import { addModelUsage, COPILOT_EDITOR_NAMES } from './statsHelpers';
+import { mergeDailyModelEfficiency } from './modelEfficiency';
 import { getModelDisplayName, getCustomProviderGroup } from './webview/shared/modelUtils';
 
 // Re-exported for existing consumers; the set lives in statsHelpers so the
@@ -149,6 +150,10 @@ function mergeInto(target: DailyTokenStats, src: DailyTokenStats): void {
 	if (src.linesRemoved !== undefined) { target.linesRemoved = (target.linesRemoved ?? 0) + src.linesRemoved; }
 	mergeLanguageUsage(target, src);
 	mergeEditorModelUsage(target, src);
+	if (src.modelEfficiency) {
+		if (!target.modelEfficiency) { target.modelEfficiency = {}; }
+		mergeDailyModelEfficiency(target.modelEfficiency, src.modelEfficiency);
+	}
 }
 
 function getMondayOfWeek(d: Date): Date {
