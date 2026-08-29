@@ -18,6 +18,7 @@ import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
+import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentSessionsResult } from './agentSessionsSanitizer';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
@@ -3520,55 +3521,6 @@ function _billingApiBalanceHtml(api: CopilotApiBalance, copilotCostUsd: number):
 		</div>`;
 }
 
-/** Cost of Copilot usage the API reports but the extension has no local session data for
- *  (github.com/copilot web chat, cloud agent, review agent, or a different device/environment). */
-function _billingOtherSessionsCostUsd(groupCosts: Record<string, number>, api: CopilotApiBalance | null | undefined): number {
-	if (!api) { return 0; }
-	const copilotCostUsd = groupCosts['GitHub Copilot'] ?? 0;
-	return Math.max(0, (api.usedAiCredits * 0.01) - copilotCostUsd);
-}
-
-function _billingExtGroupCostsHtml(groupCosts: Record<string, number>, api: CopilotApiBalance | null | undefined): string {
-	const otherSessionsCostUsd = _billingOtherSessionsCostUsd(groupCosts, api);
-	const hasLocalCopilotRow = 'GitHub Copilot' in groupCosts;
-	const totalCostUsd = Object.values(groupCosts).reduce((s, v) => s + v, 0) + otherSessionsCostUsd;
-	const otherSessionsRowHtml = otherSessionsCostUsd > 0.001
-		? `<tr>
-			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary);">GitHub Copilot - other sessions (remote or different environment)</td>
-			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary); text-align:right;">$${formatFixed(otherSessionsCostUsd, 2)}</td>
-		</tr>`
-		: '';
-	const rows = Object.entries(groupCosts)
-		.sort(([, a], [, b]) => b - a)
-		.map(([group, cost]) => {
-			const label = group === 'GitHub Copilot' ? 'GitHub Copilot - local sessions' : group;
-			return `
-				<tr>
-					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(label)}</td>
-					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
-				</tr>${group === 'GitHub Copilot' ? otherSessionsRowHtml : ''}`;
-		}).join('') + (hasLocalCopilotRow ? '' : otherSessionsRowHtml);
-	return `
-		<div style="margin-bottom:12px;">
-			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
-			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
-				<thead>
-					<tr style="background:var(--bg-tertiary);">
-						<th style="padding:6px 8px; text-align:left; font-size:11px; color:var(--text-secondary); font-weight:600;">Provider</th>
-						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
-					</tr>
-				</thead>
-				<tbody>${rows}</tbody>
-				<tfoot>
-					<tr style="border-top:1px solid var(--border-color);">
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${formatFixed(totalCostUsd, 2)}</td>
-					</tr>
-				</tfoot>
-			</table>
-		</div>`;
-}
-
 function _billingCoverageAnalysisHtml(api: CopilotApiBalance | null | undefined, copilotCostUsd: number, nonCopilotCostUsd: number): string {
 	if (!api) {
 		return `
@@ -3612,7 +3564,7 @@ function buildBillingComparisonSectionHtml(stats: UsageAnalysisStats): string {
 	const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
 
 	const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : '';
-	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts, api) : '';
+	const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? billingExtGroupCostsHtml(groupCosts, api) : '';
 	const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
 
 	return `
