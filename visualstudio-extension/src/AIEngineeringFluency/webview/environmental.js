@@ -1635,78 +1635,113 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     return button;
   }
 
+  // src/webview/shared/localization.ts
+  var DEFAULT_LOCALIZATION = {
+    "nav.btnRefresh": "Refresh",
+    "nav.btnDetails": "Details",
+    "nav.btnChart": "Chart",
+    "nav.btnUsage": "Usage Analysis",
+    "nav.btnDiagnostics": "Diagnostics",
+    "nav.btnMaturity": "Fluency Score",
+    "nav.btnDashboard": "Team Dashboard",
+    "nav.btnLevelViewer": "Level Viewer",
+    "nav.btnEnvironmental": "Environmental Impact",
+    "nav.btnEfficiency": "Efficiency"
+  };
+  var currentLocalization = { ...DEFAULT_LOCALIZATION };
+  function initializeWebviewLocalization(localization) {
+    currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization };
+  }
+  function localize(key) {
+    return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
+  }
+  var currentLanguage = "en";
+  function setCurrentLanguage(language) {
+    currentLanguage = language;
+  }
+
   // src/webview/shared/buttonConfig.ts
-  var BUTTONS = {
+  var BUTTON_DEFS = {
     "btn-refresh": {
       id: "btn-refresh",
-      label: "Refresh",
+      labelKey: "nav.btnRefresh",
       icon: "refresh",
       appearance: "primary"
     },
     "btn-details": {
       id: "btn-details",
-      label: "Details",
+      labelKey: "nav.btnDetails",
       icon: "robot",
       iconColor: "#c37bff",
       appearance: "secondary"
     },
     "btn-chart": {
       id: "btn-chart",
-      label: "Chart",
+      labelKey: "nav.btnChart",
       icon: "graph-line",
       iconColor: "#60a5fa",
       appearance: "secondary"
     },
     "btn-usage": {
       id: "btn-usage",
-      label: "Usage Analysis",
+      labelKey: "nav.btnUsage",
       icon: "graph",
       iconColor: "#22d3ee",
       appearance: "secondary"
     },
     "btn-diagnostics": {
       id: "btn-diagnostics",
-      label: "Diagnostics",
+      labelKey: "nav.btnDiagnostics",
       icon: "search",
       iconColor: "#fb7185",
       appearance: "secondary"
     },
     "btn-maturity": {
       id: "btn-maturity",
-      label: "Fluency Score",
+      labelKey: "nav.btnMaturity",
       icon: "target",
       iconColor: "#fbbf24",
       appearance: "secondary"
     },
     "btn-dashboard": {
       id: "btn-dashboard",
-      label: "Team Dashboard",
+      labelKey: "nav.btnDashboard",
       icon: "organization",
       iconColor: "#818cf8",
       appearance: "secondary"
     },
     "btn-level-viewer": {
       id: "btn-level-viewer",
-      label: "Level Viewer",
+      labelKey: "nav.btnLevelViewer",
       icon: "list-tree",
       iconColor: "#94a3b8",
       appearance: "secondary"
     },
     "btn-environmental": {
       id: "btn-environmental",
-      label: "Environmental Impact",
+      labelKey: "nav.btnEnvironmental",
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
     },
     "btn-efficiency": {
       id: "btn-efficiency",
-      label: "Efficiency",
+      labelKey: "nav.btnEfficiency",
       icon: "dashboard",
       iconColor: "#f472b6",
       appearance: "secondary"
     }
   };
+  var BUTTONS = new Proxy({}, {
+    get(_target, prop) {
+      const def = BUTTON_DEFS[prop];
+      if (!def) {
+        return void 0;
+      }
+      const { labelKey, ...rest } = def;
+      return { ...rest, label: localize(labelKey) };
+    }
+  });
   var NAV_ORDER = [
     "btn-refresh",
     "btn-details",
@@ -2137,6 +2172,11 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   var WATER_LITERS_DAILY_DRINKING = 2;
   var vscode = acquireVsCodeApi();
   var initialData = getWindowData("__INITIAL_ENVIRONMENTAL__");
+  if (initialData?.localization) {
+    initializeWebviewLocalization(initialData.localization);
+    const language = initialData.localization["__language__"] || "en";
+    setCurrentLanguage(language);
+  }
   function calculateProjection(last30DaysValue) {
     return last30DaysValue / 30 * 365.25;
   }

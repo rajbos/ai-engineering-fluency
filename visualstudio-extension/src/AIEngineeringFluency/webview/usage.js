@@ -1668,78 +1668,113 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     return { wrapper, select };
   }
 
+  // src/webview/shared/localization.ts
+  var DEFAULT_LOCALIZATION = {
+    "nav.btnRefresh": "Refresh",
+    "nav.btnDetails": "Details",
+    "nav.btnChart": "Chart",
+    "nav.btnUsage": "Usage Analysis",
+    "nav.btnDiagnostics": "Diagnostics",
+    "nav.btnMaturity": "Fluency Score",
+    "nav.btnDashboard": "Team Dashboard",
+    "nav.btnLevelViewer": "Level Viewer",
+    "nav.btnEnvironmental": "Environmental Impact",
+    "nav.btnEfficiency": "Efficiency"
+  };
+  var currentLocalization = { ...DEFAULT_LOCALIZATION };
+  function initializeWebviewLocalization(localization) {
+    currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization };
+  }
+  function localize(key) {
+    return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
+  }
+  var currentLanguage = "en";
+  function setCurrentLanguage(language) {
+    currentLanguage = language;
+  }
+
   // src/webview/shared/buttonConfig.ts
-  var BUTTONS = {
+  var BUTTON_DEFS = {
     "btn-refresh": {
       id: "btn-refresh",
-      label: "Refresh",
+      labelKey: "nav.btnRefresh",
       icon: "refresh",
       appearance: "primary"
     },
     "btn-details": {
       id: "btn-details",
-      label: "Details",
+      labelKey: "nav.btnDetails",
       icon: "robot",
       iconColor: "#c37bff",
       appearance: "secondary"
     },
     "btn-chart": {
       id: "btn-chart",
-      label: "Chart",
+      labelKey: "nav.btnChart",
       icon: "graph-line",
       iconColor: "#60a5fa",
       appearance: "secondary"
     },
     "btn-usage": {
       id: "btn-usage",
-      label: "Usage Analysis",
+      labelKey: "nav.btnUsage",
       icon: "graph",
       iconColor: "#22d3ee",
       appearance: "secondary"
     },
     "btn-diagnostics": {
       id: "btn-diagnostics",
-      label: "Diagnostics",
+      labelKey: "nav.btnDiagnostics",
       icon: "search",
       iconColor: "#fb7185",
       appearance: "secondary"
     },
     "btn-maturity": {
       id: "btn-maturity",
-      label: "Fluency Score",
+      labelKey: "nav.btnMaturity",
       icon: "target",
       iconColor: "#fbbf24",
       appearance: "secondary"
     },
     "btn-dashboard": {
       id: "btn-dashboard",
-      label: "Team Dashboard",
+      labelKey: "nav.btnDashboard",
       icon: "organization",
       iconColor: "#818cf8",
       appearance: "secondary"
     },
     "btn-level-viewer": {
       id: "btn-level-viewer",
-      label: "Level Viewer",
+      labelKey: "nav.btnLevelViewer",
       icon: "list-tree",
       iconColor: "#94a3b8",
       appearance: "secondary"
     },
     "btn-environmental": {
       id: "btn-environmental",
-      label: "Environmental Impact",
+      labelKey: "nav.btnEnvironmental",
       icon: "globe",
       iconColor: "#4ade80",
       appearance: "secondary"
     },
     "btn-efficiency": {
       id: "btn-efficiency",
-      label: "Efficiency",
+      labelKey: "nav.btnEfficiency",
       icon: "dashboard",
       iconColor: "#f472b6",
       appearance: "secondary"
     }
   };
+  var BUTTONS = new Proxy({}, {
+    get(_target, prop) {
+      const def = BUTTON_DEFS[prop];
+      if (!def) {
+        return void 0;
+      }
+      const { labelKey, ...rest } = def;
+      return { ...rest, label: localize(labelKey) };
+    }
+  });
   var NAV_ORDER = [
     "btn-refresh",
     "btn-details",
@@ -2243,15 +2278,33 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       _modelNames[modelId] = pricing.displayNames[0];
     }
   }
+  function decodeSegment(segment) {
+    try {
+      return decodeURIComponent(segment);
+    } catch {
+      return segment;
+    }
+  }
+  function parseCustomProviderModel(model) {
+    const parts = model.split("/");
+    if (parts.length !== 3 || parts.some((part) => part.trim() === "")) {
+      return void 0;
+    }
+    return {
+      source: decodeSegment(parts[0]),
+      providerName: decodeSegment(parts[1]),
+      modelId: decodeSegment(parts[2])
+    };
+  }
   function getModelDisplayName(model) {
     if (_modelNames[model]) {
       return _modelNames[model];
     }
-    try {
-      return decodeURIComponent(model);
-    } catch {
-      return model;
+    const custom = parseCustomProviderModel(model);
+    if (custom) {
+      return _modelNames[custom.modelId] ?? custom.modelId;
     }
+    return decodeSegment(model);
   }
 
   // ../src/tokenEstimation.ts
@@ -2625,6 +2678,11 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     traceCuration(stage, details);
   }
   var initialData = getWindowData("__INITIAL_USAGE__");
+  if (initialData?.localization) {
+    initializeWebviewLocalization(initialData.localization);
+    const language = initialData.localization["__language__"] || "en";
+    setCurrentLanguage(language);
+  }
   var hygieneMatrixState = null;
   var repoAnalysisState = /* @__PURE__ */ new Map();
   var selectedRepoPath = null;
@@ -2636,7 +2694,8 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   var currentInsights = [];
   var currentCurationAnalysis = null;
   var worktreeRoots = initialData?.worktreeScanRoots ? [...initialData.worktreeScanRoots] : [];
-  var worktreeResults = [];
+  var worktreeResults = initialData?.worktreeBackgroundScan ? initialData.worktreeBackgroundScan.worktrees.map(sanitizeWorktreeResult) : [];
+  var worktreeBackgroundScanMeta = initialData?.worktreeBackgroundScan ? { scannedAt: initialData.worktreeBackgroundScan.scannedAt, totalBytes: initialData.worktreeBackgroundScan.totalBytes } : null;
   var worktreeScanInProgress = false;
   var worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
   var worktreeScanError = null;
@@ -3676,6 +3735,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
     worktreeScanInProgress = true;
     worktreeResults = [];
+    worktreeBackgroundScanMeta = null;
     worktreeScanError = null;
     worktreeScanStatus = { root: "", checked: 0, total: 0, foundCount: 0, elapsedMs: 0 };
     worktreeCleanupLog = [];
@@ -4006,6 +4066,16 @@ ${_renderMultiModelMixedCostSessions(switching)}
     worktreeScanInProgress = false;
     updateWorktreeControls();
   }
+  function handleWorktreeBackgroundResults(message) {
+    if (worktreeScanInProgress || worktreeCleanupInProgress) {
+      return;
+    }
+    const worktrees = Array.isArray(message.worktrees) ? message.worktrees : [];
+    worktreeResults = worktrees.map(sanitizeWorktreeResult);
+    worktreeBackgroundScanMeta = { scannedAt: String(message.scannedAt ?? ""), totalBytes: numField(message.totalBytes) };
+    updateWorktreeControls();
+    updateWorktreeResults();
+  }
   var _worktreeMessageHandlers = {
     worktreeRootPicked: handleWorktreeRootPicked,
     worktreeRootsDiscovered: handleWorktreeRootsDiscovered,
@@ -4022,6 +4092,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     worktreeDeleted: handleWorktreeDeleted,
     worktreeScanComplete: () => handleWorktreeScanComplete(),
     worktreeScanCancelled: () => handleWorktreeScanCancelled(),
+    worktreeBackgroundResults: handleWorktreeBackgroundResults,
     cleanupDeclined: () => handleCleanupDeclined(),
     cleanupStarted: handleCleanupStarted,
     cleanupWorktreeResult: handleCleanupWorktreeResult,
@@ -5211,6 +5282,15 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
     return _renderWorktreeScanningProgress(s4, seconds);
   }
+  function renderWorktreeBackgroundScanBanner() {
+    if (!worktreeBackgroundScanMeta || worktreeScanInProgress || worktreeResults.length === 0) {
+      return "";
+    }
+    const when = escapeHtml(new Date(worktreeBackgroundScanMeta.scannedAt).toLocaleString());
+    const size = formatFileSize(worktreeBackgroundScanMeta.totalBytes);
+    const count = worktreeResults.length;
+    return `<div class="info-box" style="margin-top: 12px;"><div>\u{1F333} Found automatically by the daily background scan: ${size} across ${count} worktree${count === 1 ? "" : "s"}, last checked ${when}. Scan again for the latest.</div></div>`;
+  }
   function renderWorktreeControls() {
     return `
     <div class="section">
@@ -5231,6 +5311,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
         <button class="button" id="btn-scan-worktrees" ${worktreeScanInProgress || worktreeCleanupInProgress || worktreeRoots.length === 0 ? "disabled" : ""}>\u{1F50D} Scan for Worktrees</button>
         ${worktreeScanInProgress ? '<button class="button secondary" id="btn-cancel-worktree-scan">\u2715 Cancel</button>' : ""}
       </div>
+      ${renderWorktreeBackgroundScanBanner()}
       ${worktreeScanError ? `<div class="info-box" style="margin-top: 12px; border-color: #d97706; background: rgba(217,119,6,0.08);"><div>\u26A0\uFE0F ${escapeHtml(worktreeScanError)}</div></div>` : ""}
       <div id="worktree-progress-area">${renderWorktreeProgress()}</div>
     </div>`;
@@ -5496,13 +5577,29 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>
 		</div>`;
   }
-  function _billingExtGroupCostsHtml(groupCosts) {
-    const totalCostUsd = Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0);
-    const rows = Object.entries(groupCosts).sort(([, a3], [, b3]) => b3 - a3).map(([group, cost]) => `
-			<tr>
-				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(group)}</td>
-				<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
-			</tr>`).join("");
+  function _billingOtherSessionsCostUsd(groupCosts, api) {
+    if (!api) {
+      return 0;
+    }
+    const copilotCostUsd = groupCosts["GitHub Copilot"] ?? 0;
+    return Math.max(0, api.usedAiCredits * 0.01 - copilotCostUsd);
+  }
+  function _billingExtGroupCostsHtml(groupCosts, api) {
+    const otherSessionsCostUsd = _billingOtherSessionsCostUsd(groupCosts, api);
+    const hasLocalCopilotRow = "GitHub Copilot" in groupCosts;
+    const totalCostUsd = Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) + otherSessionsCostUsd;
+    const otherSessionsRowHtml = otherSessionsCostUsd > 1e-3 ? `<tr>
+			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary);">GitHub Copilot - other sessions (remote or different environment)</td>
+			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary); text-align:right;">$${formatFixed(otherSessionsCostUsd, 2)}</td>
+		</tr>` : "";
+    const rows = Object.entries(groupCosts).sort(([, a3], [, b3]) => b3 - a3).map(([group, cost]) => {
+      const label = group === "GitHub Copilot" ? "GitHub Copilot - local sessions" : group;
+      return `
+				<tr>
+					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(label)}</td>
+					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
+				</tr>${group === "GitHub Copilot" ? otherSessionsRowHtml : ""}`;
+    }).join("") + (hasLocalCopilotRow ? "" : otherSessionsRowHtml);
     return `
 		<div style="margin-bottom:12px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
@@ -5561,12 +5658,12 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) : 0;
     const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
     const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : "";
-    const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts) : "";
+    const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts, api) : "";
     const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
     return `
 		<div class="section">
-			<div class="section-title"><span>\u{1F4B3}</span><span>Copilot Billing Coverage</span></div>
-			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs.</div>
+			<div class="section-title"><span>\u{1F4B3}</span><span>AI Billing Coverage</span></div>
+			<div class="section-subtitle">Compare what the GitHub Copilot API reports across all channels with what the extension can track from local IDE session logs, alongside estimated costs from other AI providers.</div>
 			${apiHtml}
 			${extHtml}
 			${deltaHtml}
@@ -5574,7 +5671,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   }
   function buildActivityTabPanelHtml(stats, multiModelHtml, thinkingEffortHtml, sessionsSummaryHtml, todayTotalRefs, last30DaysTotalRefs) {
     const modelCostHtml = safeSectionHtml("Model Cost", () => buildModelCostSectionHtml(stats));
-    const billingComparisonHtml = safeSectionHtml("Copilot Billing Coverage", () => buildBillingComparisonSectionHtml(stats));
+    const billingComparisonHtml = safeSectionHtml("AI Billing Coverage", () => buildBillingComparisonSectionHtml(stats));
     const modeUsageHtml = safeSectionHtml("Interaction Modes", () => `
 			<div class="section">
 				<div class="section-title"><span>\u{1F3AF}</span><span>Interaction Modes</span></div>
