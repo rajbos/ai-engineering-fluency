@@ -1,7 +1,8 @@
 import { Hono } from 'hono';
 import { getCookie, setCookie, deleteCookie } from 'hono/cookie';
 import { readFileSync } from 'fs';
-import { join } from 'path';
+import { join, dirname } from 'path';
+import { createRequire } from 'module';
 import {
 	encodeSession, decodeSession, makeClaims,
 	COOKIE_NAME, OAUTH_STATE_COOKIE, SESSION_MAX_AGE,
@@ -24,15 +25,35 @@ const DEPLOY_DATE   = process.env.DEPLOY_DATE   ?? 'unknown';
 
 // Load Chart.js UMD bundle once at startup.
 // Bundled build: esbuild.js copies it next to dist/server.js.
-// Library build: fall back to resolving chart.js from node_modules, since a downstream
-// server consuming this package has its own dist/ layout.
+// Library build: locate chart.js through Node's own resolution, since a downstream
+// server consuming this package has its own dist/ layout and may run from any cwd.
+
+/**
+ * Resolve chart.js's UMD bundle via Node module resolution.
+ *
+ * chart.js ships an `exports` map that refuses both `chart.js/dist/*` and
+ * `chart.js/package.json`, so neither can be resolved directly. The package root
+ * *is* resolvable though, so we resolve that and walk to its sibling UMD file.
+ * Resolution starts from this module's location, which means it finds chart.js
+ * whether it is a direct dependency or hoisted into a parent node_modules — and,
+ * unlike a cwd-based guess, it does not depend on where the process was started.
+ */
+function resolveChartJsUmd(): string | undefined {
+	try {
+		const require_ = createRequire(__filename);
+		// e.g. <root>/node_modules/chart.js/dist/chart.cjs → <root>/node_modules/chart.js/dist
+		return join(dirname(require_.resolve('chart.js')), 'chart.umd.min.js');
+	} catch {
+		return undefined;
+	}
+}
+
 const _chartJsCode: string = (() => {
 	const candidates = [
 		process.env.CHART_JS_PATH,
 		join(__dirname, 'chart.min.js'),
 		join(__dirname, '..', 'chart.min.js'),
-		// Library consumers: chart.js does not export its dist files, so read it directly.
-		join(process.cwd(), 'node_modules', 'chart.js', 'dist', 'chart.umd.min.js'),
+		resolveChartJsUmd(),
 	].filter((p): p is string => Boolean(p));
 
 	for (const candidate of candidates) {
@@ -40,7 +61,13 @@ const _chartJsCode: string = (() => {
 			return readFileSync(candidate, 'utf-8');
 		} catch { /* try next candidate */ }
 	}
-	return '/* chart.js not bundled — run npm run build in sharing-server/ */';
+	console.warn(
+		'[dashboard] Chart.js not found — charts will not render. ' +
+		'Run `npm run build` in sharing-server/, or if you are consuming this package as a ' +
+		'library, install the optional peer dependency (`npm install chart.js`) or point ' +
+		'CHART_JS_PATH at a chart.umd.min.js file.',
+	);
+	return '/* chart.js not found — see the server log for how to provide it */';
 })();
 
 // ── Auth ─────────────────────────────────────────────────────────────────────

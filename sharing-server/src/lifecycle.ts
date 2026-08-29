@@ -32,8 +32,21 @@ export async function initDbWithRetry(maxAttempts = 20): Promise<void> {
 	}
 }
 
-/** Back up the DB to Azure Files then close cleanly on SIGTERM/SIGINT. */
+/**
+ * Back up the DB to Azure Files then close cleanly on SIGTERM/SIGINT.
+ *
+ * Idempotent: as a library this may be called both by a downstream app and by
+ * `startServer`, and registering twice would double-run the backup on shutdown and
+ * leak listeners (`MaxListenersExceededWarning`) across multiple servers in a test run.
+ */
+let shutdownHandlersRegistered = false;
+
 export function registerShutdownHandlers(): void {
+	if (shutdownHandlersRegistered) {
+		return;
+	}
+	shutdownHandlersRegistered = true;
+
 	function shutdown(signal: string): void {
 		console.log(`Received ${signal}, backing up database and exiting...`);
 		backupToAzureFiles();

@@ -6,10 +6,10 @@ import { dashboard } from './routes/dashboard.js';
 
 export interface CreateAppOptions {
 	/**
-	 * Called before the built-in routes are mounted. Because Hono resolves routes in
-	 * registration order, anything registered here takes precedence over the built-in
-	 * `/api` and dashboard routes — which is how a downstream server overrides a page
-	 * or an endpoint without forking this package.
+	 * Called before any built-in route is mounted. Because Hono resolves routes in
+	 * registration order, anything registered here takes precedence over every
+	 * built-in route (`/health`, `/icon.png`, `/api` and the dashboard) — which is how
+	 * a downstream server overrides a page or an endpoint without forking this package.
 	 */
 	extend?: (app: Hono) => void;
 	/** Extra fields merged into the `/health` response, e.g. a downstream version stamp. */
@@ -40,6 +40,10 @@ export interface CreateAppOptions {
 export function createApp(options: CreateAppOptions = {}): Hono {
 	const app = new Hono();
 
+	// Registered first so downstream routes take precedence over every built-in
+	// route below — Hono resolves in registration order.
+	options.extend?.(app);
+
 	// Serve the product icon used by the dashboard header. The icon is copied into
 	// dist/images/ at build time so the bundled server remains self-contained.
 	const iconPath = path.join(options.imagesDir ?? path.join(__dirname, 'images'), 'icon.png');
@@ -65,8 +69,6 @@ export function createApp(options: CreateAppOptions = {}): Hono {
 		},
 		...(options.healthExtra?.() ?? {}),
 	}));
-
-	options.extend?.(app);
 
 	// API routes (bearer token auth)
 	if (options.mountApi !== false) {
