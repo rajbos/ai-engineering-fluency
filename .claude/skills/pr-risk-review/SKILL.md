@@ -133,7 +133,7 @@ fence, no prose around it, no other file touched.
 | Field | Required | Rules |
 |-------|----------|-------|
 | `risk` | yes | Exactly `low`, `medium`, or `high` |
-| `summary` | yes | Plain prose, ~2 paragraphs, 1200 characters max after sanitising |
+| `summary` | yes | Plain prose, ~2 paragraphs, 2400 characters max after sanitising |
 | `factors` | no | Up to 8. Each needs a `title` and `detail`; `level` defaults to the overall `risk` |
 | `recommendations` | no | Up to 8 concrete, checkable actions. Omit rather than pad with "review carefully" |
 | `confidence` | no | `low`, `medium`, or `high` — say `low` when the diff was truncated or you could not read a key file |

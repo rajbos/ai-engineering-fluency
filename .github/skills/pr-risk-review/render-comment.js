@@ -36,7 +36,7 @@ const path = require('path');
 
 const LEVELS = ['low', 'medium', 'high'];
 const LEVEL_EMOJI = { low: '🟢', medium: '🟡', high: '🔴' };
-const MAX_SUMMARY_CHARS = 1200;
+const MAX_SUMMARY_CHARS = 2400;
 const MAX_FIELD_CHARS = 400;
 const MAX_FACTORS = 8;
 const MAX_RECOMMENDATIONS = 8;
