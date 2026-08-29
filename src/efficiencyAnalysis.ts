@@ -1122,14 +1122,20 @@ function comparisonRow(
 	let deltaPct: number | null = null;
 	let winner: ModelComparisonRow['winner'] = null;
 	let significant = false;
-	if (a !== null && b !== null && a !== 0) {
-		deltaPct = ((b - a) / Math.abs(a)) * 100;
-		if (Math.abs(deltaPct) < COMPARE_NOISE_PCT) {
+	if (a !== null && b !== null) {
+		const baseline = Math.max(Math.abs(a), Math.abs(b));
+		if (baseline === 0) {
+			deltaPct = 0;
 			winner = 'tie';
 		} else {
-			const bIsBetter = goodDirection === 'down' ? b < a : b > a;
-			winner = bIsBetter ? 'b' : 'a';
-			significant = true;
+			deltaPct = ((b - a) / baseline) * 100;
+			if (Math.abs(deltaPct) < COMPARE_NOISE_PCT) {
+				winner = 'tie';
+			} else {
+				const bIsBetter = goodDirection === 'down' ? b < a : b > a;
+				winner = bIsBetter ? 'b' : 'a';
+				significant = true;
+			}
 		}
 	}
 	return { id, label, description, a, b, unit, goodDirection, deltaPct, winner, significant };
