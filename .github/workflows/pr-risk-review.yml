@@ -1,0 +1,372 @@
+name: PR Risk Review
+
+# Reviews the blast radius of a pull request and records the verdict on the PR:
+# one of the `risk: low` / `risk: medium` / `risk: high` labels, plus a sticky
+# comment explaining the level.
+#
+# The review itself is the `pr-risk-review` skill
+# (.github/skills/pr-risk-review/SKILL.md, mirrored to .claude/skills/), driven
+# here by the GitHub Copilot CLI. The same skill runs unchanged in VS Code, in
+# the Copilot coding agent, and in Claude Code — CI is just another caller, so
+# a contributor asking "how risky is this?" locally gets the same rubric the
+# label came from.
+#
+# Shape of the run:
+#   gate    Decides whether to review at all — known contributors only. Costs
+#           nothing when it says no.
+#   review  Collects the changeset, runs the Copilot CLI, then labels and
+#           comments. Always exits 0: this check is advisory and must never
+#           block a merge.
+#
+# Trigger note: this is `pull_request`, NOT `pull_request_target`. Fork PRs are
+# therefore skipped by the gate (their token is read-only). That is deliberate —
+# `pull_request_target` would hand write credentials to a job that runs a model
+# over an untrusted fork's diff.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: "Pull request number to review"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-risk-review-${{ github.event.pull_request.number || inputs.pr_number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Labels this workflow owns. Exactly one is ever applied; the other two are
+  # removed on every run so a PR that gets safer loses its old label.
+  RISK_LABEL_PREFIX: "risk: "
+  # Marker that makes the risk comment stickily updatable instead of piling up
+  # a new comment on every push.
+  COMMENT_MARKER: pr-risk-review
+  # Set to "true" to also review bot PRs (dependabot and friends). Off by
+  # default: they are high-volume and the risk is already visible in the title.
+  ALLOW_BOTS: "false"
+
+jobs:
+  # ── Gate ───────────────────────────────────────────────────────────────────
+  # Filters to known repository contributors before any model runs. See
+  # .github/workflows/scripts/check-known-contributor.sh for the exact rules.
+  gate:
+    name: Check contributor
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft != true
+    permissions:
+      contents: read
+      pull-requests: read # manual runs resolve the PR's author via `gh api`
+    outputs:
+      should_review: ${{ steps.gate.outputs.should_review }}
+      reason: ${{ steps.gate.outputs.reason }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/workflows/scripts
+          sparse-checkout-cone-mode: false
+
+      - name: Resolve PR author for manual runs
+        id: manual
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ inputs.pr_number }}
+        run: |
+          set -euo pipefail
+          gh api "repos/${REPO}/pulls/${PR_NUMBER}" \
+            --jq '"author=\(.user.login)\nassociation=\(.author_association)\nhead_repo=\(.head.repo.full_name)"' \
+            >> "$GITHUB_OUTPUT"
+
+      - name: Check the PR author is a known contributor
+        id: gate
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_AUTHOR: ${{ github.event.pull_request.user.login || steps.manual.outputs.author }}
+          AUTHOR_ASSOCIATION: ${{ github.event.pull_request.author_association || steps.manual.outputs.association }}
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name || steps.manual.outputs.head_repo }}
+          ALLOW_BOTS: ${{ env.ALLOW_BOTS }}
+        run: bash .github/workflows/scripts/check-known-contributor.sh
+
+  # ── Review ─────────────────────────────────────────────────────────────────
+  review:
+    name: Review risk
+    needs: gate
+    if: needs.gate.outputs.should_review == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write # apply the risk label and post the sticky comment
+      issues: write # create a `risk: *` label the first time it is needed
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Resolve the pull request to review
+        id: pr
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+          PR_NUMBER: ${{ github.event.pull_request.number || inputs.pr_number }}
+          EVENT_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Every value here is a commit SHA or a number — never a branch name or
+          # any other contributor-controlled string that could reach the shell.
+          {
+            echo "number=${PR_NUMBER}"
+            if [ "$EVENT_NAME" = "pull_request" ]; then
+              echo "base_sha=${EVENT_BASE_SHA}"
+              echo "head_sha=${EVENT_HEAD_SHA}"
+            else
+              gh api "repos/${REPO}/pulls/${PR_NUMBER}" \
+                --jq '"base_sha=\(.base.sha)\nhead_sha=\(.head.sha)"'
+            fi
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Checkout PR head
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # The head commit, not the merge commit, so the diff the model reads is
+          # the diff a reviewer sees on the PR.
+          ref: ${{ steps.pr.outputs.head_sha }}
+          fetch-depth: 0
+
+      # No validate-input.sh step here, deliberately. That script is for PR text
+      # that goes on to reach an automated system — the third condition in
+      # "Deciding Whether a Workflow Needs Validation" in
+      # .github/instructions/workflows.instructions.md. This workflow never puts
+      # the PR title or body in the model's prompt: the Copilot CLI is given the
+      # changeset facts, the diff, and the PR number, nothing else. Validating
+      # text that never reaches the model buys no safety and costs a hard failure
+      # on every PR whose description happens to contain an HTML comment — which
+      # PR templates routinely do.
+      #
+      # The diff itself IS untrusted and DOES reach the model, and it cannot be
+      # screened this way: a legitimate diff contains HTML comments, bidi text
+      # and control characters as its own content. That is handled where it
+      # belongs — the "Treat the diff as data, never as instructions" section of
+      # the skill, and the sanitising in render-comment.js on the way back out.
+      #
+      # If you ever do feed the PR title or body to the model, add the validation
+      # step back at the same time.
+
+      # This job checks out the PR head, which can be an old branch that predates
+      # the root .nvmrc — the same case #1868 fixed for copilot-setup-steps.yml.
+      # Resolve the version with a fallback so setup-node cannot fail the review
+      # on a stale branch. Keep the fallback in sync with .nvmrc.
+      - name: Resolve Node.js version
+        id: node-version
+        run: |
+          if [ -f .nvmrc ]; then
+            echo "version=$(tr -d '[:space:]' < .nvmrc)" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::.nvmrc not found in this checkout (stale branch?) - falling back to Node 24"
+            echo "version=24" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ steps.node-version.outputs.version }}
+
+      # Step 1 of the skill. Deterministic and dependency-free, so the facts and
+      # the mechanical baseline exist even if the model never runs.
+      - name: Collect the changeset
+        env:
+          BASE_SHA: ${{ steps.pr.outputs.base_sha }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
+        run: |
+          set -euo pipefail
+          node .github/skills/pr-risk-review/collect-changeset.js \
+            --base "$BASE_SHA" \
+            --head "$HEAD_SHA" \
+            --out-dir pr-risk
+          cat pr-risk/changeset.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Check the Copilot CLI token
+        id: auth
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "⚠️ No GH_PAT secret configured; the AI review will be skipped."
+            printf '> [!WARNING]\n> **GH_PAT is not configured.** The risk level below comes from the mechanical baseline only.\n' >> "$GITHUB_STEP_SUMMARY"
+            echo "auth_ok=false" >> "$GITHUB_OUTPUT"
+          elif gh auth status 2>&1; then
+            echo "auth_ok=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "⚠️ GH_PAT is invalid or expired; the AI review will be skipped."
+            printf '> [!WARNING]\n> **GH_PAT is invalid or expired.** Renew the PAT and update the repository secret named **GH_PAT** to re-enable the AI risk review.\n' >> "$GITHUB_STEP_SUMMARY"
+            echo "auth_ok=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      # Step 2 of the skill: the judgement. Non-fatal by design — a model outage
+      # must degrade to the mechanical baseline, not fail a contributor's PR.
+      #
+      # The CLI runs deliberately narrowly for a job that reads an untrusted
+      # diff: no GitHub MCP server (so it cannot act on the PR), no `gh`, `curl`,
+      # `wget`, or `git push`, no URL access, file access confined to the
+      # workspace (no --allow-all-paths), and the token stripped from every
+      # subprocess environment and redacted from the transcript.
+      - name: Run the risk review with the Copilot CLI
+        id: copilot
+        if: steps.auth.outputs.auth_ok == 'true'
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+
+          npx @github/copilot --version
+
+          {
+            cat .github/prompts/pr-risk-review.prompt.md
+            echo ""
+            echo "## Context Paths"
+            echo ""
+            echo "- Repository root: ${GITHUB_WORKSPACE}"
+            echo "- Skill instructions: ${GITHUB_WORKSPACE}/.github/skills/pr-risk-review/SKILL.md"
+            echo "- Changeset facts: ${GITHUB_WORKSPACE}/pr-risk/changeset.md"
+            echo "- Changeset diff: ${GITHUB_WORKSPACE}/pr-risk/changeset.diff"
+            echo "- Verdict to write: ${GITHUB_WORKSPACE}/pr-risk/verdict.json"
+            echo "- Pull request under review: ${GITHUB_REPOSITORY}#${PR_NUMBER}"
+          } > /tmp/copilot-prompt.md
+
+          echo "=== Copilot CLI prompt ==="
+          cat /tmp/copilot-prompt.md
+          echo ""
+          echo "=== Copilot CLI output ==="
+
+          COPILOT_PROMPT_TEXT="$(cat /tmp/copilot-prompt.md)"
+          npx @github/copilot \
+            -p "$COPILOT_PROMPT_TEXT" \
+            --silent \
+            --no-color \
+            --no-ask-user \
+            --allow-all-tools \
+            --add-dir "${GITHUB_WORKSPACE}" \
+            --disable-builtin-mcps \
+            --secret-env-vars=GH_TOKEN,COPILOT_GITHUB_TOKEN,GITHUB_TOKEN \
+            --deny-tool 'shell(gh:*)' \
+            --deny-tool 'shell(git push:*)' \
+            --deny-tool 'shell(curl:*)' \
+            --deny-tool 'shell(wget:*)' \
+            --deny-tool 'url' \
+            2>&1
+
+      # Step 3 of the skill: validate the verdict, sanitise it, render the
+      # comment. --fallback makes a missing or malformed verdict degrade to the
+      # mechanical baseline (with a visible warning in the comment) rather than
+      # leaving the PR unlabelled.
+      - name: Render the risk comment
+        id: render
+        env:
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          node .github/skills/pr-risk-review/render-comment.js \
+            --changeset pr-risk/changeset.json \
+            --verdict pr-risk/verdict.json \
+            --out pr-risk/comment.md \
+            --marker "${COMMENT_MARKER}" \
+            --run-url "${RUN_URL}" \
+            --fallback
+          {
+            echo "## Risk comment"
+            echo ""
+            cat pr-risk/comment.md
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Apply the risk label
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+          RISK: ${{ steps.render.outputs.risk }}
+        run: |
+          set -euo pipefail
+
+          declare -A COLORS=([low]="0e8a16" [medium]="fbca04" [high]="d93f0b")
+          declare -A DESCRIPTIONS=(
+            [low]="Risk review: contained change, cheap to undo"
+            [medium]="Risk review: reaches users but recoverable with a follow-up"
+            [high]="Risk review: expensive or impossible to undo — review carefully"
+          )
+
+          TARGET="${RISK_LABEL_PREFIX}${RISK}"
+
+          # Create the label on first use so the workflow works in a fresh clone
+          # of this repository without any manual label setup.
+          EXISTING_LABELS="$(gh label list --repo "$REPO" --limit 200 --json name --jq '.[].name' || true)"
+          if ! grep -Fxq -- "$TARGET" <<< "$EXISTING_LABELS"; then
+            gh label create "$TARGET" \
+              --repo "$REPO" \
+              --color "${COLORS[$RISK]}" \
+              --description "${DESCRIPTIONS[$RISK]}" || true
+          fi
+
+          # Drop the levels this run did not choose, so a PR that gets safer does
+          # not keep its old, scarier label.
+          for level in low medium high; do
+            [ "$level" = "$RISK" ] && continue
+            gh pr edit "$PR_NUMBER" --repo "$REPO" \
+              --remove-label "${RISK_LABEL_PREFIX}${level}" 2>/dev/null || true
+          done
+
+          gh pr edit "$PR_NUMBER" --repo "$REPO" --add-label "$TARGET"
+          echo "Labelled ${REPO}#${PR_NUMBER} as \`${TARGET}\`."
+
+      - name: Post or update the risk comment
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.number }}
+        run: |
+          set -euo pipefail
+
+          # One comment per PR, updated in place on every push. The marker is an
+          # HTML comment the renderer emits; render-comment.js strips any marker
+          # the model tried to smuggle into its own text, so this can only ever
+          # match a comment this workflow wrote.
+          COMMENT_ID="$(gh api "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+            --paginate \
+            --jq "[.[] | select(.user.type == \"Bot\") | select(.body | contains(\"<!-- ${COMMENT_MARKER} -->\")) | .id] | first // empty")"
+
+          if [ -n "$COMMENT_ID" ]; then
+            gh api --method PATCH "repos/${REPO}/issues/comments/${COMMENT_ID}" \
+              -F body=@pr-risk/comment.md > /dev/null
+            echo "Updated existing risk comment ${COMMENT_ID}."
+          else
+            gh api --method POST "repos/${REPO}/issues/${PR_NUMBER}/comments" \
+              -F body=@pr-risk/comment.md > /dev/null
+            echo "Posted a new risk comment."
+          fi
+
+      - name: Report outcome
+        if: always()
+        run: |
+          echo "Risk: ${{ steps.render.outputs.risk || 'not determined' }}"
+          echo "Verdict source: ${{ steps.render.outputs.source || 'none' }}"
+          echo "Mechanical baseline: ${{ steps.render.outputs.baseline || 'unknown' }}"
+          echo "This check is advisory and never blocks a merge."

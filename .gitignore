@@ -72,3 +72,7 @@ src/graphify-out/
 # .github/skills/visual-view-diff). Regenerable from any checkout — the fixtures
 # that drive the renders are committed, the rendered PNGs are not.
 visual-output/
+
+# pr-risk-review skill scratch output (changeset facts, verdict, rendered
+# comment). Regenerated on every run by collect-changeset.js — never committed.
+pr-risk/
