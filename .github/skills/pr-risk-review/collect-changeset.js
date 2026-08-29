@@ -205,8 +205,12 @@ function classify(files, config) {
         category.matched.push(file.path);
       }
     }
-    const lowRiskOnly = file.categories.some((id) => lowRiskIds.has(id));
-    file.effectiveWeight = lowRiskOnly
+    // Kept as its own flag rather than inferred from effectiveWeight === 1:
+    // build tooling and uncategorised files are also weight 1, and they are
+    // ordinary reviewable code that must still count towards the size
+    // thresholds. Only tests and docs drop out.
+    file.lowRisk = file.categories.some((id) => lowRiskIds.has(id));
+    file.effectiveWeight = file.lowRisk
       ? 1
       : file.categories.reduce((highest, id) => {
           const category = categories.find((c) => c.id === id);
@@ -244,7 +248,7 @@ function classify(files, config) {
  */
 function sizeAssessment(files, thresholds) {
   const handWritten = files.filter(
-    (file) => !file.generated && !file.binary && file.effectiveWeight > 1
+    (file) => !file.generated && !file.binary && !file.lowRisk
   );
   const changedLines = handWritten.reduce(
     (total, file) => total + file.insertions + file.deletions,
@@ -304,7 +308,7 @@ function computeBaseline(signals, size, files) {
     reasons.push(
       files.length === 0
         ? 'empty changeset'
-        : 'small changeset, and every file is a test, a doc, or generated'
+        : 'small changeset in low-risk areas'
     );
   }
 

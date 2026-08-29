@@ -61,6 +61,7 @@ jobs:
     if: github.event_name == 'workflow_dispatch' || github.event.pull_request.draft != true
     permissions:
       contents: read
+      pull-requests: read # manual runs resolve the PR's author via `gh api`
     outputs:
       should_review: ${{ steps.gate.outputs.should_review }}
       reason: ${{ steps.gate.outputs.reason }}

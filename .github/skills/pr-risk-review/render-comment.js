@@ -206,16 +206,22 @@ function fallbackVerdict(changeset, problem) {
     `Treat it as a floor, not a review — a human still needs to read the diff.`;
   return {
     risk: baseline.level,
-    summary,
-    factors: signals.map((signal) => ({
+    // Same caps and sanitising as the agent path: this content comes from
+    // risk-signals.json rather than a model, but a comment that silently grows
+    // past the documented limits on the failure path is its own bug.
+    summary: sanitize(summary, MAX_SUMMARY_CHARS),
+    factors: signals.slice(0, MAX_FACTORS).map((signal) => ({
       level: signal.level,
-      title: signal.label,
-      detail: `${signal.files.length} file(s) matched. ${signal.why}`,
+      title: sanitizeLine(signal.label, 120),
+      detail: sanitizeLine(
+        `${signal.files.length} file(s) matched. ${signal.why}`,
+        MAX_FIELD_CHARS
+      ),
     })),
     recommendations: [
       'Review the changeset manually — no AI reasoning backs this label.',
       'Re-run the PR Risk Review workflow once the underlying failure is fixed.',
-    ],
+    ].slice(0, MAX_RECOMMENDATIONS),
     confidence: 'low',
     source: 'heuristic',
   };
