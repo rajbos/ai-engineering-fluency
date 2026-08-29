@@ -84,9 +84,17 @@ function sanitizeLine(value, maxChars) {
   return sanitize(value, maxChars).replace(/\s*\n+\s*/g, ' ');
 }
 
-/** Cell text for a markdown table: pipes and newlines would break the row. */
+/**
+ * Cell text for a markdown table: pipes and newlines would break the row.
+ * Backslashes are escaped first, or a value ending in one would consume the
+ * escape we add to the pipe after it (`a\|b` → `a\\|b`) and split the row
+ * anyway — the exact case CodeQL flags as incomplete string escaping.
+ */
 function cell(value) {
-  return value.replace(/\|/g, '\\|').replace(/\s*\n+\s*/g, ' ');
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/\|/g, '\\|')
+    .replace(/\s*\n+\s*/g, ' ');
 }
 
 function normalizeLevel(value) {
