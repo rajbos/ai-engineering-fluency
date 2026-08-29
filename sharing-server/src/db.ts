@@ -108,8 +108,8 @@ export function getDb(): DatabaseSync {
 		if (!existsSync(dataDir)) {
 			mkdirSync(dataDir, { recursive: true });
 		}
-		// Open first, then configure — only assign _db once fully initialized so
-		// that a failed startup causes the next request to retry initialization.
+		// Open first, then configure. `_db` is assigned only after the core schema is in
+		// place, so a failed startup leaves it unset and the next request retries.
 		const db = new DatabaseSync(dbPath);
 		try {
 			db.exec('PRAGMA busy_timeout = 5000');
@@ -117,8 +117,16 @@ export function getDb(): DatabaseSync {
 			db.exec('PRAGMA journal_mode = WAL');
 			db.exec('PRAGMA foreign_keys = ON');
 			initSchema(db);
+			// Publish the handle *before* running downstream extensions. An extension is
+			// handed `db` directly, but it may call a query helper that reaches for
+			// getDb() itself; with `_db` still unset that would re-enter this branch and
+			// open a second handle to the same file (recursing until it blows up).
 			_db = db;
+			runSchemaExtensions(db);
 		} catch (err) {
+			// Roll back the publish so a failed extension does not leave a half-built
+			// database in place for the next caller.
+			_db = undefined;
 			try { db.close(); } catch { /* ignore */ }
 			throw err;
 		}
@@ -228,6 +236,48 @@ function initSchema(db: DatabaseSync): void {
 		.all() as unknown as Array<{ name: string }>;
 	if (!userCols.some(c => c.name === 'fluency_score_json')) {
 		db.exec('ALTER TABLE users ADD COLUMN fluency_score_json TEXT');
+	}
+}
+
+export type SchemaExtension = (db: DatabaseSync) => void;
+
+const _schemaExtensions = new Map<string, SchemaExtension>();
+
+/**
+ * Register additional schema (tables, indexes, migrations) owned by a downstream server.
+ *
+ * Downstream tables live alongside the core ones instead of widening `usage_uploads`, so
+ * core migrations and downstream migrations stay independent. Join downstream rows onto
+ * core rows on `(user_id, dataset_id, day, workspace_id, machine_id)` at read time.
+ *
+ * Call this before the first `getDb()`. If the database is already open the extension is
+ * applied immediately. Registering the same `name` twice is a no-op.
+ *
+ * The extension receives the database handle directly, and may also call `getDb()` (or a
+ * helper that does) — during initialization that returns this same handle rather than
+ * opening a second one.
+ */
+export function registerSchemaExtension(name: string, fn: SchemaExtension): void {
+	if (_schemaExtensions.has(name)) return;
+	_schemaExtensions.set(name, fn);
+	if (_db) {
+		applySchemaExtension(_db, name, fn);
+	}
+}
+
+function applySchemaExtension(db: DatabaseSync, name: string, fn: SchemaExtension): void {
+	try {
+		fn(db);
+		console.log(`[db] Applied schema extension "${name}"`);
+	} catch (err) {
+		console.error(`[db] Schema extension "${name}" failed:`, err);
+		throw err;
+	}
+}
+
+function runSchemaExtensions(db: DatabaseSync): void {
+	for (const [name, fn] of _schemaExtensions) {
+		applySchemaExtension(db, name, fn);
 	}
 }
 
