@@ -8177,7 +8177,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 		return payload;
 	}
 
-	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {		const now = new Date();
+	private async buildEfficiencyViewData(forceRecalc = false): Promise<EfficiencyViewData> {
+		const now = new Date();
 		const dailyStats = (!forceRecalc && this.lastFullDailyStats) ? this.lastFullDailyStats : await this.calculateDailyStats();
 		const usage = await this.calculateUsageAnalysisStats(!forceRecalc);
 		const sessionInputs = await this.collectEfficiencySessionInputs(12, !forceRecalc);
