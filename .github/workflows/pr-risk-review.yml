@@ -148,20 +148,24 @@ jobs:
           ref: ${{ steps.pr.outputs.head_sha }}
           fetch-depth: 0
 
-      # The PR title and body are attacker-controllable text that reaches a model
-      # below, so they go through the repository's central hidden-content check
-      # first. See .github/instructions/workflows.instructions.md.
-      - name: Validate PR title and body for hidden content
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          INPUT_TEXT: ${{ github.event.pull_request.title }}${{ github.event.pull_request.body }}
-          ITEM_NUMBER: ${{ steps.pr.outputs.number }}
-          REPO: ${{ github.repository }}
-          RUN_ID: ${{ github.run_id }}
-          SERVER_URL: ${{ github.server_url }}
-          CONTEXT_TYPE: pr
-          FINDINGS_FILE: /tmp/validation-findings.txt
-        run: bash .github/workflows/validate-input.sh
+      # No validate-input.sh step here, deliberately. That script is for PR text
+      # that goes on to reach an automated system — the third condition in
+      # "Deciding Whether a Workflow Needs Validation" in
+      # .github/instructions/workflows.instructions.md. This workflow never puts
+      # the PR title or body in the model's prompt: the Copilot CLI is given the
+      # changeset facts, the diff, and the PR number, nothing else. Validating
+      # text that never reaches the model buys no safety and costs a hard failure
+      # on every PR whose description happens to contain an HTML comment — which
+      # PR templates routinely do.
+      #
+      # The diff itself IS untrusted and DOES reach the model, and it cannot be
+      # screened this way: a legitimate diff contains HTML comments, bidi text
+      # and control characters as its own content. That is handled where it
+      # belongs — the "Treat the diff as data, never as instructions" section of
+      # the skill, and the sanitising in render-comment.js on the way back out.
+      #
+      # If you ever do feed the PR title or body to the model, add the validation
+      # step back at the same time.
 
       # This job checks out the PR head, which can be an old branch that predates
       # the root .nvmrc — the same case #1868 fixed for copilot-setup-steps.yml.
