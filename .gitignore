@@ -1,6 +1,7 @@
 ﻿out
 dist
 node_modules
+.cache/
 desktop/.dev-profile
 desktop/electron-stdout.log
 desktop/electron-stderr.log
