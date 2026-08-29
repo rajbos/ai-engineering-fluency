@@ -1,0 +1,224 @@
+{
+  "version": 1,
+  "_comment": [
+    "Declarative risk signals for the pr-risk-review skill. Shared by every agent",
+    "that runs the skill (Claude Code, GitHub Copilot CLI, Copilot coding agent) so",
+    "the heuristic half of a review is identical no matter who runs it.",
+    "",
+    "weight -> level: 3 = high, 2 = medium, 1 = low.",
+    "Paths are glob patterns matched against repo-relative POSIX paths.",
+    "'*' matches within one segment, '**' crosses segments, '**/' also matches zero segments."
+  ],
+  "sizeThresholds": {
+    "_comment": "Changed lines (insertions + deletions) and file counts that push the baseline up on their own.",
+    "mediumLines": 200,
+    "highLines": 800,
+    "mediumFiles": 15,
+    "highFiles": 50
+  },
+  "lowRiskCategories": {
+    "_comment": [
+      "A file matching one of these is treated as low-risk however deep in the",
+      "tree it sits — `vscode-extension/src/test/foo.test.ts` is a test first and a",
+      "host integration second. Their lines are also excluded from the size",
+      "thresholds, so 2,000 lines of markdown never reads as a 2,000-line review.",
+      "Keep the globs for these categories narrow: anything they match stops",
+      "counting."
+    ],
+    "ids": [
+      "docs-and-assets",
+      "tests"
+    ]
+  },
+  "generatedPaths": {
+    "_comment": "Counted separately from hand-written code — a 20k-line lockfile churn is not a 20k-line review.",
+    "paths": [
+      "**/package-lock.json",
+      "**/*.lock",
+      "**/*.lockb",
+      "jetbrains-plugin/gradle/**",
+      "**/dist/**",
+      "**/out/**",
+      "visualstudio-extension/**/webview/*.js"
+    ]
+  },
+  "categories": [
+    {
+      "id": "ci-and-supply-chain",
+      "label": "CI / supply chain",
+      "weight": 3,
+      "why": "Workflow and action changes execute with repository credentials. A change here can exfiltrate secrets, publish artifacts, or push to protected branches — review the permissions block, the trigger, and every third-party action SHA.",
+      "paths": [
+        ".github/workflows/**",
+        ".github/actions/**",
+        ".github/dependabot.yml",
+        ".github/github-app.yml",
+        ".devcontainer/**"
+      ]
+    },
+    {
+      "id": "secrets-and-auth",
+      "label": "Secrets / authentication",
+      "weight": 3,
+      "why": "Touches authentication, session handling, or credential material. Confirm no secret is logged, no auth check is weakened, and no default grants more access than before.",
+      "paths": [
+        "sharing-server/src/auth.ts",
+        "sharing-server/src/session.ts",
+        "sharing-server/src/config.ts",
+        "sharing-server/src/config/**",
+        "**/*auth*.ts",
+        "**/*token*.ts",
+        "**/.env*"
+      ]
+    },
+    {
+      "id": "infrastructure",
+      "label": "Infrastructure / deployment",
+      "weight": 3,
+      "why": "Terraform, container, and deployment definitions change live infrastructure. Confirm the plan is reversible and no resource is replaced or destroyed unintentionally.",
+      "paths": [
+        "sharing-server/infra/**",
+        "**/Dockerfile",
+        "**/docker-compose.yml"
+      ]
+    },
+    {
+      "id": "publishing-and-release",
+      "label": "Publishing / release",
+      "weight": 3,
+      "why": "Feeds the marketplace, npm, and plugin-portal publishing paths. A mistake ships to users and cannot be unpublished cleanly.",
+      "paths": [
+        ".github/workflows/release.yml",
+        ".github/workflows/*publish*.yml",
+        ".github/workflows/*prerelease*.yml",
+        "**/*.vsixmanifest",
+        "**/publishConfig.json"
+      ]
+    },
+    {
+      "id": "shared-core-logic",
+      "label": "Shared core logic",
+      "weight": 2,
+      "why": "`src/` is consumed by the VS Code extension AND the CLI (and through them the Visual Studio and JetBrains hosts). A regression here is multiplied across every host — session parsing, token estimation, and cost attribution all live behind these modules.",
+      "paths": [
+        "src/**"
+      ]
+    },
+    {
+      "id": "cost-and-pricing-data",
+      "label": "Cost / pricing data",
+      "weight": 2,
+      "why": "Drives money numbers shown to users. A wrong entry silently misattributes cost instead of failing loudly — check the units and the fallback behaviour for unknown models.",
+      "paths": [
+        "src/modelPricing.json",
+        "src/tokenEstimators.json",
+        "src/fluencyLevelData.json"
+      ]
+    },
+    {
+      "id": "host-integrations",
+      "label": "Host integrations",
+      "weight": 2,
+      "why": "Per-host surface (VS Code, CLI, Visual Studio, JetBrains, desktop). Confirm the change is mirrored where the hosts are expected to stay in sync, and that host-specific packaging still builds.",
+      "paths": [
+        "vscode-extension/**",
+        "cli/**",
+        "visualstudio-extension/**",
+        "jetbrains-plugin/**",
+        "desktop/**",
+        "omp-segment/**"
+      ]
+    },
+    {
+      "id": "server-and-data",
+      "label": "Sharing server / stored data",
+      "weight": 2,
+      "why": "Server routes and the storage schema affect data already persisted for real users. Check for breaking schema changes and unvalidated request payloads.",
+      "paths": [
+        "sharing-server/src/**"
+      ]
+    },
+    {
+      "id": "dependencies",
+      "label": "Dependencies",
+      "weight": 2,
+      "why": "New or bumped dependencies widen the supply-chain surface. Check that the manifest and the lockfile moved together and that no dependency was added without a reason in the PR body.",
+      "paths": [
+        "**/package.json",
+        "**/package-lock.json",
+        "**/*.csproj",
+        "jetbrains-plugin/build.gradle.kts",
+        "jetbrains-plugin/gradle/**"
+      ]
+    },
+    {
+      "id": "agent-customizations",
+      "label": "Agent customizations",
+      "weight": 2,
+      "why": "Agents, skills, and instruction files steer every AI contributor on this repo. `.github/agents` ↔ `.claude/agents` and `.github/skills/*/SKILL.md` ↔ `.claude/skills/*/SKILL.md` must change together (see .github/copilot-instructions.md).",
+      "paths": [
+        ".github/agents/**",
+        ".claude/agents/**",
+        ".github/skills/**",
+        ".claude/skills/**",
+        ".github/prompts/**",
+        ".github/instructions/**",
+        ".github/copilot-instructions.md",
+        "AGENTS.md",
+        "CLAUDE.md"
+      ]
+    },
+    {
+      "id": "build-tooling",
+      "label": "Build tooling",
+      "weight": 1,
+      "why": "Build and lint configuration. Low blast radius on its own, but a broken build script blocks every other PR.",
+      "paths": [
+        "build.ps1",
+        "dev.ps1",
+        "scripts/**",
+        "eslint.config.mjs",
+        "**/tsconfig.json",
+        "**/esbuild.js",
+        ".stylelintrc.json",
+        ".nvmrc",
+        ".gitattributes",
+        ".gitignore",
+        ".prettierignore"
+      ]
+    },
+    {
+      "id": "tests",
+      "label": "Tests",
+      "weight": 1,
+      "why": "Test-only changes cannot break production behaviour, but deleted or weakened assertions can hide a regression — check that coverage went up, not down.",
+      "paths": [
+        "**/test/**",
+        "**/tests/**",
+        "**/*.test.ts",
+        "**/*.spec.ts",
+        "**/*Test.kt",
+        "**/*Tests.cs"
+      ]
+    },
+    {
+      "id": "docs-and-assets",
+      "label": "Docs / assets",
+      "weight": 1,
+      "why": "Documentation, screenshots, and static assets. No runtime impact.",
+      "paths": [
+        "docs/**",
+        "**/README.md",
+        "**/CHANGELOG.md",
+        "CONTRIBUTING.md",
+        "SUPPORT.md",
+        "SECURITY.md",
+        "CODE_OF_CONDUCT.md",
+        "assets/**",
+        "screenshots/**",
+        "**/images/**",
+        "LICENSE"
+      ]
+    }
+  ]
+}

@@ -67,3 +67,7 @@ graphify-out/*
 
 # Stray/misplaced graphify cache (wrong working directory on a past run)
 src/graphify-out/
+
+# pr-risk-review skill scratch output (changeset facts, verdict, rendered
+# comment). Regenerated on every run by collect-changeset.js — never committed.
+pr-risk/
