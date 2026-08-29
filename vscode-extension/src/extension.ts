@@ -3555,7 +3555,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * duration/LOC/apply counts are split across the session's models by token share.
 	 */
 	private addModelEfficiencyToDailyEntry(entry: DailyTokenStats, sessionData: SessionFileCache): void {
-		if (!sessionData.usageAnalysis?.modelEfficiency && !sessionData.modelUsage) { return; }
+		if (!sessionData.usageAnalysis?.modelEfficiency && Object.keys(sessionData.modelUsage).length === 0) { return; }
 		if (!entry.modelEfficiency) { entry.modelEfficiency = {}; }
 		_accumulateDailyModelCounters(entry.modelEfficiency, _buildSessionEfficiencyAttribution(sessionData));
 	}
