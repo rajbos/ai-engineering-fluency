@@ -221,11 +221,14 @@ jobs:
         echo ""
         echo "=== Copilot CLI output ==="
 
+        # --allow-all-tools (not --allow-all): the agent only needs workspace
+        # file access and shell tools (gh), so don't grant --allow-all-paths
+        # or --allow-all-urls (least privilege).
         COPILOT_PROMPT_TEXT=$(cat /tmp/copilot-prompt.md)
         npx @github/copilot \
           -p "$COPILOT_PROMPT_TEXT" \
           --silent \
-          --allow-all \
+          --allow-all-tools \
           --add-dir "${GITHUB_WORKSPACE}" \
           --no-ask-user 2>&1 || {
             EXIT_CODE=$?
