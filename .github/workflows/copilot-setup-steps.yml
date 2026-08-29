@@ -40,10 +40,24 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
+      # Copilot code review runs these setup steps against the PR head checkout,
+      # which can be an old branch that predates the root .nvmrc file. Resolve the
+      # version with a fallback so setup-node never fails on a missing file.
+      # Keep the fallback in sync with .nvmrc.
+      - name: Resolve Node.js version
+        id: node-version
+        run: |
+          if [ -f .nvmrc ]; then
+            echo "version=$(tr -d '[:space:]' < .nvmrc)" >> "$GITHUB_OUTPUT"
+          else
+            echo "::warning::.nvmrc not found in this checkout (stale branch?) - falling back to Node 24"
+            echo "version=24" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version-file: ".nvmrc"
+          node-version: ${{ steps.node-version.outputs.version }}
           cache: "npm"
           cache-dependency-path: "**/package-lock.json"
 
