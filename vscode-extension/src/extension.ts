@@ -1841,6 +1841,24 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		const since = new Date();
 		since.setDate(since.getDate() - 30);
+		this.log('🔎 Loading repository PR stats (last 30 days)…');
+		try {
+			await this.collectAndPublishRepoPrStats(since);
+		} catch (err) {
+			// Guarantee a post-back on every failure path — otherwise the webview stays on
+			// "Loading…" forever and dispatch() dedup silently swallows every retry.
+			this.error('Failed to load repository PR stats', err);
+			const result: RepoPrStatsResult = {
+				repos: [], authenticated: !this._githubSignedOutByUser, since: since.toISOString(),
+				error: err instanceof Error ? err.message : String(err),
+			};
+			this._lastRepoPrStats = result;
+			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+		}
+	}
+
+	private async collectAndPublishRepoPrStats(since: Date): Promise<void> {
+		if (!this.analysisPanel) { return; }
 
 		if (this._githubSignedOutByUser) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
@@ -1865,7 +1883,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		const workspacePaths = this._buildWorkspacePaths();
-		const repos = discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
+		const discoveryStart = Date.now();
+		const repos = await discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
+		this.log(`🔎 Discovered ${repos.length} GitHub repo(s) across ${workspacePaths.length} workspace path(s) in ${((Date.now() - discoveryStart) / 1000).toFixed(1)}s`);
 		this.analysisPanel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: 0 });
 
 		const results: RepoPrInfo[] = [];
@@ -1973,7 +1993,17 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private async loadAgentSessions(): Promise<void> {
 		if (!this.analysisPanel) { return; }
 		const since = this.agentSessionsSince();
+		this.log('🤖 Loading cloud agent sessions…');
+		try {
+			await this.collectAndPublishAgentSessions(since);
+		} catch (err) {
+			// Guarantee a post-back on every failure path so the webview never hangs on "Loading…".
+			this.error('Failed to load cloud agent sessions', err);
+			this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, !this._githubSignedOutByUser));
+		}
+	}
 
+	private async collectAndPublishAgentSessions(since: Date): Promise<void> {
 		if (this._githubSignedOutByUser) {
 			this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
@@ -2048,7 +2078,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * repos that aren't checked out here, and ad-hoc cloud chat tasks with no repository at all).
 	 */
 	private async refreshAgentSessionsSnapshot(token: string, since: Date, cachePath: string): Promise<void> {
-		const workspaceRepos = discoverGitHubRepos(this._buildWorkspacePaths(), getConfiguredGitHubEnterpriseUri());
+		const workspaceRepos = await discoverGitHubRepos(this._buildWorkspacePaths(), getConfiguredGitHubEnterpriseUri());
 		this.log(`🤖 Refreshing cloud agent snapshot (${workspaceRepos.length} workspace repo(s) + account-wide tasks)`);
 
 		const result = await collectAgentSessions({

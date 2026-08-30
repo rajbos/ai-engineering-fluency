@@ -34,6 +34,8 @@ export type RepoPrStatsResult = {
 	repos: RepoPrInfo[];
 	authenticated: boolean;
 	since: string; // ISO date string
+	/** Set when the collection itself failed (not a per-repo error) — the panel shows this instead of hanging on "Loading…". */
+	error?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -454,6 +456,35 @@ function escapeRegExp(value: string): string {
 	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
+/** Maximum number of concurrent `git remote` probes during repo discovery. */
+const DISCOVERY_CONCURRENCY = 8;
+
+/** Build the remote-URL matcher for github.com plus an optional enterprise host. */
+function buildGitHubRemotePattern(enterpriseUri?: string): RegExp {
+	let enterpriseHost: string | undefined;
+	if (enterpriseUri) {
+		try { enterpriseHost = new URL(enterpriseUri).host; } catch { /* ignore invalid URI — fall back to github.com only */ }
+	}
+	const hostAlternation = enterpriseHost ? `github\\.com|${escapeRegExp(enterpriseHost)}` : 'github\\.com';
+	return new RegExp(`(?:${hostAlternation})[:/]([^/]+)\\/([^/\\s]+?)(?:\\.git)?$`, 'i');
+}
+
+/**
+ * Read the `origin` remote of one path, resolving to undefined on any failure. Async with a
+ * hard timeout — unlike execSync this never blocks the extension host, which matters when the
+ * customization matrix contributes hundreds of workspace paths (a sync probe per path would
+ * freeze the host for minutes and leave every webview stuck on "Loading…").
+ */
+function getGitRemoteOrigin(cwd: string): Promise<string | undefined> {
+	return new Promise((resolve) => {
+		childProcess.execFile(
+			'git', ['remote', 'get-url', 'origin'],
+			{ cwd, encoding: 'utf8', timeout: 3000, windowsHide: true },
+			(error, stdout) => resolve(error ? undefined : String(stdout ?? '').trim()),
+		);
+	});
+}
+
 /**
  * Discover GitHub repos from workspace paths using git remote.
  * Deduplicates by owner/repo so each GitHub repo is only fetched once.
@@ -461,33 +492,37 @@ function escapeRegExp(value: string): string {
  * Always matches github.com remotes; when `enterpriseUri` is configured (the
  * `github-enterprise.uri` setting), remotes on that host (e.g. a `tenant.ghe.com`
  * or on-prem GitHub Enterprise Server) are recognized too.
+ *
+ * Probes run with bounded concurrency so a large workspace-path list costs the
+ * slowest handful of `git` calls rather than the sum of all of them.
  */
-export function discoverGitHubRepos(workspacePaths: string[], enterpriseUri?: string): { owner: string; repo: string }[] {
+export async function discoverGitHubRepos(workspacePaths: string[], enterpriseUri?: string): Promise<{ owner: string; repo: string }[]> {
+	const remotePattern = buildGitHubRemotePattern(enterpriseUri);
+	const uniquePaths = [...new Set(workspacePaths)];
+	const remotes = new Array<string | undefined>(uniquePaths.length);
+	let nextIndex = 0;
+	const worker = async (): Promise<void> => {
+		while (nextIndex < uniquePaths.length) {
+			const i = nextIndex++;
+			try {
+				remotes[i] = await getGitRemoteOrigin(uniquePaths[i]);
+			} catch {
+				remotes[i] = undefined; // Not a git repo or no remote — skip
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(DISCOVERY_CONCURRENCY, uniquePaths.length) }, worker));
+
 	const seen = new Set<string>();
 	const repos: { owner: string; repo: string }[] = [];
-	let enterpriseHost: string | undefined;
-	if (enterpriseUri) {
-		try { enterpriseHost = new URL(enterpriseUri).host; } catch { /* ignore invalid URI — fall back to github.com only */ }
-	}
-	const hostAlternation = enterpriseHost ? `github\\.com|${escapeRegExp(enterpriseHost)}` : 'github\\.com';
-	const remotePattern = new RegExp(`(?:${hostAlternation})[:/]([^/]+)\\/([^/\\s]+?)(?:\\.git)?$`, 'i');
-	for (const workspacePath of workspacePaths) {
-		try {
-			const remote = childProcess.execSync('git remote get-url origin', {
-				cwd: workspacePath,
-				encoding: 'utf8',
-				timeout: 3000,
-				stdio: ['pipe', 'pipe', 'pipe'],
-			}).trim();
-			const match = remote.match(remotePattern);
-			if (!match) { continue; }
-			const key = `${match[1]}/${match[2]}`.toLowerCase();
-			if (seen.has(key)) { continue; }
-			seen.add(key);
-			repos.push({ owner: match[1], repo: match[2] });
-		} catch {
-			// Not a git repo or no remote — skip
-		}
+	for (const remote of remotes) {
+		if (!remote) { continue; }
+		const match = remote.match(remotePattern);
+		if (!match) { continue; }
+		const key = `${match[1]}/${match[2]}`.toLowerCase();
+		if (seen.has(key)) { continue; }
+		seen.add(key);
+		repos.push({ owner: match[1], repo: match[2] });
 	}
 	return repos;
 }

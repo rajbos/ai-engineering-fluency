@@ -618,6 +618,7 @@ type RepoPrStatsResult = {
   repos: RepoPrInfo[];
   authenticated: boolean;
   since: string;
+  error?: string;
 };
 
 const EFFORT_DISPLAY_NAMES: Record<string, string> = {
@@ -1944,6 +1945,7 @@ function sanitizeRepoPrStatsData(input: unknown): RepoPrStatsResult {
 	return {
 		authenticated: Boolean(src.authenticated),
 		since: typeof src.since === 'string' || typeof src.since === 'number' ? src.since : Date.now(),
+		error: typeof src.error === 'string' ? escapeHtml(src.error) : undefined,
 		repos: repos.map((repo) => {
 			const r = (repo && typeof repo === 'object') ? (repo as Record<string, unknown>) : {};
 			const aiDetails = Array.isArray(r.aiDetails) ? r.aiDetails : [];
@@ -2023,6 +2025,14 @@ function renderRepoPrRow(r: RepoPrInfo, cell: string, cellCenter: string): strin
 
 function renderReposPrContent(data: RepoPrStatsResult): string {
 	const sinceDate = escapeHtml(new Date(data.since).toLocaleDateString());
+	if (data.error) {
+		return `
+			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
+				<strong>⚠️ Failed to load repository PR activity</strong><br/>
+				${data.error}<br/>
+				Switch to another tab and back to retry — details are in the extension Output channel.
+			</div>`;
+	}
 	if (!data.authenticated) {
 		return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
