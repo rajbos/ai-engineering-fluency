@@ -73,6 +73,14 @@ The extension supports localization for all user-facing strings, including comma
 
 > ⚠️ **`package.nls*.json` files must be strict JSON** — VS Code's localization loader does not tolerate `//` comments or trailing commas. Don't add comments to these files even for section organization; use blank lines to group related keys instead.
 
+### Validating Localization
+
+Run `npm run validate:l10n` (script: `scripts/validate-l10n.mjs`) to detect broken localization before it ships: it strictly parses every `package.nls*.json`, checks that all `%key%` references in `package.json` and all `l10n.t('key')` calls in `src/**` resolve against `package.nls.json`, and verifies locale files cover every base key. With `--vsix <file>` it also validates the packaged VSIX contents. CI and the nightly pre-release workflow run this automatically after packaging.
+
+### Runtime Localization (Key-Based)
+
+`vscode.l10n.t()` only resolves through `l10n/bundle.l10n.<lang>.json` files (enabled by the `l10n` field in `package.json`); it **never reads `package.nls.json`** — that file is only used for static `%key%` references in `package.json`. On an English (default language) VS Code, `l10n.t('some.key')` returns the message argument unchanged, so key-based calls surface raw keys in the UI. This is why all extension code must localize runtime strings through `src/l10n.ts` (`import { t } from './l10n'` / the module-level `l10n` object in `extension.ts`) instead of calling `vscode.l10n.t()` directly. The helper treats `package.nls*.json` as the single source of truth: esbuild inlines the bundles into `dist/extension.js`, and `t()` resolves the key from the bundle matching `vscode.env.language` (falling back to English, then to the key itself with a one-time warning for genuinely missing keys). `vscode.l10n.t()` is still consulted first so real VS Code-provided translations take precedence if l10n bundles are ever shipped. Webviews additionally ignore localization entries whose value equals their key (`initializeWebviewLocalization` in `src/webview/shared/localization.ts`).
+
 ### Adding New Localizable Strings
 
 **For package.json entries** (commands, configuration, display names):
@@ -109,13 +117,12 @@ Example:
 ```
 
 **For runtime strings in TypeScript code**:
-Use the VS Code localization API:
+Use the resilient localization helper (see "Runtime Fallback" below):
 ```typescript
-import * as vscode from 'vscode';
-const l10n = vscode.l10n;
+import { t } from './l10n';
 
-// Use l10n.t() with the same key from package.nls.json
-const message = l10n.t('command.myCommand.message');
+// Use t() with the same key from package.nls.json
+const message = t('command.myCommand.message');
 ```
 
 ### Webview Localization

@@ -175,6 +175,10 @@ jobs:
     - name: Create VSIX package
       working-directory: vscode-extension
       run: npx vsce package
+
+    - name: Validate localization bundle in VSIX
+      working-directory: vscode-extension
+      run: npm run validate:l10n -- --vsix "$(find . -maxdepth 1 -name 'ai-engineering-fluency-*.vsix' | head -n 1)"
       
     - name: Upload VSIX package
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

@@ -14,6 +14,8 @@ type VscodeMockState = {
 	lastErrorMessages: string[];
 	nextPick: string | undefined;
 	extensions: Record<string, unknown>;
+	l10nBundle: Record<string, string> | null;
+	language: string;
 };
 
 const state: VscodeMockState = {
@@ -26,7 +28,9 @@ const state: VscodeMockState = {
 	lastWarningMessages: [],
 	lastErrorMessages: [],
 	nextPick: undefined,
-	extensions: {}
+	extensions: {},
+	l10nBundle: null,
+	language: 'en'
 };
 
 function normalizeGetKey(key: string): string {
@@ -95,6 +99,8 @@ function attachMock(target: any): void {
 			state.lastErrorMessages = [];
 			state.nextPick = undefined;
 			state.extensions = {};
+			state.l10nBundle = null;
+			state.language = 'en';
 		},
 		setConfig(values: ConfigStore): void {
 			state.config = { ...values };
@@ -116,6 +122,12 @@ function attachMock(target: any): void {
 		},
 		setClipboardThrow(shouldThrow: boolean): void {
 			state.clipboardThrow = shouldThrow;
+		},
+		setL10nBundle(bundle: Record<string, string> | null): void {
+			state.l10nBundle = bundle;
+		},
+		setLanguage(language: string): void {
+			state.language = language;
 		}
 	};
 
@@ -123,6 +135,20 @@ function attachMock(target: any): void {
 	target.ExtensionMode = target.ExtensionMode ?? { Production: 1, Development: 2, Test: 3 };
 	target.ProgressLocation = target.ProgressLocation ?? { Notification: 15 };
 	target.ViewColumn = target.ViewColumn ?? { Active: -1, Beside: -2, One: 1, Two: 2, Three: 3 };
+
+	// l10n mock: mirrors real VS Code behavior for key-based calls — without a
+	// bundle (the default) t() returns the raw key; setL10nBundle() simulates a
+	// loaded l10n/bundle.l10n.<lang>.json.
+	target.l10n = target.l10n ?? {
+		t: (key: string, ...args: Array<string | number | boolean>): string => {
+			const template = state.l10nBundle?.[key];
+			if (template === undefined) {
+				return key;
+			}
+			return template.replace(/\{(\d+)\}/g, (match, index) =>
+				Number(index) < args.length ? String(args[Number(index)]) : match);
+		}
+	};
 
 	// Add Uri class for tests
 	target.Uri = target.Uri ?? class Uri {
@@ -233,6 +259,11 @@ function attachMock(target: any): void {
 
 	target.env = target.env ?? {};
 	target.env.machineId = target.env.machineId ?? 'test-machine-id-0000000000000000';
+	Object.defineProperty(target.env, 'language', {
+		get() {
+			return state.language;
+		}
+	});
 	const clipboardImpl = {
 		async writeText(text: string): Promise<void> {
 			if (state.clipboardThrow) {

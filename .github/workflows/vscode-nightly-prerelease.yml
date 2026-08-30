@@ -125,6 +125,11 @@ jobs:
         npx vsce package --pre-release \
           --baseImagesUrl https://raw.githubusercontent.com/rajbos/ai-engineering-fluency/main/vscode-extension
 
+    - name: Validate localization bundle in VSIX
+      if: steps.check_changes.outputs.has_changes == 'true'
+      working-directory: vscode-extension
+      run: npm run validate:l10n -- --vsix "$(find . -maxdepth 1 -name 'ai-engineering-fluency-*.vsix' | head -n 1)"
+
     - name: Get VSIX filename
       if: steps.check_changes.outputs.has_changes == 'true'
       id: vsix
