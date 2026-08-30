@@ -82,6 +82,10 @@ function copilotCliProvider() {
           : `exit code ${run.status}: ${(run.stderr || "").trim().slice(0, 2000)}`;
         console.error(`copilot CLI call failed after ${latencyMs}ms — ${detail}`);
       }
+      // On failure, return a ProviderResult with `error` set rather than
+      // throwing: the framework's run-eval replaces the output with
+      // "ERROR: <error>" so the judge fails the case closed, whereas a throw
+      // would abort the entire evaluation run.
       return {
         provider: "copilot-cli",
         model: modelName,
