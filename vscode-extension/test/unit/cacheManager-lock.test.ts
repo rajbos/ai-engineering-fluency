@@ -129,3 +129,45 @@ test('releaseCacheLock: only releases own lock', async () => {
 	fs.unlinkSync(lockPath);
 });
 
+
+// ── Agent-tasks lock: only one window refreshes the hourly cloud-agent snapshot ────────
+
+test('acquireAgentTasksLock: uses its own lock file, separate from the refresh leader lock', async () => {
+	const { manager } = makeDirAndManager();
+	assert.notEqual(manager.getAgentTasksLockPath(), manager.getRefreshLockPath());
+	assert.ok(manager.getAgentTasksLockPath().includes('agenttasks_'));
+
+	assert.equal(await manager.acquireAgentTasksLock(), true);
+	assert.equal(await manager.acquireRefreshLock(), true, 'holding one lock must not block the other');
+
+	await manager.releaseAgentTasksLock();
+	await manager.releaseRefreshLock();
+});
+
+test('acquireAgentTasksLock: a second window is turned away while the lock is held, then let in', async () => {
+	const { manager } = makeDirAndManager();
+	await manager.acquireAgentTasksLock();
+
+	const lockPath = manager.getAgentTasksLockPath();
+	fs.writeFileSync(lockPath, JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+	assert.equal(await manager.acquireAgentTasksLock(), false, 'a live lock from another window blocks the refresh');
+
+	fs.unlinkSync(lockPath);
+	assert.equal(await manager.acquireAgentTasksLock(), true);
+	await manager.releaseAgentTasksLock();
+});
+
+test('renewAgentTasksLock: refreshes our own timestamp and refuses to renew another window\'s lock', async () => {
+	const { manager } = makeDirAndManager();
+	await manager.acquireAgentTasksLock();
+	const lockPath = manager.getAgentTasksLockPath();
+	const before = JSON.parse(fs.readFileSync(lockPath, 'utf-8')).timestamp;
+
+	await new Promise(resolve => setTimeout(resolve, 5));
+	assert.equal(await manager.renewAgentTasksLock(), true);
+	const after = JSON.parse(fs.readFileSync(lockPath, 'utf-8')).timestamp;
+	assert.ok(after >= before, 'renewing should move the timestamp forward');
+
+	fs.writeFileSync(lockPath, JSON.stringify({ sessionId: 'other-window', pid: process.pid, timestamp: Date.now() }));
+	assert.equal(await manager.renewAgentTasksLock(), false, 'never renew a lock this window does not own');
+});

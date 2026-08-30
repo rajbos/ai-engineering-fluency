@@ -48,7 +48,7 @@ fi
 
 is_test_file() {
   case "$1" in
-    */test/*|*/tests/*|*/__tests__/*|test/*|tests/*) return 0 ;;
+    */test/*|*/tests/*|*/__tests__/*|test/*|tests/*|__tests__/*) return 0 ;;
   esac
   case "$(basename "$1")" in
     *.test.*|*.spec.*) return 0 ;;

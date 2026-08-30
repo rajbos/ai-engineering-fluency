@@ -242,7 +242,16 @@ import {
 	type RepoPrInfo,
 	type RepoPrStatsResult,
 } from './githubPrService';
-import { fetchAgentSessionsForRepo } from './agentSessionsService';
+import { collectAgentSessions } from './agentSessionsService';
+import {
+	AGENT_TASKS_CACHE_SCHEMA_VERSION,
+	AGENT_TASKS_REFRESH_INTERVAL_MS,
+	canServeAgentTasksSnapshot,
+	getAgentTasksCachePath,
+	isAgentTasksEnvelopeUsable,
+	readAgentTasksSnapshot,
+	writeAgentTasksSnapshot,
+} from './agentTasksCache';
 import { getConfiguredGitHubEnterpriseUri, getGitHubAuthProviderId } from './githubApiConfig';
 
 // --- View regression ---
@@ -634,8 +643,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Cached PR stats result for the repos tab
 	private _lastRepoPrStats?: RepoPrStatsResult;
 
-	// Cached cloud agent sessions result for the cloud agent tab
+	// Cached cloud agent sessions result for the cloud agent tab (mirrors the shared snapshot on disk)
 	private _lastAgentSessionsData?: AgentSessionsResult;
+
+	// True while this window is refreshing the shared cloud-agent snapshot from the GitHub API
+	private _agentSessionsRefreshInFlight = false;
 
 	// Tool name mapping - loaded from toolNames.json for friendly display names
 	private toolNameMap: { [key: string]: string } = toolNamesData as { [key: string]: string };
@@ -1779,9 +1791,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 				this._lastRepoPrStats = result;
 				this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
-				const agentResult: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-				this._lastAgentSessionsData = agentResult;
-				this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: agentResult });
+				this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			}
 		} catch (error) {
 			this.error('Failed to sign out from GitHub:', error);
@@ -1919,61 +1929,148 @@ class CopilotTokenTracker implements vscode.Disposable {
 			: { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails };
 	}
 
+	/** Window the cloud-agent snapshot covers: the last 30 days, matching the other GitHub panels. */
+	private agentSessionsSince(): Date {
+		const since = new Date();
+		since.setDate(since.getDate() - 30);
+		return since;
+	}
+
+	/** Path of the cross-window cloud-agent snapshot shared by every window of this VS Code edition. */
+	private agentTasksCachePath(): string {
+		return getAgentTasksCachePath(this.context.globalStorageUri.fsPath, this.cacheManager.getCacheIdentifier());
+	}
+
+	/** An empty snapshot — `fetchedAt: ''` marks "never fetched", which the panel renders as pending. */
+	private buildEmptyAgentSessionsResult(since: Date, authenticated: boolean): AgentSessionsResult {
+		return {
+			repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, totalPremiumRequests: 0,
+			authenticated, since: since.toISOString(), fetchedAt: '',
+			accountTasksAvailable: false, partial: false,
+		};
+	}
+
 	/**
-	 * Load Copilot cloud agent session stats for all discovered GitHub repos and send to the analysis panel.
-	 * Only cloud-agent sessions are counted — CLI/remote sessions that share the same task API are excluded
-	 * so they are not double-counted with the chat-session data already shown in "My Activity".
+	 * Remember and push a snapshot to the analysis panel, if one is open. The refresh interval is
+	 * stamped on here so the panel can show when the next refresh is due without duplicating the
+	 * cache policy.
+	 */
+	private publishAgentSessions(result: AgentSessionsResult): void {
+		const stamped: AgentSessionsResult = { ...result, refreshIntervalMs: AGENT_TASKS_REFRESH_INTERVAL_MS };
+		this._lastAgentSessionsData = stamped;
+		this.analysisPanel?.webview.postMessage({ command: 'agentSessionsLoaded', data: stamped });
+	}
+
+	/**
+	 * Show Copilot cloud agent session stats in the analysis panel.
+	 *
+	 * This never calls GitHub itself: it serves the shared hourly snapshot (see `agentTasksCache.ts`)
+	 * so opening the tab is instant and costs no API calls, then asks for a refresh, which only
+	 * happens if the snapshot is stale *and* this window wins the agent-tasks lock.
 	 */
 	private async loadAgentSessions(): Promise<void> {
 		if (!this.analysisPanel) { return; }
-
-		const since = new Date();
-		since.setDate(since.getDate() - 30);
+		const since = this.agentSessionsSince();
 
 		if (this._githubSignedOutByUser) {
-			const result: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-			this._lastAgentSessionsData = result;
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+			this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
 		}
 
 		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 		if (!session) {
-			const result: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-			this._lastAgentSessionsData = result;
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+			this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
 		}
-
 		if (!this.githubSession) {
 			this.githubSession = session;
 			await this.context.globalState.update('github.authenticated', true);
 			await this.context.globalState.update('github.username', session.account.label);
 		}
 
-		const workspacePaths = this._buildWorkspacePaths();
-		const repos = discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
-		this.analysisPanel.webview.postMessage({ command: 'agentSessionsProgress', total: repos.length, done: 0 });
-
-		const repoResults = [];
-		for (let i = 0; i < repos.length; i++) {
-			const { owner, repo } = repos[i];
-			const summary = await fetchAgentSessionsForRepo(owner, repo, session.accessToken, since);
-			repoResults.push(summary);
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsProgress', total: repos.length, done: i + 1 });
+		const snapshot = await readAgentTasksSnapshot(this.agentTasksCachePath());
+		if (isAgentTasksEnvelopeUsable(snapshot, since)) {
+			this.publishAgentSessions(snapshot!.data);
+		} else {
+			this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, true));
 		}
 
-		const result: AgentSessionsResult = {
-			repos: repoResults,
-			totalTasks: repoResults.reduce((s, r) => s + r.totalTasks, 0),
-			totalSessions: repoResults.reduce((s, r) => s + r.totalSessions, 0),
-			totalCredits: repoResults.reduce((s, r) => s + r.totalCredits, 0),
-			authenticated: true,
-			since: since.toISOString(),
-			fetchedAt: new Date().toISOString(),
-		};
-		this._lastAgentSessionsData = result;
-		this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+		void this.maybeRefreshAgentSessions();
+	}
+
+	/**
+	 * Refresh the cloud-agent snapshot from the GitHub API, if it is due.
+	 *
+	 * Collecting it costs one task-list call per repo plus one detail call per task, so it is
+	 * deliberately rationed: at most once every AGENT_TASKS_REFRESH_INTERVAL_MS, and only in the
+	 * window that wins the agent-tasks lock — the other windows read that window's snapshot from
+	 * global storage instead of repeating the calls. Runs on extension start and on every cache
+	 * refresh cycle (both leader-gated), plus whenever the Cloud Agent tab is opened.
+	 */
+	private async maybeRefreshAgentSessions(): Promise<void> {
+		if (this._agentSessionsRefreshInFlight || this._githubSignedOutByUser) { return; }
+		const since = this.agentSessionsSince();
+		const cachePath = this.agentTasksCachePath();
+		if (canServeAgentTasksSnapshot(await readAgentTasksSnapshot(cachePath), since, Date.now())) { return; }
+
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		if (!session) { return; }
+
+		let acquired = false;
+		try { acquired = await this.cacheManager.acquireAgentTasksLock(); }
+		catch (err) { this.warn(`Failed to acquire agent tasks lock: ${err}`); }
+		if (!acquired) {
+			this.log('⏭️ Cloud agent refresh skipped — another window is refreshing the shared snapshot');
+			return;
+		}
+
+		this._agentSessionsRefreshInFlight = true;
+		// Heartbeat the lock: a slow API pass must not look stale to another window, which would
+		// let it start the same collection in parallel.
+		const heartbeat = setInterval(() => { void this.cacheManager.renewAgentTasksLock(); }, 60 * 1000);
+		try {
+			await this.refreshAgentSessionsSnapshot(session.accessToken, since, cachePath);
+		} catch (err) {
+			this.warn(`Cloud agent session refresh failed: ${err}`);
+		} finally {
+			clearInterval(heartbeat);
+			this._agentSessionsRefreshInFlight = false;
+			try { await this.cacheManager.releaseAgentTasksLock(); }
+			catch (err) { this.warn(`Failed to release agent tasks lock: ${err}`); }
+		}
+	}
+
+	/**
+	 * Collect the snapshot and publish it, combining the workspace repos (which also surface tasks
+	 * other people started there) with the account-wide task list (tasks started on github.com in
+	 * repos that aren't checked out here, and ad-hoc cloud chat tasks with no repository at all).
+	 */
+	private async refreshAgentSessionsSnapshot(token: string, since: Date, cachePath: string): Promise<void> {
+		const workspaceRepos = discoverGitHubRepos(this._buildWorkspacePaths(), getConfiguredGitHubEnterpriseUri());
+		this.log(`🤖 Refreshing cloud agent snapshot (${workspaceRepos.length} workspace repo(s) + account-wide tasks)`);
+
+		const result = await collectAgentSessions({
+			token,
+			since,
+			workspaceRepos,
+			onProgress: (done, total) => {
+				this.analysisPanel?.webview.postMessage({ command: 'agentSessionsProgress', total, done });
+			},
+		});
+
+		try {
+			await writeAgentTasksSnapshot(cachePath, {
+				schemaVersion: AGENT_TASKS_CACHE_SCHEMA_VERSION,
+				fetchedAt: result.fetchedAt,
+				since: result.since,
+				data: result,
+			});
+		} catch (err) {
+			this.warn(`Failed to write cloud agent snapshot: ${err}`);
+		}
+
+		this.log(`🤖 Cloud agent snapshot: ${result.repos.length} repo(s), ${result.totalTasks} task(s), ${result.totalCredits.toFixed(1)} credits`);
+		this.publishAgentSessions(result);
 	}
 
 	/** Collect workspace paths from the customization matrix and currently open VS Code workspace folders. */
@@ -2480,7 +2577,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Piggyback the once-daily background worktree scan on the same leader election: only
 		// the window that won this refresh's leader lock may start it, and it runs detached
 		// (drip-throttled, can take far longer than this refresh cycle) so it never blocks it.
-		if (isLeader) { void this.maybeStartBackgroundWorktreeScan(); }
+		// The hourly cloud-agent snapshot refresh rides along for the same reason: it is leader-only
+		// GitHub API work that must not hold up the parse, and this also gives it a run at startup.
+		if (isLeader) {
+			void this.maybeStartBackgroundWorktreeScan();
+			void this.maybeRefreshAgentSessions();
+		}
 
 		try {
 			return await this._runRefreshCore(silent, isLeader);
