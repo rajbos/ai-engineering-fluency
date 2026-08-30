@@ -108,6 +108,7 @@
   "config.copilotTokenTracker.windsurf.cacheCredentials.description": "缓存 Windsurf API 凭据以减少身份验证开销。Windsurf 重新启动时凭据会自动失效。",
 
   "statusBar.name": "AI 工程熟练度",
+  "statusBar.nameInsights": "AI 工程熟练度 —— 洞察",
   "statusBar.tooltip": "AI 工程熟练度 —— 每日和 30 天令牌使用量 - 单击打开详情",
   "statusBar.loadingText": "$(loading~spin) AI 熟练度: 正在加载...",
   "statusBar.tokenError": "$(error) 令牌错误",
@@ -163,6 +164,11 @@
   "button.levelViewer": "等级查看器",
   "button.environmental": "环境影响",
   "button.efficiency": "效率",
+  "button.openSettings": "打开设置",
+  "button.openUsageAnalysis": "打开使用分析",
+  "button.openInsightsTab": "打开洞察标签页",
+  "button.removeOldExtension": "删除旧扩展",
+  "button.dismiss": "忽略",
 
   "nav.btnRefresh": "刷新",
   "nav.btnDetails": "详情",
