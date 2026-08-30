@@ -10,6 +10,38 @@ permissions:
   contents: read
 
 jobs:
+  # Deterministic guard against "new source logic without test changes" — the
+  # class of finding the agent-review Test Expert agent would otherwise have to
+  # catch with an LLM. Fails the PR when production source under
+  # vscode-extension/src/, cli/src/ or src/ changes without any test file
+  # changing too. Escape hatch: put [skip-test-check] in the PR body.
+  test-coverage-check:
+    name: Test coverage companion check
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+    - name: Harden the runner (Block all outbound calls except allowed)
+      uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+      with:
+        egress-policy: block
+        allowed-endpoints: >
+          github.com:443
+          productionresultssa*.blob.core.windows.net:443
+          results-receiver.actions.githubusercontent.com:443
+
+    - name: Checkout code
+      uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        fetch-depth: 0
+
+    - name: Check source changes come with test changes
+      env:
+        BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        PR_BODY: ${{ github.event.pull_request.body }}
+      shell: bash
+      run: bash .github/workflows/scripts/check-test-coverage.sh
+
   build:
     runs-on: ubuntu-latest
     
@@ -175,6 +207,10 @@ jobs:
     - name: Create VSIX package
       working-directory: vscode-extension
       run: npx vsce package
+
+    - name: Validate localization bundle in VSIX
+      working-directory: vscode-extension
+      run: npm run validate:l10n -- --vsix "$(find . -maxdepth 1 -name 'ai-engineering-fluency-*.vsix' | head -n 1)"
       
     - name: Upload VSIX package
       uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1

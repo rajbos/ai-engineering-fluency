@@ -5,8 +5,10 @@ import * as path from 'path';
 import * as os from 'os';
 import * as childProcess from 'child_process';
 
-// Localization support
-const l10n = vscode.l10n;
+// Localization support (key-based resolver over package.nls*.json — see l10n.ts
+// for why vscode.l10n.t() cannot be used directly with key-based strings)
+import { t as l10nT } from './l10n';
+const l10n = { t: l10nT };
 
 // --- JSON data files ---
 import tokenEstimatorsData from '../../src/tokenEstimators.json';
@@ -252,7 +254,16 @@ import {
 	type RepoPrInfo,
 	type RepoPrStatsResult,
 } from './githubPrService';
-import { fetchAgentSessionsForRepo } from './agentSessionsService';
+import { collectAgentSessions } from './agentSessionsService';
+import {
+	AGENT_TASKS_CACHE_SCHEMA_VERSION,
+	AGENT_TASKS_REFRESH_INTERVAL_MS,
+	canServeAgentTasksSnapshot,
+	getAgentTasksCachePath,
+	isAgentTasksEnvelopeUsable,
+	readAgentTasksSnapshot,
+	writeAgentTasksSnapshot,
+} from './agentTasksCache';
 import { getConfiguredGitHubEnterpriseUri, getGitHubAuthProviderId } from './githubApiConfig';
 
 // --- View regression ---
@@ -644,8 +655,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	// Cached PR stats result for the repos tab
 	private _lastRepoPrStats?: RepoPrStatsResult;
 
-	// Cached cloud agent sessions result for the cloud agent tab
+	// Cached cloud agent sessions result for the cloud agent tab (mirrors the shared snapshot on disk)
 	private _lastAgentSessionsData?: AgentSessionsResult;
+
+	// True while this window is refreshing the shared cloud-agent snapshot from the GitHub API
+	private _agentSessionsRefreshInFlight = false;
 
 	// Tool name mapping - loaded from toolNames.json for friendly display names
 	private toolNameMap: { [key: string]: string } = toolNamesData as { [key: string]: string };
@@ -1339,13 +1353,13 @@ class CopilotTokenTracker implements vscode.Disposable {
 			} catch { /* Ignore git errors in dev mode */ }
 			this.initializeCrashDebugLog(context);
 		}
-		this.outputChannel = vscode.window.createOutputChannel(vscode.l10n.t('outputChannelName'));
+		this.outputChannel = vscode.window.createOutputChannel(l10n.t('outputChannelName'));
 		context.subscriptions.push(this.outputChannel);
 		this.log('Constructor called');
 		const version = context.extension.packageJSON?.version ?? 'unknown';
 		const mode = context.extensionMode === vscode.ExtensionMode.Development ? 'Development'
 			: context.extensionMode === vscode.ExtensionMode.Test ? 'Test' : 'Production';
-		let startupInfo = vscode.l10n.t('startupInfo', version, mode, CopilotTokenTracker.CACHE_VERSION);
+		let startupInfo = l10n.t('startupInfo', version, mode, CopilotTokenTracker.CACHE_VERSION);
 		if (context.extensionMode === vscode.ExtensionMode.Development) {
 			try {
 				const sha = childProcess.execSync('git rev-parse --short HEAD', {
@@ -1408,15 +1422,15 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private initializeStatusBar(): void {
 		this.statusBarItem = vscode.window.createStatusBarItem('ai-engineering-fluency', vscode.StatusBarAlignment.Right, 102);
-		this.statusBarItem.name = vscode.l10n.t("statusBar.name");
-		this.setStatusBarText(vscode.l10n.t("statusBar.loadingText"));
-		this.statusBarItem.tooltip = vscode.l10n.t("statusBar.tooltip");
+		this.statusBarItem.name = l10n.t("statusBar.name");
+		this.setStatusBarText(l10n.t("statusBar.loadingText"));
+		this.statusBarItem.tooltip = l10n.t("statusBar.tooltip");
 		this.statusBarItem.command = 'aiEngineeringFluency.showDetails';
 		this.statusBarItem.show();
 
 		// Separate insights badge — hidden until there are new insights
 		this.insightsStatusBarItem = vscode.window.createStatusBarItem('ai-engineering-fluency-insights', vscode.StatusBarAlignment.Right, 101);
-		this.insightsStatusBarItem.name = vscode.l10n.t("statusBar.name") + " — Insights";
+		this.insightsStatusBarItem.name = l10n.t("statusBar.name") + " — Insights";
 		this.insightsStatusBarItem.command = 'aiEngineeringFluency.openInsightsTab';
 		// starts hidden; shown in refreshStatusBarInsightBadge when count > 0
 
@@ -1723,7 +1737,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.insightsStatusBarItem.text = `💡 ${label}`;
 			const tooltip = new vscode.MarkdownString();
 			tooltip.isTrusted = false;
-			tooltip.appendMarkdown(`**${vscode.l10n.t('aiFluencyInsights')}** — ${label} waiting for you\n\n`);
+			tooltip.appendMarkdown(`**${l10n.t('aiFluencyInsights')}** — ${label} waiting for you\n\n`);
 			if (this._topInsightTitle) {
 				tooltip.appendMarkdown(`${this._topInsightTitle}\n\n`);
 			}
@@ -1789,9 +1803,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 				this._lastRepoPrStats = result;
 				this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
-				const agentResult: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-				this._lastAgentSessionsData = agentResult;
-				this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: agentResult });
+				this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			}
 		} catch (error) {
 			this.error('Failed to sign out from GitHub:', error);
@@ -1929,61 +1941,148 @@ class CopilotTokenTracker implements vscode.Disposable {
 			: { totalPrs, aiAuthoredPrs, aiReviewRequestedPrs, aiDetails };
 	}
 
+	/** Window the cloud-agent snapshot covers: the last 30 days, matching the other GitHub panels. */
+	private agentSessionsSince(): Date {
+		const since = new Date();
+		since.setDate(since.getDate() - 30);
+		return since;
+	}
+
+	/** Path of the cross-window cloud-agent snapshot shared by every window of this VS Code edition. */
+	private agentTasksCachePath(): string {
+		return getAgentTasksCachePath(this.context.globalStorageUri.fsPath, this.cacheManager.getCacheIdentifier());
+	}
+
+	/** An empty snapshot — `fetchedAt: ''` marks "never fetched", which the panel renders as pending. */
+	private buildEmptyAgentSessionsResult(since: Date, authenticated: boolean): AgentSessionsResult {
+		return {
+			repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, totalPremiumRequests: 0,
+			authenticated, since: since.toISOString(), fetchedAt: '',
+			accountTasksAvailable: false, partial: false,
+		};
+	}
+
 	/**
-	 * Load Copilot cloud agent session stats for all discovered GitHub repos and send to the analysis panel.
-	 * Only cloud-agent sessions are counted — CLI/remote sessions that share the same task API are excluded
-	 * so they are not double-counted with the chat-session data already shown in "My Activity".
+	 * Remember and push a snapshot to the analysis panel, if one is open. The refresh interval is
+	 * stamped on here so the panel can show when the next refresh is due without duplicating the
+	 * cache policy.
+	 */
+	private publishAgentSessions(result: AgentSessionsResult): void {
+		const stamped: AgentSessionsResult = { ...result, refreshIntervalMs: AGENT_TASKS_REFRESH_INTERVAL_MS };
+		this._lastAgentSessionsData = stamped;
+		this.analysisPanel?.webview.postMessage({ command: 'agentSessionsLoaded', data: stamped });
+	}
+
+	/**
+	 * Show Copilot cloud agent session stats in the analysis panel.
+	 *
+	 * This never calls GitHub itself: it serves the shared hourly snapshot (see `agentTasksCache.ts`)
+	 * so opening the tab is instant and costs no API calls, then asks for a refresh, which only
+	 * happens if the snapshot is stale *and* this window wins the agent-tasks lock.
 	 */
 	private async loadAgentSessions(): Promise<void> {
 		if (!this.analysisPanel) { return; }
-
-		const since = new Date();
-		since.setDate(since.getDate() - 30);
+		const since = this.agentSessionsSince();
 
 		if (this._githubSignedOutByUser) {
-			const result: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-			this._lastAgentSessionsData = result;
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+			this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
 		}
 
 		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 		if (!session) {
-			const result: AgentSessionsResult = { repos: [], totalTasks: 0, totalSessions: 0, totalCredits: 0, authenticated: false, since: since.toISOString(), fetchedAt: new Date().toISOString() };
-			this._lastAgentSessionsData = result;
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+			this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
 		}
-
 		if (!this.githubSession) {
 			this.githubSession = session;
 			await this.context.globalState.update('github.authenticated', true);
 			await this.context.globalState.update('github.username', session.account.label);
 		}
 
-		const workspacePaths = this._buildWorkspacePaths();
-		const repos = discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
-		this.analysisPanel.webview.postMessage({ command: 'agentSessionsProgress', total: repos.length, done: 0 });
-
-		const repoResults = [];
-		for (let i = 0; i < repos.length; i++) {
-			const { owner, repo } = repos[i];
-			const summary = await fetchAgentSessionsForRepo(owner, repo, session.accessToken, since);
-			repoResults.push(summary);
-			this.analysisPanel.webview.postMessage({ command: 'agentSessionsProgress', total: repos.length, done: i + 1 });
+		const snapshot = await readAgentTasksSnapshot(this.agentTasksCachePath());
+		if (isAgentTasksEnvelopeUsable(snapshot, since)) {
+			this.publishAgentSessions(snapshot!.data);
+		} else {
+			this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, true));
 		}
 
-		const result: AgentSessionsResult = {
-			repos: repoResults,
-			totalTasks: repoResults.reduce((s, r) => s + r.totalTasks, 0),
-			totalSessions: repoResults.reduce((s, r) => s + r.totalSessions, 0),
-			totalCredits: repoResults.reduce((s, r) => s + r.totalCredits, 0),
-			authenticated: true,
-			since: since.toISOString(),
-			fetchedAt: new Date().toISOString(),
-		};
-		this._lastAgentSessionsData = result;
-		this.analysisPanel.webview.postMessage({ command: 'agentSessionsLoaded', data: result });
+		void this.maybeRefreshAgentSessions();
+	}
+
+	/**
+	 * Refresh the cloud-agent snapshot from the GitHub API, if it is due.
+	 *
+	 * Collecting it costs one task-list call per repo plus one detail call per task, so it is
+	 * deliberately rationed: at most once every AGENT_TASKS_REFRESH_INTERVAL_MS, and only in the
+	 * window that wins the agent-tasks lock — the other windows read that window's snapshot from
+	 * global storage instead of repeating the calls. Runs on extension start and on every cache
+	 * refresh cycle (both leader-gated), plus whenever the Cloud Agent tab is opened.
+	 */
+	private async maybeRefreshAgentSessions(): Promise<void> {
+		if (this._agentSessionsRefreshInFlight || this._githubSignedOutByUser) { return; }
+		const since = this.agentSessionsSince();
+		const cachePath = this.agentTasksCachePath();
+		if (canServeAgentTasksSnapshot(await readAgentTasksSnapshot(cachePath), since, Date.now())) { return; }
+
+		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
+		if (!session) { return; }
+
+		let acquired = false;
+		try { acquired = await this.cacheManager.acquireAgentTasksLock(); }
+		catch (err) { this.warn(`Failed to acquire agent tasks lock: ${err}`); }
+		if (!acquired) {
+			this.log('⏭️ Cloud agent refresh skipped — another window is refreshing the shared snapshot');
+			return;
+		}
+
+		this._agentSessionsRefreshInFlight = true;
+		// Heartbeat the lock: a slow API pass must not look stale to another window, which would
+		// let it start the same collection in parallel.
+		const heartbeat = setInterval(() => { void this.cacheManager.renewAgentTasksLock(); }, 60 * 1000);
+		try {
+			await this.refreshAgentSessionsSnapshot(session.accessToken, since, cachePath);
+		} catch (err) {
+			this.warn(`Cloud agent session refresh failed: ${err}`);
+		} finally {
+			clearInterval(heartbeat);
+			this._agentSessionsRefreshInFlight = false;
+			try { await this.cacheManager.releaseAgentTasksLock(); }
+			catch (err) { this.warn(`Failed to release agent tasks lock: ${err}`); }
+		}
+	}
+
+	/**
+	 * Collect the snapshot and publish it, combining the workspace repos (which also surface tasks
+	 * other people started there) with the account-wide task list (tasks started on github.com in
+	 * repos that aren't checked out here, and ad-hoc cloud chat tasks with no repository at all).
+	 */
+	private async refreshAgentSessionsSnapshot(token: string, since: Date, cachePath: string): Promise<void> {
+		const workspaceRepos = discoverGitHubRepos(this._buildWorkspacePaths(), getConfiguredGitHubEnterpriseUri());
+		this.log(`🤖 Refreshing cloud agent snapshot (${workspaceRepos.length} workspace repo(s) + account-wide tasks)`);
+
+		const result = await collectAgentSessions({
+			token,
+			since,
+			workspaceRepos,
+			onProgress: (done, total) => {
+				this.analysisPanel?.webview.postMessage({ command: 'agentSessionsProgress', total, done });
+			},
+		});
+
+		try {
+			await writeAgentTasksSnapshot(cachePath, {
+				schemaVersion: AGENT_TASKS_CACHE_SCHEMA_VERSION,
+				fetchedAt: result.fetchedAt,
+				since: result.since,
+				data: result,
+			});
+		} catch (err) {
+			this.warn(`Failed to write cloud agent snapshot: ${err}`);
+		}
+
+		this.log(`🤖 Cloud agent snapshot: ${result.repos.length} repo(s), ${result.totalTasks} task(s), ${result.totalCredits.toFixed(1)} credits`);
+		this.publishAgentSessions(result);
 	}
 
 	/** Collect workspace paths from the customization matrix and currently open VS Code workspace folders. */
@@ -2490,14 +2589,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Piggyback the once-daily background worktree scan on the same leader election: only
 		// the window that won this refresh's leader lock may start it, and it runs detached
 		// (drip-throttled, can take far longer than this refresh cycle) so it never blocks it.
-		if (isLeader) { void this.maybeStartBackgroundWorktreeScan(); }
+		// The hourly cloud-agent snapshot refresh rides along for the same reason: it is leader-only
+		// GitHub API work that must not hold up the parse, and this also gives it a run at startup.
+		if (isLeader) {
+			void this.maybeStartBackgroundWorktreeScan();
+			void this.maybeRefreshAgentSessions();
+		}
 
 		try {
 			return await this._runRefreshCore(silent, isLeader);
 		} catch (error) {
 			this.error('Error updating token stats:', error);
-			this.setStatusBarText(vscode.l10n.t('statusBar.tokenError'));
-			this.statusBarItem.tooltip = vscode.l10n.t('statusBar.errorTooltip');
+			this.setStatusBarText(l10n.t('statusBar.tokenError'));
+			this.statusBarItem.tooltip = l10n.t('statusBar.errorTooltip');
 			return undefined;
 		} finally {
 			this.stopRefreshHeartbeat();
@@ -2642,7 +2746,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				// changes, to avoid needless status-bar relayout on every callback.
 				if (percentage !== lastPercentage) {
 					lastPercentage = percentage;
-					this.setStatusBarText(vscode.l10n.t('statusBar.analyzingLogs', percentage.toString()));
+					this.setStatusBarText(l10n.t('statusBar.analyzingLogs', percentage.toString()));
 				}
 			}
 			if (!parsingStepNotified) {
@@ -2690,7 +2794,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private updateStatusBarAndTooltip(detailedStats: DetailedStats): void {
 		this._lastDetailedStats = detailedStats;
 		if (detailedStats.today.sessions === 0 && detailedStats.last30Days.sessions === 0) {
-			this.setStatusBarText(vscode.l10n.t('statusBar.noSessionData'));
+			this.setStatusBarText(l10n.t('statusBar.noSessionData'));
 		} else {
 			this.setStatusBarText(this.buildStatusBarText(detailedStats));
 		}
@@ -2836,22 +2940,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const tooltip = new vscode.MarkdownString();
 		tooltip.isTrusted = true;
 		tooltip.supportThemeIcons = false;
-		tooltip.appendMarkdown(`#### ${vscode.l10n.t('tooltip.title')}`);
+		tooltip.appendMarkdown(`#### ${l10n.t('tooltip.title')}`);
 		tooltip.appendMarkdown('\n---\n');
 		const secondaryPeriod = tooltipSecondaryPeriod(this.getStatusBarShowTokensSetting(), this.getStatusBarShowCostSetting());
 		const secondaryStats = secondaryPeriod === 'currentMonth' ? detailedStats.month : detailedStats.last30Days;
-		const secondaryLabel = secondaryPeriod === 'currentMonth' ? vscode.l10n.t('tooltip.currentMonthLabel') : vscode.l10n.t('tooltip.last30DaysLabel');
+		const secondaryLabel = secondaryPeriod === 'currentMonth' ? l10n.t('tooltip.currentMonthLabel') : l10n.t('tooltip.last30DaysLabel');
 		// Trailing &nbsp; padding on the "Today" column widens it a bit, giving the two
 		// value columns visual breathing room without VS Code table cell CSS to lean on.
 		const pad = (cell: string) => `${cell}&nbsp;&nbsp;&nbsp;&nbsp;`;
 		const grams = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 })} grams`;
 		const liters = (n: number) => `${n.toLocaleString(undefined, { minimumFractionDigits: 3, maximumFractionDigits: 3 })} liters`;
-		tooltip.appendMarkdown(`|  | 📅 ${vscode.l10n.t('tooltip.todayLabel')} | 📊 ${secondaryLabel} |\n|:---|:---|:---|\n`);
-		tooltip.appendMarkdown(`| ${vscode.l10n.t('tooltip.tokensLabel')} : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
-		tooltip.appendMarkdown(`| ${vscode.l10n.t('tooltip.copilotCostLabel')} : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| ${vscode.l10n.t('tooltip.allProvidersCostLabel')} : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
-		tooltip.appendMarkdown(`| ${vscode.l10n.t('tooltip.co2Label')} : | ${pad(grams(detailedStats.today.co2))} | ${grams(secondaryStats.co2)} |\n`);
-		tooltip.appendMarkdown(`| ${vscode.l10n.t('tooltip.waterLabel')} : | ${pad(liters(detailedStats.today.waterUsage))} | ${liters(secondaryStats.waterUsage)} |\n`);
+		tooltip.appendMarkdown(`|  | 📅 ${l10n.t('tooltip.todayLabel')} | 📊 ${secondaryLabel} |\n|:---|:---|:---|\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.tokensLabel')} : | ${pad(detailedStats.today.tokens.toLocaleString())} | ${secondaryStats.tokens.toLocaleString()} |\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.copilotCostLabel')} : | ${pad(`$ ${(detailedStats.today.estimatedCostCopilot ?? 0).toFixed(2)}`)} | $ ${(secondaryStats.estimatedCostCopilot ?? 0).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.allProvidersCostLabel')} : | ${pad(`$ ${this.sumBillingGroupCosts(detailedStats.today.billingGroupCosts).toFixed(2)}`)} | $ ${this.sumBillingGroupCosts(secondaryStats.billingGroupCosts).toFixed(2)} |\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.co2Label')} : | ${pad(grams(detailedStats.today.co2))} | ${grams(secondaryStats.co2)} |\n`);
+		tooltip.appendMarkdown(`| ${l10n.t('tooltip.waterLabel')} : | ${pad(liters(detailedStats.today.waterUsage))} | ${liters(secondaryStats.waterUsage)} |\n`);
 		tooltip.appendMarkdown('\n---\n');
 		this.appendProviderCostSection(tooltip, detailedStats);
 		return tooltip;
@@ -2871,12 +2975,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const providers = Object.keys(monthCosts).sort((a, b) => (monthCosts[b] ?? 0) - (monthCosts[a] ?? 0));
 		if (providers.length === 0) { return; }
 		const totalCost = this.sumBillingGroupCosts(monthCosts);
-		tooltip.appendMarkdown(`💰 ${vscode.l10n.t('tooltip.costsByProvider')}  \n`);
+		tooltip.appendMarkdown(`💰 ${l10n.t('tooltip.costsByProvider')}  \n`);
 		tooltip.appendMarkdown(`|  |  |  |\n|---|---|---|\n`);
 		const { budget, source } = this.getEffectiveMonthlyBudgetWithSource();
 		if (budget > 0) {
 			this.appendCopilotBudgetRow(tooltip, monthCosts['GitHub Copilot'] ?? 0, budget);
-			tooltip.appendMarkdown(`| **${vscode.l10n.t('tooltip.shareOfTotalSpend')}** |  |  |\n`);
+			tooltip.appendMarkdown(`| **${l10n.t('tooltip.shareOfTotalSpend')}** |  |  |\n`);
 		}
 		for (const provider of providers) {
 			const cost = monthCosts[provider] ?? 0;
@@ -2885,7 +2989,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			tooltip.appendMarkdown(`| ${provider} | $${cost.toFixed(2)} | ${barCell} |\n`);
 		}
 		if (budget > 0) {
-			tooltip.appendMarkdown(`\n*${vscode.l10n.t('tooltip.budgetFromSource', source)}*\n`);
+			tooltip.appendMarkdown(`\n*${l10n.t('tooltip.budgetFromSource', source)}*\n`);
 		}
 	}
 
@@ -3138,7 +3242,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (r.mtime >= todayStart.getTime()) { todayTokens += r.tokens; }
 			}
 		} catch (error) {
-			this.error(vscode.l10n.t('error.calculatingTokenUsage'), error);
+			this.error(l10n.t('error.calculatingTokenUsage'), error);
 		}
 
 		return {
@@ -3325,7 +3429,6 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * This provides localized button labels and other UI strings for webview panels.
 	 */
 	private getWebviewLocalization(): Record<string, string> {
-		const l10n = vscode.l10n;
 		const language = vscode.env.language;
 		
 		// Return navigation button labels and other webview-localizable strings
@@ -3452,7 +3555,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			parts.push(`$(credit-card) ${this.buildCostParts(showCost, stats).join(' | ')}`);
 		}
 
-        return parts.length > 0 ? parts.join('  ') : `$(symbol-numeric) ${vscode.l10n.t('statusBar.defaultText')}`;
+        return parts.length > 0 ? parts.join('  ') : `$(symbol-numeric) ${l10n.t('statusBar.defaultText')}`;
 	}
 
 	private refreshOpenPanelsForSettingChange(): void {
@@ -6513,7 +6616,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// Create a small webview panel
 		this.detailsPanel = vscode.window.createWebviewPanel(
 			'copilotTokenDetails',
-			vscode.l10n.t('aiEngineeringFluency'),
+			l10n.t('aiEngineeringFluency'),
 			{
 				viewColumn: vscode.ViewColumn.One,
 				preserveFocus: true
@@ -6558,7 +6661,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!stats) {
 			this.log('No cached stats — showing loading screen while calculating...');
 			this._detailsPanelIsLoading = true;
-			this.statusBarItem.tooltip = vscode.l10n.t('statusBar.loadingInPanel');
+			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
 			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview);
 
 			stats = await this.updateTokenStats();
@@ -7540,7 +7643,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const maturityData = await this.calculateMaturityScores(true);
 		const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 		this.maturityPanel = vscode.window.createWebviewPanel(
-			'copilotMaturity', vscode.l10n.t('pptxTitle'),
+			'copilotMaturity', l10n.t('pptxTitle'),
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
 			{ enableScripts: true, retainContextWhenHidden: false, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
@@ -7617,7 +7720,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			const evidenceList = c.evidence.length > 0 ? c.evidence.map(e => `- ✅ ${e}`).join('\n') : '- No significant activity detected';
 			return `<h2>${c.icon} ${c.category} — Stage ${c.stage}</h2>\n\n${evidenceList}`;
 		}).join('\n\n');
-		const body = `<h2>${vscode.l10n.t('fluencyScoreFeedbackTitle')}</h2>\n\n**Overall Stage:** ${scores.overallLabel}\n\n${categorySections}\n\n<h2>Feedback</h2>\n<!-- Describe your feedback or suggestion here -->\n`;
+		const body = `<h2>${l10n.t('fluencyScoreFeedbackTitle')}</h2>\n\n**Overall Stage:** ${scores.overallLabel}\n\n${categorySections}\n\n<h2>Feedback</h2>\n<!-- Describe your feedback or suggestion here -->\n`;
 		const issueUrl = `https://github.com/rajbos/ai-engineering-fluency/issues/new?title=${encodeURIComponent('Fluency Score Feedback')}&body=${encodeURIComponent(body)}&labels=${encodeURIComponent('fluency-score')}`;
 		await vscode.env.openExternal(vscode.Uri.parse(issueUrl));
 	}
@@ -7758,7 +7861,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const buffer = Buffer.from(base64Match[1], 'base64');
     await vscode.workspace.fs.writeFile(uri, buffer);
 
-    const shareText = vscode.l10n.t('shareText');
+    const shareText = l10n.t('shareText');
     await vscode.env.clipboard.writeText(shareText);
     await vscode.env.openExternal(vscode.Uri.parse(platformUrl));
 
@@ -7844,7 +7947,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 
   private pdfAddPage(pdf: any, imgData: string, pageIndex: number, totalPages: number, pageWidth: number, pageHeight: number, margin: number): void {
     pdf.setFontSize(8); pdf.setTextColor(128, 128, 128);
-    pdf.text(vscode.l10n.t('pdfReportTitle', (pageIndex + 1).toString(), totalPages.toString()), margin, 7);
+    pdf.text(l10n.t('pdfReportTitle', (pageIndex + 1).toString(), totalPages.toString()), margin, 7);
     pdf.text(new Date().toLocaleDateString(), pageWidth - margin, 7, { align: "right" });
     const availW = pageWidth - 2 * margin;
     const availH = pageHeight - 2 * margin - 5;
@@ -7854,7 +7957,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const x = margin + (availW - drawW) / 2; const y = margin + 5 + (availH - drawH) / 2;
     pdf.addImage(imgData, "PNG", x, y, drawW, drawH);
     pdf.setFontSize(8); pdf.setTextColor(128, 128, 128);
-    pdf.text(vscode.l10n.t('pdfGeneratedBy'), pageWidth / 2, pageHeight - 5, { align: "center" });
+    pdf.text(l10n.t('pdfGeneratedBy'), pageWidth / 2, pageHeight - 5, { align: "center" });
   }
 
   private async exportFluencyScorePptx(images: { label: string; dataUrl: string }[]): Promise<void> {
@@ -7864,8 +7967,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       const uri = await vscode.window.showSaveDialog({ defaultUri: vscode.Uri.file("copilot-fluency-score.pptx"), filters: { "PowerPoint Presentation": ["pptx"] }, title: "Export Fluency Score as PowerPoint" });
       if (!uri) { return; }
       const pptx = new PptxGenJS();
-      pptx.layout = "LAYOUT_WIDE"; pptx.author = vscode.l10n.t('pptxAuthor');
-      pptx.subject = vscode.l10n.t('pptxSubject'); pptx.title = vscode.l10n.t('pptxTitle');
+      pptx.layout = "LAYOUT_WIDE"; pptx.author = l10n.t('pptxAuthor');
+      pptx.subject = l10n.t('pptxSubject'); pptx.title = l10n.t('pptxTitle');
       const slideW = 13.33; const slideH = 7.5;
       const maxW = slideW - 0.8; const maxH = slideH - 1.0;
       for (const img of images) { this.pptxAddImageSlide(pptx, img.dataUrl, slideW, slideH, maxW, maxH); }
@@ -7901,7 +8004,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     const { w: imgW, h: imgH } = this.pptxGetImageSize(dataUrl, maxW, maxH);
     const x = (slideW - imgW) / 2; const y = (slideH - 1.0 - imgH) / 2 + 0.1;
     slide.addImage({ data: dataUrl, x, y, w: imgW, h: imgH });
-    slide.addText(vscode.l10n.t('pptxGeneratedBy'), { x: 0, y: 7.0, w: 13.33, h: 0.4, fontSize: 8, color: "808080", align: "center" });
+    slide.addText(l10n.t('pptxGeneratedBy'), { x: 0, y: 7.0, w: 13.33, h: 0.4, fontSize: 8, color: "808080", align: "center" });
   }
 
   public async showFluencyLevelViewer(): Promise<void> {
@@ -8082,7 +8185,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
 			${getCodiconStylesheetTag(webview, this.extensionUri)}
-			<title>${vscode.l10n.t('pptxTitle')}</title>
+			<title>${l10n.t('pptxTitle')}</title>
 		</head>
 		<body>
 			<div id="root"></div>
@@ -8895,7 +8998,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 ${buildCspMeta(webview, nonce)}
-<title>${vscode.l10n.t('htmlTitleLoading')}</title>
+<title>${l10n.t('htmlTitleLoading')}</title>
 <style>
 ${this.getLoadingHtmlCssBase()}
 ${this.getLoadingHtmlCssSteps()}
@@ -8951,7 +9054,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
 			${getCodiconStylesheetTag(webview, this.extensionUri)}
-			<title>${vscode.l10n.t('htmlTitle')}</title>
+			<title>${l10n.t('htmlTitle')}</title>
 		</head>
 		<body>
 			<div id="root"></div>
@@ -8981,7 +9084,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
   }
 
   private buildDiagReportHeader(report: string[]): void {
-    report.push("=".repeat(70)); report.push(vscode.l10n.t('diagnosticReportTitle')); report.push("=".repeat(70)); report.push("");
+    report.push("=".repeat(70)); report.push(l10n.t('diagnosticReportTitle')); report.push("=".repeat(70)); report.push("");
   }
 
   private buildDiagReportExtensionInfo(report: string[]): void {
@@ -9101,7 +9204,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       if (sessionFiles.length > 0) { await this.appendSessionFileListing(report, sessionFiles); }
       else { this.appendNoSessionFilesMessage(report); }
       report.push("");
-    } catch (error) { report.push(vscode.l10n.t('error.calculatingTokenUsageStatistics') + `: ${error}`); report.push(""); }
+    } catch (error) { report.push(l10n.t('error.calculatingTokenUsageStatistics') + `: ${error}`); report.push(""); }
   }
 
   private buildDiagReportFooter(report: string[]): void {
@@ -9264,7 +9367,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       await vscode.commands.executeCommand("aiEngineeringFluency.configureBackend");
     } catch {
       void (async () => {
-        const choice = await vscode.window.showInformationMessage(vscode.l10n.t('backendConfigMessage'), "Open Settings");
+        const choice = await vscode.window.showInformationMessage(l10n.t('backendConfigMessage'), "Open Settings");
         if (choice === "Open Settings") { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend"); }
       })();
     }
@@ -9275,7 +9378,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       await vscode.commands.executeCommand("aiEngineeringFluency.configureTeamServer");
     } catch {
       void (async () => {
-        const choice = await vscode.window.showInformationMessage(vscode.l10n.t('teamServerConfigMessage'), "Open Settings");
+        const choice = await vscode.window.showInformationMessage(l10n.t('teamServerConfigMessage'), "Open Settings");
         if (choice === "Open Settings") { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend.sharingServer"); }
       })();
     }
@@ -10982,7 +11085,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 			<meta name="viewport" content="width=device-width, initial-scale=1.0" />
 			${buildCspMeta(webview, nonce)}
 			${getCodiconStylesheetTag(webview, this.extensionUri)}
-			<title>${vscode.l10n.t('htmlTitleChart')}</title>
+			<title>${l10n.t('htmlTitleChart')}</title>
 		</head>
 		<body>
 			<div id="root"></div>
@@ -11254,7 +11357,7 @@ async function checkForLegacyExtensionConflict(context: vscode.ExtensionContext)
     return;
   }
   const choice = await vscode.window.showWarningMessage(
-    vscode.l10n.t('cleanupWarning') + vscode.l10n.t('cleanupMessage'),
+    l10n.t('cleanupWarning') + l10n.t('cleanupMessage'),
     'Remove Old Extension',
     'Dismiss'
   );
@@ -11263,7 +11366,7 @@ async function checkForLegacyExtensionConflict(context: vscode.ExtensionContext)
       await vscode.commands.executeCommand('workbench.extensions.uninstallExtension', LEGACY_EXTENSION_ID);
     } catch {
       vscode.window.showInformationMessage(
-        vscode.l10n.t('cleanupMessage2')
+        l10n.t('cleanupMessage2')
       );
     }
   } else if (choice === 'Dismiss') {
@@ -11391,7 +11494,7 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
     async () => {
       tokenTracker.log("Refresh command called");
       await tokenTracker.updateTokenStats();
-      vscode.window.showInformationMessage(vscode.l10n.t('dataRefreshed'));
+      vscode.window.showInformationMessage(l10n.t('dataRefreshed'));
     },
   );
 

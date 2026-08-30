@@ -513,6 +513,7 @@
     "watch-tests": "tsc -p tsconfig.tests.json -w",
     "pretest": "tsc --noEmit && eslint src ../src && node ../scripts/prepare-test-output.js && tsc -p tsconfig.tests.json",
     "check-types": "tsc --noEmit",
+    "validate:l10n": "node scripts/validate-l10n.mjs",
     "lint": "eslint src ../src",
     "lint:report": "eslint src ../src --format json",
     "lint:css": "stylelint \"src/webview/**/*.css\"",
