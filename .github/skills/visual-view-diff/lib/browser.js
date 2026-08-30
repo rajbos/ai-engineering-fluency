@@ -25,8 +25,9 @@ function candidatePaths() {
 	const paths = ['playwright', '@playwright/test', 'playwright-core'];
 	try {
 		// Global installs are not on a local script's resolution path, so ask npm
-		// where its global root is and look there too.
-		const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+		// where its global root is and look there too. On Windows npm is a .cmd
+		// shim, which Node refuses to spawn without a shell (CVE-2024-27980).
+		const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], shell: process.platform === 'win32' }).trim();
 		if (globalRoot) {
 			paths.push(`${globalRoot}/playwright`, `${globalRoot}/@playwright/test`, `${globalRoot}/playwright-core`);
 		}
