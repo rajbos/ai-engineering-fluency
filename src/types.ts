@@ -896,6 +896,9 @@ export interface SessionLogData {
 
 export type AgentSessionSource = 'cloud-agent' | 'cli-remote' | 'unknown';
 
+/** Where a repository row came from: workspace git remotes, the account-wide task list, or both. */
+export type AgentRepoDiscovery = 'workspace' | 'account' | 'both';
+
 export interface AgentRepoSummary {
   owner: string;
   repo: string;
@@ -903,14 +906,20 @@ export interface AgentRepoSummary {
   totalTasks: number;
   /** Total cloud-agent sessions across all scanned tasks. */
   totalSessions: number;
-  /** Sum of usage.credits for all cloud-agent sessions (0 when unavailable). */
+  /** Sum of session usage in whole AI credits for all cloud-agent sessions (0 when unavailable). */
   totalCredits: number;
+  /** Sum of premium requests for sessions billed before the June 2026 switch to AI credits. */
+  totalPremiumRequests: number;
   /** How many tasks we fetched full session details for. */
   tasksScanned: number;
   /** Total tasks found in the list API response (before the detail-fetch cap). */
   tasksTotal: number;
   /** True when the detail-fetch cap was reached — totals are conservative lower bounds. */
   partial: boolean;
+  /** How this repo was found. `account`-only rows are not open in any workspace folder. */
+  discovery: AgentRepoDiscovery;
+  /** True for the synthetic bucket of account tasks the API reported without a repository. */
+  unassigned?: boolean;
   error?: string;
 }
 
@@ -919,9 +928,19 @@ export interface AgentSessionsResult {
   totalTasks: number;
   totalSessions: number;
   totalCredits: number;
+  totalPremiumRequests: number;
   authenticated: boolean;
   since: string;
+  /** When the snapshot was fetched from GitHub; empty string when it has never been fetched. */
   fetchedAt: string;
+  /** True when the account-wide `/agents/tasks` listing succeeded (false → workspace repos only). */
+  accountTasksAvailable: boolean;
+  /** Why the account-wide listing was skipped or failed, when it was. */
+  accountTasksError?: string;
+  /** True when the task-detail budget was exhausted — totals are lower bounds. */
+  partial: boolean;
+  /** How often the snapshot is refreshed, so the UI can say when the next refresh is due. */
+  refreshIntervalMs?: number;
 }
 
 // Local summary type for customization files (mirrors webview/shared/contextRefUtils.ts)
