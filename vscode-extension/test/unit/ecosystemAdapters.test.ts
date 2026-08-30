@@ -37,7 +37,7 @@ import { CrushDataAccess } from '../../../src/crush';
 import { ContinueDataAccess } from '../../../src/continue';
 import { EclipseDataAccess } from '../../../src/eclipse';
 import { ClaudeCodeDataAccess } from '../../../src/claudecode';
-import { ClaudeDesktopCoworkDataAccess } from '../../../src/claudedesktop';
+import { ClaudeDesktopDataAccess } from '../../../src/claudedesktop';
 import { VisualStudioDataAccess } from '../../../src/visualstudio';
 import { MistralVibeDataAccess } from '../../../src/mistralvibe';
 import { GeminiCliDataAccess } from '../../../src/geminicli';
@@ -60,7 +60,7 @@ const crushDA = new CrushDataAccess(null as any);
 const continueDA = new ContinueDataAccess();
 const eclipseDA = new EclipseDataAccess();
 const claudeCodeDA = new ClaudeCodeDataAccess();
-const claudeDesktopDA = new ClaudeDesktopCoworkDataAccess();
+const claudeDesktopDA = new ClaudeDesktopDataAccess();
 const visualStudioDA = new VisualStudioDataAccess();
 const mistralVibeDA = new MistralVibeDataAccess();
 const geminiCliDA = new GeminiCliDataAccess();
@@ -429,7 +429,7 @@ test('VisualStudioAdapter.getCandidatePaths: returns VS log dir and SSMS session
 test('getEditorRoot: all adapters return non-empty string', () => {
     const dummyFile = '/dummy/path/session.json';
     for (const adapter of allAdapters) {
-        // claudedesktop is Windows/macOS only; getCoworkBaseDir() returns '' on Linux
+        // claudedesktop is Windows/macOS only; getDesktopSessionDirs() returns [] on Linux
         if (adapter.id === 'claudedesktop' && os.platform() === 'linux') { continue; }
         const root = adapter.getEditorRoot(dummyFile);
         assert.ok(typeof root === 'string' && root.length > 0, `${adapter.id}: getEditorRoot should return non-empty string`);

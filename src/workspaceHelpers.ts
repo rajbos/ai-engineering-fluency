@@ -1115,6 +1115,7 @@ function detectToolEditorFromPath(
 	const globalStorageEditor = detectGlobalStorageEditorFromPath(lowerPath);
 	if (globalStorageEditor) { return globalStorageEditor; }
 	if (lowerPath.includes('/.continue/sessions/')) { return 'Continue'; }
+	if (lowerPath.includes('/claude-code-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (lowerPath.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
 	if (lowerPath.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }
@@ -1152,7 +1153,8 @@ function detectVSCodeVariantFromPath(lowerPath: string): string | undefined {
  * Note: 'Claude Code' and 'Claude Desktop' share the same ~/.claude/projects/ directory
  * and are distinguished by the `entrypoint` field inside the session file, not the path
  * (see detectClaudeCodeEditorVariant). 'Claude Desktop Cowork' is a separate, unrelated
- * feature (local-agent-mode-sessions) and is still detected purely by path.
+ * feature (claude-code-sessions, formerly local-agent-mode-sessions) and is still
+ * detected purely by path.
  */
 export function getEditorTypeFromPath(filePath: string, isOpenCodeSessionFile?: (p: string) => boolean): string {
 	const lowerPath = normalizePathForComparison(filePath);
