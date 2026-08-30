@@ -28,6 +28,7 @@ import {
 	applyModelUsageToEfficiency,
 	type EfficiencyTurn,
 } from './modelEfficiency';
+import { detectCorrectionMoments, mergeCorrectionCounts, summarizeCorrectionMoments } from './correctionDetection';
 import {
 	applyDelta,
 	isJsonlContent,
@@ -719,6 +720,8 @@ function _jsonSessionDefaultModel(parsed: ParsedSessionJson): string {
 /**
  * Compute per-model efficiency counters (issue #1649) from JSON/delta session
  * requests and attach them to the analysis when any request produced a turn.
+ * Also runs correction-moment detection over the same turns — requests carry
+ * the user message text and response items needed for it.
  */
 function _applyJsonRequestsEfficiency(
 	requests: SessionRequestRaw[],
@@ -729,10 +732,29 @@ function _applyJsonRequestsEfficiency(
 	const turns: EfficiencyTurn[] = [];
 	for (const req of requests) {
 		if (!req) { continue; }
-		turns.push({ model: _pdsaGetReqModel(req, defaultModel, modelPricing), toolCalls: jsonRequestToToolCalls(req) });
+		turns.push({
+			model: _pdsaGetReqModel(req, defaultModel, modelPricing),
+			toolCalls: jsonRequestToToolCalls(req),
+			userMessage: typeof req.message?.text === 'string' ? req.message.text : undefined,
+			assistantResponse: _jsonRequestAssistantText(req),
+			timestamp: typeof req.timestamp === 'number' ? new Date(req.timestamp).toISOString() : null,
+		});
 	}
 	if (turns.length === 0) { return; }
 	analysis.modelEfficiency = computeEfficiencyFromTurns(turns);
+	const moments = detectCorrectionMoments(turns);
+	if (moments.length > 0) { analysis.correctionMoments = moments; }
+}
+
+/** Concatenate the non-thinking text of a JSON request's response items (correction detection only). */
+function _jsonRequestAssistantText(req: SessionRequestRaw): string | undefined {
+	if (!Array.isArray(req.response)) { return undefined; }
+	let text = '';
+	for (const item of req.response) {
+		const { text: itemText, isThinking } = extractResponseItemText(item);
+		if (itemText && !isThinking) { text += itemText; }
+	}
+	return text || undefined;
 }
 
 // --- processJsonSessionRequests helpers ---
@@ -1164,6 +1186,17 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	}
 	_muaMergeModelSwitching(period, analysis);
 	_muaMergeEnhancedMetrics(period, analysis);
+	_muaMergeCorrections(period, analysis);
+}
+
+/** Fold a session's correction moments into the period's aggregated counters. */
+function _muaMergeCorrections(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	if (!analysis.correctionMoments || analysis.correctionMoments.length === 0) { return; }
+	if (!period.corrections) {
+		period.corrections = { userCorrections: 0, editRetries: 0, editSelfCorrections: 0, toolErrors: 0, toolErrorsRetried: 0, agentSelfCorrections: 0, sessionsWithMoments: 0 };
+	}
+	mergeCorrectionCounts(period.corrections, summarizeCorrectionMoments(analysis.correctionMoments));
+	period.corrections.sessionsWithMoments++;
 }
 
 /** @internal lookup table for analyzeContextReferences */
@@ -1907,20 +1940,22 @@ type AsuCliState = {
 	defaultEffort: string | null;
 	requestCount: number;
 	effortByRequest: { [effort: string]: number };
-	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string> }>;
+	pendingToolCalls: Map<string, { toolName: string; args: Record<string, string>; effCall?: EfficiencyTurn['toolCalls'][number] }>;
 	editedFilePaths: Set<string>;
 	/** Per-user-turn tool-call sequences for model efficiency metrics (issue #1649). */
 	efficiencyTurns: EfficiencyTurn[];
 };
 
 /** Append a tool call to the current (or an implicit first) efficiency turn. */
-function _asuAppendEfficiencyToolCall(cliState: AsuCliState, toolName: string, args: Record<string, string> | undefined): void {
+function _asuAppendEfficiencyToolCall(cliState: AsuCliState, toolName: string, args: Record<string, string> | undefined): EfficiencyTurn['toolCalls'][number] {
 	let turn = cliState.efficiencyTurns[cliState.efficiencyTurns.length - 1];
 	if (!turn) {
 		turn = { model: cliState.defaultModel, toolCalls: [] };
 		cliState.efficiencyTurns.push(turn);
 	}
-	turn.toolCalls.push({ toolName, arguments: args ? JSON.stringify(args) : undefined });
+	const call: EfficiencyTurn['toolCalls'][number] = { toolName, arguments: args ? JSON.stringify(args) : undefined };
+	turn.toolCalls.push(call);
+	return call;
 }
 
 /** Check if the first JSONL line indicates a delta-based VS Code incremental format. */
@@ -2089,20 +2124,41 @@ export function extractInvokedSkillNameFromPlainText(content: unknown): string |
 	return m ? m[1] : null;
 }
 
+/** Create the efficiency turn for a user.message event (with text for correction detection). */
+function _asuCreateEfficiencyTurn(event: any, cliState: AsuCliState): EfficiencyTurn {
+	return {
+		model: event.model || cliState.defaultModel,
+		toolCalls: [],
+		userMessage: typeof event.data?.content === 'string' ? event.data.content : undefined,
+		timestamp: typeof event.timestamp === 'string' ? event.timestamp : null,
+	};
+}
+
 /** Handle Copilot CLI events (session.start, session.model_change, user.message). */
 
 function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis, jetBrainsMode: JetBrainsMode | null): void {
 	if (event.type === 'session.start' && event.data) { _asuHandleSessionStartEvent(event.data as Record<string, unknown>, cliState); }
 	if (event.type === 'session.model_change' && typeof event.data?.newModel === 'string') { cliState.defaultModel = event.data.newModel; }
+	_asuAccumulateAssistantText(event, cliState);
 	if (event.type === 'user.message') {
 		cliState.requestCount++;
 		const effort = typeof event.data?.reasoningEffort === 'string' ? event.data.reasoningEffort : cliState.defaultEffort;
 		if (effort) { cliState.effortByRequest[effort] = (cliState.effortByRequest[effort] || 0) + 1; }
-		cliState.efficiencyTurns.push({ model: event.model || cliState.defaultModel, toolCalls: [] });
+		cliState.efficiencyTurns.push(_asuCreateEfficiencyTurn(event, cliState));
 		analyzeCliAttachments(event.data?.attachments, analysis.contextReferences);
 		_asuHandleUserMessageMode(jetBrainsMode, analysis);
 		const skillName = extractInvokedSkillNameFromPlainText(event.data?.content);
 		if (skillName) { addSkillCall(analysis, skillName); }
+	}
+}
+
+/** Accumulate assistant.message response text onto the current turn (correction detection only). */
+function _asuAccumulateAssistantText(event: any, cliState: AsuCliState): void {
+	if (event.type !== 'assistant.message') { return; }
+	const content = event.data?.content;
+	const turn = cliState.efficiencyTurns[cliState.efficiencyTurns.length - 1];
+	if (typeof content === 'string' && content && turn) {
+		turn.assistantResponse = (turn.assistantResponse ?? '') + content;
 	}
 }
 
@@ -2160,8 +2216,8 @@ function _asuEnsureEditScope(analysis: SessionUsageAnalysis): void {
 function _asuHandleToolStart(event: any, cliState: AsuCliState): void {
 	const { toolCallId, toolName, arguments: args } = event.data ?? {};
 	if (toolCallId && toolName) {
-		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {} });
-		_asuAppendEfficiencyToolCall(cliState, toolName, args);
+		const effCall = _asuAppendEfficiencyToolCall(cliState, toolName, args);
+		cliState.pendingToolCalls.set(toolCallId, { toolName, args: args ?? {}, effCall });
 	}
 }
 
@@ -2201,6 +2257,7 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	const pending = toolCallId ? cliState.pendingToolCalls.get(toolCallId) : undefined;
 	if (toolCallId) { cliState.pendingToolCalls.delete(toolCallId); }
 	if (!pending) { return; }
+	_asuMarkEffCallError(pending, success);
 	if (success && (pending.toolName === 'edit' || pending.toolName === 'create')) {
 		_asuApplyToolLoc(pending, cliState, analysis);
 	}
@@ -2212,12 +2269,16 @@ function _asuHandleToolComplete(event: any, cliState: AsuCliState, analysis: Ses
 	analysis.toolCalls.outputTokensByTool[pending.toolName] = (analysis.toolCalls.outputTokensByTool[pending.toolName] || 0) + tokens;
 }
 
+/** Mark the efficiency tool call of a completed call as failed (correction detection). */
+function _asuMarkEffCallError(pending: { toolName: string; args: Record<string, string>; effCall?: EfficiencyTurn['toolCalls'][number] }, success: unknown): void {
+	if (success === false && pending.effCall) { pending.effCall.isError = true; }
+}
+
 /** Handle tool.execution_start / tool.execution_complete for CLI LOC tracking. */
 function _asuHandleCliLocEvent(event: any, cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
 	if (event.type === 'tool.execution_start') { _asuHandleToolStart(event, cliState); }
 	else if (event.type === 'tool.execution_complete') { _asuHandleToolComplete(event, cliState, analysis); }
 }
-
 /** Finalize editScope file counts from accumulated CLI tool LOC state. */
 function _asuApplyCliLocToEditScope(cliState: AsuCliState, analysis: SessionUsageAnalysis): void {
 	if (cliState.editedFilePaths.size === 0) { return; }
@@ -2277,6 +2338,8 @@ async function _asuProcessNonDeltaJsonl(
 	_asuApplyCliThinkingEffort(cliState, analysis);
 	if (cliState.efficiencyTurns.length > 0) {
 		analysis.modelEfficiency = computeEfficiencyFromTurns(cliState.efficiencyTurns);
+		const moments = detectCorrectionMoments(cliState.efficiencyTurns);
+		if (moments.length > 0) { analysis.correctionMoments = moments; }
 	}
 	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
 	// Track LOC/edit metrics for CLI sessions (delta path already handles this above)
@@ -2290,12 +2353,19 @@ async function _asuProcessNonDeltaJsonl(
  * already provided them. Efficiency is optional — never fail analysis over it.
  */
 async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile: string, analysis: SessionUsageAnalysis): Promise<void> {
-	if (analysis.modelEfficiency || !eco.buildTurns) { return; }
+	if (analysis.modelEfficiency && analysis.correctionMoments) { return; }
+	if (!eco.buildTurns) { return; }
 	try {
 		const { turns } = await eco.buildTurns(sessionFile);
-		const eff = computeEfficiencyFromTurns(turns);
-		if (Object.keys(eff).length > 0) { analysis.modelEfficiency = eff; }
-	} catch { /* efficiency is optional */ }
+		if (!analysis.modelEfficiency) {
+			const eff = computeEfficiencyFromTurns(turns);
+			if (Object.keys(eff).length > 0) { analysis.modelEfficiency = eff; }
+		}
+		if (!analysis.correctionMoments) {
+			const moments = detectCorrectionMoments(turns);
+			if (moments.length > 0) { analysis.correctionMoments = moments; }
+		}
+	} catch { /* efficiency and correction moments are optional */ }
 }
 
 /**

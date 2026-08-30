@@ -621,3 +621,48 @@ test('retry-price-mismatch: does NOT fire with a single model', () => {
 	const results = evaluateInsights(ctx, {}, 7, null);
 	assert.equal(results.find(i => i.id === RETRY_PRICE_ID), undefined);
 });
+
+// ---------------------------------------------------------------------------
+// corrections insights tests
+// ---------------------------------------------------------------------------
+
+function emptyCorrections() {
+	return { userCorrections: 0, editRetries: 0, editSelfCorrections: 0, toolErrors: 0, toolErrorsRetried: 0, agentSelfCorrections: 0, sessionsWithMoments: 0 };
+}
+
+test('corrections-user-pushback: fires at >= 3 user corrections', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.corrections = { ...emptyCorrections(), userCorrections: 3, sessionsWithMoments: 2 };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === 'corrections-user-pushback');
+	assert.ok(insight, 'should fire at the threshold');
+	assert.match(insight.body, /3 times/);
+});
+
+test('corrections-user-pushback: does NOT fire below the threshold or without data', () => {
+	const below = makeCtx();
+	below.last30Days.corrections = { ...emptyCorrections(), userCorrections: 2, sessionsWithMoments: 1 };
+	assert.equal(evaluateInsights(below, {}, 7, null).find(i => i.id === 'corrections-user-pushback'), undefined);
+	assert.equal(evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === 'corrections-user-pushback'), undefined);
+});
+
+test('corrections-tool-errors: fires at >= 5 tool errors', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.corrections = { ...emptyCorrections(), toolErrors: 5, toolErrorsRetried: 4, sessionsWithMoments: 3 };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === 'corrections-tool-errors'), 'should fire at the threshold');
+});
+
+test('corrections-tool-errors: fires on edit retry volume even without tool errors', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.corrections = { ...emptyCorrections(), editRetries: 7, editSelfCorrections: 3, sessionsWithMoments: 4 };
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.ok(results.find(i => i.id === 'corrections-tool-errors'), 'edit retries + self-corrections >= 10 should fire');
+});
+
+test('corrections-tool-errors: does NOT fire on low volume or missing data', () => {
+	const low = makeCtx();
+	low.last30Days.corrections = { ...emptyCorrections(), toolErrors: 4, editRetries: 4, sessionsWithMoments: 2 };
+	assert.equal(evaluateInsights(low, {}, 7, null).find(i => i.id === 'corrections-tool-errors'), undefined);
+	assert.equal(evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === 'corrections-tool-errors'), undefined);
+});

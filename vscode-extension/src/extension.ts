@@ -68,7 +68,17 @@ import type {
   EvaluatedInsight,
   InsightStateBag,
   ToolCurationAnalysis,
+  CorrectionReport,
+  CorrectionRepoGroup,
+  CorrectionSessionEntry,
 } from '../../src/types';
+
+// --- Correction-moment detection (per-repo report over recent sessions) ---
+import {
+  createEmptyCorrectionCounts as _createEmptyCorrectionCounts,
+  mergeCorrectionCounts as _mergeCorrectionCounts,
+  summarizeCorrectionMoments as _summarizeCorrectionMoments,
+} from '../../src/correctionDetection';
 
 // --- Tool curation ---
 import {
@@ -414,7 +424,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 64; // Widen sub-agent detection: Claude Agent tool, MCP spawn_task/spawn_agent, Copilot App session-spawning tools
+	private static readonly CACHE_VERSION = 65; // Add correctionMoments detection to session usage analysis
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -3675,12 +3685,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
+		let correctionReport: CorrectionReport | undefined;
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
 			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
 			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
 			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
+			correctionReport = this.buildCorrectionReport(usageResults);
 			this._lastSkillCallsByEditor = {};
 			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
 				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
@@ -3705,6 +3717,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			missedPotential: this._lastMissedPotential || [],
 			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions),
 			recentSessions,
+			correctionReport,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
 			agenticDailyTrend,
 		};
@@ -4195,6 +4208,57 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		const lastActivity = sessionData.lastInteraction ? new Date(sessionData.lastInteraction) : new Date(mtime);
 		return toLocalDayKey(lastActivity);
+	}
+
+	/** Most recent sessions scanned per repository for the correction report. */
+	private static readonly CORRECTION_SCAN_SESSIONS_PER_REPO = 25;
+
+	/** Derive a short `owner/repo` display name from a git remote URL (falls back to the raw value). */
+	private correctionRepoDisplayName(repository: string): string {
+		const m = repository.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+		return m ? m[1] : repository;
+	}
+
+	/**
+	 * Build the correction-moment report from already-parsed session results:
+	 * for each repository, the moments from its 25 most recent sessions.
+	 * Moments come from the cached per-session usage analysis, so this is a
+	 * pure in-memory regrouping — no extra parsing. Returns undefined when no
+	 * session carried any moments.
+	 */
+	private buildCorrectionReport(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
+	): CorrectionReport | undefined {
+		const byRepo = new Map<string, { sessionFile: string; sessionData: SessionFileCache; mtime: number }[]>();
+		for (const r of results) {
+			const moments = r?.sessionData.usageAnalysis?.correctionMoments;
+			if (!r || !moments || moments.length === 0) { continue; }
+			const repo = this.correctionRepoDisplayName(r.sessionData.repository || '(unknown)');
+			if (!byRepo.has(repo)) { byRepo.set(repo, []); }
+			byRepo.get(repo)!.push(r);
+		}
+		if (byRepo.size === 0) { return undefined; }
+
+		const repos: CorrectionRepoGroup[] = [];
+		const totals = _createEmptyCorrectionCounts();
+		let sessionsWithMoments = 0;
+		for (const [repository, entries] of [...byRepo.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+			entries.sort((a, b) => b.mtime - a.mtime);
+			const sessions: CorrectionSessionEntry[] = entries
+				.slice(0, CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO)
+				.map(e => ({
+					file: e.sessionFile,
+					title: e.sessionData.title ?? null,
+					lastInteraction: e.sessionData.lastInteraction ?? null,
+					moments: e.sessionData.usageAnalysis!.correctionMoments!,
+				}));
+			const counts = _createEmptyCorrectionCounts();
+			for (const s of sessions) { _mergeCorrectionCounts(counts, _summarizeCorrectionMoments(s.moments)); }
+			_mergeCorrectionCounts(totals, counts);
+			sessionsWithMoments += sessions.length;
+			repos.push({ repository, sessions, counts, sessionsWithMoments: sessions.length });
+		}
+		return { sessionsPerRepo: CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO, repos, counts: totals, sessionsWithMoments };
 	}
 
 	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {
@@ -6836,6 +6900,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			currentWorkspacePaths: workspacePaths,
 			todaySessions: analysisStats.todaySessions || [],
 			insights: this.buildCurrentInsights(analysisStats),
+			correctionReport: analysisStats.correctionReport ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,

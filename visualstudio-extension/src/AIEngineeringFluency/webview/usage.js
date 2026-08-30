@@ -3617,6 +3617,81 @@ ${_renderMultiModelMixedCostSessions(switching)}
       allowToast: !!i6.allowToast
     }));
   }
+  var CORRECTION_MOMENT_TYPES = ["user-correction", "edit-retry", "edit-self-correction", "tool-error", "agent-self-correction"];
+  function sanitizeCorrectionMoment(raw) {
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    if (!CORRECTION_MOMENT_TYPES.includes(raw.type) || typeof raw.snippet !== "string") {
+      return null;
+    }
+    return {
+      type: raw.type,
+      turnNumber: typeof raw.turnNumber === "number" ? raw.turnNumber : 0,
+      timestamp: typeof raw.timestamp === "string" ? raw.timestamp : null,
+      snippet: raw.snippet,
+      tool: typeof raw.tool === "string" ? raw.tool : void 0,
+      file: typeof raw.file === "string" ? raw.file : void 0,
+      retried: raw.retried === true ? true : void 0,
+      matchedPattern: typeof raw.matchedPattern === "string" ? raw.matchedPattern : void 0
+    };
+  }
+  function sanitizeCorrectionCounts(raw) {
+    const num = (v2) => typeof v2 === "number" && isFinite(v2) && v2 >= 0 ? v2 : 0;
+    return {
+      userCorrections: num(raw?.userCorrections),
+      editRetries: num(raw?.editRetries),
+      editSelfCorrections: num(raw?.editSelfCorrections),
+      toolErrors: num(raw?.toolErrors),
+      toolErrorsRetried: num(raw?.toolErrorsRetried),
+      agentSelfCorrections: num(raw?.agentSelfCorrections)
+    };
+  }
+  function sanitizeCorrectionSession(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.file !== "string" || !Array.isArray(raw.moments)) {
+      return null;
+    }
+    const moments = raw.moments.map(sanitizeCorrectionMoment).filter((m2) => m2 !== null);
+    if (moments.length === 0) {
+      return null;
+    }
+    return {
+      file: raw.file,
+      title: typeof raw.title === "string" ? raw.title : null,
+      lastInteraction: typeof raw.lastInteraction === "string" ? raw.lastInteraction : null,
+      moments
+    };
+  }
+  function sanitizeCorrectionRepoGroup(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.repository !== "string" || !Array.isArray(raw.sessions)) {
+      return null;
+    }
+    const sessions = raw.sessions.map(sanitizeCorrectionSession).filter((s4) => s4 !== null);
+    if (sessions.length === 0) {
+      return null;
+    }
+    return {
+      repository: raw.repository,
+      sessions,
+      counts: sanitizeCorrectionCounts(raw.counts),
+      sessionsWithMoments: typeof raw.sessionsWithMoments === "number" ? raw.sessionsWithMoments : sessions.length
+    };
+  }
+  function sanitizeCorrectionReport(raw) {
+    if (!raw || typeof raw !== "object" || !Array.isArray(raw.repos)) {
+      return null;
+    }
+    const repos = raw.repos.map(sanitizeCorrectionRepoGroup).filter((r6) => r6 !== null);
+    if (repos.length === 0) {
+      return null;
+    }
+    return {
+      sessionsPerRepo: typeof raw.sessionsPerRepo === "number" ? raw.sessionsPerRepo : 25,
+      repos,
+      counts: sanitizeCorrectionCounts(raw.counts),
+      sessionsWithMoments: typeof raw.sessionsWithMoments === "number" ? raw.sessionsWithMoments : repos.reduce((n5, g2) => n5 + g2.sessionsWithMoments, 0)
+    };
+  }
   function _sanitizeCurationAnalysis(rawCa) {
     if (!rawCa || typeof rawCa !== "object") {
       return null;
@@ -3667,6 +3742,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
       if (Array.isArray(raw.insights)) {
         sanitized.insights = sanitizeInsights(raw.insights);
       }
+      sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
       const curationAnalysis = _sanitizeCurationAnalysis(raw.curationAnalysis);
       if (curationAnalysis) {
         sanitized.curationAnalysis = curationAnalysis;
@@ -5070,6 +5146,94 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>
 		</div>`;
   }
+  function correctionsCountBadgeHtml(report) {
+    if (!report || report.sessionsWithMoments === 0) {
+      return "";
+    }
+    return ` <span style="background:rgba(251,191,36,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${report.sessionsWithMoments}</span>`;
+  }
+  function correctionsTabButtonHtml(report) {
+    return `<button class="tab-button ${activeTab === "corrections" ? "active" : ""}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections${correctionsCountBadgeHtml(report)}</button>`;
+  }
+  var CORRECTION_TYPE_META = {
+    "user-correction": { label: "You corrected the agent", color: "rgba(251,191,36,0.85)" },
+    "tool-error": { label: "Tool failed", color: "rgba(248,113,113,0.85)" },
+    "edit-retry": { label: "Edit retry", color: "rgba(251,146,60,0.85)" },
+    "edit-self-correction": { label: "Edit self-correction", color: "rgba(251,146,60,0.85)" },
+    "agent-self-correction": { label: "Agent caught itself", color: "rgba(96,165,250,0.85)" }
+  };
+  function buildCorrectionMomentHtml(moment) {
+    const meta = CORRECTION_TYPE_META[moment.type] ?? { label: moment.type, color: "rgba(148,163,184,0.85)" };
+    const time = moment.timestamp ? new Date(moment.timestamp) : null;
+    const timeLabel = time && !isNaN(time.getTime()) ? time.toLocaleString() : "";
+    const detail = moment.type === "tool-error" ? `tool \`${moment.tool ?? "?"}\`${moment.retried ? " \u2014 retried shortly after" : ""}` : moment.matchedPattern ? `matched ${moment.matchedPattern}` : "";
+    return `
+		<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--bg-tertiary);">
+			<span style="flex-shrink:0; font-size:10px; font-weight:700; letter-spacing:0.03em; padding:2px 8px; border-radius:10px; border:1px solid ${meta.color}; color:var(--text-primary); background:${meta.color.replace("0.85", "0.12")}; white-space:nowrap;">${escapeHtml(meta.label)}</span>
+			<div style="flex:1; min-width:0;">
+				<div style="font-size:12px; color:var(--text-primary); opacity:0.9; overflow-wrap:anywhere;">${escapeHtml(moment.snippet)}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:3px;">
+					turn ${moment.turnNumber}${detail ? ` \xB7 ${escapeHtml(detail)}` : ""}${timeLabel ? ` \xB7 ${escapeHtml(timeLabel)}` : ""}
+				</div>
+			</div>
+		</div>`;
+  }
+  function buildCorrectionSessionHtml(session) {
+    const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
+    const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
+    const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : "";
+    return `
+		<div style="margin:10px 0 4px; padding:10px 12px; background:var(--bg-tertiary); border-radius:6px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-primary); overflow-wrap:anywhere;">
+				${escapeHtml(title)}${dateLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">\xB7 ${escapeHtml(dateLabel)}</span>` : ""}
+			</div>
+			${session.moments.map(buildCorrectionMomentHtml).join("")}
+		</div>`;
+  }
+  function buildCorrectionsTabPanelHtml(report) {
+    if (!report || report.repos.length === 0) {
+      return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== "corrections" ? ' style="display:none"' : ""}>
+			<div class="section">
+				<div class="section-title"><span>\u{1F501}</span><span>Corrections</span></div>
+				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+					\u2728 No correction moments detected in your recent sessions \u2014 nice and smooth!
+				</div>
+			</div>
+		</div>`;
+    }
+    const c4 = report.counts;
+    const chip = (n5, label) => n5 > 0 ? `<span style="font-size:11px; padding:2px 10px; border-radius:10px; background:var(--bg-tertiary); color:var(--text-primary);">${n5} ${escapeHtml(label)}</span>` : "";
+    const summaryChips = [
+      chip(c4.userCorrections, "user corrections"),
+      chip(c4.toolErrors, "tool errors"),
+      chip(c4.editRetries, "edit retries"),
+      chip(c4.editSelfCorrections, "edit self-corrections"),
+      chip(c4.agentSelfCorrections, "agent self-corrections")
+    ].filter(Boolean).join(" ");
+    const repoSections = report.repos.map((repo) => `
+		<div style="margin-top:18px;">
+			<div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
+				${escapeHtml(repo.repository)}
+				<span style="font-weight:400; color:var(--text-secondary);">\u2014 ${repo.sessionsWithMoments} session${repo.sessionsWithMoments !== 1 ? "s" : ""} with moments</span>
+			</div>
+			${repo.sessions.map(buildCorrectionSessionHtml).join("")}
+		</div>`).join("");
+    return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== "corrections" ? ' style="display:none"' : ""}>
+			<div class="section">
+				<div class="section-title"><span>\u{1F501}</span><span>Corrections</span></div>
+				<div class="section-subtitle">
+					Moments where the agent corrected itself after an error, or you had to correct the agent \u2014
+					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions.
+					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
+				</div>
+				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
+				${repoSections}
+			</div>
+		</div>`;
+  }
   function updateTabButtonCount(insights) {
     const tabButton = document.querySelector('.tab-button[data-tab="insights"]');
     if (!tabButton) {
@@ -5218,6 +5382,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 				<button class="tab-button ${activeTab === "agent" ? "active" : ""}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
 				<button class="tab-button ${activeTab === "worktrees" ? "active" : ""}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>
 				<button class="tab-button ${activeTab === "insights" ? "active" : ""}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter((i6) => i6.status === "new").length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter((i6) => i6.status === "new").length}</span>` : ""}</button>
+				${correctionsTabButtonHtml(stats.correctionReport ?? null)}
 			</div>
 
 			${safeSectionHtml("Recent Sessions", () => buildSessionsTabPanelHtml(stats))}
@@ -5227,6 +5392,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			${safeSectionHtml("Repository PRs & Cloud Agent", () => buildReposAndAgentTabPanelsHtml())}
 			${safeSectionHtml("Worktrees", () => buildWorktreesTabPanelHtml())}
 			${safeSectionHtml("Insights", () => buildInsightsTabPanelHtml(stats.insights ?? []))}
+			${safeSectionHtml("Corrections", () => buildCorrectionsTabPanelHtml(stats.correctionReport ?? null))}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} \xB7 Updates every 5 minutes
 			</div>
