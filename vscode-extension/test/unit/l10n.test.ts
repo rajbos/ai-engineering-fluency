@@ -62,3 +62,38 @@ test('l10n: unknown key returns the key itself and warns once', () => {
 	assert.equal(warnings.length, 1);
 	assert.ok(warnings[0].includes('No localization found for key "no.such.key.exists"'));
 });
+
+// Keys added for the dialog/toast buttons and insights status bar name
+// (PR #1876 follow-up) — guards against raw keys resurfacing in the UI.
+test('l10n: dialog button and insights status bar keys resolve in English', () => {
+	const expected: Record<string, string> = {
+		'statusBar.nameInsights': 'AI Engineering Fluency — Insights',
+		'button.openSettings': 'Open Settings',
+		'button.openUsageAnalysis': 'Open Usage Analysis',
+		'button.openInsightsTab': 'Open Insights tab',
+		'button.removeOldExtension': 'Remove Old Extension',
+		'button.dismiss': 'Dismiss',
+	};
+	for (const [key, english] of Object.entries(expected)) {
+		assert.equal(t(key), english, `English value for ${key}`);
+	}
+});
+
+test('l10n: dialog button and insights status bar keys resolve in zh-cn', () => {
+	mock.setLanguage('zh-cn');
+	try {
+		const expected: Record<string, string> = {
+			'statusBar.nameInsights': 'AI 工程熟练度 —— 洞察',
+			'button.openSettings': '打开设置',
+			'button.openUsageAnalysis': '打开使用分析',
+			'button.openInsightsTab': '打开洞察标签页',
+			'button.removeOldExtension': '删除旧扩展',
+			'button.dismiss': '忽略',
+		};
+		for (const [key, chinese] of Object.entries(expected)) {
+			assert.equal(t(key), chinese, `zh-cn value for ${key}`);
+		}
+	} finally {
+		mock.setLanguage('en');
+	}
+});
