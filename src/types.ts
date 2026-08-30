@@ -455,6 +455,7 @@ export interface ModeUsage {
   plan: number; // Plan mode interactions (built-in plan agent)
   customAgent: number; // Custom agent mode interactions (.agent.md files)
   cli: number; // CLI tool interactions (Copilot CLI, Claude Code, OpenCode, Crush, Mistral Vibe)
+  cliApp?: number; // Subset of CLI interactions: Copilot CLI sessions started via the Copilot desktop app (client_name: github/autopilot), broken out from `cli`
 }
 
 export interface ContextReferenceUsage {

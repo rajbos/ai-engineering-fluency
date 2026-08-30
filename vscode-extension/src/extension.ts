@@ -425,7 +425,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 64; // Widen sub-agent detection: Claude Agent tool, MCP spawn_task/spawn_agent, Copilot App session-spawning tools
+	private static readonly CACHE_VERSION = 65; // Split Copilot desktop app CLI sessions into modeUsage.cliApp
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -6820,6 +6820,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'tools', anchor: 'section-tool-curation' });
 	}
 
+	/** Opens the Usage Analysis panel and immediately activates the Activity tab, scrolled to Interaction Modes. */
+	public async showUsageAnalysisOnActivityTab(): Promise<void> {
+		await this.showUsageAnalysis();
+		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	}
+
 	/** Opens the Usage Analysis panel, pushes the latest background worktree scan findings, and activates the Worktrees tab. */
 	public async showUsageAnalysisOnWorktreesTab(): Promise<void> {
 		await this.showUsageAnalysis();
@@ -11477,7 +11483,15 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
     },
   );
 
-  context.subscriptions.push(refreshCommand, showDetailsCommand, showChartCommand, showUsageAnalysisCommand, openInsightsTabCommand, openToolsTabCommand);
+  const openActivityTabCommand = vscode.commands.registerCommand(
+    "aiEngineeringFluency.openActivityTab",
+    async () => {
+      tokenTracker.log("Open Activity tab command called");
+      await tokenTracker.showUsageAnalysisOnActivityTab();
+    },
+  );
+
+  context.subscriptions.push(refreshCommand, showDetailsCommand, showChartCommand, showUsageAnalysisCommand, openInsightsTabCommand, openToolsTabCommand, openActivityTabCommand);
   registerSecondaryViewCommands(context, tokenTracker);
 }
 

@@ -22,11 +22,14 @@ You can access the Usage Analysis Dashboard in three ways:
 
 ### 1. Interaction Modes
 
-The dashboard tracks three primary interaction modes:
+The dashboard tracks these interaction modes:
 
 - **💬 Ask Mode (Chat)**: Regular conversational interactions where you ask Copilot questions or request explanations in the chat panel
 - **✏️ Edit Mode**: Interactions where Copilot directly edits your code inline using the edits agent (triggered via inline edit UI or commands)
-- **🤖 Agent Mode**: Autonomous task execution where Copilot operates as an independent agent (including Copilot CLI usage and agent mode in the chat panel)
+- **🤖 Agent Mode**: Autonomous task execution where Copilot operates as an independent agent in the chat panel
+- **📋 Plan Mode / ⚡ Custom Agent**: Plan-mode and custom-agent (.agent.md) interactions
+- **🖥️ CLI**: Interactions in terminal-based agent CLIs (Copilot CLI, Claude Code, OpenCode, etc.)
+- **✨ Copilot App**: Subset of Copilot CLI usage — sessions started via the Copilot desktop app (detected from `client_name: github/autopilot` in the session's `workspace.yaml`), broken out from terminal CLI usage
 
 **Data Source**: 
 - JSON files: 

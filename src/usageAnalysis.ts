@@ -3,6 +3,7 @@
  * Analysis and aggregation functions extracted from CopilotTokenTracker.
  */
 import * as fs from 'fs';
+import * as path from 'path';
 import type {
 	SessionUsageAnalysis,
 	ToolCallUsage,
@@ -43,6 +44,8 @@ import {
 	extractResponseItemText,
 } from './tokenEstimation';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage } from './copilotCliOtel';
+import { isCopilotAppClientName } from './copilotCliStore';
+import { readTextFileWithSizeGuard } from './utils/safeFileRead';
 import { getModelBillingProvider } from './chartDataBuilder';
 import {
 	getModeType,
@@ -1111,6 +1114,17 @@ function _muaMergeModelEfficiency(period: UsageAnalysisPeriod, analysis: Session
 	mergeModelEfficiency(period.modelEfficiency, analysis.modelEfficiency);
 }
 
+/** Merge a session's mode usage counters (incl. the optional Copilot App cliApp split) into the period aggregate. */
+function _muaMergeModeUsage(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	period.modeUsage.ask += analysis.modeUsage.ask;
+	period.modeUsage.edit += analysis.modeUsage.edit;
+	period.modeUsage.agent += analysis.modeUsage.agent;
+	period.modeUsage.plan += analysis.modeUsage.plan;
+	period.modeUsage.customAgent += analysis.modeUsage.customAgent;
+	period.modeUsage.cli += analysis.modeUsage.cli;
+	period.modeUsage.cliApp = (period.modeUsage.cliApp ?? 0) + (analysis.modeUsage.cliApp ?? 0);
+}
+
 /**
  * Fold one session's per-model token usage (and estimated provider cost) into a
  * period's model efficiency aggregate (issue #1649). Called by consumers that
@@ -1141,12 +1155,7 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 			period.toolCalls.outputTokensByTool[tool] = (period.toolCalls.outputTokensByTool[tool] || 0) + tokens;
 		}
 	}
-	period.modeUsage.ask += analysis.modeUsage.ask;
-	period.modeUsage.edit += analysis.modeUsage.edit;
-	period.modeUsage.agent += analysis.modeUsage.agent;
-	period.modeUsage.plan += analysis.modeUsage.plan;
-	period.modeUsage.customAgent += analysis.modeUsage.customAgent;
-	period.modeUsage.cli += analysis.modeUsage.cli;
+	_muaMergeModeUsage(period, analysis);
 	_muaMergeContextRefs(period, analysis);
 	period.mcpTools.total += analysis.mcpTools.total;
 	for (const [server, count] of Object.entries(analysis.mcpTools.byServer)) {
@@ -2299,6 +2308,26 @@ async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile
 }
 
 /**
+ * Copilot CLI sessions started via the Copilot desktop app record
+ * `client_name: github/autopilot` in the workspace.yaml sitting next to their
+ * events.jsonl. Break those interactions out of `modeUsage.cli` into
+ * `modeUsage.cliApp` so views can distinguish app-hosted sessions from plain
+ * terminal CLI usage. Runs after conversation patterns are derived so the
+ * per-session turn totals are unaffected by the split.
+ */
+async function _asuApplyCopilotAppSplit(sessionFile: string, analysis: SessionUsageAnalysis): Promise<void> {
+	if (analysis.modeUsage.cli === 0 || !sessionFile.endsWith('.jsonl')) { return; }
+	const yamlPath = path.join(path.dirname(sessionFile), 'workspace.yaml');
+	const content = await readTextFileWithSizeGuard(yamlPath, 'usageAnalysis');
+	if (content === undefined) { return; }
+	const clientMatch = content.match(/^client_name:\s*(.+)$/m);
+	if (clientMatch && isCopilotAppClientName(clientMatch[1].trim())) {
+		analysis.modeUsage.cliApp = analysis.modeUsage.cli;
+		analysis.modeUsage.cli = 0;
+	}
+}
+
+/**
  * Analyze a session file for usage patterns (tool calls, modes, context references, MCP tools)
  */
 export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: string, preloadedContent?: string, preloadedParsedJson?: unknown): Promise<SessionUsageAnalysis> {
@@ -2342,6 +2371,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		deps.warn(`Error analyzing session usage from ${sessionFile}: ${error}`);
 	}
 
+	await _asuApplyCopilotAppSplit(sessionFile, analysis);
 	return analysis;
 }
 
