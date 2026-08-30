@@ -1631,6 +1631,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		Object.keys(stats.today.mcpTools.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.last30Days.mcpTools.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.month.mcpTools.byTool).forEach(tool => allTools.add(tool));
+		// MCP server names are rendered through the same friendly-name lookup in the
+		// "By Server" tables, so include them in the missing-name detection too.
+		Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
 		Object.keys(stats.today.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.last30Days.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.month.toolCalls.byTool).forEach(tool => allTools.add(tool));
