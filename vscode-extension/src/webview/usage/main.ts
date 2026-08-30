@@ -3,7 +3,7 @@ import { el, setHtml } from '../shared/domUtils';
 import { createPeriodSelector, PERIOD_LABELS, type Period } from '../shared/periodSelector';
 import { navButtonsHtml } from '../shared/buttonConfig';
 import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRefUtils';
-import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
+import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
@@ -18,7 +18,7 @@ import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
 import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
-import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentSessionsResult } from './agentSessionsSanitizer';
+import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -2087,26 +2087,61 @@ function updateReposPrPanel(data: RepoPrStatsResult): void {
 // Cloud Agent Sessions tab
 // ---------------------------------------------------------------------------
 
+/** Label for one repo row: a link for real repos, a plain label for the "no repository" bucket. */
+function agentRepoLabelHtml(r: AgentRepoSummary): string {
+  const mono = "font-family:'Courier New',monospace; font-size:12px;";
+  if (r.unassigned) {
+    return `<span style="${mono} color:var(--text-secondary);" title="Tasks the agents API reported without a repository — typically ad-hoc sessions started from cloud chat">no repository (cloud chat)</span>`;
+  }
+  const link = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); ${mono}">${r.owner}/${r.repo}</a>`;
+  const accountOnly = r.discovery === 'account'
+    ? ` <span title="Found through your account-wide agent tasks — this repo is not open in any workspace folder" style="color:var(--text-muted); font-size:10px;">(not in workspace)</span>`
+    : '';
+  return `${link}${accountOnly}`;
+}
+
 function buildAgentSessionRows(data: AgentSessionsResult, cell: string, cellCenter: string): string {
   return data.repos.map((r) => {
     // r.owner, r.repo, r.repoUrl and r.error are pre-sanitized by sanitizeAgentSessionsData
-    const repoLink = `<a href="${r.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r.owner}/${r.repo}</a>`;
+    const label = agentRepoLabelHtml(r);
     if (r.error) {
       return `<tr>
-        <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+        <td style="${cell}">${label}</td>
         <td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r.error}</td>
       </tr>`;
     }
     const partialNote = r.partial
       ? ` <span title="Showing ${r.tasksScanned} of ${r.tasksTotal} tasks — capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r.tasksScanned}/${r.tasksTotal} tasks scanned)</span>`
       : '';
+    const credits = r.totalCredits > 0
+      ? r.totalCredits.toFixed(1)
+      : r.totalPremiumRequests > 0 ? `${r.totalPremiumRequests.toFixed(1)} PR` : '—';
     return `<tr>
-      <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
+      <td style="${cell}">${label}${partialNote}</td>
       <td style="${cellCenter} font-weight:600;">${r.totalTasks}</td>
       <td style="${cellCenter} font-weight:600;">${r.totalSessions}</td>
-      <td style="${cellCenter}">${r.totalCredits > 0 ? r.totalCredits.toFixed(1) : '—'}</td>
+      <td style="${cellCenter}">${credits}</td>
     </tr>`;
   }).join('');
+}
+
+/**
+ * Freshness line for the snapshot. The data is fetched at most once an hour, by whichever VS Code
+ * window holds the agent-tasks lock, so the panel always says how old what it shows is.
+ */
+function agentSnapshotFreshnessHtml(data: AgentSessionsResult): string {
+  const box = 'margin-bottom:12px; padding:8px 10px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:11px; color:var(--text-secondary);';
+  if (!data.fetchedAt) {
+    return `<div style="${box}">🕒 <strong>Not fetched yet.</strong> The snapshot is refreshed hourly by the main VS Code window — it will appear here once that first refresh completes.</div>`;
+  }
+  const fetchedMs = Date.parse(data.fetchedAt);
+  const nextRefresh = Number.isFinite(fetchedMs)
+    ? new Date(fetchedMs + data.refreshIntervalMs).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    : 'unknown';
+  return `<div style="${box}">
+    🕒 Updated <strong>${escapeHtml(getTimeSince(data.fetchedAt))}</strong> · next refresh after ${escapeHtml(nextRefresh)}.
+    Cached and refreshed at most once an hour, by a single VS Code window, to keep GitHub API usage low.
+  </div>`;
 }
 
 function renderAgentSessionsContent(data: AgentSessionsResult): string {
@@ -2118,9 +2153,9 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 			</div>`;
 	}
 	if (data.repos.length === 0) {
-		return `
+		return `${agentSnapshotFreshnessHtml(data)}
 			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
-				No GitHub repositories detected in your workspace folders.
+				No cloud agent tasks found — neither in your workspace repositories nor anywhere else in your account.
 			</div>`;
 	}
 
@@ -2133,32 +2168,42 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 			acc.tasks += r.totalTasks;
 			acc.sessions += r.totalSessions;
 			acc.credits += r.totalCredits;
+			acc.premiumRequests += r.totalPremiumRequests;
 		}
 		return acc;
-	}, { tasks: 0, sessions: 0, credits: 0 });
+	}, { tasks: 0, sessions: 0, credits: 0, premiumRequests: 0 });
 
 	const hasPartial = data.repos.some(r => r.partial && !r.error);
-
 	const rows = buildAgentSessionRows(data, cell, cellCenter);
+	const tile = 'background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;';
 
 	return `
+		${agentSnapshotFreshnessHtml(data)}
 		<div style="margin-bottom:12px; display:flex; gap:24px; flex-wrap:wrap;">
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.tasks}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Tasks</div>
 			</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.sessions}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Sessions</div>
 			</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.credits > 0 ? summaryTotals.credits.toFixed(1) : '—'}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">AI Credits</div>
 			</div>
+			${summaryTotals.premiumRequests > 0 ? `
+			<div style="${tile}">
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.premiumRequests.toFixed(1)}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;" title="Sessions that ran before the June 2026 switch to AI credits are billed in premium requests">Premium Requests</div>
+			</div>` : ''}
 		</div>
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
 			Showing cloud-agent sessions from ${sinceDate} to now.
-			${hasPartial ? '<strong>Note:</strong> Some repos were capped at 50 tasks — totals may be lower bounds. ' : ''}
+			${hasPartial ? '<strong>Note:</strong> Some repos were capped — totals are lower bounds. ' : ''}
+			${data.accountTasksAvailable
+				? ''
+				: `<strong>Account-wide tasks unavailable:</strong> ${data.accountTasksError ?? 'the /agents/tasks endpoint could not be read'} — only workspace repositories are shown.`}
 		</div>
 		<div class="customization-matrix-container">
 			<table class="customization-matrix" style="width:100%; border-collapse:collapse;">
@@ -2175,6 +2220,7 @@ function renderAgentSessionsContent(data: AgentSessionsResult): string {
 		</div>
 		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
 			ℹ️ <strong>No double-counting:</strong> These are cloud agent sessions only. CLI/remote sessions and local IDE chat sessions (shown in "My Activity") are excluded.<br/>
+			ℹ️ <strong>Two sources:</strong> your workspace repositories (which also surface tasks other people started there) plus your account-wide agent tasks, which cover repos you don't have open and ad-hoc cloud chat sessions. Tasks seen in both are counted once.<br/>
 			ℹ️ <strong>Action minutes</strong> (GitHub Actions compute used by the agent) are not shown here — they require additional per-branch API calls.
 		</div>`;
 }

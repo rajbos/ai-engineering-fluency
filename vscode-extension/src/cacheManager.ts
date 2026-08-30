@@ -125,7 +125,7 @@ export class CacheManager {
 			const now = Date.now();
 			let removedCount = 0;
 			for (const name of entries) {
-				if (!/^(cache|refresh)_dev-[0-9a-f]+\.(snapshot\.json|lock)$/.test(name)) { continue; }
+				if (!/^(cache|refresh|agenttasks)_dev-[0-9a-f]+\.(snapshot\.json|lock)$/.test(name)) { continue; }
 				const filePath = path.join(dir, name);
 				try {
 					const stat = await fs.promises.stat(filePath);
@@ -162,6 +162,17 @@ export class CacheManager {
 	}
 
 	/**
+	 * Get the path for the agent-tasks refresh lock file.
+	 * Held by the single window that refreshes the hourly Copilot cloud-agent snapshot from the
+	 * GitHub API, so the other windows never duplicate those API calls. Kept separate from the
+	 * cache-refresh leader lock because the two run on different schedules.
+	 */
+	getAgentTasksLockPath(): string {
+		const cacheId = this.getCacheIdentifier();
+		return path.join(this.context.globalStorageUri.fsPath, `agenttasks_${cacheId}.lock`);
+	}
+
+	/**
 	 * Acquire an exclusive file lock for cache writes.
 	 * Uses atomic file creation (O_EXCL / CREATE_NEW) to prevent concurrent writes
 	 * across multiple VS Code windows of the same edition.
@@ -169,6 +180,19 @@ export class CacheManager {
 	 */
 	async acquireCacheLock(): Promise<boolean> {
 		return this.acquireLock(this.getCacheLockPath());
+	}
+
+	/**
+	 * Try to become the window that refreshes the agent-tasks snapshot. Returns false when another
+	 * window is already refreshing it, in which case this window serves the shared snapshot.
+	 */
+	async acquireAgentTasksLock(): Promise<boolean> {
+		return this.acquireLock(this.getAgentTasksLockPath());
+	}
+
+	/** Release the agent-tasks refresh lock, but only if we own it. */
+	async releaseAgentTasksLock(): Promise<void> {
+		return this.releaseLock(this.getAgentTasksLockPath());
 	}
 
 	/**
@@ -186,7 +210,19 @@ export class CacheManager {
 	 * Returns true if the lock is still owned by us after the renew attempt.
 	 */
 	async renewRefreshLock(): Promise<boolean> {
-		const lockPath = this.getRefreshLockPath();
+		return this.renewLock(this.getRefreshLockPath());
+	}
+
+	/**
+	 * Renew (heartbeat) the agent-tasks lock so a slow GitHub API pass is not mistaken for a stale
+	 * lock by another window, which would let it duplicate the same API calls.
+	 */
+	async renewAgentTasksLock(): Promise<boolean> {
+		return this.renewLock(this.getAgentTasksLockPath());
+	}
+
+	/** Refresh a lock file's timestamp, but only while this window still owns it. */
+	private async renewLock(lockPath: string): Promise<boolean> {
 		try {
 			const content = await fs.promises.readFile(lockPath, 'utf-8');
 			const lock = JSON.parse(content);
