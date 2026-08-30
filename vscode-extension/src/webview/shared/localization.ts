@@ -42,9 +42,18 @@ let currentLocalization: WebviewLocalization = { ...DEFAULT_LOCALIZATION };
 /**
  * Initialize webview localization with strings from the extension.
  * This should be called when the webview receives its initial state/data.
+ * Entries whose value equals their key are raw localization keys passed
+ * through unresolved (bundle load failure on the extension side) — ignore
+ * them so the built-in defaults are used instead of showing raw keys.
  */
 export function initializeWebviewLocalization(localization: Partial<WebviewLocalization>): void {
-	currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization } as WebviewLocalization;
+	const resolved: Record<string, string> = {};
+	for (const [key, value] of Object.entries(localization)) {
+		if (typeof value === 'string' && value !== key) {
+			resolved[key] = value;
+		}
+	}
+	currentLocalization = { ...DEFAULT_LOCALIZATION, ...resolved } as WebviewLocalization;
 }
 
 /**
