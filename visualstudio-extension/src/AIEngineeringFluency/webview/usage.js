@@ -1683,7 +1683,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   };
   var currentLocalization = { ...DEFAULT_LOCALIZATION };
   function initializeWebviewLocalization(localization) {
-    currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization };
+    const resolved = {};
+    for (const [key, value] of Object.entries(localization)) {
+      if (typeof value === "string" && value !== key) {
+        resolved[key] = value;
+      }
+    }
+    currentLocalization = { ...DEFAULT_LOCALIZATION, ...resolved };
   }
   function localize(key) {
     return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
@@ -1901,6 +1907,32 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  }
+  function getTimeSince(isoString) {
+    try {
+      const now = Date.now();
+      const then = new Date(isoString).getTime();
+      const diffMs = now - then;
+      if (diffMs < 0) {
+        return "Just now";
+      }
+      const seconds = Math.floor(diffMs / 1e3);
+      const minutes = Math.floor(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+      if (days > 0) {
+        return `${days} day${days !== 1 ? "s" : ""} ago`;
+      }
+      if (hours > 0) {
+        return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
+      }
+      if (minutes > 0) {
+        return `${minutes} minute${minutes !== 1 ? "s" : ""} ago`;
+      }
+      return `${seconds} second${seconds !== 1 ? "s" : ""} ago`;
+    } catch {
+      return "Unknown";
+    }
   }
 
   // src/webview/shared/extensionPoints.ts
@@ -2453,7 +2485,56 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     }
   }
 
+  // src/webview/usage/billingCoverage.ts
+  function billingOtherSessionsCostUsd(groupCosts, api) {
+    if (!api) {
+      return 0;
+    }
+    const copilotCostUsd = groupCosts["GitHub Copilot"] ?? 0;
+    return Math.max(0, api.usedAiCredits * 0.01 - copilotCostUsd);
+  }
+  function billingExtGroupCostsHtml(groupCosts, api) {
+    const otherSessionsCostUsd = billingOtherSessionsCostUsd(groupCosts, api);
+    const hasLocalCopilotRow = "GitHub Copilot" in groupCosts;
+    const totalCostUsd = Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) + otherSessionsCostUsd;
+    const otherSessionsRowHtml = otherSessionsCostUsd > 1e-3 ? `<tr>
+			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary);">GitHub Copilot - other sessions (remote or different environment)</td>
+			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary); text-align:right;">$${formatFixed(otherSessionsCostUsd, 2)}</td>
+		</tr>` : "";
+    const rows = Object.entries(groupCosts).sort(([, a3], [, b3]) => b3 - a3).map(([group, cost]) => {
+      const label = group === "GitHub Copilot" ? "GitHub Copilot - local sessions" : group;
+      return `
+				<tr>
+					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(label)}</td>
+					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
+				</tr>${group === "GitHub Copilot" ? otherSessionsRowHtml : ""}`;
+    }).join("") + (hasLocalCopilotRow ? "" : otherSessionsRowHtml);
+    return `
+		<div style="margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
+			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
+				<thead>
+					<tr style="background:var(--bg-tertiary);">
+						<th style="padding:6px 8px; text-align:left; font-size:11px; color:var(--text-secondary); font-weight:600;">Provider</th>
+						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
+					</tr>
+				</thead>
+				<tbody>${rows}</tbody>
+				<tfoot>
+					<tr style="border-top:1px solid var(--border-color);">
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${formatFixed(totalCostUsd, 2)}</td>
+					</tr>
+				</tfoot>
+			</table>
+		</div>`;
+  }
+
   // src/webview/usage/agentSessionsSanitizer.ts
+  var DEFAULT_SNAPSHOT_REFRESH_INTERVAL_MS = 60 * 60 * 1e3;
+  function toDiscovery(value) {
+    return value === "account" || value === "both" ? value : "workspace";
+  }
   function toSafeNumber(value) {
     const n5 = Number(value);
     return Number.isFinite(n5) && n5 >= 0 ? n5 : 0;
@@ -2479,20 +2560,29 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       totalTasks: toSafeNumber(src.totalTasks),
       totalSessions: toSafeNumber(src.totalSessions),
       totalCredits: toSafeNumber(src.totalCredits),
+      totalPremiumRequests: toSafeNumber(src.totalPremiumRequests),
+      accountTasksAvailable: Boolean(src.accountTasksAvailable),
+      refreshIntervalMs: toSafeNumber(src.refreshIntervalMs) || DEFAULT_SNAPSHOT_REFRESH_INTERVAL_MS,
+      accountTasksError: typeof src.accountTasksError === "string" ? escapeHtml(src.accountTasksError) : void 0,
+      partial: Boolean(src.partial),
       repos: repos.map((repo) => {
         const r6 = repo && typeof repo === "object" ? repo : {};
         const owner = escapeHtml(typeof r6.owner === "string" ? r6.owner : "");
         const repoName = escapeHtml(typeof r6.repo === "string" ? r6.repo : "");
+        const unassigned = Boolean(r6.unassigned) || !owner || !repoName;
         return {
           owner,
           repo: repoName,
-          repoUrl: toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
+          repoUrl: unassigned ? "#" : toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
           totalTasks: toSafeNumber(r6.totalTasks),
           totalSessions: toSafeNumber(r6.totalSessions),
           totalCredits: toSafeNumber(r6.totalCredits),
+          totalPremiumRequests: toSafeNumber(r6.totalPremiumRequests),
           tasksScanned: toSafeNumber(r6.tasksScanned),
           tasksTotal: toSafeNumber(r6.tasksTotal),
           partial: Boolean(r6.partial),
+          discovery: toDiscovery(r6.discovery),
+          unassigned,
           error: typeof r6.error === "string" ? escapeHtml(r6.error) : void 0
         };
       })
@@ -2685,6 +2775,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   }
   var hygieneMatrixState = null;
   var repoAnalysisState = /* @__PURE__ */ new Map();
+  var repoAnalysisInFlight = /* @__PURE__ */ new Set();
   var selectedRepoPath = null;
   var isSwitchingRepository = false;
   var isBatchAnalysisInProgress = false;
@@ -4266,23 +4357,45 @@ ${_renderMultiModelMixedCostSessions(switching)}
 		${renderReposPrContent(data)}
 	`);
   }
+  function agentRepoLabelHtml(r6) {
+    const mono = "font-family:'Courier New',monospace; font-size:12px;";
+    if (r6.unassigned) {
+      return `<span style="${mono} color:var(--text-secondary);" title="Tasks the agents API reported without a repository \u2014 typically ad-hoc sessions started from cloud chat">no repository (cloud chat)</span>`;
+    }
+    const link = `<a href="${r6.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); ${mono}">${r6.owner}/${r6.repo}</a>`;
+    const accountOnly = r6.discovery === "account" ? ` <span title="Found through your account-wide agent tasks \u2014 this repo is not open in any workspace folder" style="color:var(--text-muted); font-size:10px;">(not in workspace)</span>` : "";
+    return `${link}${accountOnly}`;
+  }
   function buildAgentSessionRows(data, cell, cellCenter) {
     return data.repos.map((r6) => {
-      const repoLink = `<a href="${r6.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r6.owner}/${r6.repo}</a>`;
+      const label = agentRepoLabelHtml(r6);
       if (r6.error) {
         return `<tr>
-        <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+        <td style="${cell}">${label}</td>
         <td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r6.error}</td>
       </tr>`;
       }
       const partialNote = r6.partial ? ` <span title="Showing ${r6.tasksScanned} of ${r6.tasksTotal} tasks \u2014 capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r6.tasksScanned}/${r6.tasksTotal} tasks scanned)</span>` : "";
+      const credits = r6.totalCredits > 0 ? r6.totalCredits.toFixed(1) : r6.totalPremiumRequests > 0 ? `${r6.totalPremiumRequests.toFixed(1)} PR` : "\u2014";
       return `<tr>
-      <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
+      <td style="${cell}">${label}${partialNote}</td>
       <td style="${cellCenter} font-weight:600;">${r6.totalTasks}</td>
       <td style="${cellCenter} font-weight:600;">${r6.totalSessions}</td>
-      <td style="${cellCenter}">${r6.totalCredits > 0 ? r6.totalCredits.toFixed(1) : "\u2014"}</td>
+      <td style="${cellCenter}">${credits}</td>
     </tr>`;
     }).join("");
+  }
+  function agentSnapshotFreshnessHtml(data) {
+    const box = "margin-bottom:12px; padding:8px 10px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:11px; color:var(--text-secondary);";
+    if (!data.fetchedAt) {
+      return `<div style="${box}">\u{1F552} <strong>Not fetched yet.</strong> The snapshot is refreshed hourly by the main VS Code window \u2014 it will appear here once that first refresh completes.</div>`;
+    }
+    const fetchedMs = Date.parse(data.fetchedAt);
+    const nextRefresh = Number.isFinite(fetchedMs) ? new Date(fetchedMs + data.refreshIntervalMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "unknown";
+    return `<div style="${box}">
+    \u{1F552} Updated <strong>${escapeHtml(getTimeSince(data.fetchedAt))}</strong> \xB7 next refresh after ${escapeHtml(nextRefresh)}.
+    Cached and refreshed at most once an hour, by a single VS Code window, to keep GitHub API usage low.
+  </div>`;
   }
   function renderAgentSessionsContent(data) {
     if (!data.authenticated) {
@@ -4293,9 +4406,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>`;
     }
     if (data.repos.length === 0) {
-      return `
+      return `${agentSnapshotFreshnessHtml(data)}
 			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
-				No GitHub repositories detected in your workspace folders.
+				No cloud agent tasks found \u2014 neither in your workspace repositories nor anywhere else in your account.
 			</div>`;
     }
     const sinceDate = new Date(data.since).toLocaleDateString();
@@ -4306,29 +4419,38 @@ ${_renderMultiModelMixedCostSessions(switching)}
         acc.tasks += r6.totalTasks;
         acc.sessions += r6.totalSessions;
         acc.credits += r6.totalCredits;
+        acc.premiumRequests += r6.totalPremiumRequests;
       }
       return acc;
-    }, { tasks: 0, sessions: 0, credits: 0 });
+    }, { tasks: 0, sessions: 0, credits: 0, premiumRequests: 0 });
     const hasPartial = data.repos.some((r6) => r6.partial && !r6.error);
     const rows = buildAgentSessionRows(data, cell, cellCenter);
+    const tile = "background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;";
     return `
+		${agentSnapshotFreshnessHtml(data)}
 		<div style="margin-bottom:12px; display:flex; gap:24px; flex-wrap:wrap;">
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.tasks}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Tasks</div>
 			</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.sessions}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Sessions</div>
 			</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.credits > 0 ? summaryTotals.credits.toFixed(1) : "\u2014"}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">AI Credits</div>
 			</div>
+			${summaryTotals.premiumRequests > 0 ? `
+			<div style="${tile}">
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.premiumRequests.toFixed(1)}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;" title="Sessions that ran before the June 2026 switch to AI credits are billed in premium requests">Premium Requests</div>
+			</div>` : ""}
 		</div>
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
 			Showing cloud-agent sessions from ${sinceDate} to now.
-			${hasPartial ? "<strong>Note:</strong> Some repos were capped at 50 tasks \u2014 totals may be lower bounds. " : ""}
+			${hasPartial ? "<strong>Note:</strong> Some repos were capped \u2014 totals are lower bounds. " : ""}
+			${data.accountTasksAvailable ? "" : `<strong>Account-wide tasks unavailable:</strong> ${data.accountTasksError ?? "the /agents/tasks endpoint could not be read"} \u2014 only workspace repositories are shown.`}
 		</div>
 		<div class="customization-matrix-container">
 			<table class="customization-matrix" style="width:100%; border-collapse:collapse;">
@@ -4345,6 +4467,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 		</div>
 		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
 			\u2139\uFE0F <strong>No double-counting:</strong> These are cloud agent sessions only. CLI/remote sessions and local IDE chat sessions (shown in "My Activity") are excluded.<br/>
+			\u2139\uFE0F <strong>Two sources:</strong> your workspace repositories (which also surface tasks other people started there) plus your account-wide agent tasks, which cover repos you don't have open and ad-hoc cloud chat sessions. Tasks seen in both are counted once.<br/>
 			\u2139\uFE0F <strong>Action minutes</strong> (GitHub Actions compute used by the agent) are not shown here \u2014 they require additional per-branch API calls.
 		</div>`;
   }
@@ -5577,49 +5700,6 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>
 		</div>`;
   }
-  function _billingOtherSessionsCostUsd(groupCosts, api) {
-    if (!api) {
-      return 0;
-    }
-    const copilotCostUsd = groupCosts["GitHub Copilot"] ?? 0;
-    return Math.max(0, api.usedAiCredits * 0.01 - copilotCostUsd);
-  }
-  function _billingExtGroupCostsHtml(groupCosts, api) {
-    const otherSessionsCostUsd = _billingOtherSessionsCostUsd(groupCosts, api);
-    const hasLocalCopilotRow = "GitHub Copilot" in groupCosts;
-    const totalCostUsd = Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) + otherSessionsCostUsd;
-    const otherSessionsRowHtml = otherSessionsCostUsd > 1e-3 ? `<tr>
-			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary);">GitHub Copilot - other sessions (remote or different environment)</td>
-			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary); text-align:right;">$${formatFixed(otherSessionsCostUsd, 2)}</td>
-		</tr>` : "";
-    const rows = Object.entries(groupCosts).sort(([, a3], [, b3]) => b3 - a3).map(([group, cost]) => {
-      const label = group === "GitHub Copilot" ? "GitHub Copilot - local sessions" : group;
-      return `
-				<tr>
-					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(label)}</td>
-					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
-				</tr>${group === "GitHub Copilot" ? otherSessionsRowHtml : ""}`;
-    }).join("") + (hasLocalCopilotRow ? "" : otherSessionsRowHtml);
-    return `
-		<div style="margin-bottom:12px;">
-			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
-			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
-				<thead>
-					<tr style="background:var(--bg-tertiary);">
-						<th style="padding:6px 8px; text-align:left; font-size:11px; color:var(--text-secondary); font-weight:600;">Provider</th>
-						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
-					</tr>
-				</thead>
-				<tbody>${rows}</tbody>
-				<tfoot>
-					<tr style="border-top:1px solid var(--border-color);">
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${formatFixed(totalCostUsd, 2)}</td>
-					</tr>
-				</tfoot>
-			</table>
-		</div>`;
-  }
   function _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd) {
     if (!api) {
       return `
@@ -5658,7 +5738,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) : 0;
     const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
     const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : "";
-    const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts, api) : "";
+    const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? billingExtGroupCostsHtml(groupCosts, api) : "";
     const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
     return `
 		<div class="section">
@@ -6341,24 +6421,31 @@ ${_renderMultiModelMixedCostSessions(switching)}
     });
     wireExtensionPointButtons(vscode);
   }
+  function setButtonAnalyzingState(btn, analyzingText) {
+    if (!btn) {
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = analyzingText;
+    btn.setAttribute("appearance", "secondary");
+  }
   function wireRepositoryButtons() {
     document.getElementById("btn-analyse-repo")?.addEventListener("click", () => {
       const btn = document.getElementById("btn-analyse-repo");
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = "Analyzing...";
-      }
+      setButtonAnalyzingState(btn, "Analyzing...");
       vscode.postMessage({ command: "analyseRepository" });
     });
     document.getElementById("btn-analyse-all")?.addEventListener("click", () => {
       const btn = document.getElementById("btn-analyse-all");
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = "Analyzing All...";
-      }
+      setButtonAnalyzingState(btn, "Analyzing All...");
       isBatchAnalysisInProgress = true;
       isSwitchingRepository = true;
       selectedRepoPath = null;
+      for (const ws of hygieneMatrixState?.workspaces ?? []) {
+        if (!ws.workspacePath.startsWith("<unresolved:")) {
+          repoAnalysisInFlight.add(ws.workspacePath);
+        }
+      }
       renderRepositoryHygienePanels();
       vscode.postMessage({ command: "analyseAllRepositories" });
     });
@@ -6380,9 +6467,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
         return;
       }
       if (action === "analyze") {
-        actionButton.disabled = true;
-        actionButton.textContent = "Analyzing...";
+        repoAnalysisInFlight.add(workspacePath);
         isBatchAnalysisInProgress = false;
+        renderRepositoryHygienePanels();
         vscode.postMessage({ command: "analyseRepository", workspacePath });
       }
     });
@@ -6523,20 +6610,33 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
     return false;
   }
+  function handleRepoAnalysisMessage(message) {
+    switch (message.command) {
+      case "repoAnalysisResults":
+        try {
+          displayRepoAnalysisResults(message.data, message.workspacePath);
+        } catch (err) {
+          console.error("Failed to render repo analysis results", err);
+          displayRepoAnalysisError(err instanceof Error ? err.message : String(err), message.workspacePath);
+        }
+        return true;
+      case "repoAnalysisError":
+        displayRepoAnalysisError(message.error, message.workspacePath);
+        return true;
+      case "repoAnalysisBatchComplete":
+        handleBatchAnalysisComplete();
+        return true;
+    }
+    return false;
+  }
   function handleExtensionMessage(message) {
     if (handleLoadingStateMessage(message)) {
       return;
     }
+    if (handleRepoAnalysisMessage(message)) {
+      return;
+    }
     switch (message.command) {
-      case "repoAnalysisResults":
-        displayRepoAnalysisResults(message.data, message.workspacePath);
-        break;
-      case "repoAnalysisError":
-        displayRepoAnalysisError(message.error, message.workspacePath);
-        break;
-      case "repoAnalysisBatchComplete":
-        handleBatchAnalysisComplete();
-        break;
       case "updateStats":
         handleUpdateStats(message);
         break;
@@ -6854,16 +6954,19 @@ For each issue, please provide specific steps or code changes to fix it.`;
 			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
 			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
 			<div style="${colStyles.score} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
-			<div style="width: 80px; flex-shrink: 0;"></div>
+			<div style="width: 110px; flex-shrink: 0;"></div>
 		</div>
 	`;
     setHtml(listPane, headerHtml + visibleWorkspaces.map((ws, idx) => {
       const record = repoAnalysisState.get(ws.workspacePath);
+      const inFlight = repoAnalysisInFlight.has(ws.workspacePath);
       const hasResult = !!record?.data?.summary;
       const scoreLabel = getScoreLabel(ws.workspacePath);
-      const buttonLabel = hasResult ? "Details" : "Analyze";
-      const buttonAction = hasResult ? "details" : "analyze";
+      const buttonLabel = inFlight ? "Analyzing\u2026" : hasResult ? "Details" : "Analyze";
+      const buttonAction = hasResult && !inFlight ? "details" : "analyze";
       const isCurrentSelection = selectedRepoPath === ws.workspacePath && hasSelectedRepository;
+      const buttonDisabled = inFlight || isCurrentSelection;
+      const buttonAppearance = inFlight ? ' appearance="secondary"' : "";
       const sessions = Number(ws.sessionCount) || 0;
       const interactions = Number(ws.interactionCount) || 0;
       return `
@@ -6876,7 +6979,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
 				<div style="${colStyles.sessions}">${sessions}</div>
 				<div style="${colStyles.interactions}">${interactions}</div>
 				<div style="${colStyles.score}">${escapeHtml(scoreLabel)}</div>
-				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${isCurrentSelection ? 'disabled="true"' : ""} style="min-width: 80px; flex-shrink: 0;">
+				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${buttonDisabled ? 'disabled="true"' : ""}${buttonAppearance} style="width: 110px; flex-shrink: 0;">
 					${buttonLabel}
 				</vscode-button>
 			</div>
@@ -6952,6 +7055,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
   }
   function displayRepoAnalysisResults(data, workspacePath) {
     if (workspacePath) {
+      repoAnalysisInFlight.delete(workspacePath);
       repoAnalysisState.set(workspacePath, { data, error: void 0 });
       if (!isBatchAnalysisInProgress) {
         selectedRepoPath = workspacePath;
@@ -6964,6 +7068,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
     if (btn) {
       btn.disabled = false;
       btn.textContent = "Analyze Repo for Best Practices";
+      btn.removeAttribute("appearance");
     }
     const resultsHost = document.getElementById("repo-analysis-results");
     if (resultsHost) {
@@ -6976,6 +7081,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
   }
   function displayRepoAnalysisError(error, workspacePath) {
     if (workspacePath) {
+      repoAnalysisInFlight.delete(workspacePath);
       repoAnalysisState.set(workspacePath, { data: void 0, error });
       if (!isBatchAnalysisInProgress) {
         selectedRepoPath = workspacePath;
@@ -6988,6 +7094,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
     if (btn) {
       btn.disabled = false;
       btn.textContent = "Analyze Repo for Best Practices";
+      btn.removeAttribute("appearance");
     }
     const resultsHost = document.getElementById("repo-analysis-results");
     if (resultsHost) {
@@ -7003,10 +7110,12 @@ For each issue, please provide specific steps or code changes to fix it.`;
     isBatchAnalysisInProgress = false;
     isSwitchingRepository = true;
     selectedRepoPath = null;
+    repoAnalysisInFlight.clear();
     renderRepositoryHygienePanels();
     const btn = document.getElementById("btn-analyse-all");
     if (btn) {
       btn.disabled = false;
+      btn.removeAttribute("appearance");
       const matrix = initialData?.customizationMatrix;
       const count = matrix?.workspaces?.length || 0;
       btn.textContent = `Analyze All Repositories (${count})`;

@@ -293,6 +293,8 @@ if (initialData?.localization) {
 }
 let hygieneMatrixState: WorkspaceCustomizationMatrix | null = null;
 const repoAnalysisState = new Map<string, RepoAnalysisRecord>();
+/** Paths with an in-flight hygiene analysis; drives the disabled/secondary "Analyzing…" button state. */
+const repoAnalysisInFlight = new Set<string>();
 let selectedRepoPath: string | null = null;
 let isSwitchingRepository = false;
 let isBatchAnalysisInProgress = false;
@@ -4391,25 +4393,31 @@ function wireNavigationButtons(): void {
 }
 
 /** Wires up repository hygiene analysis buttons and pane click handlers. */
+function setButtonAnalyzingState(btn: (HTMLElement & { disabled: boolean }) | null, analyzingText: string): void {
+	if (!btn) { return; }
+	btn.disabled = true;
+	btn.textContent = analyzingText;
+	btn.setAttribute('appearance', 'secondary');
+}
+
 function wireRepositoryButtons(): void {
 	document.getElementById('btn-analyse-repo')?.addEventListener('click', () => {
 		const btn = document.getElementById('btn-analyse-repo') as HTMLElement & { disabled: boolean };
-		if (btn) {
-			btn.disabled = true;
-			btn.textContent = 'Analyzing...';
-		}
+		setButtonAnalyzingState(btn, 'Analyzing...');
 		vscode.postMessage({ command: 'analyseRepository' });
 	});
 
 	document.getElementById('btn-analyse-all')?.addEventListener('click', () => {
 		const btn = document.getElementById('btn-analyse-all') as HTMLElement & { disabled: boolean };
-		if (btn) {
-			btn.disabled = true;
-			btn.textContent = 'Analyzing All...';
-		}
+		setButtonAnalyzingState(btn, 'Analyzing All...');
 		isBatchAnalysisInProgress = true;
 		isSwitchingRepository = true;
 		selectedRepoPath = null;
+		for (const ws of hygieneMatrixState?.workspaces ?? []) {
+			if (!ws.workspacePath.startsWith('<unresolved:')) {
+				repoAnalysisInFlight.add(ws.workspacePath);
+			}
+		}
 		renderRepositoryHygienePanels();
 		vscode.postMessage({ command: 'analyseAllRepositories' });
 	});
@@ -4428,9 +4436,9 @@ function wireRepositoryButtons(): void {
 			return;
 		}
 		if (action === 'analyze') {
-			(actionButton as HTMLElement & { disabled: boolean }).disabled = true;
-			actionButton.textContent = 'Analyzing...';
+			repoAnalysisInFlight.add(workspacePath);
 			isBatchAnalysisInProgress = false;
+			renderRepositoryHygienePanels();
 			vscode.postMessage({ command: 'analyseRepository', workspacePath });
 		}
 	});
@@ -4560,15 +4568,31 @@ function handleLoadingStateMessage(message: any): boolean {
 	return false;
 }
 
-function handleExtensionMessage(message: any): void {
-	if (handleLoadingStateMessage(message)) { return; }
+/** Handles repository hygiene analysis messages. Returns true when the command was handled. */
+function handleRepoAnalysisMessage(message: any): boolean {
 	switch (message.command) {
 		case 'repoAnalysisResults':
-			displayRepoAnalysisResults(message.data, message.workspacePath); break;
+			try {
+				displayRepoAnalysisResults(message.data, message.workspacePath);
+			} catch (err) {
+				console.error('Failed to render repo analysis results', err);
+				displayRepoAnalysisError(err instanceof Error ? err.message : String(err), message.workspacePath);
+			}
+			return true;
 		case 'repoAnalysisError':
-			displayRepoAnalysisError(message.error, message.workspacePath); break;
+			displayRepoAnalysisError(message.error, message.workspacePath);
+			return true;
 		case 'repoAnalysisBatchComplete':
-			handleBatchAnalysisComplete(); break;
+			handleBatchAnalysisComplete();
+			return true;
+	}
+	return false;
+}
+
+function handleExtensionMessage(message: any): void {
+	if (handleLoadingStateMessage(message)) { return; }
+	if (handleRepoAnalysisMessage(message)) { return; }
+	switch (message.command) {
 		case 'updateStats':
 			handleUpdateStats(message); break;
 		case 'toolSuppressed':
@@ -4893,16 +4917,19 @@ function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], has
 			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
 			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
 			<div style="${colStyles.score} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
-			<div style="width: 80px; flex-shrink: 0;"></div>
+			<div style="width: 110px; flex-shrink: 0;"></div>
 		</div>
 	`;
 	setHtml(listPane, headerHtml + visibleWorkspaces.map((ws, idx) => {
 		const record = repoAnalysisState.get(ws.workspacePath);
+		const inFlight = repoAnalysisInFlight.has(ws.workspacePath);
 		const hasResult = !!record?.data?.summary;
 		const scoreLabel = getScoreLabel(ws.workspacePath);
-		const buttonLabel = hasResult ? 'Details' : 'Analyze';
-		const buttonAction = hasResult ? 'details' : 'analyze';
+		const buttonLabel = inFlight ? 'Analyzing…' : hasResult ? 'Details' : 'Analyze';
+		const buttonAction = hasResult && !inFlight ? 'details' : 'analyze';
 		const isCurrentSelection = selectedRepoPath === ws.workspacePath && hasSelectedRepository;
+		const buttonDisabled = inFlight || isCurrentSelection;
+		const buttonAppearance = inFlight ? ' appearance="secondary"' : '';
 		const sessions = Number(ws.sessionCount) || 0;
 		const interactions = Number(ws.interactionCount) || 0;
 		return `
@@ -4915,7 +4942,7 @@ function renderRepoListPane(listPane: HTMLElement, visibleWorkspaces: any[], has
 				<div style="${colStyles.sessions}">${sessions}</div>
 				<div style="${colStyles.interactions}">${interactions}</div>
 				<div style="${colStyles.score}">${escapeHtml(scoreLabel)}</div>
-				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${isCurrentSelection ? 'disabled="true"' : ''} style="min-width: 80px; flex-shrink: 0;">
+				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${buttonDisabled ? 'disabled="true"' : ''}${buttonAppearance} style="width: 110px; flex-shrink: 0;">
 					${buttonLabel}
 				</vscode-button>
 			</div>
@@ -5002,6 +5029,7 @@ function renderRepositoryHygienePanels(): void {
 
 function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: string): void {
 	if (workspacePath) {
+		repoAnalysisInFlight.delete(workspacePath);
 		repoAnalysisState.set(workspacePath, { data, error: undefined });
 		if (!isBatchAnalysisInProgress) {
 			selectedRepoPath = workspacePath;
@@ -5015,6 +5043,7 @@ function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: stri
 	if (btn) {
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
+		btn.removeAttribute('appearance');
 	}
 
 	const resultsHost = document.getElementById('repo-analysis-results');
@@ -5029,6 +5058,7 @@ function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: stri
 
 function displayRepoAnalysisError(error: string, workspacePath?: string): void {
 	if (workspacePath) {
+		repoAnalysisInFlight.delete(workspacePath);
 		repoAnalysisState.set(workspacePath, { data: undefined, error });
 		if (!isBatchAnalysisInProgress) {
 			selectedRepoPath = workspacePath;
@@ -5042,6 +5072,7 @@ function displayRepoAnalysisError(error: string, workspacePath?: string): void {
 	if (btn) {
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
+		btn.removeAttribute('appearance');
 	}
 
 	const resultsHost = document.getElementById('repo-analysis-results');
@@ -5059,12 +5090,14 @@ function handleBatchAnalysisComplete(): void {
 	isBatchAnalysisInProgress = false;
 	isSwitchingRepository = true;
 	selectedRepoPath = null;
+	repoAnalysisInFlight.clear();
 	renderRepositoryHygienePanels();
 
 	// Re-enable the "Analyze All" button
 	const btn = document.getElementById('btn-analyse-all') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
 		btn.disabled = false;
+		btn.removeAttribute('appearance');
 		const matrix = initialData?.customizationMatrix as WorkspaceCustomizationMatrix | undefined;
 		const count = matrix?.workspaces?.length || 0;
 		btn.textContent = `Analyze All Repositories (${count})`;
