@@ -666,3 +666,41 @@ test('corrections-tool-errors: does NOT fire on low volume or missing data', () 
 	assert.equal(evaluateInsights(low, {}, 7, null).find(i => i.id === 'corrections-tool-errors'), undefined);
 	assert.equal(evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === 'corrections-tool-errors'), undefined);
 });
+
+// ---------------------------------------------------------------------------
+// repeated-task-skill-candidate insight tests
+// ---------------------------------------------------------------------------
+
+function rtReport(maxClusterSize: number) {
+	return {
+		minClusterSize: 2,
+		sessionsScanned: 20,
+		clusters: [{
+			representativePrompt: 'run the tests and fix the failures',
+			sessionCount: maxClusterSize,
+			repositories: ['o/r1'],
+			sessions: [],
+			sharedKeywords: ['run', 'tests', 'fix', 'failures'],
+		}],
+	};
+}
+
+test('repeated-task-skill-candidate: fires when a cluster reaches 3 sessions', () => {
+	const ctx = makeCtx();
+	ctx.repeatedTasks = rtReport(3);
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === 'repeated-task-skill-candidate');
+	assert.ok(insight, 'should fire at sessionCount = 3');
+	assert.match(insight.body, /3 sessions/);
+	assert.match(insight.body, /run the tests/);
+});
+
+test('repeated-task-skill-candidate: does NOT fire below 3 sessions or without data', () => {
+	const below = makeCtx();
+	below.repeatedTasks = rtReport(2);
+	assert.equal(evaluateInsights(below, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+	assert.equal(evaluateInsights(makeCtx(), {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+	const empty = makeCtx();
+	empty.repeatedTasks = { minClusterSize: 2, sessionsScanned: 20, clusters: [] };
+	assert.equal(evaluateInsights(empty, {}, 7, null).find(i => i.id === 'repeated-task-skill-candidate'), undefined);
+});
