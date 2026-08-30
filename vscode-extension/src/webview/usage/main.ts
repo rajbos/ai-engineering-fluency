@@ -3200,8 +3200,8 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
 				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
 				<div class="section-subtitle">
 					Moments where the agent corrected itself after an error, or you had to correct the agent —
-					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions.
-					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
+					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments —
+					sessions without corrections are not listed. Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
 				</div>
 				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
 				${repoSections}

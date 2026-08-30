@@ -5,7 +5,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ## [Unreleased]
 
 ### Features
-- New "Corrections" tab in the Usage Analysis view: surfaces moments where the agent corrected itself after an error (failed tool calls, immediate edit retries, verbal self-corrections) or you had to correct the agent, grouped per repository over its 25 most recent sessions
+- New "Corrections" tab in the Usage Analysis view: surfaces moments where the agent corrected itself after an error (failed tool calls, immediate edit retries, verbal self-corrections) or you had to correct the agent, grouped per repository over its 25 most recent sessions with detected moments
 - New insights that fire when user corrections or tool-error/edit-retry volume in the last 30 days is high, pointing to the Corrections tab
 - Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the Details "Cost by Provider" panel and the provider charts, instead of lumping them into "GitHub Copilot"/"Other"
 - Show only the model part of a three-part custom-endpoint model ID (`customendpoint/Mistral/mistral-medium-latest` → `mistral-medium-latest`), and estimate its cost from that model's pricing entry

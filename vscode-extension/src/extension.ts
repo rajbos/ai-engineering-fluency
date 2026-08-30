@@ -4313,7 +4313,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		return toLocalDayKey(lastActivity);
 	}
 
-	/** Most recent sessions scanned per repository for the correction report. */
+	/** Maximum number of sessions with detected correction moments listed per repository. */
 	private static readonly CORRECTION_SCAN_SESSIONS_PER_REPO = 25;
 
 	/** Derive a short `owner/repo` display name from a git remote URL (falls back to the raw value). */
@@ -4324,7 +4324,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/**
 	 * Build the correction-moment report from already-parsed session results:
-	 * for each repository, the moments from its 25 most recent sessions.
+	 * sessions are first filtered to those carrying detected correction moments,
+	 * then the 25 most recent of those are kept per repository.
 	 * Moments come from the cached per-session usage analysis, so this is a
 	 * pure in-memory regrouping — no extra parsing. Returns undefined when no
 	 * session carried any moments.

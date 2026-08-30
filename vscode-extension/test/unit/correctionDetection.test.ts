@@ -207,6 +207,13 @@ test('caps moments per session at MAX_MOMENTS_PER_SESSION', () => {
     assert.equal(moments.length, MAX_MOMENTS_PER_SESSION);
 });
 
+test('a single turn cannot exceed MAX_MOMENTS_PER_SESSION', () => {
+    const toolCalls = Array.from({ length: 60 }, (_, i) => ({ toolName: `tool${i}`, isError: true, result: 'failed' }));
+    const moments = detectCorrectionMoments([{ userMessage: 'do all the things', toolCalls }]);
+    assert.equal(moments.length, MAX_MOMENTS_PER_SESSION);
+    assert.ok(moments.every(m => m.turnNumber === 1));
+});
+
 test('snippets are whitespace-normalized and length-capped', () => {
     const longMessage = 'x'.repeat(500) + '\n\nthat\'s wrong\n\n' + 'y'.repeat(500);
     const [moment] = detectCorrectionMoments([{ userMessage: longMessage }]);

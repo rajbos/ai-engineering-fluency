@@ -133,7 +133,7 @@ function detectEditMoments(
 		const file = extractEditFilePath(call.arguments);
 		// Edits without an extractable path get a unique placeholder so they never
 		// produce false retry/self-correction positives (same as modelEfficiency).
-		const key = file ?? ` unknown-${unknownPathCounter++}`;
+		const key = file ?? `-${unknownPathCounter++}`;
 		if (editedFiles.has(key)) {
 			moments.push({
 				type: lastEditFile === key ? 'edit-retry' : 'edit-self-correction',
@@ -203,7 +203,9 @@ export function detectCorrectionMoments(turns: CorrectionTurn[]): CorrectionMome
 		detectEditMoments(toolCalls, turnNumber, timestamp, moments);
 	}
 
-	return moments;
+	// A single turn can push past the cap (the loop-level check is only a
+	// performance guard), so trim to the first MAX_MOMENTS_PER_SESSION here.
+	return moments.slice(0, MAX_MOMENTS_PER_SESSION);
 }
 
 // ---------------------------------------------------------------------------
