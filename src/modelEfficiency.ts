@@ -118,7 +118,7 @@ export interface EfficiencyTurn {
 
 export function createEmptyModelEfficiencyCounters(): ModelEfficiencyCounters {
 	return {
-		calls: 0, editTurns: 0, oneShotEditTurns: 0, retries: 0, selfCorrections: 0,
+		calls: 0, toolCalls: 0, editTurns: 0, oneShotEditTurns: 0, retries: 0, selfCorrections: 0,
 		editToolCalls: 0, inputTokens: 0, outputTokens: 0, cachedReadTokens: 0, cost: 0,
 	};
 }
@@ -133,6 +133,7 @@ function analyzeTurnToolCalls(toolCalls: { toolName: string; arguments?: string 
 	let editCalls = 0;
 	let retries = 0;
 	let selfCorrections = 0;
+	counters.toolCalls = (counters.toolCalls ?? 0) + toolCalls.length;
 	const editedFiles = new Set<string>();
 	// File edited by the immediately preceding tool call, or null when the
 	// preceding call was not an edit (or there is no preceding call).
@@ -225,6 +226,7 @@ export function mergeModelEfficiency(target: ModelEfficiencyUsage, source: Model
 	for (const [model, counters] of Object.entries(source)) {
 		const t = ensureCounters(target, model);
 		t.calls += counters.calls;
+		t.toolCalls = (t.toolCalls ?? 0) + (counters.toolCalls ?? 0);
 		t.editTurns += counters.editTurns;
 		t.oneShotEditTurns += counters.oneShotEditTurns;
 		t.retries += counters.retries;
@@ -366,6 +368,7 @@ export function accumulateDailyModelCounters(target: DailyModelEfficiency, input
 	for (const [model, counters] of Object.entries(input.modelEfficiency ?? {})) {
 		const entry = ensureDailyEntry(target, model);
 		entry.calls += counters.calls;
+		entry.toolCalls = (entry.toolCalls ?? 0) + (counters.toolCalls ?? 0);
 		entry.editTurns += counters.editTurns;
 		entry.oneShotEditTurns += counters.oneShotEditTurns;
 		entry.retries += counters.retries;
@@ -410,6 +413,7 @@ export function buildSessionEfficiencyAttribution(sessionData: SessionFileCache)
 	for (const [model, s] of Object.entries(src)) {
 		const t = ensureDailyEntry(target, model);
 		t.calls += s.calls;
+		t.toolCalls = (t.toolCalls ?? 0) + (s.toolCalls ?? 0);
 		t.editTurns += s.editTurns;
 		t.oneShotEditTurns += s.oneShotEditTurns;
 		t.retries += s.retries;
@@ -448,6 +452,8 @@ export interface ModelEfficiencyRates {
 	costPerEdit: number | null;
 	/** Average output tokens per user-request turn. */
 	outputTokensPerCall: number | null;
+	/** Average tool invocations per user-request turn. */
+	toolCallsPerCall: number | null;
 	/** Cache-read share of input tokens (0..1). */
 	cacheHitRate: number | null;
 }
@@ -460,6 +466,7 @@ export function deriveModelEfficiencyRates(c: ModelEfficiencyCounters): ModelEff
 		costPerCall: c.calls > 0 ? c.cost / c.calls : null,
 		costPerEdit: c.editTurns > 0 ? c.cost / c.editTurns : null,
 		outputTokensPerCall: c.calls > 0 ? c.outputTokens / c.calls : null,
+		toolCallsPerCall: c.calls > 0 ? (c.toolCalls ?? 0) / c.calls : null,
 		// Cap at 1.0: some providers report cachedReadTokens > inputTokens (e.g. DeepSeek).
 		cacheHitRate: c.inputTokens > 0 ? Math.min(1, c.cachedReadTokens / c.inputTokens) : null,
 	};

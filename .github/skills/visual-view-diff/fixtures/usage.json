@@ -372,6 +372,86 @@
       "sessionCount": 231,
       "switchCount": 55
     },
+    "modelEfficiency": {
+      "claude-opus-4.6": {
+        "calls": 148,
+        "toolCalls": 1124,
+        "editTurns": 91,
+        "oneShotEditTurns": 76,
+        "retries": 8,
+        "selfCorrections": 7,
+        "editToolCalls": 194,
+        "inputTokens": 8740000,
+        "outputTokens": 1290000,
+        "cachedReadTokens": 5960000,
+        "cost": 42.18
+      },
+      "gpt-5.4": {
+        "calls": 121,
+        "toolCalls": 728,
+        "editTurns": 78,
+        "oneShotEditTurns": 58,
+        "retries": 13,
+        "selfCorrections": 7,
+        "editToolCalls": 166,
+        "inputTokens": 5110000,
+        "outputTokens": 842000,
+        "cachedReadTokens": 2790000,
+        "cost": 18.72
+      },
+      "gemini-3.1-pro-preview": {
+        "calls": 87,
+        "toolCalls": 626,
+        "editTurns": 54,
+        "oneShotEditTurns": 43,
+        "retries": 7,
+        "selfCorrections": 4,
+        "editToolCalls": 119,
+        "inputTokens": 3960000,
+        "outputTokens": 711000,
+        "cachedReadTokens": 1860000,
+        "cost": 9.46
+      },
+      "claude-sonnet-4.6": {
+        "calls": 64,
+        "toolCalls": 358,
+        "editTurns": 42,
+        "oneShotEditTurns": 29,
+        "retries": 8,
+        "selfCorrections": 5,
+        "editToolCalls": 94,
+        "inputTokens": 2880000,
+        "outputTokens": 492000,
+        "cachedReadTokens": 1910000,
+        "cost": 12.84
+      },
+      "gpt-5.4-mini": {
+        "calls": 38,
+        "toolCalls": 184,
+        "editTurns": 21,
+        "oneShotEditTurns": 17,
+        "retries": 3,
+        "selfCorrections": 1,
+        "editToolCalls": 47,
+        "inputTokens": 1340000,
+        "outputTokens": 219000,
+        "cachedReadTokens": 724000,
+        "cost": 2.18
+      },
+      "unknown": {
+        "calls": 19,
+        "toolCalls": 61,
+        "editTurns": 7,
+        "oneShotEditTurns": 3,
+        "retries": 3,
+        "selfCorrections": 1,
+        "editToolCalls": 17,
+        "inputTokens": 462000,
+        "outputTokens": 78000,
+        "cachedReadTokens": 0,
+        "cost": 0.74
+      }
+    },
     "multiAgentParentSessions": 33,
     "delegationSessions": 55
   },
