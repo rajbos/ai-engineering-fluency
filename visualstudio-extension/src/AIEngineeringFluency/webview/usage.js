@@ -2629,6 +2629,22 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     };
   }
 
+  // src/webview/usage/switchableTabs.ts
+  var SWITCHABLE_TABS = /* @__PURE__ */ new Set([
+    "activity",
+    "sessions",
+    "tools",
+    "health",
+    "repos",
+    "agent",
+    "worktrees",
+    "insights",
+    "corrections"
+  ]);
+  function isSwitchableTab(value) {
+    return SWITCHABLE_TABS.has(String(value));
+  }
+
   // ../src/utils/toolUtils.ts
   var GUID_MCP_PATTERN = /^mcp__[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}__(.+)$/i;
   function toTitleCase(s4) {
@@ -3139,7 +3155,8 @@ Please add friendly names for these tools to improve the user experience.`
     { label: "\u{1F916} Agent Mode", key: "agent", gradient: "linear-gradient(90deg, #7c3aed, #a855f7)" },
     { label: "\u{1F4CB} Plan Mode", key: "plan", gradient: "linear-gradient(90deg, #f59e0b, #fbbf24)" },
     { label: "\u26A1 Custom Agent", key: "customAgent", gradient: "linear-gradient(90deg, #ec4899, #f472b6)" },
-    { label: "\u{1F5A5}\uFE0F CLI", key: "cli", gradient: "linear-gradient(90deg, #06b6d4, #22d3ee)" }
+    { label: "\u{1F5A5}\uFE0F CLI", key: "cli", gradient: "linear-gradient(90deg, #06b6d4, #22d3ee)" },
+    { label: "\u2728 Copilot App", key: "cliApp", gradient: "linear-gradient(90deg, #6366f1, #818cf8)" }
   ];
   function renderModeBarItem(label, count, total, gradient) {
     const pct = total > 0 ? count / total * 100 : 0;
@@ -3150,8 +3167,8 @@ Please add friendly names for these tools to improve the user experience.`
 </div>`;
   }
   function renderModeBarChart(modeUsage, title) {
-    const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli;
-    const bars = MODE_BAR_CONFIGS.map(({ label, key, gradient }) => renderModeBarItem(label, modeUsage[key], total, gradient)).join("");
+    const total = modeUsage.ask + modeUsage.edit + modeUsage.agent + modeUsage.plan + modeUsage.customAgent + modeUsage.cli + (modeUsage.cliApp ?? 0);
+    const bars = MODE_BAR_CONFIGS.map(({ label, key, gradient }) => renderModeBarItem(label, modeUsage[key] ?? 0, total, gradient)).join("");
     return `
 <div>
 <h4 style="color: var(--text-primary); font-size: 13px; margin-bottom: 8px;">${title}</h4>
@@ -3667,7 +3684,8 @@ ${_renderMultiModelMixedCostSessions(switching)}
       agent: coerceNumber2(m2.agent),
       plan: coerceNumber2(m2.plan),
       customAgent: coerceNumber2(m2.customAgent),
-      cli: coerceNumber2(m2.cli)
+      cli: coerceNumber2(m2.cli),
+      cliApp: coerceNumber2(m2.cliApp)
     };
   }
   function sanitizeContextRefs(refs) {
@@ -4397,6 +4415,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     return {
       authenticated: Boolean(src.authenticated),
       since: typeof src.since === "string" || typeof src.since === "number" ? src.since : Date.now(),
+      error: typeof src.error === "string" ? escapeHtml(src.error) : void 0,
       repos: repos.map((repo) => {
         const r6 = repo && typeof repo === "object" ? repo : {};
         const aiDetails = Array.isArray(r6.aiDetails) ? r6.aiDetails : [];
@@ -4464,6 +4483,14 @@ ${_renderMultiModelMixedCostSessions(switching)}
   }
   function renderReposPrContent(data) {
     const sinceDate = escapeHtml(new Date(data.since).toLocaleDateString());
+    if (data.error) {
+      return `
+			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
+				<strong>\u26A0\uFE0F Failed to load repository PR activity</strong><br/>
+				${data.error}<br/>
+				Switch to another tab and back to retry \u2014 details are in the extension Output channel.
+			</div>`;
+    }
     if (!data.authenticated) {
       return `
 			<div style="margin-top:12px; padding:12px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:12px; color:var(--text-secondary);">
@@ -6043,9 +6070,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const modelCostHtml = safeSectionHtml("Model Cost", () => buildModelCostSectionHtml(stats));
     const billingComparisonHtml = safeSectionHtml("AI Billing Coverage", () => buildBillingComparisonSectionHtml(stats));
     const modeUsageHtml = safeSectionHtml("Interaction Modes", () => `
-			<div class="section">
+			<div class="section" id="section-interaction-modes">
 				<div class="section-title"><span>\u{1F3AF}</span><span>Interaction Modes</span></div>
-				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), or Agent (autonomous tasks)</div>
+				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), or Copilot App (desktop-app CLI sessions)</div>
 				<div class="two-column">
 					${renderModeBarChart(stats.today.modeUsage, "\u{1F4C5} Today")}
 					${renderModeBarChart(stats.last30Days.modeUsage, "\u{1F4CA} Last 30 Days")}
@@ -6965,7 +6992,12 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
   }
   function handleSwitchTab(message) {
-    const btn = document.querySelector(`.tab-button[data-tab="${String(message.tab)}"]`);
+    const tab = String(message.tab);
+    if (!isSwitchableTab(tab)) {
+      return;
+    }
+    activeTab = tab;
+    const btn = document.querySelector(`.tab-button[data-tab="${tab}"]`);
     btn?.click();
     if (message.anchor) {
       const anchor = document.getElementById(String(message.anchor));
