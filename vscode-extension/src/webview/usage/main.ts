@@ -735,6 +735,12 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	Object.entries(stats.today.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.month.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
+	// Also collect MCP server names — the "By Server" tables render them through the
+	// same friendly-name lookup, so an unmapped server name (e.g. `ccd_session`)
+	// would otherwise show raw without ever being flagged as missing.
+	Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
+	Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
+	Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
 	// Also collect all general tool calls so non-MCP tools without friendly names are caught
 	Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));

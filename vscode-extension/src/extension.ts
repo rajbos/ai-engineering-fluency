@@ -1438,7 +1438,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 		// Separate insights badge — hidden until there are new insights
 		this.insightsStatusBarItem = vscode.window.createStatusBarItem('ai-engineering-fluency-insights', vscode.StatusBarAlignment.Right, 101);
-		this.insightsStatusBarItem.name = l10n.t("statusBar.name") + " — Insights";
+		this.insightsStatusBarItem.name = l10n.t("statusBar.nameInsights");
 		this.insightsStatusBarItem.command = 'aiEngineeringFluency.openInsightsTab';
 		// starts hidden; shown in refreshStatusBarInsightBadge when count > 0
 
@@ -1649,6 +1649,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		Object.keys(stats.today.mcpTools.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.last30Days.mcpTools.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.month.mcpTools.byTool).forEach(tool => allTools.add(tool));
+		// MCP server names are rendered through the same friendly-name lookup in the
+		// "By Server" tables, so include them in the missing-name detection too.
+		Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
 		Object.keys(stats.today.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.last30Days.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.month.toolCalls.byTool).forEach(tool => allTools.add(tool));
@@ -1675,8 +1680,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (unknownTools.length === 0) {
 			return;
 		}
-		const open = 'Open Usage Analysis';
-		const dismiss = 'Dismiss';
+		const open = l10n.t('button.openUsageAnalysis');
+		const dismiss = l10n.t('button.dismiss');
 		const choice = await vscode.window.showInformationMessage(
 			`🔌 Found ${unknownTools.length} tool${unknownTools.length > 1 ? 's' : ''} without friendly names. Help improve the extension by reporting them.`,
 
@@ -3188,8 +3193,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._lastInsightNudgeAt = now;
 		await this.context.globalState.update('insights.lastNudgeAt', now);
 
-		const view = 'Open Insights tab';
-		const dismiss = 'Dismiss';
+		const view = l10n.t('button.openInsightsTab');
+		const dismiss = l10n.t('button.dismiss');
 		const choice = await vscode.window.showInformationMessage(
 			`💡 ${toastCandidate.title}`,
 			view,
@@ -9411,8 +9416,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       await vscode.commands.executeCommand("aiEngineeringFluency.configureBackend");
     } catch {
       void (async () => {
-        const choice = await vscode.window.showInformationMessage(l10n.t('backendConfigMessage'), "Open Settings");
-        if (choice === "Open Settings") { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend"); }
+        const openSettings = l10n.t('button.openSettings');
+        const choice = await vscode.window.showInformationMessage(l10n.t('backendConfigMessage'), openSettings);
+        if (choice === openSettings) { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend"); }
       })();
     }
   }
@@ -9422,8 +9428,9 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       await vscode.commands.executeCommand("aiEngineeringFluency.configureTeamServer");
     } catch {
       void (async () => {
-        const choice = await vscode.window.showInformationMessage(l10n.t('teamServerConfigMessage'), "Open Settings");
-        if (choice === "Open Settings") { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend.sharingServer"); }
+        const openSettings = l10n.t('button.openSettings');
+        const choice = await vscode.window.showInformationMessage(l10n.t('teamServerConfigMessage'), openSettings);
+        if (choice === openSettings) { void vscode.commands.executeCommand("workbench.action.openSettings", "aiEngineeringFluency.backend.sharingServer"); }
       })();
     }
   }
@@ -11400,12 +11407,14 @@ async function checkForLegacyExtensionConflict(context: vscode.ExtensionContext)
   if (context.globalState.get<boolean>(key, false)) {
     return;
   }
+  const removeOldExtension = l10n.t('button.removeOldExtension');
+  const dismiss = l10n.t('button.dismiss');
   const choice = await vscode.window.showWarningMessage(
     l10n.t('cleanupWarning') + l10n.t('cleanupMessage'),
-    'Remove Old Extension',
-    'Dismiss'
+    removeOldExtension,
+    dismiss
   );
-  if (choice === 'Remove Old Extension') {
+  if (choice === removeOldExtension) {
     try {
       await vscode.commands.executeCommand('workbench.extensions.uninstallExtension', LEGACY_EXTENSION_ID);
     } catch {
@@ -11413,7 +11422,7 @@ async function checkForLegacyExtensionConflict(context: vscode.ExtensionContext)
         l10n.t('cleanupMessage2')
       );
     }
-  } else if (choice === 'Dismiss') {
+  } else if (choice === dismiss) {
     // Only suppress on explicit Dismiss — closing with ✕ shows again next startup.
     await context.globalState.update(key, true);
   }
