@@ -421,3 +421,13 @@ test('discoverGitHubRepos: does not match a github.com mention inside another ho
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test('discoverGitHubRepos: matches an ssh://git@ remote', async () => {
+	const dir = makeGitRepoWithRemote('ssh://git@github.com/rajbos/ai-engineering-fluency.git');
+	try {
+		const repos = await discoverGitHubRepos([dir]);
+		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
