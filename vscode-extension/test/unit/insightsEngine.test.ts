@@ -795,6 +795,12 @@ test('insight navigation actions target their destination tabs and sections', ()
 		evaluateInsights(corrections, {}, 7, null).find(i => i.id === 'corrections-user-pushback')?.actionCommand,
 		'aiEngineeringFluency.openCorrectionsTab',
 	);
+
+	corrections.last30Days.corrections = { ...emptyCorrections(), toolErrors: 5, sessionsWithMoments: 2 };
+	assert.equal(
+		evaluateInsights(corrections, {}, 7, null).find(i => i.id === 'corrections-tool-errors')?.actionCommand,
+		'aiEngineeringFluency.openCorrectionsTab',
+	);
 });
 
 test('repeated-task-skill-candidate: does NOT fire below 3 sessions or without data', () => {
