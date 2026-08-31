@@ -443,7 +443,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 67; // firstUserPrompt capture for repeated-task detection + Copilot desktop app CLI sessions split into modeUsage.cliApp
+	private static readonly CACHE_VERSION = 68; // per-model tool-call counters for the local model leaderboard
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
