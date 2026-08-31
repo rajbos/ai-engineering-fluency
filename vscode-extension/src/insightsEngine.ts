@@ -1350,7 +1350,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		buildBody: (ctx) => {
 			const c = ctx.last30Days.corrections;
 			const count = c?.userCorrections ?? 0;
-			const sessions = c?.sessionsWithMoments ?? 0;
+			const sessions = c?.sessionsWithUserCorrections ?? Math.min(count, c?.sessionsWithMoments ?? 0);
 			return `In the last 30 days you corrected the agent ${count} time${count !== 1 ? 's' : ''} across ${sessions} session${sessions !== 1 ? 's' : ''} ` +
 				`(messages like "no, that's wrong" or "not what I asked"). Recurring corrections often mean the agent is missing project conventions — ` +
 				`capturing them in \`copilot-instructions.md\` or an \`AGENTS.md\` file can prevent the same mistakes. ` +

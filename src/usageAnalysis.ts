@@ -29,7 +29,7 @@ import {
 	applyModelUsageToEfficiency,
 	type EfficiencyTurn,
 } from './modelEfficiency';
-import { detectCorrectionMoments, mergeCorrectionCounts, summarizeCorrectionMoments } from './correctionDetection';
+import { detectCorrectionAnalysis, mergeCorrectionCounts, summarizeCorrectionMoments } from './correctionDetection';
 import { MAX_PROMPT_LENGTH } from './repeatedTasks';
 
 /** Store the session's first user prompt (truncated) for repeated-task detection. */
@@ -754,8 +754,14 @@ function _applyJsonRequestsEfficiency(
 	if (turns.length === 0) { return; }
 	analysis.modelEfficiency = computeEfficiencyFromTurns(turns);
 	_setFirstUserPrompt(analysis, turns.find(t => t.userMessage)?.userMessage);
-	const moments = detectCorrectionMoments(turns);
-	if (moments.length > 0) { analysis.correctionMoments = moments; }
+	_setCorrectionDetection(analysis, turns);
+}
+
+function _setCorrectionDetection(analysis: SessionUsageAnalysis, turns: EfficiencyTurn[]): void {
+	const detection = detectCorrectionAnalysis(turns);
+	if (detection.moments.length === 0) { return; }
+	analysis.correctionMoments = detection.moments;
+	analysis.correctionCounts = detection.counts;
 }
 
 /** Concatenate the non-thinking text of a JSON request's response items (correction detection only). */
@@ -1211,10 +1217,12 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 function _muaMergeCorrections(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
 	if (!analysis.correctionMoments || analysis.correctionMoments.length === 0) { return; }
 	if (!period.corrections) {
-		period.corrections = { userCorrections: 0, editRetries: 0, editSelfCorrections: 0, toolErrors: 0, toolErrorsRetried: 0, agentSelfCorrections: 0, sessionsWithMoments: 0 };
+		period.corrections = { userCorrections: 0, editRetries: 0, editSelfCorrections: 0, toolErrors: 0, toolErrorsRetried: 0, agentSelfCorrections: 0, sessionsWithMoments: 0, sessionsWithUserCorrections: 0 };
 	}
-	mergeCorrectionCounts(period.corrections, summarizeCorrectionMoments(analysis.correctionMoments));
+	const counts = analysis.correctionCounts ?? summarizeCorrectionMoments(analysis.correctionMoments);
+	mergeCorrectionCounts(period.corrections, counts);
 	period.corrections.sessionsWithMoments++;
+	if (counts.userCorrections > 0) { period.corrections.sessionsWithUserCorrections!++; }
 }
 
 /** @internal lookup table for analyzeContextReferences */
@@ -2142,12 +2150,21 @@ export function extractInvokedSkillNameFromPlainText(content: unknown): string |
 	return m ? m[1] : null;
 }
 
-/** Create the efficiency turn for a user.message event (with text for correction detection). */
+function _asuCorrectionUserMessage(event: any): string | undefined {
+	const content = event.data?.content;
+	if (typeof content !== 'string') { return undefined; }
+	const source = event.data?.source;
+	const generated = (typeof source === 'string' && (source.startsWith('skill-') || source.startsWith('agent-')))
+		|| /^\s*<(?:skill-context|cross_session_message|system_(?:notification|reminder))\b/i.test(content);
+	return generated ? undefined : content;
+}
+
+/** Create the efficiency turn for a user.message event (with human text for correction detection). */
 function _asuCreateEfficiencyTurn(event: any, cliState: AsuCliState): EfficiencyTurn {
 	return {
 		model: event.model || cliState.defaultModel,
 		toolCalls: [],
-		userMessage: typeof event.data?.content === 'string' ? event.data.content : undefined,
+		userMessage: _asuCorrectionUserMessage(event),
 		timestamp: typeof event.timestamp === 'string' ? event.timestamp : null,
 	};
 }
@@ -2357,8 +2374,7 @@ async function _asuProcessNonDeltaJsonl(
 	if (cliState.efficiencyTurns.length > 0) {
 		analysis.modelEfficiency = computeEfficiencyFromTurns(cliState.efficiencyTurns);
 		_setFirstUserPrompt(analysis, cliState.efficiencyTurns.find(t => t.userMessage)?.userMessage);
-		const moments = detectCorrectionMoments(cliState.efficiencyTurns);
-		if (moments.length > 0) { analysis.correctionMoments = moments; }
+		_setCorrectionDetection(analysis, cliState.efficiencyTurns);
 	}
 	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
 	// Track LOC/edit metrics for CLI sessions (delta path already handles this above)
@@ -2372,7 +2388,7 @@ async function _asuProcessNonDeltaJsonl(
  * already provided them. Efficiency is optional — never fail analysis over it.
  */
 async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile: string, analysis: SessionUsageAnalysis): Promise<void> {
-	if (analysis.modelEfficiency && analysis.correctionMoments && analysis.firstUserPrompt) { return; }
+	if (analysis.modelEfficiency && analysis.correctionMoments && analysis.correctionCounts && analysis.firstUserPrompt) { return; }
 	if (!eco.buildTurns) { return; }
 	try {
 		const { turns } = await eco.buildTurns(sessionFile);
@@ -2381,8 +2397,7 @@ async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile
 			if (Object.keys(eff).length > 0) { analysis.modelEfficiency = eff; }
 		}
 		if (!analysis.correctionMoments) {
-			const moments = detectCorrectionMoments(turns);
-			if (moments.length > 0) { analysis.correctionMoments = moments; }
+			_setCorrectionDetection(analysis, turns);
 		}
 		_setFirstUserPrompt(analysis, turns.find(t => t.userMessage)?.userMessage);
 	} catch { /* efficiency and correction moments are optional */ }
@@ -2815,6 +2830,4 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 	}
 	return modelUsage;
 }
-
-
 
