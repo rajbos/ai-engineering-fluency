@@ -1,7 +1,7 @@
 import * as fs from 'fs';
 import type { ModelUsage, ChatTurn, ActualUsage } from '../types';
 import type { IEcosystemAdapter, IDiscoverableEcosystem, IAnalyzableEcosystem, DiscoveryResult, CandidatePath, UsageAnalysisAdapterContext } from '../ecosystemAdapter';
-import { ClaudeDesktopCoworkDataAccess } from '../claudedesktop';
+import { ClaudeDesktopDataAccess } from '../claudedesktop';
 import { createEmptyContextRefs } from '../tokenEstimation';
 import { readClaudeCodeEventsForAnalysis, createEmptySessionUsageAnalysis, applyModelTierClassification } from '../usageAnalysis';
 import { normalizeClaudeModelId } from '../claudecode';
@@ -12,14 +12,14 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 	readonly displayName = 'Claude Desktop Cowork';
 
 	constructor(
-		private readonly claudeDesktopCowork: ClaudeDesktopCoworkDataAccess,
+		private readonly claudeDesktop: ClaudeDesktopDataAccess,
 		private readonly isMcpToolFn: (toolName: string) => boolean,
 		private readonly extractMcpServerNameFn: (toolName: string) => string,
 		private readonly estimateTokensFn: (text: string, model?: string) => number
 	) {}
 
 	handles(sessionFile: string): boolean {
-		return this.claudeDesktopCowork.isCoworkSessionFile(sessionFile);
+		return this.claudeDesktop.isDesktopSessionFile(sessionFile);
 	}
 
 	getBackingPath(sessionFile: string): string {
@@ -31,20 +31,20 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 	}
 
 	async getTokens(sessionFile: string): Promise<{ tokens: number; thinkingTokens: number; actualTokens: number }> {
-		const result = await this.claudeDesktopCowork.getTokensFromCoworkSession(sessionFile);
+		const result = await this.claudeDesktop.getTokensFromDesktopSession(sessionFile);
 		return { ...result, actualTokens: result.tokens };
 	}
 
 	async countInteractions(sessionFile: string): Promise<number> {
-		return await this.claudeDesktopCowork.countCoworkInteractions(sessionFile);
+		return await this.claudeDesktop.countDesktopSessionInteractions(sessionFile);
 	}
 
 	async getModelUsage(sessionFile: string): Promise<ModelUsage> {
-		return await this.claudeDesktopCowork.getCoworkModelUsage(sessionFile);
+		return await this.claudeDesktop.getDesktopSessionModelUsage(sessionFile);
 	}
 
 	async getMeta(sessionFile: string): Promise<{ title: string | undefined; firstInteraction: string | null; lastInteraction: string | null; workspacePath?: string }> {
-		const meta = await this.claudeDesktopCowork.getCoworkSessionMeta(sessionFile);
+		const meta = await this.claudeDesktop.getDesktopSessionMeta(sessionFile);
 		return {
 			title: meta?.title,
 			firstInteraction: meta?.firstInteraction || null,
@@ -53,15 +53,15 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 		};
 	}
 
-	getEditorRoot(_sessionFile: string): string {
-		return this.claudeDesktopCowork.getCoworkBaseDir();
+	getEditorRoot(sessionFile: string): string {
+		return this.claudeDesktop.getSessionDirForFile(sessionFile);
 	}
 
 	async discover(log: (msg: string) => void): Promise<DiscoveryResult> {
 		const candidatePaths = this.getCandidatePaths();
 		const sessionFiles: string[] = [];
 		try {
-			const files = await this.claudeDesktopCowork.getCoworkSessionFiles();
+			const files = await this.claudeDesktop.getDesktopSessionFiles();
 			if (files.length > 0) {
 				log(`📄 Found ${files.length} session file(s) in Claude Desktop Cowork`);
 				sessionFiles.push(...files);
@@ -73,13 +73,13 @@ export class ClaudeDesktopAdapter implements IEcosystemAdapter, IDiscoverableEco
 	}
 
 	getCandidatePaths(): CandidatePath[] {
-		const baseDir = this.claudeDesktopCowork.getCoworkBaseDir();
-		return baseDir ? [{ path: baseDir, source: 'Claude Desktop (Cowork)' }] : [];
+		return this.claudeDesktop.getDesktopSessionDirs()
+			.map(dir => ({ path: dir, source: 'Claude Desktop (Cowork)' }));
 	}
 
 	async buildTurns(sessionFile: string): Promise<{ turns: ChatTurn[]; actualTokens?: number }> {
 		const turns: ChatTurn[] = [];
-		const events = await this.claudeDesktopCowork.readCoworkEvents(sessionFile);
+		const events = await this.claudeDesktop.readDesktopSessionEvents(sessionFile);
 		let currentUserEvent: any = null;
 		const pendingAssistantEvents: any[] = [];
 

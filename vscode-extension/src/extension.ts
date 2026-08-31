@@ -116,7 +116,7 @@ import type { CrushDataAccess } from '../../src/crush';
 import type { VisualStudioDataAccess } from '../../src/visualstudio';
 import type { ContinueDataAccess } from '../../src/continue';
 import type { ClaudeCodeDataAccess } from '../../src/claudecode';
-import type { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
+import type { ClaudeDesktopDataAccess } from '../../src/claudedesktop';
 import type { MistralVibeDataAccess } from '../../src/mistralvibe';
 import type { GeminiCliDataAccess } from '../../src/geminicli';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
@@ -467,7 +467,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public visualStudio!: VisualStudioDataAccess;
 	private continue_!: ContinueDataAccess;
 	private claudeCode!: ClaudeCodeDataAccess;
-	private claudeDesktopCowork!: ClaudeDesktopCoworkDataAccess;
+	private claudeDesktop!: ClaudeDesktopDataAccess;
 	private mistralVibe!: MistralVibeDataAccess;
 	private geminiCli!: GeminiCliDataAccess;
 	public windsurf!: WindsurfDataAccess;
@@ -1316,7 +1316,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.continue_ = dataAccess.continue_;
 		this.visualStudio = dataAccess.visualStudio;
 		this.claudeCode = dataAccess.claudeCode;
-		this.claudeDesktopCowork = dataAccess.claudeDesktopCowork;
+		this.claudeDesktop = dataAccess.claudeDesktop;
 		this.mistralVibe = dataAccess.mistralVibe;
 		this.geminiCli = dataAccess.geminiCli;
 		this.windsurf = new WindsurfDataAccess(extensionUri, (m) => this.log(m));
