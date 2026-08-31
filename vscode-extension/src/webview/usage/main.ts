@@ -129,6 +129,7 @@ type CorrectionSessionEntry = {
 	title?: string | null;
 	lastInteraction?: string | null;
 	moments: CorrectionMoment[];
+	totalMoments?: number;
 };
 
 type CorrectionRepoGroup = {
@@ -1527,6 +1528,9 @@ function sanitizeCorrectionSession(raw: any): CorrectionSessionEntry | null {
 		title: typeof raw.title === 'string' ? raw.title : null,
 		lastInteraction: typeof raw.lastInteraction === 'string' ? raw.lastInteraction : null,
 		moments,
+		totalMoments: typeof raw.totalMoments === 'number' && isFinite(raw.totalMoments)
+			? Math.max(moments.length, raw.totalMoments)
+			: moments.length,
 	};
 }
 
@@ -3285,10 +3289,14 @@ function buildCorrectionSessionHtml(session: CorrectionSessionEntry): string {
 	const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
 	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
 	const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
+	const totalMoments = session.totalMoments ?? session.moments.length;
+	const truncatedLabel = totalMoments > session.moments.length
+		? ` · showing ${session.moments.length} of ${totalMoments} moments`
+		: '';
 	return `
 		<div style="margin:10px 0 4px; padding:10px 12px; background:var(--bg-tertiary); border-radius:6px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-primary); overflow-wrap:anywhere;">
-				${escapeHtml(title)}${dateLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">· ${escapeHtml(dateLabel)}</span>` : ''}
+				${escapeHtml(title)}${dateLabel || truncatedLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">${dateLabel ? `· ${escapeHtml(dateLabel)}` : ''}${escapeHtml(truncatedLabel)}</span>` : ''}
 			</div>
 			${session.moments.map(buildCorrectionMomentHtml).join('')}
 		</div>`;
@@ -3336,7 +3344,8 @@ function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
 				<div class="section-subtitle">
 					Moments where the agent corrected itself after an error, or you had to correct the agent —
 					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments —
-					sessions without corrections are not listed. Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
+					sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
+					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
 				</div>
 				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
 				${repoSections}

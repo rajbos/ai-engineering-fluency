@@ -59,7 +59,7 @@ interface CorrectionPattern {
 
 /** User-message phrasings that indicate the user is correcting the agent. */
 export const USER_CORRECTION_PATTERNS: CorrectionPattern[] = [
-	{ re: /^\s*(no[,.! ]|nope\b)/i, label: "starts with 'no'" },
+	{ re: /^\s*(no[,.!](?:\s|$)|nope\b)/i, label: "starts with 'no'" },
 	{ re: /\bthat'?s (not|wrong|incorrect)/i, label: "'that's not/wrong/incorrect'" },
 	{ re: /\bnot what i (asked|meant|wanted)/i, label: "'not what I asked/meant/wanted'" },
 	{ re: /\byou('?re| are) wrong/i, label: "'you're wrong'" },
@@ -115,11 +115,35 @@ function matchPattern(text: string | undefined, patterns: CorrectionPattern[]): 
  * Detect edit retries and edit self-corrections in one turn's ordered tool
  * calls, mirroring the definitions in modelEfficiency.analyzeTurnToolCalls.
  */
+export interface CorrectionDetectionResult {
+	moments: CorrectionMoment[];
+	counts: CorrectionCounts;
+}
+
+interface CorrectionDetectionState extends CorrectionDetectionResult {
+	openToolErrors: Map<string, CorrectionMoment>;
+}
+
+function retainMoment(state: CorrectionDetectionState, moment: CorrectionMoment): void {
+	addMomentToCounts(state.counts, moment);
+	if (state.moments.length < MAX_MOMENTS_PER_SESSION) {
+		state.moments.push(moment);
+		return;
+	}
+	if (moment.type !== 'user-correction') { return; }
+	for (let i = state.moments.length - 1; i >= 0; i--) {
+		if (state.moments[i].type !== 'user-correction') {
+			state.moments[i] = moment;
+			return;
+		}
+	}
+}
+
 function detectEditMoments(
 	toolCalls: NonNullable<CorrectionTurn['toolCalls']>,
 	turnNumber: number,
 	timestamp: string | null,
-	moments: CorrectionMoment[]
+	state: CorrectionDetectionState
 ): void {
 	const editedFiles = new Set<string>();
 	let lastEditFile: string | null = null;
@@ -135,7 +159,7 @@ function detectEditMoments(
 		// produce false retry/self-correction positives (same as modelEfficiency).
 		const key = file ?? `-${unknownPathCounter++}`;
 		if (editedFiles.has(key)) {
-			moments.push({
+			retainMoment(state, {
 				type: lastEditFile === key ? 'edit-retry' : 'edit-self-correction',
 				turnNumber,
 				timestamp,
@@ -152,20 +176,21 @@ function detectEditMoments(
  * Detect all correction moments in a session's turns.
  * Turn numbers are 1-based array positions, matching ChatTurn.turnNumber.
  */
-export function detectCorrectionMoments(turns: CorrectionTurn[]): CorrectionMoment[] {
-	const moments: CorrectionMoment[] = [];
-	// toolName -> index into moments of the most recent un-retried tool-error.
-	const openToolErrors = new Map<string, number>();
+export function detectCorrectionAnalysis(turns: CorrectionTurn[]): CorrectionDetectionResult {
+	const state: CorrectionDetectionState = {
+		moments: [],
+		counts: createEmptyCorrectionCounts(),
+		openToolErrors: new Map(),
+	};
 
 	for (let i = 0; i < turns.length; i++) {
-		if (moments.length >= MAX_MOMENTS_PER_SESSION) { break; }
 		const turn = turns[i];
 		const turnNumber = i + 1;
 		const timestamp = turn.timestamp ?? null;
 
 		const userMatch = matchPattern(turn.userMessage, USER_CORRECTION_PATTERNS);
 		if (userMatch) {
-			moments.push({
+			retainMoment(state, {
 				type: 'user-correction', turnNumber, timestamp,
 				snippet: makeSnippet(turn.userMessage!, userMatch.index),
 				matchedPattern: userMatch.label,
@@ -174,7 +199,7 @@ export function detectCorrectionMoments(turns: CorrectionTurn[]): CorrectionMome
 
 		const agentMatch = matchPattern(turn.assistantResponse, AGENT_SELF_CORRECTION_PATTERNS);
 		if (agentMatch) {
-			moments.push({
+			retainMoment(state, {
 				type: 'agent-self-correction', turnNumber, timestamp,
 				snippet: makeSnippet(turn.assistantResponse!, agentMatch.index),
 				matchedPattern: agentMatch.label,
@@ -184,28 +209,33 @@ export function detectCorrectionMoments(turns: CorrectionTurn[]): CorrectionMome
 		const toolCalls = turn.toolCalls ?? [];
 		for (const call of toolCalls) {
 			// A later call of the same tool marks an earlier failure as recovered.
-			const openIdx = openToolErrors.get(call.toolName);
-			if (openIdx !== undefined) {
-				moments[openIdx].retried = true;
-				openToolErrors.delete(call.toolName);
+			const openError = state.openToolErrors.get(call.toolName);
+			if (openError) {
+				openError.retried = true;
+				state.counts.toolErrorsRetried++;
+				state.openToolErrors.delete(call.toolName);
 			}
 			if (call.isError === true) {
-				moments.push({
+				const moment: CorrectionMoment = {
 					type: 'tool-error', turnNumber, timestamp,
 					snippet: `Tool failed: ${call.toolName}`,
 					tool: call.toolName,
 					retried: false,
-				});
-				openToolErrors.set(call.toolName, moments.length - 1);
+				};
+				retainMoment(state, moment);
+				state.openToolErrors.set(call.toolName, moment);
 			}
 		}
 
-		detectEditMoments(toolCalls, turnNumber, timestamp, moments);
+		detectEditMoments(toolCalls, turnNumber, timestamp, state);
 	}
 
-	// A single turn can push past the cap (the loop-level check is only a
-	// performance guard), so trim to the first MAX_MOMENTS_PER_SESSION here.
-	return moments.slice(0, MAX_MOMENTS_PER_SESSION);
+	state.moments.sort((a, b) => a.turnNumber - b.turnNumber);
+	return { moments: state.moments, counts: state.counts };
+}
+
+export function detectCorrectionMoments(turns: CorrectionTurn[]): CorrectionMoment[] {
+	return detectCorrectionAnalysis(turns).moments;
 }
 
 // ---------------------------------------------------------------------------

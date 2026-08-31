@@ -446,6 +446,8 @@ export interface SessionUsageAnalysis {
    * per-turn detail or no moments were found.
    */
   correctionMoments?: CorrectionMoment[];
+  /** Complete correction counts; unlike correctionMoments, these are not detail-capped. */
+  correctionCounts?: CorrectionCounts;
   /**
    * The session's first user prompt (truncated), captured for repeated-task
    * detection (see src/repeatedTasks.ts). Absent when the session format
@@ -607,6 +609,8 @@ export interface CorrectionCounts {
 /** Period-level correction counters plus the number of sessions that had any moment. */
 export interface CorrectionPeriodCounts extends CorrectionCounts {
   sessionsWithMoments: number;
+  /** Sessions containing at least one user-correction moment. */
+  sessionsWithUserCorrections?: number;
 }
 
 /** One session's entry in the correction report. */
@@ -615,6 +619,8 @@ export interface CorrectionSessionEntry {
   title?: string | null;
   lastInteraction?: string | null;
   moments: CorrectionMoment[];
+  /** Complete count before correctionMoments is detail-capped. */
+  totalMoments?: number;
 }
 
 /** Correction moments for one repository, over its most recent sessions. */

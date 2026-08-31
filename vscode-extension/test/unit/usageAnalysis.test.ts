@@ -172,6 +172,23 @@ test('mergeUsageAnalysis: leaves period.modelEfficiency absent when analysis has
     assert.equal(period.modelEfficiency, undefined);
 });
 
+test('mergeUsageAnalysis: uses uncapped correction counts and tracks user-correction sessions separately', () => {
+    const period = emptyPeriod();
+    const analysis = emptyAnalysis();
+    analysis.correctionMoments = [{
+        type: 'tool-error', turnNumber: 1, timestamp: null, snippet: 'Tool failed: edit', tool: 'edit',
+    }];
+    analysis.correctionCounts = {
+        userCorrections: 2, editRetries: 60, editSelfCorrections: 4,
+        toolErrors: 70, toolErrorsRetried: 50, agentSelfCorrections: 1,
+    };
+    mergeUsageAnalysis(period, analysis);
+    assert.equal(period.corrections?.editRetries, 60);
+    assert.equal(period.corrections?.toolErrors, 70);
+    assert.equal(period.corrections?.sessionsWithMoments, 1);
+    assert.equal(period.corrections?.sessionsWithUserCorrections, 1);
+});
+
 test('mergeModelEfficiencyTokens: folds per-session model usage tokens and cost into the period', () => {
     const period = emptyPeriod();
     mergeModelEfficiencyTokens(period, {
@@ -1288,6 +1305,25 @@ test('analyzeSessionUsage: Copilot CLI regular user message (no slash) does not 
     const deps = makeMockDeps();
     const result = await analyzeSessionUsage(deps, '/home/user/.copilot/session-state/abc/events.jsonl', content);
     assert.equal(result.skillCalls?.total ?? 0, 0);
+});
+
+test('analyzeSessionUsage: generated CLI messages do not become user corrections', async () => {
+    const events = [
+        { type: 'session.start', data: { selectedModel: 'claude-sonnet-5' } },
+        { type: 'user.message', data: { content: 'Stop doing that', source: 'agent-parent-session', parentAgentTaskId: 'subagent-task' } },
+        { type: 'user.message', data: { content: '<skill-context>you deleted files</skill-context>', source: 'skill-test' } },
+        { type: 'user.message', data: { content: '<cross_session_message>No blocker remains</cross_session_message>' } },
+        { type: 'user.message', data: { content: 'please revert that', parentAgentTaskId: 'main-agent-task' } },
+    ];
+    const content = events.map(e => JSON.stringify(e)).join('\n');
+    const result = await analyzeSessionUsage(
+        makeMockDeps(),
+        '/home/user/.copilot/session-state/abc/events.jsonl',
+        content,
+    );
+    assert.equal(result.correctionCounts?.userCorrections, 1);
+    assert.equal(result.correctionMoments?.filter(m => m.type === 'user-correction').length, 1);
+    assert.match(result.correctionMoments?.find(m => m.type === 'user-correction')?.snippet ?? '', /revert/);
 });
 
 test('analyzeSessionUsage: CLI JSONL session produces model efficiency counters with retry detection', async () => {

@@ -70,6 +70,7 @@ import type {
   EvaluatedInsight,
   InsightStateBag,
   ToolCurationAnalysis,
+  CorrectionCounts,
   CorrectionReport,
   CorrectionRepoGroup,
   CorrectionSessionEntry,
@@ -445,7 +446,7 @@ type UsageAnalysisTab = 'activity' | 'tools' | 'health' | 'worktrees' | 'insight
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 68; // per-model tool-call counters for the local model leaderboard
+	private static readonly CACHE_VERSION = 69; // uncapped correction counts and generated-message filtering
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -4400,21 +4401,33 @@ class CopilotTokenTracker implements vscode.Disposable {
 		let sessionsWithMoments = 0;
 		for (const [repository, entries] of [...byRepo.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
 			entries.sort((a, b) => b.mtime - a.mtime);
-			const sessions: CorrectionSessionEntry[] = entries
-				.slice(0, CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO)
+			const selectedEntries = entries.slice(0, CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO);
+			const sessions: CorrectionSessionEntry[] = selectedEntries
 				.map(e => ({
 					file: e.sessionFile,
 					title: e.sessionData.title ?? null,
 					lastInteraction: e.sessionData.lastInteraction ?? null,
 					moments: e.sessionData.usageAnalysis!.correctionMoments!,
+					totalMoments: this.correctionMomentCount(
+						e.sessionData.usageAnalysis!.correctionCounts
+							?? _summarizeCorrectionMoments(e.sessionData.usageAnalysis!.correctionMoments!)
+					),
 				}));
 			const counts = _createEmptyCorrectionCounts();
-			for (const s of sessions) { _mergeCorrectionCounts(counts, _summarizeCorrectionMoments(s.moments)); }
+			for (const entry of selectedEntries) {
+				const analysis = entry.sessionData.usageAnalysis!;
+				_mergeCorrectionCounts(counts, analysis.correctionCounts ?? _summarizeCorrectionMoments(analysis.correctionMoments!));
+			}
 			_mergeCorrectionCounts(totals, counts);
 			sessionsWithMoments += sessions.length;
 			repos.push({ repository, sessions, counts, sessionsWithMoments: sessions.length });
 		}
 		return { sessionsPerRepo: CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO, repos, counts: totals, sessionsWithMoments };
+	}
+
+	private correctionMomentCount(counts: CorrectionCounts): number {
+		return counts.userCorrections + counts.editRetries + counts.editSelfCorrections
+			+ counts.toolErrors + counts.agentSelfCorrections;
 	}
 
 	/**

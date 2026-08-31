@@ -2,6 +2,7 @@ import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import {
     detectCorrectionMoments,
+    detectCorrectionAnalysis,
     summarizeCorrectionMoments,
     mergeCorrectionCounts,
     createEmptyCorrectionCounts,
@@ -62,6 +63,8 @@ test('user-correction: leaves ordinary requests alone', () => {
         'can you stop the server when done?',  // "stop" only counts as an imperative correction
         'run the tests',
         'note: actually is fine inside prose-only requests',  // no comma after "actually"
+        'No rulesets matched your search',
+        'No blocker remaining — the work is done',
     ];
     for (const message of cases) {
         const moments = detectCorrectionMoments([{ userMessage: message }]);
@@ -212,6 +215,32 @@ test('a single turn cannot exceed MAX_MOMENTS_PER_SESSION', () => {
     const moments = detectCorrectionMoments([{ userMessage: 'do all the things', toolCalls }]);
     assert.equal(moments.length, MAX_MOMENTS_PER_SESSION);
     assert.ok(moments.every(m => m.turnNumber === 1));
+});
+
+test('uncapped counts retain a late user correction in the capped detail sample', () => {
+    const noisyTurn = {
+        toolCalls: Array.from({ length: MAX_MOMENTS_PER_SESSION + 10 }, (_, i) => ({
+            toolName: `tool${i}`,
+            isError: true,
+        })),
+    };
+    const result = detectCorrectionAnalysis([noisyTurn, { userMessage: 'please revert that' }]);
+    assert.equal(result.counts.toolErrors, MAX_MOMENTS_PER_SESSION + 10);
+    assert.equal(result.counts.userCorrections, 1);
+    assert.equal(result.moments.length, MAX_MOMENTS_PER_SESSION);
+    assert.ok(result.moments.some(m => m.type === 'user-correction' && m.turnNumber === 2));
+});
+
+test('uncapped counts track retries after tool-error details reach the cap', () => {
+    const failedCalls = Array.from({ length: MAX_MOMENTS_PER_SESSION + 10 }, (_, i) => ({
+        toolName: `tool${i}`,
+        isError: true,
+    }));
+    const retryCalls = failedCalls.map(({ toolName }) => ({ toolName }));
+    const result = detectCorrectionAnalysis([{ toolCalls: failedCalls }, { toolCalls: retryCalls }]);
+    assert.equal(result.counts.toolErrors, MAX_MOMENTS_PER_SESSION + 10);
+    assert.equal(result.counts.toolErrorsRetried, MAX_MOMENTS_PER_SESSION + 10);
+    assert.equal(result.moments.length, MAX_MOMENTS_PER_SESSION);
 });
 
 test('snippets are whitespace-normalized and length-capped', () => {

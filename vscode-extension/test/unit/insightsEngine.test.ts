@@ -711,11 +711,13 @@ function emptyCorrections() {
 
 test('corrections-user-pushback: fires at >= 3 user corrections', () => {
 	const ctx = makeCtx();
-	ctx.last30Days.corrections = { ...emptyCorrections(), userCorrections: 3, sessionsWithMoments: 2 };
+	ctx.last30Days.corrections = { ...emptyCorrections(), userCorrections: 3, sessionsWithMoments: 9, sessionsWithUserCorrections: 2 };
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === 'corrections-user-pushback');
 	assert.ok(insight, 'should fire at the threshold');
 	assert.match(insight.body, /3 times/);
+	assert.match(insight.body, /across 2 sessions/);
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openCorrectionsTab');
 });
 
 test('corrections-user-pushback: does NOT fire below the threshold or without data', () => {
