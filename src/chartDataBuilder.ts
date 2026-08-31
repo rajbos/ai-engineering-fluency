@@ -1,7 +1,7 @@
 import type { DailyTokenStats, ChartDataPayload, ModelUsage, LanguageUsage } from './types';
 import { addModelUsage, COPILOT_EDITOR_NAMES } from './statsHelpers';
 import { mergeDailyModelEfficiency } from './modelEfficiency';
-import { getModelDisplayName, getCustomProviderGroup } from './webview/shared/modelUtils';
+import { getModelDisplayName, getCustomProviderGroup, getModelLookupCandidates } from './webview/shared/modelUtils';
 
 // Re-exported for existing consumers; the set lives in statsHelpers so the
 // period accumulator can use it without a circular import.
@@ -44,8 +44,9 @@ const MODEL_PROVIDER_PREFIXES: Array<[string, string]> = [
 export function getModelBillingProvider(modelId: string): string {
 	const customGroup = getCustomProviderGroup(modelId);
 	if (customGroup) { return customGroup; }
-	const id = modelId.toLowerCase();
-	const match = MODEL_PROVIDER_PREFIXES.find(([prefix]) => id.startsWith(prefix));
+	const match = getModelLookupCandidates(modelId)
+		.flatMap(candidate => MODEL_PROVIDER_PREFIXES.filter(([prefix]) => candidate.toLowerCase().startsWith(prefix)))
+		.at(0);
 	return match ? match[1] : 'Other';
 }
 

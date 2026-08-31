@@ -13,6 +13,7 @@ import styles from './styles.css';
 import { getWindowData } from '../../../../src/webview/shared/dataLoader';
 import { registerMessageHandler } from '../shared/messageHandler';
 import { getModelDisplayName } from '../../../../src/webview/shared/modelUtils';
+import { getModelBillingProvider } from '../../../../src/chartDataBuilder';
 import { getLongContextInfo } from '../../../../src/tokenEstimation';
 import { deriveModelEfficiencyRates, computeEfficiencyLowUsageThreshold } from '../../../../src/modelEfficiency';
 import type { ModelPricing, ModelEfficiencyUsage, ModelEfficiencyCounters } from '../../../../src/types';
@@ -21,6 +22,7 @@ import { applyBillingFields, type CopilotApiBalance } from './billingStatsSaniti
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
+import { scaleBubbleRadius } from './modelLeaderboard';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -4334,6 +4336,8 @@ function buildUnknownMcpToolsBannerHtml(stats: UsageAnalysisStats): string {
 
 type EfficiencyPeriodKey = 'today' | 'last30Days' | 'month';
 type EfficiencyMetricKey = 'cost' | 'outputTokens' | 'toolSteps';
+type EfficiencyBubbleMetricKey = 'calls' | EfficiencyMetricKey;
+type EfficiencyColorMode = 'vendor' | 'model';
 type EfficiencyRow = { model: string; counters: ModelEfficiencyCounters; rates: ReturnType<typeof deriveModelEfficiencyRates> };
 type EfficiencySortColumn = 'model' | 'calls' | 'oneShotRate' | 'retryRate' | 'selfCorrectionRate' | 'costPerCall' | 'outputTokensPerCall' | 'toolCallsPerCall' | 'cacheHitRate';
 
@@ -4346,6 +4350,8 @@ const EFFICIENCY_PERIOD_TO_DATA_KEY: Partial<Record<Period, EfficiencyPeriodKey>
 let efficiencySelectedPeriod: Period = 'last30';
 let efficiencyPeriod: EfficiencyPeriodKey = 'last30Days';
 let efficiencyMetric: EfficiencyMetricKey = 'cost';
+let efficiencyBubbleMetric: EfficiencyBubbleMetricKey = 'calls';
+let efficiencyColorMode: EfficiencyColorMode = 'vendor';
 let efficiencySortColumn: EfficiencySortColumn = 'calls';
 let efficiencySortDirection: 'asc' | 'desc' = 'desc';
 let cachedModelEfficiency: Partial<Record<EfficiencyPeriodKey, ModelEfficiencyUsage | undefined>> = {};
@@ -4363,6 +4369,13 @@ type EfficiencyMetricDef = {
 	key: EfficiencyMetricKey;
 	label: string;
 	axisLabel: string;
+	value: (row: EfficiencyRow) => number | null;
+	format: (value: number | null) => string;
+};
+
+type EfficiencyBubbleMetricDef = {
+	key: EfficiencyBubbleMetricKey;
+	label: string;
 	value: (row: EfficiencyRow) => number | null;
 	format: (value: number | null) => string;
 };
@@ -4385,6 +4398,11 @@ const EFFICIENCY_METRICS: EfficiencyMetricDef[] = [
 	{ key: 'cost', label: 'Cost', axisLabel: 'Average cost per turn', value: row => row.rates.costPerCall, format: formatUnitCost },
 	{ key: 'outputTokens', label: 'Output tokens', axisLabel: 'Average output tokens per turn', value: row => row.rates.outputTokensPerCall, format: value => value === null ? '—' : formatCompact(Math.round(value)) },
 	{ key: 'toolSteps', label: 'Tool steps', axisLabel: 'Average tool steps per turn', value: row => row.rates.toolCallsPerCall, format: formatPerTurn },
+];
+
+const EFFICIENCY_BUBBLE_METRICS: EfficiencyBubbleMetricDef[] = [
+	{ key: 'calls', label: 'Local use', value: row => row.counters.calls, format: value => `${formatNumber(value ?? 0)} turns` },
+	...EFFICIENCY_METRICS.map(({ key, label, value, format }) => ({ key, label, value, format })),
 ];
 
 function buildLocalUsageCell(row: EfficiencyRow, totalCalls: number): string {
@@ -4443,12 +4461,28 @@ function filterLowUsageRows(rows: EfficiencyRow[], usage: ModelEfficiencyUsage):
 	return { rows: filtered, hiddenNote };
 }
 
-const MODEL_COLOR_VARS = ['--stage-1-color', '--stage-2-color', '--stage-3-color', '--stage-4-color', '--success-fg', '--warning-fg'];
+const MODEL_COLOR_VARS = ['--stage-1-color', '--stage-2-color', '--stage-3-color', '--stage-4-color', '--success-fg', '--warning-fg', '--link-color'];
+const PROVIDER_COLOR_VARS: Record<string, string> = {
+	Anthropic: '--warning-fg',
+	OpenAI: '--success-fg',
+	Google: '--stage-3-color',
+	'Mistral AI': '--stage-2-color',
+	xAI: '--stage-4-color',
+	Alibaba: '--stage-1-color',
+	Microsoft: '--link-color',
+};
 
-function getModelColor(model: string): string {
+function getColorForKey(key: string): string {
 	let hash = 0;
-	for (let i = 0; i < model.length; i++) { hash = ((hash << 5) - hash + model.charCodeAt(i)) | 0; }
+	for (let i = 0; i < key.length; i++) { hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0; }
 	return `var(${MODEL_COLOR_VARS[Math.abs(hash) % MODEL_COLOR_VARS.length]})`;
+}
+
+function getEfficiencyColor(model: string): string {
+	if (efficiencyColorMode === 'model') { return getColorForKey(model); }
+	const provider = getModelBillingProvider(model);
+	const colorVar = PROVIDER_COLOR_VARS[provider];
+	return colorVar ? `var(${colorVar})` : getColorForKey(provider);
 }
 
 function formatMetricTick(metric: EfficiencyMetricDef, value: number): string {
@@ -4469,53 +4503,84 @@ function buildEfficiencyGrid(metric: EfficiencyMetricDef, maxX: number): string 
 	return `<g class="efficiency-grid">${vertical}${horizontal}</g>`;
 }
 
-function buildEfficiencyPoint(row: EfficiencyRow, metric: EfficiencyMetricDef, maxX: number, index: number): string {
+function buildEfficiencyPoint(
+	row: EfficiencyRow,
+	metric: EfficiencyMetricDef,
+	bubbleMetric: EfficiencyBubbleMetricDef,
+	maxX: number,
+	maxBubbleValue: number,
+): string {
 	const value = metric.value(row) ?? 0;
+	const bubbleValue = bubbleMetric.value(row) ?? 0;
 	const rate = row.rates.oneShotRate ?? 0;
 	const x = 76 + (value / maxX) * 760;
 	const y = 286 - rate * 262;
-	const color = getModelColor(row.model);
+	const radius = scaleBubbleRadius(bubbleValue, maxBubbleValue);
+	const color = getEfficiencyColor(row.model);
 	const labelY = y < 46 ? y + 18 : y - 10;
 	const rawLabel = getModelDisplayName(row.model);
 	const label = escapeHtml(rawLabel);
-	const aria = `${rawLabel}: ${formatRatePercent(rate)} one-shot edit rate, ${metric.format(value)} ${metric.axisLabel.toLowerCase()}`;
+	const aria = `${rawLabel}: ${formatRatePercent(rate)} one-shot edit rate, ${metric.format(value)} ${metric.axisLabel.toLowerCase()}, bubble sized by ${bubbleMetric.label.toLowerCase()}: ${bubbleMetric.format(bubbleValue)}`;
 	return `<g class="efficiency-point" style="--model-color:${color}" tabindex="0" role="img" aria-label="${escapeHtml(aria)}">
-		<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${index < 3 ? 6 : 5}"><title>${escapeHtml(aria)}</title></circle>
-		<text x="${(x + 9).toFixed(1)}" y="${labelY.toFixed(1)}">${label}</text>
+		<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(aria)}</title></circle>
+		<text x="${(x + radius + 4).toFixed(1)}" y="${labelY.toFixed(1)}">${label}</text>
 	</g>`;
+}
+
+function buildEfficiencyColorLegendHtml(rows: EfficiencyRow[]): string {
+	if (efficiencyColorMode !== 'vendor') { return ''; }
+	const providers = [...new Set(rows.map(row => getModelBillingProvider(row.model)))].sort();
+	const items = providers.map(provider => {
+		const model = rows.find(row => getModelBillingProvider(row.model) === provider)?.model ?? '';
+		return `<span class="efficiency-legend-item" style="--model-color:${getEfficiencyColor(model)}"><span aria-hidden="true"></span>${escapeHtml(provider)}</span>`;
+	}).join('');
+	return `<div class="efficiency-vendor-legend" aria-label="Model vendor colors">${items}</div>`;
 }
 
 function buildEfficiencyChartHtml(rows: EfficiencyRow[]): string {
 	const metric = EFFICIENCY_METRICS.find(item => item.key === efficiencyMetric) ?? EFFICIENCY_METRICS[0];
+	const bubbleMetric = EFFICIENCY_BUBBLE_METRICS.find(item => item.key === efficiencyBubbleMetric) ?? EFFICIENCY_BUBBLE_METRICS[0];
 	const chartRows = rows.filter(row => row.rates.oneShotRate !== null && metric.value(row) !== null)
 		.sort((a, b) => b.counters.calls - a.counters.calls).slice(0, 12);
 	if (chartRows.length === 0) {
 		return '<div class="model-leaderboard-empty"><strong>No comparable edit data yet.</strong><span>The chart appears after local sessions record both a model and structured edit turns.</span></div>';
 	}
 	const maxX = Math.max(...chartRows.map(row => metric.value(row) ?? 0), 0.0001) * 1.08;
-	const points = chartRows.map((row, index) => buildEfficiencyPoint(row, metric, maxX, index)).join('');
+	const maxBubbleValue = Math.max(...chartRows.map(row => bubbleMetric.value(row) ?? 0), 0);
+	const points = chartRows.map(row => buildEfficiencyPoint(row, metric, bubbleMetric, maxX, maxBubbleValue)).join('');
 	return `<div class="efficiency-chart-wrap">
-		<svg class="efficiency-chart" viewBox="0 0 900 350" role="img" aria-label="One-shot edit rate compared with ${escapeHtml(metric.axisLabel.toLowerCase())}">
+		<svg class="efficiency-chart" viewBox="0 0 900 350" role="img" aria-label="One-shot edit rate compared with ${escapeHtml(metric.axisLabel.toLowerCase())}; bubble size represents ${escapeHtml(bubbleMetric.label.toLowerCase())}">
 			${buildEfficiencyGrid(metric, maxX)}
 			<text class="efficiency-axis-title" x="456" y="344" text-anchor="middle">${escapeHtml(metric.axisLabel)}</text>
 			<text class="efficiency-axis-title" x="17" y="155" text-anchor="middle" transform="rotate(-90 17 155)">One-shot edit rate</text>
 			<text class="efficiency-chart-hint" x="836" y="17" text-anchor="end">higher is better ↑</text>
 			${points}
 		</svg>
-	</div>`;
+	</div>${buildEfficiencyColorLegendHtml(chartRows)}`;
 }
 
-function buildMetricControlsHtml(): string {
+function buildChartControlsHtml(): string {
 	const buttons = EFFICIENCY_METRICS.map(metric =>
 		`<button class="efficiency-metric-button${metric.key === efficiencyMetric ? ' active' : ''}" type="button" data-eff-metric="${metric.key}" aria-pressed="${metric.key === efficiencyMetric}">${metric.label}</button>`
 	).join('');
-	return `<div class="efficiency-metric-selector" role="group" aria-label="Efficiency comparison metric">${buttons}</div>`;
+	const bubbleOptions = EFFICIENCY_BUBBLE_METRICS.map(metric =>
+		`<option value="${metric.key}"${metric.key === efficiencyBubbleMetric ? ' selected' : ''}>${metric.label}</option>`
+	).join('');
+	const colorOptions = [
+		{ value: 'vendor', label: 'Vendor' },
+		{ value: 'model', label: 'Model' },
+	].map(option => `<option value="${option.value}"${option.value === efficiencyColorMode ? ' selected' : ''}>${option.label}</option>`).join('');
+	return `<div class="efficiency-chart-controls">
+		<div class="efficiency-control"><span>X-axis</span><div class="efficiency-metric-selector" role="group" aria-label="Efficiency comparison metric">${buttons}</div></div>
+		<label class="efficiency-control"><span>Bubble size</span><select id="eff-bubble-metric">${bubbleOptions}</select></label>
+		<label class="efficiency-control"><span>Color by</span><select id="eff-color-mode">${colorOptions}</select></label>
+	</div>`;
 }
 
 function buildEfficiencyTableHtml(rows: EfficiencyRow[], totalCalls: number): string {
 	const tableRows = rows.map(row => {
 		const cells = EFFICIENCY_COLUMN_DEFS.map(column => `<td>${column.render(row, totalCalls)}</td>`).join('');
-		return `<tr style="--model-color:${getModelColor(row.model)}">${cells}</tr>`;
+		return `<tr style="--model-color:${getEfficiencyColor(row.model)}">${cells}</tr>`;
 	}).join('');
 	const headers = EFFICIENCY_COLUMN_DEFS.map(column =>
 		`<th class="sortable" data-eff-sort="${column.sortKey}" title="${column.title}">${column.label}${getEfficiencySortIndicator(column.sortKey)}</th>`
@@ -4532,7 +4597,7 @@ function buildModelEfficiencyContentHtml(): string {
 	const totalCalls = allRows.reduce((sum, row) => sum + row.counters.calls, 0);
 	const filtered = filterLowUsageRows(allRows, usage);
 	const note = filtered.hiddenNote ? `<span class="model-leaderboard-filter-note">${filtered.hiddenNote}</span>` : '';
-	return `<div class="efficiency-chart-header"><div><strong>Efficiency frontier</strong><span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span></div>${buildMetricControlsHtml()}</div>
+	return `<div class="efficiency-chart-header"><div><strong>Efficiency frontier</strong><span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span></div>${buildChartControlsHtml()}</div>
 		${buildEfficiencyChartHtml(filtered.rows)}
 		<div class="model-leaderboard-heading"><div><strong>Most used models locally</strong><span>Ranked by your local turns; all averages use the same selected period.</span></div>${note}</div>
 		${buildEfficiencyTableHtml(filtered.rows, totalCalls)}`;
@@ -4591,7 +4656,7 @@ function handleEfficiencySortClick(th: HTMLElement): void {
 	rerenderModelEfficiencyContent();
 }
 
-/** Wires sortable headers, metric selection, and the low-usage filter. */
+/** Wires sortable headers, chart controls, and the low-usage filter. */
 function setupModelEfficiencySection(): void {
 	const section = document.getElementById('section-model-efficiency');
 	if (!section) { return; }
@@ -4606,9 +4671,15 @@ function setupModelEfficiencySection(): void {
 		}
 	});
 	section.addEventListener('change', (event) => {
-		const target = event.target as HTMLInputElement;
+		const target = event.target as HTMLInputElement | HTMLSelectElement;
 		if (target.id === 'eff-filter-low-usage') {
-			efficiencyFilterLowUsage = target.checked;
+			efficiencyFilterLowUsage = (target as HTMLInputElement).checked;
+			rerenderModelEfficiencyContent();
+		} else if (target.id === 'eff-bubble-metric' && EFFICIENCY_BUBBLE_METRICS.some(item => item.key === target.value)) {
+			efficiencyBubbleMetric = target.value as EfficiencyBubbleMetricKey;
+			rerenderModelEfficiencyContent();
+		} else if (target.id === 'eff-color-mode' && (target.value === 'vendor' || target.value === 'model')) {
+			efficiencyColorMode = target.value;
 			rerenderModelEfficiencyContent();
 		}
 	});
