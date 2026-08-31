@@ -340,51 +340,93 @@ function makeGitRepoWithRemote(remoteUrl: string): string {
 	return dir;
 }
 
-test('discoverGitHubRepos: matches a github.com remote', () => {
+test('discoverGitHubRepos: matches a github.com remote', async () => {
 	const dir = makeGitRepoWithRemote('https://github.com/rajbos/ai-engineering-fluency.git');
 	try {
-		const repos = discoverGitHubRepos([dir]);
+		const repos = await discoverGitHubRepos([dir]);
 		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test('discoverGitHubRepos: ignores a non-github.com remote when no enterprise URI is configured', () => {
+test('discoverGitHubRepos: ignores a non-github.com remote when no enterprise URI is configured', async () => {
 	const dir = makeGitRepoWithRemote('https://customer.ghe.com/rajbos/private-repo.git');
 	try {
-		const repos = discoverGitHubRepos([dir]);
+		const repos = await discoverGitHubRepos([dir]);
 		assert.deepEqual(repos, []);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test('discoverGitHubRepos: matches a GHE.com remote when the enterprise URI is configured', () => {
+test('discoverGitHubRepos: matches a GHE.com remote when the enterprise URI is configured', async () => {
 	const dir = makeGitRepoWithRemote('https://customer.ghe.com/rajbos/private-repo.git');
 	try {
-		const repos = discoverGitHubRepos([dir], 'https://customer.ghe.com');
+		const repos = await discoverGitHubRepos([dir], 'https://customer.ghe.com');
 		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'private-repo' }]);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test('discoverGitHubRepos: still matches github.com remotes when an enterprise URI is also configured', () => {
+test('discoverGitHubRepos: still matches github.com remotes when an enterprise URI is also configured', async () => {
 	const dir = makeGitRepoWithRemote('https://github.com/rajbos/ai-engineering-fluency.git');
 	try {
-		const repos = discoverGitHubRepos([dir], 'https://customer.ghe.com');
+		const repos = await discoverGitHubRepos([dir], 'https://customer.ghe.com');
 		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
 
-test('discoverGitHubRepos: matches an on-prem GitHub Enterprise Server remote via SSH form', () => {
+test('discoverGitHubRepos: matches an on-prem GitHub Enterprise Server remote via SSH form', async () => {
 	const dir = makeGitRepoWithRemote('git@github.acme-corp.com:rajbos/internal-tool.git');
 	try {
-		const repos = discoverGitHubRepos([dir], 'https://github.acme-corp.com');
+		const repos = await discoverGitHubRepos([dir], 'https://github.acme-corp.com');
 		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'internal-tool' }]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('discoverGitHubRepos: skips non-git and missing paths without throwing', async () => {
+	const dir = makeGitRepoWithRemote('https://github.com/rajbos/ai-engineering-fluency.git');
+	const notARepo = fs.mkdtempSync(path.join(os.tmpdir(), 'discover-gh-notrepo-'));
+	try {
+		const repos = await discoverGitHubRepos([notARepo, path.join(os.tmpdir(), 'does-not-exist-xyz'), dir]);
+		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+		fs.rmSync(notARepo, { recursive: true, force: true });
+	}
+});
+
+test('discoverGitHubRepos: deduplicates repos reachable from multiple workspace paths', async () => {
+	const dir = makeGitRepoWithRemote('https://github.com/rajbos/ai-engineering-fluency.git');
+	try {
+		const repos = await discoverGitHubRepos([dir, dir]);
+		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('discoverGitHubRepos: does not match a github.com mention inside another host\'s URL', async () => {
+	const dir = makeGitRepoWithRemote('https://evil.example.com/github.com/rajbos/not-a-match.git');
+	try {
+		const repos = await discoverGitHubRepos([dir]);
+		assert.deepEqual(repos, []);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
+
+test('discoverGitHubRepos: matches an ssh://git@ remote', async () => {
+	const dir = makeGitRepoWithRemote('ssh://git@github.com/rajbos/ai-engineering-fluency.git');
+	try {
+		const repos = await discoverGitHubRepos([dir]);
+		assert.deepEqual(repos, [{ owner: 'rajbos', repo: 'ai-engineering-fluency' }]);
 	} finally {
 		fs.rmSync(dir, { recursive: true, force: true });
 	}

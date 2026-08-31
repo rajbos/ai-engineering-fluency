@@ -34,6 +34,8 @@ export type RepoPrStatsResult = {
 	repos: RepoPrInfo[];
 	authenticated: boolean;
 	since: string; // ISO date string
+	/** Set when the collection itself failed (not a per-repo error) — the panel shows this instead of hanging on "Loading…". */
+	error?: string;
 };
 
 // ---------------------------------------------------------------------------
@@ -449,9 +451,70 @@ export async function fetchRepoPrs(
 	return { prs: allPrs };
 }
 
-/** Escape a string for safe embedding inside a regular expression. */
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+/** Maximum number of concurrent `git remote` probes during repo discovery. */
+const DISCOVERY_CONCURRENCY = 8;
+
+/** Anchored matcher for the scp-like remote form `git@host:owner/repo(.git)` (a `/` separator after the host is also accepted). */
+const SCP_LIKE_REMOTE_PATTERN = /^git@([^:/]+)[:/]([^/]+)\/([^/\s]+?)(?:\.git)?$/i;
+
+/** Collect the accepted GitHub hosts: github.com plus an optional enterprise host. */
+function buildGitHubHosts(enterpriseUri?: string): Set<string> {
+	const hosts = new Set<string>(['github.com']);
+	if (enterpriseUri) {
+		try {
+			const enterpriseHost = new URL(enterpriseUri).host.toLowerCase();
+			if (enterpriseHost) { hosts.add(enterpriseHost); }
+		} catch { /* ignore invalid URI — fall back to github.com only */ }
+	}
+	return hosts;
+}
+
+/** Strip a trailing `.git` suffix from a repo name, matching git's own remote handling. */
+function stripGitSuffix(repo: string): string {
+	return repo.toLowerCase().endsWith('.git') ? repo.slice(0, -'.git'.length) : repo;
+}
+
+/**
+ * Extract owner/repo from a git remote URL when its host is one of `hosts`.
+ * Accepts the remote forms git actually produces for GitHub hosts:
+ * https://host/o/r(.git), ssh://git@host/o/r and the scp-like git@host:o/r.
+ * Parsed with `new URL()` where possible (no unanchored host regex) with an
+ * anchored fallback for the scp-like form, which is not a valid URL.
+ */
+function parseGitHubRemote(remote: string, hosts: Set<string>): { owner: string; repo: string } | undefined {
+	try {
+		const url = new URL(remote);
+		if ((url.protocol === 'https:' || url.protocol === 'http:' || url.protocol === 'ssh:') && hosts.has(url.host.toLowerCase())) {
+			const segments = url.pathname.split('/').filter((segment) => segment.length > 0);
+			if (segments.length === 2) {
+				return { owner: segments[0], repo: stripGitSuffix(segments[1]) };
+			}
+		}
+		return undefined;
+	} catch {
+		// Not a URL — fall through to the scp-like form below.
+	}
+	const match = SCP_LIKE_REMOTE_PATTERN.exec(remote);
+	if (match && hosts.has(match[1].toLowerCase())) {
+		return { owner: match[2], repo: match[3] };
+	}
+	return undefined;
+}
+
+/**
+ * Read the `origin` remote of one path, resolving to undefined on any failure. Async with a
+ * hard timeout — unlike execSync this never blocks the extension host, which matters when the
+ * customization matrix contributes hundreds of workspace paths (a sync probe per path would
+ * freeze the host for minutes and leave every webview stuck on "Loading…").
+ */
+function getGitRemoteOrigin(cwd: string): Promise<string | undefined> {
+	return new Promise((resolve) => {
+		childProcess.execFile(
+			'git', ['remote', 'get-url', 'origin'],
+			{ cwd, encoding: 'utf8', timeout: 3000, windowsHide: true },
+			(error, stdout) => resolve(error ? undefined : String(stdout ?? '').trim()),
+		);
+	});
 }
 
 /**
@@ -461,33 +524,37 @@ function escapeRegExp(value: string): string {
  * Always matches github.com remotes; when `enterpriseUri` is configured (the
  * `github-enterprise.uri` setting), remotes on that host (e.g. a `tenant.ghe.com`
  * or on-prem GitHub Enterprise Server) are recognized too.
+ *
+ * Probes run with bounded concurrency so a large workspace-path list costs the
+ * slowest handful of `git` calls rather than the sum of all of them.
  */
-export function discoverGitHubRepos(workspacePaths: string[], enterpriseUri?: string): { owner: string; repo: string }[] {
+export async function discoverGitHubRepos(workspacePaths: string[], enterpriseUri?: string): Promise<{ owner: string; repo: string }[]> {
+	const gitHubHosts = buildGitHubHosts(enterpriseUri);
+	const uniquePaths = [...new Set(workspacePaths)];
+	const remotes = new Array<string | undefined>(uniquePaths.length);
+	let nextIndex = 0;
+	const worker = async (): Promise<void> => {
+		while (nextIndex < uniquePaths.length) {
+			const i = nextIndex++;
+			try {
+				remotes[i] = await getGitRemoteOrigin(uniquePaths[i]);
+			} catch {
+				remotes[i] = undefined; // Not a git repo or no remote — skip
+			}
+		}
+	};
+	await Promise.all(Array.from({ length: Math.min(DISCOVERY_CONCURRENCY, uniquePaths.length) }, worker));
+
 	const seen = new Set<string>();
 	const repos: { owner: string; repo: string }[] = [];
-	let enterpriseHost: string | undefined;
-	if (enterpriseUri) {
-		try { enterpriseHost = new URL(enterpriseUri).host; } catch { /* ignore invalid URI — fall back to github.com only */ }
-	}
-	const hostAlternation = enterpriseHost ? `github\\.com|${escapeRegExp(enterpriseHost)}` : 'github\\.com';
-	const remotePattern = new RegExp(`(?:${hostAlternation})[:/]([^/]+)\\/([^/\\s]+?)(?:\\.git)?$`, 'i');
-	for (const workspacePath of workspacePaths) {
-		try {
-			const remote = childProcess.execSync('git remote get-url origin', {
-				cwd: workspacePath,
-				encoding: 'utf8',
-				timeout: 3000,
-				stdio: ['pipe', 'pipe', 'pipe'],
-			}).trim();
-			const match = remote.match(remotePattern);
-			if (!match) { continue; }
-			const key = `${match[1]}/${match[2]}`.toLowerCase();
-			if (seen.has(key)) { continue; }
-			seen.add(key);
-			repos.push({ owner: match[1], repo: match[2] });
-		} catch {
-			// Not a git repo or no remote — skip
-		}
+	for (const remote of remotes) {
+		if (!remote) { continue; }
+		const parsed = parseGitHubRemote(remote, gitHubHosts);
+		if (!parsed) { continue; }
+		const key = `${parsed.owner}/${parsed.repo}`.toLowerCase();
+		if (seen.has(key)) { continue; }
+		seen.add(key);
+		repos.push(parsed);
 	}
 	return repos;
 }
