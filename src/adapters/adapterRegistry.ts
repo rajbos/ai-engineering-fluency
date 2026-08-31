@@ -20,7 +20,7 @@ import { ContinueDataAccess } from '../continue';
 import { EclipseDataAccess } from '../eclipse';
 import { VisualStudioDataAccess } from '../visualstudio';
 import { ClaudeCodeDataAccess } from '../claudecode';
-import { ClaudeDesktopCoworkDataAccess } from '../claudedesktop';
+import { ClaudeDesktopDataAccess } from '../claudedesktop';
 import { MistralVibeDataAccess } from '../mistralvibe';
 import { GeminiCliDataAccess } from '../geminicli';
 import { AntigravityDataAccess } from '../antigravity';
@@ -63,7 +63,7 @@ continue_: ContinueDataAccess;
 eclipse: EclipseDataAccess;
 visualStudio: VisualStudioDataAccess;
 claudeCode: ClaudeCodeDataAccess;
-claudeDesktopCowork: ClaudeDesktopCoworkDataAccess;
+claudeDesktop: ClaudeDesktopDataAccess;
 mistralVibe: MistralVibeDataAccess;
 geminiCli: GeminiCliDataAccess;
 antigravity: AntigravityDataAccess;
@@ -107,7 +107,7 @@ continue_: new ContinueDataAccess(),
 eclipse: new EclipseDataAccess(),
 visualStudio: new VisualStudioDataAccess(),
 claudeCode: new ClaudeCodeDataAccess(),
-claudeDesktopCowork: new ClaudeDesktopCoworkDataAccess(),
+claudeDesktop: new ClaudeDesktopDataAccess(),
 mistralVibe: new MistralVibeDataAccess(),
 geminiCli: new GeminiCliDataAccess(),
 antigravity: new AntigravityDataAccess(),
@@ -136,7 +136,7 @@ new VisualStudioAdapter(deps.visualStudio, deps.estimateTokens),
 new ContinueAdapter(deps.continue_),
 new EclipseAdapter(deps.eclipse),
 new ClaudeDesktopAdapter(
-deps.claudeDesktopCowork,
+deps.claudeDesktop,
 deps.isMcpTool,
 deps.extractMcpServerName,
 deps.estimateTokens

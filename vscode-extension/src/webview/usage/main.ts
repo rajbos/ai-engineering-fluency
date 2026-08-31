@@ -95,6 +95,78 @@ type EvaluatedInsight = {
 	allowToast?: boolean;
 };
 
+// ── Correction-moment types ─────────────────────────────────────────────────
+// These mirror the interfaces in src/types.ts (CorrectionMoment etc.) and must
+// be kept in sync manually — the webview bundle cannot import them directly.
+
+type CorrectionMomentType = 'user-correction' | 'edit-retry' | 'edit-self-correction' | 'tool-error' | 'agent-self-correction';
+
+type CorrectionMoment = {
+	type: CorrectionMomentType;
+	turnNumber: number;
+	timestamp: string | null;
+	snippet: string;
+	tool?: string;
+	file?: string;
+	retried?: boolean;
+	matchedPattern?: string;
+};
+
+type CorrectionCounts = {
+	userCorrections: number;
+	editRetries: number;
+	editSelfCorrections: number;
+	toolErrors: number;
+	toolErrorsRetried: number;
+	agentSelfCorrections: number;
+};
+
+type CorrectionSessionEntry = {
+	file: string;
+	title?: string | null;
+	lastInteraction?: string | null;
+	moments: CorrectionMoment[];
+};
+
+type CorrectionRepoGroup = {
+	repository: string;
+	sessions: CorrectionSessionEntry[];
+	counts: CorrectionCounts;
+	sessionsWithMoments: number;
+};
+
+type CorrectionReport = {
+	sessionsPerRepo: number;
+	repos: CorrectionRepoGroup[];
+	counts: CorrectionCounts;
+	sessionsWithMoments: number;
+};
+
+// ── Repeated-task types ─────────────────────────────────────────────────────
+// Mirror the interfaces in src/types.ts (RepeatedTaskReport etc.) — keep in
+// sync manually; the webview bundle cannot import them directly.
+
+type RepeatedTaskSessionRef = {
+	file: string;
+	title?: string | null;
+	lastInteraction?: string | null;
+	repository?: string;
+};
+
+type RepeatedTaskCluster = {
+	representativePrompt: string;
+	sessionCount: number;
+	repositories: string[];
+	sessions: RepeatedTaskSessionRef[];
+	sharedKeywords: string[];
+};
+
+type RepeatedTaskReport = {
+	minClusterSize: number;
+	sessionsScanned: number;
+	clusters: RepeatedTaskCluster[];
+};
+
 type UsageAnalysisStats = {
 	today: UsageAnalysisPeriod;
 	last30Days: UsageAnalysisPeriod;
@@ -112,6 +184,10 @@ type UsageAnalysisStats = {
 	/** When true (default), rows tagged "auto" are hidden from the Tool Usage tables so only intentional tool calls are shown. */
 	hideAutomaticToolCalls?: boolean;
 	insights?: EvaluatedInsight[];
+	/** Correction-moment report: per-repo, over each repo's most recent sessions. Null when no moments were detected. */
+	correctionReport?: CorrectionReport | null;
+	/** Repeated-task candidates (skill suggestions). Null when no repeated task was found. */
+	repeatedTasks?: RepeatedTaskReport | null;
 	curationAnalysis?: ToolCurationAnalysis | null;
 	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
 	sessionColumnSettings?: { enabledColumns?: string[] };
@@ -663,6 +739,12 @@ function getUnknownMcpTools(stats: UsageAnalysisStats): string[] {
 	Object.entries(stats.today.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.month.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
+	// Also collect MCP server names — the "By Server" tables render them through the
+	// same friendly-name lookup, so an unmapped server name (e.g. `ccd_session`)
+	// would otherwise show raw without ever being flagged as missing.
+	Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
+	Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
+	Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
 	// Also collect all general tool calls so non-MCP tools without friendly names are caught
 	Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
 	Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
@@ -1400,6 +1482,105 @@ function sanitizeInsights(rawInsights: any[]): EvaluatedInsight[] {
 		}));
 }
 
+const CORRECTION_MOMENT_TYPES: CorrectionMomentType[] = ['user-correction', 'edit-retry', 'edit-self-correction', 'tool-error', 'agent-self-correction'];
+
+function sanitizeCorrectionMoment(raw: any): CorrectionMoment | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	if (!CORRECTION_MOMENT_TYPES.includes(raw.type) || typeof raw.snippet !== 'string') { return null; }
+	return {
+		type: raw.type,
+		turnNumber: typeof raw.turnNumber === 'number' ? raw.turnNumber : 0,
+		timestamp: typeof raw.timestamp === 'string' ? raw.timestamp : null,
+		snippet: raw.snippet,
+		tool: typeof raw.tool === 'string' ? raw.tool : undefined,
+		file: typeof raw.file === 'string' ? raw.file : undefined,
+		retried: raw.retried === true ? true : undefined,
+		matchedPattern: typeof raw.matchedPattern === 'string' ? raw.matchedPattern : undefined,
+	};
+}
+
+function sanitizeCorrectionCounts(raw: any): CorrectionCounts {
+	const num = (v: unknown): number => (typeof v === 'number' && isFinite(v) && v >= 0 ? v : 0);
+	return {
+		userCorrections: num(raw?.userCorrections),
+		editRetries: num(raw?.editRetries),
+		editSelfCorrections: num(raw?.editSelfCorrections),
+		toolErrors: num(raw?.toolErrors),
+		toolErrorsRetried: num(raw?.toolErrorsRetried),
+		agentSelfCorrections: num(raw?.agentSelfCorrections),
+	};
+}
+
+function sanitizeCorrectionSession(raw: any): CorrectionSessionEntry | null {
+	if (!raw || typeof raw !== 'object' || typeof raw.file !== 'string' || !Array.isArray(raw.moments)) { return null; }
+	const moments = raw.moments.map(sanitizeCorrectionMoment).filter((m: CorrectionMoment | null): m is CorrectionMoment => m !== null);
+	if (moments.length === 0) { return null; }
+	return {
+		file: raw.file,
+		title: typeof raw.title === 'string' ? raw.title : null,
+		lastInteraction: typeof raw.lastInteraction === 'string' ? raw.lastInteraction : null,
+		moments,
+	};
+}
+
+function sanitizeCorrectionRepoGroup(raw: any): CorrectionRepoGroup | null {
+	if (!raw || typeof raw !== 'object' || typeof raw.repository !== 'string' || !Array.isArray(raw.sessions)) { return null; }
+	const sessions = raw.sessions.map(sanitizeCorrectionSession).filter((s: CorrectionSessionEntry | null): s is CorrectionSessionEntry => s !== null);
+	if (sessions.length === 0) { return null; }
+	return {
+		repository: raw.repository,
+		sessions,
+		counts: sanitizeCorrectionCounts(raw.counts),
+		sessionsWithMoments: typeof raw.sessionsWithMoments === 'number' ? raw.sessionsWithMoments : sessions.length,
+	};
+}
+
+function sanitizeCorrectionReport(raw: any): CorrectionReport | null {
+	if (!raw || typeof raw !== 'object' || !Array.isArray(raw.repos)) { return null; }
+	const repos = raw.repos.map(sanitizeCorrectionRepoGroup).filter((r: CorrectionRepoGroup | null): r is CorrectionRepoGroup => r !== null);
+	if (repos.length === 0) { return null; }
+	return {
+		sessionsPerRepo: typeof raw.sessionsPerRepo === 'number' ? raw.sessionsPerRepo : 25,
+		repos,
+		counts: sanitizeCorrectionCounts(raw.counts),
+		sessionsWithMoments: typeof raw.sessionsWithMoments === 'number' ? raw.sessionsWithMoments : repos.reduce((n: number, g: CorrectionRepoGroup) => n + g.sessionsWithMoments, 0),
+	};
+}
+
+function sanitizeRepeatedTaskCluster(raw: any): RepeatedTaskCluster | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	if (typeof raw.representativePrompt !== 'string' || typeof raw.sessionCount !== 'number' || !Array.isArray(raw.sessions)) { return null; }
+	const sessions: RepeatedTaskSessionRef[] = raw.sessions
+		.filter((s: any) => s && typeof s === 'object' && typeof s.file === 'string')
+		.map((s: any): RepeatedTaskSessionRef => ({
+			file: s.file,
+			title: typeof s.title === 'string' ? s.title : null,
+			lastInteraction: typeof s.lastInteraction === 'string' ? s.lastInteraction : null,
+			repository: typeof s.repository === 'string' ? s.repository : undefined,
+		}));
+	if (sessions.length === 0) { return null; }
+	return {
+		representativePrompt: raw.representativePrompt,
+		// Derive from the sanitized session list so the UI count can never
+		// disagree with it (and NaN/float counts are impossible).
+		sessionCount: sessions.length,
+		repositories: Array.isArray(raw.repositories) ? raw.repositories.filter((r: unknown) => typeof r === 'string') : [],
+		sessions,
+		sharedKeywords: Array.isArray(raw.sharedKeywords) ? raw.sharedKeywords.filter((k: unknown) => typeof k === 'string') : [],
+	};
+}
+
+function sanitizeRepeatedTaskReport(raw: any): RepeatedTaskReport | null {
+	if (!raw || typeof raw !== 'object' || !Array.isArray(raw.clusters)) { return null; }
+	const clusters = raw.clusters.map(sanitizeRepeatedTaskCluster).filter((c: RepeatedTaskCluster | null): c is RepeatedTaskCluster => c !== null);
+	if (clusters.length === 0) { return null; }
+	return {
+		minClusterSize: typeof raw.minClusterSize === 'number' ? raw.minClusterSize : 2,
+		sessionsScanned: typeof raw.sessionsScanned === 'number' ? raw.sessionsScanned : 0,
+		clusters,
+	};
+}
+
 function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null {
 	if (!rawCa || typeof rawCa !== 'object') { return null; }
 	const ca = rawCa as Partial<ToolCurationAnalysis>;
@@ -1415,6 +1596,12 @@ function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null 
 			: { totalTokens: 0, byServer: {} },
 		recommendations: Array.isArray(ca.recommendations) ? ca.recommendations : [],
 	};
+}
+
+/** Sanitize the optional correction/repeated-task reports onto the stats object. */
+function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void {
+	sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
+	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
 }
 
 function sanitizeStats(raw: any): UsageAnalysisStats | null {
@@ -1466,6 +1653,8 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 		if (Array.isArray(raw.insights)) {
 			sanitized.insights = sanitizeInsights(raw.insights);
 		}
+
+		sanitizeOptionalReports(sanitized, raw);
 
 		// Pass through curationAnalysis (already structured server-side).
 		// Normalize required array/object fields so rendering paths don't throw on partial payloads.
@@ -2994,6 +3183,152 @@ function buildInsightsTabPanelHtml(insights: EvaluatedInsight[]): string {
 		</div>`;
 }
 
+// ── Corrections tab ─────────────────────────────────────────────────────────
+
+/** Badge with the number of sessions carrying correction moments (empty when none). */
+function correctionsCountBadgeHtml(report: CorrectionReport | null): string {
+	if (!report || report.sessionsWithMoments === 0) { return ''; }
+	return ` <span style="background:rgba(251,191,36,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${report.sessionsWithMoments}</span>`;
+}
+
+/** Corrections tab-bar button (extracted to keep buildUsageRootHtml under the complexity limit). */
+function correctionsTabButtonHtml(report: CorrectionReport | null): string {
+	return `<button class="tab-button ${activeTab === 'corrections' ? 'active' : ''}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections${correctionsCountBadgeHtml(report)}</button>`;
+}
+
+// ── Skill suggestions (repeated tasks) ──────────────────────────────────────
+
+function buildRepeatedTaskSessionLinkHtml(session: RepeatedTaskSessionRef): string {
+	const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
+	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
+	const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
+	const repo = session.repository ? ` · ${session.repository}` : '';
+	return `<div style="font-size:11px; color:var(--text-secondary); padding:2px 0; overflow-wrap:anywhere;">${escapeHtml(title)}${escapeHtml(dateLabel ? ` · ${dateLabel}` : '')}${escapeHtml(repo)}</div>`;
+}
+
+function buildRepeatedTaskClusterHtml(cluster: RepeatedTaskCluster): string {
+	const keywords = cluster.sharedKeywords.length > 0
+		? `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">${cluster.sharedKeywords.map(k => `<span style="font-size:10px; padding:1px 7px; border-radius:8px; background:var(--bg-tertiary); color:var(--text-secondary);">${escapeHtml(k)}</span>`).join('')}</div>`
+		: '';
+	return `
+		<div style="margin-top:10px; padding:12px 14px; border-radius:8px; background:var(--bg-tertiary); border:1px solid var(--border-color, transparent);">
+			<div style="display:flex; align-items:flex-start; gap:10px;">
+				<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.5); color:var(--text-primary); white-space:nowrap;">${cluster.sessionCount}× repeated</span>
+				<div style="flex:1; min-width:0; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;">&ldquo;${escapeHtml(cluster.representativePrompt)}&rdquo;</div>
+			</div>
+			${keywords}
+			<details style="margin-top:8px;">
+				<summary style="font-size:11px; color:var(--text-secondary); cursor:pointer;">Sessions (${cluster.sessions.length})</summary>
+				<div style="margin-top:4px;">${cluster.sessions.map(buildRepeatedTaskSessionLinkHtml).join('')}</div>
+			</details>
+		</div>`;
+}
+
+/** "Skill suggestions" section for the Tools & Integrations tab (empty string when no candidates). */
+function buildSkillSuggestionsSectionHtml(report: RepeatedTaskReport | null): string {
+	if (!report || report.clusters.length === 0) { return ''; }
+	return `
+		<div class="section">
+			<div class="section-title"><span>🧩</span><span>Skill Suggestions</span></div>
+			<div class="section-subtitle">
+				Tasks you keep prompting for across sessions (first prompt per session, ${report.sessionsScanned} sessions scanned).
+				A repeated task is a good candidate for a reusable skill, prompt file, or custom agent.
+			</div>
+			${report.clusters.map(buildRepeatedTaskClusterHtml).join('')}
+		</div>`;
+}
+
+const CORRECTION_TYPE_META: Record<CorrectionMomentType, { label: string; color: string }> = {
+	'user-correction': { label: 'You corrected the agent', color: 'rgba(251,191,36,0.85)' },
+	'tool-error': { label: 'Tool failed', color: 'rgba(248,113,113,0.85)' },
+	'edit-retry': { label: 'Edit retry', color: 'rgba(251,146,60,0.85)' },
+	'edit-self-correction': { label: 'Edit self-correction', color: 'rgba(251,146,60,0.85)' },
+	'agent-self-correction': { label: 'Agent caught itself', color: 'rgba(96,165,250,0.85)' },
+};
+
+function buildCorrectionMomentHtml(moment: CorrectionMoment): string {
+	const meta = CORRECTION_TYPE_META[moment.type] ?? { label: moment.type, color: 'rgba(148,163,184,0.85)' };
+	const time = moment.timestamp ? new Date(moment.timestamp) : null;
+	const timeLabel = time && !isNaN(time.getTime()) ? time.toLocaleString() : '';
+	const detail = moment.type === 'tool-error'
+		? `tool \`${moment.tool ?? '?'}\`${moment.retried ? ' — retried shortly after' : ''}`
+		: (moment.matchedPattern ? `matched ${moment.matchedPattern}` : '');
+	return `
+		<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--bg-tertiary);">
+			<span style="flex-shrink:0; font-size:10px; font-weight:700; letter-spacing:0.03em; padding:2px 8px; border-radius:10px; border:1px solid ${meta.color}; color:var(--text-primary); background:${meta.color.replace('0.85', '0.12')}; white-space:nowrap;">${escapeHtml(meta.label)}</span>
+			<div style="flex:1; min-width:0;">
+				<div style="font-size:12px; color:var(--text-primary); opacity:0.9; overflow-wrap:anywhere;">${escapeHtml(moment.snippet)}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:3px;">
+					turn ${moment.turnNumber}${detail ? ` · ${escapeHtml(detail)}` : ''}${timeLabel ? ` · ${escapeHtml(timeLabel)}` : ''}
+				</div>
+			</div>
+		</div>`;
+}
+
+function buildCorrectionSessionHtml(session: CorrectionSessionEntry): string {
+	const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
+	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
+	const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
+	return `
+		<div style="margin:10px 0 4px; padding:10px 12px; background:var(--bg-tertiary); border-radius:6px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-primary); overflow-wrap:anywhere;">
+				${escapeHtml(title)}${dateLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">· ${escapeHtml(dateLabel)}</span>` : ''}
+			</div>
+			${session.moments.map(buildCorrectionMomentHtml).join('')}
+		</div>`;
+}
+
+function buildCorrectionsTabPanelHtml(report: CorrectionReport | null): string {
+	if (!report || report.repos.length === 0) {
+		return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+					✨ No correction moments detected in your recent sessions — nice and smooth!
+				</div>
+			</div>
+		</div>`;
+	}
+
+	const c = report.counts;
+	const chip = (n: number, label: string): string => n > 0
+		? `<span style="font-size:11px; padding:2px 10px; border-radius:10px; background:var(--bg-tertiary); color:var(--text-primary);">${n} ${escapeHtml(label)}</span>`
+		: '';
+	const summaryChips = [
+		chip(c.userCorrections, 'user corrections'),
+		chip(c.toolErrors, 'tool errors'),
+		chip(c.editRetries, 'edit retries'),
+		chip(c.editSelfCorrections, 'edit self-corrections'),
+		chip(c.agentSelfCorrections, 'agent self-corrections'),
+	].filter(Boolean).join(' ');
+
+	const repoSections = report.repos.map(repo => `
+		<div style="margin-top:18px;">
+			<div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
+				${escapeHtml(repo.repository)}
+				<span style="font-weight:400; color:var(--text-secondary);">— ${repo.sessionsWithMoments} session${repo.sessionsWithMoments !== 1 ? 's' : ''} with moments</span>
+			</div>
+			${repo.sessions.map(buildCorrectionSessionHtml).join('')}
+		</div>`).join('');
+
+	return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== 'corrections' ? ' style="display:none"' : ''}>
+			<div class="section">
+				<div class="section-title"><span>🔁</span><span>Corrections</span></div>
+				<div class="section-subtitle">
+					Moments where the agent corrected itself after an error, or you had to correct the agent —
+					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments —
+					sessions without corrections are not listed. Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
+				</div>
+				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
+				${repoSections}
+			</div>
+		</div>`;
+}
+
+
 function updateTabButtonCount(insights: EvaluatedInsight[]): void {
 	const tabButton = document.querySelector<HTMLButtonElement>('.tab-button[data-tab="insights"]');
 	if (!tabButton) { return; }
@@ -3155,6 +3490,7 @@ function buildUsageRootHtml(
 				<button class="tab-button ${activeTab === 'agent' ? 'active' : ''}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
 				<button class="tab-button ${activeTab === 'worktrees' ? 'active' : ''}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>
 				<button class="tab-button ${activeTab === 'insights' ? 'active' : ''}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter(i => i.status === 'new').length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter(i => i.status === 'new').length}</span>` : ''}</button>
+				${correctionsTabButtonHtml(stats.correctionReport ?? null)}
 			</div>
 
 			${safeSectionHtml('Recent Sessions', () => buildSessionsTabPanelHtml(stats))}
@@ -3164,6 +3500,7 @@ function buildUsageRootHtml(
 			${safeSectionHtml('Repository PRs & Cloud Agent', () => buildReposAndAgentTabPanelsHtml())}
 			${safeSectionHtml('Worktrees', () => buildWorktreesTabPanelHtml())}
 			${safeSectionHtml('Insights', () => buildInsightsTabPanelHtml(stats.insights ?? []))}
+			${safeSectionHtml('Corrections', () => buildCorrectionsTabPanelHtml(stats.correctionReport ?? null))}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} · Updates every 5 minutes
 			</div>
@@ -4218,6 +4555,7 @@ function buildToolsTabPanelHtml(
 
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
+			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
 			<div class="section">
 				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>

@@ -5,7 +5,7 @@
 import type { ModelUsage, ModelPricing, ContextReferenceUsage, TokenEstimator } from './types';
 import { toLocalDayKey } from './utils/dayKeys';
 import type { CopilotCliOtelSessionUsage } from './copilotCliOtel';
-import { parseCustomProviderModel } from './webview/shared/modelUtils';
+import { getModelLookupCandidates } from './webview/shared/modelUtils';
 
 /** Minimum request shape needed by getModelFromRequest. */
 interface ModelRequestSource {
@@ -1123,7 +1123,7 @@ export function applyDelta(state: unknown, delta: unknown): unknown {
 
 export function getModelTier(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): 'standard' | 'premium' | 'unknown' {
 	// Look up the explicit `tier` field from modelPricing.json.
-	const pricingInfo = modelPricing[modelId];
+	const pricingInfo = _lookupModelPricing(modelId, modelPricing);
 	if (pricingInfo?.tier) {
 		return pricingInfo.tier;
 	}
@@ -1172,7 +1172,7 @@ export interface LongContextInfo {
  * parseable threshold — i.e. the model is billed at a single (default) rate.
  */
 export function getLongContextInfo(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): LongContextInfo | null {
-	let pricing: ModelPricing | undefined = modelPricing[modelId];
+	let pricing: ModelPricing | undefined = _lookupModelPricing(modelId, modelPricing);
 	if (!pricing) {
 		const id = modelId.toLowerCase();
 		for (const [key, value] of Object.entries(modelPricing)) {
@@ -1202,7 +1202,7 @@ function _costBucketFromPricing(pricing: ModelPricing): 'low' | 'medium' | 'high
 }
 
 export function getModelCostBucket(modelId: string, modelPricing: { [key: string]: ModelPricing } = {}): 'low' | 'medium' | 'high' | 'unknown' {
-	const pricingInfo = modelPricing[modelId];
+	const pricingInfo = _lookupModelPricing(modelId, modelPricing);
 	if (pricingInfo) { return _costBucketFromPricing(pricingInfo); }
 	for (const [key, value] of Object.entries(modelPricing)) {
 		if (modelId.includes(key) || key.includes(modelId)) { return _costBucketFromPricing(value); }
@@ -1211,16 +1211,22 @@ export function getModelCostBucket(modelId: string, modelPricing: { [key: string
 }
 
 /**
- * Resolves the pricing entry for a model served by a user-configured custom endpoint,
- * e.g. `customendpoint/Mistral/mistral-medium-latest` → the `mistral-medium-latest` rates.
- * Returns undefined for plain model ids and for endpoint models with no pricing entry.
+ * Resolves the pricing entry for a raw model id by trying the normalized
+ * candidates from getModelLookupCandidates — handles `copilot/` prefixes,
+ * custom-endpoint ids (`customendpoint/<provider>/<model id>`), org-scoped
+ * Copilot catalog ids (`<uuid>/<model id>`), and dash/dot version variants
+ * (`claude-opus-4-8` → `claude-opus-4.8`).
+ * Returns undefined when no candidate has a pricing entry.
  */
-function _pricingForCustomEndpointModel(
+function _lookupModelPricing(
 	model: string,
 	modelPricing: { [key: string]: ModelPricing }
 ): ModelPricing | undefined {
-	const custom = parseCustomProviderModel(model);
-	return custom ? modelPricing[custom.modelId] : undefined;
+	for (const candidate of getModelLookupCandidates(model)) {
+		const entry = modelPricing[candidate];
+		if (entry) { return entry; }
+	}
+	return undefined;
 }
 
 /**
@@ -1262,9 +1268,9 @@ export function calculateEstimatedCost(
 	for (const [model, usage] of Object.entries(modelUsage)) {
 		// No pricing entry → model still appears in usage breakdowns (via modelUsage)
 		// but contributes $0 to cost. Do NOT fall back to another model's rates.
-		// Custom-endpoint ids (`customendpoint/<provider>/<model id>`) are priced by their
-		// model-id part — the same model, just reached through a user-configured endpoint.
-		const baseEntry = modelPricing[model] ?? _pricingForCustomEndpointModel(model, modelPricing);
+		// Prefixed/variant ids (custom endpoints, org-UUID catalog ids, dash/dot
+		// version variants) are priced by their resolved canonical id.
+		const baseEntry = _lookupModelPricing(model, modelPricing);
 		if (!baseEntry) {
 			continue;
 		}

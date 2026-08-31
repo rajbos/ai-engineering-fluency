@@ -813,6 +813,7 @@
   ,"invoke_subagent": "Invoke Subagent"
   ,"list_permissions": "List Permissions"
   ,"manage_task": "Manage Task"
+  ,"ccd_session": "CCD Session"
   ,"mcp__ccd_session__mark_chapter": "CCD Session: Mark Chapter"
   ,"multi_replace_file_content": "Multi-Replace File Content"
   ,"read_currently_open_file": "Read Currently Open File"

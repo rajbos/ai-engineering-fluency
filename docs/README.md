@@ -74,6 +74,8 @@ Detailed documentation for individual features.
 | [features/THEMING_CHANGES.md](features/THEMING_CHANGES.md) | Light theme support implementation details |
 | [features/TOOL-CURATION.md](features/TOOL-CURATION.md) | Tool Curation — surface unused MCP servers and stale skills |
 | [features/MODEL-EFFICIENCY-COMPARISON.md](features/MODEL-EFFICIENCY-COMPARISON.md) | Models tab — compare two models, or one model across two periods |
+| [features/CORRECTIONS.md](features/CORRECTIONS.md) | Corrections tab — detect moments where the agent or the user had to correct the conversation |
+| [features/REPEATED-TASKS.md](features/REPEATED-TASKS.md) | Skill Suggestions — find tasks you keep prompting for across sessions and turn them into skills |
 | [features/CLOUD-AGENT-COST.md](features/CLOUD-AGENT-COST.md) | Cloud Agent tab — per-repository AI credits, and the hourly cached snapshot behind it |
 
 ## Architecture Decision Records (ADR)

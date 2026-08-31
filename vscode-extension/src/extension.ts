@@ -70,7 +70,25 @@ import type {
   EvaluatedInsight,
   InsightStateBag,
   ToolCurationAnalysis,
+  CorrectionReport,
+  CorrectionRepoGroup,
+  CorrectionSessionEntry,
+  RepeatedTaskReport,
 } from '../../src/types';
+
+// --- Correction-moment detection (per-repo report over recent sessions) ---
+import {
+  createEmptyCorrectionCounts as _createEmptyCorrectionCounts,
+  mergeCorrectionCounts as _mergeCorrectionCounts,
+  summarizeCorrectionMoments as _summarizeCorrectionMoments,
+} from '../../src/correctionDetection';
+
+// --- Repeated-task detection (skill candidates from recurring prompts) ---
+import {
+  detectRepeatedTasks as _detectRepeatedTasks,
+  MIN_CLUSTER_SIZE as _MIN_CLUSTER_SIZE,
+  type RepeatedTaskInput as _RepeatedTaskInput,
+} from '../../src/repeatedTasks';
 
 // --- Tool curation ---
 import {
@@ -106,7 +124,7 @@ import type { CrushDataAccess } from '../../src/crush';
 import type { VisualStudioDataAccess } from '../../src/visualstudio';
 import type { ContinueDataAccess } from '../../src/continue';
 import type { ClaudeCodeDataAccess } from '../../src/claudecode';
-import type { ClaudeDesktopCoworkDataAccess } from '../../src/claudedesktop';
+import type { ClaudeDesktopDataAccess } from '../../src/claudedesktop';
 import type { MistralVibeDataAccess } from '../../src/mistralvibe';
 import type { GeminiCliDataAccess } from '../../src/geminicli';
 import type { IEcosystemAdapter } from '../../src/ecosystemAdapter';
@@ -425,7 +443,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 64; // Widen sub-agent detection: Claude Agent tool, MCP spawn_task/spawn_agent, Copilot App session-spawning tools
+	private static readonly CACHE_VERSION = 66; // Add firstUserPrompt capture for repeated-task detection
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -457,7 +475,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	public visualStudio!: VisualStudioDataAccess;
 	private continue_!: ContinueDataAccess;
 	private claudeCode!: ClaudeCodeDataAccess;
-	private claudeDesktopCowork!: ClaudeDesktopCoworkDataAccess;
+	private claudeDesktop!: ClaudeDesktopDataAccess;
 	private mistralVibe!: MistralVibeDataAccess;
 	private geminiCli!: GeminiCliDataAccess;
 	public windsurf!: WindsurfDataAccess;
@@ -1306,7 +1324,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this.continue_ = dataAccess.continue_;
 		this.visualStudio = dataAccess.visualStudio;
 		this.claudeCode = dataAccess.claudeCode;
-		this.claudeDesktopCowork = dataAccess.claudeDesktopCowork;
+		this.claudeDesktop = dataAccess.claudeDesktop;
 		this.mistralVibe = dataAccess.mistralVibe;
 		this.geminiCli = dataAccess.geminiCli;
 		this.windsurf = new WindsurfDataAccess(extensionUri, (m) => this.log(m));
@@ -1631,6 +1649,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 		Object.keys(stats.today.mcpTools.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.last30Days.mcpTools.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.month.mcpTools.byTool).forEach(tool => allTools.add(tool));
+		// MCP server names are rendered through the same friendly-name lookup in the
+		// "By Server" tables, so include them in the missing-name detection too.
+		Object.keys(stats.today.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(stats.last30Days.mcpTools.byServer).forEach(server => allTools.add(server));
+		Object.keys(stats.month.mcpTools.byServer).forEach(server => allTools.add(server));
 		Object.keys(stats.today.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.last30Days.toolCalls.byTool).forEach(tool => allTools.add(tool));
 		Object.keys(stats.month.toolCalls.byTool).forEach(tool => allTools.add(tool));
@@ -3202,6 +3225,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			customizationMatrix: stats.customizationMatrix,
 			todaySessions: stats.todaySessions,
 			curationAnalysis: stats.curationAnalysis ?? null,
+			repeatedTasks: stats.repeatedTasks ?? null,
 		};
 		return _evaluateInsights(ctx, this._insightStateBag, cadenceDays, this._lastInsightNudgeAt);
 	}
@@ -3778,12 +3802,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 		this._skillWorkspacePathsAccum = new Map();
 		let agenticDailyTrend: AgenticTrendPoint[] | undefined;
 		let recentSessions: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } | undefined;
+		let correctionReport: CorrectionReport | undefined;
+		let repeatedTasks: RepeatedTaskReport | undefined;
 		try {
 			const { results: usageResults, totalFiles } = await this.loadUsageSessionFiles(preloaded, cutoffMs);
 			const periods = { todayStats, last30DaysStats, monthStats, lastMonthStats, todayUtcKey, last30DaysUtcStartKey, monthUtcStartKey, lastMonthUtcStartKey, lastMonthUtcEndKey };
 			const wsMaps = { workspaceSessionCounts, workspaceInteractionCounts, unresolvedWorkspaceIds, unresolvedWorkspaceInteractionCounts };
 			this.aggregateUsageFileResults(usageResults, periods, wsMaps, todaySessionsList, totalFiles);
 			recentSessions = this.buildRecentSessionBuckets(usageResults, now);
+			correctionReport = this.buildCorrectionReport(usageResults);
+			repeatedTasks = this.buildRepeatedTaskReport(usageResults);
 			this._lastSkillCallsByEditor = {};
 			for (const [skillName, byEditor] of this._skillCallsByEditorAccum) {
 				this._lastSkillCallsByEditor[skillName] = Object.fromEntries(byEditor);
@@ -3808,6 +3836,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			missedPotential: this._lastMissedPotential || [],
 			todaySessions: todaySessionsList.sort((a, b) => b.interactions - a.interactions),
 			recentSessions,
+			correctionReport,
+			repeatedTasks,
 			curationAnalysis: this.computeCurationAnalysis(last30DaysStats),
 			agenticDailyTrend,
 		};
@@ -4298,6 +4328,88 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		const lastActivity = sessionData.lastInteraction ? new Date(sessionData.lastInteraction) : new Date(mtime);
 		return toLocalDayKey(lastActivity);
+	}
+
+	/** Maximum number of sessions with detected correction moments listed per repository. */
+	private static readonly CORRECTION_SCAN_SESSIONS_PER_REPO = 25;
+
+	/** Derive a short `owner/repo` display name from a git remote URL (falls back to the raw value). */
+	private repoDisplayName(repository: string): string {
+		const m = repository.match(/[:/]([^/:]+\/[^/]+?)(?:\.git)?$/);
+		return m ? m[1] : repository;
+	}
+
+	/**
+	 * Build the correction-moment report from already-parsed session results:
+	 * sessions are first filtered to those carrying detected correction moments,
+	 * then the 25 most recent of those are kept per repository.
+	 * Moments come from the cached per-session usage analysis, so this is a
+	 * pure in-memory regrouping — no extra parsing. Returns undefined when no
+	 * session carried any moments.
+	 */
+	private buildCorrectionReport(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
+	): CorrectionReport | undefined {
+		const byRepo = new Map<string, { sessionFile: string; sessionData: SessionFileCache; mtime: number }[]>();
+		for (const r of results) {
+			const moments = r?.sessionData.usageAnalysis?.correctionMoments;
+			if (!r || !moments || moments.length === 0) { continue; }
+			const repo = this.repoDisplayName(r.sessionData.repository || '(unknown)');
+			if (!byRepo.has(repo)) { byRepo.set(repo, []); }
+			byRepo.get(repo)!.push(r);
+		}
+		if (byRepo.size === 0) { return undefined; }
+
+		const repos: CorrectionRepoGroup[] = [];
+		const totals = _createEmptyCorrectionCounts();
+		let sessionsWithMoments = 0;
+		for (const [repository, entries] of [...byRepo.entries()].sort((a, b) => a[0].localeCompare(b[0]))) {
+			entries.sort((a, b) => b.mtime - a.mtime);
+			const sessions: CorrectionSessionEntry[] = entries
+				.slice(0, CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO)
+				.map(e => ({
+					file: e.sessionFile,
+					title: e.sessionData.title ?? null,
+					lastInteraction: e.sessionData.lastInteraction ?? null,
+					moments: e.sessionData.usageAnalysis!.correctionMoments!,
+				}));
+			const counts = _createEmptyCorrectionCounts();
+			for (const s of sessions) { _mergeCorrectionCounts(counts, _summarizeCorrectionMoments(s.moments)); }
+			_mergeCorrectionCounts(totals, counts);
+			sessionsWithMoments += sessions.length;
+			repos.push({ repository, sessions, counts, sessionsWithMoments: sessions.length });
+		}
+		return { sessionsPerRepo: CopilotTokenTracker.CORRECTION_SCAN_SESSIONS_PER_REPO, repos, counts: totals, sessionsWithMoments };
+	}
+
+	/**
+	 * Build the repeated-task report from already-parsed session results:
+	 * cluster the first user prompt of every scanned session (across all
+	 * repositories) into tasks the user keeps prompting for manually —
+	 * candidates for a reusable skill or prompt file. Pure in-memory
+	 * clustering over cached prompts; returns undefined when no cluster
+	 * reaches the minimum size.
+	 */
+	private buildRepeatedTaskReport(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
+	): RepeatedTaskReport | undefined {
+		const inputs: _RepeatedTaskInput[] = [];
+		for (const r of results) {
+			const prompt = r?.sessionData.usageAnalysis?.firstUserPrompt;
+			if (!r || !prompt) { continue; }
+			inputs.push({
+				prompt,
+				session: {
+					file: r.sessionFile,
+					title: r.sessionData.title ?? null,
+					lastInteraction: r.sessionData.lastInteraction ?? new Date(r.mtime).toISOString(),
+					repository: r.sessionData.repository ? this.repoDisplayName(r.sessionData.repository) : undefined,
+				},
+			});
+		}
+		const clusters = _detectRepeatedTasks(inputs);
+		if (clusters.length === 0) { return undefined; }
+		return { minClusterSize: _MIN_CLUSTER_SIZE, sessionsScanned: inputs.length, clusters };
 	}
 
 	private _resolveSessionModelTokens(sessionData: SessionFileCache, modelUsage: ModelUsage): { inputTok: number; outputTok: number; cachedTok: number } {
@@ -6939,6 +7051,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			currentWorkspacePaths: workspacePaths,
 			todaySessions: analysisStats.todaySessions || [],
 			insights: this.buildCurrentInsights(analysisStats),
+			correctionReport: analysisStats.correctionReport ?? null,
+			repeatedTasks: analysisStats.repeatedTasks ?? null,
 			curationAnalysis: analysisStats.curationAnalysis ?? null,
 			copilotApiBalance: this._buildCopilotApiBalance(),
 			monthBillingGroupCosts: this.lastDetailedStats?.month.billingGroupCosts ?? null,

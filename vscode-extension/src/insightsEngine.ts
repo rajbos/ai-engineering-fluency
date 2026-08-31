@@ -10,6 +10,7 @@ import type {
 	WorkspaceCustomizationMatrix,
 	TodaySessionSummary,
 	ToolCurationAnalysis,
+	RepeatedTaskReport,
 } from '../../src/types';
 import toolNamesData from '../../src/toolNames.json';
 import modelPricingData from '../../src/modelPricing.json';
@@ -282,6 +283,8 @@ export interface InsightContext {
 	todaySessions?: TodaySessionSummary[];
 	/** Optional — populated when tool-curation analysis has run. */
 	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Optional — populated when repeated-task detection found candidates. */
+	repeatedTasks?: RepeatedTaskReport | null;
 }
 
 export interface InsightState {
@@ -1326,6 +1329,70 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			return stale.length >= 1;
 		},
 		weight: 40,
+	},
+
+	// ── Corrections ─────────────────────────────────────────────────────────
+	{
+		id: 'corrections-user-pushback',
+		category: 'customization',
+		severity: 'opportunity',
+		title: '🔁 You had to correct the agent repeatedly',
+		buildBody: (ctx) => {
+			const c = ctx.last30Days.corrections;
+			const count = c?.userCorrections ?? 0;
+			const sessions = c?.sessionsWithMoments ?? 0;
+			return `In the last 30 days you corrected the agent ${count} time${count !== 1 ? 's' : ''} across ${sessions} session${sessions !== 1 ? 's' : ''} ` +
+				`(messages like "no, that's wrong" or "not what I asked"). Recurring corrections often mean the agent is missing project conventions — ` +
+				`capturing them in \`copilot-instructions.md\` or an \`AGENTS.md\` file can prevent the same mistakes. ` +
+				`See the Corrections tab for the exact moments.`;
+		},
+		actionLabel: 'View Corrections',
+		actionCommand: 'aiEngineeringFluency.showUsageAnalysis',
+		appliesTo: (ctx) => (ctx.last30Days.corrections?.userCorrections ?? 0) >= 3,
+		weight: 70,
+	},
+	{
+		id: 'corrections-tool-errors',
+		category: 'tools',
+		severity: 'tip',
+		title: '🛠️ The agent is hitting repeated tool failures',
+		buildBody: (ctx) => {
+			const c = ctx.last30Days.corrections;
+			const errors = c?.toolErrors ?? 0;
+			const editRetries = (c?.editRetries ?? 0) + (c?.editSelfCorrections ?? 0);
+			return `The agent hit ${errors} failed tool call${errors !== 1 ? 's' : ''} and re-edited a file it had just edited ${editRetries} time${editRetries !== 1 ? 's' : ''} ` +
+				`in the last 30 days. These self-correction loops burn tokens and time. ` +
+				`The Corrections tab shows which tools and files are involved — a recurring failure on the same tool is worth investigating.`;
+		},
+		actionLabel: 'View Corrections',
+		actionCommand: 'aiEngineeringFluency.showUsageAnalysis',
+		appliesTo: (ctx) => {
+			const c = ctx.last30Days.corrections;
+			if (!c) { return false; }
+			return c.toolErrors >= 5 || (c.editRetries + c.editSelfCorrections) >= 10;
+		},
+		weight: 55,
+	},
+	{
+		id: 'repeated-task-skill-candidate',
+		category: 'customization',
+		severity: 'opportunity',
+		title: '🧩 You keep prompting for the same task — make it a skill',
+		buildBody: (ctx) => {
+			const top = ctx.repeatedTasks?.clusters[0];
+			const count = top?.sessionCount ?? 0;
+			const prompt = top?.representativePrompt ?? '';
+			const more = (ctx.repeatedTasks?.clusters.length ?? 1) - 1;
+			return `You started ${count} sessions with a similar prompt: "${prompt}". ` +
+				`Turning a repeated task like this into a skill or prompt file saves you from re-explaining it and makes the outcome more consistent. ` +
+				(more > 0
+					? `${more} more repeated task${more !== 1 ? 's' : ''} found — see Tools & Integrations → Skill Suggestions.`
+					: `See Tools & Integrations → Skill Suggestions for details.`);
+		},
+		actionLabel: 'View Skill Suggestions',
+		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		appliesTo: (ctx) => (ctx.repeatedTasks?.clusters[0]?.sessionCount ?? 0) >= 3,
+		weight: 60,
 	},
 ];
 

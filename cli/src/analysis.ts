@@ -122,6 +122,7 @@ export function getEditorSourceFromPath(filePath: string): string {
 	if (normalized.includes('/.kiro/sessions/cli/')) { return 'Kiro CLI'; }
 	if (normalized.includes('/kiro.kiroagent/workspace-sessions/')) { return 'Kiro'; }
 	if (normalized.includes('/.continue/sessions/')) { return 'Continue'; }
+	if (normalized.includes('/claude-code-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (normalized.includes('/local-agent-mode-sessions/')) { return 'Claude Desktop Cowork'; }
 	if (normalized.includes('/.claude/projects/')) { return detectClaudeCodeEditorVariant(filePath); }
 	if (normalized.includes('/.vibe/logs/session/')) { return 'Mistral Vibe'; }

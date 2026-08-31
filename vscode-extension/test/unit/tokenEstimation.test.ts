@@ -277,6 +277,26 @@ test('calculateEstimatedCost: custom-endpoint model with an unpriced model part 
         assert.equal(calculateEstimatedCost(modelUsage, pricing), 0);
 });
 
+test('calculateEstimatedCost: prices an org-UUID-prefixed catalog model from its model-ID part', () => {
+        const modelUsage = { '83a386ed-9f05-4fd9-83d4-f453d20c994c/mistral-medium-latest': { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 0} };
+        const pricing = { 'mistral-medium-latest': { inputCostPerMillion: 0.4, outputCostPerMillion: 2.0 } };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        assert.ok(Math.abs(cost - 2.4) < 1e-9);
+});
+
+test('calculateEstimatedCost: prices a dash-separated version id from its dotted pricing key', () => {
+        const modelUsage = { 'claude-opus-4-8': { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 0} };
+        const pricing = { 'claude-opus-4.8': { inputCostPerMillion: 5.0, outputCostPerMillion: 25.0 } };
+        const cost = calculateEstimatedCost(modelUsage, pricing);
+        assert.ok(Math.abs(cost - 30.0) < 1e-9);
+});
+
+test('calculateEstimatedCost: UUID-prefixed model with an unpriced model part stays $0', () => {
+        const modelUsage = { '83a386ed-9f05-4fd9-83d4-f453d20c994c/some-private-model': { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 0} };
+        const pricing = { 'mistral-medium-latest': { inputCostPerMillion: 0.4, outputCostPerMillion: 2.0 } };
+        assert.equal(calculateEstimatedCost(modelUsage, pricing), 0);
+});
+
 test('calculateEstimatedCost: copilot source uses copilotPricing block when present', () => {
         const modelUsage = { 'gpt-x': { inputTokens: 1_000_000, outputTokens: 1_000_000, sessions: 0} };
         const pricing = {

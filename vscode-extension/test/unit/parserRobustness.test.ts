@@ -32,7 +32,7 @@ import { ContinueDataAccess } from '../../../src/continue';
 import { KiroDataAccess } from '../../../src/kiro';
 import { ClineDataAccess } from '../../../src/cline';
 import { PiDataAccess } from '../../../src/pi';
-import { ClaudeDesktopCoworkDataAccess } from '../../../src/claudedesktop';
+import { ClaudeDesktopDataAccess } from '../../../src/claudedesktop';
 import { EclipseDataAccess } from '../../../src/eclipse';
 import { MistralVibeDataAccess } from '../../../src/mistralvibe';
 import { TokenAccumulator } from '../../../src/sessionParser';
@@ -535,8 +535,8 @@ test('ClaudeDesktop Cowork: __proto__ model is skipped and does not pollute Obje
 			{ type: 'assistant', message: { role: 'assistant', model: 'claude-sonnet-4-6', stop_reason: 'end_turn', usage: { input_tokens: 7, output_tokens: 3 } } },
 		];
 		fs.writeFileSync(file, events.map(e => JSON.stringify(e)).join('\n'), 'utf8');
-		const cowork = new ClaudeDesktopCoworkDataAccess();
-		const modelUsage = await cowork.getCoworkModelUsage(file);
+		const cowork = new ClaudeDesktopDataAccess();
+		const modelUsage = await cowork.getDesktopSessionModelUsage(file);
 		assertNoPrototypePollution();
 		assert.equal(Object.prototype.hasOwnProperty.call(modelUsage, '__proto__'), false);
 		assert.ok(modelUsage['claude-sonnet-4.6'], 'legitimate model must still be counted');
