@@ -469,11 +469,11 @@ test('model-edit-retries: does NOT fire when models retry at similar modest rate
 	assert.equal(results.find(i => i.id === RETRIES_ID), undefined);
 });
 
-test('model-edit-retries: action opens the usage analysis view', () => {
+test('model-edit-retries: action opens the model efficiency section', () => {
 	const ctx = makeRetryCtx({ 'gpt-4o': effCounters(10, 20) });
 	const results = evaluateInsights(ctx, {}, 7, null);
 	const insight = results.find(i => i.id === RETRIES_ID);
-	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.showUsageAnalysis');
+	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.openModelEfficiency');
 });
 
 // ---------------------------------------------------------------------------
@@ -772,6 +772,29 @@ test('repeated-task-skill-candidate: fires when a cluster reaches 3 sessions', (
 	assert.ok(insight, 'should fire at sessionCount = 3');
 	assert.match(insight.body, /3 sessions/);
 	assert.match(insight.body, /run the tests/);
+	assert.equal(insight.actionCommand, 'aiEngineeringFluency.openToolsTab');
+});
+
+test('insight navigation actions target their destination tabs and sections', () => {
+	const missingInstructions = makeCtx();
+	missingInstructions.missedPotential = [{
+		workspaceName: 'repo',
+		workspacePath: 'C:\\repo',
+		sessionCount: 3,
+		interactionCount: 10,
+		nonCopilotFiles: [],
+	}];
+	assert.equal(
+		evaluateInsights(missingInstructions, {}, 7, null).find(i => i.id === 'missing-instructions')?.actionCommand,
+		'aiEngineeringFluency.openHealthTab',
+	);
+
+	const corrections = makeCtx();
+	corrections.last30Days.corrections = { ...emptyCorrections(), userCorrections: 3, sessionsWithMoments: 2 };
+	assert.equal(
+		evaluateInsights(corrections, {}, 7, null).find(i => i.id === 'corrections-user-pushback')?.actionCommand,
+		'aiEngineeringFluency.openCorrectionsTab',
+	);
 });
 
 test('repeated-task-skill-candidate: does NOT fire below 3 sessions or without data', () => {

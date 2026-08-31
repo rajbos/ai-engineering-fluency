@@ -441,6 +441,8 @@ interface WorktreeScanResult {
 	bytes: number;
 }
 
+type UsageAnalysisTab = 'activity' | 'tools' | 'health' | 'worktrees' | 'insights' | 'corrections';
+
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
 	private static readonly CACHE_VERSION = 68; // per-model tool-call counters for the local model leaderboard
@@ -536,6 +538,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private detailsPanel: vscode.WebviewPanel | undefined;
 	private chartPanel: vscode.WebviewPanel | undefined;
 	private analysisPanel: vscode.WebviewPanel | undefined;
+	private analysisWebviewReady = false;
+	private pendingAnalysisNavigation: { tab: UsageAnalysisTab; anchor?: string } | undefined;
 	private maturityPanel: vscode.WebviewPanel | undefined;
 	private dashboardPanel: vscode.WebviewPanel | undefined;
 	private fluencyLevelViewerPanel: vscode.WebviewPanel | undefined;
@@ -897,6 +901,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				if (picked) { await vscode.window.showTextDocument(vscode.Uri.file(picked.fsPath)); }
 			},
 			searchMcpExtensions:    () => vscode.commands.executeCommand('workbench.extensions.search', '@tag:mcp'),
+			'workbench.extensions.action.showExtensions': () =>
+				vscode.commands.executeCommand('workbench.extensions.action.showExtensions'),
 			openAgentPlugins:       () => {
 				// Open the Extensions view filtered to agent plugins. When a plugin name
 				// is provided the query becomes "@agentPlugins <name>" so the user lands
@@ -1690,10 +1696,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		);
 		await this.context.globalState.update(dismissedKey, packageJson.version);
 		if (choice === open) {
-			await this.showUsageAnalysis();
-			setTimeout(() => {
-				this.analysisPanel?.webview.postMessage({ command: 'highlightUnknownTools' });
-			}, 500);
+			await this.showUsageAnalysisOnToolsTab('unknown-mcp-tools-section');
 		}
 	}
 
@@ -3132,6 +3135,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				},
 			});
 		} else {
+			this.analysisWebviewReady = false;
 			this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, analysisStats);
 		}
 	}
@@ -6940,6 +6944,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			{ viewColumn: vscode.ViewColumn.One, preserveFocus: true },
 			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
+		this.analysisWebviewReady = false;
 		this.log('✅ Usage Analysis dashboard created successfully');
 		this.analysisPanel.webview.onDidReceiveMessage(async (message) => {
 			if (this.handleLocalViewRegressionMessage(message)) { return; }
@@ -6948,35 +6953,62 @@ class CopilotTokenTracker implements vscode.Disposable {
 		});
 		this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, this.lastUsageAnalysisStats ?? null);
 		if (!this.lastUsageAnalysisStats) { void this.loadAnalysisStatsInBackground(this.analysisPanel); }
-		this.analysisPanel.onDidDispose(() => { this.log('📊 Usage Analysis dashboard closed'); this.analysisPanel = undefined; });
+		this.analysisPanel.onDidDispose(() => {
+			this.log('📊 Usage Analysis dashboard closed');
+			this.analysisPanel = undefined;
+			this.analysisWebviewReady = false;
+			this.pendingAnalysisNavigation = undefined;
+		});
 	}
 
-	/** Opens the Usage Analysis panel and immediately activates the Insights tab. */
+	private async flushPendingAnalysisNavigation(): Promise<void> {
+		const panel = this.analysisPanel;
+		const navigation = this.pendingAnalysisNavigation;
+		if (!panel || !this.analysisWebviewReady || !navigation) { return; }
+		const delivered = await panel.webview.postMessage({ command: 'switchTab', ...navigation });
+		if (delivered && this.pendingAnalysisNavigation === navigation) {
+			this.pendingAnalysisNavigation = undefined;
+		}
+	}
+
+	private async showUsageAnalysisOnTab(tab: UsageAnalysisTab, anchor?: string): Promise<void> {
+		this.pendingAnalysisNavigation = { tab, ...(anchor ? { anchor } : {}) };
+		await this.showUsageAnalysis();
+		this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
+		await this.flushPendingAnalysisNavigation();
+	}
+
+	/** Opens the Usage Analysis panel and activates the Insights tab. */
 	public async showUsageAnalysisOnInsightsTab(): Promise<void> {
-		await this.showUsageAnalysis();
-		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'insights' });
+		await this.showUsageAnalysisOnTab('insights');
 	}
 
-	/** Opens the Usage Analysis panel and immediately activates the Tools & Integration tab. */
-	public async showUsageAnalysisOnToolsTab(): Promise<void> {
-		await this.showUsageAnalysis();
-		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'tools', anchor: 'section-tool-curation' });
+	/** Opens the Usage Analysis panel and activates the Tools & Integrations tab. */
+	public async showUsageAnalysisOnToolsTab(anchor = 'section-tool-curation'): Promise<void> {
+		await this.showUsageAnalysisOnTab('tools', anchor);
 	}
 
-	/** Opens the Usage Analysis panel and immediately activates the Activity tab, scrolled to Interaction Modes. */
-	public async showUsageAnalysisOnActivityTab(): Promise<void> {
-		await this.showUsageAnalysis();
-		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'activity', anchor: 'section-interaction-modes' });
+	/** Opens the Usage Analysis panel and activates the Activity tab. */
+	public async showUsageAnalysisOnActivityTab(anchor = 'section-interaction-modes'): Promise<void> {
+		await this.showUsageAnalysisOnTab('activity', anchor);
+	}
+
+	public async showUsageAnalysisOnHealthTab(): Promise<void> {
+		await this.showUsageAnalysisOnTab('health');
+	}
+
+	public async showUsageAnalysisOnCorrectionsTab(): Promise<void> {
+		await this.showUsageAnalysisOnTab('corrections');
+	}
+
+	public async showUsageAnalysisOnModelEfficiency(): Promise<void> {
+		await this.showUsageAnalysisOnTab('activity', 'section-model-efficiency');
 	}
 
 	/** Opens the Usage Analysis panel, pushes the latest background worktree scan findings, and activates the Worktrees tab. */
 	public async showUsageAnalysisOnWorktreesTab(): Promise<void> {
-		await this.showUsageAnalysis();
-		// showUsageAnalysis() creates a fresh panel with preserveFocus: true; for this explicit
-		// notification action, force focus so the panel visibly comes forward.
-		if (this.analysisPanel) this.analysisPanel.reveal(vscode.ViewColumn.One, false);
+		await this.showUsageAnalysisOnTab('worktrees');
 		this.postWorktreeBackgroundResults();
-		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'worktrees' });
 	}
 
 	private async _handleSuppressUnknownTool(toolName: string): Promise<void> {
@@ -7022,6 +7054,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 			loadAgentSessions: () => this.dispatch('loadAgentSessions', () => this.loadAgentSessions()),
 			loadRecentSessions: (message) => this.dispatch(`loadRecentSessions:${message.period}`, () => this.loadRecentSessions(message.period as ChartTimeWindow)),
 			openSessionFile: (message) => this._handleOpenSessionFile(message),
+			usageWebviewReady: async () => {
+				this.analysisWebviewReady = true;
+				await this.flushPendingAnalysisNavigation();
+			},
 			insightAction: (message) => this.dispatch(`insightAction:${message.id ?? ''}`, () => this.handleInsightAction(message)),
 			traceUsageCuration: (message) => this._logTraceCuration(message),
 			saveSessionColumnSettings: (message) => this.dispatch('saveSessionColumnSettings', () =>
@@ -11596,6 +11632,23 @@ function registerSecondaryViewCommands(context: vscode.ExtensionContext, tokenTr
   context.subscriptions.push(showMaturityCommand, showDashboardCommand, showEnvironmentalCommand, showEfficiencyCommand, openMcpJsonCommand);
 }
 
+function registerUsageNavigationCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
+  const commands: Array<[string, string, () => Promise<void>]> = [
+    ["aiEngineeringFluency.openInsightsTab", "Open Insights tab command called", () => tokenTracker.showUsageAnalysisOnInsightsTab()],
+    ["aiEngineeringFluency.openToolsTab", "Open Tools tab command called", () => tokenTracker.showUsageAnalysisOnToolsTab()],
+    ["aiEngineeringFluency.openActivityTab", "Open Activity tab command called", () => tokenTracker.showUsageAnalysisOnActivityTab()],
+    ["aiEngineeringFluency.openHealthTab", "Open Workspace Health tab command called", () => tokenTracker.showUsageAnalysisOnHealthTab()],
+    ["aiEngineeringFluency.openCorrectionsTab", "Open Corrections tab command called", () => tokenTracker.showUsageAnalysisOnCorrectionsTab()],
+    ["aiEngineeringFluency.openModelEfficiency", "Open Model Efficiency section command called", () => tokenTracker.showUsageAnalysisOnModelEfficiency()],
+  ];
+  context.subscriptions.push(...commands.map(([id, logMessage, handler]) =>
+    vscode.commands.registerCommand(id, async () => {
+      tokenTracker.log(logMessage);
+      await handler();
+    })
+  ));
+}
+
 function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: CopilotTokenTracker): void {
   const refreshCommand = vscode.commands.registerCommand(
     "aiEngineeringFluency.refresh",
@@ -11630,31 +11683,8 @@ function registerViewCommands(context: vscode.ExtensionContext, tokenTracker: Co
     },
   );
 
-  const openInsightsTabCommand = vscode.commands.registerCommand(
-    "aiEngineeringFluency.openInsightsTab",
-    async () => {
-      tokenTracker.log("Open Insights tab command called");
-      await tokenTracker.showUsageAnalysisOnInsightsTab();
-    },
-  );
-
-  const openToolsTabCommand = vscode.commands.registerCommand(
-    "aiEngineeringFluency.openToolsTab",
-    async () => {
-      tokenTracker.log("Open Tools tab command called");
-      await tokenTracker.showUsageAnalysisOnToolsTab();
-    },
-  );
-
-  const openActivityTabCommand = vscode.commands.registerCommand(
-    "aiEngineeringFluency.openActivityTab",
-    async () => {
-      tokenTracker.log("Open Activity tab command called");
-      await tokenTracker.showUsageAnalysisOnActivityTab();
-    },
-  );
-
-  context.subscriptions.push(refreshCommand, showDetailsCommand, showChartCommand, showUsageAnalysisCommand, openInsightsTabCommand, openToolsTabCommand, openActivityTabCommand);
+  context.subscriptions.push(refreshCommand, showDetailsCommand, showChartCommand, showUsageAnalysisCommand);
+  registerUsageNavigationCommands(context, tokenTracker);
   registerSecondaryViewCommands(context, tokenTracker);
 }
 

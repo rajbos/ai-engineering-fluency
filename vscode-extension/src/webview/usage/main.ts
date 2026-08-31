@@ -379,6 +379,7 @@ let isBatchAnalysisInProgress = false;
 let isSingleRepoAnalysisInProgress = false;
 let currentWorkspacePaths: string[] = [];
 let activeTab = 'activity';
+let pendingTabAnchor: string | null = null;
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
 let currentInsights: EvaluatedInsight[] = [];
 // Persisted across stats refreshes so the curation section doesn't disappear
@@ -4781,6 +4782,7 @@ function renderLayout(stats: UsageAnalysisStats): void {
 	// Initialize currentInsights from the stats and wire card buttons
 	currentInsights = stats.insights ?? [];
 	wireInsightCardButtons();
+	scrollToPendingTabAnchor();
 }
 
 /** Wires up the collapsible "About This Dashboard" info box; the collapsed state is persisted via webview state. */
@@ -5073,19 +5075,24 @@ function handleSwitchTab(message: any): void {
 	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
 	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
 	activeTab = tab;
+	pendingTabAnchor = typeof message.anchor === 'string' && message.anchor ? message.anchor : null;
 	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
 	btn?.click();
-	if (message.anchor) {
-		const anchor = document.getElementById(String(message.anchor));
-		if (anchor) {
-			// Use setTimeout to let the tab panel become visible before scrolling
-			setTimeout(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
-		}
+	scrollToPendingTabAnchor();
+}
+
+function scrollToPendingTabAnchor(): void {
+	if (!pendingTabAnchor) { return; }
+	const anchor = document.getElementById(pendingTabAnchor);
+	if (anchor) {
+		pendingTabAnchor = null;
+		setTimeout(() => anchor.scrollIntoView({ behavior: 'smooth', block: 'start' }), 50);
 	}
 }
 
 // Listen for messages from the extension
 registerMessageHandler<any>((message) => { handleExtensionMessage(message); });
+vscode.postMessage({ command: 'usageWebviewReady' });
 
 function getWorkspaceName(workspacePath: string): string {
 	const workspace = hygieneMatrixState?.workspaces.find((ws) => ws.workspacePath === workspacePath);

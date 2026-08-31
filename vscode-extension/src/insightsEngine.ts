@@ -359,7 +359,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				`Adding one gives Copilot project-specific context, reducing back-and-forth and improving response quality.`;
 		},
 		actionLabel: 'View Workspace Health',
-		actionCommand: 'aiEngineeringFluency.showUsageAnalysis',
+		actionCommand: 'aiEngineeringFluency.openHealthTab',
 		appliesTo: (ctx) => ctx.missedPotential.length > 0,
 		weight: 90,
 		allowToast: true,
@@ -960,7 +960,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				`Compare your models in the Model Efficiency table, or give the model more context (attach the relevant files) before asking for edits.`;
 		},
 		actionLabel: 'View Model Efficiency',
-		actionCommand: 'aiEngineeringFluency.showUsageAnalysis',
+		actionCommand: 'aiEngineeringFluency.openModelEfficiency',
 		appliesTo: (ctx) => {
 			const ranked = rankModelsByEditRetries(ctx.last30Days);
 			if (ranked.length === 0) { return false; }
@@ -1357,7 +1357,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				`See the Corrections tab for the exact moments.`;
 		},
 		actionLabel: 'View Corrections',
-		actionCommand: 'aiEngineeringFluency.showUsageAnalysis',
+		actionCommand: 'aiEngineeringFluency.openCorrectionsTab',
 		appliesTo: (ctx) => (ctx.last30Days.corrections?.userCorrections ?? 0) >= 3,
 		weight: 70,
 	},
@@ -1375,7 +1375,7 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 				`The Corrections tab shows which tools and files are involved — a recurring failure on the same tool is worth investigating.`;
 		},
 		actionLabel: 'View Corrections',
-		actionCommand: 'aiEngineeringFluency.showUsageAnalysis',
+		actionCommand: 'aiEngineeringFluency.openCorrectionsTab',
 		appliesTo: (ctx) => {
 			const c = ctx.last30Days.corrections;
 			if (!c) { return false; }

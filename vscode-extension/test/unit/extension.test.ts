@@ -24,6 +24,13 @@ test('Commands should be registered', async () => {
 		'aiEngineeringFluency.refresh',
 		'aiEngineeringFluency.showDetails',
 		'aiEngineeringFluency.showChart',
+		'aiEngineeringFluency.showUsageAnalysis',
+		'aiEngineeringFluency.openInsightsTab',
+		'aiEngineeringFluency.openToolsTab',
+		'aiEngineeringFluency.openActivityTab',
+		'aiEngineeringFluency.openHealthTab',
+		'aiEngineeringFluency.openCorrectionsTab',
+		'aiEngineeringFluency.openModelEfficiency',
 		'aiEngineeringFluency.showMaturity',
 		'aiEngineeringFluency.showFluencyLevelViewer',
 		'aiEngineeringFluency.runLocalViewRegression',
@@ -37,4 +44,3 @@ test('Commands should be registered', async () => {
 		);
 	}
 });
-
