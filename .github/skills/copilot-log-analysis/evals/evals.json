@@ -1,0 +1,28 @@
+{
+  "skill_name": "copilot-log-analysis",
+  "evals": [
+    {
+      "id": "session-file-locations",
+      "name": "knows where Copilot session log files live",
+      "prompt": "I want to find all GitHub Copilot session log files on a Linux developer machine so I can analyze token usage. Which file paths and file formats should I look at? Cover VS Code Chat, Copilot CLI, JetBrains, Gemini CLI, and Antigravity sessions.",
+      "expected_output": "The response lists workspaceStorage chatSessions .json files under the VS Code user directory, ~/.copilot/session-state/*.jsonl for Copilot CLI, ~/.copilot/jb/{conversationId}/partition-{n}.jsonl for JetBrains, ~/.gemini/tmp/{project}/chats/session-*.jsonl for Gemini CLI, and the Antigravity transcript.jsonl under ~/.gemini/antigravity/brain/, distinguishing .json (VS Code Chat) from .jsonl (CLI/agent) formats.",
+      "assertions": [
+        "The output mentions VS Code Chat session .json files under workspaceStorage (chatSessions) in the VS Code user data directory.",
+        "The output identifies ~/.copilot/session-state/ as the location of Copilot CLI .jsonl sessions.",
+        "The output identifies ~/.copilot/jb/ as the location of JetBrains Copilot session partition .jsonl files.",
+        "The output identifies a Gemini CLI session location under ~/.gemini/tmp/ with session .jsonl files.",
+        "The output distinguishes the .json format (VS Code Copilot Chat) from the .jsonl format (CLI/agent style, one JSON event per line)."
+      ]
+    },
+    {
+      "id": "token-estimation",
+      "name": "knows the character-to-token estimation approach",
+      "prompt": "When a Copilot session log does not include actual token counts, how should the number of tokens be estimated from the message text, and how does the estimate account for different models?",
+      "expected_output": "The response describes a character-to-token ratio estimation: roughly 4 characters per token (ratio 0.25) by default, with model-specific ratios (loaded from tokenEstimators data) matched by model name, computed as ceil(text length × tokens-per-char).",
+      "assertions": [
+        "The output describes estimating tokens from character counts using a characters-per-token ratio, with a default of about 4 characters per token (0.25 tokens per character).",
+        "The output states that model-specific ratios are used when the model name matches a configured estimator entry."
+      ]
+    }
+  ]
+}
