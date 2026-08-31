@@ -490,6 +490,10 @@ test('getEditorTypeFromPath: detects Claude Desktop Cowork', () => {
         assert.equal(getEditorTypeFromPath('/home/user/AppData/Local/Packages/Claude_pzs/LocalCache/Roaming/claude/local-agent-mode-sessions/session.jsonl'), 'Claude Desktop Cowork');
 });
 
+test('getEditorTypeFromPath: detects Claude Desktop Cowork from renamed claude-code-sessions dir', () => {
+        assert.equal(getEditorTypeFromPath('/home/user/AppData/Local/Packages/Claude_pzs/LocalCache/Roaming/claude/claude-code-sessions/app/machine/local_abc/.claude/projects/hash/session.jsonl'), 'Claude Desktop Cowork');
+});
+
 test('getEditorTypeFromPath: returns Unknown for unrecognized paths', () => {
         assert.equal(getEditorTypeFromPath('/tmp/random/file.json'), 'Unknown');
 });
@@ -547,6 +551,7 @@ test('detectEditorSource: detects Visual Studio', () => {
 
 test('detectEditorSource: detects Claude Desktop Cowork', () => {
         assert.equal(detectEditorSource('/home/user/.config/local-agent-mode-sessions/session.json'), 'Claude Desktop Cowork');
+        assert.equal(detectEditorSource('/home/user/.config/claude-code-sessions/session.json'), 'Claude Desktop Cowork');
 });
 
 test('detectEditorSource: detects Crush', () => {

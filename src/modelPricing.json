@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "description": "Model pricing data - costs per million tokens. Each model has direct provider/API pricing at the top level (used as a reference); models billed through GitHub Copilot AI Credits also include a `copilotPricing` block reflecting GitHub's published per-token rates (1 AI credit = $0.01).",
   "metadata": {
-    "lastUpdated": "2026-08-25",
+    "lastUpdated": "2026-08-30",
     "sources": [
       {
         "name": "OpenAI API Pricing",
@@ -424,7 +424,7 @@
       "category": "Claude models (Anthropic)",
       "tier": "standard",
       "displayNames": [
-        "Claude Sonnet 4.6 (alternate format)"
+        "Claude Sonnet 4.6"
       ],
       "copilotPricing": {
         "inputCostPerMillion": 3.0,
@@ -976,6 +976,15 @@
       "tier": "unknown",
       "displayNames": [
         "Devstral Medium"
+      ]
+    },
+    "devstral-latest": {
+      "inputCostPerMillion": 0.4,
+      "outputCostPerMillion": 2.0,
+      "category": "Mistral models",
+      "tier": "unknown",
+      "displayNames": [
+        "Devstral 2"
       ]
     },
     "pixtral-large-2411": {

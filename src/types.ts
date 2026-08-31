@@ -440,6 +440,18 @@ export interface SessionUsageAnalysis {
    * Token/cost fields are zero here — they are folded in at aggregation time.
    */
   modelEfficiency?: ModelEfficiencyUsage;
+  /**
+   * Correction moments detected in this session's conversation (see
+   * src/correctionDetection.ts). Absent when the session format carries no
+   * per-turn detail or no moments were found.
+   */
+  correctionMoments?: CorrectionMoment[];
+  /**
+   * The session's first user prompt (truncated), captured for repeated-task
+   * detection (see src/repeatedTasks.ts). Absent when the session format
+   * carries no user-message text.
+   */
+  firstUserPrompt?: string;
 }
 
 export interface ToolCallUsage {
@@ -537,6 +549,126 @@ export interface ModelEfficiencyCounters {
 
 export interface ModelEfficiencyUsage {
   [modelName: string]: ModelEfficiencyCounters;
+}
+
+// ---------------------------------------------------------------------------
+// Correction moments (see src/correctionDetection.ts)
+// ---------------------------------------------------------------------------
+
+/**
+ * Kinds of correction moments detected in a session conversation:
+ * - `user-correction`       — a user message correcting the agent ("no, that's wrong", "revert", ...)
+ * - `edit-retry`            — a repeat edit to a file whose immediately preceding tool call was an
+ *                             edit to the same file (failed edit retried right away)
+ * - `edit-self-correction`  — a repeat edit to a file already edited in the same turn with other
+ *                             tool calls in between (the model checked, then corrected itself)
+ * - `tool-error`            — a tool call that failed (where the format records success/failure);
+ *                             `retried` is true when the same tool was called again later
+ * - `agent-self-correction` — an assistant message admitting or fixing a mistake ("my mistake",
+ *                             "let me fix", "you're right", ...)
+ */
+export type CorrectionMomentType =
+  | 'user-correction'
+  | 'edit-retry'
+  | 'edit-self-correction'
+  | 'tool-error'
+  | 'agent-self-correction';
+
+/** One detected correction moment within a session. */
+export interface CorrectionMoment {
+  type: CorrectionMomentType;
+  /** 1-based user-turn index within the session. */
+  turnNumber: number;
+  timestamp: string | null;
+  /** Short excerpt (capped length) providing context for the moment. */
+  snippet: string;
+  /** Tool name for `tool-error` moments. */
+  tool?: string;
+  /** Target file for `edit-retry` / `edit-self-correction` moments. */
+  file?: string;
+  /** For `tool-error`: the same tool was called again later in the session. */
+  retried?: boolean;
+  /** Label of the heuristic pattern that matched (pattern-based types only). */
+  matchedPattern?: string;
+}
+
+/** Aggregated correction-moment counters (per session, repo, or period). */
+export interface CorrectionCounts {
+  userCorrections: number;
+  editRetries: number;
+  editSelfCorrections: number;
+  toolErrors: number;
+  toolErrorsRetried: number;
+  agentSelfCorrections: number;
+}
+
+/** Period-level correction counters plus the number of sessions that had any moment. */
+export interface CorrectionPeriodCounts extends CorrectionCounts {
+  sessionsWithMoments: number;
+}
+
+/** One session's entry in the correction report. */
+export interface CorrectionSessionEntry {
+  file: string;
+  title?: string | null;
+  lastInteraction?: string | null;
+  moments: CorrectionMoment[];
+}
+
+/** Correction moments for one repository, over its most recent sessions. */
+export interface CorrectionRepoGroup {
+  repository: string;
+  sessions: CorrectionSessionEntry[];
+  counts: CorrectionCounts;
+  sessionsWithMoments: number;
+}
+
+/**
+ * Report of correction moments across repositories, each limited to its most
+ * recent sessions (see `sessionsPerRepo`). Built from cached per-session
+ * `SessionUsageAnalysis.correctionMoments`.
+ */
+export interface CorrectionReport {
+  sessionsPerRepo: number;
+  repos: CorrectionRepoGroup[];
+  counts: CorrectionCounts;
+  sessionsWithMoments: number;
+}
+
+// ---------------------------------------------------------------------------
+// Repeated tasks (see src/repeatedTasks.ts)
+// ---------------------------------------------------------------------------
+
+/** Reference to one session in a repeated-task cluster. */
+export interface RepeatedTaskSessionRef {
+  file: string;
+  title?: string | null;
+  lastInteraction?: string | null;
+  repository?: string;
+}
+
+/**
+ * A group of sessions whose first user prompts are similar enough to describe
+ * the same task — a candidate for a reusable skill, prompt file, or agent.
+ */
+export interface RepeatedTaskCluster {
+  /** The cluster's most recent prompt, truncated for display. */
+  representativePrompt: string;
+  sessionCount: number;
+  /** Repositories (short owner/repo names) the cluster's sessions belong to. */
+  repositories: string[];
+  /** Most recent session first. */
+  sessions: RepeatedTaskSessionRef[];
+  /** Tokens shared by every prompt in the cluster (display hint). */
+  sharedKeywords: string[];
+}
+
+/** Repeated-task candidates across all scanned sessions. */
+export interface RepeatedTaskReport {
+  minClusterSize: number;
+  /** Sessions that carried a usable first user prompt. */
+  sessionsScanned: number;
+  clusters: RepeatedTaskCluster[];
 }
 
 export interface EditScopeUsage {
@@ -677,6 +809,17 @@ curationAnalysis?: ToolCurationAnalysis | null;
  * with multi-agent signals were found in the window.
  */
 agenticDailyTrend?: AgenticTrendPoint[];
+/**
+ * Correction moments per repository over its most recent sessions
+ * (default 25). Absent when no moments were detected.
+ */
+correctionReport?: CorrectionReport;
+/**
+ * Repeated-task candidates: clusters of sessions whose first user prompts
+ * describe the same task (see src/repeatedTasks.ts). Absent when no
+ * cluster reached the minimum size.
+ */
+repeatedTasks?: RepeatedTaskReport;
 }
 
 /** One day's worth of multi-agent/delegation signal, used to render a trend sparkline. */
@@ -754,6 +897,12 @@ export interface UsageAnalysisPeriod {
    * efficiency counters or per-model token usage.
    */
   modelEfficiency?: ModelEfficiencyUsage;
+  /**
+   * Aggregated correction-moment counters across the period's sessions
+   * (folded in by mergeUsageAnalysis from each session's correctionMoments).
+   * Absent when no session in the period carried moments.
+   */
+  corrections?: CorrectionPeriodCounts;
 }
 
 /** Aggregated context-window usage for one usage-analysis period. */

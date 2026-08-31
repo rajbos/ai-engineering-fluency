@@ -62,6 +62,39 @@ export function parseCustomProviderModel(model: string): CustomProviderModel | u
     };
 }
 
+/** Matches a leading `<uuid>/` prefix, e.g. org-scoped Copilot model catalog ids. */
+const UUID_PREFIX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//i;
+
+/**
+ * Returns candidate model ids to try when looking up a raw model id in the
+ * pricing JSON, most specific first. Handles the id variants seen in session
+ * logs that all refer to the same underlying model:
+ *
+ * - `copilot/` prefix stripping
+ * - custom-endpoint ids (`<source>/<provider>/<model>`) → the model part
+ * - org-scoped Copilot catalog ids (`<uuid>/<model>`) → the model part
+ * - dash-separated version numbers (`claude-opus-4-8` → `claude-opus-4.8`),
+ *   applied to each of the above
+ */
+export function getModelLookupCandidates(model: string): string[] {
+	const candidates: string[] = [];
+	const add = (id: string) => { if (id && !candidates.includes(id)) { candidates.push(id); } };
+	const addWithVersionVariant = (id: string) => {
+		add(id);
+		// Some logs emit version numbers dash-separated (claude-opus-4-8) where the
+		// pricing JSON uses dots (claude-opus-4.8). Only convert the first
+		// digit-dash-digit run so date suffixes (…-4-5-20251001) stay intact.
+		add(id.replace(/(\d+)-(\d+)(?=-|$)/, '$1.$2'));
+	};
+
+	const base = model.replace(/^copilot\//, '');
+	addWithVersionVariant(base);
+	const custom = parseCustomProviderModel(base);
+	if (custom) { addWithVersionVariant(custom.modelId); }
+	if (UUID_PREFIX.test(base)) { addWithVersionVariant(base.replace(UUID_PREFIX, '')); }
+	return candidates;
+}
+
 /**
  * Returns the provider group for a custom-endpoint model — the user-chosen provider
  * name marked as custom, e.g. `Mistral (Custom)` for
@@ -85,14 +118,19 @@ export function isCustomProviderGroup(group: string): boolean {
  * Custom-endpoint ids are reduced to their model part (the user-chosen provider
  * name is surfaced separately as a provider group), so
  * `customendpoint/Mistral/mistral-medium-latest` displays as the friendly name of
- * `mistral-medium-latest`.
+ * `mistral-medium-latest`. Org-scoped catalog ids (`<uuid>/model`) and
+ * dash/dot version variants are resolved via `getModelLookupCandidates`.
  *
  * If the model ID is not in the pricing JSON, it falls back to URI-decoding
- * the raw ID (e.g. unify-chat-provider names contain %20-encoded segments).
+ * the raw ID (e.g. unify-chat-provider names contain %20-encoded segments),
+ * with known prefix forms (custom endpoint, org UUID) stripped.
  */
 export function getModelDisplayName(model: string): string {
-    if (_modelNames[model]) { return _modelNames[model]; }
+    for (const candidate of getModelLookupCandidates(model)) {
+    	if (_modelNames[candidate]) { return _modelNames[candidate]; }
+    }
     const custom = parseCustomProviderModel(model);
-    if (custom) { return _modelNames[custom.modelId] ?? custom.modelId; }
+    if (custom) { return custom.modelId; }
+    if (UUID_PREFIX.test(model)) { return model.replace(UUID_PREFIX, ''); }
     return decodeSegment(model);
 }

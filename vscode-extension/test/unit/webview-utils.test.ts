@@ -54,6 +54,34 @@ test('getModelDisplayName: resolves the friendly name of a custom-endpoint model
 	assert.equal(getModelDisplayName('customendpoint/Mistral/gpt-4o'), 'GPT-4o');
 });
 
+test('getModelDisplayName: resolves dash-separated version ids to the dotted pricing key', () => {
+	assert.equal(getModelDisplayName('claude-opus-4-8'), 'Claude Opus 4.8');
+	assert.equal(getModelDisplayName('claude-sonnet-4-6'), 'Claude Sonnet 4.6');
+	assert.equal(getModelDisplayName('claude-haiku-4-5-20251001'), 'Claude Haiku 4.5 (2025-10-01)');
+});
+
+test('getModelDisplayName: resolves org-UUID-prefixed catalog ids to the friendly name of the model part', () => {
+	assert.equal(
+		getModelDisplayName('83a386ed-9f05-4fd9-83d4-f453d20c994c/mistral-medium-latest'),
+		'Mistral Medium 3.5'
+	);
+	assert.equal(
+		getModelDisplayName('83a386ed-9f05-4fd9-83d4-f453d20c994c/codestral-latest'),
+		'Codestral'
+	);
+	assert.equal(
+		getModelDisplayName('83a386ed-9f05-4fd9-83d4-f453d20c994c/devstral-latest'),
+		'Devstral 2'
+	);
+});
+
+test('getModelDisplayName: strips the org-UUID prefix for unknown catalog models', () => {
+	assert.equal(
+		getModelDisplayName('83a386ed-9f05-4fd9-83d4-f453d20c994c/some-private-model'),
+		'some-private-model'
+	);
+});
+
 // ── parseCustomProviderModel ────────────────────────────────────────────
 
 test('parseCustomProviderModel: splits a three-part custom-endpoint ID', () => {

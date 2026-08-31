@@ -1683,7 +1683,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   };
   var currentLocalization = { ...DEFAULT_LOCALIZATION };
   function initializeWebviewLocalization(localization) {
-    currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization };
+    const resolved = {};
+    for (const [key, value] of Object.entries(localization)) {
+      if (typeof value === "string" && value !== key) {
+        resolved[key] = value;
+      }
+    }
+    currentLocalization = { ...DEFAULT_LOCALIZATION, ...resolved };
   }
   function localize(key) {
     return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
@@ -1901,6 +1907,32 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     const hours = Math.floor(totalMinutes / 60);
     const minutes = totalMinutes % 60;
     return `${hours}h ${String(minutes).padStart(2, "0")}m`;
+  }
+  function getTimeSince(isoString) {
+    try {
+      const now = Date.now();
+      const then = new Date(isoString).getTime();
+      const diffMs = now - then;
+      if (diffMs < 0) {
+        return "Just now";
+      }
+      const seconds = Math.floor(diffMs / 1e3);
+      const minutes = Math.floor(seconds / 60);
+      const hours = Math.floor(minutes / 60);
+      const days = Math.floor(hours / 24);
+      if (days > 0) {
+        return `${days} day${days !== 1 ? "s" : ""} ago`;
+      }
+      if (hours > 0) {
+        return `${hours} hour${hours !== 1 ? "s" : ""} ago`;
+      }
+      if (minutes > 0) {
+        return `${minutes} minute${minutes !== 1 ? "s" : ""} ago`;
+      }
+      return `${seconds} second${seconds !== 1 ? "s" : ""} ago`;
+    } catch {
+      return "Unknown";
+    }
   }
 
   // src/webview/shared/extensionPoints.ts
@@ -2453,7 +2485,56 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     }
   }
 
+  // src/webview/usage/billingCoverage.ts
+  function billingOtherSessionsCostUsd(groupCosts, api) {
+    if (!api) {
+      return 0;
+    }
+    const copilotCostUsd = groupCosts["GitHub Copilot"] ?? 0;
+    return Math.max(0, api.usedAiCredits * 0.01 - copilotCostUsd);
+  }
+  function billingExtGroupCostsHtml(groupCosts, api) {
+    const otherSessionsCostUsd = billingOtherSessionsCostUsd(groupCosts, api);
+    const hasLocalCopilotRow = "GitHub Copilot" in groupCosts;
+    const totalCostUsd = Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) + otherSessionsCostUsd;
+    const otherSessionsRowHtml = otherSessionsCostUsd > 1e-3 ? `<tr>
+			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary);">GitHub Copilot - other sessions (remote or different environment)</td>
+			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary); text-align:right;">$${formatFixed(otherSessionsCostUsd, 2)}</td>
+		</tr>` : "";
+    const rows = Object.entries(groupCosts).sort(([, a3], [, b3]) => b3 - a3).map(([group, cost]) => {
+      const label = group === "GitHub Copilot" ? "GitHub Copilot - local sessions" : group;
+      return `
+				<tr>
+					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(label)}</td>
+					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
+				</tr>${group === "GitHub Copilot" ? otherSessionsRowHtml : ""}`;
+    }).join("") + (hasLocalCopilotRow ? "" : otherSessionsRowHtml);
+    return `
+		<div style="margin-bottom:12px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
+			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
+				<thead>
+					<tr style="background:var(--bg-tertiary);">
+						<th style="padding:6px 8px; text-align:left; font-size:11px; color:var(--text-secondary); font-weight:600;">Provider</th>
+						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
+					</tr>
+				</thead>
+				<tbody>${rows}</tbody>
+				<tfoot>
+					<tr style="border-top:1px solid var(--border-color);">
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
+						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${formatFixed(totalCostUsd, 2)}</td>
+					</tr>
+				</tfoot>
+			</table>
+		</div>`;
+  }
+
   // src/webview/usage/agentSessionsSanitizer.ts
+  var DEFAULT_SNAPSHOT_REFRESH_INTERVAL_MS = 60 * 60 * 1e3;
+  function toDiscovery(value) {
+    return value === "account" || value === "both" ? value : "workspace";
+  }
   function toSafeNumber(value) {
     const n5 = Number(value);
     return Number.isFinite(n5) && n5 >= 0 ? n5 : 0;
@@ -2479,20 +2560,29 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       totalTasks: toSafeNumber(src.totalTasks),
       totalSessions: toSafeNumber(src.totalSessions),
       totalCredits: toSafeNumber(src.totalCredits),
+      totalPremiumRequests: toSafeNumber(src.totalPremiumRequests),
+      accountTasksAvailable: Boolean(src.accountTasksAvailable),
+      refreshIntervalMs: toSafeNumber(src.refreshIntervalMs) || DEFAULT_SNAPSHOT_REFRESH_INTERVAL_MS,
+      accountTasksError: typeof src.accountTasksError === "string" ? escapeHtml(src.accountTasksError) : void 0,
+      partial: Boolean(src.partial),
       repos: repos.map((repo) => {
         const r6 = repo && typeof repo === "object" ? repo : {};
         const owner = escapeHtml(typeof r6.owner === "string" ? r6.owner : "");
         const repoName = escapeHtml(typeof r6.repo === "string" ? r6.repo : "");
+        const unassigned = Boolean(r6.unassigned) || !owner || !repoName;
         return {
           owner,
           repo: repoName,
-          repoUrl: toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
+          repoUrl: unassigned ? "#" : toSafeHttpUrl(`https://github.com/${owner}/${repoName}`),
           totalTasks: toSafeNumber(r6.totalTasks),
           totalSessions: toSafeNumber(r6.totalSessions),
           totalCredits: toSafeNumber(r6.totalCredits),
+          totalPremiumRequests: toSafeNumber(r6.totalPremiumRequests),
           tasksScanned: toSafeNumber(r6.tasksScanned),
           tasksTotal: toSafeNumber(r6.tasksTotal),
           partial: Boolean(r6.partial),
+          discovery: toDiscovery(r6.discovery),
+          unassigned,
           error: typeof r6.error === "string" ? escapeHtml(r6.error) : void 0
         };
       })
@@ -2976,6 +3066,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     Object.entries(stats.today.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.last30Days.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.month.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
+    Object.keys(stats.today.mcpTools.byServer).forEach((server) => allTools.add(server));
+    Object.keys(stats.last30Days.mcpTools.byServer).forEach((server) => allTools.add(server));
+    Object.keys(stats.month.mcpTools.byServer).forEach((server) => allTools.add(server));
     Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.month.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
@@ -3617,6 +3710,121 @@ ${_renderMultiModelMixedCostSessions(switching)}
       allowToast: !!i6.allowToast
     }));
   }
+  var CORRECTION_MOMENT_TYPES = ["user-correction", "edit-retry", "edit-self-correction", "tool-error", "agent-self-correction"];
+  function sanitizeCorrectionMoment(raw) {
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    if (!CORRECTION_MOMENT_TYPES.includes(raw.type) || typeof raw.snippet !== "string") {
+      return null;
+    }
+    return {
+      type: raw.type,
+      turnNumber: typeof raw.turnNumber === "number" ? raw.turnNumber : 0,
+      timestamp: typeof raw.timestamp === "string" ? raw.timestamp : null,
+      snippet: raw.snippet,
+      tool: typeof raw.tool === "string" ? raw.tool : void 0,
+      file: typeof raw.file === "string" ? raw.file : void 0,
+      retried: raw.retried === true ? true : void 0,
+      matchedPattern: typeof raw.matchedPattern === "string" ? raw.matchedPattern : void 0
+    };
+  }
+  function sanitizeCorrectionCounts(raw) {
+    const num = (v2) => typeof v2 === "number" && isFinite(v2) && v2 >= 0 ? v2 : 0;
+    return {
+      userCorrections: num(raw?.userCorrections),
+      editRetries: num(raw?.editRetries),
+      editSelfCorrections: num(raw?.editSelfCorrections),
+      toolErrors: num(raw?.toolErrors),
+      toolErrorsRetried: num(raw?.toolErrorsRetried),
+      agentSelfCorrections: num(raw?.agentSelfCorrections)
+    };
+  }
+  function sanitizeCorrectionSession(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.file !== "string" || !Array.isArray(raw.moments)) {
+      return null;
+    }
+    const moments = raw.moments.map(sanitizeCorrectionMoment).filter((m2) => m2 !== null);
+    if (moments.length === 0) {
+      return null;
+    }
+    return {
+      file: raw.file,
+      title: typeof raw.title === "string" ? raw.title : null,
+      lastInteraction: typeof raw.lastInteraction === "string" ? raw.lastInteraction : null,
+      moments
+    };
+  }
+  function sanitizeCorrectionRepoGroup(raw) {
+    if (!raw || typeof raw !== "object" || typeof raw.repository !== "string" || !Array.isArray(raw.sessions)) {
+      return null;
+    }
+    const sessions = raw.sessions.map(sanitizeCorrectionSession).filter((s4) => s4 !== null);
+    if (sessions.length === 0) {
+      return null;
+    }
+    return {
+      repository: raw.repository,
+      sessions,
+      counts: sanitizeCorrectionCounts(raw.counts),
+      sessionsWithMoments: typeof raw.sessionsWithMoments === "number" ? raw.sessionsWithMoments : sessions.length
+    };
+  }
+  function sanitizeCorrectionReport(raw) {
+    if (!raw || typeof raw !== "object" || !Array.isArray(raw.repos)) {
+      return null;
+    }
+    const repos = raw.repos.map(sanitizeCorrectionRepoGroup).filter((r6) => r6 !== null);
+    if (repos.length === 0) {
+      return null;
+    }
+    return {
+      sessionsPerRepo: typeof raw.sessionsPerRepo === "number" ? raw.sessionsPerRepo : 25,
+      repos,
+      counts: sanitizeCorrectionCounts(raw.counts),
+      sessionsWithMoments: typeof raw.sessionsWithMoments === "number" ? raw.sessionsWithMoments : repos.reduce((n5, g2) => n5 + g2.sessionsWithMoments, 0)
+    };
+  }
+  function sanitizeRepeatedTaskCluster(raw) {
+    if (!raw || typeof raw !== "object") {
+      return null;
+    }
+    if (typeof raw.representativePrompt !== "string" || typeof raw.sessionCount !== "number" || !Array.isArray(raw.sessions)) {
+      return null;
+    }
+    const sessions = raw.sessions.filter((s4) => s4 && typeof s4 === "object" && typeof s4.file === "string").map((s4) => ({
+      file: s4.file,
+      title: typeof s4.title === "string" ? s4.title : null,
+      lastInteraction: typeof s4.lastInteraction === "string" ? s4.lastInteraction : null,
+      repository: typeof s4.repository === "string" ? s4.repository : void 0
+    }));
+    if (sessions.length === 0) {
+      return null;
+    }
+    return {
+      representativePrompt: raw.representativePrompt,
+      // Derive from the sanitized session list so the UI count can never
+      // disagree with it (and NaN/float counts are impossible).
+      sessionCount: sessions.length,
+      repositories: Array.isArray(raw.repositories) ? raw.repositories.filter((r6) => typeof r6 === "string") : [],
+      sessions,
+      sharedKeywords: Array.isArray(raw.sharedKeywords) ? raw.sharedKeywords.filter((k2) => typeof k2 === "string") : []
+    };
+  }
+  function sanitizeRepeatedTaskReport(raw) {
+    if (!raw || typeof raw !== "object" || !Array.isArray(raw.clusters)) {
+      return null;
+    }
+    const clusters = raw.clusters.map(sanitizeRepeatedTaskCluster).filter((c4) => c4 !== null);
+    if (clusters.length === 0) {
+      return null;
+    }
+    return {
+      minClusterSize: typeof raw.minClusterSize === "number" ? raw.minClusterSize : 2,
+      sessionsScanned: typeof raw.sessionsScanned === "number" ? raw.sessionsScanned : 0,
+      clusters
+    };
+  }
   function _sanitizeCurationAnalysis(rawCa) {
     if (!rawCa || typeof rawCa !== "object") {
       return null;
@@ -3632,6 +3840,10 @@ ${_renderMultiModelMixedCostSessions(switching)}
       estimatedPromptBloat: ca.estimatedPromptBloat && typeof ca.estimatedPromptBloat === "object" ? ca.estimatedPromptBloat : { totalTokens: 0, byServer: {} },
       recommendations: Array.isArray(ca.recommendations) ? ca.recommendations : []
     };
+  }
+  function sanitizeOptionalReports(sanitized, raw) {
+    sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
+    sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
   }
   function sanitizeStats(raw) {
     if (!raw || typeof raw !== "object") {
@@ -3667,6 +3879,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
       if (Array.isArray(raw.insights)) {
         sanitized.insights = sanitizeInsights(raw.insights);
       }
+      sanitizeOptionalReports(sanitized, raw);
       const curationAnalysis = _sanitizeCurationAnalysis(raw.curationAnalysis);
       if (curationAnalysis) {
         sanitized.curationAnalysis = curationAnalysis;
@@ -4266,23 +4479,45 @@ ${_renderMultiModelMixedCostSessions(switching)}
 		${renderReposPrContent(data)}
 	`);
   }
+  function agentRepoLabelHtml(r6) {
+    const mono = "font-family:'Courier New',monospace; font-size:12px;";
+    if (r6.unassigned) {
+      return `<span style="${mono} color:var(--text-secondary);" title="Tasks the agents API reported without a repository \u2014 typically ad-hoc sessions started from cloud chat">no repository (cloud chat)</span>`;
+    }
+    const link = `<a href="${r6.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); ${mono}">${r6.owner}/${r6.repo}</a>`;
+    const accountOnly = r6.discovery === "account" ? ` <span title="Found through your account-wide agent tasks \u2014 this repo is not open in any workspace folder" style="color:var(--text-muted); font-size:10px;">(not in workspace)</span>` : "";
+    return `${link}${accountOnly}`;
+  }
   function buildAgentSessionRows(data, cell, cellCenter) {
     return data.repos.map((r6) => {
-      const repoLink = `<a href="${r6.repoUrl}" target="_blank" rel="noopener noreferrer" style="color:var(--link-color); font-family:'Courier New',monospace; font-size:12px;">${r6.owner}/${r6.repo}</a>`;
+      const label = agentRepoLabelHtml(r6);
       if (r6.error) {
         return `<tr>
-        <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}</td>
+        <td style="${cell}">${label}</td>
         <td colspan="3" style="${cell} color:var(--text-secondary); font-style:italic; font-size:12px;">${r6.error}</td>
       </tr>`;
       }
       const partialNote = r6.partial ? ` <span title="Showing ${r6.tasksScanned} of ${r6.tasksTotal} tasks \u2014 capped to limit API usage" style="color:var(--text-muted); font-size:10px;">(${r6.tasksScanned}/${r6.tasksTotal} tasks scanned)</span>` : "";
+      const credits = r6.totalCredits > 0 ? r6.totalCredits.toFixed(1) : r6.totalPremiumRequests > 0 ? `${r6.totalPremiumRequests.toFixed(1)} PR` : "\u2014";
       return `<tr>
-      <td style="${cell} font-family:'Courier New',monospace; font-size:12px;">${repoLink}${partialNote}</td>
+      <td style="${cell}">${label}${partialNote}</td>
       <td style="${cellCenter} font-weight:600;">${r6.totalTasks}</td>
       <td style="${cellCenter} font-weight:600;">${r6.totalSessions}</td>
-      <td style="${cellCenter}">${r6.totalCredits > 0 ? r6.totalCredits.toFixed(1) : "\u2014"}</td>
+      <td style="${cellCenter}">${credits}</td>
     </tr>`;
     }).join("");
+  }
+  function agentSnapshotFreshnessHtml(data) {
+    const box = "margin-bottom:12px; padding:8px 10px; background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; font-size:11px; color:var(--text-secondary);";
+    if (!data.fetchedAt) {
+      return `<div style="${box}">\u{1F552} <strong>Not fetched yet.</strong> The snapshot is refreshed hourly by the main VS Code window \u2014 it will appear here once that first refresh completes.</div>`;
+    }
+    const fetchedMs = Date.parse(data.fetchedAt);
+    const nextRefresh = Number.isFinite(fetchedMs) ? new Date(fetchedMs + data.refreshIntervalMs).toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" }) : "unknown";
+    return `<div style="${box}">
+    \u{1F552} Updated <strong>${escapeHtml(getTimeSince(data.fetchedAt))}</strong> \xB7 next refresh after ${escapeHtml(nextRefresh)}.
+    Cached and refreshed at most once an hour, by a single VS Code window, to keep GitHub API usage low.
+  </div>`;
   }
   function renderAgentSessionsContent(data) {
     if (!data.authenticated) {
@@ -4293,9 +4528,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>`;
     }
     if (data.repos.length === 0) {
-      return `
+      return `${agentSnapshotFreshnessHtml(data)}
 			<div style="margin-top:12px; font-size:12px; color:var(--text-secondary);">
-				No GitHub repositories detected in your workspace folders.
+				No cloud agent tasks found \u2014 neither in your workspace repositories nor anywhere else in your account.
 			</div>`;
     }
     const sinceDate = new Date(data.since).toLocaleDateString();
@@ -4306,29 +4541,38 @@ ${_renderMultiModelMixedCostSessions(switching)}
         acc.tasks += r6.totalTasks;
         acc.sessions += r6.totalSessions;
         acc.credits += r6.totalCredits;
+        acc.premiumRequests += r6.totalPremiumRequests;
       }
       return acc;
-    }, { tasks: 0, sessions: 0, credits: 0 });
+    }, { tasks: 0, sessions: 0, credits: 0, premiumRequests: 0 });
     const hasPartial = data.repos.some((r6) => r6.partial && !r6.error);
     const rows = buildAgentSessionRows(data, cell, cellCenter);
+    const tile = "background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;";
     return `
+		${agentSnapshotFreshnessHtml(data)}
 		<div style="margin-bottom:12px; display:flex; gap:24px; flex-wrap:wrap;">
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.tasks}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Tasks</div>
 			</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.sessions}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">Sessions</div>
 			</div>
-			<div style="background:var(--bg-tertiary); border:1px solid var(--border-color); border-radius:6px; padding:12px 20px; text-align:center; min-width:80px;">
+			<div style="${tile}">
 				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.credits > 0 ? summaryTotals.credits.toFixed(1) : "\u2014"}</div>
 				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;">AI Credits</div>
 			</div>
+			${summaryTotals.premiumRequests > 0 ? `
+			<div style="${tile}">
+				<div style="font-size:22px; font-weight:700; color:var(--text-primary);">${summaryTotals.premiumRequests.toFixed(1)}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:2px;" title="Sessions that ran before the June 2026 switch to AI credits are billed in premium requests">Premium Requests</div>
+			</div>` : ""}
 		</div>
 		<div style="font-size:11px; color:var(--text-secondary); margin-bottom:12px;">
 			Showing cloud-agent sessions from ${sinceDate} to now.
-			${hasPartial ? "<strong>Note:</strong> Some repos were capped at 50 tasks \u2014 totals may be lower bounds. " : ""}
+			${hasPartial ? "<strong>Note:</strong> Some repos were capped \u2014 totals are lower bounds. " : ""}
+			${data.accountTasksAvailable ? "" : `<strong>Account-wide tasks unavailable:</strong> ${data.accountTasksError ?? "the /agents/tasks endpoint could not be read"} \u2014 only workspace repositories are shown.`}
 		</div>
 		<div class="customization-matrix-container">
 			<table class="customization-matrix" style="width:100%; border-collapse:collapse;">
@@ -4345,6 +4589,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 		</div>
 		<div style="margin-top:8px; font-size:10px; color:var(--text-muted); border-top:1px solid var(--border-subtle); padding-top:8px;">
 			\u2139\uFE0F <strong>No double-counting:</strong> These are cloud agent sessions only. CLI/remote sessions and local IDE chat sessions (shown in "My Activity") are excluded.<br/>
+			\u2139\uFE0F <strong>Two sources:</strong> your workspace repositories (which also surface tasks other people started there) plus your account-wide agent tasks, which cover repos you don't have open and ad-hoc cloud chat sessions. Tasks seen in both are counted once.<br/>
 			\u2139\uFE0F <strong>Action minutes</strong> (GitHub Actions compute used by the agent) are not shown here \u2014 they require additional per-branch API calls.
 		</div>`;
   }
@@ -5070,6 +5315,130 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>
 		</div>`;
   }
+  function correctionsCountBadgeHtml(report) {
+    if (!report || report.sessionsWithMoments === 0) {
+      return "";
+    }
+    return ` <span style="background:rgba(251,191,36,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${report.sessionsWithMoments}</span>`;
+  }
+  function correctionsTabButtonHtml(report) {
+    return `<button class="tab-button ${activeTab === "corrections" ? "active" : ""}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections${correctionsCountBadgeHtml(report)}</button>`;
+  }
+  function buildRepeatedTaskSessionLinkHtml(session) {
+    const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
+    const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
+    const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : "";
+    const repo = session.repository ? ` \xB7 ${session.repository}` : "";
+    return `<div style="font-size:11px; color:var(--text-secondary); padding:2px 0; overflow-wrap:anywhere;">${escapeHtml(title)}${escapeHtml(dateLabel ? ` \xB7 ${dateLabel}` : "")}${escapeHtml(repo)}</div>`;
+  }
+  function buildRepeatedTaskClusterHtml(cluster) {
+    const keywords = cluster.sharedKeywords.length > 0 ? `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">${cluster.sharedKeywords.map((k2) => `<span style="font-size:10px; padding:1px 7px; border-radius:8px; background:var(--bg-tertiary); color:var(--text-secondary);">${escapeHtml(k2)}</span>`).join("")}</div>` : "";
+    return `
+		<div style="margin-top:10px; padding:12px 14px; border-radius:8px; background:var(--bg-tertiary); border:1px solid var(--border-color, transparent);">
+			<div style="display:flex; align-items:flex-start; gap:10px;">
+				<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.5); color:var(--text-primary); white-space:nowrap;">${cluster.sessionCount}\xD7 repeated</span>
+				<div style="flex:1; min-width:0; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;">&ldquo;${escapeHtml(cluster.representativePrompt)}&rdquo;</div>
+			</div>
+			${keywords}
+			<details style="margin-top:8px;">
+				<summary style="font-size:11px; color:var(--text-secondary); cursor:pointer;">Sessions (${cluster.sessions.length})</summary>
+				<div style="margin-top:4px;">${cluster.sessions.map(buildRepeatedTaskSessionLinkHtml).join("")}</div>
+			</details>
+		</div>`;
+  }
+  function buildSkillSuggestionsSectionHtml(report) {
+    if (!report || report.clusters.length === 0) {
+      return "";
+    }
+    return `
+		<div class="section">
+			<div class="section-title"><span>\u{1F9E9}</span><span>Skill Suggestions</span></div>
+			<div class="section-subtitle">
+				Tasks you keep prompting for across sessions (first prompt per session, ${report.sessionsScanned} sessions scanned).
+				A repeated task is a good candidate for a reusable skill, prompt file, or custom agent.
+			</div>
+			${report.clusters.map(buildRepeatedTaskClusterHtml).join("")}
+		</div>`;
+  }
+  var CORRECTION_TYPE_META = {
+    "user-correction": { label: "You corrected the agent", color: "rgba(251,191,36,0.85)" },
+    "tool-error": { label: "Tool failed", color: "rgba(248,113,113,0.85)" },
+    "edit-retry": { label: "Edit retry", color: "rgba(251,146,60,0.85)" },
+    "edit-self-correction": { label: "Edit self-correction", color: "rgba(251,146,60,0.85)" },
+    "agent-self-correction": { label: "Agent caught itself", color: "rgba(96,165,250,0.85)" }
+  };
+  function buildCorrectionMomentHtml(moment) {
+    const meta = CORRECTION_TYPE_META[moment.type] ?? { label: moment.type, color: "rgba(148,163,184,0.85)" };
+    const time = moment.timestamp ? new Date(moment.timestamp) : null;
+    const timeLabel = time && !isNaN(time.getTime()) ? time.toLocaleString() : "";
+    const detail = moment.type === "tool-error" ? `tool \`${moment.tool ?? "?"}\`${moment.retried ? " \u2014 retried shortly after" : ""}` : moment.matchedPattern ? `matched ${moment.matchedPattern}` : "";
+    return `
+		<div style="display:flex; gap:10px; align-items:flex-start; padding:8px 0; border-bottom:1px solid var(--bg-tertiary);">
+			<span style="flex-shrink:0; font-size:10px; font-weight:700; letter-spacing:0.03em; padding:2px 8px; border-radius:10px; border:1px solid ${meta.color}; color:var(--text-primary); background:${meta.color.replace("0.85", "0.12")}; white-space:nowrap;">${escapeHtml(meta.label)}</span>
+			<div style="flex:1; min-width:0;">
+				<div style="font-size:12px; color:var(--text-primary); opacity:0.9; overflow-wrap:anywhere;">${escapeHtml(moment.snippet)}</div>
+				<div style="font-size:11px; color:var(--text-secondary); margin-top:3px;">
+					turn ${moment.turnNumber}${detail ? ` \xB7 ${escapeHtml(detail)}` : ""}${timeLabel ? ` \xB7 ${escapeHtml(timeLabel)}` : ""}
+				</div>
+			</div>
+		</div>`;
+  }
+  function buildCorrectionSessionHtml(session) {
+    const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
+    const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
+    const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : "";
+    return `
+		<div style="margin:10px 0 4px; padding:10px 12px; background:var(--bg-tertiary); border-radius:6px;">
+			<div style="font-size:12px; font-weight:600; color:var(--text-primary); overflow-wrap:anywhere;">
+				${escapeHtml(title)}${dateLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">\xB7 ${escapeHtml(dateLabel)}</span>` : ""}
+			</div>
+			${session.moments.map(buildCorrectionMomentHtml).join("")}
+		</div>`;
+  }
+  function buildCorrectionsTabPanelHtml(report) {
+    if (!report || report.repos.length === 0) {
+      return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== "corrections" ? ' style="display:none"' : ""}>
+			<div class="section">
+				<div class="section-title"><span>\u{1F501}</span><span>Corrections</span></div>
+				<div class="section-subtitle">Moments where the agent corrected itself after an error, or you had to correct the agent.</div>
+				<div style="margin-top:16px; padding:16px; background:var(--bg-tertiary); border-radius:8px; font-size:12px; color:var(--text-secondary); text-align:center;">
+					\u2728 No correction moments detected in your recent sessions \u2014 nice and smooth!
+				</div>
+			</div>
+		</div>`;
+    }
+    const c4 = report.counts;
+    const chip = (n5, label) => n5 > 0 ? `<span style="font-size:11px; padding:2px 10px; border-radius:10px; background:var(--bg-tertiary); color:var(--text-primary);">${n5} ${escapeHtml(label)}</span>` : "";
+    const summaryChips = [
+      chip(c4.userCorrections, "user corrections"),
+      chip(c4.toolErrors, "tool errors"),
+      chip(c4.editRetries, "edit retries"),
+      chip(c4.editSelfCorrections, "edit self-corrections"),
+      chip(c4.agentSelfCorrections, "agent self-corrections")
+    ].filter(Boolean).join(" ");
+    const repoSections = report.repos.map((repo) => `
+		<div style="margin-top:18px;">
+			<div style="font-size:12px; font-weight:700; color:var(--text-primary); margin-bottom:4px;">
+				${escapeHtml(repo.repository)}
+				<span style="font-weight:400; color:var(--text-secondary);">\u2014 ${repo.sessionsWithMoments} session${repo.sessionsWithMoments !== 1 ? "s" : ""} with moments</span>
+			</div>
+			${repo.sessions.map(buildCorrectionSessionHtml).join("")}
+		</div>`).join("");
+    return `
+		<div id="tab-panel-corrections" class="tab-panel"${activeTab !== "corrections" ? ' style="display:none"' : ""}>
+			<div class="section">
+				<div class="section-title"><span>\u{1F501}</span><span>Corrections</span></div>
+				<div class="section-subtitle">
+					Moments where the agent corrected itself after an error, or you had to correct the agent \u2014
+					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments \u2014
+					sessions without corrections are not listed. Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
+				</div>
+				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
+				${repoSections}
+			</div>
+		</div>`;
+  }
   function updateTabButtonCount(insights) {
     const tabButton = document.querySelector('.tab-button[data-tab="insights"]');
     if (!tabButton) {
@@ -5218,6 +5587,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 				<button class="tab-button ${activeTab === "agent" ? "active" : ""}" data-tab="agent"><span class="codicon codicon-cloud"></span> Cloud Agent</button>
 				<button class="tab-button ${activeTab === "worktrees" ? "active" : ""}" data-tab="worktrees"><span class="codicon codicon-git-branch"></span> Worktrees</button>
 				<button class="tab-button ${activeTab === "insights" ? "active" : ""}" data-tab="insights"><span class="codicon codicon-lightbulb"></span> Insights${(stats.insights ?? []).filter((i6) => i6.status === "new").length > 0 ? ` <span style="background:rgba(96,165,250,0.4);border-radius:10px;padding:1px 6px;font-size:11px;">${(stats.insights ?? []).filter((i6) => i6.status === "new").length}</span>` : ""}</button>
+				${correctionsTabButtonHtml(stats.correctionReport ?? null)}
 			</div>
 
 			${safeSectionHtml("Recent Sessions", () => buildSessionsTabPanelHtml(stats))}
@@ -5227,6 +5597,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			${safeSectionHtml("Repository PRs & Cloud Agent", () => buildReposAndAgentTabPanelsHtml())}
 			${safeSectionHtml("Worktrees", () => buildWorktreesTabPanelHtml())}
 			${safeSectionHtml("Insights", () => buildInsightsTabPanelHtml(stats.insights ?? []))}
+			${safeSectionHtml("Corrections", () => buildCorrectionsTabPanelHtml(stats.correctionReport ?? null))}
 			<div class="footer">
 				Last updated: ${escapeHtml(new Date(stats.lastUpdated).toLocaleString())} \xB7 Updates every 5 minutes
 			</div>
@@ -5577,49 +5948,6 @@ ${_renderMultiModelMixedCostSessions(switching)}
 			</div>
 		</div>`;
   }
-  function _billingOtherSessionsCostUsd(groupCosts, api) {
-    if (!api) {
-      return 0;
-    }
-    const copilotCostUsd = groupCosts["GitHub Copilot"] ?? 0;
-    return Math.max(0, api.usedAiCredits * 0.01 - copilotCostUsd);
-  }
-  function _billingExtGroupCostsHtml(groupCosts, api) {
-    const otherSessionsCostUsd = _billingOtherSessionsCostUsd(groupCosts, api);
-    const hasLocalCopilotRow = "GitHub Copilot" in groupCosts;
-    const totalCostUsd = Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) + otherSessionsCostUsd;
-    const otherSessionsRowHtml = otherSessionsCostUsd > 1e-3 ? `<tr>
-			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary);">GitHub Copilot - other sessions (remote or different environment)</td>
-			<td style="padding:4px 8px; font-size:12px; color:var(--text-secondary); text-align:right;">$${formatFixed(otherSessionsCostUsd, 2)}</td>
-		</tr>` : "";
-    const rows = Object.entries(groupCosts).sort(([, a3], [, b3]) => b3 - a3).map(([group, cost]) => {
-      const label = group === "GitHub Copilot" ? "GitHub Copilot - local sessions" : group;
-      return `
-				<tr>
-					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary);">${escapeHtml(label)}</td>
-					<td style="padding:4px 8px; font-size:12px; color:var(--text-primary); text-align:right;">$${formatFixed(cost, 2)}</td>
-				</tr>${group === "GitHub Copilot" ? otherSessionsRowHtml : ""}`;
-    }).join("") + (hasLocalCopilotRow ? "" : otherSessionsRowHtml);
-    return `
-		<div style="margin-bottom:12px;">
-			<div style="font-size:12px; font-weight:600; color:var(--text-secondary); margin-bottom:6px;">Extension tracked (this calendar month, IDE sessions only)</div>
-			<table style="width:100%; border-collapse:collapse; border:1px solid var(--border-subtle); border-radius:6px; overflow:hidden;">
-				<thead>
-					<tr style="background:var(--bg-tertiary);">
-						<th style="padding:6px 8px; text-align:left; font-size:11px; color:var(--text-secondary); font-weight:600;">Provider</th>
-						<th style="padding:6px 8px; text-align:right; font-size:11px; color:var(--text-secondary); font-weight:600;">Estimated cost</th>
-					</tr>
-				</thead>
-				<tbody>${rows}</tbody>
-				<tfoot>
-					<tr style="border-top:1px solid var(--border-color);">
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary);">Total</td>
-						<td style="padding:6px 8px; font-size:12px; font-weight:600; color:var(--text-primary); text-align:right;">$${formatFixed(totalCostUsd, 2)}</td>
-					</tr>
-				</tfoot>
-			</table>
-		</div>`;
-  }
   function _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd) {
     if (!api) {
       return `
@@ -5658,7 +5986,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const totalCostUsd = groupCosts ? Object.values(groupCosts).reduce((s4, v2) => s4 + v2, 0) : 0;
     const nonCopilotCostUsd = totalCostUsd - copilotCostUsd;
     const apiHtml = api ? _billingApiBalanceHtml(api, copilotCostUsd) : "";
-    const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? _billingExtGroupCostsHtml(groupCosts, api) : "";
+    const extHtml = groupCosts && Object.keys(groupCosts).length > 0 ? billingExtGroupCostsHtml(groupCosts, api) : "";
     const deltaHtml = _billingCoverageAnalysisHtml(api, copilotCostUsd, nonCopilotCostUsd);
     return `
 		<div class="section">
@@ -6189,6 +6517,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
+			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
 			<div class="section">
 				<div class="section-title"><span>\u{1F500}</span><span>Multi-Model Usage</span></div>
