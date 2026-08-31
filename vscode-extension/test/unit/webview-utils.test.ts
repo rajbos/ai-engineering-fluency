@@ -12,6 +12,7 @@ import {
 	formatCost,
 	formatDurationShort,
 	formatFileSize,
+	getTimeSince,
 	escapeHtml,
 	safeSectionHtml,
 	markdownToHtml,
@@ -363,4 +364,22 @@ test('formatFileSize: scales into PB and caps there', () => {
 test('formatFileSize: rejects negative and non-finite values', () => {
 	assert.equal(formatFileSize(-1), 'N/A');
 	assert.equal(formatFileSize(NaN), 'N/A');
+});
+
+// ── getTimeSince ────────────────────────────────────────────────────────
+
+test('getTimeSince: returns "Unknown" for invalid timestamps instead of NaN text', () => {
+	assert.equal(getTimeSince('not-a-date'), 'Unknown');
+	assert.equal(getTimeSince(''), 'Unknown');
+});
+
+test('getTimeSince: returns "Just now" for future timestamps', () => {
+	assert.equal(getTimeSince(new Date(Date.now() + 60_000).toISOString()), 'Just now');
+});
+
+test('getTimeSince: formats seconds, minutes, hours and days', () => {
+	assert.equal(getTimeSince(new Date(Date.now() - 5_000).toISOString()), '5 seconds ago');
+	assert.equal(getTimeSince(new Date(Date.now() - 3 * 60_000).toISOString()), '3 minutes ago');
+	assert.equal(getTimeSince(new Date(Date.now() - 2 * 3_600_000).toISOString()), '2 hours ago');
+	assert.equal(getTimeSince(new Date(Date.now() - 4 * 86_400_000).toISOString()), '4 days ago');
 });

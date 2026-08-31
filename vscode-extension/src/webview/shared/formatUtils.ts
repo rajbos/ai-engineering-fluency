@@ -190,6 +190,9 @@ export function getTimeSince(isoString: string): string {
 	try {
 		const now = Date.now();
 		const then = new Date(isoString).getTime();
+		if (!Number.isFinite(then)) {
+			return 'Unknown';
+		}
 		const diffMs = now - then;
 
 		if (diffMs < 0) {

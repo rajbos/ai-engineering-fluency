@@ -7272,13 +7272,28 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const model = models[0];
 		this.log(`🤖 Using Copilot model: ${model.id} for repository analysis`);
 		const cts = new vscode.CancellationTokenSource();
+		// Hard cap so a hung model request can't leave the webview stuck on "Analyzing…" forever.
+		const timeoutMs = 120_000;
+		const timer = setTimeout(() => cts.cancel(), timeoutMs);
 		try {
 			const response = await model.sendRequest([vscode.LanguageModelChatMessage.User(prompt)], {}, cts.token);
 			let fullResponse = '';
 			for await (const chunk of response.text) { fullResponse += chunk; }
+			// Clear the timer before the cancellation check so a request that finished
+			// streaming just as the timer fired isn't reported as a timeout.
+			clearTimeout(timer);
+			if (cts.token.isCancellationRequested) {
+				throw new Error(`Copilot model request timed out after ${timeoutMs / 1000}s`);
+			}
 			this.log(`📋 Copilot analysis response length: ${fullResponse.length} characters`);
 			return fullResponse;
+		} catch (error) {
+			if (cts.token.isCancellationRequested) {
+				throw new Error(`Copilot model request timed out after ${timeoutMs / 1000}s. Please try again.`);
+			}
+			throw error;
 		} finally {
+			clearTimeout(timer);
 			cts.dispose();
 		}
 	}

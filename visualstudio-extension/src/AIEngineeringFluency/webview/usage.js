@@ -1912,6 +1912,9 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     try {
       const now = Date.now();
       const then = new Date(isoString).getTime();
+      if (!Number.isFinite(then)) {
+        return "Unknown";
+      }
       const diffMs = now - then;
       if (diffMs < 0) {
         return "Just now";
@@ -2328,13 +2331,41 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       modelId: decodeSegment(parts[2])
     };
   }
+  var UUID_PREFIX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\//i;
+  function getModelLookupCandidates(model) {
+    const candidates = [];
+    const add = (id) => {
+      if (id && !candidates.includes(id)) {
+        candidates.push(id);
+      }
+    };
+    const addWithVersionVariant = (id) => {
+      add(id);
+      add(id.replace(/(\d+)-(\d+)(?=-|$)/, "$1.$2"));
+    };
+    const base = model.replace(/^copilot\//, "");
+    addWithVersionVariant(base);
+    const custom = parseCustomProviderModel(base);
+    if (custom) {
+      addWithVersionVariant(custom.modelId);
+    }
+    if (UUID_PREFIX.test(base)) {
+      addWithVersionVariant(base.replace(UUID_PREFIX, ""));
+    }
+    return candidates;
+  }
   function getModelDisplayName(model) {
-    if (_modelNames[model]) {
-      return _modelNames[model];
+    for (const candidate of getModelLookupCandidates(model)) {
+      if (_modelNames[candidate]) {
+        return _modelNames[candidate];
+      }
     }
     const custom = parseCustomProviderModel(model);
     if (custom) {
-      return _modelNames[custom.modelId] ?? custom.modelId;
+      return custom.modelId;
+    }
+    if (UUID_PREFIX.test(model)) {
+      return model.replace(UUID_PREFIX, "");
     }
     return decodeSegment(model);
   }
@@ -2357,7 +2388,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     return Math.round(n5 * (unit === "M" ? 1e6 : unit === "K" ? 1e3 : 1));
   }
   function getLongContextInfo(modelId, modelPricing = {}) {
-    let pricing = modelPricing[modelId];
+    let pricing = _lookupModelPricing(modelId, modelPricing);
     if (!pricing) {
       const id = modelId.toLowerCase();
       for (const [key, value] of Object.entries(modelPricing)) {
@@ -2380,6 +2411,15 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       defaultInputCostPerMillion: pricing.copilotPricing.inputCostPerMillion,
       longContextInputCostPerMillion: longContext.inputCostPerMillion
     };
+  }
+  function _lookupModelPricing(model, modelPricing) {
+    for (const candidate of getModelLookupCandidates(model)) {
+      const entry = modelPricing[candidate];
+      if (entry) {
+        return entry;
+      }
+    }
+    return void 0;
   }
 
   // ../src/modelEfficiency.ts
@@ -2775,9 +2815,11 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   }
   var hygieneMatrixState = null;
   var repoAnalysisState = /* @__PURE__ */ new Map();
+  var repoAnalysisInFlight = /* @__PURE__ */ new Set();
   var selectedRepoPath = null;
   var isSwitchingRepository = false;
   var isBatchAnalysisInProgress = false;
+  var isSingleRepoAnalysisInProgress = false;
   var currentWorkspacePaths = [];
   var activeTab = "activity";
   var loadingTimeoutId = null;
@@ -4809,7 +4851,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 				</div>
 				${hygieneMatrixState && hygieneMatrixState.workspaces && hygieneMatrixState.workspaces.length > 0 ? `
 					<div style="margin-bottom: 12px;">
-						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${hygieneMatrixState.workspaces.length})</vscode-button>
+						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;" ${isBatchAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ""}>${isBatchAnalysisInProgress ? "Analyzing All..." : `Analyze All Repositories (${hygieneMatrixState.workspaces.length})`}</vscode-button>
 					</div>
 					<div id="repo-list-pane-container" class="repo-hygiene-pane">
 						<div class="repo-hygiene-pane-header">\u{1F4C1} Repository List</div>
@@ -4820,7 +4862,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 						<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
 					</div>
 				` : `
-					<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
+					<vscode-button id="btn-analyse-repo" ${isSingleRepoAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ""}>${isSingleRepoAnalysisInProgress ? "Analyzing..." : "Analyze Repo for Best Practices"}</vscode-button>
 					<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
 				`}
 			</div>
@@ -6670,24 +6712,32 @@ ${_renderMultiModelMixedCostSessions(switching)}
     });
     wireExtensionPointButtons(vscode);
   }
+  function setButtonAnalyzingState(btn, analyzingText) {
+    if (!btn) {
+      return;
+    }
+    btn.disabled = true;
+    btn.textContent = analyzingText;
+    btn.setAttribute("appearance", "secondary");
+  }
   function wireRepositoryButtons() {
     document.getElementById("btn-analyse-repo")?.addEventListener("click", () => {
       const btn = document.getElementById("btn-analyse-repo");
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = "Analyzing...";
-      }
+      isSingleRepoAnalysisInProgress = true;
+      setButtonAnalyzingState(btn, "Analyzing...");
       vscode.postMessage({ command: "analyseRepository" });
     });
     document.getElementById("btn-analyse-all")?.addEventListener("click", () => {
       const btn = document.getElementById("btn-analyse-all");
-      if (btn) {
-        btn.disabled = true;
-        btn.textContent = "Analyzing All...";
-      }
+      setButtonAnalyzingState(btn, "Analyzing All...");
       isBatchAnalysisInProgress = true;
       isSwitchingRepository = true;
       selectedRepoPath = null;
+      for (const ws of hygieneMatrixState?.workspaces ?? []) {
+        if (!ws.workspacePath.startsWith("<unresolved:")) {
+          repoAnalysisInFlight.add(ws.workspacePath);
+        }
+      }
       renderRepositoryHygienePanels();
       vscode.postMessage({ command: "analyseAllRepositories" });
     });
@@ -6709,9 +6759,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
         return;
       }
       if (action === "analyze") {
-        actionButton.disabled = true;
-        actionButton.textContent = "Analyzing...";
+        repoAnalysisInFlight.add(workspacePath);
         isBatchAnalysisInProgress = false;
+        renderRepositoryHygienePanels();
         vscode.postMessage({ command: "analyseRepository", workspacePath });
       }
     });
@@ -6852,20 +6902,33 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
     return false;
   }
+  function handleRepoAnalysisMessage(message) {
+    switch (message.command) {
+      case "repoAnalysisResults":
+        try {
+          displayRepoAnalysisResults(message.data, message.workspacePath);
+        } catch (err) {
+          console.error("Failed to render repo analysis results", err);
+          displayRepoAnalysisError(err instanceof Error ? err.message : String(err), message.workspacePath);
+        }
+        return true;
+      case "repoAnalysisError":
+        displayRepoAnalysisError(message.error, message.workspacePath);
+        return true;
+      case "repoAnalysisBatchComplete":
+        handleBatchAnalysisComplete();
+        return true;
+    }
+    return false;
+  }
   function handleExtensionMessage(message) {
     if (handleLoadingStateMessage(message)) {
       return;
     }
+    if (handleRepoAnalysisMessage(message)) {
+      return;
+    }
     switch (message.command) {
-      case "repoAnalysisResults":
-        displayRepoAnalysisResults(message.data, message.workspacePath);
-        break;
-      case "repoAnalysisError":
-        displayRepoAnalysisError(message.error, message.workspacePath);
-        break;
-      case "repoAnalysisBatchComplete":
-        handleBatchAnalysisComplete();
-        break;
       case "updateStats":
         handleUpdateStats(message);
         break;
@@ -7183,16 +7246,19 @@ For each issue, please provide specific steps or code changes to fix it.`;
 			<div style="${colStyles.sessions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Sessions</div>
 			<div style="${colStyles.interactions} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Interactions</div>
 			<div style="${colStyles.score} font-weight: 600; color: var(--text-secondary); text-transform: uppercase; letter-spacing: 0.04em;">Score</div>
-			<div style="width: 80px; flex-shrink: 0;"></div>
+			<div style="width: 110px; flex-shrink: 0;"></div>
 		</div>
 	`;
     setHtml(listPane, headerHtml + visibleWorkspaces.map((ws, idx) => {
       const record = repoAnalysisState.get(ws.workspacePath);
+      const inFlight = repoAnalysisInFlight.has(ws.workspacePath);
       const hasResult = !!record?.data?.summary;
       const scoreLabel = getScoreLabel(ws.workspacePath);
-      const buttonLabel = hasResult ? "Details" : "Analyze";
-      const buttonAction = hasResult ? "details" : "analyze";
+      const buttonLabel = inFlight ? "Analyzing\u2026" : hasResult ? "Details" : "Analyze";
+      const buttonAction = hasResult && !inFlight ? "details" : "analyze";
       const isCurrentSelection = selectedRepoPath === ws.workspacePath && hasSelectedRepository;
+      const buttonDisabled = inFlight || isCurrentSelection;
+      const buttonAppearance = inFlight ? ' appearance="secondary"' : "";
       const sessions = Number(ws.sessionCount) || 0;
       const interactions = Number(ws.interactionCount) || 0;
       return `
@@ -7205,7 +7271,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
 				<div style="${colStyles.sessions}">${sessions}</div>
 				<div style="${colStyles.interactions}">${interactions}</div>
 				<div style="${colStyles.score}">${escapeHtml(scoreLabel)}</div>
-				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${isCurrentSelection ? 'disabled="true"' : ""} style="min-width: 80px; flex-shrink: 0;">
+				<vscode-button class="btn-repo-action" data-action="${buttonAction}" data-workspace-path="${escapeHtml(ws.workspacePath)}" ${buttonDisabled ? 'disabled="true"' : ""}${buttonAppearance} style="width: 110px; flex-shrink: 0;">
 					${buttonLabel}
 				</vscode-button>
 			</div>
@@ -7281,6 +7347,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
   }
   function displayRepoAnalysisResults(data, workspacePath) {
     if (workspacePath) {
+      repoAnalysisInFlight.delete(workspacePath);
       repoAnalysisState.set(workspacePath, { data, error: void 0 });
       if (!isBatchAnalysisInProgress) {
         selectedRepoPath = workspacePath;
@@ -7291,8 +7358,10 @@ For each issue, please provide specific steps or code changes to fix it.`;
     }
     const btn = document.getElementById("btn-analyse-repo");
     if (btn) {
+      isSingleRepoAnalysisInProgress = false;
       btn.disabled = false;
       btn.textContent = "Analyze Repo for Best Practices";
+      btn.removeAttribute("appearance");
     }
     const resultsHost = document.getElementById("repo-analysis-results");
     if (resultsHost) {
@@ -7305,6 +7374,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
   }
   function displayRepoAnalysisError(error, workspacePath) {
     if (workspacePath) {
+      repoAnalysisInFlight.delete(workspacePath);
       repoAnalysisState.set(workspacePath, { data: void 0, error });
       if (!isBatchAnalysisInProgress) {
         selectedRepoPath = workspacePath;
@@ -7315,8 +7385,10 @@ For each issue, please provide specific steps or code changes to fix it.`;
     }
     const btn = document.getElementById("btn-analyse-repo");
     if (btn) {
+      isSingleRepoAnalysisInProgress = false;
       btn.disabled = false;
       btn.textContent = "Analyze Repo for Best Practices";
+      btn.removeAttribute("appearance");
     }
     const resultsHost = document.getElementById("repo-analysis-results");
     if (resultsHost) {
@@ -7332,10 +7404,12 @@ For each issue, please provide specific steps or code changes to fix it.`;
     isBatchAnalysisInProgress = false;
     isSwitchingRepository = true;
     selectedRepoPath = null;
+    repoAnalysisInFlight.clear();
     renderRepositoryHygienePanels();
     const btn = document.getElementById("btn-analyse-all");
     if (btn) {
       btn.disabled = false;
+      btn.removeAttribute("appearance");
       const matrix = initialData?.customizationMatrix;
       const count = matrix?.workspaces?.length || 0;
       btn.textContent = `Analyze All Repositories (${count})`;
