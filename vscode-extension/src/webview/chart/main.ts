@@ -228,17 +228,31 @@ function buildChartHeader(data: InitialChartData): HTMLElement {
 	return header;
 }
 
+function getSummaryValues(periodData: ChartPeriodData, periodMeta: typeof PERIOD_LABELS[ChartPeriod]) {
+	if (currentMetric === 'cost') {
+		return { totalLabel: 'Total Cost (est.)', totalValue: `$${periodData.totalCost.toFixed(2)}`, avgLabel: periodMeta.avgCostLabel, avgValue: `$${periodData.avgCostPerPeriod.toFixed(2)}` };
+	}
+	if (currentMetric === 'output') {
+		return {
+			totalLabel: 'Total Lines (AI)',
+			totalValue: ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString(),
+			avgLabel: periodMeta.avgLocLabel,
+			avgValue: Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString()
+		};
+	}
+	if (currentMetric === 'sessions') {
+		return {
+			totalLabel: 'Total Sessions',
+			totalValue: periodData.totalSessions.toLocaleString(),
+			avgLabel: periodMeta.avgSessionsLabel,
+			avgValue: Math.round(periodData.totalSessions / Math.max(1, periodData.periodCount)).toLocaleString()
+		};
+	}
+	return { totalLabel: 'Total Tokens', totalValue: formatCompact(periodData.totalTokens), avgLabel: periodMeta.avgLabel, avgValue: formatCompact(periodData.avgPerPeriod) };
+}
+
 function buildSummaryCards(periodData: ChartPeriodData, periodMeta: typeof PERIOD_LABELS[ChartPeriod]): HTMLElement {
-	const totalLabel = currentMetric === 'cost' ? 'Total Cost (est.)' : currentMetric === 'output' ? 'Total Lines (AI)' : currentMetric === 'sessions' ? 'Total Sessions' : 'Total Tokens';
-	const totalValue = currentMetric === 'cost' ? `$${periodData.totalCost.toFixed(2)}`
-		: currentMetric === 'output' ? ((periodData.totalLinesAdded ?? 0) + (periodData.totalLinesRemoved ?? 0)).toLocaleString()
-		: currentMetric === 'sessions' ? periodData.totalSessions.toLocaleString()
-		: formatCompact(periodData.totalTokens);
-	const avgLabel = currentMetric === 'cost' ? periodMeta.avgCostLabel : currentMetric === 'output' ? periodMeta.avgLocLabel : currentMetric === 'sessions' ? periodMeta.avgSessionsLabel : periodMeta.avgLabel;
-	const avgValue = currentMetric === 'cost' ? `$${periodData.avgCostPerPeriod.toFixed(2)}`
-		: currentMetric === 'output' ? Math.round(periodData.avgLocPerPeriod ?? 0).toLocaleString()
-		: currentMetric === 'sessions' ? Math.round(periodData.totalSessions / Math.max(1, periodData.periodCount)).toLocaleString()
-		: formatCompact(periodData.avgPerPeriod);
+	const { totalLabel, totalValue, avgLabel, avgValue } = getSummaryValues(periodData, periodMeta);
 	const cards = el('div', 'cards');
 	cards.id = 'summary-cards';
 	cards.append(
@@ -537,13 +551,7 @@ async function switchPeriod(period: ChartPeriod, data: InitialChartData): Promis
 
 async function switchMetric(metric: typeof currentMetric, data: InitialChartData): Promise<void> {
 	if (currentMetric === metric) { return; }
-	// When switching to cost, keep editor/provider split if active; otherwise fall back to total
-	if (metric === 'cost' && currentSplit !== 'editor' && currentSplit !== 'provider' && currentSplit !== 'task') { currentSplit = 'total'; }
-	// When switching to output, disable unsupported splits
-	if (metric === 'output' && (currentSplit === 'model' || currentSplit === 'provider' || currentSplit === 'task')) { currentSplit = 'total'; }
-	// When switching to tokens, disable language split
-	if (metric === 'tokens' && currentSplit === 'language') { currentSplit = 'total'; }
-	if (metric === 'sessions' && currentSplit !== 'total' && currentSplit !== 'task') { currentSplit = 'total'; }
+	currentSplit = getPreferredSplitForMetric(metric, currentSplit);
 	currentMetric = metric;
 	const rollingApplicable = currentSplit === 'total' && metric !== 'output';
 	if (!rollingApplicable) { currentDisplayMode = 'actual'; }
@@ -559,6 +567,22 @@ async function switchMetric(metric: typeof currentMetric, data: InitialChartData
 	}
 	updateSummaryCards(data);
 	await reinitChart(data);
+}
+
+function getPreferredSplitForMetric(metric: typeof currentMetric, split: typeof currentSplit): typeof currentSplit {
+	if (metric === 'cost') {
+		return (split === 'editor' || split === 'provider' || split === 'task') ? split : 'total';
+	}
+	if (metric === 'output') {
+		return (split === 'model' || split === 'provider' || split === 'task') ? 'total' : split;
+	}
+	if (metric === 'tokens') {
+		return split === 'language' ? 'total' : split;
+	}
+	if (metric === 'sessions') {
+		return (split === 'total' || split === 'task') ? split : 'total';
+	}
+	return split;
 }
 
 function isSplitSupported(metric: typeof currentMetric, split: typeof currentSplit): boolean {
@@ -1029,24 +1053,14 @@ function buildStackedViewConfig(view: string, period: ChartPeriodData, baseOptio
 }
 
 function resolveChartView(metric: typeof currentMetric, split: typeof currentSplit): string {
-	if (metric === 'sessions') {
-		if (split === 'task') { return 'sessions-task'; }
-		return 'sessions-total';
-	}
-	if (metric === 'tokens') {
-		if (split === 'model') { return 'model'; }
-		if (split === 'editor') { return 'editor'; }
-		if (split === 'repository') { return 'repository'; }
-		if (split === 'task') { return 'task'; }
-		return 'total';
-	}
-	if (metric === 'cost') {
-		if (split === 'editor') { return 'cost-editor'; }
-		if (split === 'provider') { return 'cost-provider'; }
-		if (split === 'task') { return 'cost-task'; }
-		return 'cost';
-	}
-	return `output-${split}`;
+	const byMetric: Record<typeof currentMetric, Partial<Record<typeof currentSplit, string>>> = {
+		tokens: { total: 'total', model: 'model', editor: 'editor', repository: 'repository', task: 'task' },
+		cost: { total: 'cost', editor: 'cost-editor', provider: 'cost-provider', task: 'cost-task' },
+		sessions: { total: 'sessions-total', task: 'sessions-task' },
+		output: {},
+	};
+	if (metric === 'output') { return `output-${split}`; }
+	return byMetric[metric][split] ?? 'total';
 }
 
 function createConfig(data: InitialChartData): ChartConfig {
@@ -1079,27 +1093,36 @@ function migrateViewKey(view: string): MetricSplit {
 	return map[view] ?? { metric: 'tokens', split: 'total' };
 }
 
-function restoreChartState(initialData: InitialChartData): void {
-	const saved = chartState.restore();
-	if (!vscode.getState()) {
-		if (initialData.initialPeriod) { currentPeriod = initialData.initialPeriod; }
-		if (initialData.initialMetric) { currentMetric = initialData.initialMetric; }
-		if (initialData.initialSplit) { currentSplit = initialData.initialSplit; }
-		else if (initialData.initialView) {
-			const m = migrateViewKey(initialData.initialView);
-			currentMetric = m.metric; currentSplit = m.split;
-		}
-		return;
-	}
+function applyInitialChartState(data: InitialChartData): void {
+	if (data.initialPeriod) { currentPeriod = data.initialPeriod; }
+	if (data.initialMetric) { currentMetric = data.initialMetric; }
+	if (data.initialSplit) { currentSplit = data.initialSplit; return; }
+	if (!data.initialView) { return; }
+	const m = migrateViewKey(data.initialView);
+	currentMetric = m.metric;
+	currentSplit = m.split;
+}
+
+function applySavedChartState(saved: ChartWebviewState): void {
 	currentPeriod = saved.period;
 	currentDisplayMode = saved.displayMode;
 	if (saved.view && !saved.metric) {
 		const m = migrateViewKey(saved.view);
-		currentMetric = m.metric; currentSplit = m.split;
-	} else {
-		currentMetric = saved.metric ?? 'tokens';
-		currentSplit = saved.split ?? 'total';
+		currentMetric = m.metric;
+		currentSplit = m.split;
+		return;
 	}
+	currentMetric = saved.metric ?? 'tokens';
+	currentSplit = saved.split ?? 'total';
+}
+
+function restoreChartState(initialData: InitialChartData): void {
+	const saved = chartState.restore();
+	if (!vscode.getState()) {
+		applyInitialChartState(initialData);
+		return;
+	}
+	applySavedChartState(saved);
 }
 
 async function bootstrap(): Promise<void> {

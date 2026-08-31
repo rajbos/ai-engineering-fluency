@@ -33,9 +33,9 @@ const CATEGORY_PRIORITY: TaskCategory[] = [
 	'Delegation',
 	'Git Ops',
 	'Build/Deploy',
+	'Debugging',
 	'Testing',
 	'Refactoring',
-	'Debugging',
 	'Feature Dev',
 	'Planning',
 	'Exploration',
@@ -47,7 +47,7 @@ const CATEGORY_PRIORITY: TaskCategory[] = [
 const TOOL_PATTERNS: Record<TaskCategory, RegExp[]> = {
 	'Coding': [/^(edit|create|write|apply_patch|replace|insert|multi_edit|str_replace)$/i],
 	'Debugging': [/^(read|view|grep|rg|diagnostics?|log|trace)$/i],
-	'Feature Dev': [/^(create|write|edit|scaffold|generate)$/i],
+	'Feature Dev': [],
 	'Refactoring': [/^(refactor|rename|move|restructure)$/i],
 	'Testing': [/^(test|jest|vitest|pytest|mocha|playwright|cypress)$/i],
 	'Exploration': [/^(read|view|grep|rg|glob|search|web_fetch|web_search|ls|list)$/i],
@@ -99,27 +99,38 @@ function scoreTurn(turn: TaskTurnSignal): TaskCategoryBreakdown {
 	const message = (turn.messageText ?? '').trim();
 	const tools = (turn.toolNames ?? []).map(t => t.trim()).filter(Boolean);
 	const shellCommands = (turn.shellCommands ?? []).join('\n');
+	applyKeywordScores(scores, message);
+	applyToolScores(scores, tools);
+	applyShellScores(scores, shellCommands);
+	applyConversationFallback(scores, message, tools);
+	return scores;
+}
 
+function applyKeywordScores(scores: TaskCategoryBreakdown, message: string): void {
 	for (const [category, patterns] of Object.entries(KEYWORD_PATTERNS) as Array<[TaskCategory, RegExp[]]>) {
 		for (const pattern of patterns) {
 			if (pattern.test(message)) { scores[category] += 2; }
 		}
 	}
+}
 
+function applyToolScores(scores: TaskCategoryBreakdown, tools: string[]): void {
 	for (const tool of tools) {
 		for (const [category, patterns] of Object.entries(TOOL_PATTERNS) as Array<[TaskCategory, RegExp[]]>) {
 			if (patterns.some(p => p.test(tool))) { scores[category] += 1; }
 		}
 	}
+}
 
+function applyShellScores(scores: TaskCategoryBreakdown, shellCommands: string): void {
 	if (/\b(git (commit|push|pull|merge|rebase|checkout|cherry-pick|tag|branch)|gh pr)\b/i.test(shellCommands)) { scores['Git Ops'] += 3; }
 	if (/\b(npm (run )?(test|lint|build)|pnpm (test|build)|yarn (test|build)|pytest|vitest|jest|mocha|cypress)\b/i.test(shellCommands)) { scores['Testing'] += 2; }
 	if (/\b(npm (run )?build|pnpm build|yarn build|docker (build|push|run)|kubectl|helm|terraform|vercel|netlify)\b/i.test(shellCommands)) { scores['Build/Deploy'] += 2; }
+}
 
+function applyConversationFallback(scores: TaskCategoryBreakdown, message: string, tools: string[]): void {
 	if (tools.length === 0 && !message) { scores['Conversation'] += 1; }
 	if (tools.length === 0 && message && Object.values(scores).every(v => v === 0)) { scores['Conversation'] += 1; }
-
-	return scores;
 }
 
 export function classifyTurn(turn: TaskTurnSignal): TaskCategory {

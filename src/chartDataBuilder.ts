@@ -128,17 +128,7 @@ function mergeEditorModelUsage(target: DailyTokenStats, src: DailyTokenStats): v
 	}
 }
 
-function mergeInto(target: DailyTokenStats, src: DailyTokenStats): void {
-	target.tokens += src.tokens;
-	target.sessions += src.sessions;
-	target.interactions += src.interactions;
-	addModelUsage(target.modelUsage, src.modelUsage);
-	mergeUsageGroup(target.editorUsage, src.editorUsage);
-	mergeUsageGroup(target.repositoryUsage, src.repositoryUsage);
-	if (src.linesAdded !== undefined) { target.linesAdded = (target.linesAdded ?? 0) + src.linesAdded; }
-	if (src.linesRemoved !== undefined) { target.linesRemoved = (target.linesRemoved ?? 0) + src.linesRemoved; }
-	mergeLanguageUsage(target, src);
-	mergeEditorModelUsage(target, src);
+function mergeTaskCategoryUsage(target: DailyTokenStats, src: DailyTokenStats): void {
 	if (src.taskCategoryTokens) {
 		target.taskCategoryTokens = target.taskCategoryTokens ?? {};
 		for (const [category, value] of Object.entries(src.taskCategoryTokens)) {
@@ -151,14 +141,27 @@ function mergeInto(target: DailyTokenStats, src: DailyTokenStats): void {
 			target.taskCategorySessions[category as TaskCategory] = (target.taskCategorySessions[category as TaskCategory] || 0) + value;
 		}
 	}
-	if (src.taskCategoryModelUsage) {
-		target.taskCategoryModelUsage = target.taskCategoryModelUsage ?? {};
-		for (const [category, usage] of Object.entries(src.taskCategoryModelUsage)) {
-			const key = category as TaskCategory;
-			target.taskCategoryModelUsage[key] = target.taskCategoryModelUsage[key] ?? {};
-			addModelUsage(target.taskCategoryModelUsage[key]!, usage);
-		}
+	if (!src.taskCategoryModelUsage) { return; }
+	target.taskCategoryModelUsage = target.taskCategoryModelUsage ?? {};
+	for (const [category, usage] of Object.entries(src.taskCategoryModelUsage)) {
+		const key = category as TaskCategory;
+		target.taskCategoryModelUsage[key] = target.taskCategoryModelUsage[key] ?? {};
+		addModelUsage(target.taskCategoryModelUsage[key]!, usage);
 	}
+}
+
+function mergeInto(target: DailyTokenStats, src: DailyTokenStats): void {
+	target.tokens += src.tokens;
+	target.sessions += src.sessions;
+	target.interactions += src.interactions;
+	addModelUsage(target.modelUsage, src.modelUsage);
+	mergeUsageGroup(target.editorUsage, src.editorUsage);
+	mergeUsageGroup(target.repositoryUsage, src.repositoryUsage);
+	if (src.linesAdded !== undefined) { target.linesAdded = (target.linesAdded ?? 0) + src.linesAdded; }
+	if (src.linesRemoved !== undefined) { target.linesRemoved = (target.linesRemoved ?? 0) + src.linesRemoved; }
+	mergeLanguageUsage(target, src);
+	mergeEditorModelUsage(target, src);
+	mergeTaskCategoryUsage(target, src);
 }
 
 function getMondayOfWeek(d: Date): Date {
@@ -274,6 +277,45 @@ function buildEditorCostDatasets(entries: DailyTokenStats[], deps: ChartDataBuil
 	});
 }
 
+function buildTaskCategoryTokenDatasets(entries: DailyTokenStats[]) {
+	return TASK_CATEGORIES.map((category, idx) => {
+		const color = getModelColor(idx);
+		return {
+			label: category,
+			data: entries.map(e => e.taskCategoryTokens?.[category] || 0),
+			backgroundColor: color.bg,
+			borderColor: color.border,
+			borderWidth: 1,
+		};
+	}).filter(ds => ds.data.some(v => v > 0));
+}
+
+function buildTaskCategorySessionDatasets(entries: DailyTokenStats[]) {
+	return TASK_CATEGORIES.map((category, idx) => {
+		const color = getModelColor(idx);
+		return {
+			label: category,
+			data: entries.map(e => e.taskCategorySessions?.[category] || 0),
+			backgroundColor: color.bg,
+			borderColor: color.border,
+			borderWidth: 1,
+		};
+	}).filter(ds => ds.data.some(v => v > 0));
+}
+
+function buildTaskCategoryCostDatasets(entries: DailyTokenStats[], deps: ChartDataBuilderDeps) {
+	return TASK_CATEGORIES.map((category, idx) => {
+		const color = getModelColor(idx);
+		return {
+			label: category,
+			data: entries.map(e => deps.calculateEstimatedCost(e.taskCategoryModelUsage?.[category] ?? {}, 'copilot')),
+			backgroundColor: color.bg,
+			borderColor: color.border,
+			borderWidth: 1,
+		};
+	}).filter(ds => ds.data.some(v => v > 0));
+}
+
 /**
  * Aggregates model usage per billing group from a day's editorModelUsage.
  *
@@ -321,44 +363,6 @@ function buildBillingGroupCostDatasets(entries: DailyTokenStats[], deps: ChartDa
 		groupTotals.set(group, total);
 	}
 
-	function buildTaskCategoryTokenDatasets(entries: DailyTokenStats[]) {
-		return TASK_CATEGORIES.map((category, idx) => {
-			const color = getModelColor(idx);
-			return {
-				label: category,
-				data: entries.map(e => e.taskCategoryTokens?.[category] || 0),
-				backgroundColor: color.bg,
-				borderColor: color.border,
-				borderWidth: 1,
-			};
-		}).filter(ds => ds.data.some(v => v > 0));
-	}
-
-	function buildTaskCategorySessionDatasets(entries: DailyTokenStats[]) {
-		return TASK_CATEGORIES.map((category, idx) => {
-			const color = getModelColor(idx);
-			return {
-				label: category,
-				data: entries.map(e => e.taskCategorySessions?.[category] || 0),
-				backgroundColor: color.bg,
-				borderColor: color.border,
-				borderWidth: 1,
-			};
-		}).filter(ds => ds.data.some(v => v > 0));
-	}
-
-	function buildTaskCategoryCostDatasets(entries: DailyTokenStats[], deps: ChartDataBuilderDeps) {
-		return TASK_CATEGORIES.map((category, idx) => {
-			const color = getModelColor(idx);
-			return {
-				label: category,
-				data: entries.map(e => deps.calculateEstimatedCost(e.taskCategoryModelUsage?.[category] ?? {}, 'copilot')),
-				backgroundColor: color.bg,
-				borderColor: color.border,
-				borderWidth: 1,
-			};
-		}).filter(ds => ds.data.some(v => v > 0));
-	}
 	const sortedGroups = Array.from(allGroups).sort((a, b) => (groupTotals.get(b) || 0) - (groupTotals.get(a) || 0));
 	return sortedGroups.map((group, idx) => {
 		const color = getModelColor(idx);

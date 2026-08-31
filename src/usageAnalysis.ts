@@ -214,10 +214,10 @@ function _asuFinalizeTaskClassification(analysis: SessionUsageAnalysis, turns: T
 		analysis.taskClassification.primaryCategory = 'Planning';
 		analysis.taskClassification.categoryShares['Planning'] = Math.max(analysis.taskClassification.categoryShares['Planning'], 0.6);
 	}
-	if (analysis.modeUsage.customAgent > 0 || analysis.modeUsage.cli > 0) {
+	if (analysis.modeUsage.customAgent > 0) {
 		analysis.taskClassification.categoryShares['Delegation'] = Math.max(
 			analysis.taskClassification.categoryShares['Delegation'],
-			Math.min(1, (analysis.modeUsage.customAgent + analysis.modeUsage.cli) / Math.max(1, analysis.taskClassification.turnCount))
+			Math.min(1, analysis.modeUsage.customAgent / Math.max(1, analysis.taskClassification.turnCount))
 		);
 		if (analysis.taskClassification.categoryShares['Delegation'] >= analysis.taskClassification.categoryShares[analysis.taskClassification.primaryCategory]) {
 			analysis.taskClassification.primaryCategory = 'Delegation';
@@ -231,6 +231,18 @@ function _asuEnsureTaskCategoryMaps(period: UsageAnalysisPeriod): void {
 	}
 	if (!period.taskCategoryWeightedSessions) {
 		period.taskCategoryWeightedSessions = {};
+	}
+}
+
+function _muaMergeTaskCategories(period: UsageAnalysisPeriod, analysis: SessionUsageAnalysis): void {
+	_asuEnsureTaskCategoryMaps(period);
+	const primary = analysis.taskClassification?.primaryCategory ?? 'Conversation';
+	period.taskCategoryPrimarySessions![primary] = (period.taskCategoryPrimarySessions![primary] || 0) + 1;
+	const shares = analysis.taskClassification?.categoryShares;
+	for (const category of TASK_CATEGORIES) {
+		const share = shares?.[category] ?? 0;
+		if (share <= 0) { continue; }
+		period.taskCategoryWeightedSessions![category] = (period.taskCategoryWeightedSessions![category] || 0) + share;
 	}
 }
 
@@ -1171,15 +1183,7 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	}
 	_muaMergeModelSwitching(period, analysis);
 	_muaMergeEnhancedMetrics(period, analysis);
-	_asuEnsureTaskCategoryMaps(period);
-	const primary = analysis.taskClassification?.primaryCategory ?? 'Conversation';
-	period.taskCategoryPrimarySessions![primary] = (period.taskCategoryPrimarySessions![primary] || 0) + 1;
-	const shares = analysis.taskClassification?.categoryShares;
-	for (const category of TASK_CATEGORIES) {
-		const share = shares?.[category] ?? 0;
-		if (share <= 0) { continue; }
-		period.taskCategoryWeightedSessions![category] = (period.taskCategoryWeightedSessions![category] || 0) + share;
-	}
+	_muaMergeTaskCategories(period, analysis);
 }
 
 /** @internal lookup table for analyzeContextReferences */
@@ -2100,6 +2104,24 @@ function _asuExtractShellCommandFromArgs(args: unknown): string | undefined {
 	return undefined;
 }
 
+function _asuCollectTaskTurnFromEvent(event: any, currentTurn: TaskTurnSignal | null, taskTurns: TaskTurnSignal[]): TaskTurnSignal | null {
+	let nextTurn = currentTurn;
+	if (event.type === 'user.message') {
+		if (nextTurn) { taskTurns.push(nextTurn); }
+		nextTurn = { messageText: _asuExtractCliUserMessageText(event), toolNames: [], shellCommands: [] };
+	}
+	if (event.type !== 'tool.call' && event.type !== 'tool.execution_start' && event.type !== 'tool.result') { return nextTurn; }
+	const toolName = event.data?.toolName || event.toolName || 'unknown';
+	if (!nextTurn) { nextTurn = { toolNames: [], shellCommands: [] }; }
+	nextTurn.toolNames = nextTurn.toolNames ?? [];
+	nextTurn.toolNames.push(toolName);
+	const shellCmd = _asuExtractShellCommandFromArgs(event.data?.arguments);
+	if (!shellCmd) { return nextTurn; }
+	nextTurn.shellCommands = nextTurn.shellCommands ?? [];
+	nextTurn.shellCommands.push(shellCmd);
+	return nextTurn;
+}
+
 /** Handle tool.call / tool.result / tool.execution_start events. */
  
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
@@ -2256,21 +2278,7 @@ async function _asuProcessNonDeltaJsonl(
 		if (!line.trim()) { continue; }
 		try {
 			const event = JSON.parse(line);
-			if (event.type === 'user.message') {
-				if (currentTurn) { taskTurns.push(currentTurn); }
-				currentTurn = { messageText: _asuExtractCliUserMessageText(event), toolNames: [], shellCommands: [] };
-			}
-			if (event.type === 'tool.call' || event.type === 'tool.execution_start' || event.type === 'tool.result') {
-				const toolName = event.data?.toolName || event.toolName || 'unknown';
-				if (!currentTurn) { currentTurn = { toolNames: [], shellCommands: [] }; }
-				currentTurn.toolNames = currentTurn.toolNames ?? [];
-				currentTurn.toolNames.push(toolName);
-				const shellCmd = _asuExtractShellCommandFromArgs(event.data?.arguments);
-				if (shellCmd) {
-					currentTurn.shellCommands = currentTurn.shellCommands ?? [];
-					currentTurn.shellCommands.push(shellCmd);
-				}
-			}
+			currentTurn = _asuCollectTaskTurnFromEvent(event, currentTurn, taskTurns);
 			_asuProcessJsonlEvent(event, analysis, modeState, cliState, jetBrainsMode, deps.toolNameMap);
 		} catch { /* skip malformed lines */ }
 	}
@@ -2283,6 +2291,39 @@ async function _asuProcessNonDeltaJsonl(
 	// Track LOC/edit metrics for CLI sessions (delta path already handles this above)
 	await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
 	deriveConversationPatterns(analysis);
+}
+
+async function _asuProcessJsonlUsage(
+	deps: UsageAnalysisDeps,
+	sessionFile: string,
+	fileContent: string,
+	analysis: SessionUsageAnalysis
+): Promise<void> {
+	const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
+	if (_asuIsDeltaBased(lines)) {
+		_asuReconstructAndProcessDeltaState(deps, lines, analysis);
+		await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
+		if (!analysis.taskClassification) { analysis.taskClassification = createEmptyTaskClassificationResult(); }
+		return;
+	}
+	await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
+}
+
+async function _asuProcessJsonUsage(
+	deps: UsageAnalysisDeps,
+	sessionFile: string,
+	fileContent: string,
+	preloadedParsedJson: unknown,
+	analysis: SessionUsageAnalysis
+): Promise<void> {
+	const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
+	if (!isParsedSessionJson(parsed)) {
+		deps.warn(`Unexpected session format in ${sessionFile}`);
+		return;
+	}
+	processJsonSessionRequests(deps, parsed, analysis);
+	await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
+	await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
 }
 
 /**
@@ -2307,24 +2348,9 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 		const isJsonl = sessionFile.endsWith('.jsonl') || isJsonlContent(fileContent);
 
 		if (isJsonl) {
-			const lines = fileContent.trim().split('\n').filter((l: string) => l.trim());
-			if (_asuIsDeltaBased(lines)) {
-				_asuReconstructAndProcessDeltaState(deps, lines, analysis);
-				// Also track enhanced metrics (edit scope / LOC data) from the reconstructed requests
-				await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
-				if (!analysis.taskClassification) { analysis.taskClassification = createEmptyTaskClassificationResult(); }
-				return analysis;
-			}
-			await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
+			await _asuProcessJsonlUsage(deps, sessionFile, fileContent, analysis);
 		} else {
-			const parsed: unknown = preloadedParsedJson !== undefined ? preloadedParsedJson : JSON.parse(fileContent);
-			if (!isParsedSessionJson(parsed)) {
-				deps.warn(`Unexpected session format in ${sessionFile}`);
-				return analysis;
-			}
-			processJsonSessionRequests(deps, parsed, analysis);
-			await calculateModelSwitching(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
-			await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent, preloadedParsedJson);
+			await _asuProcessJsonUsage(deps, sessionFile, fileContent, preloadedParsedJson, analysis);
 		}
 	} catch (error) {
 		deps.warn(`Error analyzing session usage from ${sessionFile}: ${error}`);
