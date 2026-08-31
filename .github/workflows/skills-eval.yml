@@ -1,0 +1,87 @@
+name: Agent Skills Eval
+
+# Weekly evaluation of the Agent Skills in .github/skills using
+# https://github.com/darkrishabh/agent-skills-eval, with the GitHub Copilot
+# CLI acting as both the target and judge model (see
+# .github/workflows/scripts/skills-eval.mjs). Only skills that ship an
+# evals/evals.json are evaluated; the rest are skipped by the tool.
+#
+# No validate-input.sh step: this workflow runs on trusted triggers only
+# (schedule / workflow_dispatch / push to workflow files) and never reads
+# user-authored event text.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: "Model for the Copilot CLI (blank = CLI default)"
+        required: false
+        default: ""
+  schedule:
+    - cron: '15 6 * * 1'  # Every Monday at 06:15 UTC
+  push:
+    paths:
+      - .github/workflows/skills-eval.yml
+      - .github/workflows/scripts/skills-eval.mjs
+
+permissions:
+  contents: read
+
+jobs:
+  skills-eval:
+    runs-on: ubuntu-latest
+    if: github.actor != 'dependabot[bot]' && !startsWith(github.ref_name, 'dependabot/')
+    timeout-minutes: 90
+
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@05e31511f85b41b11d1cf0ef85d0992719546e2c # v2.21.0
+        with:
+          egress-policy: audit
+
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: '.nvmrc'
+
+      - name: Check the Copilot CLI token
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GH_TOKEN:-}" ]; then
+            echo "❌ GH_PAT secret is not configured — the Copilot CLI cannot authenticate."
+            exit 1
+          fi
+          gh auth status
+          npx --yes @github/copilot --version
+
+      - name: Install agent-skills-eval
+        run: |
+          set -euo pipefail
+          mkdir -p /tmp/skills-eval
+          cd /tmp/skills-eval
+          npm init -y > /dev/null
+          npm install --ignore-scripts --no-audit --no-fund agent-skills-eval@0.1.1
+
+      - name: Run agent-skills-eval via the Copilot CLI
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          COPILOT_GITHUB_TOKEN: ${{ secrets.GH_PAT }}
+          EVAL_PKG_DIR: /tmp/skills-eval
+          COPILOT_MODEL: ${{ inputs.model || '' }}
+          SKILLS_ROOT: .github/skills
+          EVAL_WORKSPACE: ./agent-skills-workspace
+        run: node .github/workflows/scripts/skills-eval.mjs
+
+      - name: Upload eval workspace and report
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: agent-skills-eval-workspace
+          path: agent-skills-workspace/
+          if-no-files-found: warn
+          retention-days: 90

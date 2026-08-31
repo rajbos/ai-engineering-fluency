@@ -1,0 +1,18 @@
+{
+  "skill_name": "session-log-data",
+  "evals": [
+    {
+      "id": "data-sources",
+      "name": "knows the coding agent data files and their schemas",
+      "prompt": "In the GitHub Copilot Coding Agent environment for this repository, what pre-downloaded usage data files may exist in the workspace root, what date range does each cover, and which JSON fields would you read from a session log file to count interactions and detect the model used?",
+      "expected_output": "The response names ./session-logs/ (raw Copilot Chat session JSON files, last 7 days, organized by datasetId/machineId/date) and ./usage-data/usage-agg-daily.json (aggregated daily usage from Azure Table Storage, last 30 days), and reads requests.length for interactions and requests[].result.metadata.modelId for the model.",
+      "assertions": [
+        "The output mentions the ./session-logs/ directory containing raw session log files covering roughly the last 7 days.",
+        "The output mentions ./usage-data/usage-agg-daily.json containing aggregated daily usage data covering roughly the last 30 days.",
+        "The output identifies requests[].result.metadata.modelId (or equivalent path) as the field for the model used.",
+        "The output identifies the length of the requests array as the interaction count.",
+        "The output notes these files only exist when Azure Storage is configured for the environment (they may be absent)."
+      ]
+    }
+  ]
+}
