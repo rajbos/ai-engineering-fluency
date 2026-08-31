@@ -466,7 +466,10 @@ function buildGitHubRemotePattern(enterpriseUri?: string): RegExp {
 		try { enterpriseHost = new URL(enterpriseUri).host; } catch { /* ignore invalid URI — fall back to github.com only */ }
 	}
 	const hostAlternation = enterpriseHost ? `github\\.com|${escapeRegExp(enterpriseHost)}` : 'github\\.com';
-	return new RegExp(`(?:${hostAlternation})[:/]([^/]+)\\/([^/\\s]+?)(?:\\.git)?$`, 'i');
+	// Anchored at the start of the remote URL so a host mention later in the string
+	// (e.g. https://evil.example.com/github.com/o/r) can never match (CodeQL js/regex/missing-regexp-anchor).
+	// Accepts https://host/o/r(.git), ssh://[git@]host/o/r and the scp-like git@host:o/r forms.
+	return new RegExp(`^(?:(?:https?|ssh):\\/\\/(?:[^@/\\s]+@)?|[^@/\\s]+@)(?:${hostAlternation})[:/]([^/]+)\\/([^/\\s]+?)(?:\\.git)?$`, 'i');
 }
 
 /**

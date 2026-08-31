@@ -1837,33 +1837,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Load PR stats for all discovered GitHub repos and send results to the analysis panel. */
 	private async loadRepoPrStats(): Promise<void> {
-		if (!this.analysisPanel) { return; }
+		const panel = this.analysisPanel;
+		if (!panel) { return; }
 
 		const since = new Date();
 		since.setDate(since.getDate() - 30);
 		this.log('🔎 Loading repository PR stats (last 30 days)…');
 		try {
-			await this.collectAndPublishRepoPrStats(since);
+			await this.collectAndPublishRepoPrStats(panel, since);
 		} catch (err) {
 			// Guarantee a post-back on every failure path — otherwise the webview stays on
 			// "Loading…" forever and dispatch() dedup silently swallows every retry.
+			// Post via the captured panel: this.analysisPanel may have been disposed mid-flight
+			// (postMessage on a disposed webview resolves false instead of throwing).
 			this.error('Failed to load repository PR stats', err);
 			const result: RepoPrStatsResult = {
 				repos: [], authenticated: !this._githubSignedOutByUser, since: since.toISOString(),
 				error: err instanceof Error ? err.message : String(err),
 			};
 			this._lastRepoPrStats = result;
-			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+			void panel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
 		}
 	}
 
-	private async collectAndPublishRepoPrStats(since: Date): Promise<void> {
-		if (!this.analysisPanel) { return; }
-
+	private async collectAndPublishRepoPrStats(panel: vscode.WebviewPanel, since: Date): Promise<void> {
 		if (this._githubSignedOutByUser) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
-			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+			void panel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
 			return;
 		}
 
@@ -1871,7 +1872,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!session) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
-			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+			void panel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
 			return;
 		}
 
@@ -1886,7 +1887,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const discoveryStart = Date.now();
 		const repos = await discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
 		this.log(`🔎 Discovered ${repos.length} GitHub repo(s) across ${workspacePaths.length} workspace path(s) in ${((Date.now() - discoveryStart) / 1000).toFixed(1)}s`);
-		this.analysisPanel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: 0 });
+		void panel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: 0 });
 
 		const results: RepoPrInfo[] = [];
 		for (let i = 0; i < repos.length; i++) {
@@ -1894,12 +1895,12 @@ class CopilotTokenTracker implements vscode.Disposable {
 			const { prs, error } = await fetchRepoPrs(owner, repo, session.accessToken, since);
 			const stats = this.collectAiPrStats(prs, error, session.account.label);
 			results.push({ owner, repo, repoUrl: `https://github.com/${owner}/${repo}`, ...stats, error });
-			this.analysisPanel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
+			void panel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
 		}
 
 		const result: RepoPrStatsResult = { repos: results, authenticated: true, since: since.toISOString() };
 		this._lastRepoPrStats = result;
-		this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+		void panel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
 	}
 
 	/** Classify one PR, pushing any AI detail rows and returning its contribution to the counters. */

@@ -411,3 +411,13 @@ test('discoverGitHubRepos: deduplicates repos reachable from multiple workspace 
 		fs.rmSync(dir, { recursive: true, force: true });
 	}
 });
+
+test('discoverGitHubRepos: does not match a github.com mention inside another host\'s URL', async () => {
+	const dir = makeGitRepoWithRemote('https://evil.example.com/github.com/rajbos/not-a-match.git');
+	try {
+		const repos = await discoverGitHubRepos([dir]);
+		assert.deepEqual(repos, []);
+	} finally {
+		fs.rmSync(dir, { recursive: true, force: true });
+	}
+});
