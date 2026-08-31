@@ -527,6 +527,8 @@ export interface SkillCallUsage {
 export interface ModelEfficiencyCounters {
   /** User-request turns attributed to this model. */
   calls: number;
+  /** Tool invocations across those turns. Used as the local equivalent of agent steps. */
+  toolCalls?: number;
   /** Turns containing at least one file-edit tool call. */
   editTurns: number;
   /** Edit turns with no retries and no self-corrections. */

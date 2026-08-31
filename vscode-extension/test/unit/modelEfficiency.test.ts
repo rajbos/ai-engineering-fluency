@@ -82,6 +82,7 @@ test('computeEfficiencyFromTurns: one-shot edit turn counts as one-shot', () => 
     assert.equal(c.retries, 0);
     assert.equal(c.selfCorrections, 0);
     assert.equal(c.editToolCalls, 2);
+    assert.equal(c.toolCalls, 3);
 });
 
 test('computeEfficiencyFromTurns: consecutive same-file edits count as retries', () => {
@@ -187,13 +188,14 @@ test('jsonRequestToToolCalls: handles missing response gracefully', () => {
 
 test('mergeModelEfficiency: sums counters per model and creates missing entries', () => {
     const target: ModelEfficiencyUsage = {
-        'gpt-4o': { ...createEmptyModelEfficiencyCounters(), calls: 2, editTurns: 1, oneShotEditTurns: 1 },
+        'gpt-4o': { ...createEmptyModelEfficiencyCounters(), calls: 2, toolCalls: 5, editTurns: 1, oneShotEditTurns: 1 },
     };
     mergeModelEfficiency(target, {
-        'gpt-4o': { ...createEmptyModelEfficiencyCounters(), calls: 3, editTurns: 2, retries: 1 },
-        'claude-sonnet-4.5': { ...createEmptyModelEfficiencyCounters(), calls: 1 },
+        'gpt-4o': { ...createEmptyModelEfficiencyCounters(), calls: 3, toolCalls: 7, editTurns: 2, retries: 1 },
+        'claude-sonnet-4.5': { ...createEmptyModelEfficiencyCounters(), calls: 1, toolCalls: 2 },
     });
     assert.equal(target['gpt-4o'].calls, 5);
+    assert.equal(target['gpt-4o'].toolCalls, 12);
     assert.equal(target['gpt-4o'].editTurns, 3);
     assert.equal(target['gpt-4o'].oneShotEditTurns, 1);
     assert.equal(target['gpt-4o'].retries, 1);
@@ -232,7 +234,7 @@ test('applyModelUsageToEfficiency: folds tokens and estimated cost into counters
 test('deriveModelEfficiencyRates: computes all rates from counters', () => {
     const rates = deriveModelEfficiencyRates({
         calls: 10, editTurns: 4, oneShotEditTurns: 3, retries: 2, selfCorrections: 1,
-        editToolCalls: 7, inputTokens: 1000, outputTokens: 500, cachedReadTokens: 800, cost: 2,
+        toolCalls: 25, editToolCalls: 7, inputTokens: 1000, outputTokens: 500, cachedReadTokens: 800, cost: 2,
     });
     assert.equal(rates.oneShotRate, 0.75);
     assert.equal(rates.retryRate, 0.5);
@@ -240,6 +242,7 @@ test('deriveModelEfficiencyRates: computes all rates from counters', () => {
     assert.equal(rates.costPerCall, 0.2);
     assert.equal(rates.costPerEdit, 0.5);
     assert.equal(rates.outputTokensPerCall, 50);
+    assert.equal(rates.toolCallsPerCall, 2.5);
     assert.equal(rates.cacheHitRate, 0.8);
 });
 
@@ -251,6 +254,7 @@ test('deriveModelEfficiencyRates: zero denominators produce nulls', () => {
     assert.equal(rates.costPerCall, null);
     assert.equal(rates.costPerEdit, null);
     assert.equal(rates.outputTokensPerCall, null);
+    assert.equal(rates.toolCallsPerCall, null);
     assert.equal(rates.cacheHitRate, null);
 });
 
@@ -258,7 +262,7 @@ test('deriveModelEfficiencyRates: cacheHitRate is capped at 1.0 when cachedReadT
     // Some providers (e.g. DeepSeek) report cachedReadTokens > inputTokens; cap at 100%.
     const rates = deriveModelEfficiencyRates({
         calls: 5, editTurns: 0, oneShotEditTurns: 0, retries: 0, selfCorrections: 0,
-        editToolCalls: 0, inputTokens: 100, outputTokens: 200, cachedReadTokens: 3000, cost: 0,
+        toolCalls: 0, editToolCalls: 0, inputTokens: 100, outputTokens: 200, cachedReadTokens: 3000, cost: 0,
     });
     assert.equal(rates.cacheHitRate, 1);
 });
@@ -347,8 +351,8 @@ test('accumulateDailyModelCounters: splits duration and LOC by token share, summ
             'gpt-5.5': { inputTokens: 150, outputTokens: 50, sessions: 1 },
         },
         modelEfficiency: {
-            'kimi-k3': counters({ calls: 8, editTurns: 5, retries: 2, oneShotEditTurns: 3 }),
-            'gpt-5.5': counters({ calls: 2, editTurns: 1, oneShotEditTurns: 1 }),
+            'kimi-k3': counters({ calls: 8, toolCalls: 42, editTurns: 5, retries: 2, oneShotEditTurns: 3 }),
+            'gpt-5.5': counters({ calls: 2, toolCalls: 6, editTurns: 1, oneShotEditTurns: 1 }),
         },
         activeDurationMs: 600_000,
         linesAdded: 100,
@@ -359,6 +363,7 @@ test('accumulateDailyModelCounters: splits duration and LOC by token share, summ
 
     // Turn counters are exact per model — never split.
     assert.equal(daily['kimi-k3'].editTurns, 5);
+    assert.equal(daily['kimi-k3'].toolCalls, 42);
     assert.equal(daily['kimi-k3'].retries, 2);
     assert.equal(daily['gpt-5.5'].editTurns, 1);
 
@@ -423,13 +428,14 @@ test('mergeDailyModelEfficiency: sums every field when rolling days into a windo
     const b: DailyModelEfficiency = {};
     const input = {
         modelUsage: { m: { inputTokens: 100, outputTokens: 0, sessions: 1 } },
-        modelEfficiency: { m: counters({ calls: 2, editTurns: 1, retries: 1 }) },
+        modelEfficiency: { m: counters({ calls: 2, toolCalls: 7, editTurns: 1, retries: 1 }) },
         activeDurationMs: 1000, linesAdded: 10, applies: 2, codeBlocks: 4,
     };
     accumulateDailyModelCounters(a, input);
     accumulateDailyModelCounters(b, input);
     mergeDailyModelEfficiency(a, b);
     assert.equal(a['m'].calls, 4);
+    assert.equal(a['m'].toolCalls, 14);
     assert.equal(a['m'].retries, 2);
     assert.equal(a['m'].sessionShare, 2);
     assert.equal(a['m'].activeDurationMs, 2000);
