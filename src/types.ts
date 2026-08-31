@@ -446,6 +446,12 @@ export interface SessionUsageAnalysis {
    * per-turn detail or no moments were found.
    */
   correctionMoments?: CorrectionMoment[];
+  /**
+   * The session's first user prompt (truncated), captured for repeated-task
+   * detection (see src/repeatedTasks.ts). Absent when the session format
+   * carries no user-message text.
+   */
+  firstUserPrompt?: string;
 }
 
 export interface ToolCallUsage {
@@ -628,6 +634,42 @@ export interface CorrectionReport {
   sessionsWithMoments: number;
 }
 
+// ---------------------------------------------------------------------------
+// Repeated tasks (see src/repeatedTasks.ts)
+// ---------------------------------------------------------------------------
+
+/** Reference to one session in a repeated-task cluster. */
+export interface RepeatedTaskSessionRef {
+  file: string;
+  title?: string | null;
+  lastInteraction?: string | null;
+  repository?: string;
+}
+
+/**
+ * A group of sessions whose first user prompts are similar enough to describe
+ * the same task — a candidate for a reusable skill, prompt file, or agent.
+ */
+export interface RepeatedTaskCluster {
+  /** The cluster's most recent prompt, truncated for display. */
+  representativePrompt: string;
+  sessionCount: number;
+  /** Repositories (short owner/repo names) the cluster's sessions belong to. */
+  repositories: string[];
+  /** Most recent session first. */
+  sessions: RepeatedTaskSessionRef[];
+  /** Tokens shared by every prompt in the cluster (display hint). */
+  sharedKeywords: string[];
+}
+
+/** Repeated-task candidates across all scanned sessions. */
+export interface RepeatedTaskReport {
+  minClusterSize: number;
+  /** Sessions that carried a usable first user prompt. */
+  sessionsScanned: number;
+  clusters: RepeatedTaskCluster[];
+}
+
 export interface EditScopeUsage {
   singleFileEdits: number; // Edit sessions touching 1 file
   multiFileEdits: number; // Edit sessions touching 2+ files
@@ -771,6 +813,12 @@ agenticDailyTrend?: AgenticTrendPoint[];
  * (default 25). Absent when no moments were detected.
  */
 correctionReport?: CorrectionReport;
+/**
+ * Repeated-task candidates: clusters of sessions whose first user prompts
+ * describe the same task (see src/repeatedTasks.ts). Absent when no
+ * cluster reached the minimum size.
+ */
+repeatedTasks?: RepeatedTaskReport;
 }
 
 /** One day's worth of multi-agent/delegation signal, used to render a trend sparkline. */

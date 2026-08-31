@@ -10,6 +10,7 @@ import type {
 	WorkspaceCustomizationMatrix,
 	TodaySessionSummary,
 	ToolCurationAnalysis,
+	RepeatedTaskReport,
 } from '../../src/types';
 import toolNamesData from '../../src/toolNames.json';
 import modelPricingData from '../../src/modelPricing.json';
@@ -282,6 +283,8 @@ export interface InsightContext {
 	todaySessions?: TodaySessionSummary[];
 	/** Optional — populated when tool-curation analysis has run. */
 	curationAnalysis?: ToolCurationAnalysis | null;
+	/** Optional — populated when repeated-task detection found candidates. */
+	repeatedTasks?: RepeatedTaskReport | null;
 }
 
 export interface InsightState {
@@ -1369,6 +1372,27 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 			return c.toolErrors >= 5 || (c.editRetries + c.editSelfCorrections) >= 10;
 		},
 		weight: 55,
+	},
+	{
+		id: 'repeated-task-skill-candidate',
+		category: 'customization',
+		severity: 'opportunity',
+		title: '🧩 You keep prompting for the same task — make it a skill',
+		buildBody: (ctx) => {
+			const top = ctx.repeatedTasks?.clusters[0];
+			const count = top?.sessionCount ?? 0;
+			const prompt = top?.representativePrompt ?? '';
+			const more = (ctx.repeatedTasks?.clusters.length ?? 1) - 1;
+			return `You started ${count} sessions with a similar prompt: "${prompt}". ` +
+				`Turning a repeated task like this into a skill or prompt file saves you from re-explaining it and makes the outcome more consistent. ` +
+				(more > 0
+					? `${more} more repeated task${more !== 1 ? 's' : ''} found — see Tools & Integrations → Skill Suggestions.`
+					: `See Tools & Integrations → Skill Suggestions for details.`);
+		},
+		actionLabel: 'View Skill Suggestions',
+		actionCommand: 'aiEngineeringFluency.openToolsTab',
+		appliesTo: (ctx) => (ctx.repeatedTasks?.clusters[0]?.sessionCount ?? 0) >= 3,
+		weight: 60,
 	},
 ];
 

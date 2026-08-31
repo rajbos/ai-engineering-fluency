@@ -142,6 +142,31 @@ type CorrectionReport = {
 	sessionsWithMoments: number;
 };
 
+// ── Repeated-task types ─────────────────────────────────────────────────────
+// Mirror the interfaces in src/types.ts (RepeatedTaskReport etc.) — keep in
+// sync manually; the webview bundle cannot import them directly.
+
+type RepeatedTaskSessionRef = {
+	file: string;
+	title?: string | null;
+	lastInteraction?: string | null;
+	repository?: string;
+};
+
+type RepeatedTaskCluster = {
+	representativePrompt: string;
+	sessionCount: number;
+	repositories: string[];
+	sessions: RepeatedTaskSessionRef[];
+	sharedKeywords: string[];
+};
+
+type RepeatedTaskReport = {
+	minClusterSize: number;
+	sessionsScanned: number;
+	clusters: RepeatedTaskCluster[];
+};
+
 type UsageAnalysisStats = {
 	today: UsageAnalysisPeriod;
 	last30Days: UsageAnalysisPeriod;
@@ -161,6 +186,8 @@ type UsageAnalysisStats = {
 	insights?: EvaluatedInsight[];
 	/** Correction-moment report: per-repo, over each repo's most recent sessions. Null when no moments were detected. */
 	correctionReport?: CorrectionReport | null;
+	/** Repeated-task candidates (skill suggestions). Null when no repeated task was found. */
+	repeatedTasks?: RepeatedTaskReport | null;
 	curationAnalysis?: ToolCurationAnalysis | null;
 	/** Persisted "Recent Sessions" column visibility (optional column ids). Absent/invalid entries mean "show all". */
 	sessionColumnSettings?: { enabledColumns?: string[] };
@@ -1516,6 +1543,40 @@ function sanitizeCorrectionReport(raw: any): CorrectionReport | null {
 	};
 }
 
+function sanitizeRepeatedTaskCluster(raw: any): RepeatedTaskCluster | null {
+	if (!raw || typeof raw !== 'object') { return null; }
+	if (typeof raw.representativePrompt !== 'string' || typeof raw.sessionCount !== 'number' || !Array.isArray(raw.sessions)) { return null; }
+	const sessions: RepeatedTaskSessionRef[] = raw.sessions
+		.filter((s: any) => s && typeof s === 'object' && typeof s.file === 'string')
+		.map((s: any): RepeatedTaskSessionRef => ({
+			file: s.file,
+			title: typeof s.title === 'string' ? s.title : null,
+			lastInteraction: typeof s.lastInteraction === 'string' ? s.lastInteraction : null,
+			repository: typeof s.repository === 'string' ? s.repository : undefined,
+		}));
+	if (sessions.length === 0) { return null; }
+	return {
+		representativePrompt: raw.representativePrompt,
+		// Derive from the sanitized session list so the UI count can never
+		// disagree with it (and NaN/float counts are impossible).
+		sessionCount: sessions.length,
+		repositories: Array.isArray(raw.repositories) ? raw.repositories.filter((r: unknown) => typeof r === 'string') : [],
+		sessions,
+		sharedKeywords: Array.isArray(raw.sharedKeywords) ? raw.sharedKeywords.filter((k: unknown) => typeof k === 'string') : [],
+	};
+}
+
+function sanitizeRepeatedTaskReport(raw: any): RepeatedTaskReport | null {
+	if (!raw || typeof raw !== 'object' || !Array.isArray(raw.clusters)) { return null; }
+	const clusters = raw.clusters.map(sanitizeRepeatedTaskCluster).filter((c: RepeatedTaskCluster | null): c is RepeatedTaskCluster => c !== null);
+	if (clusters.length === 0) { return null; }
+	return {
+		minClusterSize: typeof raw.minClusterSize === 'number' ? raw.minClusterSize : 2,
+		sessionsScanned: typeof raw.sessionsScanned === 'number' ? raw.sessionsScanned : 0,
+		clusters,
+	};
+}
+
 function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null {
 	if (!rawCa || typeof rawCa !== 'object') { return null; }
 	const ca = rawCa as Partial<ToolCurationAnalysis>;
@@ -1531,6 +1592,12 @@ function _sanitizeCurationAnalysis(rawCa: unknown): ToolCurationAnalysis | null 
 			: { totalTokens: 0, byServer: {} },
 		recommendations: Array.isArray(ca.recommendations) ? ca.recommendations : [],
 	};
+}
+
+/** Sanitize the optional correction/repeated-task reports onto the stats object. */
+function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void {
+	sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
+	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
 }
 
 function sanitizeStats(raw: any): UsageAnalysisStats | null {
@@ -1583,7 +1650,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			sanitized.insights = sanitizeInsights(raw.insights);
 		}
 
-		sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
+		sanitizeOptionalReports(sanitized, raw);
 
 		// Pass through curationAnalysis (already structured server-side).
 		// Normalize required array/object fields so rendering paths don't throw on partial payloads.
@@ -3125,6 +3192,48 @@ function correctionsTabButtonHtml(report: CorrectionReport | null): string {
 	return `<button class="tab-button ${activeTab === 'corrections' ? 'active' : ''}" data-tab="corrections"><span class="codicon codicon-debug-restart"></span> Corrections${correctionsCountBadgeHtml(report)}</button>`;
 }
 
+// ── Skill suggestions (repeated tasks) ──────────────────────────────────────
+
+function buildRepeatedTaskSessionLinkHtml(session: RepeatedTaskSessionRef): string {
+	const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
+	const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
+	const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : '';
+	const repo = session.repository ? ` · ${session.repository}` : '';
+	return `<div style="font-size:11px; color:var(--text-secondary); padding:2px 0; overflow-wrap:anywhere;">${escapeHtml(title)}${escapeHtml(dateLabel ? ` · ${dateLabel}` : '')}${escapeHtml(repo)}</div>`;
+}
+
+function buildRepeatedTaskClusterHtml(cluster: RepeatedTaskCluster): string {
+	const keywords = cluster.sharedKeywords.length > 0
+		? `<div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:4px;">${cluster.sharedKeywords.map(k => `<span style="font-size:10px; padding:1px 7px; border-radius:8px; background:var(--bg-tertiary); color:var(--text-secondary);">${escapeHtml(k)}</span>`).join('')}</div>`
+		: '';
+	return `
+		<div style="margin-top:10px; padding:12px 14px; border-radius:8px; background:var(--bg-tertiary); border:1px solid var(--border-color, transparent);">
+			<div style="display:flex; align-items:flex-start; gap:10px;">
+				<span style="flex-shrink:0; font-size:11px; font-weight:700; padding:2px 8px; border-radius:10px; background:rgba(74,222,128,0.15); border:1px solid rgba(74,222,128,0.5); color:var(--text-primary); white-space:nowrap;">${cluster.sessionCount}× repeated</span>
+				<div style="flex:1; min-width:0; font-size:12px; color:var(--text-primary); font-style:italic; overflow-wrap:anywhere;">&ldquo;${escapeHtml(cluster.representativePrompt)}&rdquo;</div>
+			</div>
+			${keywords}
+			<details style="margin-top:8px;">
+				<summary style="font-size:11px; color:var(--text-secondary); cursor:pointer;">Sessions (${cluster.sessions.length})</summary>
+				<div style="margin-top:4px;">${cluster.sessions.map(buildRepeatedTaskSessionLinkHtml).join('')}</div>
+			</details>
+		</div>`;
+}
+
+/** "Skill suggestions" section for the Tools & Integrations tab (empty string when no candidates). */
+function buildSkillSuggestionsSectionHtml(report: RepeatedTaskReport | null): string {
+	if (!report || report.clusters.length === 0) { return ''; }
+	return `
+		<div class="section">
+			<div class="section-title"><span>🧩</span><span>Skill Suggestions</span></div>
+			<div class="section-subtitle">
+				Tasks you keep prompting for across sessions (first prompt per session, ${report.sessionsScanned} sessions scanned).
+				A repeated task is a good candidate for a reusable skill, prompt file, or custom agent.
+			</div>
+			${report.clusters.map(buildRepeatedTaskClusterHtml).join('')}
+		</div>`;
+}
+
 const CORRECTION_TYPE_META: Record<CorrectionMomentType, { label: string; color: string }> = {
 	'user-correction': { label: 'You corrected the agent', color: 'rgba(251,191,36,0.85)' },
 	'tool-error': { label: 'Tool failed', color: 'rgba(248,113,113,0.85)' },
@@ -4442,6 +4551,7 @@ function buildToolsTabPanelHtml(
 
 			${buildMcpToolsSectionHtml(stats, allMcpToolKeys, allMcpServerKeys)}
 			${buildCurationSectionHtml(currentCurationAnalysis ?? stats.curationAnalysis)}
+			${buildSkillSuggestionsSectionHtml(stats.repeatedTasks ?? null)}
 			<!-- Multi-Model Usage Section -->
 			<div class="section">
 				<div class="section-title"><span>🔀</span><span>Multi-Model Usage</span></div>

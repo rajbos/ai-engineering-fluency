@@ -29,6 +29,13 @@ import {
 	type EfficiencyTurn,
 } from './modelEfficiency';
 import { detectCorrectionMoments, mergeCorrectionCounts, summarizeCorrectionMoments } from './correctionDetection';
+import { MAX_PROMPT_LENGTH } from './repeatedTasks';
+
+/** Store the session's first user prompt (truncated) for repeated-task detection. */
+function _setFirstUserPrompt(analysis: SessionUsageAnalysis, prompt: string | undefined | null): void {
+	if (analysis.firstUserPrompt || !prompt || !prompt.trim()) { return; }
+	analysis.firstUserPrompt = prompt.trim().slice(0, MAX_PROMPT_LENGTH);
+}
 import {
 	applyDelta,
 	isJsonlContent,
@@ -742,6 +749,7 @@ function _applyJsonRequestsEfficiency(
 	}
 	if (turns.length === 0) { return; }
 	analysis.modelEfficiency = computeEfficiencyFromTurns(turns);
+	_setFirstUserPrompt(analysis, turns.find(t => t.userMessage)?.userMessage);
 	const moments = detectCorrectionMoments(turns);
 	if (moments.length > 0) { analysis.correctionMoments = moments; }
 }
@@ -2338,6 +2346,7 @@ async function _asuProcessNonDeltaJsonl(
 	_asuApplyCliThinkingEffort(cliState, analysis);
 	if (cliState.efficiencyTurns.length > 0) {
 		analysis.modelEfficiency = computeEfficiencyFromTurns(cliState.efficiencyTurns);
+		_setFirstUserPrompt(analysis, cliState.efficiencyTurns.find(t => t.userMessage)?.userMessage);
 		const moments = detectCorrectionMoments(cliState.efficiencyTurns);
 		if (moments.length > 0) { analysis.correctionMoments = moments; }
 	}
@@ -2353,7 +2362,7 @@ async function _asuProcessNonDeltaJsonl(
  * already provided them. Efficiency is optional — never fail analysis over it.
  */
 async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile: string, analysis: SessionUsageAnalysis): Promise<void> {
-	if (analysis.modelEfficiency && analysis.correctionMoments) { return; }
+	if (analysis.modelEfficiency && analysis.correctionMoments && analysis.firstUserPrompt) { return; }
 	if (!eco.buildTurns) { return; }
 	try {
 		const { turns } = await eco.buildTurns(sessionFile);
@@ -2365,6 +2374,7 @@ async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile
 			const moments = detectCorrectionMoments(turns);
 			if (moments.length > 0) { analysis.correctionMoments = moments; }
 		}
+		_setFirstUserPrompt(analysis, turns.find(t => t.userMessage)?.userMessage);
 	} catch { /* efficiency and correction moments are optional */ }
 }
 

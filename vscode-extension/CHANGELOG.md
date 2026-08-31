@@ -5,6 +5,7 @@ All notable changes to the VS Code extension will be documented in this file.
 ## [Unreleased]
 
 ### Features
+- New "Skill Suggestions" section in the Usage Analysis Tools & Integrations tab: clusters the first prompt of each session to find tasks you keep prompting for manually (candidates for a reusable skill or prompt file), plus a new insight when a task repeats across 3+ sessions
 - New "Corrections" tab in the Usage Analysis view: surfaces moments where the agent corrected itself after an error (failed tool calls, immediate edit retries, verbal self-corrections) or you had to correct the agent, grouped per repository over its 25 most recent sessions with detected moments
 - New insights that fire when user corrections or tool-error/edit-retry volume in the last 30 days is high, pointing to the Corrections tab
 - Group models from user-configured custom endpoints (BYOK) under their own provider group (e.g. `Mistral (Custom)`) in the Details "Cost by Provider" panel and the provider charts, instead of lumping them into "GitHub Copilot"/"Other"
