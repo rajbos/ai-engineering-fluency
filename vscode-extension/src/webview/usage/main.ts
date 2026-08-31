@@ -20,6 +20,7 @@ import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
+import { nextActiveTab } from './switchableTabs';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -4973,19 +4974,13 @@ function handleExtensionMessage(message: any): void {
 	}
 }
 
-// Tabs the extension host may activate via the 'switchTab' message. Guarded so a bogus tab
-// name can never blank the dashboard by leaving every panel hidden.
-const SWITCHABLE_TABS = new Set(['activity', 'sessions', 'tools', 'health', 'repos', 'agent', 'worktrees', 'insights', 'corrections']);
-
 function handleSwitchTab(message: any): void {
 	const tab = String(message.tab);
-	if (SWITCHABLE_TABS.has(tab)) {
-		// Persist the requested tab in module state, not just the DOM: while the webview is in
-		// its loading state the tab bar doesn't exist, so btn.click() below silently no-ops and
-		// the later renderLayout would land on the default tab — swallowing e.g. the worktree
-		// notification's "Show Me" action. With activeTab set, the eventual render honors it.
-		activeTab = tab;
-	}
+	// Persist the requested tab in module state, not just the DOM: while the webview is in
+	// its loading state the tab bar doesn't exist, so btn.click() below silently no-ops and
+	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
+	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
+	activeTab = nextActiveTab(tab, activeTab);
 	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
 	btn?.click();
 	if (message.anchor) {
