@@ -105,30 +105,57 @@ function sharedKeywords(membersTokens: Set<string>[]): string[] {
 		.map(([t]) => t);
 }
 
+interface TaskMember { input: RepeatedTaskInput; tokens: Set<string>; }
+interface TaskClusterState { members: TaskMember[]; centroid: Set<string>; }
+
+/** Find the most similar cluster above the threshold (null when none qualifies). */
+function bestMatchingCluster(clusters: TaskClusterState[], tokens: Set<string>): TaskClusterState | null {
+	let best: TaskClusterState | null = null;
+	let bestSim = PROMPT_SIMILARITY_THRESHOLD;
+	for (const c of clusters) {
+		const sim = tokenSimilarity(c.centroid, tokens);
+		if (best === null ? sim >= PROMPT_SIMILARITY_THRESHOLD : sim > bestSim) {
+			best = c;
+			bestSim = sim;
+		}
+	}
+	return best;
+}
+
+/** Recompute the centroid as the strict-majority token set of the members. */
+function recomputeCentroid(cluster: TaskClusterState): void {
+	const counts = new Map<string, number>();
+	for (const m of cluster.members) { for (const t of m.tokens) { counts.set(t, (counts.get(t) ?? 0) + 1); } }
+	const majority = Math.floor(cluster.members.length / 2) + 1;
+	cluster.centroid = new Set([...counts.entries()].filter(([, n]) => n >= majority).map(([t]) => t));
+}
+
+/** Assign one normalized prompt to its best cluster, or start a new cluster. */
+function assignToCluster(clusters: TaskClusterState[], input: RepeatedTaskInput, tokens: Set<string>): void {
+	const best = bestMatchingCluster(clusters, tokens);
+	if (!best) {
+		clusters.push({ members: [{ input, tokens }], centroid: tokens });
+		return;
+	}
+	best.members.push({ input, tokens });
+	recomputeCentroid(best);
+}
+
 /**
  * Cluster session prompts into repeated-task candidates.
  * Returns clusters largest-first; each cluster's sessions are most-recent-first.
  */
 export function detectRepeatedTasks(inputs: RepeatedTaskInput[]): RepeatedTaskCluster[] {
-	interface Member { input: RepeatedTaskInput; tokens: Set<string>; }
-	const clusters: { members: Member[]; centroid: Set<string> }[] = [];
+	const clusters: TaskClusterState[] = [];
 
-	for (const input of inputs) {
+	// Sort by session file so identical data clusters identically across
+	// refreshes even when session discovery order varies by adapter/OS.
+	const sortedInputs = inputs.slice().sort((a, b) => a.session.file.localeCompare(b.session.file));
+
+	for (const input of sortedInputs) {
 		const tokens = normalizePromptTokens(input.prompt);
 		if (!tokens) { continue; }
-		// Greedy: join the first cluster whose centroid is similar enough.
-		const target = clusters.find(c => tokenSimilarity(c.centroid, tokens) >= PROMPT_SIMILARITY_THRESHOLD);
-		if (target) {
-			target.members.push({ input, tokens });
-			// Centroid = tokens appearing in a strict majority of members keeps the
-			// cluster stable as it grows instead of drifting toward new members.
-			const counts = new Map<string, number>();
-			for (const m of target.members) { for (const t of m.tokens) { counts.set(t, (counts.get(t) ?? 0) + 1); } }
-			const majority = Math.floor(target.members.length / 2) + 1;
-			target.centroid = new Set([...counts.entries()].filter(([, n]) => n >= majority).map(([t]) => t));
-		} else {
-			clusters.push({ members: [{ input, tokens }], centroid: tokens });
-		}
+		assignToCluster(clusters, input, tokens);
 	}
 
 	return clusters

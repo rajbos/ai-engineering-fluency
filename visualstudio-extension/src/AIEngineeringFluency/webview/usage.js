@@ -3066,6 +3066,9 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     Object.entries(stats.today.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.last30Days.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.month.mcpTools.byTool).forEach(([tool]) => allTools.add(tool));
+    Object.keys(stats.today.mcpTools.byServer).forEach((server) => allTools.add(server));
+    Object.keys(stats.last30Days.mcpTools.byServer).forEach((server) => allTools.add(server));
+    Object.keys(stats.month.mcpTools.byServer).forEach((server) => allTools.add(server));
     Object.entries(stats.today.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.last30Days.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
     Object.entries(stats.month.toolCalls.byTool).forEach(([tool]) => allTools.add(tool));
@@ -3800,7 +3803,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
     return {
       representativePrompt: raw.representativePrompt,
-      sessionCount: raw.sessionCount,
+      // Derive from the sanitized session list so the UI count can never
+      // disagree with it (and NaN/float counts are impossible).
+      sessionCount: sessions.length,
       repositories: Array.isArray(raw.repositories) ? raw.repositories.filter((r6) => typeof r6 === "string") : [],
       sessions,
       sharedKeywords: Array.isArray(raw.sharedKeywords) ? raw.sharedKeywords.filter((k2) => typeof k2 === "string") : []

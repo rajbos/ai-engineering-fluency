@@ -1557,7 +1557,9 @@ function sanitizeRepeatedTaskCluster(raw: any): RepeatedTaskCluster | null {
 	if (sessions.length === 0) { return null; }
 	return {
 		representativePrompt: raw.representativePrompt,
-		sessionCount: raw.sessionCount,
+		// Derive from the sanitized session list so the UI count can never
+		// disagree with it (and NaN/float counts are impossible).
+		sessionCount: sessions.length,
 		repositories: Array.isArray(raw.repositories) ? raw.repositories.filter((r: unknown) => typeof r === 'string') : [],
 		sessions,
 		sharedKeywords: Array.isArray(raw.sharedKeywords) ? raw.sharedKeywords.filter((k: unknown) => typeof k === 'string') : [],

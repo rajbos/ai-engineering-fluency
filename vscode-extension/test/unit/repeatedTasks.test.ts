@@ -155,3 +155,47 @@ test('threshold and cluster size constants are sane', () => {
     assert.ok(PROMPT_SIMILARITY_THRESHOLD > 0 && PROMPT_SIMILARITY_THRESHOLD <= 1);
     assert.ok(MIN_CLUSTER_SIZE >= 2);
 });
+
+test('detectRepeatedTasks: a prompt joins the MOST similar cluster, not the first match', () => {
+    // Cluster A centroid: {red, green, blue, alpha, beta, gamma} (6 tokens).
+    // Cluster B centroid: {red, green, blue, alpha, delta, epsilon, zeta, eta} (8 tokens).
+    // P tokens: {red, green, blue, alpha, delta, epsilon} (6) ->
+    //   vs A: |cap|=4, |cup|=8 -> 0.50 (meets threshold, first match would join A)
+    //   vs B: |cap|=6, |cup|=8 -> 0.75 (more similar -> must join B)
+    const inputs = [
+        input('red green blue alpha beta gamma task', 'a1', '2026-08-01T10:00:00Z'),
+        input('red green blue alpha beta gamma task', 'a2', '2026-08-02T10:00:00Z'),
+        input('red green blue alpha delta epsilon zeta eta task', 'b1', '2026-08-01T10:00:00Z'),
+        input('red green blue alpha delta epsilon zeta eta task', 'b2', '2026-08-02T10:00:00Z'),
+        input('red green blue alpha delta epsilon task', 'p', '2026-08-03T10:00:00Z'),
+    ];
+    const clusters = detectRepeatedTasks(inputs);
+    assert.equal(clusters.length, 2);
+    const withP = clusters.find(c => c.sessions.some(s => s.file === 'p'));
+    assert.ok(withP, 'P should join a cluster');
+    assert.ok(withP.sharedKeywords.includes('delta'), 'P should join the more similar cluster B');
+    assert.equal(withP.sessionCount, 3);
+    const withoutP = clusters.find(c => !c.sessions.some(s => s.file === 'p'));
+    assert.ok(withoutP);
+    assert.equal(withoutP.sessionCount, 2);
+    assert.ok(!withoutP.sharedKeywords.includes('delta'));
+});
+
+test('detectRepeatedTasks: identical data clusters identically regardless of input order', () => {
+    const inputs = [
+        input('run the tests and fix the failures', 's1', '2026-08-01T10:00:00Z', 'o/r1'),
+        input('please run the tests and fix any failures', 's2', '2026-08-02T10:00:00Z', 'o/r1'),
+        input('update the changelog and bump the version for release', 's3', '2026-08-03T10:00:00Z', 'o/r2'),
+        input('update the changelog and bump the version please', 's4', '2026-08-04T10:00:00Z', 'o/r2'),
+    ];
+    const forward = detectRepeatedTasks(inputs);
+    const reversed = detectRepeatedTasks(inputs.slice().reverse());
+    assert.deepEqual(
+        reversed.map(c => c.representativePrompt).sort(),
+        forward.map(c => c.representativePrompt).sort(),
+    );
+    assert.deepEqual(
+        reversed.map(c => c.sessionCount).sort(),
+        forward.map(c => c.sessionCount).sort(),
+    );
+});
