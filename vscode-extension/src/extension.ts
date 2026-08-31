@@ -1933,7 +1933,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Classify one PR, pushing any AI detail rows and returning its contribution to the counters. */
 	private classifyPr(pr: any, login: string | undefined, aiDetails: RepoPrDetail[]): { aiAuthored: number; aiReviewRequested: number; userAuthored: number; userMerged: number } {
 		const author = pr.user?.login ?? '';
-		const authorAi = detectAiType(author);
+		const authorAi = detectAiType(pr.user);
 		let aiAuthored = 0;
 		if (authorAi) {
 			aiAuthored = 1;
@@ -1941,7 +1941,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 		let aiReviewRequested = 0;
 		for (const reviewer of (pr.requested_reviewers ?? [])) {
-			const reviewerAi = detectAiType(reviewer.login ?? '');
+			const reviewerAi = detectAiType(reviewer);
 			if (reviewerAi) {
 				aiReviewRequested++;
 				aiDetails.push({ number: pr.number, title: pr.title, url: pr.html_url, aiType: reviewerAi, role: 'reviewer-requested' });

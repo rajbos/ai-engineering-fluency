@@ -4,39 +4,106 @@ import * as os from 'node:os';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import * as childProcess from 'node:child_process';
-import { detectAiType, fetchRepoPrs, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
+import { detectAiType, detectCoAuthorAiType, fetchPrCommitMessages, fetchRepoPrs, fetchCopilotPlanInfo, fetchCopilotTokenEndpointInfo, fetchUserEnterprises, fetchEnterprisePremiumBudgets, discoverGitHubRepos, type CopilotPlanInfo, type CopilotTokenEndpointInfo, type EnterpriseInfo, type EnterpriseBudgetEntry } from '../../src/githubPrService';
 
 // ---------------------------------------------------------------------------
 // detectAiType — pure function, no I/O
 // ---------------------------------------------------------------------------
 
-test('detectAiType: returns copilot for login containing "copilot"', () => {
-	assert.equal(detectAiType('copilot-swe-agent'), 'copilot');
-	assert.equal(detectAiType('github-copilot-bot'), 'copilot');
-	assert.equal(detectAiType('COPILOT-agent'), 'copilot');
+test('detectAiType: returns copilot for a Bot-typed login containing "copilot"', () => {
+	assert.equal(detectAiType({ login: 'copilot-swe-agent', type: 'Bot' }), 'copilot');
+	assert.equal(detectAiType({ login: 'github-copilot-bot', type: 'Bot' }), 'copilot');
+	assert.equal(detectAiType({ login: 'COPILOT-agent', type: 'Bot' }), 'copilot');
 });
 
-test('detectAiType: returns claude for login containing "claude" or "anthropic"', () => {
-	assert.equal(detectAiType('claude-code-action'), 'claude');
-	assert.equal(detectAiType('anthropic-bot'), 'claude');
-	assert.equal(detectAiType('Claude-Agent'), 'claude');
+test('detectAiType: returns claude for a Bot-typed login containing "claude" or "anthropic"', () => {
+	assert.equal(detectAiType({ login: 'claude-code-action', type: 'Bot' }), 'claude');
+	assert.equal(detectAiType({ login: 'anthropic-bot', type: 'Bot' }), 'claude');
+	assert.equal(detectAiType({ login: 'Claude-Agent', type: 'Bot' }), 'claude');
 });
 
-test('detectAiType: returns openai for login containing "openai" or "codex"', () => {
-	assert.equal(detectAiType('openai-code-agent'), 'openai');
-	assert.equal(detectAiType('codex-bot'), 'openai');
-	assert.equal(detectAiType('OPENAI-agent'), 'openai');
+test('detectAiType: returns openai for a Bot-typed login containing "openai" or "codex"', () => {
+	assert.equal(detectAiType({ login: 'openai-code-agent', type: 'Bot' }), 'openai');
+	assert.equal(detectAiType({ login: 'codex-bot', type: 'Bot' }), 'openai');
+	assert.equal(detectAiType({ login: 'OPENAI-agent', type: 'Bot' }), 'openai');
 });
 
 test('detectAiType: returns null for a regular human login', () => {
-	assert.equal(detectAiType('octocat'), null);
-	assert.equal(detectAiType('jane-doe'), null);
-	assert.equal(detectAiType(''), null);
+	assert.equal(detectAiType({ login: 'octocat', type: 'User' }), null);
+	assert.equal(detectAiType({ login: 'jane-doe', type: 'User' }), null);
+	assert.equal(detectAiType({ login: '', type: 'User' }), null);
+	assert.equal(detectAiType(undefined), null);
+	assert.equal(detectAiType(null), null);
 });
 
 test('detectAiType: copilot match takes priority over other patterns', () => {
 	// A login that technically contains both; copilot check comes first
-	assert.equal(detectAiType('copilot-openai-test'), 'copilot');
+	assert.equal(detectAiType({ login: 'copilot-openai-test', type: 'Bot' }), 'copilot');
+});
+
+test('detectAiType: gates on user.type === "Bot" rather than the login string alone', () => {
+	// Same logins as the recognized-pattern tests above, but type: 'User' — must not classify as AI.
+	assert.equal(detectAiType({ login: 'copilot-swe-agent', type: 'User' }), null);
+	assert.equal(detectAiType({ login: 'claude-code-action', type: 'User' }), null);
+	assert.equal(detectAiType({ login: 'openai-code-agent', type: 'User' }), null);
+});
+
+test('detectAiType: recognizes the "[bot]" login suffix as a secondary bot signal when type is absent', () => {
+	assert.equal(detectAiType({ login: 'copilot-swe-agent[bot]' }), 'copilot');
+	assert.equal(detectAiType({ login: 'dependabot[bot]' }), 'other-ai');
+});
+
+test('detectAiType: false positives — a human login containing an AI substring is not classified as AI', () => {
+	assert.equal(detectAiType({ login: 'copilotpilot', type: 'User' }), null);
+	assert.equal(detectAiType({ login: 'claudia-dev', type: 'User' }), null);
+	assert.equal(detectAiType({ login: 'openai-research-partner', type: 'User' }), null);
+	assert.equal(detectAiType({ login: 'codexterous', type: 'User' }), null);
+});
+
+test('detectAiType: an unrecognized Bot-typed account (e.g. a custom enterprise GitHub App) is classified as other-ai, not human', () => {
+	assert.equal(detectAiType({ login: 'acme-devbot[bot]', type: 'Bot' }), 'other-ai');
+	assert.equal(detectAiType({ login: 'internal-release-bot', type: 'Bot' }), 'other-ai');
+});
+
+// ---------------------------------------------------------------------------
+// detectCoAuthorAiType — pure function, no I/O
+// ---------------------------------------------------------------------------
+
+test('detectCoAuthorAiType: detects Claude Code from its noreply@anthropic.com trailer', () => {
+	const messages = ['Fix bug\n\nCo-Authored-By: Claude <noreply@anthropic.com>'];
+	assert.equal(detectCoAuthorAiType(messages), 'claude');
+});
+
+test('detectCoAuthorAiType: detects Copilot coding agent from its bot trailer', () => {
+	const messages = ['Add feature\n\nCo-authored-by: copilot-swe-agent[bot] <123+copilot-swe-agent[bot]@users.noreply.github.com>'];
+	assert.equal(detectCoAuthorAiType(messages), 'copilot');
+});
+
+test('detectCoAuthorAiType: returns null when no commit has a recognized AI trailer', () => {
+	const messages = ['Fix bug\n\nCo-authored-by: Jane Doe <jane@example.com>', 'Unrelated commit'];
+	assert.equal(detectCoAuthorAiType(messages), null);
+});
+
+test('detectCoAuthorAiType: returns null for an empty message list', () => {
+	assert.equal(detectCoAuthorAiType([]), null);
+});
+
+// ---------------------------------------------------------------------------
+// fetchPrCommitMessages — uses injectable fetcher
+// ---------------------------------------------------------------------------
+
+test('fetchPrCommitMessages: returns commit messages on success', async () => {
+	const mockFetcher = async () => ({ messages: ['first commit', 'second commit'], statusCode: 200 });
+	const { messages, error } = await fetchPrCommitMessages('owner', 'repo', 42, 'token', mockFetcher);
+	assert.deepEqual(messages, ['first commit', 'second commit']);
+	assert.equal(error, undefined);
+});
+
+test('fetchPrCommitMessages: propagates error from fetcher', async () => {
+	const mockFetcher = async () => ({ messages: [], statusCode: 404, error: 'Not Found' });
+	const { messages, error } = await fetchPrCommitMessages('owner', 'repo', 42, 'token', mockFetcher);
+	assert.deepEqual(messages, []);
+	assert.equal(error, 'Not Found');
 });
 
 // ---------------------------------------------------------------------------
