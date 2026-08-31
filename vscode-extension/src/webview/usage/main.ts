@@ -298,6 +298,8 @@ const repoAnalysisInFlight = new Set<string>();
 let selectedRepoPath: string | null = null;
 let isSwitchingRepository = false;
 let isBatchAnalysisInProgress = false;
+/** True while the single "Analyze Repo for Best Practices" analysis (no workspace matrix) runs. */
+let isSingleRepoAnalysisInProgress = false;
 let currentWorkspacePaths: string[] = [];
 let activeTab = 'activity';
 let loadingTimeoutId: ReturnType<typeof setTimeout> | null = null;
@@ -2463,7 +2465,7 @@ function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysis
 				</div>
 				${hygieneMatrixState && hygieneMatrixState.workspaces && hygieneMatrixState.workspaces.length > 0 ? `
 					<div style="margin-bottom: 12px;">
-						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${hygieneMatrixState.workspaces.length})</vscode-button>
+						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;" ${isBatchAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ''}>${isBatchAnalysisInProgress ? 'Analyzing All...' : `Analyze All Repositories (${hygieneMatrixState.workspaces.length})`}</vscode-button>
 					</div>
 					<div id="repo-list-pane-container" class="repo-hygiene-pane">
 						<div class="repo-hygiene-pane-header">📁 Repository List</div>
@@ -2474,7 +2476,7 @@ function buildHealthTabPanelHtml(customizationHtml: string, stats: UsageAnalysis
 						<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
 					</div>
 				` : `
-					<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
+					<vscode-button id="btn-analyse-repo" ${isSingleRepoAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ''}>${isSingleRepoAnalysisInProgress ? 'Analyzing...' : 'Analyze Repo for Best Practices'}</vscode-button>
 					<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
 				`}
 			</div>
@@ -4403,6 +4405,7 @@ function setButtonAnalyzingState(btn: (HTMLElement & { disabled: boolean }) | nu
 function wireRepositoryButtons(): void {
 	document.getElementById('btn-analyse-repo')?.addEventListener('click', () => {
 		const btn = document.getElementById('btn-analyse-repo') as HTMLElement & { disabled: boolean };
+		isSingleRepoAnalysisInProgress = true;
 		setButtonAnalyzingState(btn, 'Analyzing...');
 		vscode.postMessage({ command: 'analyseRepository' });
 	});
@@ -5041,6 +5044,7 @@ function displayRepoAnalysisResults(data: RepoAnalysisData, workspacePath?: stri
 
 	const btn = document.getElementById('btn-analyse-repo') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
+		isSingleRepoAnalysisInProgress = false;
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
 		btn.removeAttribute('appearance');
@@ -5070,6 +5074,7 @@ function displayRepoAnalysisError(error: string, workspacePath?: string): void {
 
 	const btn = document.getElementById('btn-analyse-repo') as (HTMLElement & { disabled: boolean }) | null;
 	if (btn) {
+		isSingleRepoAnalysisInProgress = false;
 		btn.disabled = false;
 		btn.textContent = 'Analyze Repo for Best Practices';
 		btn.removeAttribute('appearance');

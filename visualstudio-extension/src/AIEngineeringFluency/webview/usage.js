@@ -1912,6 +1912,9 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     try {
       const now = Date.now();
       const then = new Date(isoString).getTime();
+      if (!Number.isFinite(then)) {
+        return "Unknown";
+      }
       const diffMs = now - then;
       if (diffMs < 0) {
         return "Just now";
@@ -2779,6 +2782,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   var selectedRepoPath = null;
   var isSwitchingRepository = false;
   var isBatchAnalysisInProgress = false;
+  var isSingleRepoAnalysisInProgress = false;
   var currentWorkspacePaths = [];
   var activeTab = "activity";
   var loadingTimeoutId = null;
@@ -4687,7 +4691,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 				</div>
 				${hygieneMatrixState && hygieneMatrixState.workspaces && hygieneMatrixState.workspaces.length > 0 ? `
 					<div style="margin-bottom: 12px;">
-						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;">Analyze All Repositories (${hygieneMatrixState.workspaces.length})</vscode-button>
+						<vscode-button id="btn-analyse-all" style="margin-bottom: 8px;" ${isBatchAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ""}>${isBatchAnalysisInProgress ? "Analyzing All..." : `Analyze All Repositories (${hygieneMatrixState.workspaces.length})`}</vscode-button>
 					</div>
 					<div id="repo-list-pane-container" class="repo-hygiene-pane">
 						<div class="repo-hygiene-pane-header">\u{1F4C1} Repository List</div>
@@ -4698,7 +4702,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
 						<div id="repo-details-pane" class="repo-hygiene-pane-body"></div>
 					</div>
 				` : `
-					<vscode-button id="btn-analyse-repo">Analyze Repo for Best Practices</vscode-button>
+					<vscode-button id="btn-analyse-repo" ${isSingleRepoAnalysisInProgress ? 'disabled="true" appearance="secondary"' : ""}>${isSingleRepoAnalysisInProgress ? "Analyzing..." : "Analyze Repo for Best Practices"}</vscode-button>
 					<div id="repo-analysis-results" class="repo-hygiene-results" style="margin-top: 12px;"></div>
 				`}
 			</div>
@@ -6432,6 +6436,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
   function wireRepositoryButtons() {
     document.getElementById("btn-analyse-repo")?.addEventListener("click", () => {
       const btn = document.getElementById("btn-analyse-repo");
+      isSingleRepoAnalysisInProgress = true;
       setButtonAnalyzingState(btn, "Analyzing...");
       vscode.postMessage({ command: "analyseRepository" });
     });
@@ -7066,6 +7071,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
     }
     const btn = document.getElementById("btn-analyse-repo");
     if (btn) {
+      isSingleRepoAnalysisInProgress = false;
       btn.disabled = false;
       btn.textContent = "Analyze Repo for Best Practices";
       btn.removeAttribute("appearance");
@@ -7092,6 +7098,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
     }
     const btn = document.getElementById("btn-analyse-repo");
     if (btn) {
+      isSingleRepoAnalysisInProgress = false;
       btn.disabled = false;
       btn.textContent = "Analyze Repo for Best Practices";
       btn.removeAttribute("appearance");

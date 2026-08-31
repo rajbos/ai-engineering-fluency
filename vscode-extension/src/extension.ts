@@ -7159,6 +7159,9 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 			const response = await model.sendRequest([vscode.LanguageModelChatMessage.User(prompt)], {}, cts.token);
 			let fullResponse = '';
 			for await (const chunk of response.text) { fullResponse += chunk; }
+			// Clear the timer before the cancellation check so a request that finished
+			// streaming just as the timer fired isn't reported as a timeout.
+			clearTimeout(timer);
 			if (cts.token.isCancellationRequested) {
 				throw new Error(`Copilot model request timed out after ${timeoutMs / 1000}s`);
 			}
