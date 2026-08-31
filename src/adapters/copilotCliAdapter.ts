@@ -207,7 +207,14 @@ export class CopilotCliAdapter implements IEcosystemAdapter, IDiscoverableEcosys
 		if (!this.store.isCliStoreSession(sessionFile)) { return analysis; }
 		const turns = await this.store.getTurns(sessionFile);
 		// Each user turn counts as one CLI interaction; no model/tool data available in the schema.
-		analysis.modeUsage.cli = turns.filter(t => t.user_message !== null).length;
+		const cliCount = turns.filter(t => t.user_message !== null).length;
+		const sessionId = this.store.getSessionId(sessionFile);
+		if (sessionId && this._appSessionIds.has(sessionId)) {
+			// Copilot desktop app session — broken out from terminal CLI usage.
+			analysis.modeUsage.cliApp = cliCount;
+		} else {
+			analysis.modeUsage.cli = cliCount;
+		}
 		return analysis;
 	}
 

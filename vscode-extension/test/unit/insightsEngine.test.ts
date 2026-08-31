@@ -623,6 +623,85 @@ test('retry-price-mismatch: does NOT fire with a single model', () => {
 });
 
 // ---------------------------------------------------------------------------
+// mode-diversity-low insight tests
+// ---------------------------------------------------------------------------
+
+const MODE_DIVERSITY_ID = 'mode-diversity-low';
+
+test('mode-diversity-low: fires when usage is mostly Ask mode', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 18;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MODE_DIVERSITY_ID);
+	assert.ok(insight, 'should fire when ask dominates mode interactions');
+	assert.ok(insight!.body.includes('mostly use Ask mode'));
+});
+
+test('mode-diversity-low: has an action button opening the Interaction Modes view', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 18;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MODE_DIVERSITY_ID);
+	assert.ok(insight);
+	assert.equal(insight!.actionLabel, 'View Interaction Modes');
+	assert.equal(insight!.actionCommand, 'aiEngineeringFluency.openActivityTab');
+});
+
+test('mode-diversity-low: does NOT fire for CLI-heavy users (CLI counts as agentic usage)', () => {
+	const ctx = makeCtx();
+	// Mirrors a heavy Copilot CLI user: few in-editor Ask interactions, mostly CLI.
+	ctx.last30Days.modeUsage.ask = 268;
+	ctx.last30Days.modeUsage.cli = 1123;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined);
+});
+
+test('mode-diversity-low: does NOT fire when Copilot App CLI usage dominates (cliApp)', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 100;
+	ctx.last30Days.modeUsage.cliApp = 300;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined);
+});
+
+test('mode-diversity-low: does NOT fire when Plan/Custom Agent usage is significant', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 40;
+	ctx.last30Days.modeUsage.plan = 30;
+	ctx.last30Days.modeUsage.customAgent = 30;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined,
+		'plan and custom-agent interactions count as agentic — no false "haven\'t tried Agent mode" claim');
+});
+
+test('mode-diversity-low: fires with "haven\'t tried Agent mode" body when no agentic usage at all', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 10;
+	ctx.last30Days.modeUsage.edit = 8;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MODE_DIVERSITY_ID);
+	assert.ok(insight, 'should fire when there is no agent/CLI usage and enough interactions');
+	assert.ok(insight!.body.includes('haven\'t tried Agent mode'));
+});
+
+test('mode-diversity-low: still fires when agentic share is small', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 90;
+	ctx.last30Days.modeUsage.agent = 5;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	const insight = results.find(i => i.id === MODE_DIVERSITY_ID);
+	assert.ok(insight, 'should fire when agentic interactions are under 15% of mode interactions');
+});
+
+test('mode-diversity-low: does NOT fire with too little data', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.sessions = 5;
+	ctx.last30Days.modeUsage.ask = 5;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined);
+});
+
+// ---------------------------------------------------------------------------
 // corrections insights tests
 // ---------------------------------------------------------------------------
 

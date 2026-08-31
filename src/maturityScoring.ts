@@ -22,6 +22,11 @@ function fmt(n: number): string {
 	return n.toLocaleString('en-US');
 }
 
+/** Total CLI-style interactions: terminal CLI plus Copilot desktop app sessions (broken out as `cliApp`). */
+function cliTotal(m: UsageAnalysisPeriod['modeUsage']): number {
+	return (m.cli ?? 0) + (m.cliApp ?? 0);
+}
+
 /** Fluency stage levels (1 = AI Skeptic through 4 = AI Strategist). */
 type Stage = 1 | 2 | 3 | 4;
 
@@ -222,11 +227,11 @@ function _scorePromptEngineering(p: UsageAnalysisPeriod): CategoryScore {
  * Add evidence for mode usage counts.
  */
 function _speAddModeEvidence(evidence: string[], p: UsageAnalysisPeriod): void {
-	const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + p.modeUsage.cli;
+	const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + cliTotal(p.modeUsage);
 	if (totalInteractions > 0) { evidence.push(`${fmt(totalInteractions)} total interactions`); }
 	if (p.modeUsage.ask > 0) { evidence.push(`${fmt(p.modeUsage.ask)} ask-mode conversations`); }
 	if (p.modeUsage.agent > 0) { evidence.push(`${fmt(p.modeUsage.agent)} agent-mode interactions`); }
-	if (p.modeUsage.cli > 0) { evidence.push(`${fmt(p.modeUsage.cli)} CLI interactions`); }
+	if (cliTotal(p.modeUsage) > 0) { evidence.push(`${fmt(cliTotal(p.modeUsage))} CLI interactions`); }
 }
 
 /**
@@ -269,7 +274,7 @@ function _speComputeEvidence(p: UsageAnalysisPeriod): SpeResult {
 	
 	_speAddModeEvidence(evidence, p);
 	
-	const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + p.modeUsage.cli;
+	const totalInteractions = p.modeUsage.ask + p.modeUsage.edit + p.modeUsage.agent + cliTotal(p.modeUsage);
 	let stage: Stage = _applyPeConversationStage(p, evidence, 1);
 	if (totalInteractions >= T.stage2MinInteractions) { stage = 2; }
 
@@ -277,7 +282,7 @@ function _speComputeEvidence(p: UsageAnalysisPeriod): SpeResult {
 	if (usedSlashCommands.length > 0) { evidence.push(`Used slash commands: /${usedSlashCommands.join(', /')}`); }
 
 	const hasModelSwitching = _peHasModelSwitching(p.modelSwitching.mixedTierSessions, p.modelSwitching.mixedCostSessions, p.modelSwitching.switchingFrequency);
-	const hasAgentMode = _peHasAgentMode(p.modeUsage.agent, p.modeUsage.cli);
+	const hasAgentMode = _peHasAgentMode(p.modeUsage.agent, cliTotal(p.modeUsage));
 	const autoUsageRatio = p.modelSwitching.totalSessions > 0 ? (p.modelSwitching.autoSessions / p.modelSwitching.totalSessions) : 0;
 	
 	_speAddAutoModelEvidence(evidence, p, autoUsageRatio);
@@ -468,7 +473,7 @@ function _agBuildTips(stage: Stage): string[] {
 function _agAddBasicEvidence(evidence: string[], p: UsageAnalysisPeriod, stage: Stage): Stage {
 	let result = stage;
 	if (p.modeUsage.agent > 0) { evidence.push(`${fmt(p.modeUsage.agent)} agent-mode interactions`); result = 2; }
-	if (p.modeUsage.cli > 0) { evidence.push(`${fmt(p.modeUsage.cli)} CLI interactions`); result = promoteStage(result, 2); }
+	if (cliTotal(p.modeUsage) > 0) { evidence.push(`${fmt(cliTotal(p.modeUsage))} CLI interactions`); result = promoteStage(result, 2); }
 	if (p.toolCalls.total > 0) { evidence.push(`${fmt(p.toolCalls.total)} tool calls executed`); }
 	if (p.modeUsage.edit > 0) { evidence.push(`${fmt(p.modeUsage.edit)} edit-mode interactions`); }
 	return result;
@@ -505,7 +510,7 @@ function _agApplyStageQualifications(stage: Stage, p: UsageAnalysisPeriod, T: ty
 	if (p.agentTypes?.editsAgent) { evidence.push(`${fmt(p.agentTypes.editsAgent)} edits agent sessions`); result = promoteStage(result, 2); }
 
 	const nonAutoToolCount = countNonAutoTools(p.toolCalls.byTool);
-	const agentInteractions = p.modeUsage.agent + p.modeUsage.cli;
+	const agentInteractions = p.modeUsage.agent + cliTotal(p.modeUsage);
 	
 	if (_agQualifiesForStage3(agentInteractions, nonAutoToolCount, T)) { result = 3; }
 	if (_agQualifiesForStage4(agentInteractions, nonAutoToolCount, T)) { result = 4; }
@@ -812,7 +817,7 @@ function _wiCalculateTotalContextRefs(p: UsageAnalysisPeriod): number {
  * Calculate number of modes used.
  */
 function _wiCalculateModesUsed(p: UsageAnalysisPeriod): number {
-	return [p.modeUsage.ask > 0, p.modeUsage.agent > 0, p.modeUsage.cli > 0].filter(Boolean).length;
+	return [p.modeUsage.ask > 0, p.modeUsage.agent > 0, cliTotal(p.modeUsage) > 0].filter(Boolean).length;
 }
 
 /**

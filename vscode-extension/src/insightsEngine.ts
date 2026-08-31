@@ -581,21 +581,31 @@ export const INSIGHT_CATALOG: InsightDefinition[] = [
 		severity: 'tip',
 		title: '🔀 Explore more Copilot modes',
 		buildBody: (ctx) => {
-			const sessions = ctx.last30Days.sessions;
 			const m = ctx.last30Days.modeUsage;
-			if ((m.ask ?? 0) > 0.85 * sessions) {
+			const ask = m.ask ?? 0;
+			const agentic = (m.agent ?? 0) + (m.plan ?? 0) + (m.customAgent ?? 0) + (m.cli ?? 0) + (m.cliApp ?? 0);
+			const total = ask + (m.edit ?? 0) + agentic;
+			if (total > 0 && ask > 0.85 * total) {
 				return 'You mostly use Ask mode. Try Agent mode for making code changes directly — it can edit files, run terminal commands, and iterate across your whole codebase autonomously.';
 			}
 			return 'You haven\'t tried Agent mode yet. It handles multi-step tasks autonomously — great for refactoring, adding tests, or implementing features.';
 		},
 		appliesTo: (ctx) => {
-			const sessions = ctx.last30Days.sessions;
-			if (sessions < 10) { return false; }
+			if (ctx.last30Days.sessions < 10) { return false; }
 			const m = ctx.last30Days.modeUsage;
-			if ((m.agent ?? 0) > 0.85 * sessions) { return false; }
-			return (m.ask ?? 0) > 0.85 * sessions
-				|| ((m.agent ?? 0) === 0 && sessions >= 15);
+			const ask = m.ask ?? 0;
+			// Agent, Plan and Custom Agent modes and CLI interactions (terminal or
+			// Copilot desktop app) are autonomous agent-mode-style usage — count them
+			// as agentic, not as "ask-only".
+			const agentic = (m.agent ?? 0) + (m.plan ?? 0) + (m.customAgent ?? 0) + (m.cli ?? 0) + (m.cliApp ?? 0);
+			const total = ask + (m.edit ?? 0) + agentic;
+			if (total < 10) { return false; }
+			if (agentic > 0.15 * total) { return false; }
+			return ask > 0.85 * total
+				|| (agentic === 0 && total >= 15);
 		},
+		actionLabel: 'View Interaction Modes',
+		actionCommand: 'aiEngineeringFluency.openActivityTab',
 		weight: 50,
 	},
 

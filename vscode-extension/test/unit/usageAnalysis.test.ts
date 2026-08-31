@@ -1,5 +1,8 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
 import {
     mergeUsageAnalysis,
     analyzeContextReferences,
@@ -2424,6 +2427,53 @@ test('analyzeSessionUsage: CLI session.model_change event is processed without e
     const deps = makeMockDeps();
     const result = await analyzeSessionUsage(deps, '/tmp/test.jsonl', content);
     assert.equal(result.modeUsage.cli, 1, 'user.message after model_change should count');
+});
+
+// ---------------------------------------------------------------------------
+// analyzeSessionUsage: Copilot desktop app CLI split (cliApp)
+// ---------------------------------------------------------------------------
+
+function writeCliSessionFixture(t: test.TestContext, clientName: string): string {
+    // The split only applies under ~/.copilot/session-state/, so mirror that layout.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cliapp-split-'));
+    t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
+    const sessionDir = path.join(dir, '.copilot', 'session-state', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const sessionFile = path.join(sessionDir, 'events.jsonl');
+    const content = [
+        JSON.stringify({ type: 'session.start', data: { selectedModel: 'gpt-4o' } }),
+        JSON.stringify({ type: 'user.message', data: {} }),
+        JSON.stringify({ type: 'user.message', data: {} }),
+    ].join('\n');
+    fs.writeFileSync(sessionFile, content);
+    fs.writeFileSync(path.join(sessionDir, 'workspace.yaml'), `cwd: C:\\repo\nclient_name: ${clientName}\n`);
+    return sessionFile;
+}
+
+test('analyzeSessionUsage: Copilot App CLI session (client_name github/autopilot) splits cli into cliApp', async (t) => {
+    const sessionFile = writeCliSessionFixture(t, 'github/autopilot');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, sessionFile);
+    assert.equal(result.modeUsage.cli, 0, 'app-hosted session should not count as terminal CLI');
+    assert.equal(result.modeUsage.cliApp, 2, 'app-hosted session user messages should count as cliApp');
+});
+
+test('analyzeSessionUsage: terminal CLI session (client_name github/cli) stays in cli', async (t) => {
+    const sessionFile = writeCliSessionFixture(t, 'github/cli');
+    const deps = makeMockDeps();
+    const result = await analyzeSessionUsage(deps, sessionFile);
+    assert.equal(result.modeUsage.cli, 2, 'terminal CLI session should stay in cli');
+    assert.equal(result.modeUsage.cliApp, undefined, 'cliApp should not be set for terminal CLI sessions');
+});
+
+test('mergeUsageAnalysis: folds cliApp into the period aggregate', () => {
+    const period = emptyPeriod();
+    const a = emptyAnalysis();
+    a.modeUsage.cli = 3;
+    a.modeUsage.cliApp = 2;
+    mergeUsageAnalysis(period, a);
+    assert.equal(period.modeUsage.cli, 3);
+    assert.equal(period.modeUsage.cliApp, 2);
 });
 
 // ---------------------------------------------------------------------------
