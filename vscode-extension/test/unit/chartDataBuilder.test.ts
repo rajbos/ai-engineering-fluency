@@ -1,7 +1,8 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 
-import { getModelBillingProvider, getBillingGroup, COPILOT_EDITOR_NAMES } from '../../../src/chartDataBuilder';
+import { buildChartData, getModelBillingProvider, getBillingGroup, COPILOT_EDITOR_NAMES } from '../../../src/chartDataBuilder';
+import type { DailyTokenStats, ModelUsage } from '../../../src/types';
 
 // ── getModelBillingProvider ───────────────────────────────────────────────────
 
@@ -112,4 +113,38 @@ test('COPILOT_EDITOR_NAMES includes Visual Studio', () => {
 
 test('COPILOT_EDITOR_NAMES includes JetBrains', () => {
 	assert.ok(COPILOT_EDITOR_NAMES.has('JetBrains'));
+});
+
+test('buildChartData: includes task-category token/session/cost datasets', () => {
+	const modelUsage: ModelUsage = {
+		'gpt-4o': { inputTokens: 800, outputTokens: 200 },
+	};
+	const daily: DailyTokenStats[] = [{
+		date: '2026-08-30',
+		tokens: 1000,
+		sessions: 2,
+		interactions: 4,
+		modelUsage,
+		editorUsage: { 'VS Code': { tokens: 1000, sessions: 2 } },
+		repositoryUsage: { 'https://github.com/a/b': { tokens: 1000, sessions: 2 } },
+		taskCategoryTokens: { Coding: 600, Testing: 400 },
+		taskCategorySessions: { Coding: 1.25, Testing: 0.75 },
+		taskCategoryModelUsage: {
+			Coding: { 'gpt-4o': { inputTokens: 480, outputTokens: 120 } },
+			Testing: { 'gpt-4o': { inputTokens: 320, outputTokens: 80 } },
+		},
+	}];
+	const payload = buildChartData(daily, {
+		getRepoDisplayName: (url) => url.split('/').slice(-2).join('/'),
+		calculateEstimatedCost: (usage) => Object.values(usage).reduce((sum, u) => sum + (u.inputTokens + u.outputTokens) / 1_000_000, 0),
+		backendConfigured: false,
+		compactNumbers: false,
+		now: new Date('2026-08-31T00:00:00.000Z'),
+	});
+	const taskTokenSets = payload.periods.day.taskCategoryTokenDatasets as Array<{ label: string; data: number[] }>;
+	const taskSessionSets = payload.periods.day.taskCategorySessionDatasets as Array<{ label: string; data: number[] }>;
+	const taskCostSets = payload.periods.day.taskCategoryCostDatasets as Array<{ label: string; data: number[] }>;
+	assert.ok(taskTokenSets.some(ds => ds.label === 'Coding' && ds.data.some(v => v === 600)));
+	assert.ok(taskSessionSets.some(ds => ds.label === 'Testing' && ds.data.some(v => v === 0.75)));
+	assert.ok(taskCostSets.some(ds => ds.label === 'Coding' && ds.data.some(v => v > 0)));
 });

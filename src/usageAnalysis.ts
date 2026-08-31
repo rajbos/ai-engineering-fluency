@@ -22,6 +22,12 @@ import type {
 	LanguageUsage,
 } from './types';
 import {
+	classifySessionTurns,
+	createEmptyTaskClassificationResult,
+	type TaskTurnSignal,
+	TASK_CATEGORIES,
+} from './taskClassification';
+import {
 	applyDelta,
 	isJsonlContent,
 	isUuidPointerFile,
@@ -176,6 +182,56 @@ toolName?: string;
 };
 model?: string;
 toolName?: string;
+}
+
+function _asuExtractMessageTextFromRequest(request: SessionRequestRaw): string {
+	if (typeof request.message?.text === 'string' && request.message.text.trim()) { return request.message.text; }
+	if (Array.isArray(request.message?.parts)) {
+		return request.message.parts
+			.map(p => typeof p?.text === 'string' ? p.text : '')
+			.filter(Boolean)
+			.join('\n')
+			.trim();
+	}
+	return '';
+}
+
+function _asuExtractToolNamesFromRequest(request: SessionRequestRaw): string[] {
+	if (!Array.isArray(request.response)) { return []; }
+	const tools: string[] = [];
+	for (const responseItemRaw of request.response as ResponseItemRaw[]) {
+		if (!responseItemRaw) { continue; }
+		if (responseItemRaw.kind !== 'toolInvocationSerialized' && responseItemRaw.kind !== 'prepareToolInvocation') { continue; }
+		const toolName = responseItemRaw.toolId || responseItemRaw.toolName || responseItemRaw.invocationMessage?.toolName || responseItemRaw.toolSpecificData?.kind || 'unknown';
+		tools.push(toolName);
+	}
+	return tools;
+}
+
+function _asuFinalizeTaskClassification(analysis: SessionUsageAnalysis, turns: TaskTurnSignal[]): void {
+	analysis.taskClassification = turns.length > 0 ? classifySessionTurns(turns) : createEmptyTaskClassificationResult();
+	if (analysis.modeUsage.plan > 0 && analysis.modeUsage.plan >= analysis.modeUsage.agent && analysis.modeUsage.plan >= analysis.modeUsage.edit) {
+		analysis.taskClassification.primaryCategory = 'Planning';
+		analysis.taskClassification.categoryShares['Planning'] = Math.max(analysis.taskClassification.categoryShares['Planning'], 0.6);
+	}
+	if (analysis.modeUsage.customAgent > 0 || analysis.modeUsage.cli > 0) {
+		analysis.taskClassification.categoryShares['Delegation'] = Math.max(
+			analysis.taskClassification.categoryShares['Delegation'],
+			Math.min(1, (analysis.modeUsage.customAgent + analysis.modeUsage.cli) / Math.max(1, analysis.taskClassification.turnCount))
+		);
+		if (analysis.taskClassification.categoryShares['Delegation'] >= analysis.taskClassification.categoryShares[analysis.taskClassification.primaryCategory]) {
+			analysis.taskClassification.primaryCategory = 'Delegation';
+		}
+	}
+}
+
+function _asuEnsureTaskCategoryMaps(period: UsageAnalysisPeriod): void {
+	if (!period.taskCategoryPrimarySessions) {
+		period.taskCategoryPrimarySessions = {};
+	}
+	if (!period.taskCategoryWeightedSessions) {
+		period.taskCategoryWeightedSessions = {};
+	}
 }
 
 type SelectedModelMetadataRaw = {
@@ -590,7 +646,8 @@ function _pdsaProcessRequest(
 	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
 	request: SessionRequestRaw,
 	sessionModeType: string,
-	analysis: SessionUsageAnalysis
+	analysis: SessionUsageAnalysis,
+	taskTurns: TaskTurnSignal[]
 ): void {
 	if (!request.requestId) { return; }
 	incrementModeUsage(sessionModeType, analysis.modeUsage);
@@ -600,6 +657,11 @@ function _pdsaProcessRequest(
 	}
 	analyzeRequestContext(request, analysis.contextReferences);
 	_pdsaProcessResponses(request, analysis, deps.toolNameMap);
+	const turn: TaskTurnSignal = {
+		messageText: _asuExtractMessageTextFromRequest(request),
+		toolNames: _asuExtractToolNamesFromRequest(request),
+	};
+	taskTurns.push(turn);
 }
 
 function _pdsaGetReqModel(req: SessionRequestRaw, defaultModel: string, modelPricing: { [key: string]: ModelPricing }): string {
@@ -678,6 +740,7 @@ function processDeltaSessionAnalysis(
 	lines: string[],
 	analysis: SessionUsageAnalysis
 ): void {
+	const taskTurns: TaskTurnSignal[] = [];
 	const sessionModeType = sessionState.inputState?.mode
 		? getModeType(sessionState.inputState.mode)
 		: 'ask';
@@ -694,11 +757,12 @@ function processDeltaSessionAnalysis(
 
 	const requests = (sessionState.requests ?? []) as SessionRequestRaw[];
 	for (const request of requests) {
-		_pdsaProcessRequest(deps, request, sessionModeType, analysis);
+		_pdsaProcessRequest(deps, request, sessionModeType, analysis, taskTurns);
 	}
 
 	_pdsaExtractModelSwitching(deps, sessionState, requests, analysis);
 	_pdsaExtractThinkingEffort(lines, requests, analysis);
+	_asuFinalizeTaskClassification(analysis, taskTurns);
 	deriveConversationPatterns(analysis);
 }
 
@@ -745,7 +809,8 @@ function _pjsrProcessRequest(
 	deps: Pick<UsageAnalysisDeps, 'toolNameMap'>,
 	request: SessionRequestRaw,
 	sessionContent: ParsedSessionJson,
-	analysis: SessionUsageAnalysis
+	analysis: SessionUsageAnalysis,
+	taskTurns: TaskTurnSignal[]
 ): void {
 	const requestMode = _pjsrDetermineMode(request, sessionContent);
 	if (requestMode === 'agent') { analysis.modeUsage.agent++; }
@@ -758,6 +823,10 @@ function _pjsrProcessRequest(
 			_pjsrProcessResponseItem(responseItemRaw, analysis, deps);
 		}
 	}
+	taskTurns.push({
+		messageText: _asuExtractMessageTextFromRequest(request),
+		toolNames: _asuExtractToolNamesFromRequest(request),
+	});
 }
 
 /**
@@ -770,9 +839,11 @@ function processJsonSessionRequests(
 	analysis: SessionUsageAnalysis
 ): void {
 	if (!sessionContent.requests || !Array.isArray(sessionContent.requests)) { return; }
+	const taskTurns: TaskTurnSignal[] = [];
 	for (const requestRaw of sessionContent.requests) {
-		_pjsrProcessRequest(deps, requestRaw as SessionRequestRaw, sessionContent, analysis);
+		_pjsrProcessRequest(deps, requestRaw as SessionRequestRaw, sessionContent, analysis, taskTurns);
 	}
+	_asuFinalizeTaskClassification(analysis, taskTurns);
 }
 
 /**
@@ -1100,6 +1171,15 @@ export function mergeUsageAnalysis(period: UsageAnalysisPeriod, analysis: Sessio
 	}
 	_muaMergeModelSwitching(period, analysis);
 	_muaMergeEnhancedMetrics(period, analysis);
+	_asuEnsureTaskCategoryMaps(period);
+	const primary = analysis.taskClassification?.primaryCategory ?? 'Conversation';
+	period.taskCategoryPrimarySessions![primary] = (period.taskCategoryPrimarySessions![primary] || 0) + 1;
+	const shares = analysis.taskClassification?.categoryShares;
+	for (const category of TASK_CATEGORIES) {
+		const share = shares?.[category] ?? 0;
+		if (share <= 0) { continue; }
+		period.taskCategoryWeightedSessions![category] = (period.taskCategoryWeightedSessions![category] || 0) + share;
+	}
 }
 
 /** @internal lookup table for analyzeContextReferences */
@@ -1798,6 +1878,7 @@ export function createEmptySessionUsageAnalysis(): SessionUsageAnalysis {
 		modeUsage: { ask: 0, edit: 0, agent: 0, plan: 0, customAgent: 0, cli: 0 },
 		contextReferences: createEmptyContextRefs(),
 		mcpTools: { total: 0, byServer: {}, byTool: {} },
+		taskClassification: createEmptyTaskClassificationResult(),
 		modelSwitching: {
 			uniqueModels: [],
 			modelCount: 0,
@@ -2001,6 +2082,24 @@ function _asuProcessCliEvents(event: any, cliState: AsuCliState, analysis: Sessi
 	}
 }
 
+function _asuExtractCliUserMessageText(event: any): string {
+	if (typeof event?.data?.content === 'string' && event.data.content.trim()) { return event.data.content; }
+	if (typeof event?.data?.message === 'string' && event.data.message.trim()) { return event.data.message; }
+	if (typeof event?.content === 'string' && event.content.trim()) { return event.content; }
+	return '';
+}
+
+function _asuExtractShellCommandFromArgs(args: unknown): string | undefined {
+	if (!args || typeof args !== 'object') { return undefined; }
+	const argObj = args as Record<string, unknown>;
+	const keys = ['command', 'cmd', 'script'];
+	for (const key of keys) {
+		const val = argObj[key];
+		if (typeof val === 'string' && val.trim()) { return val; }
+	}
+	return undefined;
+}
+
 /** Handle tool.call / tool.result / tool.execution_start events. */
  
 function _asuHandleToolCallEvent(event: any, analysis: SessionUsageAnalysis, toolNameMap: { [key: string]: string }): void {
@@ -2143,6 +2242,7 @@ async function _asuProcessNonDeltaJsonl(
 	fileContent: string,
 	analysis: SessionUsageAnalysis
 ): Promise<void> {
+	const taskTurns: TaskTurnSignal[] = [];
 	const modeState: AsuModeState = { sessionMode: 'ask' };
 	const cliState: AsuCliState = {
 		defaultModel: 'unknown', defaultEffort: null, requestCount: 0, effortByRequest: {},
@@ -2150,17 +2250,35 @@ async function _asuProcessNonDeltaJsonl(
 	};
 	const isJetBrains = isJetBrainsSessionPath(sessionFile);
 	const jetBrainsMode: JetBrainsMode | null = isJetBrains ? detectJetBrainsModeFromContent(fileContent) : null;
+	let currentTurn: TaskTurnSignal | null = null;
 
 	for (const line of lines) {
 		if (!line.trim()) { continue; }
 		try {
 			const event = JSON.parse(line);
+			if (event.type === 'user.message') {
+				if (currentTurn) { taskTurns.push(currentTurn); }
+				currentTurn = { messageText: _asuExtractCliUserMessageText(event), toolNames: [], shellCommands: [] };
+			}
+			if (event.type === 'tool.call' || event.type === 'tool.execution_start' || event.type === 'tool.result') {
+				const toolName = event.data?.toolName || event.toolName || 'unknown';
+				if (!currentTurn) { currentTurn = { toolNames: [], shellCommands: [] }; }
+				currentTurn.toolNames = currentTurn.toolNames ?? [];
+				currentTurn.toolNames.push(toolName);
+				const shellCmd = _asuExtractShellCommandFromArgs(event.data?.arguments);
+				if (shellCmd) {
+					currentTurn.shellCommands = currentTurn.shellCommands ?? [];
+					currentTurn.shellCommands.push(shellCmd);
+				}
+			}
 			_asuProcessJsonlEvent(event, analysis, modeState, cliState, jetBrainsMode, deps.toolNameMap);
 		} catch { /* skip malformed lines */ }
 	}
+	if (currentTurn) { taskTurns.push(currentTurn); }
 
 	_asuApplyCliLocToEditScope(cliState, analysis);
 	_asuApplyCliThinkingEffort(cliState, analysis);
+	_asuFinalizeTaskClassification(analysis, taskTurns);
 	await calculateModelSwitching(deps, sessionFile, analysis, fileContent);
 	// Track LOC/edit metrics for CLI sessions (delta path already handles this above)
 	await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
@@ -2176,9 +2294,12 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 	try {
 		const eco = deps.ecosystems.find(e => e.handles(sessionFile));
 		if (eco && isAnalyzable(eco)) {
-			return eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
+			const result = await eco.analyzeUsage(sessionFile, { modelPricing: deps.modelPricing, toolNameMap: deps.toolNameMap });
+			if (!result.taskClassification) { result.taskClassification = createEmptyTaskClassificationResult(); }
+			return result;
 		}
 		if (sessionFile.startsWith('windsurf://') || sessionFile.startsWith('devin://')) {
+			analysis.taskClassification = createEmptyTaskClassificationResult();
 			return analysis;
 		}
 
@@ -2191,6 +2312,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 				_asuReconstructAndProcessDeltaState(deps, lines, analysis);
 				// Also track enhanced metrics (edit scope / LOC data) from the reconstructed requests
 				await trackEnhancedMetrics(deps, sessionFile, analysis, fileContent);
+				if (!analysis.taskClassification) { analysis.taskClassification = createEmptyTaskClassificationResult(); }
 				return analysis;
 			}
 			await _asuProcessNonDeltaJsonl(deps, sessionFile, lines, fileContent, analysis);
@@ -2207,6 +2329,7 @@ export async function analyzeSessionUsage(deps: UsageAnalysisDeps, sessionFile: 
 	} catch (error) {
 		deps.warn(`Error analyzing session usage from ${sessionFile}: ${error}`);
 	}
+	if (!analysis.taskClassification) { analysis.taskClassification = createEmptyTaskClassificationResult(); }
 
 	return analysis;
 }
@@ -2552,6 +2675,3 @@ export async function getModelUsageFromSession(deps: Pick<UsageAnalysisDeps, 'wa
 	}
 	return modelUsage;
 }
-
-
-

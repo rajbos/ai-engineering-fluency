@@ -142,6 +142,7 @@ import {
   getModelUsageFromSession as _getModelUsageFromSession,
   type UsageAnalysisDeps,
 } from '../../src/usageAnalysis';
+import { createEmptyTaskClassificationResult } from '../../src/taskClassification';
 
 // --- Maturity & fluency scoring ---
 import {
@@ -380,7 +381,7 @@ interface WorktreeScanResult {
 
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
-	private static readonly CACHE_VERSION = 59; // Detect Auto model and Foundry local models from request-level fields
+	private static readonly CACHE_VERSION = 60; // Add task-category classification fields to session cache and chart rollups
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -477,9 +478,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Last period selected by the user in the chart view; restored on next open. */
 	private lastChartPeriod: 'day' | 'week' | 'month' = 'day';
 	/** Last view selected by the user in the chart view; restored on next open. */
-	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' = 'total';
-	private lastChartMetric: string = 'tokens';
-	private lastChartSplit: string = 'total';
+	private lastChartView: 'total' | 'model' | 'editor' | 'repository' | 'cost' | 'task' = 'total';
+	private lastChartMetric: 'tokens' | 'output' | 'cost' | 'sessions' = 'tokens';
+	private lastChartSplit: 'total' | 'model' | 'editor' | 'repository' | 'language' | 'provider' | 'task' = 'total';
 	private lastUsageAnalysisStats: UsageAnalysisStats | undefined;
 	private lastDashboardData: any | undefined;
 	/** Insight engine: persisted state for all surfaced insights. */
@@ -3333,7 +3334,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			if (dayKey < cutoffUtcStartKey) { continue; }
 			const dayTokens = (dayRollup.actualTokens > 0 ? dayRollup.actualTokens : dayRollup.tokens);
 			const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dayKey);
-			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage);
+			this.addUsageToDailyEntry(dailyEntry, dayTokens, dayRollup.interactions, editorType, repository, dayRollup.modelUsage, dayRollup.taskCategoryShares, dayRollup.primaryTaskCategory);
 			if (!lastDayKey || dayKey > lastDayKey) { lastDayKey = dayKey; }
 		}
 		if (lastDayKey && (sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
@@ -3349,7 +3350,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const dateKey = toLocalDayKey(lastActivity);
 		if (dateKey < cutoffUtcStartKey) { return; }
 		const dailyEntry = this.getOrCreateDailyEntry(dailyStatsMap, dateKey);
-		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage);
+		this.addUsageToDailyEntry(dailyEntry, tokens, sessionData.interactions, editorType, repository, sessionData.modelUsage, sessionData.taskCategoryShares, sessionData.taskCategory);
 		if ((sessionData.linesAdded ?? 0) + (sessionData.linesRemoved ?? 0) > 0) {
 			this.addLocToDailyEntry(dailyEntry, sessionData.linesAdded ?? 0, sessionData.linesRemoved ?? 0, editorType, repository, sessionData.languageUsage);
 		}
@@ -3357,12 +3358,21 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private getOrCreateDailyEntry(dailyStatsMap: Map<string, DailyTokenStats>, dateKey: string): DailyTokenStats {
 		if (!dailyStatsMap.has(dateKey)) {
-			dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {} });
+			dailyStatsMap.set(dateKey, { date: dateKey, tokens: 0, sessions: 0, interactions: 0, modelUsage: {}, editorUsage: {}, repositoryUsage: {}, taskCategoryTokens: {}, taskCategorySessions: {}, taskCategoryModelUsage: {} });
 		}
 		return dailyStatsMap.get(dateKey)!;
 	}
 
-	private addUsageToDailyEntry(entry: DailyTokenStats, tokens: number, interactions: number, editorType: string, repository: string, modelUsage: any): void {
+	private addUsageToDailyEntry(
+		entry: DailyTokenStats,
+		tokens: number,
+		interactions: number,
+		editorType: string,
+		repository: string,
+		modelUsage: any,
+		taskCategoryShares?: Record<string, number>,
+		primaryTaskCategory?: string
+	): void {
 		entry.tokens += tokens;
 		entry.sessions += 1;
 		entry.interactions += interactions;
@@ -3376,6 +3386,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!entry.editorModelUsage) { entry.editorModelUsage = {}; }
 		if (!entry.editorModelUsage[editorType]) { entry.editorModelUsage[editorType] = {}; }
 		addModelUsage(entry.editorModelUsage[editorType], modelUsage);
+		if (!entry.taskCategoryTokens) { entry.taskCategoryTokens = {}; }
+		if (!entry.taskCategorySessions) { entry.taskCategorySessions = {}; }
+		if (!entry.taskCategoryModelUsage) { entry.taskCategoryModelUsage = {}; }
+		const shares = taskCategoryShares && Object.keys(taskCategoryShares).length > 0
+			? taskCategoryShares
+			: (primaryTaskCategory ? { [primaryTaskCategory]: 1 } : { Conversation: 1 });
+		for (const [category, shareRaw] of Object.entries(shares)) {
+			const share = Number(shareRaw) || 0;
+			if (share <= 0) { continue; }
+			entry.taskCategoryTokens[category as any] = (entry.taskCategoryTokens[category as any] || 0) + (tokens * share);
+			entry.taskCategorySessions[category as any] = (entry.taskCategorySessions[category as any] || 0) + share;
+			if (!entry.taskCategoryModelUsage[category as any]) { entry.taskCategoryModelUsage[category as any] = {}; }
+			addModelUsage(entry.taskCategoryModelUsage[category as any]!, this.scaledModelUsage(modelUsage, share));
+		}
 	}
 
 	private addLocToDailyEntry(entry: DailyTokenStats, linesAdded: number, linesRemoved: number, editorType: string, repository: string, languageUsage?: any): void {
@@ -3654,7 +3678,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			applyUsage: { totalApplies: 0, totalCodeBlocks: 0, applyRate: 0 },
 			sessionDuration: { totalDurationMs: 0, avgDurationMs: 0, avgFirstProgressMs: 0, avgTotalElapsedMs: 0, avgWaitTimeMs: 0, activeDurationMs: 0 },
 			conversationPatterns: { multiTurnSessions: 0, singleTurnSessions: 0, avgTurnsPerSession: 0, maxTurnsInSession: 0 },
-			agentTypes: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 }
+			agentTypes: { editsAgent: 0, defaultAgent: 0, workspaceAgent: 0, other: 0 },
+			taskCategoryPrimarySessions: {},
+			taskCategoryWeightedSessions: {},
 		};
 	}
 
@@ -3780,6 +3806,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {}
 			},
 			mcpTools: { total: 0, byServer: {}, byTool: {} },
+			taskClassification: createEmptyTaskClassificationResult(),
 			modelSwitching: {
 				uniqueModels: [], modelCount: 0, switchCount: 0,
 				autoSessions: 0, foundryWindowsSessions: 0, unknownProviderSessions: 0,
@@ -4529,7 +4556,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.extractSessionMetadata(sessionFilePath, preloadedContent, preloadedParsedJson),
 		]);
 
-		const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, modelUsage, interactions);
+		const { dailyRollups, totalInteractions } = this.computeDailyRollups(sessionMeta, tokenResult, modelUsage, interactions, usageAnalysis);
 		const debugLogTokens = await this.readTokensFromDebugLog(sessionFilePath);
 		const { resolvedActualTokens, finalCacheReadTokens, resolvedModelUsage } = this.resolveAndApplyDebugLog(tokenResult, debugLogTokens, modelUsage, dailyRollups, totalInteractions);
 
@@ -4645,6 +4672,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			tokens: tokenResult.tokens, interactions, modelUsage: resolvedModelUsage, mtime, size: fileSize,
 			usageAnalysis, title: sessionMeta.title, firstInteraction: sessionMeta.firstInteraction,
 			lastInteraction: sessionMeta.lastInteraction, actualTokens: resolvedActualTokens,
+			taskCategory: usageAnalysis.taskClassification?.primaryCategory,
+			taskCategoryShares: usageAnalysis.taskClassification?.categoryShares,
 			// Repository is discovered separately by getSessionFileDetails() (via content-reference
 			// git-root lookup) and is not recomputed here. Without preserving it, every cache-miss
 			// rebuild of this entry (e.g. an actively-edited session whose file keeps changing)
@@ -4694,6 +4723,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 		interactions: number,
 		modelUsage: ModelUsage,
 		totalNanoAiu: number,
+		taskCategoryShares?: Record<string, number>,
+		primaryTaskCategory?: string,
 	): DailyRollupEntry {
 		const dayModelUsage = this.scaledModelUsage(modelUsage, fraction);
 		const dayExactCost = totalNanoAiu > 0 ? totalNanoAiu * NANO_AIU_TO_DOLLARS * fraction : undefined;
@@ -4704,6 +4735,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			cachedReadTokens: 0,
 			interactions,
 			modelUsage: dayModelUsage,
+			...(taskCategoryShares ? { taskCategoryShares } : {}),
+			...(primaryTaskCategory ? { primaryTaskCategory } : {}),
 			...(dayExactCost !== undefined ? { copilotExactCostDollars: dayExactCost } : {}),
 		};
 	}
@@ -4714,12 +4747,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		modelUsage: ModelUsage,
 		interactions: number,
 		totalNanoAiu: number,
+		taskCategoryShares?: Record<string, number>,
+		primaryTaskCategory?: string,
 	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
 		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
 		const totalFracInteractions = Math.max(1, interactions);
 		for (const [dayKey, fraction] of Object.entries(fractions)) {
 			const dayInteractions = Math.max(1, Math.round(totalFracInteractions * fraction));
-			dailyRollups[dayKey] = this.buildDailyRollupEntry(tokenResult, fraction, dayInteractions, modelUsage, totalNanoAiu);
+			dailyRollups[dayKey] = this.buildDailyRollupEntry(tokenResult, fraction, dayInteractions, modelUsage, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
 		}
 		return { dailyRollups, totalInteractions: totalFracInteractions };
 	}
@@ -4729,12 +4764,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
 		modelUsage: ModelUsage,
 		totalNanoAiu: number,
+		taskCategoryShares?: Record<string, number>,
+		primaryTaskCategory?: string,
 	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
 		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
 		const totalInteractions = Object.values(interactionMap).reduce((a, b) => a + b, 0);
 		for (const [dayKey, dayInteractionCount] of Object.entries(interactionMap)) {
 			const fraction = dayInteractionCount / totalInteractions;
-			dailyRollups[dayKey] = this.buildDailyRollupEntry(tokenResult, fraction, dayInteractionCount, modelUsage, totalNanoAiu);
+			dailyRollups[dayKey] = this.buildDailyRollupEntry(tokenResult, fraction, dayInteractionCount, modelUsage, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
 		}
 		return { dailyRollups, totalInteractions };
 	}
@@ -4744,35 +4781,63 @@ class CopilotTokenTracker implements vscode.Disposable {
 		sessionMeta: { firstInteraction: string | null; dailyInteractions: { [localDayKey: string]: number }; dailyFractions?: Record<string, number> },
 		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number; copilotNanoAiu?: number },
 		modelUsage: ModelUsage,
-		interactions: number
+		interactions: number,
+		usageAnalysis: SessionUsageAnalysis
 	): { dailyRollups: { [localDayKey: string]: DailyRollupEntry }; totalInteractions: number } {
 		const totalNanoAiu = tokenResult.copilotNanoAiu ?? 0;
+		const taskCategoryShares = usageAnalysis.taskClassification?.categoryShares as Record<string, number> | undefined;
+		const primaryTaskCategory = usageAnalysis.taskClassification?.primaryCategory;
 
 		// Prefer pre-computed fractions from ecosystem adapters (e.g. getDailyFractions()),
 		// which have accurate per-request timestamps. Fall back to dailyInteractions counts.
 		if (sessionMeta.dailyFractions && Object.keys(sessionMeta.dailyFractions).length > 0) {
-			return this.computeRollupsFromFractions(sessionMeta.dailyFractions, tokenResult, modelUsage, interactions, totalNanoAiu);
+			return this.computeRollupsFromFractions(sessionMeta.dailyFractions, tokenResult, modelUsage, interactions, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
 		}
 
 		const dailyInteractionMap = sessionMeta.dailyInteractions;
 		const totalInteractions = Object.values(dailyInteractionMap).reduce((a, b) => a + b, 0);
 		if (totalInteractions > 0) {
-			return this.computeRollupsFromInteractionCounts(dailyInteractionMap, tokenResult, modelUsage, totalNanoAiu);
+			return this.computeRollupsFromInteractionCounts(dailyInteractionMap, tokenResult, modelUsage, totalNanoAiu, taskCategoryShares, primaryTaskCategory);
 		}
 
 		const dailyRollups: { [localDayKey: string]: DailyRollupEntry } = {};
-		this.computeFallbackDailyRollup(dailyRollups, sessionMeta.firstInteraction, tokenResult, modelUsage, interactions);
+		this.computeFallbackDailyRollup(
+			dailyRollups,
+			sessionMeta.firstInteraction,
+			tokenResult,
+			modelUsage,
+			interactions,
+			taskCategoryShares,
+			primaryTaskCategory
+		);
 		return { dailyRollups, totalInteractions };
 	}
 
-	private computeFallbackDailyRollup(dailyRollups: { [localDayKey: string]: DailyRollupEntry }, firstInteraction: string | null, tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number }, modelUsage: ModelUsage, interactions: number): void {
+	private computeFallbackDailyRollup(
+		dailyRollups: { [localDayKey: string]: DailyRollupEntry },
+		firstInteraction: string | null,
+		tokenResult: { tokens: number; actualTokens?: number; thinkingTokens?: number },
+		modelUsage: ModelUsage,
+		interactions: number,
+		taskCategoryShares?: Record<string, number>,
+		primaryTaskCategory?: string
+	): void {
 		if (!tokenResult.tokens || !firstInteraction) { return; }
 		try {
 			const interactionDate = new Date(firstInteraction);
 			if (isNaN(interactionDate.getTime())) { return; }
 			const dayKey = toLocalDayKey(interactionDate);
 			const dayModelUsage = this.scaledModelUsage(modelUsage, 1);
-			dailyRollups[dayKey] = { tokens: tokenResult.tokens, actualTokens: tokenResult.actualTokens || 0, thinkingTokens: tokenResult.thinkingTokens || 0, cachedReadTokens: 0, interactions: Math.max(1, interactions), modelUsage: dayModelUsage };
+			dailyRollups[dayKey] = {
+				tokens: tokenResult.tokens,
+				actualTokens: tokenResult.actualTokens || 0,
+				thinkingTokens: tokenResult.thinkingTokens || 0,
+				cachedReadTokens: 0,
+				interactions: Math.max(1, interactions),
+				modelUsage: dayModelUsage,
+				...(taskCategoryShares ? { taskCategoryShares } : {}),
+				...(primaryTaskCategory ? { primaryTaskCategory } : {}),
+			};
 		} catch { /* ignore */ }
 	}
 
@@ -4886,6 +4951,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			analysis.modelSwitching.selectedModelExtensions ??= [];
 			analysis.modelSwitching.unknownProviderModels ??= [];
 		}
+		if (!analysis.taskClassification) { analysis.taskClassification = createEmptyTaskClassificationResult(); }
 
 		return analysis;
 	}
@@ -5023,6 +5089,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 			...this.preserveExistingDebugLogFields(existingCache),
 			...this.preserveExistingLocFields(existingCache),
 			usageAnalysis: existingCache?.usageAnalysis || this.buildDefaultUsageAnalysis(),
+			taskCategory: existingCache?.taskCategory,
+			taskCategoryShares: existingCache?.taskCategoryShares,
 			firstInteraction: details.firstInteraction,
 			lastInteraction: details.lastInteraction,
 			title: details.title,
@@ -5077,6 +5145,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 				byKind: {}, copilotInstructions: 0, agentsMd: 0, byPath: {}
 			},
 			mcpTools: { total: 0, byServer: {}, byTool: {} },
+			taskClassification: createEmptyTaskClassificationResult(),
 			modelSwitching: { uniqueModels: [], modelCount: 0, switchCount: 0, autoSessions: 0, foundryWindowsSessions: 0, unknownProviderSessions: 0, selectedModelExtensions: [], unknownProviderModels: [], tiers: { standard: [], premium: [], unknown: [] }, hasMixedTiers: false, standardRequests: 0, premiumRequests: 0, unknownRequests: 0, totalRequests: 0, costBuckets: { low: [], medium: [], high: [], unknown: [] }, hasMixedCosts: false, lowCostRequests: 0, mediumCostRequests: 0, highCostRequests: 0 }
 		};
 	}
@@ -6167,9 +6236,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	private setChartViewPreference(message: any): void {
 		const v = message.view;
-		if (v === 'total' || v === 'model' || v === 'editor' || v === 'repository' || v === 'cost') { this.lastChartView = v; }
-		if (typeof message.metric === 'string') { this.lastChartMetric = message.metric; }
-		if (typeof message.split === 'string') { this.lastChartSplit = message.split; }
+		if (v === 'total' || v === 'model' || v === 'editor' || v === 'repository' || v === 'cost' || v === 'task') { this.lastChartView = v; }
+		if (message.metric === 'tokens' || message.metric === 'output' || message.metric === 'cost' || message.metric === 'sessions') { this.lastChartMetric = message.metric; }
+		if (message.split === 'total' || message.split === 'model' || message.split === 'editor' || message.split === 'repository' || message.split === 'language' || message.split === 'provider' || message.split === 'task') { this.lastChartSplit = message.split; }
 	}
 
 	public async showUsageAnalysis(): Promise<void> {

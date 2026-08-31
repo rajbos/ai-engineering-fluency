@@ -2,6 +2,7 @@
  * Shared type definitions for the Copilot Token Tracker extension.
  * Extracted from extension.ts to reduce file size and improve reusability.
  */
+import type { TaskCategory, TaskCategoryBreakdown, TaskClassificationResult } from './taskClassification';
 
 /**
  * Character-to-token ratio for a specific AI model.
@@ -149,6 +150,9 @@ export interface DailyTokenStats {
   modelUsage: ModelUsage;
   editorUsage: EditorUsage;
   repositoryUsage: RepositoryUsage;
+  taskCategoryTokens?: Partial<Record<TaskCategory, number>>;
+  taskCategorySessions?: Partial<Record<TaskCategory, number>>;
+  taskCategoryModelUsage?: Partial<Record<TaskCategory, ModelUsage>>;
   languageUsage?: LanguageUsage;
   linesAdded?: number;
   linesRemoved?: number;
@@ -202,6 +206,9 @@ export interface ChartPeriodData {
    * Copilot group uses AI-Credit pricing; all others use direct provider pricing.
    */
   billingGroupCostDatasets?: object[];
+  taskCategoryTokenDatasets?: object[];
+  taskCategorySessionDatasets?: object[];
+  taskCategoryCostDatasets?: object[];
 }
 
 /** Shape of the data payload sent to the chart webview (via window.__INITIAL_CHART__ or postMessage). */
@@ -243,6 +250,8 @@ export interface DailyRollupEntry {
   cachedReadTokens?: number;
   interactions: number;
   modelUsage: ModelUsage;
+  taskCategoryShares?: TaskCategoryBreakdown;
+  primaryTaskCategory?: TaskCategory;
   /** Per-day share of the session's exact Copilot billing (in USD). Set when session has nanoAiu data. */
   copilotExactCostDollars?: number;
 }
@@ -254,6 +263,8 @@ export interface SessionFileCache {
   mtime: number; // file modification time as timestamp
   size?: number; // file size in bytes (optional for backward compatibility)
   usageAnalysis?: SessionUsageAnalysis; // New analysis data
+  taskCategory?: TaskCategory;
+  taskCategoryShares?: TaskCategoryBreakdown;
   firstInteraction?: string | null; // ISO timestamp of first interaction
   lastInteraction?: string | null; // ISO timestamp of last interaction
   title?: string; // Session title (customTitle from session file)
@@ -312,6 +323,7 @@ export interface SessionUsageAnalysis {
   modeUsage: ModeUsage;
   contextReferences: ContextReferenceUsage;
   mcpTools: McpToolUsage;
+  taskClassification: TaskClassificationResult;
   modelSwitching: {
     uniqueModels: string[];
     modelCount: number;
@@ -559,6 +571,8 @@ export interface UsageAnalysisPeriod {
    * Absent when no session in the period carried context-size data.
    */
   contextWindow?: ContextWindowStats;
+  taskCategoryPrimarySessions?: Partial<Record<TaskCategory, number>>;
+  taskCategoryWeightedSessions?: Partial<Record<TaskCategory, number>>;
 }
 
 /** Aggregated context-window usage for one usage-analysis period. */
