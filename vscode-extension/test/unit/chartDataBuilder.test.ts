@@ -79,6 +79,14 @@ test('getModelBillingProvider: case insensitive', () => {
 	assert.equal(getModelBillingProvider('GPT-4O'), 'OpenAI');
 });
 
+test('getModelBillingProvider: classifies prefixed catalog model IDs', () => {
+	assert.equal(getModelBillingProvider('copilot/claude-sonnet-4.6'), 'Anthropic');
+	assert.equal(
+		getModelBillingProvider('83a386ed-9f05-4fd9-83d4-f453d20c994c/mistral-medium-latest'),
+		'Mistral AI'
+	);
+});
+
 // ── getBillingGroup ───────────────────────────────────────────────────────────
 
 test('getBillingGroup: VS Code editor returns GitHub Copilot', () => {
@@ -240,4 +248,3 @@ test('buildChartData builds non-empty provider token datasets', () => {
 	// day1: (400+100)+(300+200)=1000, day2: 300+200=500
 	assert.equal((copilotDataset as any).data.reduce((a: number, b: number) => a + b, 0), 1500);
 });
-
