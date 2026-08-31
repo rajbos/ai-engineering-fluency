@@ -10,6 +10,34 @@
  */
 
 const { execFileSync } = require('child_process');
+const fs = require('fs');
+const path = require('path');
+
+/**
+ * Global npm root without spawning the `npm` shim: Node refuses to spawn .cmd
+ * shims without a shell on Windows (CVE-2024-27980), and we deliberately keep
+ * `shell` disabled, so run npm's CLI entrypoint with the current Node binary.
+ * Falls back to npm's default Windows prefix when the CLI can't be located.
+ */
+function globalNpmRoot() {
+	const nodeDir = path.dirname(process.execPath);
+	const cliCandidates = [
+		path.join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js'), // Windows layout
+		path.join(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js'), // POSIX layout
+	];
+	const cli = cliCandidates.find(p => fs.existsSync(p));
+	if (cli) {
+		try {
+			return execFileSync(process.execPath, [cli, 'root', '-g'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+		} catch {
+			// Fall through to the platform default below.
+		}
+	}
+	if (process.platform === 'win32' && process.env.APPDATA) {
+		return path.join(process.env.APPDATA, 'npm', 'node_modules');
+	}
+	return null;
+}
 
 const INSTALL_HINT = [
 	'Playwright is required to render the webviews but was not found.',
@@ -23,15 +51,11 @@ const INSTALL_HINT = [
 /** Candidate module paths, cheapest first. */
 function candidatePaths() {
 	const paths = ['playwright', '@playwright/test', 'playwright-core'];
-	try {
-		// Global installs are not on a local script's resolution path, so ask npm
-		// where its global root is and look there too.
-		const globalRoot = execFileSync('npm', ['root', '-g'], { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
-		if (globalRoot) {
-			paths.push(`${globalRoot}/playwright`, `${globalRoot}/@playwright/test`, `${globalRoot}/playwright-core`);
-		}
-	} catch {
-		// npm not available — the local candidates above are still worth trying.
+	// Global installs are not on a local script's resolution path, so ask npm
+	// where its global root is and look there too.
+	const globalRoot = globalNpmRoot();
+	if (globalRoot) {
+		paths.push(`${globalRoot}/playwright`, `${globalRoot}/@playwright/test`, `${globalRoot}/playwright-core`);
 	}
 	return paths;
 }

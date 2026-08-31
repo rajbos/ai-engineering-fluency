@@ -86,7 +86,9 @@ let demoPanelExpanded = false; // Hidden by default
 // ── Radar chart SVG ────────────────────────────────────────────────────
 
 function renderRadarChart(categories: CategoryScore[], overallStage: number): string {
-	const cx = 325, cy = 325, maxR = 150;
+	// Content extends maxR + 35 (label radius) + ~20 (label text) above/below
+	// center, so a 650x410 viewBox wraps it tightly without empty bands.
+	const cx = 325, cy = 205, maxR = 150;
 	const n = categories.length;
 	const angleStep = (2 * Math.PI) / n;
 	// Start from top (- PI/2)
@@ -151,7 +153,7 @@ function renderRadarChart(categories: CategoryScore[], overallStage: number): st
 		return `<text x="${cx + 4}" y="${cy - r + 3}" class="radar-ring-label" font-size="9">${ringLabelNames[level]}</text>`;
 	}).join('');
 
-	return `<svg viewBox="0 0 650 650" class="radar-svg" xmlns="http://www.w3.org/2000/svg">
+	return `<svg viewBox="0 0 650 410" class="radar-svg" xmlns="http://www.w3.org/2000/svg">
 		${rings}
 		${axes}
 		<polygon points="${dataPoints}" fill="${polyFill}" stroke="${polyStroke}" stroke-width="2" />
@@ -511,8 +513,11 @@ function handlePngExport(): void {
   if (!svgEl) { return; }
 
   const clone = svgEl.cloneNode(true) as SVGSVGElement;
-  clone.setAttribute('width', '1100');
-  clone.setAttribute('height', '1100');
+  const vb = (svgEl.getAttribute('viewBox') || '0 0 650 410').split(/\s+/).map(Number);
+  const exportWidth = 1100;
+  const exportHeight = Math.round(exportWidth * ((vb[3] || 410) / (vb[2] || 650)));
+  clone.setAttribute('width', String(exportWidth));
+  clone.setAttribute('height', String(exportHeight));
   const bg = document.createElementNS('http://www.w3.org/2000/svg', 'rect');
   bg.setAttribute('width', '100%');
   bg.setAttribute('height', '100%');
@@ -525,11 +530,11 @@ function handlePngExport(): void {
   const img = new Image();
   img.onload = () => {
     const canvas = document.createElement('canvas');
-    canvas.width = 1100;
-    canvas.height = 1100;
+    canvas.width = exportWidth;
+    canvas.height = exportHeight;
     const ctx = canvas.getContext('2d');
     if (!ctx) { return; }
-    ctx.drawImage(img, 0, 0, 1100, 1100);
+    ctx.drawImage(img, 0, 0, exportWidth, exportHeight);
     const dataUrl = canvas.toDataURL('image/png');
     vscode.postMessage({ command: 'saveChartImage', data: dataUrl });
   };
