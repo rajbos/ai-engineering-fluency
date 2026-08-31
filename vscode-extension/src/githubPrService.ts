@@ -451,26 +451,54 @@ export async function fetchRepoPrs(
 	return { prs: allPrs };
 }
 
-/** Escape a string for safe embedding inside a regular expression. */
-function escapeRegExp(value: string): string {
-	return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 /** Maximum number of concurrent `git remote` probes during repo discovery. */
 const DISCOVERY_CONCURRENCY = 8;
 
-/** Build the remote-URL matcher for github.com plus an optional enterprise host. */
-function buildGitHubRemotePattern(enterpriseUri?: string): RegExp {
-	let enterpriseHost: string | undefined;
+/** Anchored matcher for the scp-like remote form `git@host:owner/repo(.git)` (a `/` separator after the host is also accepted). */
+const SCP_LIKE_REMOTE_PATTERN = /^git@([^:/]+)[:/]([^/]+)\/([^/\s]+?)(?:\.git)?$/i;
+
+/** Collect the accepted GitHub hosts: github.com plus an optional enterprise host. */
+function buildGitHubHosts(enterpriseUri?: string): Set<string> {
+	const hosts = new Set<string>(['github.com']);
 	if (enterpriseUri) {
-		try { enterpriseHost = new URL(enterpriseUri).host; } catch { /* ignore invalid URI — fall back to github.com only */ }
+		try {
+			const enterpriseHost = new URL(enterpriseUri).host.toLowerCase();
+			if (enterpriseHost) { hosts.add(enterpriseHost); }
+		} catch { /* ignore invalid URI — fall back to github.com only */ }
 	}
-	const hostAlternation = enterpriseHost ? `github\\.com|${escapeRegExp(enterpriseHost)}` : 'github\\.com';
-	// Anchored with literal scheme prefixes so neither arbitrary text nor a host mention later
-	// in the string can match (CodeQL js/regex/missing-regexp-anchor). Accepts the remote forms
-	// git actually produces for GitHub hosts: https://host/o/r(.git), ssh://git@host/o/r and the
-	// scp-like git@host:o/r. Userinfo other than git@ is intentionally not supported.
-	return new RegExp(`^(?:https:\\/\\/|http:\\/\\/|ssh:\\/\\/git@|git@)(?:${hostAlternation})[:/]([^/]+)\\/([^/\\s]+?)(?:\\.git)?$`, 'i');
+	return hosts;
+}
+
+/** Strip a trailing `.git` suffix from a repo name, matching git's own remote handling. */
+function stripGitSuffix(repo: string): string {
+	return repo.toLowerCase().endsWith('.git') ? repo.slice(0, -'.git'.length) : repo;
+}
+
+/**
+ * Extract owner/repo from a git remote URL when its host is one of `hosts`.
+ * Accepts the remote forms git actually produces for GitHub hosts:
+ * https://host/o/r(.git), ssh://git@host/o/r and the scp-like git@host:o/r.
+ * Parsed with `new URL()` where possible (no unanchored host regex) with an
+ * anchored fallback for the scp-like form, which is not a valid URL.
+ */
+function parseGitHubRemote(remote: string, hosts: Set<string>): { owner: string; repo: string } | undefined {
+	try {
+		const url = new URL(remote);
+		if ((url.protocol === 'https:' || url.protocol === 'http:' || url.protocol === 'ssh:') && hosts.has(url.host.toLowerCase())) {
+			const segments = url.pathname.split('/').filter((segment) => segment.length > 0);
+			if (segments.length === 2) {
+				return { owner: segments[0], repo: stripGitSuffix(segments[1]) };
+			}
+		}
+		return undefined;
+	} catch {
+		// Not a URL — fall through to the scp-like form below.
+	}
+	const match = SCP_LIKE_REMOTE_PATTERN.exec(remote);
+	if (match && hosts.has(match[1].toLowerCase())) {
+		return { owner: match[2], repo: match[3] };
+	}
+	return undefined;
 }
 
 /**
@@ -501,7 +529,7 @@ function getGitRemoteOrigin(cwd: string): Promise<string | undefined> {
  * slowest handful of `git` calls rather than the sum of all of them.
  */
 export async function discoverGitHubRepos(workspacePaths: string[], enterpriseUri?: string): Promise<{ owner: string; repo: string }[]> {
-	const remotePattern = buildGitHubRemotePattern(enterpriseUri);
+	const gitHubHosts = buildGitHubHosts(enterpriseUri);
 	const uniquePaths = [...new Set(workspacePaths)];
 	const remotes = new Array<string | undefined>(uniquePaths.length);
 	let nextIndex = 0;
@@ -521,12 +549,12 @@ export async function discoverGitHubRepos(workspacePaths: string[], enterpriseUr
 	const repos: { owner: string; repo: string }[] = [];
 	for (const remote of remotes) {
 		if (!remote) { continue; }
-		const match = remote.match(remotePattern);
-		if (!match) { continue; }
-		const key = `${match[1]}/${match[2]}`.toLowerCase();
+		const parsed = parseGitHubRemote(remote, gitHubHosts);
+		if (!parsed) { continue; }
+		const key = `${parsed.owner}/${parsed.repo}`.toLowerCase();
 		if (seen.has(key)) { continue; }
 		seen.add(key);
-		repos.push({ owner: match[1], repo: match[2] });
+		repos.push(parsed);
 	}
 	return repos;
 }
