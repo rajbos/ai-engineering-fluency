@@ -20,6 +20,7 @@ import { sanitizeCustomizationMatrix } from './customizationSanitizer';
 import { applyBillingFields, type CopilotApiBalance } from './billingStatsSanitizer';
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
+import { isSwitchableTab } from './switchableTabs';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -5063,7 +5064,16 @@ function handleExtensionMessage(message: any): void {
 }
 
 function handleSwitchTab(message: any): void {
-	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${String(message.tab)}"]`);
+	const tab = String(message.tab);
+	// Ignore unknown tabs entirely: a bogus name must not blank the dashboard, and only
+	// allowlisted names may be interpolated into the selector below.
+	if (!isSwitchableTab(tab)) { return; }
+	// Persist the requested tab in module state, not just the DOM: while the webview is in
+	// its loading state the tab bar doesn't exist, so btn.click() below silently no-ops and
+	// the later renderLayout would land on the default tab — swallowing e.g. the worktree
+	// notification's "Show Me" action. With activeTab set, the eventual render honors it.
+	activeTab = tab;
+	const btn = document.querySelector<HTMLButtonElement>(`.tab-button[data-tab="${tab}"]`);
 	btn?.click();
 	if (message.anchor) {
 		const anchor = document.getElementById(String(message.anchor));

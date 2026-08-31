@@ -6972,6 +6972,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 	/** Opens the Usage Analysis panel, pushes the latest background worktree scan findings, and activates the Worktrees tab. */
 	public async showUsageAnalysisOnWorktreesTab(): Promise<void> {
 		await this.showUsageAnalysis();
+		// showUsageAnalysis() creates a fresh panel with preserveFocus: true; for this explicit
+		// notification action, force focus so the panel visibly comes forward.
+		this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
 		this.postWorktreeBackgroundResults();
 		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'worktrees' });
 	}
