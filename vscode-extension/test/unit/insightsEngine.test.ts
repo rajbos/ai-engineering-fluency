@@ -664,6 +664,16 @@ test('mode-diversity-low: does NOT fire when Copilot App CLI usage dominates (cl
 	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined);
 });
 
+test('mode-diversity-low: does NOT fire when Plan/Custom Agent usage is significant', () => {
+	const ctx = makeCtx();
+	ctx.last30Days.modeUsage.ask = 40;
+	ctx.last30Days.modeUsage.plan = 30;
+	ctx.last30Days.modeUsage.customAgent = 30;
+	const results = evaluateInsights(ctx, {}, 7, null);
+	assert.equal(results.find(i => i.id === MODE_DIVERSITY_ID), undefined,
+		'plan and custom-agent interactions count as agentic — no false "haven\'t tried Agent mode" claim');
+});
+
 test('mode-diversity-low: fires with "haven\'t tried Agent mode" body when no agentic usage at all', () => {
 	const ctx = makeCtx();
 	ctx.last30Days.modeUsage.ask = 10;

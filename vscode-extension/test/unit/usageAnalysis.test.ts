@@ -2434,16 +2434,19 @@ test('analyzeSessionUsage: CLI session.model_change event is processed without e
 // ---------------------------------------------------------------------------
 
 function writeCliSessionFixture(t: test.TestContext, clientName: string): string {
+    // The split only applies under ~/.copilot/session-state/, so mirror that layout.
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cliapp-split-'));
     t.after(() => fs.rmSync(dir, { recursive: true, force: true }));
-    const sessionFile = path.join(dir, 'events.jsonl');
+    const sessionDir = path.join(dir, '.copilot', 'session-state', 'cccccccc-cccc-cccc-cccc-cccccccccccc');
+    fs.mkdirSync(sessionDir, { recursive: true });
+    const sessionFile = path.join(sessionDir, 'events.jsonl');
     const content = [
         JSON.stringify({ type: 'session.start', data: { selectedModel: 'gpt-4o' } }),
         JSON.stringify({ type: 'user.message', data: {} }),
         JSON.stringify({ type: 'user.message', data: {} }),
     ].join('\n');
     fs.writeFileSync(sessionFile, content);
-    fs.writeFileSync(path.join(dir, 'workspace.yaml'), `cwd: C:\\repo\nclient_name: ${clientName}\n`);
+    fs.writeFileSync(path.join(sessionDir, 'workspace.yaml'), `cwd: C:\\repo\nclient_name: ${clientName}\n`);
     return sessionFile;
 }
 

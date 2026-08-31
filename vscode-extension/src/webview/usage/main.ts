@@ -3978,7 +3978,7 @@ function buildActivityTabPanelHtml(
 	const modeUsageHtml = safeSectionHtml('Interaction Modes', () => `
 			<div class="section" id="section-interaction-modes">
 				<div class="section-title"><span>🎯</span><span>Interaction Modes</span></div>
-				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), CLI (terminal), or Copilot App (desktop-app CLI sessions)</div>
+				<div class="section-subtitle">How you're using Copilot: Ask (chat), Edit (code edits), Agent (autonomous tasks), Plan, Custom Agent, CLI (terminal), or Copilot App (desktop-app CLI sessions)</div>
 				<div class="two-column">
 					${renderModeBarChart(stats.today.modeUsage, '📅 Today')}
 					${renderModeBarChart(stats.last30Days.modeUsage, '📊 Last 30 Days')}

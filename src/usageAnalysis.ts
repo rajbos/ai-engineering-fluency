@@ -54,6 +54,7 @@ import {
 import { extractCopilotCliSessionId, getCopilotCliExactUsage } from './copilotCliOtel';
 import { isCopilotAppClientName } from './copilotCliStore';
 import { readTextFileWithSizeGuard } from './utils/safeFileRead';
+import { pathExists } from './utils/fsAsync';
 import { getModelBillingProvider } from './chartDataBuilder';
 import {
 	getModeType,
@@ -62,7 +63,7 @@ import {
 	extractMcpServerName,
 	normalizePathForComparison,
 } from './workspaceHelpers';
-import { isJetBrainsSessionPath } from './adapters/adapterPredicates';
+import { isCopilotCliSessionPath, isJetBrainsSessionPath } from './adapters/adapterPredicates';
 import { detectJetBrainsModeFromContent, type JetBrainsMode } from './jetbrains';
 import type { IEcosystemAdapter } from './ecosystemAdapter';
 import { isAnalyzable } from './ecosystemAdapter';
@@ -2394,10 +2395,15 @@ async function _addTurnEfficiencyFromAdapter(eco: IEcosystemAdapter, sessionFile
  * `modeUsage.cliApp` so views can distinguish app-hosted sessions from plain
  * terminal CLI usage. Runs after conversation patterns are derived so the
  * per-session turn totals are unaffected by the split.
+ *
+ * Scoped to Copilot CLI session-state paths only: other JSONL ecosystems
+ * (Claude Code, OpenCode, …) never carry a workspace.yaml, and probing for one
+ * would log noisy open errors via readTextFileWithSizeGuard.
  */
 async function _asuApplyCopilotAppSplit(sessionFile: string, analysis: SessionUsageAnalysis): Promise<void> {
-	if (analysis.modeUsage.cli === 0 || !sessionFile.endsWith('.jsonl')) { return; }
+	if (analysis.modeUsage.cli === 0 || !isCopilotCliSessionPath(sessionFile)) { return; }
 	const yamlPath = path.join(path.dirname(sessionFile), 'workspace.yaml');
+	if (!await pathExists(yamlPath)) { return; }
 	const content = await readTextFileWithSizeGuard(yamlPath, 'usageAnalysis');
 	if (content === undefined) { return; }
 	const clientMatch = content.match(/^client_name:\s*(.+)$/m);
