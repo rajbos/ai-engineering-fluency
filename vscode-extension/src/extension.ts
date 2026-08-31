@@ -118,6 +118,7 @@ import {
   sumWorktreeBytes as _sumWorktreeBytes,
   type WorktreeBackgroundScanResult,
 } from './worktreeBackgroundScan';
+import { scanWorktreeRootsWithTimeout as _scanWorktreeRootsWithTimeout } from './worktreeScan';
 
 // --- Ecosystem adapter types & helpers ---
 import type { OpenCodeDataAccess } from '../../src/opencode';
@@ -9796,37 +9797,42 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
 
     // Phase 1 — fast discovery: locate worktrees and report each with cheap git metadata only
     // (size and push status are left pending and filled in during phase 2).
-    const discovered: WorktreeScanResult[] = [];
-    for (const root of rootPaths) {
-      if (!isActive()) { return; }
-      let isDirectory = false;
-      try { isDirectory = (await fs.promises.stat(root)).isDirectory(); } catch { isDirectory = false; }
-      if (!isDirectory) {
-        send({ command: "worktreeScanRootSkipped", root, reason: "Path does not exist or is not a directory" });
-        continue;
-      }
-
-      send({ command: "worktreeScanRootStarted", root });
-      const gitMarkers: string[] = [];
-      // Report folder-walk progress (throttled) so the user sees activity on large roots
-      // long before the first worktree is found.
-      let dirsScanned = 0;
-      let lastWalkPost = 0;
-      const onDir = (): void => {
-        dirsScanned++;
-        const now = Date.now();
-        if (now - lastWalkPost >= 200) {
-          lastWalkPost = now;
-          send({ command: "worktreeScanWalkProgress", root, dirsScanned, markersFound: gitMarkers.length, elapsedMs: now - startTime });
+    const discovered = await _scanWorktreeRootsWithTimeout<WorktreeScanResult>({
+      roots: rootPaths,
+      isActive,
+      scanRoot: async (root, isRootActive) => {
+        let isDirectory = false;
+        try { isDirectory = (await fs.promises.stat(root)).isDirectory(); } catch { isDirectory = false; }
+        if (!isDirectory) {
+          send({ command: "worktreeScanRootSkipped", root, reason: "Path does not exist or is not a directory" });
+          return [];
         }
-      };
-      await this.findGitMarkerFiles(root, excludeDirs, gitMarkers, isActive, onDir);
-      if (!isActive()) { return; }
-      send({ command: "worktreeScanRootMarkersFound", root, count: gitMarkers.length });
 
-      discovered.push(...await this.discoverWorktreesFromMarkers(gitMarkers, root, isActive, send, startTime));
-      if (!isActive()) { return; }
-    }
+        send({ command: "worktreeScanRootStarted", root });
+        const gitMarkers: string[] = [];
+        // Report folder-walk progress (throttled) so the user sees activity on large roots
+        // long before the first worktree is found.
+        let dirsScanned = 0;
+        let lastWalkPost = 0;
+        const onDir = (): void => {
+          dirsScanned++;
+          const now = Date.now();
+          if (now - lastWalkPost >= 200) {
+            lastWalkPost = now;
+            send({ command: "worktreeScanWalkProgress", root, dirsScanned, markersFound: gitMarkers.length, elapsedMs: now - startTime });
+          }
+        };
+        await this.findGitMarkerFiles(root, excludeDirs, gitMarkers, isRootActive, onDir);
+        if (!isRootActive()) { return []; }
+        send({ command: "worktreeScanRootMarkersFound", root, count: gitMarkers.length });
+
+        return this.discoverWorktreesFromMarkers(gitMarkers, root, isRootActive, send, startTime);
+      },
+      onRootError: (root, error) => {
+        send({ command: "worktreeScanRootSkipped", root, reason: error.message });
+      },
+    });
+    if (!isActive()) { return; }
 
     // Phase 2 — background enrichment: compute disk size and push status concurrently and
     // patch each row as results arrive, so discovery is not blocked by these slow operations.
