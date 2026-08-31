@@ -6974,7 +6974,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		await this.showUsageAnalysis();
 		// showUsageAnalysis() creates a fresh panel with preserveFocus: true; for this explicit
 		// notification action, force focus so the panel visibly comes forward.
-		this.analysisPanel?.reveal(vscode.ViewColumn.One, false);
+		if (this.analysisPanel) this.analysisPanel.reveal(vscode.ViewColumn.One, false);
 		this.postWorktreeBackgroundResults();
 		void this.analysisPanel?.webview.postMessage({ command: 'switchTab', tab: 'worktrees' });
 	}
