@@ -37,4 +37,3 @@ test('Commands should be registered', async () => {
 		);
 	}
 });
-
