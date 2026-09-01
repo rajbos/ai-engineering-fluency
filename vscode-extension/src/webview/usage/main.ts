@@ -22,7 +22,7 @@ import { applyBillingFields, type CopilotApiBalance } from './billingStatsSaniti
 import { billingExtGroupCostsHtml } from './billingCoverage';
 import { sanitizeAgentSessionsData, toSafeNumber, toSafeHttpUrl, type AgentRepoSummary, type AgentSessionsResult } from './agentSessionsSanitizer';
 import { isSwitchableTab } from './switchableTabs';
-import { scaleBubbleRadius } from './modelLeaderboard';
+import { placeBubbleLabels, scaleBubbleRadius, type BubbleLabelPlacement } from './modelLeaderboard';
 
 type ModelSwitchingAnalysis = BaseModelSwitchingAnalysis & {
 	minModelsPerSession: number;
@@ -4519,6 +4519,7 @@ function buildEfficiencyPoint(
 	bubbleMetric: EfficiencyBubbleMetricDef,
 	maxX: number,
 	maxBubbleValue: number,
+	labelPlacement: BubbleLabelPlacement,
 ): string {
 	const value = metric.value(row) ?? 0;
 	const bubbleValue = bubbleMetric.value(row) ?? 0;
@@ -4527,13 +4528,12 @@ function buildEfficiencyPoint(
 	const y = 286 - rate * 262;
 	const radius = scaleBubbleRadius(bubbleValue, maxBubbleValue);
 	const color = getEfficiencyColor(row.model);
-	const labelY = y < 46 ? y + 18 : y - 10;
 	const rawLabel = getModelDisplayName(row.model);
 	const label = escapeHtml(rawLabel);
 	const aria = `${rawLabel}: ${formatRatePercent(rate)} one-shot edit rate, ${metric.format(value)} ${metric.axisLabel.toLowerCase()}, bubble sized by ${bubbleMetric.label.toLowerCase()}: ${bubbleMetric.format(bubbleValue)}`;
 	return `<g class="efficiency-point" style="--model-color:${color}" tabindex="0" role="img" aria-label="${escapeHtml(aria)}">
 		<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(aria)}</title></circle>
-		<text x="${(x + radius + 4).toFixed(1)}" y="${labelY.toFixed(1)}">${label}</text>
+		<text x="${labelPlacement.x.toFixed(1)}" y="${labelPlacement.y.toFixed(1)}" text-anchor="${labelPlacement.textAnchor}">${label}</text>
 	</g>`;
 }
 
@@ -4557,7 +4557,20 @@ function buildEfficiencyChartHtml(rows: EfficiencyRow[]): string {
 	}
 	const maxX = Math.max(...chartRows.map(row => metric.value(row) ?? 0), 0.0001) * 1.08;
 	const maxBubbleValue = Math.max(...chartRows.map(row => bubbleMetric.value(row) ?? 0), 0);
-	const points = chartRows.map(row => buildEfficiencyPoint(row, metric, bubbleMetric, maxX, maxBubbleValue)).join('');
+	const labelInputs = chartRows.map(row => {
+		const value = metric.value(row) ?? 0;
+		const bubbleValue = bubbleMetric.value(row) ?? 0;
+		return {
+			x: 76 + (value / maxX) * 760,
+			y: 286 - (row.rates.oneShotRate ?? 0) * 262,
+			radius: scaleBubbleRadius(bubbleValue, maxBubbleValue),
+			label: getModelDisplayName(row.model),
+		};
+	});
+	const labelPlacements = placeBubbleLabels(labelInputs, { left: 76, right: 836, top: 24, bottom: 286 });
+	const points = chartRows.map((row, index) =>
+		buildEfficiencyPoint(row, metric, bubbleMetric, maxX, maxBubbleValue, labelPlacements[index])
+	).join('');
 	return `<div class="efficiency-chart-wrap">
 		<svg class="efficiency-chart" viewBox="0 0 900 350" role="img" aria-label="One-shot edit rate compared with ${escapeHtml(metric.axisLabel.toLowerCase())}; bubble size represents ${escapeHtml(bubbleMetric.label.toLowerCase())}">
 			${buildEfficiencyGrid(metric, maxX)}

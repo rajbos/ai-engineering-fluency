@@ -1650,7 +1650,13 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
   };
   var currentLocalization = { ...DEFAULT_LOCALIZATION };
   function initializeWebviewLocalization(localization) {
-    currentLocalization = { ...DEFAULT_LOCALIZATION, ...localization };
+    const resolved = {};
+    for (const [key, value] of Object.entries(localization)) {
+      if (typeof value === "string" && value !== key) {
+        resolved[key] = value;
+      }
+    }
+    currentLocalization = { ...DEFAULT_LOCALIZATION, ...resolved };
   }
   function localize(key) {
     return currentLocalization[key] || DEFAULT_LOCALIZATION[key] || key;
@@ -2148,9 +2154,12 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   var styles_default = "body {\n	margin: 0;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n}\n\n.container {\n	padding: 16px;\n	display: flex;\n	flex-direction: column;\n	gap: 14px;\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	padding-bottom: 4px;\n}\n\n.title {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n\n\n.sections {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.section {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 12px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n}\n\n.section h3 {\n	margin: 0 0 10px;\n	font-size: 14px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n}\n\n/* --- Metric cards --- */\n.metric-cards {\n	display: flex;\n	flex-direction: column;\n	gap: 16px;\n}\n\n.metric-card {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-subtle);\n	border-radius: 8px;\n	padding: 14px 16px;\n}\n\n.metric-card-header {\n	display: flex;\n	align-items: center;\n	gap: 7px;\n	margin-bottom: 12px;\n}\n\n.metric-card-icon {\n	font-size: 16px;\n	line-height: 1;\n}\n\n.metric-card-label {\n	font-size: 13px;\n	font-weight: 700;\n	color: var(--text-primary);\n	text-transform: uppercase;\n	letter-spacing: 0.4px;\n}\n\n.metric-primary-value {\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n	padding: 6px 0 10px;\n	border-bottom: 1px solid var(--border-subtle);\n	margin-bottom: 8px;\n}\n\n.analogy-grid {\n	display: grid;\n	grid-template-columns: repeat(4, 1fr);\n	gap: 16px;\n}\n\n.analogy-col {\n	display: flex;\n	flex-direction: column;\n	gap: 6px;\n}\n\n.analogy-col-header {\n	font-size: 11px;\n	font-weight: 700;\n	color: var(--text-secondary);\n	text-transform: uppercase;\n	letter-spacing: 0.5px;\n	padding-bottom: 5px;\n	border-bottom: 1px solid var(--border-subtle);\n	margin-bottom: 2px;\n}\n\n.analogy-item {\n	display: flex;\n	align-items: baseline;\n	gap: 6px;\n	font-size: 12px;\n	color: var(--text-primary);\n	line-height: 1.5;\n}\n\n.analogy-icon {\n	flex-shrink: 0;\n	width: 20px;\n	text-align: center;\n	font-size: 13px;\n}\n\n.notes {\n	margin: 4px 0 0;\n	padding-left: 16px;\n	color: var(--text-secondary);\n}\n\n.notes li {\n	margin: 4px 0;\n	line-height: 1.4;\n}\n\n.footer {\n	color: var(--text-muted);\n	font-size: 11px;\n	margin-top: 6px;\n}\n\n.section-intro {\n	color: var(--text-secondary);\n	font-size: 12px;\n	margin: 0 0 10px;\n	line-height: 1.5;\n}\n";
 
   // src/webview/shared/messageHandler.ts
+  function isTrustedWebviewMessageSource(source, currentWindow) {
+    return source === null || source === currentWindow;
+  }
   function registerMessageHandler(handler) {
     window.addEventListener("message", (event) => {
-      if (event.source !== window) {
+      if (!isTrustedWebviewMessageSource(event.source, window)) {
         return;
       }
       handler(event.data);

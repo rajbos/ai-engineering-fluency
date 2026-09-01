@@ -2293,12 +2293,1110 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
 `;
 
   // src/webview/usage/styles.css
-  var styles_default = "* {\n	margin: 0;\n	padding: 0;\n	box-sizing: border-box;\n}\n\nbody {\n	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;\n	background: var(--bg-primary);\n	color: var(--text-primary);\n	padding: 16px;\n	line-height: 1.5;\n	min-width: 320px;\n}\n\n.container {\n	background: var(--bg-secondary);\n	border: 1px solid var(--border-color);\n	border-radius: 10px;\n	padding: 16px;\n	box-shadow: 0 4px 10px var(--shadow-color);\n	max-width: 1200px;\n	margin: 0 auto;\n}\n\n.header {\n	display: flex;\n	justify-content: space-between;\n	align-items: center;\n	gap: 12px;\n	margin-bottom: 14px;\n	padding-bottom: 4px;\n}\n\n.header-left {\n	display: flex;\n	align-items: center;\n	gap: 8px;\n}\n\n.header-icon {\n	font-size: 20px;\n}\n\n.header-title {\n	font-size: 16px;\n	font-weight: 700;\n	color: var(--text-primary);\n	letter-spacing: 0.2px;\n}\n\n\n\n.section {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-color);\n	border-radius: 8px;\n	padding: 12px;\n	margin-bottom: 16px;\n	box-shadow: 0 2px 6px var(--shadow-color);\n}\n\n.section-title {\n	font-size: 14px;\n	font-weight: 700;\n	color: var(--text-primary);\n	margin-bottom: 10px;\n	display: flex;\n	align-items: center;\n	gap: 6px;\n	letter-spacing: 0.2px;\n}\n\n.section-subtitle {\n	font-size: 12px;\n	color: var(--text-secondary);\n	margin-bottom: 12px;\n}\n\n.stats-grid {\n	display: grid;\n	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));\n	gap: 12px;\n	margin-bottom: 16px;\n}\n\n.stat-card {\n	background: var(--list-hover-bg);\n	border: 1px solid var(--border-color);\n	border-radius: 6px;\n	padding: 12px;\n	box-shadow: 0 2px 4px var(--shadow-color);\n}\n\n.stat-card[title] {\n	cursor: help;\n}\n\n.stat-label {\n	font-size: 11px;\n	color: var(--text-secondary);\n	margin-bottom: 4px;\n}\n\n.stat-value {\n	font-size: 20px;\n	font-weight: 700;\n	color: var(--text-primary);\n}\n\n.ctx-ref-table-wrap {\n	margin-bottom: 16px;\n	overflow-x: auto;\n	border: 1px solid var(--border-color);\n	border-radius: 6px;\n	box-shadow: 0 2px 4px var(--shadow-color);\n}\n\n.ctx-ref-table {\n	width: 100%;\n	border-collapse: collapse;\n	font-size: 13px;\n}\n\n.ctx-ref-table th,\n.ctx-ref-table td {\n	padding: 8px 14px;\n	text-align: left;\n	border-bottom: 1px solid var(--border-subtle);\n}\n\n.ctx-ref-table thead th {\n	background: var(--bg-tertiary);\n	color: var(--text-secondary);\n	font-size: 11px;\n	font-weight: 600;\n	text-transform: uppercase;\n	letter-spacing: 0.4px;\n	position: sticky;\n	top: 0;\n}\n\n.ctx-ref-table tbody tr:hover {\n	background: var(--list-hover-bg);\n}\n\n.ctx-ref-table .ctx-ref-name {\n	color: var(--text-primary);\n	white-space: nowrap;\n}\n\n.ctx-ref-table .ctx-ref-num {\n	text-align: right;\n	font-variant-numeric: tabular-nums;\n	font-weight: 600;\n	color: var(--text-primary);\n	width: 110px;\n}\n\n.ctx-ref-table .ctx-ref-zero {\n	color: var(--text-muted);\n	font-weight: 400;\n}\n\n.ctx-ref-table .ctx-ref-today-active {\n	color: var(--link-color);\n}\n\n.ctx-ref-table tfoot .ctx-ref-total td {\n	background: var(--list-active-bg);\n	color: var(--list-active-fg);\n	font-weight: 700;\n	border-bottom: none;\n	border-top: 2px solid var(--border-color);\n}\n\n.ctx-ref-table tfoot .ctx-ref-total .ctx-ref-num {\n	color: var(--list-active-fg);\n}\n\n.ctx-ref-table .ctx-ref-spark {\n	width: 68px;\n	text-align: center;\n	padding: 4px 8px;\n	vertical-align: middle;\n	color: var(--text-primary);\n}\n\n\n.bar-chart {\n	background: var(--list-hover-bg);\n	border: 1px solid var(--border-color);\n	border-radius: 6px;\n	padding: 12px;\n	margin-bottom: 12px;\n}.bar-item {\n	margin-bottom: 8px;\n}\n\n.bar-label {\n	display: flex;\n	justify-content: space-between;\n	font-size: 12px;\n	margin-bottom: 4px;\n	color: var(--text-primary);\n}\n\n.bar-track {\n	background: var(--row-alternate-bg);\n	height: 8px;\n	border-radius: 4px;\n	overflow: hidden;\n}\n\n.bar-fill {\n	height: 100%;\n	border-radius: 4px;\n	transition: width 0.3s ease;\n}\n\n.list {\n	background: var(--list-hover-bg);\n	border: 1px solid var(--border-color);\n	border-radius: 6px;\n	padding: 12px 16px;\n}\n\n.list ul {\n	list-style: none;\n	padding: 0;\n}\n\n.list li {\n	padding: 4px 0;\n	font-size: 13px;\n}\n\n/* Customization matrix styles */\n.customization-matrix-container {\n	overflow-x: auto;\n	max-width: 100%;\n}\n\n.customization-matrix {\n	width: 100%;\n	border-collapse: collapse;\n	font-size: 12px;\n	color: var(--text-primary);\n}\n\n.customization-matrix th {\n	background: var(--list-hover-bg);\n	color: var(--text-primary);\n	font-weight: 600;\n	font-size: 11px;\n	white-space: nowrap;\n}\n\n.customization-matrix td {\n	background: var(--bg-tertiary);\n}\n\n.customization-matrix tbody tr:hover td {\n	background: var(--list-hover-bg);\n}\n\n.stale-warning {\n	color: var(--warning-fg);\n	font-weight: 600;\n}\n\n.two-column {\n	display: grid;\n	grid-template-columns: 1fr 1fr;\n	gap: 16px;\n}\n\n.three-column {\n	display: grid;\n	grid-template-columns: 1fr 1fr 1fr;\n	gap: 16px;\n	align-items: stretch;\n}\n\n.three-column > div {\n	display: flex;\n	flex-direction: column;\n}\n\n.three-column > div > .list {\n	flex: 1;\n}\n\n.info-box {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-color);\n	border-radius: 6px;\n	padding: 12px;\n	margin-bottom: 16px;\n	font-size: 12px;\n	color: var(--text-secondary);\n}\n\n.info-box-title {\n	font-weight: 600;\n	color: var(--text-primary);\n	margin-bottom: 6px;\n}\n\n.info-box-toggle {\n	display: flex;\n	align-items: center;\n	justify-content: space-between;\n	gap: 8px;\n	cursor: pointer;\n	user-select: none;\n	margin-bottom: 0;\n}\n\n.info-box-chevron {\n	font-size: 10px;\n	color: var(--text-secondary);\n}\n\n.info-box-body {\n	margin-top: 6px;\n}\n\n\n.repo-hygiene-results {\n	margin-top: 4px;\n}\n\n.repo-analysis-card {\n	margin: 0;\n}\n\n.repo-hygiene-pane {\n	border: 1px solid var(--border-color);\n	border-radius: 6px;\n	margin-bottom: 12px;\n	background: var(--bg-secondary);\n}\n\n.repo-hygiene-pane-header {\n	padding: 8px 12px;\n	font-size: 12px;\n	font-weight: 600;\n	color: var(--text-primary);\n	border-bottom: 1px solid var(--border-color);\n	background: var(--list-hover-bg);\n}\n\n.repo-hygiene-pane-body {\n	display: block;\n}\n\n.repo-hygiene-pane-collapsed {\n	display: none;\n}\n\n.repo-hygiene-pane-collapsed .repo-hygiene-pane-body {\n	display: none;\n}\n\n.btn-repo-action[disabled] {\n	opacity: 0.7;\n}\n\n.footer {\n	margin-top: 6px;\n	padding-top: 12px;\n	border-top: 1px solid var(--border-subtle);\n	text-align: left;\n	font-size: 11px;\n	color: var(--text-muted);\n}\n\n@media (width <= 768px) {\n	.two-column {\n		grid-template-columns: 1fr;\n	}\n\n	.three-column {\n		grid-template-columns: 1fr;\n	}\n}\n\n\n.tab-bar {\ndisplay: flex;\ngap: 2px;\nmargin-bottom: 16px;\nborder-bottom: 2px solid var(--border-color);\npadding-bottom: 0;\nflex-wrap: wrap;\n}\n\n.tab-button {\ndisplay: inline-flex;\nalign-items: center;\ngap: 4px;\nbackground: transparent;\nborder: none;\nborder-bottom: 3px solid transparent;\ncolor: var(--text-secondary);\npadding: 8px 16px;\nfont-size: 12px;\nfont-weight: 600;\ncursor: pointer;\nborder-radius: 4px 4px 0 0;\ntransition: all 0.15s ease;\nwhite-space: nowrap;\nmargin-bottom: -2px;\nfont-family: inherit;\n}\n\n.tab-button:hover {\ncolor: var(--text-primary);\nbackground: var(--list-hover-bg);\n}\n\n.tab-button.active {\ncolor: var(--text-primary);\nborder-bottom-color: var(--link-color);\nbackground: var(--bg-tertiary);\n}\n\n.auto-badge {\n	display: inline-block;\n	margin-left: 6px;\n	padding: 1px 5px;\n	font-size: 10px;\n	border-radius: 3px;\n	border: 1px solid var(--text-primary);\n	color: var(--text-primary);\n	background: transparent;\n	vertical-align: middle;\n	line-height: 1.4;\n}\n\n/* Sortable table headers */\n.sessions-table th.sortable {\n	cursor: pointer;\n	user-select: none;\n	transition: background 0.1s ease, color 0.1s ease;\n}\n\n.sessions-table th.sortable:hover {\n	background: var(--list-hover-bg);\n	color: var(--link-color);\n}\n\n.sessions-table tr:hover td {\n	background: var(--list-hover-bg);\n}\n\n/* Worktrees tab */\n.summary-cards {\n	display: grid;\n	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));\n	gap: 12px;\n	margin-bottom: 16px;\n}\n\n.summary-card {\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-color);\n	border-radius: 4px;\n	padding: 12px;\n	text-align: center;\n}\n\n.summary-label {\n	font-size: 11px;\n	color: var(--text-secondary);\n	margin-bottom: 4px;\n}\n\n.summary-value {\n	font-size: 18px;\n	font-weight: 600;\n	color: var(--text-primary);\n}\n\n.table-container {\n	overflow: auto;\n	max-height: 500px;\n}\n\n.session-table {\n	width: 100%;\n	border-collapse: collapse;\n	font-size: 12px;\n}\n\n.session-table th,\n.session-table td {\n	padding: 8px 10px;\n	text-align: left;\n	border-bottom: 1px solid var(--border-color);\n}\n\n.session-table th {\n	background: var(--bg-tertiary);\n	color: var(--text-primary);\n	font-weight: 600;\n	position: sticky;\n	top: 0;\n}\n\n.session-table th.sortable {\n	cursor: pointer;\n	user-select: none;\n}\n\n.session-table th.sortable:hover {\n	background: var(--list-hover-bg);\n	color: var(--link-color);\n}\n\n.button {\n	background: var(--button-secondary-bg);\n	border: 1px solid var(--border-subtle);\n	color: var(--text-primary);\n	padding: 8px 12px;\n	border-radius: 6px;\n	cursor: pointer;\n	font-size: 13px;\n	font-weight: 500;\n	transition: background-color 0.15s ease;\n	display: inline-flex;\n	align-items: center;\n	gap: 8px;\n}\n\n.button:hover {\n	background: var(--bg-tertiary);\n}\n\n.button:active {\n	background: var(--button-bg);\n}\n\n.button:disabled {\n	opacity: 0.6;\n	cursor: not-allowed;\n}\n\n.button.secondary {\n	background: var(--bg-tertiary);\n	border-color: var(--border-subtle);\n	color: var(--text-primary);\n}\n\n.button.secondary:hover {\n	background: var(--list-hover-bg);\n}\n\n.folder-input-row {\n	display: flex;\n	gap: 8px;\n	align-items: center;\n}\n\n.folder-input {\n	flex: 1;\n	background: var(--vscode-input-background);\n	color: var(--vscode-input-foreground);\n	border: 1px solid var(--vscode-input-border, var(--border-color));\n	border-radius: 4px;\n	padding: 6px 10px;\n	font-size: 13px;\n	min-width: 0;\n}\n\n.folder-input:focus {\n	outline: 1px solid var(--link-color);\n	border-color: var(--link-color);\n}\n\n.worktree-roots-list {\n	display: flex;\n	flex-direction: column;\n	gap: 6px;\n}\n\n.worktree-root-item {\n	display: flex;\n	align-items: center;\n	justify-content: space-between;\n	gap: 8px;\n	background: var(--bg-tertiary);\n	border: 1px solid var(--border-color);\n	border-radius: 4px;\n	padding: 6px 10px;\n	font-family: var(--vscode-editor-font-family, monospace);\n	font-size: 12px;\n}\n\n.worktree-root-item span {\n	overflow: hidden;\n	text-overflow: ellipsis;\n	white-space: nowrap;\n}\n\n.worktree-progress-bar {\n	height: 6px;\n	border-radius: 3px;\n	background: var(--bg-tertiary);\n	overflow: hidden;\n	margin-top: 8px;\n}\n\n.worktree-progress-fill {\n	height: 100%;\n	background: var(--link-color);\n	transition: width 0.2s ease;\n}\n\n/* While walking the folder tree we have no percentage yet, so pulse the bar to\n   signal ongoing activity instead of showing a misleading fixed progress. */\n.worktree-progress-fill.indeterminate {\n	animation: worktree-pulse 1.2s ease-in-out infinite;\n}\n\n@keyframes worktree-pulse {\n	0%,\n	100% {\n		opacity: 0.35;\n	}\n\n	50% {\n		opacity: 1;\n	}\n}\n\n.worktree-repo-row {\n	cursor: pointer;\n	font-weight: 600;\n}\n\n.worktree-repo-row:hover {\n	background: var(--bg-tertiary);\n}\n\n.worktree-repo-row.expanded {\n	background: var(--bg-tertiary);\n}\n\n.worktree-delete-link {\n	margin-left: 8px;\n	color: var(--vscode-errorForeground, #f14c4c);\n}\n\n.worktree-delete-link:hover {\n	text-decoration: underline;\n}\n\n.worktree-caret {\n	display: inline-block;\n	width: 14px;\n	color: var(--text-muted);\n	font-size: 10px;\n}\n\n.worktree-roots-toggle {\n	display: inline-flex;\n	align-items: center;\n	gap: 4px;\n	margin: 8px 0;\n	padding: 0;\n	background: none;\n	border: none;\n	color: var(--link-color);\n	font-size: 12px;\n	cursor: pointer;\n}\n\n.worktree-roots-toggle:hover {\n	text-decoration: underline;\n}\n\n.worktree-pending {\n	color: var(--text-muted);\n	font-style: italic;\n	opacity: 0.8;\n}\n\n/* The details row's cell wraps the per-worktree table; trim its padding so the\n   nested table aligns with the parent columns. */\n.worktree-repo-details > td {\n	padding: 0 0 12px;\n}\n\n.worktree-cleanup-card {\n	display: flex;\n	flex-direction: column;\n	align-items: center;\n	justify-content: center;\n	gap: 6px;\n}\n\n.worktree-cleanup-card-actions {\n	display: flex;\n	align-items: center;\n	justify-content: center;\n	gap: 6px;\n	flex-wrap: wrap;\n}\n\n.worktree-cleanup-card-actions .button {\n	font-size: 12px;\n	padding: 4px 10px;\n}\n\n.worktree-cleanup-log {\n	margin-top: 8px;\n	display: flex;\n	flex-direction: column;\n	gap: 4px;\n	font-size: 12px;\n}\n\n.worktree-cleanup-log-row {\n	display: flex;\n	gap: 8px;\n	align-items: baseline;\n	padding: 4px 6px;\n	border-radius: 4px;\n	background: var(--bg-tertiary);\n}\n\n.worktree-cleanup-log-branch {\n	font-weight: 600;\n	font-family: var(--vscode-editor-font-family, monospace);\n}\n\n.worktree-cleanup-log-repo {\n	color: var(--text-muted);\n}\n\n.worktree-cleanup-log-reason {\n	color: var(--text-muted);\n	flex: 1;\n}\n";
+  var styles_default = `* {
+	margin: 0;
+	padding: 0;
+	box-sizing: border-box;
+}
+
+body {
+	font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	background: var(--bg-primary);
+	color: var(--text-primary);
+	padding: 16px;
+	line-height: 1.5;
+	min-width: 320px;
+}
+
+.container {
+	background: var(--bg-secondary);
+	border: 1px solid var(--border-color);
+	border-radius: 10px;
+	padding: 16px;
+	box-shadow: 0 4px 10px var(--shadow-color);
+	max-width: 1200px;
+	margin: 0 auto;
+}
+
+.header {
+	display: flex;
+	justify-content: space-between;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 14px;
+	padding-bottom: 4px;
+}
+
+.header-left {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.header-icon {
+	font-size: 20px;
+}
+
+.header-title {
+	font-size: 16px;
+	font-weight: 700;
+	color: var(--text-primary);
+	letter-spacing: 0.2px;
+}
+
+
+
+.section {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 8px;
+	padding: 12px;
+	margin-bottom: 16px;
+	box-shadow: 0 2px 6px var(--shadow-color);
+}
+
+.section-title {
+	font-size: 14px;
+	font-weight: 700;
+	color: var(--text-primary);
+	margin-bottom: 10px;
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	letter-spacing: 0.2px;
+}
+
+.section-subtitle {
+	font-size: 12px;
+	color: var(--text-secondary);
+	margin-bottom: 12px;
+}
+
+.stats-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.stat-card {
+	background: var(--list-hover-bg);
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	padding: 12px;
+	box-shadow: 0 2px 4px var(--shadow-color);
+}
+
+.stat-card[title] {
+	cursor: help;
+}
+
+.stat-label {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-bottom: 4px;
+}
+
+.stat-value {
+	font-size: 20px;
+	font-weight: 700;
+	color: var(--text-primary);
+}
+
+.ctx-ref-table-wrap {
+	margin-bottom: 16px;
+	overflow-x: auto;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	box-shadow: 0 2px 4px var(--shadow-color);
+}
+
+.ctx-ref-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 13px;
+}
+
+.ctx-ref-table th,
+.ctx-ref-table td {
+	padding: 8px 14px;
+	text-align: left;
+	border-bottom: 1px solid var(--border-subtle);
+}
+
+.ctx-ref-table thead th {
+	background: var(--bg-tertiary);
+	color: var(--text-secondary);
+	font-size: 11px;
+	font-weight: 600;
+	text-transform: uppercase;
+	letter-spacing: 0.4px;
+	position: sticky;
+	top: 0;
+}
+
+.ctx-ref-table tbody tr:hover {
+	background: var(--list-hover-bg);
+}
+
+.ctx-ref-table .ctx-ref-name {
+	color: var(--text-primary);
+	white-space: nowrap;
+}
+
+.ctx-ref-table .ctx-ref-num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+	font-weight: 600;
+	color: var(--text-primary);
+	width: 110px;
+}
+
+.ctx-ref-table .ctx-ref-zero {
+	color: var(--text-muted);
+	font-weight: 400;
+}
+
+.ctx-ref-table .ctx-ref-today-active {
+	color: var(--link-color);
+}
+
+.ctx-ref-table tfoot .ctx-ref-total td {
+	background: var(--list-active-bg);
+	color: var(--list-active-fg);
+	font-weight: 700;
+	border-bottom: none;
+	border-top: 2px solid var(--border-color);
+}
+
+.ctx-ref-table tfoot .ctx-ref-total .ctx-ref-num {
+	color: var(--list-active-fg);
+}
+
+.ctx-ref-table .ctx-ref-spark {
+	width: 68px;
+	text-align: center;
+	padding: 4px 8px;
+	vertical-align: middle;
+	color: var(--text-primary);
+}
+
+
+.bar-chart {
+	background: var(--list-hover-bg);
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	padding: 12px;
+	margin-bottom: 12px;
+}.bar-item {
+	margin-bottom: 8px;
+}
+
+.bar-label {
+	display: flex;
+	justify-content: space-between;
+	font-size: 12px;
+	margin-bottom: 4px;
+	color: var(--text-primary);
+}
+
+.bar-track {
+	background: var(--row-alternate-bg);
+	height: 8px;
+	border-radius: 4px;
+	overflow: hidden;
+}
+
+.bar-fill {
+	height: 100%;
+	border-radius: 4px;
+	transition: width 0.3s ease;
+}
+
+/* Local model leaderboard */
+.model-leaderboard-controls,
+.efficiency-chart-header,
+.model-leaderboard-heading {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 12px;
+	flex-wrap: wrap;
+}
+
+.model-leaderboard-controls {
+	margin: 8px 0 14px;
+}
+
+.model-leaderboard-filter {
+	display: inline-flex;
+	align-items: center;
+	gap: 6px;
+	color: var(--text-secondary);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.model-leaderboard-filter input {
+	accent-color: var(--link-color);
+}
+
+.efficiency-chart-header,
+.model-leaderboard-heading {
+	margin: 14px 2px 8px;
+}
+
+.efficiency-chart-controls {
+	display: flex;
+	align-items: flex-end;
+	justify-content: flex-end;
+	gap: 10px;
+	flex-wrap: wrap;
+}
+
+.efficiency-control {
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	color: var(--text-secondary);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.efficiency-control select {
+	min-height: 27px;
+	border: 1px solid var(--input-border);
+	border-radius: 4px;
+	background: var(--input-bg);
+	color: var(--input-fg);
+	padding: 3px 24px 3px 8px;
+	font: inherit;
+	font-weight: 400;
+}
+
+.efficiency-control select:focus-visible {
+	outline: 2px solid var(--focus-border);
+	outline-offset: 1px;
+}
+
+.efficiency-chart-header > div:first-child,
+.model-leaderboard-heading > div:first-child,
+.model-leaderboard-empty {
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+}
+
+.efficiency-chart-header strong,
+.model-leaderboard-heading strong,
+.model-leaderboard-empty strong {
+	font-size: 13px;
+	color: var(--text-primary);
+}
+
+.efficiency-chart-header span,
+.model-leaderboard-heading span,
+.model-leaderboard-empty span {
+	font-size: 11px;
+	color: var(--text-secondary);
+}
+
+.efficiency-metric-selector {
+	display: inline-flex;
+	border: 1px solid var(--border-color);
+	border-radius: 5px;
+	overflow: hidden;
+}
+
+.efficiency-metric-button {
+	border: 0;
+	border-right: 1px solid var(--border-color);
+	background: var(--button-secondary-bg);
+	color: var(--button-secondary-fg);
+	padding: 5px 10px;
+	font: inherit;
+	font-size: 11px;
+	cursor: pointer;
+	transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.efficiency-metric-button:last-child {
+	border-right: 0;
+}
+
+.efficiency-metric-button:hover {
+	background: var(--button-secondary-hover-bg);
+}
+
+.efficiency-metric-button.active {
+	background: var(--button-bg);
+	color: var(--button-fg);
+}
+
+.efficiency-metric-button:focus-visible,
+.efficiency-point:focus {
+	outline: 2px solid var(--focus-border);
+	outline-offset: -2px;
+}
+
+.efficiency-chart-wrap {
+	overflow-x: auto;
+	border: 1px solid var(--border-color);
+	background: var(--list-hover-bg);
+	border-radius: 6px;
+}
+
+.efficiency-chart {
+	display: block;
+	width: 100%;
+	min-width: 700px;
+	min-height: 300px;
+}
+
+.efficiency-grid line {
+	stroke: var(--border-subtle);
+	stroke-width: 1;
+}
+
+.efficiency-grid text,
+.efficiency-axis-title,
+.efficiency-chart-hint,
+.efficiency-point text {
+	fill: var(--text-secondary);
+	font-family: inherit;
+	font-size: 10px;
+}
+
+.efficiency-axis-title {
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.efficiency-chart-hint {
+	fill: var(--success-fg);
+	font-style: italic;
+}
+
+.efficiency-point {
+	cursor: default;
+}
+
+.efficiency-point circle {
+	fill: var(--model-color);
+	stroke: var(--bg-tertiary);
+	stroke-width: 2;
+	transition: filter 0.15s ease;
+}
+
+.efficiency-point:hover circle,
+.efficiency-point:focus circle {
+	filter: brightness(1.18);
+}
+
+.efficiency-point text {
+	fill: var(--model-color);
+	font-size: 10px;
+	font-weight: 600;
+	paint-order: stroke;
+	stroke: var(--bg-tertiary);
+	stroke-width: 3px;
+	stroke-linejoin: round;
+}
+
+.efficiency-vendor-legend {
+	display: flex;
+	gap: 8px 14px;
+	flex-wrap: wrap;
+	margin: 8px 2px 0;
+	color: var(--text-secondary);
+	font-size: 11px;
+}
+
+.efficiency-legend-item {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+}
+
+.efficiency-legend-item > span {
+	width: 8px;
+	height: 8px;
+	border-radius: 50%;
+	background: var(--model-color);
+}
+
+.model-leaderboard-filter-note {
+	color: var(--text-muted);
+	font-size: 11px;
+}
+
+.model-leaderboard-table-wrap {
+	overflow-x: auto;
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+}
+
+.model-leaderboard-table {
+	width: 100%;
+	min-width: 940px;
+	border-collapse: collapse;
+	font-size: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+.model-leaderboard-table th,
+.model-leaderboard-table td {
+	padding: 8px 10px;
+	text-align: right;
+	border-bottom: 1px solid var(--border-subtle);
+	white-space: nowrap;
+}
+
+.model-leaderboard-table th:first-child,
+.model-leaderboard-table td:first-child,
+.model-leaderboard-table th:nth-child(2),
+.model-leaderboard-table td:nth-child(2) {
+	text-align: left;
+}
+
+.model-leaderboard-table th {
+	color: var(--text-secondary);
+	background: var(--bg-tertiary);
+	font-size: 11px;
+	font-weight: 600;
+}
+
+.model-leaderboard-table th.sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+.model-leaderboard-table th.sortable:hover {
+	color: var(--link-color);
+	background: var(--list-hover-bg);
+}
+
+.model-leaderboard-table tbody tr:last-child td {
+	border-bottom: 0;
+}
+
+.model-leaderboard-table tbody tr:hover td {
+	background: var(--list-hover-bg);
+}
+
+.model-leaderboard-table td:first-child {
+	color: var(--text-primary);
+	font-weight: 600;
+}
+
+.model-leaderboard-table td:first-child::before {
+	content: "";
+	display: inline-block;
+	width: 7px;
+	height: 7px;
+	margin-right: 7px;
+	border-radius: 50%;
+	background: var(--model-color);
+}
+
+.model-use-cell {
+	display: grid;
+	grid-template-columns: 82px 42px auto;
+	align-items: center;
+	gap: 7px;
+}
+
+.model-use-track {
+	height: 6px;
+	overflow: hidden;
+	background: var(--row-alternate-bg);
+	border-radius: 3px;
+}
+
+.model-use-track span {
+	display: block;
+	height: 100%;
+	background: var(--model-color);
+	border-radius: inherit;
+}
+
+.model-use-cell strong {
+	color: var(--text-primary);
+	text-align: right;
+}
+
+.model-use-cell > span {
+	color: var(--text-secondary);
+	font-size: 11px;
+}
+
+.model-leaderboard-empty {
+	align-items: flex-start;
+	padding: 18px;
+	border: 1px dashed var(--border-color);
+	border-radius: 6px;
+	background: var(--list-hover-bg);
+}
+
+@media (width <= 768px) {
+	.efficiency-chart-header,
+	.model-leaderboard-heading {
+		align-items: flex-start;
+	}
+
+	.efficiency-chart-controls {
+		width: 100%;
+		justify-content: flex-start;
+	}
+
+	.efficiency-metric-selector {
+		width: 100%;
+	}
+
+	.efficiency-metric-button {
+		flex: 1;
+	}
+
+	.efficiency-control:first-child {
+		width: 100%;
+	}
+}
+
+.list {
+	background: var(--list-hover-bg);
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	padding: 12px 16px;
+}
+
+.list ul {
+	list-style: none;
+	padding: 0;
+}
+
+.list li {
+	padding: 4px 0;
+	font-size: 13px;
+}
+
+/* Customization matrix styles */
+.customization-matrix-container {
+	overflow-x: auto;
+	max-width: 100%;
+}
+
+.customization-matrix {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 12px;
+	color: var(--text-primary);
+}
+
+.customization-matrix th {
+	background: var(--list-hover-bg);
+	color: var(--text-primary);
+	font-weight: 600;
+	font-size: 11px;
+	white-space: nowrap;
+}
+
+.customization-matrix td {
+	background: var(--bg-tertiary);
+}
+
+.customization-matrix tbody tr:hover td {
+	background: var(--list-hover-bg);
+}
+
+.stale-warning {
+	color: var(--warning-fg);
+	font-weight: 600;
+}
+
+.two-column {
+	display: grid;
+	grid-template-columns: 1fr 1fr;
+	gap: 16px;
+}
+
+.three-column {
+	display: grid;
+	grid-template-columns: 1fr 1fr 1fr;
+	gap: 16px;
+	align-items: stretch;
+}
+
+.three-column > div {
+	display: flex;
+	flex-direction: column;
+}
+
+.three-column > div > .list {
+	flex: 1;
+}
+
+.info-box {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	padding: 12px;
+	margin-bottom: 16px;
+	font-size: 12px;
+	color: var(--text-secondary);
+}
+
+.info-box-title {
+	font-weight: 600;
+	color: var(--text-primary);
+	margin-bottom: 6px;
+}
+
+.info-box-toggle {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	cursor: pointer;
+	user-select: none;
+	margin-bottom: 0;
+}
+
+.info-box-chevron {
+	font-size: 10px;
+	color: var(--text-secondary);
+}
+
+.info-box-body {
+	margin-top: 6px;
+}
+
+
+.repo-hygiene-results {
+	margin-top: 4px;
+}
+
+.repo-analysis-card {
+	margin: 0;
+}
+
+.repo-hygiene-pane {
+	border: 1px solid var(--border-color);
+	border-radius: 6px;
+	margin-bottom: 12px;
+	background: var(--bg-secondary);
+}
+
+.repo-hygiene-pane-header {
+	padding: 8px 12px;
+	font-size: 12px;
+	font-weight: 600;
+	color: var(--text-primary);
+	border-bottom: 1px solid var(--border-color);
+	background: var(--list-hover-bg);
+}
+
+.repo-hygiene-pane-body {
+	display: block;
+}
+
+.repo-hygiene-pane-collapsed {
+	display: none;
+}
+
+.repo-hygiene-pane-collapsed .repo-hygiene-pane-body {
+	display: none;
+}
+
+.btn-repo-action[disabled] {
+	opacity: 0.7;
+}
+
+.footer {
+	margin-top: 6px;
+	padding-top: 12px;
+	border-top: 1px solid var(--border-subtle);
+	text-align: left;
+	font-size: 11px;
+	color: var(--text-muted);
+}
+
+@media (width <= 768px) {
+	.two-column {
+		grid-template-columns: 1fr;
+	}
+
+	.three-column {
+		grid-template-columns: 1fr;
+	}
+}
+
+
+.tab-bar {
+display: flex;
+gap: 2px;
+margin-bottom: 16px;
+border-bottom: 2px solid var(--border-color);
+padding-bottom: 0;
+flex-wrap: wrap;
+}
+
+.tab-button {
+display: inline-flex;
+align-items: center;
+gap: 4px;
+background: transparent;
+border: none;
+border-bottom: 3px solid transparent;
+color: var(--text-secondary);
+padding: 8px 16px;
+font-size: 12px;
+font-weight: 600;
+cursor: pointer;
+border-radius: 4px 4px 0 0;
+transition: all 0.15s ease;
+white-space: nowrap;
+margin-bottom: -2px;
+font-family: inherit;
+}
+
+.tab-button:hover {
+color: var(--text-primary);
+background: var(--list-hover-bg);
+}
+
+.tab-button.active {
+color: var(--text-primary);
+border-bottom-color: var(--link-color);
+background: var(--bg-tertiary);
+}
+
+.auto-badge {
+	display: inline-block;
+	margin-left: 6px;
+	padding: 1px 5px;
+	font-size: 10px;
+	border-radius: 3px;
+	border: 1px solid var(--text-primary);
+	color: var(--text-primary);
+	background: transparent;
+	vertical-align: middle;
+	line-height: 1.4;
+}
+
+/* Sortable table headers */
+.sessions-table th.sortable {
+	cursor: pointer;
+	user-select: none;
+	transition: background 0.1s ease, color 0.1s ease;
+}
+
+.sessions-table th.sortable:hover {
+	background: var(--list-hover-bg);
+	color: var(--link-color);
+}
+
+.sessions-table tr:hover td {
+	background: var(--list-hover-bg);
+}
+
+/* Worktrees tab */
+.summary-cards {
+	display: grid;
+	grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.summary-card {
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 12px;
+	text-align: center;
+}
+
+.summary-label {
+	font-size: 11px;
+	color: var(--text-secondary);
+	margin-bottom: 4px;
+}
+
+.summary-value {
+	font-size: 18px;
+	font-weight: 600;
+	color: var(--text-primary);
+}
+
+.table-container {
+	overflow: auto;
+	max-height: 500px;
+}
+
+.session-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 12px;
+}
+
+.session-table th,
+.session-table td {
+	padding: 8px 10px;
+	text-align: left;
+	border-bottom: 1px solid var(--border-color);
+}
+
+.session-table th {
+	background: var(--bg-tertiary);
+	color: var(--text-primary);
+	font-weight: 600;
+	position: sticky;
+	top: 0;
+}
+
+.session-table th.sortable {
+	cursor: pointer;
+	user-select: none;
+}
+
+.session-table th.sortable:hover {
+	background: var(--list-hover-bg);
+	color: var(--link-color);
+}
+
+.button {
+	background: var(--button-secondary-bg);
+	border: 1px solid var(--border-subtle);
+	color: var(--text-primary);
+	padding: 8px 12px;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: 13px;
+	font-weight: 500;
+	transition: background-color 0.15s ease;
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.button:hover {
+	background: var(--bg-tertiary);
+}
+
+.button:active {
+	background: var(--button-bg);
+}
+
+.button:disabled {
+	opacity: 0.6;
+	cursor: not-allowed;
+}
+
+.button.secondary {
+	background: var(--bg-tertiary);
+	border-color: var(--border-subtle);
+	color: var(--text-primary);
+}
+
+.button.secondary:hover {
+	background: var(--list-hover-bg);
+}
+
+.folder-input-row {
+	display: flex;
+	gap: 8px;
+	align-items: center;
+}
+
+.folder-input {
+	flex: 1;
+	background: var(--vscode-input-background);
+	color: var(--vscode-input-foreground);
+	border: 1px solid var(--vscode-input-border, var(--border-color));
+	border-radius: 4px;
+	padding: 6px 10px;
+	font-size: 13px;
+	min-width: 0;
+}
+
+.folder-input:focus {
+	outline: 1px solid var(--link-color);
+	border-color: var(--link-color);
+}
+
+.worktree-roots-list {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+}
+
+.worktree-root-item {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	background: var(--bg-tertiary);
+	border: 1px solid var(--border-color);
+	border-radius: 4px;
+	padding: 6px 10px;
+	font-family: var(--vscode-editor-font-family, monospace);
+	font-size: 12px;
+}
+
+.worktree-root-item span {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.worktree-progress-bar {
+	height: 6px;
+	border-radius: 3px;
+	background: var(--bg-tertiary);
+	overflow: hidden;
+	margin-top: 8px;
+}
+
+.worktree-progress-fill {
+	height: 100%;
+	background: var(--link-color);
+	transition: width 0.2s ease;
+}
+
+/* While walking the folder tree we have no percentage yet, so pulse the bar to
+   signal ongoing activity instead of showing a misleading fixed progress. */
+.worktree-progress-fill.indeterminate {
+	animation: worktree-pulse 1.2s ease-in-out infinite;
+}
+
+@keyframes worktree-pulse {
+	0%,
+	100% {
+		opacity: 0.35;
+	}
+
+	50% {
+		opacity: 1;
+	}
+}
+
+.worktree-repo-row {
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.worktree-repo-row:hover {
+	background: var(--bg-tertiary);
+}
+
+.worktree-repo-row.expanded {
+	background: var(--bg-tertiary);
+}
+
+.worktree-delete-link {
+	margin-left: 8px;
+	color: var(--vscode-errorForeground, #f14c4c);
+}
+
+.worktree-delete-link:hover {
+	text-decoration: underline;
+}
+
+.worktree-caret {
+	display: inline-block;
+	width: 14px;
+	color: var(--text-muted);
+	font-size: 10px;
+}
+
+.worktree-roots-toggle {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
+	margin: 8px 0;
+	padding: 0;
+	background: none;
+	border: none;
+	color: var(--link-color);
+	font-size: 12px;
+	cursor: pointer;
+}
+
+.worktree-roots-toggle:hover {
+	text-decoration: underline;
+}
+
+.worktree-pending {
+	color: var(--text-muted);
+	font-style: italic;
+	opacity: 0.8;
+}
+
+/* The details row's cell wraps the per-worktree table; trim its padding so the
+   nested table aligns with the parent columns. */
+.worktree-repo-details > td {
+	padding: 0 0 12px;
+}
+
+.worktree-cleanup-card {
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+}
+
+.worktree-cleanup-card-actions {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	flex-wrap: wrap;
+}
+
+.worktree-cleanup-card-actions .button {
+	font-size: 12px;
+	padding: 4px 10px;
+}
+
+.worktree-cleanup-log {
+	margin-top: 8px;
+	display: flex;
+	flex-direction: column;
+	gap: 4px;
+	font-size: 12px;
+}
+
+.worktree-cleanup-log-row {
+	display: flex;
+	gap: 8px;
+	align-items: baseline;
+	padding: 4px 6px;
+	border-radius: 4px;
+	background: var(--bg-tertiary);
+}
+
+.worktree-cleanup-log-branch {
+	font-weight: 600;
+	font-family: var(--vscode-editor-font-family, monospace);
+}
+
+.worktree-cleanup-log-repo {
+	color: var(--text-muted);
+}
+
+.worktree-cleanup-log-reason {
+	color: var(--text-muted);
+	flex: 1;
+}
+`;
 
   // src/webview/shared/messageHandler.ts
+  function isTrustedWebviewMessageSource(source, currentWindow) {
+    return source === null || source === currentWindow;
+  }
   function registerMessageHandler(handler) {
     window.addEventListener("message", (event) => {
-      if (event.source !== window) {
+      if (!isTrustedWebviewMessageSource(event.source, window)) {
         return;
       }
       handler(event.data);
@@ -2313,6 +3411,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       _modelNames[modelId] = pricing.displayNames[0];
     }
   }
+  var CUSTOM_PROVIDER_SUFFIX = " (Custom)";
   function decodeSegment(segment) {
     try {
       return decodeURIComponent(segment);
@@ -2353,6 +3452,10 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       addWithVersionVariant(base.replace(UUID_PREFIX, ""));
     }
     return candidates;
+  }
+  function getCustomProviderGroup(model) {
+    const parsed = parseCustomProviderModel(model);
+    return parsed ? `${parsed.providerName}${CUSTOM_PROVIDER_SUFFIX}` : void 0;
   }
   function getModelDisplayName(model) {
     for (const candidate of getModelLookupCandidates(model)) {
@@ -2431,6 +3534,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       costPerCall: c4.calls > 0 ? c4.cost / c4.calls : null,
       costPerEdit: c4.editTurns > 0 ? c4.cost / c4.editTurns : null,
       outputTokensPerCall: c4.calls > 0 ? c4.outputTokens / c4.calls : null,
+      toolCallsPerCall: c4.calls > 0 ? (c4.toolCalls ?? 0) / c4.calls : null,
       // Cap at 1.0: some providers report cachedReadTokens > inputTokens (e.g. DeepSeek).
       cacheHitRate: c4.inputTokens > 0 ? Math.min(1, c4.cachedReadTokens / c4.inputTokens) : null
     };
@@ -2441,6 +3545,37 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
       return null;
     }
     return calls[Math.floor((calls.length - 1) * 0.25)];
+  }
+
+  // ../src/chartDataBuilder.ts
+  var MODEL_PROVIDER_PREFIXES = [
+    ["anthropic", "Anthropic"],
+    ["claude", "Anthropic"],
+    ["codestral", "Mistral AI"],
+    ["devstral", "Mistral AI"],
+    ["gemini", "Google"],
+    ["goldeneye", "xAI"],
+    ["google", "Google"],
+    ["gpt", "OpenAI"],
+    ["grok", "xAI"],
+    ["magistral", "Mistral AI"],
+    ["mai-", "Microsoft"],
+    ["ministral", "Mistral AI"],
+    ["mistral", "Mistral AI"],
+    ["o1", "OpenAI"],
+    ["o3", "OpenAI"],
+    ["o4", "OpenAI"],
+    ["pixtral", "Mistral AI"],
+    ["qwen", "Alibaba"],
+    ["raptor", "xAI"]
+  ];
+  function getModelBillingProvider(modelId) {
+    const customGroup = getCustomProviderGroup(modelId);
+    if (customGroup) {
+      return customGroup;
+    }
+    const match = getModelLookupCandidates(modelId).flatMap((candidate) => MODEL_PROVIDER_PREFIXES.filter(([prefix]) => candidate.toLowerCase().startsWith(prefix))).at(0);
+    return match ? match[1] : "Other";
   }
 
   // src/webview/usage/customizationSanitizer.ts
@@ -2645,6 +3780,73 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
     return SWITCHABLE_TABS.has(String(value));
   }
 
+  // src/webview/usage/modelLeaderboard.ts
+  var MIN_BUBBLE_RADIUS = 5;
+  var MAX_BUBBLE_RADIUS = 16;
+  var LABEL_HEIGHT = 12;
+  var LABEL_CHARACTER_WIDTH = 6;
+  var LABEL_GAP = 4;
+  function scaleBubbleRadius(value, maxValue) {
+    if (!Number.isFinite(value) || value <= 0 || !Number.isFinite(maxValue) || maxValue <= 0) {
+      return MIN_BUBBLE_RADIUS;
+    }
+    const normalized = Math.min(value / maxValue, 1);
+    return MIN_BUBBLE_RADIUS + Math.sqrt(normalized) * (MAX_BUBBLE_RADIUS - MIN_BUBBLE_RADIUS);
+  }
+  function createLabelPlacement(input, x2, y3, textAnchor) {
+    const width = Math.max(18, Array.from(input.label).length * LABEL_CHARACTER_WIDTH);
+    const left = textAnchor === "start" ? x2 : textAnchor === "end" ? x2 - width : x2 - width / 2;
+    return {
+      x: x2,
+      y: y3,
+      textAnchor,
+      bounds: { left, right: left + width, top: y3 - 10, bottom: y3 - 10 + LABEL_HEIGHT }
+    };
+  }
+  function getLabelCandidates(input, bounds) {
+    const right = input.x + input.radius + LABEL_GAP;
+    const left = input.x - input.radius - LABEL_GAP;
+    const above = input.y - input.radius - 6;
+    const below = input.y + input.radius + LABEL_HEIGHT;
+    const sideY = input.y < bounds.top + 22 ? [input.y + 18, input.y - 10] : [input.y - 10, input.y + 18];
+    return [
+      createLabelPlacement(input, right, sideY[0], "start"),
+      createLabelPlacement(input, right, sideY[1], "start"),
+      createLabelPlacement(input, left, sideY[0], "end"),
+      createLabelPlacement(input, left, sideY[1], "end"),
+      createLabelPlacement(input, input.x, above, "middle"),
+      createLabelPlacement(input, input.x, below, "middle")
+    ];
+  }
+  function rectanglesOverlap(a3, b3) {
+    return a3.left < b3.right + 2 && a3.right + 2 > b3.left && a3.top < b3.bottom + 2 && a3.bottom + 2 > b3.top;
+  }
+  function intersectsBubble(rect, bubble) {
+    const nearestX = Math.max(rect.left, Math.min(bubble.x, rect.right));
+    const nearestY = Math.max(rect.top, Math.min(bubble.y, rect.bottom));
+    const dx = bubble.x - nearestX;
+    const dy = bubble.y - nearestY;
+    return dx * dx + dy * dy < (bubble.radius + 2) ** 2;
+  }
+  function getPlacementPenalty(placement, placed, bubbles, bounds) {
+    const rect = placement.bounds;
+    const overflow = Math.max(0, bounds.left - rect.left) + Math.max(0, rect.right - bounds.right) + Math.max(0, bounds.top - rect.top) + Math.max(0, rect.bottom - bounds.bottom);
+    const labelCollisions = placed.filter((other) => rectanglesOverlap(rect, other.bounds)).length;
+    const bubbleCollisions = bubbles.filter((bubble) => intersectsBubble(rect, bubble)).length;
+    return overflow * 1e4 + bubbleCollisions * 1e3 + labelCollisions * 100;
+  }
+  function placeBubbleLabels(inputs, bounds) {
+    const placed = [];
+    for (const input of inputs) {
+      const candidates = getLabelCandidates(input, bounds);
+      const best = candidates.reduce(
+        (current, candidate) => getPlacementPenalty(candidate, placed, inputs, bounds) < getPlacementPenalty(current, placed, inputs, bounds) ? candidate : current
+      );
+      placed.push(best);
+    }
+    return placed;
+  }
+
   // ../src/utils/toolUtils.ts
   var GUID_MCP_PATTERN = /^mcp__[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}__(.+)$/i;
   function toTitleCase(s4) {
@@ -2838,6 +4040,7 @@ body[data-vscode-theme-kind="vscode-high-contrast-light"] .title {
   var isSingleRepoAnalysisInProgress = false;
   var currentWorkspacePaths = [];
   var activeTab = "activity";
+  var pendingTabAnchor = null;
   var loadingTimeoutId = null;
   var currentInsights = [];
   var currentCurationAnalysis = null;
@@ -3812,7 +5015,8 @@ ${_renderMultiModelMixedCostSessions(switching)}
       file: raw.file,
       title: typeof raw.title === "string" ? raw.title : null,
       lastInteraction: typeof raw.lastInteraction === "string" ? raw.lastInteraction : null,
-      moments
+      moments,
+      totalMoments: typeof raw.totalMoments === "number" && isFinite(raw.totalMoments) ? Math.max(moments.length, raw.totalMoments) : moments.length
     };
   }
   function sanitizeCorrectionRepoGroup(raw) {
@@ -5456,10 +6660,12 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const title = session.title || session.file.split(/[\\/]/).pop() || session.file;
     const date = session.lastInteraction ? new Date(session.lastInteraction) : null;
     const dateLabel = date && !isNaN(date.getTime()) ? date.toLocaleDateString() : "";
+    const totalMoments = session.totalMoments ?? session.moments.length;
+    const truncatedLabel = totalMoments > session.moments.length ? ` \xB7 showing ${session.moments.length} of ${totalMoments} moments` : "";
     return `
 		<div style="margin:10px 0 4px; padding:10px 12px; background:var(--bg-tertiary); border-radius:6px;">
 			<div style="font-size:12px; font-weight:600; color:var(--text-primary); overflow-wrap:anywhere;">
-				${escapeHtml(title)}${dateLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">\xB7 ${escapeHtml(dateLabel)}</span>` : ""}
+				${escapeHtml(title)}${dateLabel || truncatedLabel ? ` <span style="font-weight:400; color:var(--text-secondary);">${dateLabel ? `\xB7 ${escapeHtml(dateLabel)}` : ""}${escapeHtml(truncatedLabel)}</span>` : ""}
 			</div>
 			${session.moments.map(buildCorrectionMomentHtml).join("")}
 		</div>`;
@@ -5501,7 +6707,8 @@ ${_renderMultiModelMixedCostSessions(switching)}
 				<div class="section-subtitle">
 					Moments where the agent corrected itself after an error, or you had to correct the agent \u2014
 					heuristic detection over each repository's ${report.sessionsPerRepo} most recent sessions with detected moments \u2014
-					sessions without corrections are not listed. Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
+					sessions without corrections are not listed. Summary counts include all detected moments; long sessions show a capped detail sample.
+					Pattern-based matches are candidates, not verdicts; open the session in the log viewer for full context.
 				</div>
 				<div style="display:flex; flex-wrap:wrap; gap:6px; margin-top:12px;">${summaryChips}</div>
 				${repoSections}
@@ -6376,6 +7583,9 @@ ${_renderMultiModelMixedCostSessions(switching)}
   };
   var efficiencySelectedPeriod = "last30";
   var efficiencyPeriod = "last30Days";
+  var efficiencyMetric = "cost";
+  var efficiencyBubbleMetric = "calls";
+  var efficiencyColorMode = "vendor";
   var efficiencySortColumn = "calls";
   var efficiencySortDirection = "desc";
   var cachedModelEfficiency = {};
@@ -6384,25 +7594,41 @@ ${_renderMultiModelMixedCostSessions(switching)}
     if (value === null) {
       return "\u2014";
     }
-    return value >= 0.01 ? formatCost(value) : `$${value.toFixed(2)}`;
+    return value >= 0.01 ? formatCost(value) : `$${value.toFixed(3)}`;
   }
   function formatRatePercent(value) {
     return value === null ? "\u2014" : formatPercent(value * 100);
   }
-  function formatPerEdit(value) {
-    return value === null ? "\u2014" : formatFixed(value, 2);
+  function formatPerTurn(value) {
+    return value === null ? "\u2014" : formatFixed(value, 1);
+  }
+  var EFFICIENCY_METRICS = [
+    { key: "cost", label: "Cost", axisLabel: "Average cost per turn", value: (row) => row.rates.costPerCall, format: formatUnitCost },
+    { key: "outputTokens", label: "Output tokens", axisLabel: "Average output tokens per turn", value: (row) => row.rates.outputTokensPerCall, format: (value) => value === null ? "\u2014" : formatCompact(Math.round(value)) },
+    { key: "toolSteps", label: "Tool steps", axisLabel: "Average tool steps per turn", value: (row) => row.rates.toolCallsPerCall, format: formatPerTurn }
+  ];
+  var EFFICIENCY_BUBBLE_METRICS = [
+    { key: "calls", label: "Local use", value: (row) => row.counters.calls, format: (value) => `${formatNumber(value ?? 0)} turns` },
+    ...EFFICIENCY_METRICS.map(({ key, label, value, format }) => ({ key, label, value, format }))
+  ];
+  function buildLocalUsageCell(row, totalCalls) {
+    const share = totalCalls > 0 ? row.counters.calls / totalCalls : 0;
+    return `<div class="model-use-cell">
+		<div class="model-use-track" aria-hidden="true"><span style="width:${Math.max(2, share * 100).toFixed(1)}%"></span></div>
+		<strong>${formatRatePercent(share)}</strong>
+		<span>${formatNumber(row.counters.calls)} turns</span>
+	</div>`;
   }
   var EFFICIENCY_COLUMN_DEFS = [
-    { sortKey: "model", label: "Model", title: "Model identifier", align: "left", sortValue: (r6) => r6.model, render: (r6) => escapeHtml(getModelDisplayName(r6.model)) },
-    { sortKey: "calls", label: "Turns", title: "User-request turns attributed to this model", align: "right", sortValue: (r6) => r6.counters.calls, render: (r6) => r6.counters.calls > 0 ? formatNumber(r6.counters.calls) : "\u2014" },
-    { sortKey: "editTurns", label: "Edit turns", title: "Turns containing at least one file-edit tool call", align: "right", sortValue: (r6) => r6.counters.editTurns, render: (r6) => r6.counters.calls > 0 ? formatNumber(r6.counters.editTurns) : "\u2014" },
-    { sortKey: "oneShotRate", label: "One-shot edit rate", title: "Share of edit turns completed without retries or self-corrections", align: "right", sortValue: (r6) => r6.rates.oneShotRate, render: (r6) => formatRatePercent(r6.rates.oneShotRate) },
-    { sortKey: "retryRate", label: "Retries/edit", title: "Average immediate same-file retries per edit turn", align: "right", sortValue: (r6) => r6.rates.retryRate, render: (r6) => formatPerEdit(r6.rates.retryRate) },
-    { sortKey: "selfCorrectionRate", label: "Self-corr/edit", title: "Average self-corrections (re-edits after other tool calls) per edit turn", align: "right", sortValue: (r6) => r6.rates.selfCorrectionRate, render: (r6) => formatPerEdit(r6.rates.selfCorrectionRate) },
-    { sortKey: "costPerCall", label: "Cost/turn", title: "Average estimated cost per turn (provider rates)", align: "right", sortValue: (r6) => r6.rates.costPerCall, render: (r6) => formatUnitCost(r6.rates.costPerCall) },
-    { sortKey: "costPerEdit", label: "Cost/edit", title: "Average estimated cost per edit turn (provider rates)", align: "right", sortValue: (r6) => r6.rates.costPerEdit, render: (r6) => formatUnitCost(r6.rates.costPerEdit) },
-    { sortKey: "outputTokensPerCall", label: "Out tok/turn", title: "Average output tokens per turn", align: "right", sortValue: (r6) => r6.rates.outputTokensPerCall, render: (r6) => r6.rates.outputTokensPerCall === null ? "\u2014" : formatCompact(Math.round(r6.rates.outputTokensPerCall)) },
-    { sortKey: "cacheHitRate", label: "Cache hit", title: "Cache-read share of input tokens", align: "right", sortValue: (r6) => r6.rates.cacheHitRate, render: (r6) => formatRatePercent(r6.rates.cacheHitRate) }
+    { sortKey: "model", label: "Model", title: "Model identifier", sortValue: (row) => row.model, render: (row) => escapeHtml(getModelDisplayName(row.model)) },
+    { sortKey: "calls", label: "Local use", title: "Share of user-request turns attributed to this model", sortValue: (row) => row.counters.calls, render: buildLocalUsageCell },
+    { sortKey: "oneShotRate", label: "One-shot", title: "Share of edit turns completed without retries or self-corrections", sortValue: (row) => row.rates.oneShotRate, render: (row) => formatRatePercent(row.rates.oneShotRate) },
+    { sortKey: "retryRate", label: "Retries/edit", title: "Average immediate same-file retries per edit turn", sortValue: (row) => row.rates.retryRate, render: (row) => formatPerTurn(row.rates.retryRate) },
+    { sortKey: "selfCorrectionRate", label: "Self-corr/edit", title: "Average re-edits after intervening tool calls per edit turn", sortValue: (row) => row.rates.selfCorrectionRate, render: (row) => formatPerTurn(row.rates.selfCorrectionRate) },
+    { sortKey: "costPerCall", label: "Avg cost", title: "Average estimated provider cost per user-request turn", sortValue: (row) => row.rates.costPerCall, render: (row) => formatUnitCost(row.rates.costPerCall) },
+    { sortKey: "outputTokensPerCall", label: "Out tok", title: "Average output tokens per user-request turn", sortValue: (row) => row.rates.outputTokensPerCall, render: (row) => row.rates.outputTokensPerCall === null ? "\u2014" : formatCompact(Math.round(row.rates.outputTokensPerCall)) },
+    { sortKey: "toolCallsPerCall", label: "Steps", title: "Average tool invocations per user-request turn", sortValue: (row) => row.rates.toolCallsPerCall, render: (row) => formatPerTurn(row.rates.toolCallsPerCall) },
+    { sortKey: "cacheHitRate", label: "Cache hit", title: "Cache-read share of input tokens", sortValue: (row) => row.rates.cacheHitRate, render: (row) => formatRatePercent(row.rates.cacheHitRate) }
   ];
   function getEfficiencySortIndicator(column) {
     if (efficiencySortColumn !== column) {
@@ -6410,85 +7636,201 @@ ${_renderMultiModelMixedCostSessions(switching)}
     }
     return efficiencySortDirection === "desc" ? " \u25BC" : " \u25B2";
   }
+  function compareEfficiencyRows(a3, b3, column) {
+    const av = column.sortValue(a3);
+    const bv = column.sortValue(b3);
+    if (av === null && bv === null) {
+      return 0;
+    }
+    if (av === null) {
+      return 1;
+    }
+    if (bv === null) {
+      return -1;
+    }
+    const cmp = typeof av === "string" || typeof bv === "string" ? String(av).localeCompare(String(bv)) : av - bv;
+    return efficiencySortDirection === "desc" ? -cmp : cmp;
+  }
   function buildEfficiencyRows(usage) {
     const rows = Object.entries(usage).map(([model, counters]) => ({ model, counters, rates: deriveModelEfficiencyRates(counters) }));
-    const col = EFFICIENCY_COLUMN_DEFS.find((c4) => c4.sortKey === efficiencySortColumn) ?? EFFICIENCY_COLUMN_DEFS[1];
-    rows.sort((a3, b3) => {
-      const av = col.sortValue(a3);
-      const bv = col.sortValue(b3);
-      if (av === null && bv === null) {
-        return 0;
-      }
-      if (av === null) {
-        return 1;
-      }
-      if (bv === null) {
-        return -1;
-      }
-      const cmp = typeof av === "string" || typeof bv === "string" ? String(av).localeCompare(String(bv)) : av - bv;
-      return efficiencySortDirection === "desc" ? -cmp : cmp;
-    });
-    return rows;
+    const column = EFFICIENCY_COLUMN_DEFS.find((item) => item.sortKey === efficiencySortColumn) ?? EFFICIENCY_COLUMN_DEFS[1];
+    return rows.sort((a3, b3) => compareEfficiencyRows(a3, b3, column));
   }
-  function buildModelEfficiencyTableHtml() {
+  function filterLowUsageRows(rows, usage) {
+    if (!efficiencyFilterLowUsage) {
+      return { rows, hiddenNote: "" };
+    }
+    const threshold = computeEfficiencyLowUsageThreshold(usage);
+    if (threshold === null) {
+      return { rows, hiddenNote: "" };
+    }
+    const filtered = rows.filter((row) => row.counters.calls > threshold);
+    const hiddenCount = rows.length - filtered.length;
+    const noun = hiddenCount === 1 ? "model" : "models";
+    const turnNoun = threshold === 1 ? "turn" : "turns";
+    const hiddenNote = hiddenCount > 0 ? `${hiddenCount} low-usage ${noun} hidden (\u2264${threshold} ${turnNoun})` : "";
+    return { rows: filtered, hiddenNote };
+  }
+  var MODEL_COLOR_VARS = ["--stage-1-color", "--stage-2-color", "--stage-3-color", "--stage-4-color", "--success-fg", "--warning-fg", "--link-color"];
+  var PROVIDER_COLOR_VARS = {
+    Anthropic: "--warning-fg",
+    OpenAI: "--success-fg",
+    Google: "--stage-3-color",
+    "Mistral AI": "--stage-2-color",
+    xAI: "--stage-4-color",
+    Alibaba: "--stage-1-color",
+    Microsoft: "--link-color"
+  };
+  function getColorForKey(key) {
+    let hash = 0;
+    for (let i6 = 0; i6 < key.length; i6++) {
+      hash = (hash << 5) - hash + key.charCodeAt(i6) | 0;
+    }
+    return `var(${MODEL_COLOR_VARS[Math.abs(hash) % MODEL_COLOR_VARS.length]})`;
+  }
+  function getEfficiencyColor(model) {
+    if (efficiencyColorMode === "model") {
+      return getColorForKey(model);
+    }
+    const provider = getModelBillingProvider(model);
+    const colorVar = PROVIDER_COLOR_VARS[provider];
+    return colorVar ? `var(${colorVar})` : getColorForKey(provider);
+  }
+  function formatMetricTick(metric, value) {
+    if (metric.key === "cost") {
+      return formatUnitCost(value);
+    }
+    if (metric.key === "outputTokens") {
+      return formatCompact(Math.round(value));
+    }
+    return formatFixed(value, 1);
+  }
+  function buildEfficiencyGrid(metric, maxX) {
+    const vertical = [0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+      const x2 = 76 + fraction * 760;
+      return `<line x1="${x2}" y1="24" x2="${x2}" y2="286"></line><text x="${x2}" y="310" text-anchor="middle">${escapeHtml(formatMetricTick(metric, maxX * fraction))}</text>`;
+    }).join("");
+    const horizontal = [0, 0.25, 0.5, 0.75, 1].map((fraction) => {
+      const y3 = 286 - fraction * 262;
+      return `<line x1="76" y1="${y3}" x2="836" y2="${y3}"></line><text x="64" y="${y3 + 4}" text-anchor="end">${Math.round(fraction * 100)}%</text>`;
+    }).join("");
+    return `<g class="efficiency-grid">${vertical}${horizontal}</g>`;
+  }
+  function buildEfficiencyPoint(row, metric, bubbleMetric, maxX, maxBubbleValue, labelPlacement) {
+    const value = metric.value(row) ?? 0;
+    const bubbleValue = bubbleMetric.value(row) ?? 0;
+    const rate = row.rates.oneShotRate ?? 0;
+    const x2 = 76 + value / maxX * 760;
+    const y3 = 286 - rate * 262;
+    const radius = scaleBubbleRadius(bubbleValue, maxBubbleValue);
+    const color = getEfficiencyColor(row.model);
+    const rawLabel = getModelDisplayName(row.model);
+    const label = escapeHtml(rawLabel);
+    const aria = `${rawLabel}: ${formatRatePercent(rate)} one-shot edit rate, ${metric.format(value)} ${metric.axisLabel.toLowerCase()}, bubble sized by ${bubbleMetric.label.toLowerCase()}: ${bubbleMetric.format(bubbleValue)}`;
+    return `<g class="efficiency-point" style="--model-color:${color}" tabindex="0" role="img" aria-label="${escapeHtml(aria)}">
+		<circle cx="${x2.toFixed(1)}" cy="${y3.toFixed(1)}" r="${radius.toFixed(1)}"><title>${escapeHtml(aria)}</title></circle>
+		<text x="${labelPlacement.x.toFixed(1)}" y="${labelPlacement.y.toFixed(1)}" text-anchor="${labelPlacement.textAnchor}">${label}</text>
+	</g>`;
+  }
+  function buildEfficiencyColorLegendHtml(rows) {
+    if (efficiencyColorMode !== "vendor") {
+      return "";
+    }
+    const providers = [...new Set(rows.map((row) => getModelBillingProvider(row.model)))].sort();
+    const items = providers.map((provider) => {
+      const model = rows.find((row) => getModelBillingProvider(row.model) === provider)?.model ?? "";
+      return `<span class="efficiency-legend-item" style="--model-color:${getEfficiencyColor(model)}"><span aria-hidden="true"></span>${escapeHtml(provider)}</span>`;
+    }).join("");
+    return `<div class="efficiency-vendor-legend" aria-label="Model vendor colors">${items}</div>`;
+  }
+  function buildEfficiencyChartHtml(rows) {
+    const metric = EFFICIENCY_METRICS.find((item) => item.key === efficiencyMetric) ?? EFFICIENCY_METRICS[0];
+    const bubbleMetric = EFFICIENCY_BUBBLE_METRICS.find((item) => item.key === efficiencyBubbleMetric) ?? EFFICIENCY_BUBBLE_METRICS[0];
+    const chartRows = rows.filter((row) => row.rates.oneShotRate !== null && metric.value(row) !== null).sort((a3, b3) => b3.counters.calls - a3.counters.calls).slice(0, 12);
+    if (chartRows.length === 0) {
+      return '<div class="model-leaderboard-empty"><strong>No comparable edit data yet.</strong><span>The chart appears after local sessions record both a model and structured edit turns.</span></div>';
+    }
+    const maxX = Math.max(...chartRows.map((row) => metric.value(row) ?? 0), 1e-4) * 1.08;
+    const maxBubbleValue = Math.max(...chartRows.map((row) => bubbleMetric.value(row) ?? 0), 0);
+    const labelInputs = chartRows.map((row) => {
+      const value = metric.value(row) ?? 0;
+      const bubbleValue = bubbleMetric.value(row) ?? 0;
+      return {
+        x: 76 + value / maxX * 760,
+        y: 286 - (row.rates.oneShotRate ?? 0) * 262,
+        radius: scaleBubbleRadius(bubbleValue, maxBubbleValue),
+        label: getModelDisplayName(row.model)
+      };
+    });
+    const labelPlacements = placeBubbleLabels(labelInputs, { left: 76, right: 836, top: 24, bottom: 286 });
+    const points = chartRows.map(
+      (row, index) => buildEfficiencyPoint(row, metric, bubbleMetric, maxX, maxBubbleValue, labelPlacements[index])
+    ).join("");
+    return `<div class="efficiency-chart-wrap">
+		<svg class="efficiency-chart" viewBox="0 0 900 350" role="img" aria-label="One-shot edit rate compared with ${escapeHtml(metric.axisLabel.toLowerCase())}; bubble size represents ${escapeHtml(bubbleMetric.label.toLowerCase())}">
+			${buildEfficiencyGrid(metric, maxX)}
+			<text class="efficiency-axis-title" x="456" y="344" text-anchor="middle">${escapeHtml(metric.axisLabel)}</text>
+			<text class="efficiency-axis-title" x="17" y="155" text-anchor="middle" transform="rotate(-90 17 155)">One-shot edit rate</text>
+			<text class="efficiency-chart-hint" x="836" y="17" text-anchor="end">higher is better \u2191</text>
+			${points}
+		</svg>
+	</div>${buildEfficiencyColorLegendHtml(chartRows)}`;
+  }
+  function buildChartControlsHtml() {
+    const buttons = EFFICIENCY_METRICS.map(
+      (metric) => `<button class="efficiency-metric-button${metric.key === efficiencyMetric ? " active" : ""}" type="button" data-eff-metric="${metric.key}" aria-pressed="${metric.key === efficiencyMetric}">${metric.label}</button>`
+    ).join("");
+    const bubbleOptions = EFFICIENCY_BUBBLE_METRICS.map(
+      (metric) => `<option value="${metric.key}"${metric.key === efficiencyBubbleMetric ? " selected" : ""}>${metric.label}</option>`
+    ).join("");
+    const colorOptions = [
+      { value: "vendor", label: "Vendor" },
+      { value: "model", label: "Model" }
+    ].map((option) => `<option value="${option.value}"${option.value === efficiencyColorMode ? " selected" : ""}>${option.label}</option>`).join("");
+    return `<div class="efficiency-chart-controls">
+		<div class="efficiency-control"><span>X-axis</span><div class="efficiency-metric-selector" role="group" aria-label="Efficiency comparison metric">${buttons}</div></div>
+		<label class="efficiency-control"><span>Bubble size</span><select id="eff-bubble-metric">${bubbleOptions}</select></label>
+		<label class="efficiency-control"><span>Color by</span><select id="eff-color-mode">${colorOptions}</select></label>
+	</div>`;
+  }
+  function buildEfficiencyTableHtml(rows, totalCalls) {
+    const tableRows = rows.map((row) => {
+      const cells = EFFICIENCY_COLUMN_DEFS.map((column) => `<td>${column.render(row, totalCalls)}</td>`).join("");
+      return `<tr style="--model-color:${getEfficiencyColor(row.model)}">${cells}</tr>`;
+    }).join("");
+    const headers = EFFICIENCY_COLUMN_DEFS.map(
+      (column) => `<th class="sortable" data-eff-sort="${column.sortKey}" title="${column.title}">${column.label}${getEfficiencySortIndicator(column.sortKey)}</th>`
+    ).join("");
+    return `<div class="model-leaderboard-table-wrap"><table class="model-leaderboard-table"><thead><tr>${headers}</tr></thead><tbody>${tableRows}</tbody></table></div>`;
+  }
+  function buildModelEfficiencyContentHtml() {
     const usage = cachedModelEfficiency[efficiencyPeriod];
     if (!usage || Object.keys(usage).length === 0) {
-      return '<div style="color: var(--text-secondary); font-size: 13px; padding: 16px;">No per-model efficiency data recorded for this period yet.</div>';
+      return '<div class="model-leaderboard-empty"><strong>No per-model efficiency data for this period.</strong><span>Run local agent sessions with model and tool-call metadata, then refresh the dashboard.</span></div>';
     }
-    let rows = buildEfficiencyRows(usage);
-    let hiddenNote = "";
-    if (efficiencyFilterLowUsage) {
-      const threshold = computeEfficiencyLowUsageThreshold(usage);
-      if (threshold !== null) {
-        const before = rows.length;
-        rows = rows.filter((r6) => r6.counters.calls > threshold);
-        const hiddenCount = before - rows.length;
-        if (hiddenCount > 0) {
-          hiddenNote = `<div style="color:var(--text-secondary); font-size:11px; padding:4px 8px 2px;">${hiddenCount} model${hiddenCount === 1 ? "" : "s"} hidden (\u2264${threshold} turn${threshold === 1 ? "" : "s"})</div>`;
-        }
-      }
-    }
-    const tableRows = rows.map((r6) => {
-      const cells = EFFICIENCY_COLUMN_DEFS.map((col) => {
-        const alignStyle = col.align === "right" ? "text-align:right;" : "";
-        return `<td style="padding:6px 8px; border-bottom:1px solid var(--border-subtle); font-size:12px; ${alignStyle}">${col.render(r6)}</td>`;
-      }).join("");
-      return `<tr>${cells}</tr>`;
-    }).join("");
-    const headerCells = EFFICIENCY_COLUMN_DEFS.map((col) => {
-      const alignStyle = col.align === "right" ? " text-align:right;" : "";
-      return `<th class="sortable" data-eff-sort="${col.sortKey}" title="${col.title}" style="padding:6px 8px; cursor:pointer;${alignStyle}">${col.label}${getEfficiencySortIndicator(col.sortKey)}</th>`;
-    }).join("");
-    return `
-		<div style="overflow-x:auto;">
-		<table style="width:100%; border-collapse:collapse; min-width:900px;">
-			<thead>
-				<tr style="color:var(--text-secondary); font-size:11px; text-align:left;">${headerCells}</tr>
-			</thead>
-			<tbody>${tableRows}</tbody>
-		</table>
-		</div>
-		${hiddenNote}`;
+    const allRows = buildEfficiencyRows(usage);
+    const totalCalls = allRows.reduce((sum, row) => sum + row.counters.calls, 0);
+    const filtered = filterLowUsageRows(allRows, usage);
+    const note = filtered.hiddenNote ? `<span class="model-leaderboard-filter-note">${filtered.hiddenNote}</span>` : "";
+    return `<div class="efficiency-chart-header"><div><strong>Efficiency frontier</strong><span>One-shot edit rate is a local quality proxy, not a benchmark pass rate.</span></div>${buildChartControlsHtml()}</div>
+		${buildEfficiencyChartHtml(filtered.rows)}
+		<div class="model-leaderboard-heading"><div><strong>Most used models locally</strong><span>Ranked by your local turns; all averages use the same selected period.</span></div>${note}</div>
+		${buildEfficiencyTableHtml(filtered.rows, totalCalls)}`;
   }
   function buildModelEfficiencySectionHtml(stats) {
-    cachedModelEfficiency = {
-      today: stats.today.modelEfficiency,
-      last30Days: stats.last30Days.modelEfficiency,
-      month: stats.month.modelEfficiency
-    };
-    return `
-		<div class="section" id="section-model-efficiency">
-			<div class="section-title"><span>\u{1F3AF}</span><span>Model Efficiency</span></div>
-			<div class="section-subtitle">Compare models on quality and efficiency, not just cost \u2014 one-shot edit rate, retries, self-corrections, per-turn cost, and cache hit rate. Retry/self-correction detection needs structured tool-call data, so some editors show token metrics only.</div>
-			<div id="model-efficiency-controls" style="display:flex; gap:6px; flex-wrap:wrap; margin:8px 0;"><span id="model-efficiency-period-selector"></span></div>
-			<div style="margin:2px 0 8px 0;">
-				<label style="display:inline-flex; align-items:center; gap:6px; font-size:12px; color:var(--text-secondary); cursor:pointer;" title="Shows only models above the 25th-percentile turn count (Q1). Uncheck to see all models.">
-					<input type="checkbox" id="eff-filter-low-usage"${efficiencyFilterLowUsage ? " checked" : ""} style="cursor:pointer;">
-					Hide low-usage models
-				</label>
-			</div>
-			<div id="model-efficiency-table">${buildModelEfficiencyTableHtml()}</div>
-		</div>`;
+    cachedModelEfficiency = { today: stats.today.modelEfficiency, last30Days: stats.last30Days.modelEfficiency, month: stats.month.modelEfficiency };
+    return `<div class="section" id="section-model-efficiency">
+		<div class="section-title"><span>\u{1F3AF}</span><span>Local Model Leaderboard</span></div>
+		<div class="section-subtitle">Compare the models in your own sessions by local usage, one-shot edits, cost, output tokens, and tool steps. Exactness depends on what each editor records; missing structured data is shown as unavailable rather than estimated.</div>
+		<div class="model-leaderboard-controls">
+			<span id="model-efficiency-period-selector"></span>
+			<label class="model-leaderboard-filter" title="Show only models above the 25th-percentile local turn count.">
+				<input type="checkbox" id="eff-filter-low-usage"${efficiencyFilterLowUsage ? " checked" : ""}>
+				Hide low-usage models
+			</label>
+		</div>
+		<div id="model-efficiency-content">${buildModelEfficiencyContentHtml()}</div>
+	</div>`;
   }
   function renderModelEfficiencyPeriodSelector() {
     const wrapper = document.getElementById("model-efficiency-period-selector");
@@ -6508,47 +7850,59 @@ ${_renderMultiModelMixedCostSessions(switching)}
         }
         efficiencySelectedPeriod = value;
         efficiencyPeriod = dataKey;
-        rerenderModelEfficiencyTable();
+        rerenderModelEfficiencyContent();
       }
     });
     wrapper.append(selectorWrapper);
   }
-  function rerenderModelEfficiencyTable() {
-    const table = document.getElementById("model-efficiency-table");
-    if (table) {
-      setHtml(table, buildModelEfficiencyTableHtml());
+  function rerenderModelEfficiencyContent() {
+    const content = document.getElementById("model-efficiency-content");
+    if (content) {
+      setHtml(content, buildModelEfficiencyContentHtml());
     }
   }
   function handleEfficiencySortClick(th) {
-    const col = th.getAttribute("data-eff-sort");
-    if (!col) {
+    const column = th.getAttribute("data-eff-sort");
+    if (!column) {
       return;
     }
-    if (efficiencySortColumn === col) {
+    if (efficiencySortColumn === column) {
       efficiencySortDirection = efficiencySortDirection === "desc" ? "asc" : "desc";
     } else {
-      efficiencySortColumn = col;
-      efficiencySortDirection = col === "model" ? "asc" : "desc";
+      efficiencySortColumn = column;
+      efficiencySortDirection = column === "model" ? "asc" : "desc";
     }
-    rerenderModelEfficiencyTable();
+    rerenderModelEfficiencyContent();
   }
   function setupModelEfficiencySection() {
     const section = document.getElementById("section-model-efficiency");
     if (!section) {
       return;
     }
-    section.addEventListener("click", (e7) => {
-      const target = e7.target;
-      const th = target.closest("th[data-eff-sort]");
-      if (th) {
-        handleEfficiencySortClick(th);
+    section.addEventListener("click", (event) => {
+      const target = event.target;
+      const header = target.closest("th[data-eff-sort]");
+      if (header) {
+        handleEfficiencySortClick(header);
+        return;
+      }
+      const metric = target.closest("button[data-eff-metric]")?.dataset.effMetric;
+      if (metric && EFFICIENCY_METRICS.some((item) => item.key === metric)) {
+        efficiencyMetric = metric;
+        rerenderModelEfficiencyContent();
       }
     });
-    section.addEventListener("change", (e7) => {
-      const target = e7.target;
+    section.addEventListener("change", (event) => {
+      const target = event.target;
       if (target.id === "eff-filter-low-usage") {
         efficiencyFilterLowUsage = target.checked;
-        rerenderModelEfficiencyTable();
+        rerenderModelEfficiencyContent();
+      } else if (target.id === "eff-bubble-metric" && EFFICIENCY_BUBBLE_METRICS.some((item) => item.key === target.value)) {
+        efficiencyBubbleMetric = target.value;
+        rerenderModelEfficiencyContent();
+      } else if (target.id === "eff-color-mode" && (target.value === "vendor" || target.value === "model")) {
+        efficiencyColorMode = target.value;
+        rerenderModelEfficiencyContent();
       }
     });
   }
@@ -6687,6 +8041,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     wireCopyButtons();
     currentInsights = stats.insights ?? [];
     wireInsightCardButtons();
+    scrollToPendingTabAnchor();
   }
   function wireAboutInfoToggle() {
     const toggle = document.getElementById("about-info-toggle");
@@ -6997,18 +8352,25 @@ ${_renderMultiModelMixedCostSessions(switching)}
       return;
     }
     activeTab = tab;
+    pendingTabAnchor = typeof message.anchor === "string" && message.anchor ? message.anchor : null;
     const btn = document.querySelector(`.tab-button[data-tab="${tab}"]`);
     btn?.click();
-    if (message.anchor) {
-      const anchor = document.getElementById(String(message.anchor));
-      if (anchor) {
-        setTimeout(() => anchor.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-      }
+    scrollToPendingTabAnchor();
+  }
+  function scrollToPendingTabAnchor() {
+    if (!pendingTabAnchor) {
+      return;
+    }
+    const anchor = document.getElementById(pendingTabAnchor);
+    if (anchor) {
+      pendingTabAnchor = null;
+      setTimeout(() => anchor.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     }
   }
   registerMessageHandler((message) => {
     handleExtensionMessage(message);
   });
+  vscode.postMessage({ command: "usageWebviewReady" });
   function getWorkspaceName(workspacePath) {
     const workspace = hygieneMatrixState?.workspaces.find((ws) => ws.workspacePath === workspacePath);
     return workspace?.workspaceName || workspacePath;
