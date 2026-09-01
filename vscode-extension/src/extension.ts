@@ -593,6 +593,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
+	private _updateTokenStatsStartedAt: number | undefined;
 
 	// --- Multi-window refresh coordination ---
 	// When several VS Code/Codium windows are open, only the window that holds the
@@ -2447,11 +2448,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return this._updateTokenStatsInFlight;
 		}
 
+		const startedAt = Date.now();
+		this._updateTokenStatsStartedAt = startedAt;
 		this._updateTokenStatsInFlight = this._runUpdateTokenStats(silent);
 		try {
 			return await this._updateTokenStatsInFlight;
 		} finally {
 			this._updateTokenStatsInFlight = undefined;
+			if (this._updateTokenStatsStartedAt === startedAt) {
+				this._updateTokenStatsStartedAt = undefined;
+			}
 		}
 	}
 
@@ -6762,7 +6768,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('No cached stats — showing loading screen while calculating...');
 			this._detailsPanelIsLoading = true;
 			this.statusBarItem.tooltip = l10n.t('statusBar.loadingInPanel');
-			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview);
+			this.detailsPanel.webview.html = this.getLoadingHtml(this.detailsPanel.webview, this._updateTokenStatsStartedAt ?? Date.now());
 
 			stats = await this.updateTokenStats();
 
@@ -9170,7 +9176,7 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
     return '';
   }
 
-  private getLoadingHtml(webview: vscode.Webview): string {
+  private getLoadingHtml(webview: vscode.Webview, startedAtMs: number = Date.now()): string {
     const nonce = getNonce();
     const iconUri = webview.asWebviewUri(vscode.Uri.joinPath(this.extensionUri, 'media', 'robot-icon.png'));
     return `<!DOCTYPE html>
@@ -9185,7 +9191,7 @@ ${this.getLoadingHtmlCssBase()}
 ${this.getLoadingHtmlCssSteps()}
 </style>
 </head>
-${this.getLoadingHtmlBody(nonce, iconUri.toString())}
+${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
 </html>`;
   }
 
@@ -9197,8 +9203,8 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
     return loadingHtml.getLoadingHtmlCssSteps();
   }
 
-  private getLoadingHtmlBody(nonce: string, iconUri?: string): string {
-    return loadingHtml.getLoadingHtmlBody(nonce, iconUri);
+  private getLoadingHtmlBody(nonce: string, iconUri?: string, startedAtMs: number = Date.now()): string {
+    return loadingHtml.getLoadingHtmlBody(nonce, iconUri, startedAtMs);
   }
 
   private getDetailsHtml(
