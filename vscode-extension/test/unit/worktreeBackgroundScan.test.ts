@@ -8,6 +8,7 @@ import {
 	WORKTREE_BACKGROUND_SCAN_INTERVAL_MS,
 	WORKTREE_SCAN_NOTIFY_MIN_BYTES,
 } from '../../src/worktreeBackgroundScan';
+import { scanWorktreeRootsWithTimeout } from '../../src/worktreeScan';
 
 // ---------------------------------------------------------------------------
 // shouldRunDailyWorktreeScan
@@ -111,4 +112,46 @@ test('sumWorktreeBytes: sums only known (non-negative) byte counts', () => {
 
 test('sumWorktreeBytes: empty list -> 0', () => {
 	assert.equal(sumWorktreeBytes([]), 0);
+});
+
+test('scanWorktreeRootsWithTimeout: skips a blocked root and continues scanning', async () => {
+	const errors: Array<{ root: string; message: string }> = [];
+	const visited: string[] = [];
+
+	const results = await scanWorktreeRootsWithTimeout({
+		roots: ['blocked', 'healthy'],
+		isActive: () => true,
+		timeoutMs: 10,
+		scanRoot: async (root) => {
+			visited.push(root);
+			if (root === 'blocked') {
+				return new Promise<string[]>(() => { /* never settles */ });
+			}
+			return ['found'];
+		},
+		onRootError: (root, error) => errors.push({ root, message: error.message }),
+	});
+
+	assert.deepEqual(visited, ['blocked', 'healthy']);
+	assert.deepEqual(results, ['found']);
+	assert.equal(errors.length, 1);
+	assert.equal(errors[0].root, 'blocked');
+	assert.match(errors[0].message, /timed out after 10ms/);
+});
+
+test('scanWorktreeRootsWithTimeout: invalidates a timed-out root callback', async () => {
+	let isBlockedRootActive: (() => boolean) | undefined;
+
+	await scanWorktreeRootsWithTimeout({
+		roots: ['blocked'],
+		isActive: () => true,
+		timeoutMs: 10,
+		scanRoot: async (_root, isRootActive) => {
+			isBlockedRootActive = isRootActive;
+			return new Promise<string[]>(() => { /* never settles */ });
+		},
+		onRootError: () => undefined,
+	});
+
+	assert.equal(isBlockedRootActive?.(), false);
 });
