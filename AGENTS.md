@@ -146,7 +146,8 @@ Do not enter retry loops trying to capture terminal output. These patterns waste
 ### What to do instead
 
 1. **Use `npm` scripts for standard operations** (from inside `vscode-extension/`):
-   - `npm run compile` — lint + build
+   - `npm run compile` — build the extension bundles
+   - `npm run validate` — type-check + lint + build
    - `npm run compile-tests` — compile test files to `out/`
    - `npm run test:node` — compile + run unit tests
    - `npm run test:coverage` — compile + run tests with coverage thresholds
