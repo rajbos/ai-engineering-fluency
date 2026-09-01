@@ -141,7 +141,7 @@ import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
-import { createWakeupGate, withTimeout as _withTimeout } from './utils/promises';
+import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
 
 // --- Session parsing & token estimation ---
 import {
@@ -597,6 +597,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
 	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
 	private readonly _deferredSessionPreloadFiles = new Set<string>();
+	private _deferredSessionPreloadCount = 0;
 	private _deferredSessionRefreshTimer: NodeJS.Timeout | undefined;
 	private _updateTokenStatsStartedAt: number | undefined;
 
@@ -2487,6 +2488,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const preloaded: SessionFilePreload[] = [];
 		let processed = 0;
 		const CONCURRENCY = 20;
+		this._deferredSessionPreloadCount = 0;
 
 		// Event-driven wakeups: workers that find the queue empty park on the gate
 		// instead of polling on a timer, avoiding pointless wake-ups while discovery runs.
@@ -2543,13 +2545,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return { sessionFiles, preloaded: [] };
 		}
 
-		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
-		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		this.logPreloadSessionFileSummary(sessionFiles, preloaded, analyzeStartMs);
 
 		// Defer expired-cache cleanup to avoid blocking discovery/workers startup
 		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		return { sessionFiles, preloaded };
+	}
+
+	private logPreloadSessionFileSummary(sessionFiles: string[], preloaded: SessionFilePreload[], analyzeStartMs: number): void {
+		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
+		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		if (this._deferredSessionPreloadCount > 0) {
+			this.warn(`⏳ Deferred ${this._deferredSessionPreloadCount} slow session parse(s) to the background`);
+		}
 	}
 
 	/**
@@ -2570,9 +2579,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			await _withTimeout(processing, CopilotTokenTracker.SESSION_PRELOAD_TIMEOUT_MS, operation);
 			this.debugCrashLog(`done  ${sessionFile}`);
 		} catch (e) {
-			if (e instanceof Error && e.message === `${operation} timed out after ${CopilotTokenTracker.SESSION_PRELOAD_TIMEOUT_MS}ms`) {
+			if (e instanceof _TimeoutError) {
 				this.debugCrashLog(`deferred ${sessionFile}`);
-				this.warn(`⏳ Deferring slow session parse to the background: ${path.basename(sessionFile)}`);
+				this._deferredSessionPreloadCount++;
 				this.deferSessionPreloadRefresh(sessionFile, processing);
 				return;
 			}
