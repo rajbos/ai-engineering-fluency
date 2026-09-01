@@ -17,10 +17,10 @@ export const PERIOD_LABELS: Record<Period, string> = {
 };
 
 /** Ordered list of the canonical periods used by default. */
-export const CANONICAL_PERIODS: Period[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
+export const CANONICAL_PERIODS: Period[] = ['today', 'last7', 'last30', 'last90', 'currentMonth', 'allTime'];
 
 /** Ordered list of every known period, including extras such as Previous month / This week. */
-export const ALL_PERIODS: Period[] = ['today', 'last7', 'last30', 'currentMonth', 'lastMonth', 'thisWeek', 'allTime'];
+export const ALL_PERIODS: Period[] = ['today', 'last7', 'last30', 'last90', 'currentMonth', 'lastMonth', 'thisWeek', 'allTime'];
 
 export type PeriodSelectorExtraOption = {
 	value: string;
@@ -34,7 +34,7 @@ export type PeriodSelectorExtraOption = {
 export type PeriodSelectorOptions = {
 	/** Value currently selected. */
 	selected: string;
-	/** Which known periods to show and in which order. Defaults to the canonical 5. */
+	/** Which known periods to show and in which order. Defaults to the canonical periods. */
 	periods?: Period[];
 	/** Extra ad-hoc options appended after the known periods (e.g. "Yesterday"). */
 	extraOptions?: PeriodSelectorExtraOption[];
