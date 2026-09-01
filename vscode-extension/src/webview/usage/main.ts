@@ -6,6 +6,7 @@ import { ContextReferenceUsage, getTotalContextRefs } from '../shared/contextRef
 import { escapeHtml, formatCompact, formatCost, formatDurationShort, formatFileSize, formatFixed, formatNumber, formatPercent, getTimeSince, safeSectionHtml, setFormatLocale } from '../shared/formatUtils';
 import { wireExtensionPointButtons } from '../shared/extensionPoints';
 import { initializeWebviewLocalization, setCurrentLanguage } from '../shared/localization';
+import { RECENT_SESSION_PERIODS, sanitizeRecentSessionBuckets } from './recentSessionsSanitizer';
 import type { McpToolUsage, ModeUsage, ModelSwitchingAnalysis as BaseModelSwitchingAnalysis, ToolCallUsage } from '../shared/types';
 // CSS imported as text via esbuild
 import themeStyles from '../shared/theme.css';
@@ -184,6 +185,7 @@ type UsageAnalysisStats = {
 	currentWorkspacePaths?: string[];
 	suppressedUnknownTools?: string[];
 	todaySessions?: TodaySessionSummary[];
+	recentSessions?: { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] };
 	use24HourTime?: boolean;
 	/** When true (default), rows tagged "auto" are hidden from the Tool Usage tables so only intentional tool calls are shown. */
 	hideAutomaticToolCalls?: boolean;
@@ -1377,6 +1379,17 @@ function handleRecentSessionsLoaded(message: any): void {
 	}
 }
 
+function replaceRecentSessionsCache(raw: unknown): void {
+	for (const period of RECENT_SESSION_PERIODS) {
+		delete recentSessionsCache[period];
+	}
+	const buckets = sanitizeRecentSessionBuckets(raw);
+	if (!buckets) { return; }
+	for (const period of RECENT_SESSION_PERIODS) {
+		recentSessionsCache[period] = buckets[period] as TodaySessionSummary[];
+	}
+}
+
 function unionFill(map: { [key: string]: number }, keys: string[]): { [key: string]: number } {
 	const result: { [key: string]: number } = { ...map };
 	for (const k of keys) {
@@ -1615,6 +1628,22 @@ function sanitizeOptionalReports(sanitized: UsageAnalysisStats, raw: any): void 
 	sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
 }
 
+function applySessionSummaries(sanitized: UsageAnalysisStats, raw: any): void {
+	if (Array.isArray(raw.todaySessions)) {
+		sanitized.todaySessions = raw.todaySessions.filter(
+			(session: any) => session && typeof session === 'object' && typeof session.interactions === 'number'
+		) as TodaySessionSummary[];
+	}
+	const recentSessions = sanitizeRecentSessionBuckets(raw.recentSessions);
+	if (recentSessions) {
+		sanitized.recentSessions = recentSessions as {
+			last7: TodaySessionSummary[];
+			last30: TodaySessionSummary[];
+			currentMonth: TodaySessionSummary[];
+		};
+	}
+}
+
 function sanitizeStats(raw: any): UsageAnalysisStats | null {
 	if (!raw || typeof raw !== 'object') {
 		traceCurationOnce('sanitize-invalid-root', 'sanitizeStats.invalidRoot');
@@ -1653,12 +1682,7 @@ function sanitizeStats(raw: any): UsageAnalysisStats | null {
 			) as MissedPotentialWorkspace[];
 		}
 
-		// Pass-through todaySessions (array of session summary objects)
-		if (Array.isArray(raw.todaySessions)) {
-			sanitized.todaySessions = raw.todaySessions.filter(
-				(s: any) => s && typeof s === 'object' && typeof s.interactions === 'number'
-			) as TodaySessionSummary[];
-		}
+		applySessionSummaries(sanitized, raw);
 
 		// Sanitize insights
 		if (Array.isArray(raw.insights)) {
@@ -5022,10 +5046,8 @@ function handleUpdateStats(message: any): void {
 	const sanitized = sanitizeStats(message.data);
 	if (sanitized) {
 		_ulLoadingActive = false;
-		// New stats invalidate any lazily-loaded lookback data; it is re-requested on demand.
-		for (const key of Object.keys(recentSessionsCache)) {
-			delete recentSessionsCache[key];
-		}
+		// CLI-backed hosts include all buckets; VS Code omits them and keeps using lazy loading.
+		replaceRecentSessionsCache(sanitized.recentSessions);
 		renderLayout(sanitized);
 		setupSessionsTableSort();
 		renderRepositoryHygienePanels();
@@ -5685,6 +5707,7 @@ async function bootstrap(): Promise<void> {
 	setFormatLocale(initialData.locale);
 	use24HourTime = initialData.use24HourTime !== false;
 	hideAutomaticToolCalls = initialData.hideAutomaticToolCalls !== false;
+	replaceRecentSessionsCache(initialData.recentSessions);
 	const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
 	if (Array.isArray(savedColumns)) {
 		const valid = savedColumns.filter((c): c is SessionColumnId => (ALL_SESSION_COLUMN_IDS as string[]).includes(c));

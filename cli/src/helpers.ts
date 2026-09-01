@@ -22,6 +22,7 @@ import type { DetailedStats, ModelUsage, UsageAnalysisStats, WorkspaceCustomizat
 import { analyzeSessionUsage, mergeUsageAnalysis, getModelUsageFromSession } from '../../src/usageAnalysis';
 import { reconcileModelUsageToActualTokens } from '../../src/statsHelpers';
 import { withErrorRecovery } from '../../src/utils/errors';
+import { buildRecentSessionBuckets, type RecentSessionBucketItem } from '../../src/recentSessions';
 import * as vscodeStub from './vscode-stub';
 import { loadCache, saveCache, disableCache, getCached, setCached, getCacheStats } from './cliCache';
 import { ENVIRONMENTAL } from './constants';
@@ -540,6 +541,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 	const monthPeriod = createEmptyUsageAnalysisPeriod();
 	const lastMonthPeriod = createEmptyUsageAnalysisPeriod();
 	const todaySessions: TodaySessionSummary[] = [];
+	const recentSessionItems: RecentSessionBucketItem<TodaySessionSummary>[] = [];
 
 	for (const file of sessionFiles) {
 		try {
@@ -551,6 +553,38 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 			}
 
 			const analysis = await analyzeSessionUsage(deps, file);
+			let sessionSummary: TodaySessionSummary | undefined;
+			const data = modified >= last30DaysStart ? await processSessionFile(file) : undefined;
+			if (data && data.interactions > 0) {
+				let inputTokens = 0, outputTokens = 0, cachedTokens = 0;
+				for (const usage of Object.values(data.modelUsage)) {
+					inputTokens += usage.inputTokens;
+					outputTokens += usage.outputTokens;
+					cachedTokens += usage.cachedReadTokens ?? 0;
+				}
+				sessionSummary = {
+					title: null,
+					filePath: file,
+					interactions: data.interactions,
+					toolCalls: analysis.toolCalls.total,
+					inputTokens,
+					outputTokens,
+					thinkingTokens: data.thinkingTokens ?? 0,
+					cachedTokens,
+					totalTokens: data.tokens,
+					estimatedCost: calculateEstimatedCost(data.modelUsage, modelPricing),
+					editor: data.editorSource,
+					models: Object.keys(data.modelUsage),
+					lastActivity: data.lastModified.toISOString(),
+					...(analysis.sessionDuration?.totalDurationMs !== undefined ? { durationMs: analysis.sessionDuration.totalDurationMs } : {}),
+					...(analysis.sessionDuration?.activeDurationMs !== undefined ? { activeDurationMs: analysis.sessionDuration.activeDurationMs } : {}),
+				};
+				recentSessionItems.push({
+					activityKey: toLocalDayKey(data.lastModified),
+					interactions: data.interactions,
+					value: sessionSummary,
+				});
+			}
 
 			if (modified >= last30DaysStart) {
 				mergeUsageAnalysis(last30DaysPeriod, analysis);
@@ -563,34 +597,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 			if (modified >= todayStart) {
 				mergeUsageAnalysis(todayPeriod, analysis);
 				todayPeriod.sessions++;
-				// Build per-session summary for the Today's Sessions tab.
-				// processSessionFile uses the shared LRU cache so the file isn't re-read on disk.
-				const data = await processSessionFile(file);
-				if (data && data.interactions > 0) {
-					let inputTokens = 0, outputTokens = 0, cachedTokens = 0;
-					for (const usage of Object.values(data.modelUsage)) {
-						inputTokens += usage.inputTokens;
-						outputTokens += usage.outputTokens;
-						cachedTokens += usage.cachedReadTokens ?? 0;
-					}
-					todaySessions.push({
-						title: null,
-						filePath: file,
-						interactions: data.interactions,
-						toolCalls: analysis.toolCalls.total,
-						inputTokens,
-						outputTokens,
-						thinkingTokens: data.thinkingTokens ?? 0,
-						cachedTokens,
-						totalTokens: data.tokens,
-						estimatedCost: calculateEstimatedCost(data.modelUsage, modelPricing),
-						editor: data.editorSource,
-						models: Object.keys(data.modelUsage),
-						lastActivity: data.lastModified.toISOString(),
-						...(analysis.sessionDuration?.totalDurationMs !== undefined ? { durationMs: analysis.sessionDuration.totalDurationMs } : {}),
-						...(analysis.sessionDuration?.activeDurationMs !== undefined ? { activeDurationMs: analysis.sessionDuration.activeDurationMs } : {}),
-					});
-				}
+				if (sessionSummary) { todaySessions.push(sessionSummary); }
 			}
 			if (modified >= lastMonthStart && modified < monthStart) {
 				mergeUsageAnalysis(lastMonthPeriod, analysis);
@@ -608,6 +615,7 @@ export async function calculateUsageAnalysisStats(sessionFiles: string[]): Promi
 		lastMonth: lastMonthPeriod,
 		lastUpdated: now,
 		todaySessions: todaySessions.sort((a, b) => b.interactions - a.interactions),
+		recentSessions: buildRecentSessionBuckets(recentSessionItems, now),
 	};
 }
 

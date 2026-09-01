@@ -304,6 +304,7 @@ import { ConfirmationMessages } from './backend/ui/messages';
 import { getNonce, buildCspMeta, getCodiconStylesheetTag } from './utils/webviewUtils';
 import { isGuidMcpTool, isMcpFamilyResolvedTool } from '../../src/utils/toolUtils';
 import { toLocalDayKey } from '../../src/utils/dayKeys';
+import { buildRecentSessionBuckets as bucketRecentSessions } from '../../src/recentSessions';
 import { determineOnboardingAction } from './onboarding';
 import { mergeNotifiedEditors, mergeSeenEditors } from './editorDiscovery';
 
@@ -4418,15 +4419,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		now: Date
 	): { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } {
-		const last7Key = getTimeWindowStartDayKey('last7', now);
-		const last30Key = getTimeWindowStartDayKey('last30', now);
-		const monthKey = getTimeWindowStartDayKey('currentMonth', now);
-		const items = this.buildRecentSessionItems(results);
-		return {
-			last7: items.filter(it => it.activityKey >= last7Key).map(it => it.value),
-			last30: items.filter(it => it.activityKey >= last30Key).map(it => it.value),
-			currentMonth: items.filter(it => it.activityKey >= monthKey).map(it => it.value),
-		};
+		return bucketRecentSessions(this.buildRecentSessionItems(results), now);
 	}
 
 	private buildRecentSessionBucket(
