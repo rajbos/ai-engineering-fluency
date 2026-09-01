@@ -142,7 +142,7 @@ import { getVSCodeUserPaths } from '../../src/adapters/copilotChatAdapter';
 import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
-import { createWakeupGate } from './utils/promises';
+import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
 
 // --- Session parsing & token estimation ---
 import {
@@ -452,6 +452,8 @@ type UsageAnalysisTab = 'activity' | 'tools' | 'health' | 'worktrees' | 'insight
 class CopilotTokenTracker implements vscode.Disposable {
 	// Cache version - increment this when making changes that require cache invalidation
 	private static readonly CACHE_VERSION = 69; // uncapped correction counts and generated-message filtering
+	/** Initial stats should not wait indefinitely for one inaccessible or stalled session. */
+	private static readonly SESSION_PRELOAD_TIMEOUT_MS = 15_000;
 	// Maximum length for displaying workspace IDs in diagnostics/customization matrix
 	private static readonly WORKSPACE_ID_DISPLAY_LENGTH = 8;
 	private static readonly SEEN_EDITORS_STATE_KEY = 'discovery.seenEditors';
@@ -594,6 +596,10 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	// In-flight updateTokenStats promise — coalesces concurrent callers onto the same run
 	private _updateTokenStatsInFlight: Promise<DetailedStats | undefined> | undefined;
+	// Timed-out preloads continue in the background; skip duplicate work until their cache entries settle.
+	private readonly _deferredSessionPreloadFiles = new Set<string>();
+	private _deferredSessionPreloadCount = 0;
+	private _deferredSessionRefreshTimer: NodeJS.Timeout | undefined;
 	private _updateTokenStatsStartedAt: number | undefined;
 
 	// --- Multi-window refresh coordination ---
@@ -2483,6 +2489,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const preloaded: SessionFilePreload[] = [];
 		let processed = 0;
 		const CONCURRENCY = 20;
+		this._deferredSessionPreloadCount = 0;
 
 		// Event-driven wakeups: workers that find the queue empty park on the gate
 		// instead of polling on a timer, avoiding pointless wake-ups while discovery runs.
@@ -2539,13 +2546,20 @@ class CopilotTokenTracker implements vscode.Disposable {
 			return { sessionFiles, preloaded: [] };
 		}
 
-		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
-		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		this.logPreloadSessionFileSummary(sessionFiles, preloaded, analyzeStartMs);
 
 		// Defer expired-cache cleanup to avoid blocking discovery/workers startup
 		void Promise.resolve().then(() => this.cacheManager.clearExpiredCache());
 
 		return { sessionFiles, preloaded };
+	}
+
+	private logPreloadSessionFileSummary(sessionFiles: string[], preloaded: SessionFilePreload[], analyzeStartMs: number): void {
+		this.log(`📊 Analyzed ${sessionFiles.length} session file(s)`);
+		this.log(`📦 Preloaded ${preloaded.length}/${sessionFiles.length} session file(s) within date range in ${((Date.now() - analyzeStartMs) / 1000).toFixed(1)}s`);
+		if (this._deferredSessionPreloadCount > 0) {
+			this.warn(`⏳ Deferred ${this._deferredSessionPreloadCount} slow session parse(s) to the background`);
+		}
 	}
 
 	/**
@@ -2555,12 +2569,57 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * for the same file means the process died while processing it.
 	 */
 	private async processPreloadQueueFileWithCrashLog(sessionFile: string, cutoffMs: number, preloaded: SessionFilePreload[], missBudget?: { remaining: number }): Promise<void> {
+		if (this._deferredSessionPreloadFiles.has(sessionFile)) {
+			this.debugCrashLog(`deferred ${sessionFile}`);
+			return;
+		}
 		this.debugCrashLog(`start ${sessionFile}`);
+		const processing = this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+		const operation = `Parsing session "${sessionFile}"`;
 		try {
-			await this.processPreloadQueueFile(sessionFile, cutoffMs, preloaded, missBudget);
+			await _withTimeout(processing, CopilotTokenTracker.SESSION_PRELOAD_TIMEOUT_MS, operation);
 			this.debugCrashLog(`done  ${sessionFile}`);
 		} catch (e) {
+			if (e instanceof _TimeoutError) {
+				this.debugCrashLog(`deferred ${sessionFile}`);
+				this._deferredSessionPreloadCount++;
+				this.deferSessionPreloadRefresh(sessionFile, processing);
+				return;
+			}
 			this.debugCrashLog(`error ${sessionFile}: ${e}`);
+		}
+	}
+
+	/**
+	 * Keeps a timed-out preload alive without holding the initial statistics pass. Once every
+	 * deferred parse has filled its cache entry, a single refresh incorporates those results.
+	 */
+	private deferSessionPreloadRefresh(sessionFile: string, processing: Promise<void>): void {
+		this._deferredSessionPreloadFiles.add(sessionFile);
+		void processing
+			.then(() => this.debugCrashLog(`done(background)  ${sessionFile}`))
+			.catch(error => this.debugCrashLog(`error(background) ${sessionFile}: ${error}`))
+			.finally(() => {
+				this._deferredSessionPreloadFiles.delete(sessionFile);
+				if (this._deferredSessionPreloadFiles.size === 0) {
+					this.scheduleDeferredSessionRefresh();
+				}
+			});
+	}
+
+	private scheduleDeferredSessionRefresh(): void {
+		if (this._deferredSessionRefreshTimer || this._disposed) { return; }
+		this._deferredSessionRefreshTimer = setTimeout(() => {
+			this._deferredSessionRefreshTimer = undefined;
+			if (this._disposed) { return; }
+			if (this._updateTokenStatsInFlight) {
+				void this._updateTokenStatsInFlight.finally(() => this.scheduleDeferredSessionRefresh());
+				return;
+			}
+			void this.updateTokenStats(true, true);
+		}, 0);
+		if (typeof this._deferredSessionRefreshTimer.unref === 'function') {
+			this._deferredSessionRefreshTimer.unref();
 		}
 	}
 
@@ -11416,6 +11475,10 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString(), startedAtMs)}
     if (this._followerResyncTimer) {
       clearTimeout(this._followerResyncTimer);
       this._followerResyncTimer = undefined;
+    }
+    if (this._deferredSessionRefreshTimer) {
+      clearTimeout(this._deferredSessionRefreshTimer);
+      this._deferredSessionRefreshTimer = undefined;
     }
     // Release the refresh leader lock if this window held it, so another window can
     // take over promptly instead of waiting for the stale-lock timeout.

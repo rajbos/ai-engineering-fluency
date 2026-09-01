@@ -2,6 +2,13 @@
  * Promise utility helpers.
  */
 
+export class TimeoutError extends Error {
+  constructor(operation: string, timeoutMs: number) {
+    super(`${operation} timed out after ${timeoutMs}ms`);
+    this.name = 'TimeoutError';
+  }
+}
+
 /**
  * Wraps a promise with a timeout to prevent indefinite hangs.
  * The timeout handle is cleared via `.finally()` to prevent memory leaks when
@@ -26,7 +33,7 @@ export function withTimeout<T>(
     }),
     new Promise<never>((_, reject) => {
       timeoutHandle = setTimeout(
-        () => reject(new Error(`${operation} timed out after ${timeoutMs}ms`)),
+        () => reject(new TimeoutError(operation, timeoutMs)),
         timeoutMs,
       );
     }),
