@@ -84,3 +84,16 @@ test('withTimeout: rejects with a descriptive error when it times out', async ()
 		/slow op timed out after 10ms/,
 	);
 });
+
+test('withTimeout: does not cancel work that can be deferred after a timeout', async () => {
+	let resolveWork: ((value: string) => void) | undefined;
+	const work = new Promise<string>((resolve) => { resolveWork = resolve; });
+
+	await assert.rejects(
+		withTimeout(work, 10, 'deferred session'),
+		/deferred session timed out after 10ms/,
+	);
+
+	resolveWork?.('cached');
+	assert.equal(await work, 'cached');
+});
