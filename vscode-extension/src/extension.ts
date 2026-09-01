@@ -58,6 +58,7 @@ import type {
   WorkspaceCustomizationMatrix,
   UsageAnalysisPeriod,
   AgenticTrendPoint,
+  DarkFactoryReport,
   SessionFileDetails,
   PromptTokenDetail,
   ActualUsage,
@@ -203,6 +204,8 @@ import {
   type ModelDailyInput,
   type PeriodVolumeTotals,
 } from '../../src/efficiencyAnalysis';
+
+import { scanDarkFactoryReadiness } from './darkFactoryService';
 
 // --- Maturity & fluency scoring ---
 import {
@@ -7789,6 +7792,28 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		return _calculateMaturityScores(this._lastCustomizationMatrix, (useCache) => this.calculateUsageAnalysisStats(useCache, preloaded), useCache, this._copilotPlanResolved?.isMCPEnabled);
 	}
 
+	/**
+	 * Run the Dark Factory readiness scan over the repositories in this workspace.
+	 *
+	 * Filesystem-only plus the pull-request statistics the Usage Analysis view has
+	 * already fetched, so opening the Fluency Score view issues no extra GitHub
+	 * calls. A failure here must never take the whole view down — the section is
+	 * simply omitted and the reason logged.
+	 */
+	private runDarkFactoryScan(): DarkFactoryReport | undefined {
+		try {
+			const openFolders = (vscode.workspace.workspaceFolders ?? []).map(folder => folder.uri.fsPath);
+			return scanDarkFactoryReadiness({
+				workspacePaths: [...openFolders, ...this._buildWorkspacePaths()],
+				prStats: this._lastRepoPrStats,
+				enterpriseUri: getConfiguredGitHubEnterpriseUri(),
+			});
+		} catch (err) {
+			this.warn(`Dark Factory readiness scan failed: ${err}`);
+			return undefined;
+		}
+	}
+
 	public async showMaturity(): Promise<void> {
 		this.log('🎯 Opening Copilot Fluency Score dashboard');
 		await this.context.globalState.update('fluencyScore.everOpened', true);
@@ -7803,7 +7828,7 @@ Return ONLY the JSON object, no markdown formatting, no explanations.`;
 		const dismissedTips = await this.getDismissedFluencyTips();
 		const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
 		this.maturityPanel.webview.onDidReceiveMessage(async (message) => { await this.handleMaturityMessage(message); });
-		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
+		this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
 		this.maturityPanel.onDidDispose(() => { this.log('🎯 Copilot Fluency Score dashboard closed'); this.maturityPanel = undefined; });
 	}
 
@@ -7888,7 +7913,7 @@ private async refreshMaturityPanel(): Promise<void> {
 	const dismissedTips = await this.getDismissedFluencyTips();
 	const isDebugMode = this.context.extensionMode === vscode.ExtensionMode.Development;
 	const fluencyLevels = isDebugMode ? this.getFluencyLevelData(isDebugMode).categories : undefined;
-	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks() });
+	this.maturityPanel.webview.html = this.getMaturityHtml(this.maturityPanel.webview, { ...maturityData, dismissedTips, isDebugMode, fluencyLevels, installedHooks: this.hookManager.getInstalledHooks(), darkFactory: this.runDarkFactoryScan() });
 	this.log('✅ Copilot Fluency Score dashboard refreshed');
 }
 
@@ -8303,6 +8328,8 @@ private async shareTextToSocialPlatform(shareText: string, platform: 'linkedin' 
       dismissedTips?: string[];
       isDebugMode?: boolean;
       installedHooks?: string[];
+      /** Per-repository Dark Factory readiness scan; omitted when the scan could not run. */
+      darkFactory?: DarkFactoryReport;
       fluencyLevels?: Array<{
         category: string;
         icon: string;
