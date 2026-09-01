@@ -369,13 +369,148 @@ function fetchEnterprisePremiumBudgetsPage(enterpriseSlug: string, username: str
 	});
 }
 
-/** Detect which AI system a GitHub login belongs to, or null if not an AI bot. */
-export function detectAiType(login: string): RepoPrDetail['aiType'] | null {
-	const l = login.toLowerCase();
-	if (l.includes('copilot')) { return 'copilot'; }
-	if (l.includes('claude') || l.includes('anthropic')) { return 'claude'; }
-	if (l.includes('openai') || l.includes('codex')) { return 'openai'; }
+/**
+ * Recognized AI bot/App login substrings, mapped to the `aiType` the dashboard reports.
+ * Extend this list as new AI coding agents or custom GitHub Apps are identified — each
+ * entry is matched as a case-insensitive substring against the bot's login. Order matters:
+ * the first match wins, so put more specific patterns first if a login could plausibly
+ * match more than one entry.
+ */
+const KNOWN_BOT_LOGIN_PATTERNS: ReadonlyArray<{ pattern: string; aiType: NonNullable<RepoPrDetail['aiType']> }> = [
+	{ pattern: 'copilot', aiType: 'copilot' },
+	{ pattern: 'claude', aiType: 'claude' },
+	{ pattern: 'anthropic', aiType: 'claude' },
+	{ pattern: 'openai', aiType: 'openai' },
+	{ pattern: 'codex', aiType: 'openai' },
+];
+
+/**
+ * Detect which AI system authored or was requested to review a PR, from the GitHub user
+ * object on the REST payload (`pr.user`, or one entry of `pr.requested_reviewers`).
+ *
+ * **What this can see**: any account GitHub itself marks as automated — `type: 'Bot'` on the
+ * REST payload, or (as a secondary signal, since some App-driven accounts have historically
+ * omitted `type`) a login ending in the `[bot]` suffix GitHub Apps conventionally use. A bot
+ * whose login matches a known pattern (Copilot, Claude/Anthropic, OpenAI/Codex) is attributed
+ * to that specific `aiType`. A bot that doesn't match any known pattern — e.g. an enterprise's
+ * own custom GitHub App fronting an internal agent — is still counted as AI via `'other-ai'`
+ * rather than silently falling through to "human". Gating on `type === 'Bot'` (instead of the
+ * old login-substring-only check) also removes the false-positive side: a human account whose
+ * login happens to contain "copilot", "claude" or "openai" (e.g. `copilotpilot`, `claudia-dev`,
+ * an org named `openai-research-partners`) has `type: 'User'` and is correctly left unclassified.
+ *
+ * **What this cannot see**: AI coding work driven locally (Claude Code, Copilot agent mode in
+ * the IDE, etc.) and pushed under the human's own GitHub account. That PR is authored by a real
+ * `User`, not a `Bot`, and is indistinguishable from manual work by this function alone — see
+ * `RepoPrInfo.userAuthoredPrs` and `detectCoAuthorAiType` below for the `Co-authored-by:`
+ * trailer signal that can recover it (as a separate, opt-in enrichment, not part of this check).
+ */
+export function detectAiType(user: { login?: string; type?: string } | null | undefined): RepoPrDetail['aiType'] | null {
+	const login = (user?.login ?? '').toLowerCase();
+	const isBot = user?.type === 'Bot' || login.endsWith('[bot]');
+	if (!isBot) { return null; }
+	for (const { pattern, aiType } of KNOWN_BOT_LOGIN_PATTERNS) {
+		if (login.includes(pattern)) { return aiType; }
+	}
+	return 'other-ai';
+}
+
+// ---------------------------------------------------------------------------
+// Co-authored-by trailer detection (locally-driven agent work)
+// ---------------------------------------------------------------------------
+
+/** Matches one `Co-authored-by: Name <email>` git trailer line (case-insensitive), capturing the email. */
+const CO_AUTHOR_TRAILER_PATTERN = /^co-authored-by:.*<([^>]+)>/gim;
+
+/**
+ * Known co-author email patterns that identify AI-authored commits, mapped to the existing
+ * `aiType` union. Extend alongside `KNOWN_BOT_LOGIN_PATTERNS` as new tools are identified.
+ * Claude Code stamps `Co-Authored-By: Claude <noreply@anthropic.com>`; GitHub's coding agent
+ * and Copilot agent mode stamp the bot's own `users.noreply.github.com` address.
+ */
+const KNOWN_CO_AUTHOR_EMAIL_PATTERNS: ReadonlyArray<{ pattern: string; aiType: NonNullable<RepoPrDetail['aiType']> }> = [
+	{ pattern: '@anthropic.com', aiType: 'claude' },
+	{ pattern: 'copilot-swe-agent', aiType: 'copilot' },
+	{ pattern: 'copilot@users.noreply.github.com', aiType: 'copilot' },
+	{ pattern: '@openai.com', aiType: 'openai' },
+];
+
+/**
+ * Detect an AI co-author from a PR's commit messages, via `Co-authored-by:` trailers. This is
+ * the signal that can attribute locally-driven agent work (Claude Code, Copilot agent mode) —
+ * work `detectAiType` cannot see because it lands under the human's own GitHub account.
+ *
+ * Deliberately **not** wired into `fetchRepoPrs` / any bulk aggregation path: getting commit
+ * messages requires a `GET .../pulls/{number}/commits` request per PR (there is no bulk
+ * endpoint), and `fetchRepoPrs` already caps at up to 500 PRs/repo per refresh — calling this
+ * for every PR would multiply that into up to 500 extra requests per repo per refresh. Callers
+ * that want this signal must fetch commit messages (e.g. via `fetchPrCommitMessages` below) for
+ * a deliberately bounded set of PRs (e.g. only the signed-in user's own PRs in the current
+ * window) rather than from the bulk path.
+ */
+export function detectCoAuthorAiType(commitMessages: string[]): RepoPrDetail['aiType'] | null {
+	for (const message of commitMessages) {
+		for (const match of message.matchAll(CO_AUTHOR_TRAILER_PATTERN)) {
+			const email = match[1].toLowerCase();
+			for (const { pattern, aiType } of KNOWN_CO_AUTHOR_EMAIL_PATTERNS) {
+				if (email.includes(pattern)) { return aiType; }
+			}
+		}
+	}
 	return null;
+}
+
+/**
+ * Fetch the commit messages for a single PR (`GET /pulls/{number}/commits`), for use with
+ * `detectCoAuthorAiType`. One HTTP request per call — see that function's doc comment for why
+ * this is not called from the bulk `fetchRepoPrs` path.
+ */
+export function fetchPrCommitMessages(
+	owner: string,
+	repo: string,
+	prNumber: number,
+	token: string,
+	fetcher: (owner: string, repo: string, prNumber: number, token: string) => Promise<{ messages: string[]; statusCode?: number; error?: string }> = fetchPrCommitMessagesPage,
+): Promise<{ messages: string[]; statusCode?: number; error?: string }> {
+	return fetcher(owner, repo, prNumber, token);
+}
+
+function fetchPrCommitMessagesPage(owner: string, repo: string, prNumber: number, token: string): Promise<{ messages: string[]; statusCode?: number; error?: string }> {
+	const { hostname, restPathPrefix } = getGitHubApiEndpoints();
+	return new Promise((resolve) => {
+		const req = https.request(
+			{
+				hostname,
+				path: `${restPathPrefix}/repos/${owner}/${repo}/pulls/${prNumber}/commits?per_page=100`,
+				headers: {
+					Authorization: `Bearer ${token}`,
+					'User-Agent': GITHUB_API_USER_AGENT,
+					Accept: GITHUB_API_ACCEPT_V3,
+				},
+			},
+			(res) => {
+				let data = '';
+				res.on('data', (chunk) => (data += chunk));
+				res.on('end', () => {
+					try {
+						const parsed = JSON.parse(data);
+						if (!Array.isArray(parsed)) {
+							resolve({ messages: [], statusCode: res.statusCode, error: parsed.message ?? 'Unexpected API response' });
+						} else {
+							resolve({ messages: parsed.map((c: any) => c?.commit?.message ?? '').filter(Boolean), statusCode: res.statusCode });
+						}
+					} catch (e) {
+						resolve({ messages: [], statusCode: res.statusCode, error: String(e) });
+					}
+				});
+			},
+		);
+		req.on('error', (e) => resolve({ messages: [], error: e.message }));
+		req.setTimeout(15000, () => {
+			req.destroy(new Error('Request timed out after 15 s'));
+		});
+		req.end();
+	});
 }
 
 /** Fetch a single page of PRs from GitHub REST API. */
