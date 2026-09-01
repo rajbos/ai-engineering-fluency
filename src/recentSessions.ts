@@ -1,4 +1,4 @@
-import { toLocalDayKey } from './utils/dayKeys';
+import { getTimeWindowStartDayKey } from './timeWindows';
 
 export type RecentSessionBuckets<T> = {
 	last7: T[];
@@ -16,9 +16,9 @@ export function buildRecentSessionBuckets<T>(
 	items: RecentSessionBucketItem<T>[],
 	now: Date,
 ): RecentSessionBuckets<T> {
-	const last7Key = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
-	const last30Key = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30));
-	const monthKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), 1));
+	const last7Key = getTimeWindowStartDayKey('last7', now);
+	const last30Key = getTimeWindowStartDayKey('last30', now);
+	const monthKey = getTimeWindowStartDayKey('currentMonth', now);
 	const buckets: RecentSessionBuckets<T> = { last7: [], last30: [], currentMonth: [] };
 
 	for (const item of [...items].sort((a, b) => b.interactions - a.interactions)) {

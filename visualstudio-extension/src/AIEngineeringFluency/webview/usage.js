@@ -1602,7 +1602,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     thisWeek: "This week",
     allTime: "All time"
   };
-  var CANONICAL_PERIODS = ["today", "last7", "last30", "currentMonth", "allTime"];
+  var CANONICAL_PERIODS = ["today", "last7", "last30", "last90", "currentMonth", "allTime"];
   function setOptionSelected(option, value, selected) {
     if (value === selected) {
       option.selected = true;
@@ -1961,6 +1961,51 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
 
   // src/webview/usage/recentSessionsSanitizer.ts
   var RECENT_SESSION_PERIODS = ["last7", "last30", "currentMonth"];
+  var REQUIRED_NUMBER_FIELDS = [
+    "interactions",
+    "toolCalls",
+    "inputTokens",
+    "outputTokens",
+    "thinkingTokens",
+    "cachedTokens",
+    "totalTokens",
+    "estimatedCost"
+  ];
+  var OPTIONAL_NUMBER_FIELDS = [
+    "truncationCount",
+    "maxRequestInputTokens",
+    "contextWindowLimit",
+    "contextReachedTokens",
+    "durationMs",
+    "activeDurationMs",
+    "subAgentCalls"
+  ];
+  var OPTIONAL_STRING_FIELDS = ["contextTier", "workspace"];
+  function isFiniteNumber(value) {
+    return typeof value === "number" && Number.isFinite(value);
+  }
+  function isTodaySessionSummary(value) {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const session = value;
+    if (session.title !== null && typeof session.title !== "string") {
+      return false;
+    }
+    if (typeof session.filePath !== "string" || typeof session.editor !== "string" || typeof session.lastActivity !== "string") {
+      return false;
+    }
+    if (!Array.isArray(session.models) || !session.models.every((model) => typeof model === "string")) {
+      return false;
+    }
+    if (!REQUIRED_NUMBER_FIELDS.every((field) => isFiniteNumber(session[field]))) {
+      return false;
+    }
+    if (!OPTIONAL_NUMBER_FIELDS.every((field) => session[field] === void 0 || isFiniteNumber(session[field]))) {
+      return false;
+    }
+    return OPTIONAL_STRING_FIELDS.every((field) => session[field] === void 0 || typeof session[field] === "string");
+  }
   function sanitizeRecentSessionBuckets(raw) {
     if (!raw || typeof raw !== "object") {
       return void 0;
@@ -1972,9 +2017,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       if (!Array.isArray(sessions)) {
         return void 0;
       }
-      result[period] = sessions.filter(
-        (session) => !!session && typeof session === "object" && typeof session.interactions === "number"
-      );
+      result[period] = sessions.filter(isTodaySessionSummary);
     }
     return result;
   }
@@ -7879,7 +7922,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     wrapper.replaceChildren();
     const { wrapper: selectorWrapper } = createPeriodSelector({
       selected: efficiencySelectedPeriod,
-      disabled: ["last7", "allTime"],
+      disabled: ["last7", "last90", "allTime"],
       disabledTitle: "Not available for model efficiency",
       label: "",
       onChange: (value) => {
