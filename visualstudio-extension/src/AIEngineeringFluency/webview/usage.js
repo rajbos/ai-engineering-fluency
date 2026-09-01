@@ -1602,7 +1602,7 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
     thisWeek: "This week",
     allTime: "All time"
   };
-  var CANONICAL_PERIODS = ["today", "last7", "last30", "currentMonth", "allTime"];
+  var CANONICAL_PERIODS = ["today", "last7", "last30", "last90", "currentMonth", "allTime"];
   function setOptionSelected(option, value, selected) {
     if (value === selected) {
       option.selected = true;
@@ -1957,6 +1957,69 @@ To suppress this warning, set window.${CONFIG_KEY} to true`);
       });
       buttonRow.append(el2);
     }
+  }
+
+  // src/webview/usage/recentSessionsSanitizer.ts
+  var RECENT_SESSION_PERIODS = ["last7", "last30", "currentMonth"];
+  var REQUIRED_NUMBER_FIELDS = [
+    "interactions",
+    "toolCalls",
+    "inputTokens",
+    "outputTokens",
+    "thinkingTokens",
+    "cachedTokens",
+    "totalTokens",
+    "estimatedCost"
+  ];
+  var OPTIONAL_NUMBER_FIELDS = [
+    "truncationCount",
+    "maxRequestInputTokens",
+    "contextWindowLimit",
+    "contextReachedTokens",
+    "durationMs",
+    "activeDurationMs",
+    "subAgentCalls"
+  ];
+  var OPTIONAL_STRING_FIELDS = ["contextTier", "workspace"];
+  function isFiniteNumber(value) {
+    return typeof value === "number" && Number.isFinite(value);
+  }
+  function isTodaySessionSummary(value) {
+    if (!value || typeof value !== "object") {
+      return false;
+    }
+    const session = value;
+    if (session.title !== null && typeof session.title !== "string") {
+      return false;
+    }
+    if (typeof session.filePath !== "string" || typeof session.editor !== "string" || typeof session.lastActivity !== "string") {
+      return false;
+    }
+    if (!Array.isArray(session.models) || !session.models.every((model) => typeof model === "string")) {
+      return false;
+    }
+    if (!REQUIRED_NUMBER_FIELDS.every((field) => isFiniteNumber(session[field]))) {
+      return false;
+    }
+    if (!OPTIONAL_NUMBER_FIELDS.every((field) => session[field] === void 0 || isFiniteNumber(session[field]))) {
+      return false;
+    }
+    return OPTIONAL_STRING_FIELDS.every((field) => session[field] === void 0 || typeof session[field] === "string");
+  }
+  function sanitizeRecentSessionBuckets(raw) {
+    if (!raw || typeof raw !== "object") {
+      return void 0;
+    }
+    const source = raw;
+    const result = {};
+    for (const period of RECENT_SESSION_PERIODS) {
+      const sessions = source[period];
+      if (!Array.isArray(sessions)) {
+        return void 0;
+      }
+      result[period] = sessions.filter(isTodaySessionSummary);
+    }
+    return result;
   }
 
   // src/webview/shared/theme.css
@@ -4866,6 +4929,18 @@ ${_renderMultiModelMixedCostSessions(switching)}
       refreshSessionsPanelBody();
     }
   }
+  function replaceRecentSessionsCache(raw) {
+    for (const period of RECENT_SESSION_PERIODS) {
+      delete recentSessionsCache[period];
+    }
+    const buckets = sanitizeRecentSessionBuckets(raw);
+    if (!buckets) {
+      return;
+    }
+    for (const period of RECENT_SESSION_PERIODS) {
+      recentSessionsCache[period] = buckets[period];
+    }
+  }
   function unionFill(map, keys) {
     const result = { ...map };
     for (const k2 of keys) {
@@ -5109,6 +5184,17 @@ ${_renderMultiModelMixedCostSessions(switching)}
     sanitized.correctionReport = sanitizeCorrectionReport(raw.correctionReport);
     sanitized.repeatedTasks = sanitizeRepeatedTaskReport(raw.repeatedTasks);
   }
+  function applySessionSummaries(sanitized, raw) {
+    if (Array.isArray(raw.todaySessions)) {
+      sanitized.todaySessions = raw.todaySessions.filter(
+        (session) => session && typeof session === "object" && typeof session.interactions === "number"
+      );
+    }
+    const recentSessions = sanitizeRecentSessionBuckets(raw.recentSessions);
+    if (recentSessions) {
+      sanitized.recentSessions = recentSessions;
+    }
+  }
   function sanitizeStats(raw) {
     if (!raw || typeof raw !== "object") {
       traceCurationOnce("sanitize-invalid-root", "sanitizeStats.invalidRoot");
@@ -5135,11 +5221,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
           (w2) => w2 && typeof w2 === "object" && typeof w2.workspacePath === "string"
         );
       }
-      if (Array.isArray(raw.todaySessions)) {
-        sanitized.todaySessions = raw.todaySessions.filter(
-          (s4) => s4 && typeof s4 === "object" && typeof s4.interactions === "number"
-        );
-      }
+      applySessionSummaries(sanitized, raw);
       if (Array.isArray(raw.insights)) {
         sanitized.insights = sanitizeInsights(raw.insights);
       }
@@ -7840,7 +7922,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     wrapper.replaceChildren();
     const { wrapper: selectorWrapper } = createPeriodSelector({
       selected: efficiencySelectedPeriod,
-      disabled: ["last7", "allTime"],
+      disabled: ["last7", "last90", "allTime"],
       disabledTitle: "Not available for model efficiency",
       label: "",
       onChange: (value) => {
@@ -8187,9 +8269,7 @@ ${_renderMultiModelMixedCostSessions(switching)}
     const sanitized = sanitizeStats(message.data);
     if (sanitized) {
       _ulLoadingActive = false;
-      for (const key of Object.keys(recentSessionsCache)) {
-        delete recentSessionsCache[key];
-      }
+      replaceRecentSessionsCache(sanitized.recentSessions);
       renderLayout(sanitized);
       setupSessionsTableSort();
       renderRepositoryHygienePanels();
@@ -8831,6 +8911,7 @@ For each issue, please provide specific steps or code changes to fix it.`;
     setFormatLocale(initialData.locale);
     use24HourTime = initialData.use24HourTime !== false;
     hideAutomaticToolCalls = initialData.hideAutomaticToolCalls !== false;
+    replaceRecentSessionsCache(initialData.recentSessions);
     const savedColumns = initialData.sessionColumnSettings?.enabledColumns;
     if (Array.isArray(savedColumns)) {
       const valid = savedColumns.filter((c4) => ALL_SESSION_COLUMN_IDS.includes(c4));
