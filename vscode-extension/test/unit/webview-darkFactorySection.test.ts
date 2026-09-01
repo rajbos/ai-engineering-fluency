@@ -101,7 +101,17 @@ describe('buildDarkFactorySectionHtml', () => {
 
 	test('reports the repositories it did not scan rather than truncating silently', () => {
 		const html = buildDarkFactorySectionHtml(report([repoReport()], { skippedRepoCount: 7 }));
-		assert.match(html, /7 further repository/);
+		assert.match(html, /7 further repositories were found but not scanned/);
+	});
+
+	test('uses the singular when exactly one repository was skipped', () => {
+		const html = buildDarkFactorySectionHtml(report([repoReport()], { skippedRepoCount: 1 }));
+		assert.match(html, /1 further repository was found but not scanned/);
+	});
+
+	test('says nothing about skipped repositories when none were skipped', () => {
+		const html = buildDarkFactorySectionHtml(report([repoReport()], { skippedRepoCount: 0 }));
+		assert.equal(/further repositor/.test(html), false);
 	});
 
 	test('marks a repository whose GitHub remote could not be resolved', () => {

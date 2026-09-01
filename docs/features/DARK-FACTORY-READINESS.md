@@ -61,6 +61,14 @@ Three further honesty rules, all enforced in `resolveControl()`:
   cannot be observed by a scanner, so the scan says so instead of guessing. This also means no
   repository is ever reported as fully evidenced.
 
+The collector applies the same rule one level down, in `darkFactorySignals.ts`: **`absent` is only
+reported when every path the control needed was actually readable.** A directory that exists but
+cannot be read (`EACCES`, `EIO`, …) and a workflow scan cut short by the file cap are both missing
+evidence, so they downgrade the result to `unknown`. `ENOENT` and `ENOTDIR` are the exception — those
+mean the path genuinely is not there, which is a real answer. Because unreadable evidence can only
+ever produce a false *absence* and never a false presence, a positive match is always reported as
+`present` even when the surrounding scan was incomplete.
+
 Controls detected by pattern matching are labelled **heuristic** in the UI — they produce
 candidates, not verdicts.
 
@@ -90,9 +98,10 @@ Findings surface the anti-patterns from the research that are actually observabl
 
 The scan issues **no network calls of its own**. Per repository it is a bounded set of `existsSync`
 probes, one shallow `readdir` per interesting directory, and a capped read of at most
-`MAX_WORKFLOW_FILES` (50) workflow files. Repository identity comes from reading `.git/config`
+`MAX_WORKFLOW_FILES` (50) workflow files. Repository identity comes from reading the git config
 directly rather than spawning `git remote get-url`, because a workspace can contribute hundreds of
-paths. At most `MAX_SCANNED_REPOS` (25) repositories are scanned per run, and the report says how
+paths. That read follows the `.git` *file* that linked worktrees and submodules use, via its
+`gitdir:` pointer and (for worktrees) the `commondir` hop to the shared config. At most `MAX_SCANNED_REPOS` (25) repositories are scanned per run, and the report says how
 many it skipped rather than truncating silently.
 
 The one GitHub-derived signal — `agent-authored-pull-requests` — reuses the pull-request statistics

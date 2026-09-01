@@ -145,8 +145,9 @@ function buildEvidenceNoticeHtml(report: DarkFactoryReport): string {
 	const apiNote = report.apiSignalsIncluded
 		? 'Pull-request evidence from the Usage Analysis view is included.'
 		: 'No GitHub API evidence was available, so rulesets, required reviews, environment protection and scanning enablement are all reported as unchecked rather than missing.';
-	const skipped = report.skippedRepoCount > 0
-		? ` ${report.skippedRepoCount} further repository/repositories were found but not scanned in this run.`
+	const skippedCount = report.skippedRepoCount;
+	const skipped = skippedCount > 0
+		? ` ${skippedCount} further ${skippedCount === 1 ? 'repository was' : 'repositories were'} found but not scanned in this run.`
 		: '';
 	return `<div class="df-notice">${apiNote}${skipped}</div>`;
 }

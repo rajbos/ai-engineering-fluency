@@ -1,6 +1,7 @@
 import test from 'node:test';
 import * as assert from 'node:assert/strict';
 import * as fs from 'fs';
+import * as Module from 'node:module';
 import * as os from 'os';
 import * as path from 'path';
 
@@ -100,20 +101,24 @@ test('readWorkflowFiles: reads yml and yaml, skipping other files', () => {
 		'.github/workflows/release.yaml': 'name: release\n',
 		'.github/workflows/notes.txt': 'ignored',
 	}, root => {
-		const names = readWorkflowFiles(root).map(w => w.name).sort();
+		const names = readWorkflowFiles(root).files.map(w => w.name).sort();
 		assert.deepEqual(names, ['build.yml', 'release.yaml']);
 	});
 });
 
 test('readWorkflowFiles: returns nothing for a repository with no workflows directory', () => {
-	withRepo({ 'README.md': '' }, root => assert.deepEqual(readWorkflowFiles(root), []));
+	withRepo({ 'README.md': '' }, root => {
+		assert.deepEqual(readWorkflowFiles(root), { files: [], unreadable: false, truncated: false });
+	});
 });
 
 test('readWorkflowFiles: caps how many workflow files it reads', () => {
 	const files: Record<string, string> = {};
 	for (let i = 0; i < MAX_WORKFLOW_FILES + 10; i++) { files[`.github/workflows/w${i}.yml`] = 'name: w\n'; }
 	withRepo(files, root => {
-		assert.equal(readWorkflowFiles(root).length, MAX_WORKFLOW_FILES);
+		const scan = readWorkflowFiles(root);
+		assert.equal(scan.files.length, MAX_WORKFLOW_FILES);
+		assert.equal(scan.truncated, true, 'a capped scan must admit it did not see every workflow');
 	});
 });
 
@@ -340,4 +345,209 @@ test('collectDarkFactoryFileSignals: a non-existent path yields observations rat
 	const { observations, facts } = collectDarkFactoryFileSignals(missing);
 	assert.equal(observations['ci-workflows'].state, 'absent');
 	assert.deepEqual(facts.agentFileNames, []);
+});
+
+// ---------------------------------------------------------------------------
+// Git worktrees and submodules — `.git` is a file, not a directory
+// ---------------------------------------------------------------------------
+
+test('readGitOriginUrl: follows a worktree .git file through commondir to the shared config', () => {
+	// Mirrors what `git worktree add` produces: the worktree's .git file points at
+	// per-worktree state, whose `commondir` points back at the main .git directory
+	// where `config` actually lives.
+	const main = makeRepo({
+		'.git/config': '[remote "origin"]\n\turl = https://github.com/rajbos/demo.git\n',
+		'.git/worktrees/feature/commondir': '../..\n',
+	});
+	const worktree = makeRepo({ '.git': `gitdir: ${path.join(main, '.git', 'worktrees', 'feature')}\n` });
+	try {
+		assert.equal(isGitRepoRoot(worktree), true);
+		assert.equal(readGitOriginUrl(worktree), 'https://github.com/rajbos/demo.git');
+	} finally {
+		fs.rmSync(main, { recursive: true, force: true });
+		fs.rmSync(worktree, { recursive: true, force: true });
+	}
+});
+
+test('readGitOriginUrl: reads a submodule .git file, whose gitdir carries config directly', () => {
+	// A submodule has no `commondir` — its gitdir under the superproject holds `config`.
+	const superproject = makeRepo({
+		'.git/modules/lib/config': '[remote "origin"]\n\turl = git@github.com:rajbos/lib.git\n',
+	});
+	const submodule = makeRepo({ '.git': `gitdir: ${path.join(superproject, '.git', 'modules', 'lib')}\n` });
+	try {
+		assert.equal(readGitOriginUrl(submodule), 'git@github.com:rajbos/lib.git');
+	} finally {
+		fs.rmSync(superproject, { recursive: true, force: true });
+		fs.rmSync(submodule, { recursive: true, force: true });
+	}
+});
+
+test('readGitOriginUrl: resolves a relative gitdir pointer against the repository root', () => {
+	const root = makeRepo({
+		'.git': 'gitdir: ./real-git\n',
+		'real-git/config': '[remote "origin"]\n\turl = https://github.com/rajbos/relative.git\n',
+	});
+	try {
+		assert.equal(readGitOriginUrl(root), 'https://github.com/rajbos/relative.git');
+	} finally {
+		fs.rmSync(root, { recursive: true, force: true });
+	}
+});
+
+test('readGitOriginUrl: undefined when the .git file is not a gitdir pointer', () => {
+	withRepo({ '.git': 'not a pointer\n' }, root => assert.equal(readGitOriginUrl(root), undefined));
+});
+
+test('readGitOriginUrl: undefined when the gitdir pointer leads nowhere', () => {
+	withRepo({ '.git': 'gitdir: /nonexistent/path/xyz\n' }, root => {
+		assert.equal(readGitOriginUrl(root), undefined);
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Agent definitions — documentation must not be counted as an agent
+// ---------------------------------------------------------------------------
+
+test('agents: a README in .github/agents is not counted as an agent definition', () => {
+	withRepo({ '.github/agents/README.md': '# how to add an agent' }, root => {
+		assert.equal(stateOf(root, 'custom-agents'), 'absent');
+		assert.deepEqual(collectDarkFactoryFileSignals(root).facts.agentFileNames, []);
+	});
+});
+
+test('agents: a README alongside real agents does not inflate the count or mask the evaluator check', () => {
+	withRepo({
+		'.github/agents/README.md': '# index',
+		'.github/agents/refactor.agent.md': '',
+		'.github/agents/test-expert.agent.md': '',
+	}, root => {
+		const { observations, facts } = collectDarkFactoryFileSignals(root);
+		assert.deepEqual((facts.agentFileNames ?? []).sort(), ['refactor.agent.md', 'test-expert.agent.md']);
+		assert.match(observations['custom-agents'].detail ?? '', /^2 agent definition/);
+		assert.equal(observations['independent-evaluator-agent'].state, 'present');
+	});
+});
+
+test('agents: a plain .md agent definition still counts, matching the repo customization scanner', () => {
+	withRepo({ '.github/agents/planner.md': '# planner' }, root => {
+		assert.equal(stateOf(root, 'custom-agents'), 'present');
+	});
+});
+
+// ---------------------------------------------------------------------------
+// Unreadable evidence must never be reported as absence
+// ---------------------------------------------------------------------------
+
+// The `import * as fs` namespace object is getter-only once compiled, so reach
+// the real, mutable CJS module to stub it — the same approach
+// azureResourceService.test.ts uses for module-level fakes.
+const fsModule = Module.createRequire(__filename)('fs') as typeof fs;
+
+/**
+ * Run `body` with `fs.readdirSync` failing with `code` for any path containing
+ * `match`. A real permission failure cannot be staged here: the suite may run as
+ * root, where `chmod 000` is bypassed entirely.
+ */
+function withUnreadableDir(match: string, code: string, body: () => void): void {
+	const original = fsModule.readdirSync;
+	fsModule.readdirSync = ((target: fs.PathLike, options?: unknown) => {
+		if (String(target).includes(match)) {
+			const error = new Error(`${code}: simulated`) as NodeJS.ErrnoException;
+			error.code = code;
+			throw error;
+		}
+		return (original as (t: fs.PathLike, o?: unknown) => string[])(target, options);
+	}) as typeof fs.readdirSync;
+	try { body(); } finally { fsModule.readdirSync = original; }
+}
+
+test('unreadable: a workflows directory that cannot be read reports unknown, not absent', () => {
+	withRepo({ '.github/workflows/build.yml': CI_WORKFLOW }, root => {
+		withUnreadableDir(path.join('.github', 'workflows'), 'EACCES', () => {
+			const { observations } = collectDarkFactoryFileSignals(root);
+			assert.equal(observations['ci-workflows'].state, 'unknown');
+			assert.equal(observations['ci-test-execution'].state, 'unknown');
+			assert.equal(observations['reusable-workflows'].state, 'unknown');
+			assert.equal(observations['deployment-environments'].state, 'unknown');
+			assert.equal(observations['agentic-workflows'].state, 'unknown');
+		});
+	});
+});
+
+test('unreadable: an agents directory that cannot be read reports unknown for both agent controls', () => {
+	withRepo({ '.github/agents/refactor.agent.md': '' }, root => {
+		withUnreadableDir(path.join('.github', 'agents'), 'EACCES', () => {
+			const { observations } = collectDarkFactoryFileSignals(root);
+			assert.equal(observations['custom-agents'].state, 'unknown');
+			assert.equal(observations['independent-evaluator-agent'].state, 'unknown');
+		});
+	});
+});
+
+test('unreadable: an unreadable ISSUE_TEMPLATE directory reports unknown', () => {
+	withRepo({ '.github/ISSUE_TEMPLATE/bug.yml': 'name: Bug\n' }, root => {
+		withUnreadableDir('ISSUE_TEMPLATE', 'EIO', () => {
+			assert.equal(stateOf(root, 'issue-forms'), 'unknown');
+		});
+	});
+});
+
+test('unreadable: a missing directory is still absent — ENOENT is a real answer', () => {
+	withRepo({ 'README.md': '' }, root => {
+		assert.equal(stateOf(root, 'issue-forms'), 'absent');
+		assert.equal(stateOf(root, 'custom-agents'), 'absent');
+	});
+});
+
+test('unreadable: ENOTDIR is treated as missing, not as unreadable', () => {
+	// `.github/agents` exists as a *file*, so readdir yields ENOTDIR — the folder
+	// genuinely does not exist, which is an absence rather than missing evidence.
+	withRepo({ '.github/agents': 'not a directory' }, root => {
+		assert.equal(stateOf(root, 'custom-agents'), 'absent');
+	});
+});
+
+test('unreadable: a truncated workflow scan reports unknown rather than absent for content patterns', () => {
+	const files: Record<string, string> = {};
+	for (let i = 0; i < MAX_WORKFLOW_FILES + 5; i++) { files[`.github/workflows/w${i}.yml`] = 'name: w\n'; }
+	withRepo(files, root => {
+		const { observations } = collectDarkFactoryFileSignals(root);
+		assert.equal(observations['ci-workflows'].state, 'present', 'the workflows themselves were seen');
+		assert.equal(observations['ci-test-execution'].state, 'unknown', 'not every workflow was read, so absence is unproven');
+	});
+});
+
+test('unreadable: an unreadable repository root leaves infrastructure-as-code unknown', () => {
+	withRepo({ 'README.md': '' }, root => {
+		withUnreadableDir(path.basename(root), 'EACCES', () => {
+			assert.equal(stateOf(root, 'infrastructure-as-code'), 'unknown');
+		});
+	});
+});
+
+test('unreadable: a positive match still wins even when the scan is incomplete', () => {
+	const files: Record<string, string> = { '.github/workflows/aaa-test.yml': CI_WORKFLOW };
+	for (let i = 0; i < MAX_WORKFLOW_FILES + 5; i++) { files[`.github/workflows/w${i}.yml`] = 'name: w\n'; }
+	withRepo(files, root => {
+		assert.equal(stateOf(root, 'ci-test-execution'), 'present', 'evidence found is evidence, however incomplete the scan');
+	});
+});
+
+test('unreadable: a directory larger than the entry cap reports unknown rather than absent', () => {
+	// The listing is capped, so a control that found no match across a truncated
+	// view has not established absence.
+	const files: Record<string, string> = {};
+	for (let i = 0; i < 250; i++) { files[`.github/ISSUE_TEMPLATE/note-${i}.md`] = ''; }
+	withRepo(files, root => {
+		assert.equal(stateOf(root, 'issue-forms'), 'unknown');
+	});
+});
+
+test('unreadable: a directory within the entry cap still reports absence normally', () => {
+	const files: Record<string, string> = {};
+	for (let i = 0; i < 10; i++) { files[`.github/ISSUE_TEMPLATE/note-${i}.md`] = ''; }
+	withRepo(files, root => {
+		assert.equal(stateOf(root, 'issue-forms'), 'absent');
+	});
 });
