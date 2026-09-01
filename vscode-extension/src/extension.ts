@@ -77,6 +77,7 @@ import type {
   CorrectionSessionEntry,
   RepeatedTaskReport,
 } from '../../src/types';
+import { getTimeWindowStartDate, getTimeWindowStartDayKey } from '../../src/timeWindows';
 
 // --- Correction-moment detection (per-repo report over recent sessions) ---
 import {
@@ -4331,8 +4332,18 @@ class CopilotTokenTracker implements vscode.Disposable {
 		// every path (including errors) so the webview never hangs on "Loading...".
 		let sessions: TodaySessionSummary[] = [];
 		try {
-			const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
-			sessions = stats.recentSessions?.[period as 'last7' | 'last30' | 'currentMonth'] ?? [];
+			if (period === 'last90') {
+				const now = new Date();
+				const start = getTimeWindowStartDate(period, now);
+				if (!start) {
+					throw new Error(`Cannot load recent sessions for time window "${period}"`);
+				}
+				const { results } = await this.loadUsageSessionFiles(undefined, start.getTime());
+				sessions = this.buildRecentSessionBucket(results, getTimeWindowStartDayKey(period, now));
+			} else {
+				const stats = this.lastUsageAnalysisStats ?? await this.calculateUsageAnalysisStats(true);
+				sessions = stats.recentSessions?.[period] ?? [];
+			}
 		} catch (error) {
 			this.error('Error loading recent sessions:', error);
 		}
@@ -4348,9 +4359,29 @@ class CopilotTokenTracker implements vscode.Disposable {
 		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
 		now: Date
 	): { last7: TodaySessionSummary[]; last30: TodaySessionSummary[]; currentMonth: TodaySessionSummary[] } {
-		const last7Key = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 7));
-		const last30Key = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 30));
-		const monthKey = toLocalDayKey(new Date(now.getFullYear(), now.getMonth(), 1));
+		const last7Key = getTimeWindowStartDayKey('last7', now);
+		const last30Key = getTimeWindowStartDayKey('last30', now);
+		const monthKey = getTimeWindowStartDayKey('currentMonth', now);
+		const items = this.buildRecentSessionItems(results);
+		return {
+			last7: items.filter(it => it.activityKey >= last7Key).map(it => it.value),
+			last30: items.filter(it => it.activityKey >= last30Key).map(it => it.value),
+			currentMonth: items.filter(it => it.activityKey >= monthKey).map(it => it.value),
+		};
+	}
+
+	private buildRecentSessionBucket(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[],
+		startKey: string
+	): TodaySessionSummary[] {
+		return this.buildRecentSessionItems(results)
+			.filter(it => it.activityKey >= startKey)
+			.map(it => it.value);
+	}
+
+	private buildRecentSessionItems(
+		results: ({ sessionFile: string; sessionData: SessionFileCache; mtime: number } | null | undefined)[]
+	): { activityKey: string; interactions: number; value: TodaySessionSummary }[] {
 		const items: { activityKey: string; interactions: number; value: TodaySessionSummary }[] = [];
 		for (const r of results) {
 			if (!r || r.sessionData.interactions === 0) { continue; }
@@ -4359,13 +4390,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			items.push({ activityKey: this.computeLastActivityKey(r.sessionData, r.mtime), interactions: r.sessionData.interactions, value });
 		}
 		items.sort((a, b) => b.interactions - a.interactions);
-		const buckets = { last7: [] as TodaySessionSummary[], last30: [] as TodaySessionSummary[], currentMonth: [] as TodaySessionSummary[] };
-		for (const it of items) {
-			if (it.activityKey >= last7Key) { buckets.last7.push(it.value); }
-			if (it.activityKey >= last30Key) { buckets.last30.push(it.value); }
-			if (it.activityKey >= monthKey) { buckets.currentMonth.push(it.value); }
-		}
-		return buckets;
+		return items;
 	}
 
 	private computeLastActivityKey(sessionData: SessionFileCache, mtime: number): string {
@@ -6944,7 +6969,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 	}
 
 	private setChartTimeWindowPreference(timeWindow: string): void {
-		const valid: ChartTimeWindow[] = ['today', 'last7', 'last30', 'currentMonth', 'allTime'];
+		const valid: ChartTimeWindow[] = ['today', 'last7', 'last30', 'last90', 'currentMonth', 'allTime'];
 		if (valid.includes(timeWindow as ChartTimeWindow)) { this.lastChartTimeWindow = timeWindow as ChartTimeWindow; }
 	}
 

@@ -4648,7 +4648,7 @@ function renderModelEfficiencyPeriodSelector(): void {
 	wrapper.replaceChildren();
 	const { wrapper: selectorWrapper } = createPeriodSelector({
 		selected: efficiencySelectedPeriod,
-		disabled: ['last7', 'allTime'],
+		disabled: ['last7', 'last90', 'allTime'],
 		disabledTitle: 'Not available for model efficiency',
 		label: '',
 		onChange: (value) => {
