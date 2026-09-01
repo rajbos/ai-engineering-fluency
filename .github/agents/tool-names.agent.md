@@ -169,7 +169,7 @@ When adding a new tool to `toolNames.json`, also determine if it belongs in `aut
 
 After editing `src/toolNames.json`:
 
-1. Run `npm run compile` to verify ESLint + build passes
+1. Run `npm run validate` to verify type-checking, ESLint, and the build pass
 2. Ensure the JSON is valid (no trailing commas, proper quoting)
 3. Run tests with `npm run test:node` to confirm nothing is broken
 
@@ -217,5 +217,5 @@ This is already handled by `workspaceHelpers.ts` (`detectToolEditorFromPath`, `d
 - [ ] Generate friendly names following the conventions above
 - [ ] Add entries to `src/toolNames.json` in the correct location
 - [ ] For each new tool, decide if it is **automatic** or **intentional** — add automatic tools to `src/automaticTools.json`
-- [ ] Run `npm run compile` to validate
+- [ ] Run `npm run validate`
 - [ ] Run `npm run test:node` to confirm tests pass
