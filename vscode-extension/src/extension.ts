@@ -9803,6 +9803,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
       scanRoot: async (root, isRootActive) => {
         let isDirectory = false;
         try { isDirectory = (await fs.promises.stat(root)).isDirectory(); } catch { isDirectory = false; }
+        if (!isRootActive()) { return []; }
         if (!isDirectory) {
           send({ command: "worktreeScanRootSkipped", root, reason: "Path does not exist or is not a directory" });
           return [];
@@ -9815,6 +9816,7 @@ ${this.getLoadingHtmlBody(nonce, iconUri.toString())}
         let dirsScanned = 0;
         let lastWalkPost = 0;
         const onDir = (): void => {
+          if (!isRootActive()) { return; }
           dirsScanned++;
           const now = Date.now();
           if (now - lastWalkPost >= 200) {
