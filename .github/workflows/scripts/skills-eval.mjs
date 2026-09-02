@@ -117,11 +117,15 @@ const result = await evaluateSkills({
 // Report runner-relative paths: the absolute /home/runner/... paths are
 // meaningless once the job is gone, so point at the artifact contents instead.
 const rel = (p) => (p ? path.relative(process.cwd(), p).split(path.sep).join("/") : undefined);
-const workspaceRel = rel(result.workspaceRoot);
-// Path of the report inside the workspace artifact, whose contents are stored
-// relative to the workspace root (e.g. `iteration-1/report/index.html`).
+// `agent-skills-eval-workspace` is uploaded from the EVAL_WORKSPACE directory,
+// so its contents are stored relative to that. Note this is NOT
+// `result.workspaceRoot`, which under the "iteration" layout points one level
+// deeper at the current iteration-N directory.
+const uploadRoot = path.resolve(workspace);
+const workspaceRel = rel(uploadRoot);
+// Path of the report inside that artifact, e.g. `iteration-1/report/index.html`.
 const reportInWorkspaceArtifact = result.reportPath
-  ? path.relative(result.workspaceRoot, result.reportPath).split(path.sep).join("/")
+  ? path.relative(uploadRoot, result.reportPath).split(path.sep).join("/")
   : undefined;
 
 // Hand the report directory to the workflow so it can be uploaded as a flat,
