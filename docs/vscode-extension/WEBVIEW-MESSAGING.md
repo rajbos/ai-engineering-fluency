@@ -46,11 +46,17 @@ extension → webview message. Observed in VS Code Insiders (`1.10x`), on a docu
 ```
 
 The real boundary is **`event.origin`**, which VS Code stamps with the webview's own
-`vscode-webview://<id>` origin. `isTrustedWebviewMessageSource(source, window, origin)`:
+`vscode-webview://<id>` origin. `isTrustedWebviewMessageSource(source, window, origin)` applies
+two rules, in order:
 
-1. accepts a source it can positively identify as this window (`null`/`undefined`/`window`/
-   `parent`/`top`), then
-2. falls back to requiring `origin` to match one of this document's own origins.
+1. Trust a source that is one of this document's own self-references: `null` or `undefined`
+   (no source attached), `window`, `parent`, or `top`. In a top-level webview the last three
+   are all `window`, so this rule really means "the message did not come from somewhere else".
+2. Otherwise the source is an object we cannot identify, so fall back to the origin: trust it
+   only when `origin` is present **and** matches one of this document's own origins. An
+   unidentified source with no origin is rejected.
+
+Rule 2 is the branch VS Code's own relayed messages take.
 
 Own origins are collected from **both** `location.origin` and the scheme+host parsed out of
 `location.href`. `location.origin` alone is not enough: an engine that does not register
@@ -58,9 +64,8 @@ Own origins are collected from **both** `location.origin` and the scheme+host pa
 matches the concrete origin on the event. (jsdom does exactly this, so the tests would pass
 against a check that is broken in production — and vice versa.)
 
-A same-origin child frame would also pass this check. That is acceptable because every panel
-serves `default-src 'none'` with **no `frame-src`**, so it cannot embed a frame at all. When no
-origin is supplied, an unidentifiable source is still rejected outright.
+A same-origin child frame would also satisfy rule 2. That is acceptable because every panel
+serves `default-src 'none'` with **no `frame-src`**, so it cannot embed a frame at all.
 
 ## Why the failure was invisible
 
@@ -135,7 +140,7 @@ catches the class of bug described above — the trust check and the readiness h
 correct in isolation and only fail in combination with a real host.
 
 The regression case that matters is `postFromHostFrame`, which dispatches a message with an
-unidentifiable `event.source` and the document's own origin — VS Code's actual delivery shape.
+unidentified `event.source` and the document's own origin — VS Code's actual delivery shape.
 Verify any change to the trust model by neutering the fix and confirming these tests fail.
 
 jsdom gotchas when extending the harness:
