@@ -1,6 +1,7 @@
 import * as https from 'https';
 import * as childProcess from 'child_process';
 import { getGitHubApiEndpoints, GITHUB_API_USER_AGENT, GITHUB_API_ACCEPT_V3, GITHUB_API_VERSION } from './githubApiConfig';
+import { withTimeout } from './utils/promises';
 
 export type RepoPrDetail = {
 	number: number;
@@ -563,18 +564,42 @@ function buildFetchRepoPrsError(statusCode: number | undefined, error: string | 
 	return error ?? 'Unknown error';
 }
 
+type RepoPrPageResult = { prs: any[]; statusCode?: number; error?: string };
+
+async function fetchRepoPrsPageWithinTimeout(
+	fetchPage: (owner: string, repo: string, token: string, page: number) => Promise<RepoPrPageResult>,
+	owner: string,
+	repo: string,
+	token: string,
+	page: number,
+	pageTimeoutMs: number,
+): Promise<RepoPrPageResult> {
+	try {
+		return await withTimeout(
+			fetchPage(owner, repo, token, page),
+			pageTimeoutMs,
+			`Fetching PRs for ${owner}/${repo} page ${page}`,
+		);
+	} catch (error) {
+		return { prs: [], error: error instanceof Error ? error.message : String(error) };
+	}
+}
+
 /** Fetch all PRs from the last 30 days for a repo, paginating as needed. */
 export async function fetchRepoPrs(
 	owner: string,
 	repo: string,
 	token: string,
 	since: Date,
-	fetchPage: (owner: string, repo: string, token: string, page: number) => Promise<{ prs: any[]; statusCode?: number; error?: string }> = fetchRepoPrsPage,
+	fetchPage: (owner: string, repo: string, token: string, page: number) => Promise<RepoPrPageResult> = fetchRepoPrsPage,
+	pageTimeoutMs = 20_000,
 ): Promise<{ prs: any[]; error?: string }> {
 	const allPrs: any[] = [];
 	const MAX_PAGES = 5; // Cap at 500 PRs per repo
 	for (let page = 1; page <= MAX_PAGES; page++) {
-		const { prs, statusCode, error } = await fetchPage(owner, repo, token, page);
+		const { prs, statusCode, error } = await fetchRepoPrsPageWithinTimeout(
+			fetchPage, owner, repo, token, page, pageTimeoutMs,
+		);
 		if (error) { return { prs: allPrs, error: buildFetchRepoPrsError(statusCode, error) }; }
 		if (prs.length === 0) { break; }
 		for (const pr of prs) {

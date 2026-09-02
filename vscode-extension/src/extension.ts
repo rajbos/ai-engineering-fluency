@@ -143,6 +143,7 @@ import { isJetBrainsSessionPath } from '../../src/adapters/adapterPredicates';
 import { detectJetBrainsModelHintFromContent } from '../../src/jetbrains';
 import { extractCopilotCliSessionId, getCopilotCliExactUsage, getCopilotCliOtelStatus, getCopilotCliOtelUsage, loadCopilotCliOtelIndex } from '../../src/copilotCliOtel';
 import { createWakeupGate, TimeoutError as _TimeoutError, withTimeout as _withTimeout } from './utils/promises';
+import { WebviewMessageReplay } from './webviewMessageReplay';
 
 // --- Session parsing & token estimation ---
 import {
@@ -547,7 +548,14 @@ class CopilotTokenTracker implements vscode.Disposable {
 	private detailsPanel: vscode.WebviewPanel | undefined;
 	private chartPanel: vscode.WebviewPanel | undefined;
 	private analysisPanel: vscode.WebviewPanel | undefined;
+	/** Incremented per created analysis panel so logs can distinguish a stale panel from the live one. */
+	private _analysisPanelSeq = 0;
 	private analysisWebviewReady = false;
+	private readonly analysisMessageReplay = new WebviewMessageReplay(
+		(message) => this.analysisPanel?.webview.postMessage(message) ?? false,
+		2_000,
+		(error) => this.warn(`Usage Analysis message delivery failed: ${error}`),
+	);
 	private pendingAnalysisNavigation: { tab: UsageAnalysisTab; anchor?: string } | undefined;
 	private maturityPanel: vscode.WebviewPanel | undefined;
 	private dashboardPanel: vscode.WebviewPanel | undefined;
@@ -1832,8 +1840,8 @@ class CopilotTokenTracker implements vscode.Disposable {
 				since.setDate(since.getDate() - 30);
 				const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 				this._lastRepoPrStats = result;
-				this.analysisPanel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
-				this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
+				await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+				await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			}
 		} catch (error) {
 			this.error('Failed to sign out from GitHub:', error);
@@ -1877,34 +1885,34 @@ class CopilotTokenTracker implements vscode.Disposable {
 
 	/** Load PR stats for all discovered GitHub repos and send results to the analysis panel. */
 	private async loadRepoPrStats(): Promise<void> {
-		const panel = this.analysisPanel;
-		if (!panel) { return; }
+		if (!this.analysisPanel) { return; }
 
 		const since = new Date();
 		since.setDate(since.getDate() - 30);
 		this.log('🔎 Loading repository PR stats (last 30 days)…');
 		try {
-			await this.collectAndPublishRepoPrStats(panel, since);
+			await this.collectAndPublishRepoPrStats(since);
 		} catch (err) {
 			// Guarantee a post-back on every failure path — otherwise the webview stays on
 			// "Loading…" forever and dispatch() dedup silently swallows every retry.
-			// Post via the captured panel: this.analysisPanel may have been disposed mid-flight
-			// (postMessage on a disposed webview resolves false instead of throwing).
+			// publish() routes through analysisMessageReplay, which retains the payload and
+			// tolerates the panel being disposed mid-flight (postMessage on a disposed webview
+			// resolves false instead of throwing).
 			this.error('Failed to load repository PR stats', err);
 			const result: RepoPrStatsResult = {
 				repos: [], authenticated: !this._githubSignedOutByUser, since: since.toISOString(),
 				error: err instanceof Error ? err.message : String(err),
 			};
 			this._lastRepoPrStats = result;
-			void panel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
 		}
 	}
 
-	private async collectAndPublishRepoPrStats(panel: vscode.WebviewPanel, since: Date): Promise<void> {
+	private async collectAndPublishRepoPrStats(since: Date): Promise<void> {
 		if (this._githubSignedOutByUser) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
-			void panel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
 			return;
 		}
 
@@ -1912,7 +1920,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		if (!session) {
 			const result: RepoPrStatsResult = { repos: [], authenticated: false, since: since.toISOString() };
 			this._lastRepoPrStats = result;
-			void panel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
 			return;
 		}
 
@@ -1927,20 +1935,23 @@ class CopilotTokenTracker implements vscode.Disposable {
 		const discoveryStart = Date.now();
 		const repos = await discoverGitHubRepos(workspacePaths, getConfiguredGitHubEnterpriseUri());
 		this.log(`🔎 Discovered ${repos.length} GitHub repo(s) across ${workspacePaths.length} workspace path(s) in ${((Date.now() - discoveryStart) / 1000).toFixed(1)}s`);
-		void panel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: 0 });
+		await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: 0 });
 
 		const results: RepoPrInfo[] = [];
 		for (let i = 0; i < repos.length; i++) {
 			const { owner, repo } = repos[i];
+			this.log(`🔎 Fetching PRs for ${owner}/${repo} (${i + 1}/${repos.length})…`);
 			const { prs, error } = await fetchRepoPrs(owner, repo, session.accessToken, since);
+			this.log(`🔎 Fetched ${prs.length} PR(s) for ${owner}/${repo}${error ? ` — ${error}` : ''}`);
 			const stats = this.collectAiPrStats(prs, error, session.account.label);
 			results.push({ owner, repo, repoUrl: `https://github.com/${owner}/${repo}`, ...stats, error });
-			void panel.webview.postMessage({ command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
+			await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsProgress', total: repos.length, done: i + 1 });
 		}
 
 		const result: RepoPrStatsResult = { repos: results, authenticated: true, since: since.toISOString() };
 		this._lastRepoPrStats = result;
-		void panel.webview.postMessage({ command: 'repoPrStatsLoaded', data: result });
+		const { delivered, wasReady } = await this.analysisMessageReplay.publish('repoPrStats', { command: 'repoPrStatsLoaded', data: result });
+		this.log(`🔎 Repository PR stats posted for ${results.length} repo(s) (delivered=${delivered}, webviewReady=${wasReady}, ${this._describeAnalysisPanel()})`);
 	}
 
 	/** Classify one PR, pushing any AI detail rows and returning its contribution to the counters. */
@@ -2018,10 +2029,11 @@ class CopilotTokenTracker implements vscode.Disposable {
 	 * stamped on here so the panel can show when the next refresh is due without duplicating the
 	 * cache policy.
 	 */
-	private publishAgentSessions(result: AgentSessionsResult): void {
+	private async publishAgentSessions(result: AgentSessionsResult): Promise<void> {
 		const stamped: AgentSessionsResult = { ...result, refreshIntervalMs: AGENT_TASKS_REFRESH_INTERVAL_MS };
 		this._lastAgentSessionsData = stamped;
-		this.analysisPanel?.webview.postMessage({ command: 'agentSessionsLoaded', data: stamped });
+		const { delivered, wasReady } = await this.analysisMessageReplay.publish('agentSessions', { command: 'agentSessionsLoaded', data: stamped });
+		this.log(`🤖 Cloud agent snapshot posted (${stamped.repos.length} repo(s), delivered=${delivered}, webviewReady=${wasReady})`);
 	}
 
 	/**
@@ -2040,19 +2052,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 		} catch (err) {
 			// Guarantee a post-back on every failure path so the webview never hangs on "Loading…".
 			this.error('Failed to load cloud agent sessions', err);
-			this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, !this._githubSignedOutByUser));
+			await this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, !this._githubSignedOutByUser));
 		}
 	}
 
 	private async collectAndPublishAgentSessions(since: Date): Promise<void> {
 		if (this._githubSignedOutByUser) {
-			this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
+			await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
 		}
 
 		const session = await vscode.authentication.getSession(getGitHubAuthProviderId(), ['read:user'], { silent: true });
 		if (!session) {
-			this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
+			await this.publishAgentSessions(this.buildEmptyAgentSessionsResult(since, false));
 			return;
 		}
 		if (!this.githubSession) {
@@ -2061,14 +2073,19 @@ class CopilotTokenTracker implements vscode.Disposable {
 			await this.context.globalState.update('github.username', session.account.label);
 		}
 
-		const snapshot = await readAgentTasksSnapshot(this.agentTasksCachePath());
+		await this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, true));
+		const snapshot = await _withTimeout(
+			readAgentTasksSnapshot(this.agentTasksCachePath()),
+			10_000,
+			'Reading the cloud agent snapshot',
+		);
 		if (isAgentTasksEnvelopeUsable(snapshot, since)) {
-			this.publishAgentSessions(snapshot!.data);
-		} else {
-			this.publishAgentSessions(this._lastAgentSessionsData ?? this.buildEmptyAgentSessionsResult(since, true));
+			await this.publishAgentSessions(snapshot!.data);
 		}
 
-		void this.maybeRefreshAgentSessions();
+		void this.maybeRefreshAgentSessions().catch((err) => {
+			this.warn(`Cloud agent refresh scheduling failed: ${err}`);
+		});
 	}
 
 	/**
@@ -2127,7 +2144,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			since,
 			workspaceRepos,
 			onProgress: (done, total) => {
-				this.analysisPanel?.webview.postMessage({ command: 'agentSessionsProgress', total, done });
+				void this.analysisMessageReplay.publish('agentSessions', { command: 'agentSessionsProgress', total, done });
 			},
 		});
 
@@ -2143,7 +2160,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 		}
 
 		this.log(`🤖 Cloud agent snapshot: ${result.repos.length} repo(s), ${result.totalTasks} task(s), ${result.totalCredits.toFixed(1)} credits`);
-		this.publishAgentSessions(result);
+		await this.publishAgentSessions(result);
 	}
 
 	/** Collect workspace paths from the customization matrix and currently open VS Code workspace folders. */
@@ -3208,6 +3225,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			});
 		} else {
 			this.analysisWebviewReady = false;
+			this.analysisMessageReplay.markNotReady();
 			this.analysisPanel.webview.html = this.getUsageAnalysisHtml(this.analysisPanel.webview, analysisStats);
 		}
 	}
@@ -7045,7 +7063,9 @@ class CopilotTokenTracker implements vscode.Disposable {
 			{ enableScripts: true, retainContextWhenHidden: true, localResourceRoots: [vscode.Uri.joinPath(this.extensionUri, 'dist', 'webview')] }
 		);
 		this.analysisWebviewReady = false;
-		this.log('✅ Usage Analysis dashboard created successfully');
+		this.analysisMessageReplay.markNotReady();
+		this._analysisPanelSeq++;
+		this.log(`✅ Usage Analysis dashboard created successfully (panel #${this._analysisPanelSeq})`);
 		this.analysisPanel.webview.onDidReceiveMessage(async (message) => {
 			if (this.handleLocalViewRegressionMessage(message)) { return; }
 			if (await this.dispatchSharedCommand(message)) { return; }
@@ -7057,6 +7077,7 @@ class CopilotTokenTracker implements vscode.Disposable {
 			this.log('📊 Usage Analysis dashboard closed');
 			this.analysisPanel = undefined;
 			this.analysisWebviewReady = false;
+			this.analysisMessageReplay.markNotReady();
 			this.pendingAnalysisNavigation = undefined;
 		});
 	}
@@ -7154,9 +7175,16 @@ class CopilotTokenTracker implements vscode.Disposable {
 			loadAgentSessions: () => this.dispatch('loadAgentSessions', () => this.loadAgentSessions()),
 			loadRecentSessions: (message) => this.dispatch(`loadRecentSessions:${message.period}`, () => this.loadRecentSessions(message.period as ChartTimeWindow)),
 			openSessionFile: (message) => this._handleOpenSessionFile(message),
-			usageWebviewReady: async () => {
+			usageWebviewReady: async (message) => {
 				this.analysisWebviewReady = true;
+				const reason = typeof message.reason === 'string' ? message.reason : 'unknown';
+				const hasContainers = Boolean(message.hasGitHubActivityContainers);
+				const replayed = await this.analysisMessageReplay.markReady();
+				this.log(`📨 Usage Analysis webview ready (${reason}, containers=${hasContainers}); replayed: ${replayed.length ? replayed.join(', ') : 'nothing buffered'}`);
 				await this.flushPendingAnalysisNavigation();
+			},
+			usageWebviewTrace: (message) => {
+				this.log(`📨 Usage Analysis webview trace: ${message.stage} ${JSON.stringify(message.details ?? {})}`);
 			},
 			insightAction: (message) => this.dispatch(`insightAction:${message.id ?? ''}`, () => this.handleInsightAction(message)),
 			traceUsageCuration: (message) => this._logTraceCuration(message),
@@ -7173,9 +7201,22 @@ class CopilotTokenTracker implements vscode.Disposable {
 		};
 	}
 
+	/** Describes the analysis panel's identity/visibility so delivery logs can be told apart from "posted into the void". */
+	private _describeAnalysisPanel(): string {
+		const panel = this.analysisPanel;
+		if (!panel) { return 'panel=none'; }
+		return `panel=#${this._analysisPanelSeq} visible=${panel.visible} active=${panel.active} htmlLen=${panel.webview.html.length}`;
+	}
+
 	private async handleAnalysisMessage(message: any): Promise<void> {
 		const handler = this._getAnalysisMessageHandlers()[message.command];
-		if (handler) { await handler(message); }
+		if (!handler) {
+			// Silently dropping unknown commands hides real wiring bugs (a webview posting a
+			// command nobody registered looks exactly like a webview posting nothing at all).
+			this.log(`📨 Usage Analysis: no handler for webview command '${String(message?.command ?? '(none)')}'`);
+			return;
+		}
+		await handler(message);
 	}
 
 	private async handleInsightAction(message: any): Promise<void> {

@@ -5,6 +5,7 @@ import {
 	detectSessionSource,
 	fetchAgentSessionsForRepo,
 	readSessionUsage,
+	requestGitHubJson,
 	resolveTaskRepo,
 	type AgentRepoSummary,
 	type FetchAccountTaskPageFn,
@@ -53,6 +54,12 @@ function makeSession(model: string, credits?: number): any {
 }
 
 const SINCE = new Date('2024-01-01T00:00:00Z');
+
+test('requestGitHubJson: stops waiting when the transport never settles', async () => {
+	const hangingTransport = async (): Promise<never> => new Promise(() => {});
+	const result = await requestGitHubJson('/agents/tasks', 'token', hangingTransport, 5);
+	assert.match(result.error ?? '', /GitHub API request \/agents\/tasks timed out/);
+});
 
 test('fetchAgentSessionsForRepo: returns empty result when task list is empty', async () => {
 	const fetchPage: FetchTaskPageFn = async () => ({ tasks: [] });

@@ -1,5 +1,6 @@
 import * as https from 'https';
 import { getGitHubApiEndpoints, buildGitHubApiHeaders } from './githubApiConfig';
+import { withTimeout } from './utils/promises';
 import type {
 	AgentRepoDiscovery,
 	AgentRepoSummary,
@@ -81,8 +82,11 @@ export type FetchTaskDetailFn = (
 
 export type FetchAccountTaskDetailFn = (taskId: string, token: string) => Promise<TaskDetailResult>;
 
+export type GitHubJsonResult = { body?: any; statusCode?: number; error?: string };
+type GitHubJsonTransport = (path: string, token: string) => Promise<GitHubJsonResult>;
+
 /** GET a GitHub REST path and parse the JSON body, mapping transport/HTTP errors into the result. */
-function requestGitHubJson(path: string, token: string): Promise<{ body?: any; statusCode?: number; error?: string }> {
+function requestGitHubJsonTransport(path: string, token: string): Promise<GitHubJsonResult> {
 	return new Promise((resolve) => {
 		const { hostname, restPathPrefix } = getGitHubApiEndpoints();
 		const req = https.request(
@@ -108,6 +112,23 @@ function requestGitHubJson(path: string, token: string): Promise<{ body?: any; s
 		req.setTimeout(15000, () => { req.destroy(new Error('Request timed out')); });
 		req.end();
 	});
+}
+
+export async function requestGitHubJson(
+	path: string,
+	token: string,
+	transport: GitHubJsonTransport = requestGitHubJsonTransport,
+	timeoutMs = 20_000,
+): Promise<GitHubJsonResult> {
+	try {
+		return await withTimeout(
+			transport(path, token),
+			timeoutMs,
+			`GitHub API request ${path}`,
+		);
+	} catch (error) {
+		return { error: error instanceof Error ? error.message : String(error) };
+	}
 }
 
 /** Build the shared query string for both the repo-scoped and account-wide task listings. */

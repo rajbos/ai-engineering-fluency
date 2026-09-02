@@ -217,6 +217,14 @@ test('fetchRepoPrs: propagates generic error from fetchPage', async () => {
 	assert.equal(error, 'Network error');
 });
 
+test('fetchRepoPrs: stops waiting when a page fetch never settles', async () => {
+	const hangingFetchPage = async (): Promise<{ prs: any[] }> => new Promise(() => {});
+	const since = new Date('2024-01-01T00:00:00Z');
+	const { prs, error } = await fetchRepoPrs('owner', 'repo', 'token', since, hangingFetchPage, 5);
+	assert.deepEqual(prs, []);
+	assert.match(error ?? '', /Fetching PRs for owner\/repo page 1 timed out/);
+});
+
 // ---------------------------------------------------------------------------
 // fetchCopilotPlanInfo — uses injectable fetcher
 // ---------------------------------------------------------------------------
