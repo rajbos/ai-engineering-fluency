@@ -74,7 +74,7 @@ import {
 } from '../../src/toolCuration';
 
 // --- Insights engine ---
-import type { TaskCategory, TaskCategoryBreakdown } from "../../src/taskClassification";
+import type { TaskCategory, TaskCategoryBreakdown } from '../../src/taskClassification';
 import {
   evaluateInsights as _evaluateInsights,
   mergeInsightStates as _mergeInsightStates,
